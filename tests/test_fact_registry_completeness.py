@@ -275,6 +275,95 @@ class TestModelFactSiblings:
         siblings = _model_fact_siblings()
         assert ("Param", "is_va_list") in siblings
 
+    def test_records_the_real_inner_type_for_every_real_sibling(self) -> None:
+        siblings = _model_fact_siblings()
+        _rel, inner = siblings[("RecordType", "is_final")]
+        assert inner == "bool | None"
+        _rel, inner = siblings[("RecordType", "bases")]
+        assert inner == "list[str]"
+        _rel, inner = siblings[("Param", "is_va_list")]
+        assert inner == "bool"
+
+    def test_ignores_a_fact_suffixed_field_that_is_not_actually_fact_shaped(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review (direction 6): naming a field ``<x>_fact`` is not
+        itself evidence it holds a real ``Fact[T]`` value — a plain
+        ``dict``-typed field sharing the suffix must not be treated as a
+        converted sibling."""
+        module = tmp_path / "synthetic_fake_fact.py"
+        module.write_text(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Widget:\n"
+            "    widget_fact: dict[str, object] | None = None\n"
+        )
+        siblings = _model_fact_siblings(model_dir=tmp_path)
+        assert ("Widget", "widget") not in siblings
+
+    def test_finds_a_bare_non_optional_fact_shaped_field(self, tmp_path: Path) -> None:
+        module = tmp_path / "synthetic_bare_fact.py"
+        module.write_text(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "from abicheck.model.fact import Fact\n"
+            "@dataclass\n"
+            "class Widget:\n"
+            "    gadget_fact: Fact[str] = None\n"
+        )
+        siblings = _model_fact_siblings(model_dir=tmp_path)
+        assert siblings[("Widget", "gadget")] == (
+            _rel_for(tmp_path / "synthetic_bare_fact.py"),
+            "str",
+        )
+
+
+def _rel_for(path: Path) -> str:
+    try:
+        return path.relative_to(fact_registry_completeness.ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+class TestFactAnnotationInnerType:
+    """Direct tests of ``_fact_annotation_inner_type`` — the Codex-review
+    "is this genuinely Fact[...]-shaped" primitive ``_model_fact_siblings``
+    and Direction 6's value_type cross-check both depend on."""
+
+    @pytest.mark.parametrize(
+        "annotation,expected",
+        [
+            ("Fact[bool]", "bool"),
+            ("Fact[bool] | None", "bool"),
+            ("Fact[list[str]] | None", "list[str]"),
+            ("Fact[int | None] | None", "int | None"),
+            ("Fact[bool | None] | None", "bool | None"),
+        ],
+    )
+    def test_extracts_inner_type_from_real_shapes(
+        self, annotation: str, expected: str
+    ) -> None:
+        assert (
+            fact_registry_completeness._fact_annotation_inner_type(annotation)
+            == expected
+        )
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            "dict[str, object]",
+            "dict[str, object] | None",
+            "str | None",
+            "Fact",
+            "Optional[Fact[bool]]",
+        ],
+    )
+    def test_rejects_non_fact_shapes(self, annotation: str) -> None:
+        assert (
+            fact_registry_completeness._fact_annotation_inner_type(annotation) is None
+        )
+
 
 # ---------------------------------------------------------------------------
 # The real gate, against the real repository
@@ -356,6 +445,132 @@ class TestReferenceFlagCoverage:
         owners = {owner for owner, _ in pairs}
         assert owners == {"Function", "Variable", "TypeField", "RecordType", "EnumType"}
         assert ("EnumType", "is_scoped") in pairs
+
+    def test_every_key_names_a_real_abisnapshot_field(self) -> None:
+        """Direction 7 (Codex review): the earlier check only ever unions
+        REFERENCE_FLAG_COVERAGE's *values* and silently discards the keys —
+        this proves every key itself is a real AbiSnapshot field too."""
+        snapshot_fields = fact_registry_completeness._abi_snapshot_field_names()
+        assert snapshot_fields  # sanity: the real scan actually found fields
+        for flag in REFERENCE_FLAG_COVERAGE:
+            assert flag in snapshot_fields, (
+                f"{flag!r} is not a real field on AbiSnapshot "
+                f"(abicheck/model/snapshot.py)"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Direction 7 (Codex review): a REFERENCE_FLAG_COVERAGE key must name a real
+# AbiSnapshot field, not merely have its covered (owner, field) pairs stay
+# tracked.
+# ---------------------------------------------------------------------------
+
+
+class TestReferenceFlagCoverageAgainstSnapshot:
+    def test_gate_flags_a_flag_name_not_on_abisnapshot(self, monkeypatch) -> None:
+        import abicheck.model.fact_registry as fr
+
+        bad_coverage = dict(REFERENCE_FLAG_COVERAGE)
+        bad_coverage["totally_fake_facts_reliable"] = (("RecordType", "is_final"),)
+        monkeypatch.setattr(fr, "REFERENCE_FLAG_COVERAGE", bad_coverage)
+        findings = _LocalFindings()
+        check_fact_registry_completeness(findings)
+        assert any(
+            "totally_fake_facts_reliable" in msg and "no such field" in msg
+            for _, msg in findings.errors
+        )
+
+    def test_abi_snapshot_field_names_finds_a_real_flag(self) -> None:
+        snapshot_fields = fact_registry_completeness._abi_snapshot_field_names()
+        assert "header_cv_facts_reliable" in snapshot_fields
+
+    def test_abi_snapshot_field_names_empty_for_missing_file(
+        self, tmp_path: Path
+    ) -> None:
+        original = fact_registry_completeness._SNAPSHOT_PATH
+        fact_registry_completeness._SNAPSHOT_PATH = tmp_path / "does_not_exist.py"
+        try:
+            assert fact_registry_completeness._abi_snapshot_field_names() == set()
+        finally:
+            fact_registry_completeness._SNAPSHOT_PATH = original
+
+
+# ---------------------------------------------------------------------------
+# Direction 6 (Codex review): a registry entry's value_type must match the
+# real inner type its Fact[...] sibling annotation actually declares.
+# ---------------------------------------------------------------------------
+
+
+class TestStaleAllowlistEntryNamesNoRealField:
+    """Direction 8 (Codex review): a KNOWN_UNCONVERTED_ELIGIBLE_FACTS entry
+    naming a legacy field that has since been renamed or removed (not just
+    "already converted") is a stale entry too."""
+
+    def test_real_repo_every_entry_names_a_real_field(self) -> None:
+        all_fields = fact_registry_completeness._all_model_dataclass_field_pairs()
+        assert all_fields
+        for pair in KNOWN_UNCONVERTED_ELIGIBLE_FACTS:
+            assert pair in all_fields, f"{pair} names no real model field"
+
+    def test_gate_flags_a_renamed_or_removed_allowlist_entry(self, monkeypatch) -> None:
+        import abicheck.model.fact_registry as fr
+
+        bad = frozenset(
+            {*KNOWN_UNCONVERTED_ELIGIBLE_FACTS, ("RecordType", "no_such_legacy_field")}
+        )
+        monkeypatch.setattr(fr, "KNOWN_UNCONVERTED_ELIGIBLE_FACTS", bad)
+        findings = _LocalFindings()
+        check_fact_registry_completeness(findings)
+        assert any(
+            "RecordType.no_such_legacy_field" in msg and "no such field exists" in msg
+            for _, msg in findings.errors
+        )
+
+    def test_all_model_dataclass_field_pairs_finds_real_fields(self) -> None:
+        pairs = fact_registry_completeness._all_model_dataclass_field_pairs()
+        assert ("RecordType", "is_final") in pairs
+        assert ("RecordType", "bases") in pairs
+        assert ("Param", "is_va_list") in pairs
+
+
+class TestValueTypeCrossCheck:
+    def test_real_repo_every_entry_value_type_matches_its_real_annotation(self) -> None:
+        siblings = fact_registry_completeness._model_fact_siblings()
+        for entry in FACT_REGISTRY.entries.values():
+            found = siblings.get((entry.owner, entry.field))
+            assert found is not None, f"{entry.id} has no real Fact[...] sibling"
+            _rel, inner_type = found
+            assert inner_type == entry.value_type, (
+                f"{entry.id} registers value_type={entry.value_type!r} but its "
+                f"real annotation is Fact[{inner_type}]"
+            )
+
+    def test_gate_flags_a_value_type_mismatch(self, monkeypatch) -> None:
+        import abicheck.model.fact_registry as fr
+
+        wrong = FactDefinition(
+            owner="RecordType",
+            field="is_final",
+            value_type="bool",  # real annotation is Fact[bool | None]
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+        )
+        other_entries = [
+            e for e in FACT_REGISTRY.entries.values() if e.id != "RecordType.is_final"
+        ]
+        monkeypatch.setattr(fr, "FACT_REGISTRY", FactRegistry([*other_entries, wrong]))
+        findings = _LocalFindings()
+        check_fact_registry_completeness(findings)
+        assert any(
+            "RecordType.is_final registers value_type='bool'" in msg
+            and "Fact[bool | None]" in msg
+            for _, msg in findings.errors
+        )
 
 
 # ---------------------------------------------------------------------------

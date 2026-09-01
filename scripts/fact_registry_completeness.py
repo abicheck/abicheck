@@ -80,6 +80,58 @@ different way a registry could go silently stale:
    never covered a real third producer like DWARF in the first place; see
    that function's own docstring for the false positive an earlier draft
    found here.
+6. A ``<field>_fact`` sibling only counts as a real ``Fact[T]`` value when
+   its own annotation is genuinely ``Fact[...]``-shaped (``Fact[X]`` or
+   ``Fact[X] | None``) — a field merely *named* with the ``_fact`` suffix
+   (e.g. a hypothetical ``widget_fact: dict[str, object]``) is not itself
+   evidence (Codex review). ``_model_fact_siblings()`` now parses each
+   sibling's real annotation and only counts it when it matches that
+   shape, and every registry entry's ``value_type`` must then string-match
+   the ``X`` this scan actually finds on its sibling — a registry entry
+   claiming ``value_type="bool"`` for a field whose real annotation is
+   ``Fact[str]`` disagrees with the code it claims to describe.
+7. Every key of ``fact_registry.REFERENCE_FLAG_COVERAGE`` (a
+   ``*_facts_reliable`` flag name) must name a real field declared on
+   ``AbiSnapshot`` (``abicheck/model/snapshot.py``) — direction 3 above
+   only ever unions the *values* (the covered ``(owner, field)`` pairs)
+   and silently discards the keys, so a typo'd or renamed flag name (e.g.
+   ``clang_vtables_facts_reliable``) would keep passing as long as its
+   covered pairs stay tracked, while the generated reference page and the
+   eligibility inventory both go on advertising a flag that does not
+   exist (Codex review).
+8. Every ``KNOWN_UNCONVERTED_ELIGIBLE_FACTS`` entry must still name a
+   real, currently-declared field under ``model/`` — the shrink-only loop
+   direction 3 also enforces only ever checks whether the pair has
+   *gained* a ``_fact`` sibling, so a legacy field renamed or removed
+   before ever being converted would sit in the allowlist forever,
+   advertising a gap that no longer exists in that form (Codex review).
+   Deliberately narrower than re-running the full case-(a)/case-(b)
+   eligibility heuristic against every entry: several entries (e.g. the
+   three non-``Function`` ``source_header`` fields) are eligible by
+   manual inspection rather than by the textual scan's own marker-comment
+   heuristic (see ``fact_registry.py``'s own comment on that gap), so
+   gating on "still scan-discoverable" would falsely flag those as stale;
+   gating on "still exists as a real field at all" catches the concrete
+   renamed/removed scenario the review named without that false-positive
+   risk.
+
+**Acknowledged, deliberately deferred gap (Codex review, not yet closed).**
+A registry entry's ``suppressible``/``reportable`` flags are validated
+claims in D7's own design, the same as ``persisted`` — but unlike
+``persisted`` (direction 4 above, checked against real ``fact_codec.py``/
+``serialization.py`` call sites), no consumer code reading a ``Fact[...]``
+sibling for suppression or reporting purposes exists anywhere in this
+codebase yet: ``fact_registry.py``'s own ``FactLifecycle`` docstring states
+plainly that every entry today sits no higher than ``PERSISTED`` and that
+"no detector has migrated ... this is intentional." A wiring check modeled
+on direction 4 has nothing real to check against — every current entry
+already declares ``reportable=True`` with zero report-schema wiring by
+design, so a check requiring real wiring would fail the entire committed
+registry rather than catching a genuine future regression. Extending this
+module with a direction 4-shaped check for ``suppressible``/``reportable``
+is real, valuable follow-up work, but it is gated on suppression/report
+consumer wiring landing first (a separate, later phase per the plan's own
+scope) — tracked here rather than attempted as a vacuous check today.
 
 **Case (b) heuristic, stated precisely.** A field is a case-(b) candidate
 when its annotation textually contains ``| None`` (or ``Optional[``) *and*
@@ -104,6 +156,7 @@ first and independently of the annotation-shape heuristic below.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 from typing import Protocol
@@ -111,6 +164,7 @@ from typing import Protocol
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "abicheck"
 MODEL_DIR = PKG / "model"
+_SNAPSHOT_PATH = MODEL_DIR / "snapshot.py"
 
 # This script's own directory, so `backend_capabilities` (below) resolves
 # whether this module is run directly, loaded as a sibling import from
@@ -181,6 +235,35 @@ def _is_optional_annotation(text: str) -> bool:
     return "| None" in text or "Optional[" in text
 
 
+#: Matches ``Fact[<inner>]`` or ``Fact[<inner>] | None`` -- every real
+#: ``<field>_fact`` sibling in this codebase is declared exactly one of
+#: these two shapes (the field itself is always ``kw_only`` with a
+#: ``None`` default, so the ``| None`` wrapper is near-universal, but the
+#: bare form is accepted too since nothing about "is this really a
+#: Fact[T]" depends on the sibling's own optionality). Greedy ``.*`` plus
+#: anchored ``$`` makes this resolve to the *outermost* ``Fact[...]``, so
+#: a nested-bracket inner type (``Fact[list[str]]``) still extracts
+#: correctly -- verified directly against every real sibling annotation
+#: in ``model/entities.py``/``model/declarations.py``.
+_FACT_SHAPE_RE = re.compile(r"^Fact\[(?P<inner>.*)\](?:\s*\|\s*None)?$")
+
+
+def _fact_annotation_inner_type(annotation_text: str) -> str | None:
+    """If ``annotation_text`` is genuinely ``Fact[...]``-shaped, return its
+    inner type ``X`` (whitespace-normalized); otherwise ``None``.
+
+    A field merely *named* with the ``_fact`` suffix is not itself
+    evidence it holds a real ``Fact[T]`` value (Codex review: a
+    hypothetical ``widget_fact: dict[str, object]`` must not silently
+    satisfy the "has a Fact sibling" checks the suffix-only scan this
+    replaces used to accept unconditionally).
+    """
+    match = _FACT_SHAPE_RE.match(annotation_text.strip())
+    if not match:
+        return None
+    return " ".join(match.group("inner").split())
+
+
 def _preceding_comment_text(lines: list[str], lineno: int, lookback: int = 40) -> str:
     """Every ``#``-comment line immediately above ``lineno`` (1-indexed), joined.
 
@@ -214,6 +297,64 @@ def _dataclass_field_names(class_node: ast.ClassDef) -> set[str]:
         if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             names.add(stmt.target.id)
     return names
+
+
+def _all_model_dataclass_field_pairs() -> set[tuple[str, str]]:
+    """Every ``(owner, field)`` pair declared on any ``@dataclass`` under
+    ``model/`` — not filtered by eligibility or ``_fact`` suffix, unlike
+    ``_model_fact_siblings()``/``scan_model_dataclasses()``. The ground
+    truth Direction 8 checks a ``KNOWN_UNCONVERTED_ELIGIBLE_FACTS`` entry
+    against: does the legacy field it names still exist at all, under any
+    name it was declared with (Codex review — a field renamed or removed
+    before conversion must not be able to sit in the allowlist forever;
+    the existing shrink-only loop above only ever checks "has this pair
+    gained a ``_fact`` sibling", which a renamed/removed field trivially
+    never will, so it would otherwise never be caught).
+    """
+    pairs: set[tuple[str, str]] = set()
+    for path in sorted(MODEL_DIR.glob("*.py")):
+        source = _read(path)
+        if not source:
+            continue
+        try:
+            tree = ast.parse(source, filename=_rel(path))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any(
+                (isinstance(d, ast.Name) and d.id == "dataclass")
+                or (
+                    isinstance(d, ast.Call) and getattr(d.func, "id", "") == "dataclass"
+                )
+                for d in node.decorator_list
+            ):
+                continue
+            for field_name in _dataclass_field_names(node):
+                pairs.add((node.name, field_name))
+    return pairs
+
+
+def _abi_snapshot_field_names() -> set[str]:
+    """Every field declared directly on ``AbiSnapshot`` in
+    ``abicheck/model/snapshot.py``, via AST — the ground truth Direction 7
+    validates ``REFERENCE_FLAG_COVERAGE``'s keys against. Returns an empty
+    set (rather than raising) if the file is unreadable or the class isn't
+    found, so a caller can treat that as "nothing to check against" the
+    same way every other best-effort scan in this module does.
+    """
+    source = _read(_SNAPSHOT_PATH)
+    if not source:
+        return set()
+    try:
+        tree = ast.parse(source, filename=_rel(_SNAPSHOT_PATH))
+    except SyntaxError:
+        return set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "AbiSnapshot":
+            return _dataclass_field_names(node)
+    return set()
 
 
 def scan_model_dataclasses(
@@ -272,17 +413,31 @@ def scan_model_dataclasses(
     return found
 
 
-def _model_fact_siblings() -> dict[tuple[str, str], str]:
-    """Every real ``<field>_fact`` sibling declared under ``model/``.
+def _model_fact_siblings(
+    model_dir: Path = MODEL_DIR,
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """Every real, genuinely ``Fact[...]``-shaped ``<field>_fact`` sibling
+    declared under ``model/``.
 
-    Returns ``{(owner, field): rel_path}`` (``field`` without the
-    ``_fact`` suffix, matching ``FactDefinition.field``) — the ground
-    truth "already converted" set, read via AST rather than importing
-    every dataclass's live fields, so this stays independent of whether
-    ``abicheck`` happens to import cleanly in the running environment.
+    Returns ``{(owner, field): (rel_path, inner_type)}`` (``field``
+    without the ``_fact`` suffix, matching ``FactDefinition.field``;
+    ``inner_type`` the ``X`` in the sibling's own ``Fact[X]``/
+    ``Fact[X] | None`` annotation) — the ground truth "already converted"
+    set, read via AST rather than importing every dataclass's live
+    fields, so this stays independent of whether ``abicheck`` happens to
+    import cleanly in the running environment. ``model_dir`` defaults to
+    the real ``abicheck/model/`` but accepts any directory (mirroring
+    ``scan_model_dataclasses``) for synthetic-fixture testability.
+
+    A ``*_fact``-suffixed field whose annotation does **not** actually
+    parse as ``Fact[...]``-shaped is not counted here at all (Codex
+    review, direction 6 in this module's docstring) — suffix alone is not
+    evidence, so a hypothetical ``widget_fact: dict[str, object]`` would
+    previously have silently satisfied every completeness check a real
+    ``Fact[T]`` sibling does.
     """
-    siblings: dict[tuple[str, str], str] = {}
-    for path in sorted(MODEL_DIR.glob("*.py")):
+    siblings: dict[tuple[str, str], tuple[str, str]] = {}
+    for path in sorted(model_dir.glob("*.py")):
         rel = _rel(path)
         source = _read(path)
         if not source:
@@ -303,13 +458,17 @@ def _model_fact_siblings() -> dict[tuple[str, str], str]:
             ):
                 continue
             for stmt in node.body:
-                if (
+                if not (
                     isinstance(stmt, ast.AnnAssign)
                     and isinstance(stmt.target, ast.Name)
                     and stmt.target.id.endswith("_fact")
                 ):
-                    field_name = stmt.target.id[: -len("_fact")]
-                    siblings[(node.name, field_name)] = rel
+                    continue
+                inner = _fact_annotation_inner_type(_annotation_text(stmt))
+                if inner is None:
+                    continue
+                field_name = stmt.target.id[: -len("_fact")]
+                siblings[(node.name, field_name)] = (rel, inner)
     return siblings
 
 
@@ -472,7 +631,7 @@ def _cross_check_against_backend_capabilities(
 
 
 def check_fact_registry_completeness(f: Findings) -> None:
-    """ERROR on any of the three directions this module's docstring states.
+    """ERROR on any of the eight directions this module's docstring states.
 
     Imports ``abicheck.model.fact_registry`` directly rather than
     re-parsing its data via AST — that module is a dependency-free leaf
@@ -493,11 +652,11 @@ def check_fact_registry_completeness(f: Findings) -> None:
         )
         return
 
-    siblings = _model_fact_siblings()  # {(owner, field): rel_path}
+    siblings = _model_fact_siblings()  # {(owner, field): (rel_path, inner_type)}
 
     # Direction 1 + 2: every Fact[T]-typed field <-> exactly one registry entry.
     registry_keys = {(e.owner, e.field) for e in FACT_REGISTRY.entries.values()}
-    for owner_field, rel in siblings.items():
+    for owner_field, (rel, _inner) in siblings.items():
         if owner_field not in registry_keys:
             owner, field_name = owner_field
             f.err(
@@ -552,6 +711,25 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 f"convention)",
             )
 
+    # Direction 8 (Codex review): an allowlist entry naming a field that has
+    # since been renamed or removed (not just "already converted", the only
+    # staleness the loop above catches) is a stale entry too — check every
+    # entry still names a real, currently-declared model field.
+    all_model_fields = _all_model_dataclass_field_pairs()
+    if all_model_fields:
+        for owner, field_name in sorted(KNOWN_UNCONVERTED_ELIGIBLE_FACTS):
+            if (owner, field_name) in siblings:
+                continue  # already reported above
+            if (owner, field_name) not in all_model_fields:
+                f.err(
+                    "fact-registry-completeness",
+                    f"{owner}.{field_name} is listed in "
+                    f"KNOWN_UNCONVERTED_ELIGIBLE_FACTS but no such field "
+                    f"exists under abicheck/model/ at all — likely renamed "
+                    f"or removed before conversion; remove or update the "
+                    f"stale allowlist entry",
+                )
+
     # Direction 4: a persisted entry must actually be wired into BOTH a real
     # encode path and a real decode path — checked independently, not as a
     # combined occurrence count (Codex review: a count alone can't tell an
@@ -592,6 +770,42 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 "fact-registry-completeness",
                 f"{entry.id}: {problem}",
             )
+
+    # Direction 6: a registry entry's value_type must match the real inner
+    # type its Fact[...] sibling annotation actually declares (Codex review
+    # — a suffix-matched-but-wrong-shaped field is already excluded from
+    # `siblings` by _model_fact_siblings() itself; this additionally catches
+    # a real Fact[...] sibling whose payload type disagrees with what the
+    # registry claims, e.g. value_type="bool" for a real Fact[str]).
+    for entry in FACT_REGISTRY.entries.values():
+        found = siblings.get((entry.owner, entry.field))
+        if found is None:
+            continue  # already reported as a stale entry above
+        rel, inner_type = found
+        if inner_type != entry.value_type:
+            f.err(
+                "fact-registry-completeness",
+                f"{rel}: {entry.id} registers value_type={entry.value_type!r}, "
+                f"but its real {entry.fact_attr} annotation is "
+                f"Fact[{inner_type}] — the registry disagrees with the code "
+                f"it claims to describe",
+            )
+
+    # Direction 7: every REFERENCE_FLAG_COVERAGE key must name a real field
+    # declared on AbiSnapshot (Codex review — direction 3 above only unions
+    # the covered (owner, field) *values* and silently discards the keys, so
+    # a typo'd/renamed flag name would keep passing as long as its covered
+    # pairs stay tracked).
+    snapshot_fields = _abi_snapshot_field_names()
+    if snapshot_fields:
+        for flag in REFERENCE_FLAG_COVERAGE:
+            if flag not in snapshot_fields:
+                f.err(
+                    "fact-registry-completeness",
+                    f"fact_registry.REFERENCE_FLAG_COVERAGE names {flag!r}, "
+                    f"but AbiSnapshot (abicheck/model/snapshot.py) has no "
+                    f"such field — stale or typo'd reliability-flag key",
+                )
 
 
 if __name__ == "__main__":
