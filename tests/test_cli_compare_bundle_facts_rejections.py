@@ -159,6 +159,97 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 1
         assert "Traceback" not in out
 
+    def test_old_input_directory_is_a_clean_error(self, tmp_path: Path) -> None:
+        # Codex review: load_bundle_facts() raises IsADirectoryError (an
+        # OSError) when OLD_INPUT is a directory -- OLD_INPUT is a plain
+        # click.Path(exists=True) argument (not dir_okay=False, since the
+        # ordinary live-directory compare mode needs a directory there), so
+        # `compare a_dir/ new/ --old-bundle-facts` reaches this path and
+        # previously leaked a raw traceback instead of a clean CLI error.
+        old_dir = tmp_path / "old_dir"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--format",
+            "json",
+        )
+
+        assert code == 1
+        assert "Traceback" not in out
+
+    def test_lang_explicit_is_forwarded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: an explicit --lang c++ was indistinguishable from
+        # Click's own identical default once inside dispatch(), so a
+        # language-ambiguous NEW-side header could be silently auto-detected
+        # away from the caller's explicit request. Proven the same way
+        # test_includes_from_config_are_merged_and_forwarded is: capture
+        # what compare_cmd forwards to dispatch(), not
+        # compare_release_against_bundle_facts's own behavior.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        from abicheck.frontends.cli.commands import compare_bundle_facts
+
+        captured: dict[str, object] = {}
+
+        def _fake_dispatch(*, compile_context: object, **kwargs: object) -> None:
+            captured["lang_explicit"] = kwargs.get("lang_explicit")
+
+        monkeypatch.setattr(compare_bundle_facts, "dispatch", _fake_dispatch)
+
+        code, _out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--lang",
+            "c++",
+            "--format",
+            "json",
+        )
+
+        assert code == 0
+        assert captured.get("lang_explicit") is True
+
+    def test_lang_explicit_is_false_when_lang_not_given(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        from abicheck.frontends.cli.commands import compare_bundle_facts
+
+        captured: dict[str, object] = {}
+
+        def _fake_dispatch(*, compile_context: object, **kwargs: object) -> None:
+            captured["lang_explicit"] = kwargs.get("lang_explicit")
+
+        monkeypatch.setattr(compare_bundle_facts, "dispatch", _fake_dispatch)
+
+        code, _out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--format",
+            "json",
+        )
+
+        assert code == 0
+        assert captured.get("lang_explicit") is False
+
     def test_includes_from_config_are_merged_and_forwarded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -239,6 +239,7 @@ def compare_release_against_bundle_facts(
     per_library_compile: dict[str, CompileContext] | None = None,
     new_version: str = "",
     lang: str = "c++",
+    lang_explicit: bool = False,
     include_private_dso: bool = False,
     manifest_path: Path | None = None,
     system_providers: list[str] | None = None,
@@ -291,6 +292,15 @@ def compare_release_against_bundle_facts(
     extra flags -- e.g. a SYCL/DPC++ host that needs
     ``CompileContext(gcc_path="icpx", frontend="clang", ...)``) can now pass
     it directly instead of monkeypatching this module.
+
+    *lang_explicit* (Codex review, fresh evidence): whether *lang* reflects
+    a genuinely explicit ``--lang`` on the command line rather than the
+    identical, indistinguishable Click default -- forwarded straight to
+    ``service.resolve_input()``'s own parameter of the same name. Left at
+    the default ``False`` (this function's own pre-existing behavior)
+    silently forces ``resolve_input``'s auto-detection to run even when a
+    caller explicitly asked for ``lang="c++"`` on a language-ambiguous
+    header, which can change the extracted API and findings.
 
     *headers*/*includes*/*compile* are the **uniform** fallback applied to
     every matched library -- correct only when every library in the bundle
@@ -422,6 +432,7 @@ def compare_release_against_bundle_facts(
             includes=lib_includes,
             version=new_version,
             lang=lang,
+            lang_explicit=lang_explicit,
             header_backend=header_backend,
             compile=lib_compile,
             include_dependencies=include_dependencies,

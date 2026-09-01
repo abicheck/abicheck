@@ -237,6 +237,15 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 compile=compile_context,
                 new_version=kwargs.get("new_version", "new"),
                 lang=kwargs.get("lang", "c++"),
+                # Codex review, fresh evidence: kwargs["lang_explicit"] is
+                # compare_cmd's own ctx.get_parameter_source("lang") ==
+                # COMMANDLINE detection (compare.py, mirroring run_compare's
+                # identical lang_explicit computation) -- without threading
+                # it through, an explicit --lang c++ on a language-ambiguous
+                # NEW-side header was indistinguishable from Click's own
+                # default and silently let resolve_input() auto-detect past
+                # it, which can change the extracted API and findings.
+                lang_explicit=bool(kwargs.get("lang_explicit", False)),
                 include_private_dso=bool(kwargs.get("include_private_dso", False)),
                 manifest_path=kwargs.get("manifest_path"),
                 system_providers=bundle_system_providers or None,
@@ -247,7 +256,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 include_dependencies=bool(kwargs.get("include_dependencies", False)),
                 max_json_object_nodes=kwargs.get("max_json_object_nodes"),
             )
-        except (SnapshotError, ValueError) as exc:
+        except (SnapshotError, ValueError, OSError) as exc:
             # Same CLI-boundary translation every other SnapshotError-raising
             # entry point uses (cli_resolve.py et al.) -- without this, a
             # container-node-budget rejection (or any other SnapshotError) would
@@ -260,7 +269,12 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             # ValueError, not SnapshotError, for these) -- would otherwise leak
             # the same raw traceback. json.JSONDecodeError (genuinely malformed
             # JSON, from the plain-JSON load path) is itself a ValueError
-            # subclass, so it's covered by the same clause.
+            # subclass, so it's covered by the same clause. OSError (Codex
+            # review, fresh evidence) covers load_bundle_facts()'s own
+            # IsADirectoryError/PermissionError/etc when OLD_INPUT -- a plain
+            # click.Path(exists=True) argument, not dir_okay=False, since the
+            # ordinary live-directory compare mode needs a directory there --
+            # turns out to be a directory or otherwise unreadable file.
             raise click.ClickException(str(exc)) from exc
     finally:
         # Mirrors the live release fan-out's own --keep-extracted handling

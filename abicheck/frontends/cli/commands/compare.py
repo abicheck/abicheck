@@ -755,6 +755,10 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             dispatch as dispatch_bundle_facts,
         )
 
+        # Codex review: mirrors run_compare's own explicit-vs-default --lang
+        # detection -- otherwise indistinguishable from Click's own default.
+        _lang_src = ctx.get_parameter_source("lang")
+        kwargs["lang_explicit"] = _lang_src == click.core.ParameterSource.COMMANDLINE
         _headers, _includes = _resolve_new_side_headers_includes(kwargs)
         _header_backend = (
             kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
@@ -793,4 +797,3 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     kwargs.pop("max_json_object_nodes", None)
 
     run_compare(ctx, **kwargs)
-

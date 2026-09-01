@@ -108,6 +108,19 @@
   once it pushed the dispatcher itself past the architecture no-growth
   800-line cap.
 
+  A directory (or otherwise unreadable file) given as `OLD_INPUT` now
+  produces a clean CLI error instead of a raw `IsADirectoryError`/`OSError`
+  traceback -- `OLD_INPUT` is a plain `click.Path(exists=True)` argument,
+  not `dir_okay=False`, since the ordinary live-directory `compare` mode
+  needs a directory there too. An explicit `--lang c++` is now honored
+  correctly for the NEW side: `compare_release_against_bundle_facts()`
+  gained a `lang_explicit` parameter (forwarded to `service.resolve_input()`,
+  mirroring `run_compare`'s own `ctx.get_parameter_source("lang") ==
+  COMMANDLINE` detection) -- previously an explicit request was
+  indistinguishable from Click's identical default, so a language-ambiguous
+  header could be silently auto-detected away from the caller's request,
+  changing the extracted API and findings.
+
   Separately, `run_plan.py`'s newline-join fix for `RunPlanCheck.header`
   (public_headers reaching a generated run-plan cell) missed the
   single-element case: `"\n".join([x])` for a one-item list contains no
