@@ -162,6 +162,11 @@ def build_record_type(
                 if off is not None:
                     base_offsets[type_name(ctx, b.get("type", ""))] = off
     # is_standard_layout / is_trivially_copyable / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST), and CastXML doesn't expose the trivially-copyable trait directly (Codex review #345).
+    # castxml records the `final` class-key specifier as a `final` token
+    # inside the compound ``attributes`` string (e.g. ``attributes="final"``),
+    # the same channel used for noexcept -- header mode always knows the
+    # answer, so this is a concrete bool, never None on the castxml path.
+    is_final = bool(re.search(r"\bfinal\b", el.get("attributes", "")))
     return RecordType(
         name=name,
         kind=el.tag.lower(),
@@ -187,13 +192,11 @@ def build_record_type(
         # whether a segment was a namespace or a record.
         entity_id=entity_id_for_type(scope_path(ctx, el), name),
         qualified_name=qualified_type_name(ctx, el, leaf_name=name),
-        # castxml records the `final` class-key specifier as a `final`
-        # token inside the compound ``attributes`` string (e.g.
-        # ``attributes="final"``), the same channel used for noexcept.
-        # Header mode always knows the answer, so this is a concrete bool
-        # (never None on the castxml path); DWARF/symbols mode leaves the
-        # model default of None since the binary carries no `final` info.
-        is_final=bool(re.search(r"\bfinal\b", el.get("attributes", ""))),
+        is_final=is_final,
+        # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
+        # local variable's own comment above for why this is always a real,
+        # concrete determination on the castxml path.
+        is_final_fact=Fact.present(is_final),
         source_location=source_location(ctx, el),
         # castxml's `abstract="1"` marks a class/struct with at least one
         # pure virtual function (cannot be instantiated). Header mode

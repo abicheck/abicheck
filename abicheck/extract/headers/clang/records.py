@@ -222,6 +222,10 @@ def _build_record(
             is_union=kind == "union",
             is_opaque=is_opaque,
             is_final=_clang_record_is_final(node),
+            # ADR-063 Phase 5: Fact[bool | None] sibling of is_final --
+            # _clang_record_is_final() always returns a real bool, so this
+            # is a genuine determination even for an opaque/incomplete type.
+            is_final_fact=Fact.present(_clang_record_is_final(node)),
             is_standard_layout=None,
             is_trivially_copyable=None,
             is_template_pattern=entry.in_template,
@@ -285,6 +289,10 @@ def _build_record(
         is_union=kind == "union",
         is_opaque=is_opaque,
         is_final=_clang_record_is_final(node),
+        # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see
+        # the opaque branch above for why this is always a real
+        # determination, never a placeholder.
+        is_final_fact=Fact.present(_clang_record_is_final(node)),
         # G31 Phase C: unlike layout (size/align/offsets), these are
         # semantic type traits clang's AST computes independent of any
         # layout pass, and are genuinely absent from CastXML's own schema

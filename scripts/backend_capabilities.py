@@ -519,6 +519,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("RecordType", "is_final", _FULL, _FULL),
     FactRow(
         "RecordType",
+        "is_final_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 5: `Fact[bool | None]` sibling of `is_final`. "
+            "Same convention as `bases_fact`/`vtable_fact` above: both "
+            "backends construct it directly, as an explicit kwarg "
+            "(`Fact.present(is_final)`) rather than relying on "
+            "`RecordType.__post_init__`'s generic legacy-value bridge, "
+            "since `is_final` is always a concrete bool on the header-AST "
+            "path (never a placeholder), matching `is_final`'s own row."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "is_template_pattern",
         _NONE,
         _FULL,

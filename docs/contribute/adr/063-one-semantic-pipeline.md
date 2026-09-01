@@ -207,12 +207,20 @@
   conversion, `RecordType.is_final` — chosen because, unlike Phase 0's own
   five fields, it needs no private omission sentinel and no reliability
   flag (`is_final`'s own `None` already unambiguously means "not
-  captured"), demonstrating the plan's stated six-item touch list at its
-  simplest: model field + registry entry + serialization encode/decode
-  (`storage/fact_codec.py`, `SCHEMA_VERSION` 30) + parser (none needed —
-  the legacy-to-`Fact[T]` bridge is automatic) + detector (none needed —
-  Phase 0's own precedent: no detector migrates to read a `Fact[...]`
-  sibling in this phase either) + test. `scripts/fact_registry_
+  captured"), demonstrating the plan's stated six-item touch list: model
+  field + registry entry + serialization encode/decode (`storage/
+  fact_codec.py`, `SCHEMA_VERSION` 30) + parser (both header-AST backends
+  — `extract/headers/castxml/records.py`, `extract/headers/clang/
+  records.py` — construct `is_final_fact` directly as an explicit kwarg,
+  the same convention Phase 0's own `bases_fact`/`vtable_fact` already
+  established, rather than relying on `RecordType.__post_init__`'s
+  generic legacy-value bridge; a Codex review round on this PR caught the
+  first draft's claim that no parser change was needed, which left
+  `scripts/backend_capabilities.py`'s AST-verified capability matrix
+  correctly failing since neither backend's source literally names
+  `is_final_fact` without it) + detector (none needed — Phase 0's own
+  precedent: no detector migrates to read a `Fact[...]` sibling in this
+  phase either) + test. `scripts/fact_registry_
   completeness.py` (new, mirroring `fact_field_readers.py`'s split-leaf-
   module pattern) is the `fact-registry-completeness` AI-readiness check
   D7 calls for: every `Fact[T]`-typed field has exactly one registry entry
