@@ -58,6 +58,7 @@ from collections.abc import (
     Iterator as _Iterator,
     Mapping as _Mapping,
 )
+from enum import Enum as _Enum
 from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
 
 _SnapshotT = _TypeVar("_SnapshotT")
@@ -277,9 +278,8 @@ def raw_segments(qualified: str) -> list[str]:
 #: fixed prefix is a regex; the variable-length basename that follows is
 #: scanned manually by :func:`_scan_anon_type_marker` below, since a single
 #: regex alternation (``\([^()]*\)``) can only ever balance one level of
-#: nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp``
-#: (Codex review, fresh evidence).
-_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+):")
+#: nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp`` (Codex review, fresh evidence).
+_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+|anonymous\s+\w+):")
 
 #: Matches a marker's trailing ``:<line>:<col>`` right before the closing
 #: paren :func:`_scan_anon_type_marker` already found -- applied to the text
@@ -554,7 +554,7 @@ def _collect_strings(value: object, out: list[str]) -> None:
     through dataclasses, lists/tuples, and dicts (keys and values) --
     except a field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`.
     """
-    if isinstance(value, str):
+    if isinstance(value, str) and not isinstance(value, _Enum):
         out.append(value)
     elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
         for f in _dataclasses.fields(value):
@@ -566,7 +566,7 @@ def _collect_strings(value: object, out: list[str]) -> None:
             _collect_strings(item, out)
     elif isinstance(value, dict):
         for k, v in value.items():
-            if isinstance(k, str):
+            if isinstance(k, str) and not isinstance(k, _Enum):
                 out.append(k)
             _collect_strings(v, out)
 
@@ -605,7 +605,7 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
     even though the dataclass it belongs to was otherwise correctly
     rebuilt.
     """
-    if isinstance(value, str):
+    if isinstance(value, str) and not isinstance(value, _Enum):
         return rewrite(value)
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
         params = getattr(value, "__dataclass_params__", None)
@@ -642,7 +642,7 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
         rewritten: dict[object, object] = {}
         changed = False
         for k, v in value.items():
-            new_k = rewrite(k) if isinstance(k, str) else k
+            new_k = rewrite(k) if isinstance(k, str) and not isinstance(k, _Enum) else k
             new_v = _walk_rewrite_strings(v, rewrite)
             rewritten[new_k] = new_v
             if new_k != k or new_v is not v:
@@ -739,7 +739,8 @@ def _lambda_identity_containers_and_strings(
     strings: list[str] = []
     for container in containers:
         _collect_strings(container, strings)
-    if not any("(lambda" in s or "(unnamed " in s for s in strings):
+    markers = ("(lambda", "(unnamed ", "(anonymous ")
+    if not any(m in s for s in strings for m in markers):
         return None
     return containers, strings
 

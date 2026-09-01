@@ -54,7 +54,21 @@ _ROOT = st.text(alphabet=_PATH_CHARS, min_size=0, max_size=30)
 _LINE_COL = st.tuples(
     st.integers(min_value=0, max_value=99999), st.integers(min_value=0, max_value=999)
 )
-_KIND = st.sampled_from(["lambda", "unnamed struct", "unnamed enum", "unnamed union"])
+_KIND = st.sampled_from(
+    [
+        "lambda",
+        "unnamed struct",
+        "unnamed enum",
+        "unnamed union",
+        # "anonymous <kind>" is a distinct real-world vocabulary from
+        # "unnamed <kind>" (observed directly in a real L5 graph node
+        # identity) that the regex's alternation originally omitted,
+        # leaving its checkout-dependent path unstripped.
+        "anonymous struct",
+        "anonymous enum",
+        "anonymous union",
+    ]
+)
 
 
 def _spelling(kind: str, path: str, line: int, col: int) -> str:
