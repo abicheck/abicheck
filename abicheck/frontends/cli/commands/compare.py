@@ -457,6 +457,34 @@ def _embed_inline_source_side(
 @set_input_options
 # ── Release (directory/package) comparison knobs (ADR-037 D7) ────────────────
 @release_options
+# ── Stored bundle-facts OLD side (G38 Phase 13 follow-up) ────────────────────
+# OLD_INPUT is reinterpreted as a persisted BundleFacts document (produced by
+# a prior `compare --bundle-facts-out`) rather than a live directory/package;
+# see compare_bundle_facts.py for why this is a flag on OLD_INPUT rather
+# than a new required argument or root command.
+@click.option(
+    "--old-bundle-facts",
+    "old_bundle_facts",
+    is_flag=True,
+    default=False,
+    help="Treat OLD_INPUT as a stored BundleFacts document (from a "
+    "prior --bundle-facts-out), not a live library/directory. "
+    "NEW_INPUT stays a live release directory/package. Only "
+    "--format json/markdown are available in this mode.",
+)
+@click.option(
+    "--max-json-object-nodes",
+    "max_json_object_nodes",
+    type=int,
+    default=None,
+    help="Override the JSON container-node budget "
+    "(bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES, 1,000,000) "
+    "when decoding OLD_INPUT with --old-bundle-facts. A real "
+    "per-library facts blob for a large, template-heavy "
+    "library (e.g. SYCL/DPC++) can legitimately need well "
+    "over the default to decode; this is the supported way "
+    "to raise it, instead of patching the budget in code.",
+)
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
 # Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
 # family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
@@ -713,5 +741,59 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ``profile`` key before delegating to the typed run_compare signature.
     apply_compare_profile(ctx, kwargs)
 
-    run_compare(ctx, **kwargs)
+    # --old-bundle-facts short-circuits the ordinary live-binary/directory
+    # dispatch entirely (never reaches run_compare/_dispatch_release_compare):
+    # OLD_INPUT is already a resolved, stored BundleFacts document, not
+    # something to classify as a single file/directory/package. See
+    # compare_bundle_facts.py's module docstring for why this lives here
+    # rather than as a branch inside cli_compare_helpers.run_compare itself.
+    if kwargs.pop("old_bundle_facts", False):
+        from ....cli_helpers_compare import discover_project_config
+        from ....cli_options import resolve_compile_context
+        from .compare_bundle_facts import (
+            _resolve_new_side_headers_includes,
+            dispatch as dispatch_bundle_facts,
+        )
 
+        # Codex review: mirrors run_compare's own explicit-vs-default --lang
+        # detection -- otherwise indistinguishable from Click's own default.
+        _lang_src = ctx.get_parameter_source("lang")
+        kwargs["lang_explicit"] = _lang_src == click.core.ParameterSource.COMMANDLINE
+        _headers, _includes = _resolve_new_side_headers_includes(kwargs)
+        _header_backend = (
+            kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
+        )
+        # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
+        # (_resolve_compare_config) -- resolve_compile_context alone never
+        # auto-discovers without a --sources tree. Overwriting kwargs
+        # ["config"] means dispatch()'s own config check (cli_options is
+        # kept out of that sibling module's own imports -- see its
+        # docstring) covers an auto-discovered .abicheck.yml too.
+        _cfg_path = kwargs.get("config") or discover_project_config()
+        kwargs["config"] = _cfg_path
+        _compile_context, _merged_includes = resolve_compile_context(
+            ctx,
+            sysroot=kwargs.get("sysroot"),
+            nostdinc=bool(kwargs.get("nostdinc", False)),
+            header_backend=_header_backend,
+            includes=tuple(_includes),
+            build_config=_cfg_path,
+            frontend_context=kwargs.get("frontend_context", "host"),
+            compiler_path=kwargs.get("compiler_path"),
+            compiler_prefix=kwargs.get("compiler_prefix"),
+            compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+        )
+        # Forward the *merged* include list (Codex review), not the raw
+        # kwargs `resolve_compile_context` was given -- when `.abicheck.yml`
+        # supplies `compile.include_dirs`, `_merged_includes` is `_includes`
+        # extended with those config-derived roots, and the side-scoped
+        # `new_includes_only` override (already folded into `_includes`
+        # above) would otherwise make `dispatch()`'s own independent
+        # re-derivation from raw kwargs silently drop them.
+        kwargs["includes"] = tuple(_merged_includes)
+        kwargs["new_includes_only"] = ()
+        dispatch_bundle_facts(compile_context=_compile_context, **kwargs)
+        return
+    kwargs.pop("max_json_object_nodes", None)
+
+    run_compare(ctx, **kwargs)

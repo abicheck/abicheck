@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
+    from .workflows.suppression import SuppressionList
 
 
 @dataclass(frozen=True)
@@ -238,12 +239,14 @@ def compare_release_against_bundle_facts(
     per_library_compile: dict[str, CompileContext] | None = None,
     new_version: str = "",
     lang: str = "c++",
+    lang_explicit: bool = False,
     include_private_dso: bool = False,
     manifest_path: Path | None = None,
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppress: SuppressionList | None = None,
     include_dependencies: bool = False,
     max_json_object_nodes: int | None = None,
 ) -> BundleDiffResult:
@@ -289,6 +292,15 @@ def compare_release_against_bundle_facts(
     extra flags -- e.g. a SYCL/DPC++ host that needs
     ``CompileContext(gcc_path="icpx", frontend="clang", ...)``) can now pass
     it directly instead of monkeypatching this module.
+
+    *lang_explicit* (Codex review, fresh evidence): whether *lang* reflects
+    a genuinely explicit ``--lang`` on the command line rather than the
+    identical, indistinguishable Click default -- forwarded straight to
+    ``service.resolve_input()``'s own parameter of the same name. Left at
+    the default ``False`` (this function's own pre-existing behavior)
+    silently forces ``resolve_input``'s auto-detection to run even when a
+    caller explicitly asked for ``lang="c++"`` on a language-ambiguous
+    header, which can change the extracted API and findings.
 
     *headers*/*includes*/*compile* are the **uniform** fallback applied to
     every matched library -- correct only when every library in the bundle
@@ -357,14 +369,27 @@ def compare_release_against_bundle_facts(
     ``bundle_facts.read_bundle_facts_archive``'s own docstring. ``None``
     (the default) uses the library default, matching this driver's
     pre-existing behavior.
+
+    *suppress*, when given, is forwarded to each per-library
+    ``service.compare_snapshots()`` call as its own *suppression* argument
+    -- the same object the native ``compare``/``compare-release`` CLIs pass
+    (``--suppress``). Previously this driver had no way to honor a caller's
+    suppression list at all: every matched library was scored with every
+    known/intentional change still live, unlike every other comparison
+    entry point in this codebase. Omitted (the default): behavior is
+    unchanged from before this parameter existed. Not applied to
+    *bundle_findings* (the cross-library ``BUNDLE_*`` aggregate) -- the
+    native release fan-out does not apply per-library suppression there
+    either, since a suppression rule is authored against one library's own
+    symbol/type identity, not a cross-library relationship.
     """
     from . import service
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
-    from .cli_helpers_compare import _build_match_map
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
+    from .workflows.extraction import build_match_map
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
 
@@ -373,12 +398,18 @@ def compare_release_against_bundle_facts(
     else:
         new_files = [new_dir]
     # Version-aware duplicate resolution (the same rule the live release
-    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`
-    # call), rather than a plain last-write-wins dict build: a directory
-    # carrying more than one version of a library (e.g. `libfoo.so.9` and
-    # `libfoo.so.10`) must not silently resolve to whichever sorts last
-    # lexicographically (Codex review).
-    new_map, _match_warnings = _build_match_map(new_files)
+    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`,
+    # itself now a thin `click.ClickException`-translating wrapper over this
+    # same `binary_utils.build_match_map` primitive), rather than a plain
+    # last-write-wins dict build: a directory carrying more than one version
+    # of a library (e.g. `libfoo.so.9` and `libfoo.so.10`) must not silently
+    # resolve to whichever sorts last lexicographically (Codex review). Calls
+    # the pure, Click-free primitive directly (ADR-061: this module is
+    # classified `workflows`, which may not import the `frontends`-legacy
+    # `cli_helpers_compare.py`) -- an `AmbiguousLibraryMatchError` here
+    # propagates as a plain Python exception, appropriate for a module with
+    # callers outside any Click command.
+    new_map, _match_warnings = build_match_map(new_files)
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
@@ -401,12 +432,13 @@ def compare_release_against_bundle_facts(
             includes=lib_includes,
             version=new_version,
             lang=lang,
+            lang_explicit=lang_explicit,
             header_backend=header_backend,
             compile=lib_compile,
             include_dependencies=include_dependencies,
         )
         diff = service.compare_snapshots(
-            old_snapshot, new_snapshot, policy=policy, policy_file=policy_file
+            old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
         )
         per_library_results.append(diff)
         new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)

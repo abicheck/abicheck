@@ -298,6 +298,26 @@ provision a matching conda environment instead of sharing whatever the
 workflow-level value said. With both unset the legacy `install-deps` boolean
 still decides, exactly as before.
 
+**Exception: `header` also gets a per-cell override**, on the same
+precedence rule. A `kind: library` target's own `public_headers:`
+([`project-targets-schema.md`](project-targets-schema.md#targets)) —
+newline-joined into `run_plan.RunPlanCheck.header` — wins over this workflow's
+`header` input for that target's cells only, so a project whose libraries
+each have their own header tree gets that scoping automatically once
+declared, instead of every cell sharing one workflow-global `header` value.
+An `app-consumer`/`plugin-contract` target has no `public_headers:` of its
+own and redirects through its `library:` target's, the same way its
+`binary_pattern` already does. A target that declares none falls back to
+the workflow-global `header` input unchanged, so a project that only ever
+set the global value sees no behavior change. **`kind: bundle` cells are
+excluded from this override**, for the same reason `ast-frontend` is: a
+bundle cell's candidate is the staged directory of every member's own
+binary, and there is no per-bundle-member header staging mechanism to give
+each member's binary its own header tree in that one directory comparison
+— see `BUNDLE_CHECK_DEPTHS`'s own docstring in `project_targets.py`. A
+bundle cell keeps resolving the workflow-global `header` input exactly as
+it did before this override existed.
+
 **Each cell is scheduled on its profile's own runner** (G34 Phase C), rather
 than the `ubuntu-latest` every cell used to hardcode: the `plan` job derives
 `runs_on` from each profile's `os:`, so an `os: windows` profile's cell lands

@@ -367,7 +367,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy, policy_file=None: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
         )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -416,7 +418,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
         captured: dict[str, object] = {}
 
-        def _fake_compare_snapshots(old, new, policy, policy_file=None):
+        def _fake_compare_snapshots(
+            old, new, suppress=None, *, policy, policy_file=None
+        ):
             captured["policy_file"] = policy_file
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
 
@@ -430,6 +434,57 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         pf = PolicyFile(overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: VerdictEnum.BREAKING})
         compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
         assert captured["policy_file"] is pf
+
+    def test_suppress_is_forwarded_to_per_library_compare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before this fix, this driver had no way to honor a caller's
+        suppression list at all -- ``service.compare_snapshots`` was called
+        with no *suppression* argument, so a matched library was always
+        scored with every known/intentional change still live, unlike every
+        other comparison entry point in this codebase (the same class of
+        gap the ``policy_file`` fix above closed for reclassify/override
+        rules)."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.workflows.suppression import SuppressionList
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            ),
+        )
+        captured: dict[str, object] = {}
+
+        def _fake_compare_snapshots(old, new, suppress=None, *, policy, policy_file=None):
+            captured["suppress"] = suppress
+            return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _fake_compare_snapshots)
+
+        # Omitted: unchanged behavior, None reaches the per-library call.
+        compare_release_against_bundle_facts(facts_path, new_dir)
+        assert captured["suppress"] is None
+
+        # Given: forwarded verbatim to every matched library's own compare.
+        suppression = SuppressionList([])
+        compare_release_against_bundle_facts(facts_path, new_dir, suppress=suppression)
+        assert captured["suppress"] is suppression
 
     def test_policy_file_also_reaches_bundle_level_verdict(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -468,7 +523,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy, policy_file=None: _diff(
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
             ),
         )
@@ -614,7 +669,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy, policy_file=None: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
         )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -659,7 +716,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy, policy_file=None: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
         )
 
         ctx = CompileContext(
@@ -722,7 +781,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy, policy_file=None: _diff(new.library, verdict=Verdict.NO_CHANGE),
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                new.library, verdict=Verdict.NO_CHANGE
+            ),
         )
 
         uniform_headers = [Path("/include/common")]

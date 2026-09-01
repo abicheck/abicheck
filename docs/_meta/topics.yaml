@@ -184,6 +184,9 @@ topics:
       - abicheck/bundle_soname.py
       - abicheck/bundle_facts.py
       - abicheck/product_baseline.py
+      - abicheck/bundle_side_input.py
+      - abicheck/frontends/cli/commands/compare_bundle_facts.py
+    reference_page: reference/cli-reference.md
 
   cli-surface:
     canonical_page: use/cli-usage.md

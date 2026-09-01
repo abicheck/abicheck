@@ -275,6 +275,7 @@
         "abicheck/bundle_models.py",
         "abicheck/bundle_multibuild.py",
         "abicheck/bundle_resolution_reachability.py",
+        "abicheck/bundle_side_input.py",
         "abicheck/bundle_signature_evidence.py",
         "abicheck/bundle_soname.py",
         "abicheck/bundle_variants_config.py",

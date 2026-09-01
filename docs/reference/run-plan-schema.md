@@ -92,6 +92,7 @@ dicts can forward each field through with no renaming.
 | `target_kind` | `kind: target` | `library` \| `app-consumer` \| `plugin-contract`. |
 | `baseline_target` | `target_kind: app-consumer`/`plugin-contract` | The referenced `kind: library` target's id (empty otherwise — `check-target`'s own `baseline-target` input treats empty as "use `name`"). |
 | `binary_pattern` | `kind: target` | Glob pattern (resolved against the *current* build's candidate artifacts by the calling workflow, never by this generator) locating the candidate binary. For a redirected check, the referenced library's own pattern. |
+| `header` | `kind: target`, and the target (or, for a redirected check, the referenced library) declares `public_headers:` | That target's `public_headers:`, newline-joined so a header root containing whitespace survives `action/run.sh`'s `add_flag()` multi-value input handling intact. Empty (field omitted) when the target declares none — a caller then falls back to its own workflow-global `header` input. Never set for `kind: bundle` (no per-bundle-member header staging exists yet — see `BUNDLE_CHECK_DEPTHS` in `project_targets.py`). |
 | `consumer_binary_pattern` | `target_kind: app-consumer` | The consumer binary/binaries pattern. |
 | `contract_file` | `target_kind: plugin-contract` | The `.syms` contract file path. |
 | `bundle_members` | `kind: bundle` | Member target ids. |

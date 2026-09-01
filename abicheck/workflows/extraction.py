@@ -42,6 +42,8 @@ from __future__ import annotations
 from .._compiler_options import has_explicit_std
 from ..binary_utils import (
     _canonical_library_key,
+    _version_sort_key,
+    build_match_map,
     detect_binary_format,
     normalize_binary_input,
     resolve_linker_script,
@@ -186,11 +188,13 @@ __all__ = [
     "_is_elf_shared_object",
     "_load_build_evidence",
     "_manifest_declared_includes",
+    "_version_sort_key",
     "apply_provenance",
     "ast_memoize_scope",
     "attach_build_context_for_parsed_headers",
     "attach_clang_layout",
     "build_inline_coverage",
+    "build_match_map",
     "build_points_of_interest",
     "build_source_graph",
     "check_profile_bindings_resolve",

@@ -1001,7 +1001,19 @@ jobs:
           new-library: ${{ steps.candidate.outputs.new-library }}
           consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.consumer-binary || '' }}
           contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
-          header: ${{ inputs.header }}
+          # RunPlanCheck.header (run_plan.py's own field docstring): a
+          # target's `public_headers:` (ADR-047's own worked example),
+          # space-joined -- the same per-cell-first precedence as
+          # ast-frontend/gcc-path/gcc-options above/below (`matrix.header ||
+          # inputs.header`, never merged with the workflow-global value).
+          # Gated on `kind != 'bundle'` for the identical reason those three
+          # already are: RunPlanCheck.header is never set for a bundle cell
+          # (per-bundle-member header staging doesn't exist yet -- see
+          # BUNDLE_CHECK_DEPTHS's own docstring), so this expression is a
+          # no-op for one today, but the explicit guard keeps this cell's
+          # behaviour pinned to "falls back to the workflow-global input"
+          # rather than silently depending on the field always being empty.
+          header: ${{ matrix.kind != 'bundle' && matrix.header || inputs.header }}
           old-header: ${{ inputs.old-header }}
           new-header: ${{ inputs.new-header }}
           include: ${{ inputs.include }}
