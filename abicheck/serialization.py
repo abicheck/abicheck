@@ -308,6 +308,20 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 #     `True`, so an older snapshot degrades cleanly to today's (buggy)
 #     inclusive behavior rather than being misread as "confirmed
 #     user-written".
+#   30 — ADR-063 Phase 3 (D5) traversal migration: `compare/surface_graph.py`'s
+#     `_node_attrs()` started stamping `referenced_identifiers`/
+#     `identifiers_collision` on every `GraphNode` it builds, which
+#     `policy.public_surface_closure`'s real graph-traversal closure walk
+#     (replacing the prior independent regex re-parse) now reads. A
+#     schema-v29 snapshot's `surface_graph` (persisted one version earlier,
+#     v29) is already non-`None`, so its nodes are real but predate these two
+#     keys entirely — same real-but-WRONG shape as v19-v24 above, this time
+#     at the node-attrs level rather than a scalar field: an absent key would
+#     silently read as "references nothing", collapsing the transitive
+#     closure. `snapshot_from_dict` marks such a snapshot's
+#     `AbiSnapshot.surface_graph_referenced_identifiers_reliable` False so
+#     `resolve_surface_graph_nodes()` rebuilds the graph in memory instead of
+#     trusting the stale persisted one.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -320,7 +334,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 29  # v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 30  # v30: surface_graph node referenced_identifiers/identifiers_collision attrs became reliable (see history above); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -348,6 +362,10 @@ _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS = 23
 # Schema version at which the castxml backend's Variable.access facts
 # became reliable (see v24 above).
 _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS = 24
+
+# Schema version at which a persisted AbiSnapshot.surface_graph's node attrs
+# gained referenced_identifiers/identifiers_collision (see v30 above).
+_MIN_SCHEMA_VERSION_FOR_SURFACE_GRAPH_REFERENCED_IDENTIFIERS = 30
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
 # (``AbiSnapshot.contract``) was first introduced. This constant only takes
@@ -1311,6 +1329,25 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS
         )
 
+    if "surface_graph_referenced_identifiers_reliable" in d:
+        # Same explicit-marker-wins reasoning as the flags above.
+        surface_graph_referenced_identifiers_reliable_value = bool(
+            d["surface_graph_referenced_identifiers_reliable"]
+        )
+    else:
+        # Producer-independent, unlike the flags above: `_node_attrs()`
+        # stamps `referenced_identifiers`/`identifiers_collision` on every
+        # node regardless of which header backend built the graph, so the
+        # only question is whether this snapshot's schema version predates
+        # that change. Whether it actually matters is deferred to the
+        # "consulted" check below (`snap.surface_graph is not None`) rather
+        # than computed here, mirroring how the scalar flags above don't
+        # gate on `from_headers` for a producer-irrelevant fact either.
+        surface_graph_referenced_identifiers_reliable_value = (
+            _schema_version
+            >= _MIN_SCHEMA_VERSION_FOR_SURFACE_GRAPH_REFERENCED_IDENTIFIERS
+        )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
@@ -1429,6 +1466,15 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # prefers an explicit dict key, falling back to a schema_version +
         # producer derivation scoped to the "castxml" producer specifically.
         castxml_var_access_facts_reliable=castxml_var_access_facts_reliable_value,
+        # See surface_graph_referenced_identifiers_reliable_value's
+        # computation above: prefers an explicit dict key, falling back to a
+        # producer-independent schema_version derivation. `decode_surface_graph`
+        # (below) runs after this constructor call, so `snap.surface_graph`
+        # itself isn't available yet to consult here — only `_schema_version`
+        # / the explicit dict key decide this value.
+        surface_graph_referenced_identifiers_reliable=(
+            surface_graph_referenced_identifiers_reliable_value
+        ),
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).
@@ -1581,6 +1627,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                 "castxml_var_access_facts_reliable",
                 castxml_var_access_facts_reliable_value,
                 _header_confirmed and ast_producer_value == "castxml",
+            ),
+            (
+                "surface_graph_referenced_identifiers_reliable",
+                surface_graph_referenced_identifiers_reliable_value,
+                snap.surface_graph is not None,
             ),
         )
         if not reliable and consulted

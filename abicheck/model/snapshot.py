@@ -542,6 +542,33 @@ class AbiSnapshot:
     # independently-built copy.
     surface_graph: SurfaceGraphLike | None = field(default=None, kw_only=True)
 
+    # ADR-063 Phase 3 (D5, schema v30) — True when this snapshot's
+    # `surface_graph` nodes (when non-None) carry the `referenced_identifiers`/
+    # `identifiers_collision` attrs `compare/surface_graph.py`'s
+    # `_node_attrs()` stamps on every node it builds. A schema-v29 snapshot's
+    # `surface_graph` was already persisted (D5's plumbing landed one version
+    # earlier than the traversal that reads these attrs), so its nodes are
+    # real, already-built `GraphNode`s -- not merely absent evidence -- that
+    # simply predate these two keys; `dict.get(..., [])`/an absent
+    # `identifiers_collision` key would silently read as "references
+    # nothing" for every node, collapsing `policy.public_surface_closure`'s
+    # transitive closure and potentially hiding a real ABI break reachable
+    # only through a type not directly referenced by a public root. Same
+    # "real but WRONG (here: incomplete) data" shape as
+    # `header_cv_facts_reliable` above, and the same fix: only a
+    # snapshot-level marker can tell "no node references this identifier"
+    # apart from "this node predates recording references at all". False
+    # only for a snapshot rehydrated from a persisted pre-v30 schema whose
+    # `surface_graph` is non-None; a freshly-built in-memory snapshot
+    # defaults True, since `build_public_surface_facts` always stamps both
+    # attrs on every node it creates. When False,
+    # `policy.public_surface_closure.resolve_surface_graph_nodes()` rebuilds
+    # the graph in memory from the snapshot's own declarations rather than
+    # trusting the stale persisted one (never written back onto `snap`).
+    surface_graph_referenced_identifiers_reliable: bool = field(
+        default=True, kw_only=True
+    )
+
     # ADR-029 — True when this snapshot's public-header AST was parsed using the
     # real build context (a compile_commands.json supplied to `dump -p`), so the
     # declared API facts reflect the build's ABI-relevant flags. Lets the

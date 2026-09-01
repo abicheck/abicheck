@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`29`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`30`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 29,
+  "schema_version": 30,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -101,7 +101,13 @@ declaration's `entity_id` carrier persisted through its own codec
 (`storage/entity_id_codec.py`), and (v29) `AbiSnapshot.surface_graph` — the
 unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
 "Fields" below) persisted through its own `to_dict()` encoding, not
-`asdict()`'s naive recursion.
+`asdict()`'s naive recursion, and (v30) whether a persisted `surface_graph`'s
+nodes carry reliable `referenced_identifiers`/`identifiers_collision` attrs
+(`surface_graph_referenced_identifiers_reliable`, ADR-063 Phase 3 D5's
+traversal migration — a v29 snapshot's graph predates these two node attrs
+entirely, so trusting it unconditionally would read every node as
+referencing nothing and collapse the transitive public-surface closure; see
+`policy.public_surface_closure.resolve_surface_graph_nodes`).
 
 ### Forward / backward compatibility
 
@@ -112,7 +118,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 29`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 30`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -177,7 +183,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `29`). |
+| `schema_version` | int | Snapshot format version (currently `30`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -292,6 +298,7 @@ gets backfilled, only report on it.
 | `build_source_pack` | object \| null | Reference to an out-of-band build/source pack (ADR-028). Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
 | `build_source` | object \| null | Inline-embedded build/source facts for single-artifact workflows. Omitted when nothing was embedded. |
 | `surface_graph` | object \| omitted | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. |
+| `surface_graph_referenced_identifiers_reliable` | bool | (v30, ADR-063 Phase 3 D5) True when `surface_graph`'s nodes (when present) carry reliable `referenced_identifiers`/`identifiers_collision` attrs. False only for a snapshot rehydrated from a persisted pre-v30 schema whose `surface_graph` is non-`None` — `resolve_surface_graph_nodes()` then rebuilds the graph in memory instead of trusting the stale, attr-less one. |
 | `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database (ADR-039). Empty when no compile database was supplied. |
 | `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields` (ADR-039). Feeds the opt-in `--reconcile-build-context` diff pass; empty when no compile database was supplied at dump time. |
 
@@ -309,7 +316,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `29`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `30`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

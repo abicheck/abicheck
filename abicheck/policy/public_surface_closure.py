@@ -516,11 +516,16 @@ def _record_is_confirmed_public_seed(
         and not _is_internal_type(qname)
         and not _record_nested_in_known_record(qname, record_identities)
     )
+
+
 def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
     """``snap.surface_graph``'s nodes, keyed by id -- lazily backfilling an
     approximate, in-memory-only graph for a snapshot that predates
-    ``AbiSnapshot.surface_graph`` (schema < 29), never persisted back onto
-    *snap*.
+    ``AbiSnapshot.surface_graph`` (schema < 29), or whose persisted graph
+    predates its nodes carrying reliable ``referenced_identifiers``/
+    ``identifiers_collision`` attrs (schema < 30 --
+    ``AbiSnapshot.surface_graph_referenced_identifiers_reliable``), never
+    persisted back onto *snap* either way.
 
     The one place every ADR-063 Phase 3 traversal (this module's own public-
     domain closure, and ``export_surface.py``'s export-domain closure, which
@@ -528,6 +533,15 @@ def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
     caller with an already-resolved ``snap.surface_graph`` and one without
     are handled identically rather than each reimplementing the ``None``
     check.
+
+    The reliability check matters because a schema-v29 snapshot's
+    ``surface_graph`` is already non-``None`` -- D5's plumbing persisted the
+    graph one schema version before this module's traversal started reading
+    the two node attrs above -- so trusting it unconditionally would read
+    every node as referencing nothing (``dict.get(..., ())`` on an absent
+    key), collapsing the transitive closure and potentially hiding a real
+    ABI break in a type only reachable through such a node (Codex review,
+    PR #979).
 
     Lazy backfill: the same builder a fresh extraction uses, given the same
     flat snapshot fields it would have been called with at dump time. Falls
@@ -540,7 +554,7 @@ def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
     fresh snapshots carry the field).
     """
     graph: SurfaceGraphLike | None = snap.surface_graph
-    if graph is None:
+    if graph is None or not snap.surface_graph_referenced_identifiers_reliable:
         backfilled = SourceGraphSummary()
         build_public_surface_facts(snap, backfilled)
         graph = backfilled

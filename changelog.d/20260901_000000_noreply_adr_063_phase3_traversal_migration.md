@@ -33,3 +33,19 @@
     represent precisely. A regression test
     (`TestGraphNodeCollisionDoesNotBlurReachability` in
     `tests/test_policy_public_surface.py`) pins this directly.
+  - A second correctness hazard, found by review after this migration
+    landed: a persisted `surface_graph` from the schema-v29 plumbing (which
+    landed one version before this traversal started reading it) is already
+    non-`None`, but its nodes predate the `referenced_identifiers`/
+    `identifiers_collision` attrs entirely -- so `resolve_surface_graph_
+    nodes()` was trusting such a graph unconditionally and reading every
+    node as referencing nothing, silently collapsing the transitive type
+    closure for any snapshot round-tripped through an older abicheck.
+    Schema bumped to v30; a new `AbiSnapshot.surface_graph_referenced_
+    identifiers_reliable` flag (following the file's own established
+    `header_cv_facts_reliable`/`castxml_var_access_facts_reliable` pattern)
+    marks such a snapshot, and `resolve_surface_graph_nodes()` rebuilds the
+    graph in memory instead of trusting the stale one. Regression test
+    (`TestStalePersistedGraphIsNotTrustedForReachability` in
+    `tests/test_policy_public_surface.py`) constructs a stale-but-otherwise-
+    real graph and confirms a type only reachable through it survives.
