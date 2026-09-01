@@ -156,3 +156,57 @@ class TestParseBundleFactsLibraryOverrides:
             {"libfoo.so": {"gcc_path": "gcc"}}
         )
         assert result.compile["libfoo.so"].gcc_option_tokens == ()
+
+    def test_no_base_dir_leaves_relative_paths_unresolved(self) -> None:
+        # Default (no base_dir): unchanged from every pre-existing test above
+        # -- a Python-API caller with no real manifest file behind the raw
+        # dict gets the path exactly as written, resolution deferred to it.
+        result = parse_bundle_facts_library_overrides(
+            {
+                "libfoo.so": {
+                    "headers": ["include/foo"],
+                    "sysroot": "opt/sysroot",
+                }
+            }
+        )
+        assert result.headers["libfoo.so"] == [Path("include/foo")]
+        assert result.compile["libfoo.so"].sysroot == Path("opt/sysroot")
+
+    def test_base_dir_anchors_relative_headers_includes_and_sysroot(self) -> None:
+        """Codex review: a manifest is a portable document -- a relative
+        ``headers``/``includes``/``sysroot`` path must resolve against the
+        manifest file's own directory, not the process's current working
+        directory, mirroring ``dump_manifest.load_manifest()``'s identical
+        ``base_dir`` handling."""
+        base_dir = Path("/some/manifest/dir")
+        result = parse_bundle_facts_library_overrides(
+            {
+                "libfoo.so": {
+                    "headers": ["include/foo"],
+                    "includes": ["include/extra"],
+                    "sysroot": "opt/sysroot",
+                }
+            },
+            base_dir=base_dir,
+        )
+        assert result.headers["libfoo.so"] == [Path("/some/manifest/dir/include/foo")]
+        assert result.includes["libfoo.so"] == [
+            Path("/some/manifest/dir/include/extra")
+        ]
+        assert result.compile["libfoo.so"].sysroot == Path(
+            "/some/manifest/dir/opt/sysroot"
+        )
+
+    def test_base_dir_never_alters_an_already_absolute_path(self) -> None:
+        base_dir = Path("/some/manifest/dir")
+        result = parse_bundle_facts_library_overrides(
+            {
+                "libfoo.so": {
+                    "headers": ["/abs/include/foo"],
+                    "sysroot": "/abs/sysroot",
+                }
+            },
+            base_dir=base_dir,
+        )
+        assert result.headers["libfoo.so"] == [Path("/abs/include/foo")]
+        assert result.compile["libfoo.so"].sysroot == Path("/abs/sysroot")

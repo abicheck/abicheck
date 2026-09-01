@@ -112,10 +112,33 @@ def _require_str_list(value: object, *, where: str) -> list[str]:
     return value
 
 
+def _resolve_path(raw: str, *, base_dir: Path | None) -> Path:
+    # Mirrors dump_manifest._resolve_path exactly (Codex review): a manifest
+    # is a portable, shareable document, so a relative header/include/sysroot
+    # path inside it must anchor to the manifest's own directory, not
+    # whatever directory the `compare` process happens to be launched from.
+    # `base_dir=None` (no real manifest file behind this call, e.g. a
+    # Python-API caller passing an in-memory dict) keeps the path exactly as
+    # given, deferred to the caller the same way it always was.
+    p = Path(raw)
+    if base_dir is None or p.is_absolute():
+        return p
+    return base_dir / p
+
+
+def _resolve_str_list_as_paths(
+    value: object, *, base_dir: Path | None, where: str
+) -> list[Path]:
+    return [
+        _resolve_path(p, base_dir=base_dir) for p in _require_str_list(value, where=where)
+    ]
+
+
 def parse_bundle_facts_library_overrides(
     raw: dict[str, object],
     *,
     known_libraries: set[str] | None = None,
+    base_dir: Path | None = None,
 ) -> BundleFactsLibraryOverrides:
     """Validate a raw per-library override mapping.
 
@@ -134,6 +157,16 @@ def parse_bundle_facts_library_overrides(
     library outside that set is a hard error, since a typo'd name would
     otherwise silently fall back to the uniform default with no signal
     anything is wrong.
+
+    *base_dir*, when given, is the directory every relative ``headers``/
+    ``includes``/``sysroot`` path resolves against -- the manifest file's own
+    parent directory, for a real manifest file (Codex review: without this, a
+    manifest stored outside the process's current working directory silently
+    resolved its relative paths against the wrong directory, exactly the
+    portability trap ``dump_manifest.load_manifest()``'s own ``base_dir``
+    threading already closed for ``--dump-manifest``). An absolute path is
+    never altered. ``None`` (the default) keeps every path exactly as
+    written, for a caller with no real manifest file behind the raw dict.
     """
     if not isinstance(raw, dict):
         raise BundleFactsLibraryOverridesError(
@@ -179,32 +212,75 @@ def parse_bundle_facts_library_overrides(
                 f"{sorted(_LIBRARY_KEYS)!r}"
             )
         if "headers" in entry:
-            headers[name] = [
-                Path(p)
-                for p in _require_str_list(
-                    entry["headers"],
-                    where=f"per-library override manifest.{name}.headers",
-                )
-            ]
+            headers[name] = _resolve_str_list_as_paths(
+                entry["headers"],
+                base_dir=base_dir,
+                where=f"per-library override manifest.{name}.headers",
+            )
         if "includes" in entry:
-            includes[name] = [
-                Path(p)
-                for p in _require_str_list(
-                    entry["includes"],
-                    where=f"per-library override manifest.{name}.includes",
-                )
-            ]
+            includes[name] = _resolve_str_list_as_paths(
+                entry["includes"],
+                base_dir=base_dir,
+                where=f"per-library override manifest.{name}.includes",
+            )
         compile_fields = {k: v for k, v in entry.items() if k in _COMPILE_KEYS}
         if compile_fields:
             compile_by_library[name] = _build_compile_context(
-                compile_fields, where=f"per-library override manifest.{name}"
+                compile_fields,
+                where=f"per-library override manifest.{name}",
+                base_dir=base_dir,
             )
     return BundleFactsLibraryOverrides(
         headers=headers, includes=includes, compile=compile_by_library
     )
 
 
-def _build_compile_context(fields: dict[str, object], *, where: str) -> CompileContext:
+def load_bundle_facts_library_overrides(
+    manifest_path: Path,
+    *,
+    known_libraries: set[str] | None = None,
+) -> BundleFactsLibraryOverrides:
+    """Read, strictly parse, and validate a real
+    ``--bundle-facts-library-manifest`` YAML/JSON file at *manifest_path*.
+
+    The file-reading counterpart of :func:`parse_bundle_facts_library_overrides`
+    above, kept in this ``workflows``-classified module rather than the
+    ``frontends``-layer CLI dispatch code that calls it (Codex review):
+    ``dump_manifest`` (the ``_load_yaml_strict`` duplicate-key-checking YAML
+    loader below, shared with ``--dump-manifest``) is classified ``extract``,
+    and ``frontends`` may not import ``extract`` directly
+    (``architecture/modules.yaml``'s ``may_import: [model, workflows,
+    report]``) -- only ``workflows`` may. Threads the manifest's own resolved
+    parent directory through as *base_dir*, so a relative ``headers``/
+    ``includes``/``sysroot`` path inside the manifest anchors to the manifest
+    file itself rather than the calling process's current working directory.
+
+    Raises :class:`BundleFactsLibraryOverridesError` (a ``ValueError``
+    subclass) on invalid YAML, a duplicate mapping key anywhere in the
+    document, or any schema violation :func:`parse_bundle_facts_library_overrides`
+    itself raises.
+    """
+    from ..dump_manifest import _load_yaml_strict
+    from ..errors import ManifestValidationError
+
+    try:
+        raw = _load_yaml_strict(
+            manifest_path.read_text(encoding="utf-8"), source=str(manifest_path)
+        )
+    except ManifestValidationError as exc:
+        raise BundleFactsLibraryOverridesError(
+            f"--bundle-facts-library-manifest {manifest_path}: {exc}"
+        ) from exc
+    return parse_bundle_facts_library_overrides(
+        raw if raw is not None else {},
+        known_libraries=known_libraries,
+        base_dir=manifest_path.resolve().parent,
+    )
+
+
+def _build_compile_context(
+    fields: dict[str, object], *, where: str, base_dir: Path | None
+) -> CompileContext:
     # `gcc_options` here is a list of already-separate compiler-flag tokens,
     # mirroring the modern `--compiler-option` CLI flag (repeatable, one
     # literal argument each) that `resolve_compile_context()` maps straight
@@ -247,7 +323,7 @@ def _build_compile_context(fields: dict[str, object], *, where: str) -> CompileC
         gcc_path=str_fields["gcc_path"],
         gcc_prefix=str_fields["gcc_prefix"],
         gcc_option_tokens=tuple(gcc_options),
-        sysroot=Path(sysroot) if sysroot else None,
+        sysroot=_resolve_path(sysroot, base_dir=base_dir) if sysroot else None,
         nostdinc=nostdinc,
         frontend=frontend,
         frontend_context=frontend_context,

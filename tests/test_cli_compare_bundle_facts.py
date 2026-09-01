@@ -675,3 +675,99 @@ class TestBundleFactsLibraryManifest:
         assert captured["per_library_headers"] == {}
         assert captured["per_library_includes"] == {}
         assert captured["per_library_compile"] == {}
+
+    def test_duplicate_library_key_is_rejected(self, tmp_path: Path) -> None:
+        """Codex review: plain ``yaml.safe_load()`` silently keeps only the
+        last value of a repeated mapping key, so a manifest with two entries
+        for the same library would silently forward the last one's overrides
+        with no signal the first was ever written. The manifest loader now
+        uses the same duplicate-checking YAML loader ``--dump-manifest``
+        uses, which raises instead."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libreal.so:\n  headers: []\nlibreal.so:\n  includes: []\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert "duplicate key" in out
+        assert "libreal.so" in out
+
+    def test_relative_manifest_paths_anchor_to_the_manifest_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review: a manifest is a portable document -- a relative
+        ``headers``/``includes``/``sysroot`` path inside it must resolve
+        against the manifest file's own directory, not whatever directory
+        the ``compare`` process happens to be launched from."""
+        import abicheck.bundle_side_input as bundle_side_input_mod
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        manifest_dir = tmp_path / "manifest_dir"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        manifest_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        header_dir = manifest_dir / "headers"
+        header_dir.mkdir()
+        (header_dir / "libreal.h").write_text("int add(int a, int b);\n")
+        manifest = manifest_dir / "manifest.yaml"
+        manifest.write_text("libreal.so:\n  headers:\n    - headers\n")
+
+        captured: dict[str, object] = {}
+        real = bundle_side_input_mod.compare_release_against_bundle_facts
+
+        def _spy(*args: object, **kwargs: object):
+            captured.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(
+            bundle_side_input_mod, "compare_release_against_bundle_facts", _spy
+        )
+        # Launch from a directory that is neither the manifest's own
+        # directory nor contains a same-named "headers" subdirectory --
+        # proving resolution anchors to the manifest file, not the process's
+        # current working directory.
+        monkeypatch.chdir(old_dir)
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        assert captured["per_library_headers"] == {
+            "libreal.so": [header_dir.resolve()]
+        }

@@ -102,28 +102,25 @@ def _load_library_overrides(
 ) -> tuple[dict[str, list[Path]], dict[str, list[Path]], dict[str, Any]]:
     """Load and validate ``--bundle-facts-library-manifest``.
 
-    Raises :class:`~abicheck.workflows.bundle_facts_library_overrides.
-    BundleFactsLibraryOverridesError` (a ``ValueError`` subclass, caught
-    alongside every other malformed-input case by ``dispatch()``'s own
-    ``except (SnapshotError, ValueError, OSError)`` clause) on a structurally
-    invalid manifest, an unrecognized key, or a library name outside
+    Thin wrapper over :func:`~abicheck.workflows.bundle_facts_library_
+    overrides.load_bundle_facts_library_overrides` -- the actual file
+    reading/YAML-loading lives in that ``workflows``-classified module, not
+    here, since it needs ``dump_manifest``'s duplicate-key-checking strict
+    YAML loader (classified ``extract``) and ``frontends`` may not import
+    ``extract`` directly (only ``workflows`` may -- ``architecture/
+    modules.yaml``). Raises :class:`~abicheck.workflows.bundle_facts_library_
+    overrides.BundleFactsLibraryOverridesError` (a ``ValueError`` subclass,
+    caught alongside every other malformed-input case by ``dispatch()``'s own
+    ``except (SnapshotError, ValueError, OSError)`` clause) on invalid YAML, a
+    duplicate manifest key, an unrecognized key, or a library name outside
     *known_libraries*.
     """
-    import yaml
-
     from ....workflows.bundle_facts_library_overrides import (
-        BundleFactsLibraryOverridesError,
-        parse_bundle_facts_library_overrides,
+        load_bundle_facts_library_overrides,
     )
 
-    try:
-        raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise BundleFactsLibraryOverridesError(
-            f"--bundle-facts-library-manifest {manifest_path}: invalid YAML/JSON: {exc}"
-        ) from exc
-    overrides = parse_bundle_facts_library_overrides(
-        raw if raw is not None else {}, known_libraries=known_libraries
+    overrides = load_bundle_facts_library_overrides(
+        manifest_path, known_libraries=known_libraries
     )
     return overrides.headers, overrides.includes, overrides.compile
 
