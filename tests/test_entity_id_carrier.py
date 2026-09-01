@@ -565,6 +565,24 @@ class TestMalformedSidecarEntityIdDocumentIsRefused:
         with pytest.raises((TypeError, ValueError)):
             snapshot_from_dict(d)
 
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    def test_non_string_sidecar_key_is_refused_on_encode(
+        self, sidecar_key: str
+    ) -> None:
+        # A caller that constructs AbiSnapshot directly (not through either
+        # header-AST producer) could hand the sidecar a non-string key --
+        # the encode side must refuse it too, or two colliding keys (1 and
+        # "1") would silently collapse onto one JSON key, losing an
+        # identity rather than being rejected up front (Codex review).
+        bad_entity_id = entity_id_for_typedef((), "x")
+        snap = dataclasses.replace(
+            _snapshot_with_every_kind(), **{sidecar_key: {1: bad_entity_id}}
+        )
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_to_dict(snap)
+
 
 #: Modules allowed to *call* an ``entity_id_for_*`` constructor: the two
 #: header-AST producers and their ``extract`` entity modules. By option

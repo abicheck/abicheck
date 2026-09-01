@@ -151,10 +151,18 @@ def encode_sidecar_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str,
     segments into anonymous dicts with no record of which segment dataclass
     produced them. An empty sidecar is written as an empty mapping rather than
     dropped, matching how ``typedefs_qualified`` itself is written.
+
+    Each key is checked with ``identity_text`` before it reaches the wire —
+    a non-string key (reachable only via a direct, non-producer
+    ``AbiSnapshot`` construction, since both parsers only ever emit
+    ``str``) would otherwise encode as JSON's own coerced string form, and a
+    snapshot carrying both ``1`` and ``"1"`` would silently collide onto one
+    key, losing one entity's identity rather than refusing the document
+    (Codex review).
     """
     for key in _SIDECAR_KEYS:
         d[key] = {
-            name: domain_entity_id_to_dto(entity_id)
+            identity_text(name, f"{key} key"): domain_entity_id_to_dto(entity_id)
             for name, entity_id in getattr(snap, key).items()
         }
     return d
