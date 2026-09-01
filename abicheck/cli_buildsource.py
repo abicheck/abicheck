@@ -67,15 +67,6 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
 )
 from .errors import SnapshotError, ValidationError
 
-# Back-compat alias for the pre-move name: `purge_external_outputs` used to be
-# `cli_buildsource_helpers._purge_external_outputs` (a private helper, but one
-# this module has always re-exported "for API stability / tests" per
-# AGENTS.md's "Moving helpers out of a module that re-exports them?"
-# guidance). A plain assignment, not the lazy `__getattr__` shim below --
-# `purge_external_outputs` is already imported statically above with no
-# cycle risk, unlike the `cli_graph` names that shim exists for.
-_purge_external_outputs = purge_external_outputs
-
 if TYPE_CHECKING:
     from .api_types import DumpRequest
     from .model import AbiSnapshot
@@ -575,7 +566,7 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
         raise click.UsageError(str(exc)) from exc
 
 
-# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# ── Back-compat re-export shims (lazy) ─────────────────────────────────────
 # `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
 # (re-exported from `cli_buildsource_helpers`, like the block above). They moved
 # to `cli_graph` when the `graph` command group was extracted. A *static*
@@ -588,10 +579,29 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
 # from `cli_graph` directly.
 _GRAPH_REEXPORTS = frozenset({"_load_source_graph", "_resolve_symbol_from_report"})
 
+# `_purge_external_outputs` was `cli_buildsource_helpers._purge_external_outputs`
+# (a private helper, but one this module has always re-exported "for API
+# stability / tests" per AGENTS.md's "Moving helpers out of a module that
+# re-exports them?" guidance) before it moved to `buildsource/pack_shape.py`
+# as the public `purge_external_outputs` (ADR-061). Resolved the same lazy
+# way as the `cli_graph` names above -- not because of an import cycle here,
+# but so this compatibility path keeps tracking whatever
+# `cli_buildsource_helpers.purge_external_outputs` currently resolves to
+# (including a test's `monkeypatch.setattr` on that name) rather than
+# freezing a snapshot of it at this module's own import time the way a plain
+# assignment would (Codex review).
+_HELPERS_REEXPORTS = frozenset({"_purge_external_outputs"})
+
 
 def __getattr__(name: str) -> Any:
     if name in _GRAPH_REEXPORTS:
         import importlib
 
         return getattr(importlib.import_module("abicheck.cli_graph"), name)
+    if name in _HELPERS_REEXPORTS:
+        import importlib
+
+        return importlib.import_module(
+            "abicheck.cli_buildsource_helpers"
+        ).purge_external_outputs
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
