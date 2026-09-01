@@ -103,11 +103,7 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
     from .surface import compute_public_surface
 
     surface = compute_public_surface(snap)
-    public_types = (
-        _public_by_value_type_closure(snap)
-        if surface.resolvable
-        else None
-    )
+    public_types = _public_by_value_type_closure(snap) if surface.resolvable else None
 
     for rec in snap.types:
         # Skip non-ABI-surface owner records (std::/__gnu_cxx:: internals): their
@@ -134,7 +130,7 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
 
 def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     """Record types reachable from public ABI roots through by-value edges."""
-    from .model import RecordType, Visibility
+    from .model import RecordType, Visibility, resolved_fact_value
     from .surface import _type_identifiers
 
     record_by_name: dict[str, RecordType] = {rec.name: rec for rec in snap.types}
@@ -174,7 +170,9 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         public_by_value.add(record.name)
         for fld in record.fields:
             _add_type(queue, fld.type)
-        for base in (*record.bases, *record.virtual_bases):
+        bases = resolved_fact_value(record.bases_fact, [])
+        virtual_bases = resolved_fact_value(record.virtual_bases_fact, [])
+        for base in (*bases, *virtual_bases):
             _add_type(queue, base)
     return public_by_value
 

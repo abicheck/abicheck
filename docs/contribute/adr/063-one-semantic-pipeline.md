@@ -3,20 +3,73 @@
 **Date:** 2026-08-27
 **Status:** Proposed — roadmap ADR, partially implemented.
 
-- **Phase 0** (`Fact[T]`/`FactStatus` infrastructure) has landed: the five
-  converted `RecordType`/`Param` fields, producer-side construction,
-  serialization round-trip, and the `fact-detector-misuse`/
-  `fact-field-readers` AI-readiness gates. **No detector has migrated to
-  read the converted fields' `Fact[...]` siblings yet** — every existing
-  detector still reads the retained legacy fields
-  (`RecordType.vtable`/`bases`/etc.,
-  `AbiSnapshot.clang_vtable_facts_reliable`) unchanged. This is intentional
-  and within Phase 0's own deliberately narrow scope (a blanket detector
-  migration is Phase 5's job), but means Phase 0 has not yet changed any
-  detector's actual behavior — it is enforcement/tracking infrastructure
-  (an allowlist-and-shrink baseline of known unmigrated legacy-field
-  readers — see `scripts/fact_field_readers.py`'s
-  `KNOWN_UNMIGRATED_READERS`), not a completed migration.
+- **Phase 0** (`Fact[T]`/`FactStatus` infrastructure) is **complete**: the
+  five converted `RecordType`/`Param` fields, producer-side construction,
+  serialization round-trip, the `fact-detector-misuse`/`fact-field-readers`
+  AI-readiness gates, and — closing the gap this status paragraph
+  previously recorded — **every known reader of the five converted fields
+  has migrated off the retained legacy attribute onto its `Fact[...]`
+  sibling.** `scripts/fact_field_readers.py`'s `KNOWN_UNMIGRATED_READERS`
+  baseline, which stood at 104 recorded sites across 20 modules (the
+  allowlist-and-shrink tracking mechanism the previous revision of this
+  paragraph described as "not a completed migration"), is now the empty
+  set: the scan itself is unchanged and stays permanently live (a genuinely
+  new direct read of `RecordType.bases`/`virtual_bases`/`vtable`/
+  `vptr_offset_bits` or `Param.is_va_list` anywhere under `abicheck/` still
+  fails the gate), but there is nothing left in the baseline for it to
+  exempt. `abicheck/model/fact.py`'s new `resolved_fact_value(fact, default)`
+  helper — the one, audited, mypy-safe narrowing every migrated site calls
+  through (a `<field>_fact` field is statically `Fact[T] | None` only
+  because of the direct-construction compatibility bridge; `__post_init__`
+  guarantees it is never `None` on a real instance, but mypy cannot see
+  that invariant across instances) — is what every migrated call site now
+  reads through instead of the bare attribute, re-exported from
+  `abicheck.model` alongside `Fact`/`replace_with_fact_sync`.
+  **This migration is representation-only, exactly as Phase 0's own
+  acceptance bar requires ("this phase changes representation, not
+  detector logic")**: `bridge_legacy_and_fact`'s own construction invariant
+  (`rec.bases == (rec.bases_fact.value if rec.bases_fact.is_present else
+  [])` for every constructed instance, and identically for the other four
+  fields) makes `resolved_fact_value(rec.bases_fact, [])` an exact,
+  provable re-spelling of what `rec.bases` already returned — not a new
+  collapse of availability into a default, since the `Fact[...]` sibling's
+  own `.status` remains fully inspectable at every migrated site for a
+  future caller that wants it. No detector's emitted findings changed:
+  confirmed by the full test suite (mypy 0 errors, ruff clean, the
+  complete non-integration/non-slow/non-golden suite green) and by the
+  FP-rate/tier-accuracy gates staying at their existing baselines. A
+  detector actually *branching* on `FactStatus` — treating
+  `NOT_COLLECTED`/`UNSUPPORTED`/`FAILED` differently from `PRESENT` rather
+  than resolving to the same default the legacy field already held — is
+  still Phase 5's job, exactly as this paragraph's previous revision
+  scoped it; Phase 0 closes the representation gap Phase 5 needs standing
+  ready, it does not pre-empt Phase 5's own behavior change. Two large
+  detector modules (`diff_types.py`, `dwarf_snapshot.py`) crossed the
+  AI-readiness `file-size` hard cap purely from this migration's added
+  local-variable lines; both were split the same way this codebase already
+  splits an oversized module — `diff_types_vtable.py` (the
+  `TYPE_VTABLE_CHANGED` evidence-gating cluster:
+  `_vtable_transition_is_evidenced`/`_vtable_transition_rests_on_
+  unresolved_evidence`/`_layout_evidence_is_unverifiable`/
+  `_owned_virtual_signatures`/`_owned_virtual_signatures_for_record`/
+  `_diff_type_vtable`, re-imported back into `diff_types.py`) and
+  `dwarf_snapshot_datasources.py` (`show_data_sources` and its private
+  helpers, re-exported from `dwarf_snapshot.py` so every existing
+  `from abicheck.dwarf_snapshot import show_data_sources` call site is
+  unaffected) — neither split changes any behavior, only which module owns
+  the code. Six further modules separately tracked in ADR-061's
+  `architecture/debt.yaml` no-growth ledger (a stricter, independent
+  per-file budget from the `file-size` cap above) needed a narrower fix:
+  `RecordType` gained two short, import-free convenience methods,
+  `resolved_bases()`/`resolved_virtual_bases()` (each a one-line call to
+  the same `resolved_fact_value` primitive), so a caller with an
+  already-typed `RecordType` in hand can write `rec.resolved_bases()`
+  instead of paying a new `from .model import resolved_fact_value` line —
+  not a second representation (both spellings resolve through the one
+  primitive), a narrower avoidance of an import cost. All six land exactly
+  at their recorded adoption baseline with this migration's reads
+  included; see the implementation plan's own Phase 0 section for the
+  full accounting.
 - **Phase 1** ("finish the `dump`/`scan` typed-API convergence," closing
   AGENTS.md "PR C") has landed its real ELF `dump` execution routing onto
   `execute_dump_request` (`frontends/cli/dump_execute.py`), on top of the

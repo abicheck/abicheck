@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from .fact import Fact, _Omitted, bridge_legacy_and_fact
+from .fact import Fact, _Omitted, bridge_legacy_and_fact, resolved_fact_value
 from .identity import EntityId
 from .vocabulary import AccessLevel, ScopeOrigin
 
@@ -244,6 +244,20 @@ class RecordType:
             _OMITTED_VPTR_OFFSET_BITS,
             None,
         )
+
+    def resolved_bases(self) -> list[str]:
+        """``bases_fact``, safely narrowed (ADR-063 Phase 0) -- a short,
+        import-free alias for ``model.resolved_fact_value(self.bases_fact,
+        [])`` wherever a caller already has a typed ``RecordType`` in hand.
+        Exactly value-preserving; see that function's own docstring.
+        """
+        return resolved_fact_value(self.bases_fact, [])
+
+    def resolved_virtual_bases(self) -> list[str]:
+        """``virtual_bases_fact``, safely narrowed -- see
+        :meth:`resolved_bases`.
+        """
+        return resolved_fact_value(self.virtual_bases_fact, [])
 
 
 @dataclass

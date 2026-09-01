@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.diff_types import _vtable_transition_is_evidenced
+from abicheck.diff_types_vtable import _vtable_transition_is_evidenced
 from abicheck.model import Function, RecordType, Visibility
 
 NAME = "Abstract"

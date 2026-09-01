@@ -57,7 +57,22 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .finding_identity_ctor_dtor import iter_matched_function_pairs
-from .model import Function
+from .model import Fact, Function
+
+
+def _fact_bool(fact: Fact[bool] | None) -> bool:
+    """Read a ``Fact[bool]`` sibling the owning dataclass's own
+    ``__post_init__`` guarantees is never ``None`` (ADR-063 Phase 0 —
+    ``Param.is_va_list_fact``, see ``model/fact.py``'s
+    ``bridge_legacy_and_fact``). The ``assert`` states that runtime
+    invariant for mypy, which cannot see it through the dataclass field's
+    declared ``Fact[...] | None`` type; the trailing ``or False`` only
+    removes the *type-level* ``None`` mypy still carries for ``.value`` and
+    is a no-op for an actually-``False`` value.
+    """
+    assert fact is not None
+    value = fact.value if fact.is_present else False
+    return value or False
 
 
 def param_restrict_changes(
@@ -129,7 +144,9 @@ def param_va_list_changes(
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if not p_old.is_va_list and p_new.is_va_list:
+            old_is_va_list = _fact_bool(p_old.is_va_list_fact)
+            new_is_va_list = _fact_bool(p_new.is_va_list_fact)
+            if not old_is_va_list and new_is_va_list:
                 changes.append(
                     make_change(
                         ChangeKind.PARAM_BECAME_VA_LIST,
@@ -141,7 +158,7 @@ def param_va_list_changes(
                         entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
-            elif p_old.is_va_list and not p_new.is_va_list:
+            elif old_is_va_list and not new_is_va_list:
                 changes.append(
                     make_change(
                         ChangeKind.PARAM_LOST_VA_LIST,

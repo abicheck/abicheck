@@ -164,145 +164,34 @@ EXEMPT_FUNCTIONS: frozenset[str] = frozenset(
 
 #: Every currently-known unmigrated semantic reader, keyed
 #: `"<rel>::<qualname>::<attr>::<outer-expr>::<expr-text>::<occurrence>"` --
-#: `qualname` is the enclosing function (`<module>` for module-level code,
-#: `Class.method` for a method); `outer-expr` is the read's *outermost
-#: containing expression* (`_outermost_containing_expr`, e.g. the whole
-#: `old_decision(rec.bases)` call, or the whole `not p_old.is_va_list and
-#: p_new.is_va_list` boolean test -- never a compound statement's body);
-#: `expr-text` is the read's own bare exact source text
-#: (`ast.get_source_segment`, e.g. `"p_old.is_va_list"` or `'getattr(t,
-#: "vtable", None)'`); `occurrence` is a 1-based rank among reads sharing
-#: all four of those, in top-to-bottom (line, column) order -- almost
-#: always `1`. Keying on real expression text at two nesting levels (not
-#: just a positional ordinal) is what keeps a migrated-and-replaced read
-#: from silently inheriting an unrelated new read's key, at either
-#: granularity -- see this module's own docstring for the three
-#: successive collision classes this key shape had to close. Closing one
-#: of these (migrating the reader to check `.status` before trusting the
-#: legacy value) removes its entry here; a brand-new, unlisted hit fails
-#: the gate.
+#: see this module's own docstring for the exact key shape and the
+#: successive collision classes it had to close.
 #:
-#: The nine modules the plan doc's own Design section names
-#: (`docs/contribute/plans/one-semantic-pipeline.md`, "nine distinct
-#: modules, ten call sites" table) plus the primary detectors and other
-#: readers that section names separately (`diff_layout.py`/`diff_types.py`/
-#: `diff_vtable_layout.py`/`diff_param_qualifiers.py`/`diff_cxx_rules.py`),
-#: plus five more this check's own construction found and the plan doc
-#: does not yet name (`buildsource/header_graph.py`,
-#: `buildsource/source_extractors/base.py`, `idioms.py`, and two decision
-#: functions living inside otherwise-exempt producer modules --
-#: `dwarf_snapshot._DwarfSnapshotBuilder._filter_types_by_reachability`
-#: and `dumper_layout_backfill._fields_corroborate`, both found only once
-#: whole-module exemption was narrowed to function scope, per this
-#: module's own docstring).
-KNOWN_UNMIGRATED_READERS: frozenset[str] = frozenset(
-    {
-        "abicheck/buildsource/header_graph.py::_flat_structural_type_edges::bases::rt.bases::rt.bases::1",
-        "abicheck/buildsource/source_extractors/base.py::entity_from_record::bases::f\"{rec.kind}|size={rec.size_bits}|align={rec.alignment_bits}\"\n        f\"|bases={','.join(rec.bases)}|vt={','.join(rec.vtable)}|{field_repr}\"::rec.bases::1",
-        "abicheck/buildsource/source_extractors/base.py::entity_from_record::vtable::f\"{rec.kind}|size={rec.size_bits}|align={rec.alignment_bits}\"\n        f\"|bases={','.join(rec.bases)}|vt={','.join(rec.vtable)}|{field_repr}\"::rec.vtable::1",
-        "abicheck/contract_evidence_collect.py::build_type_graph::bases::list(rec.bases) + list(rec.virtual_bases)::rec.bases::1",
-        "abicheck/contract_evidence_collect.py::build_type_graph::virtual_bases::list(rec.bases) + list(rec.virtual_bases)::rec.virtual_bases::1",
-        'abicheck/diff_cpp_patterns.py::_is_empty_record::vtable::getattr(t, "vtable", None) or []::getattr(t, "vtable", None)::1',
-        "abicheck/diff_cxx_rules.py::_transitive_bases::bases::[*start.bases, *start.virtual_bases]::start.bases::1",
-        "abicheck/diff_cxx_rules.py::_transitive_bases::bases::stack.extend((*rec.bases, *rec.virtual_bases))::rec.bases::1",
-        "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::[*start.bases, *start.virtual_bases]::start.virtual_bases::1",
-        "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::stack.extend((*rec.bases, *rec.virtual_bases))::rec.virtual_bases::1",
-        "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::t_old.vtable != t_new.vtable::t_new.vtable::1",
-        "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::t_old.vtable != t_new.vtable::t_old.vtable::1",
-        'abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::[\n            make_change(\n                ChangeKind.VPTR_INTRODUCED,\n                symbol=name,\n                name=name,\n                old_value="non-polymorphic",\n                new_value=f"vptr@{new_rec.vptr_offset_bits}",\n            )\n        ]::new_rec.vptr_offset_bits::1',
-        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::new_rec.vptr_offset_bits::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::old_rec.vptr_offset_bits::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vtable::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::new_rec.vtable::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vtable::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::old_rec.vtable::1",
-        "abicheck/diff_layout.py::_has_layout_descriptor::vptr_offset_bits::rec.data_size_bits is not None\n        or (vtable_facts_reliable and rec.vptr_offset_bits is not None)\n        or bool(rec.base_offsets)::rec.vptr_offset_bits::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::not p_old.is_va_list and p_new.is_va_list::p_new.is_va_list::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::not p_old.is_va_list and p_new.is_va_list::p_old.is_va_list::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_old.is_va_list and not p_new.is_va_list::p_new.is_va_list::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_old.is_va_list and not p_new.is_va_list::p_old.is_va_list::1",
-        "abicheck/diff_stdlib_impl.py::_public_by_value_type_closure::bases::(*record.bases, *record.virtual_bases)::record.bases::1",
-        "abicheck/diff_stdlib_impl.py::_public_by_value_type_closure::virtual_bases::(*record.bases, *record.virtual_bases)::record.virtual_bases::1",
-        "abicheck/diff_time64.py::_fold_record_tokens::bases::list(rec.bases) + list(rec.virtual_bases)::rec.bases::1",
-        "abicheck/diff_time64.py::_fold_record_tokens::virtual_bases::list(rec.bases) + list(rec.virtual_bases)::rec.virtual_bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::changes.append(\n            make_change(\n                ChangeKind.BASE_CLASS_POSITION_CHANGED,\n                symbol=name,\n                name=name,\n                old_value=str(t_old.bases),\n                new_value=str(t_new.bases),\n            )\n        )::t_new.bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::changes.append(\n            make_change(\n                ChangeKind.BASE_CLASS_POSITION_CHANGED,\n                symbol=name,\n                name=name,\n                old_value=str(t_old.bases),\n                new_value=str(t_new.bases),\n            )\n        )::t_old.bases::1",
-        'abicheck/diff_types.py::_diff_type_bases::bases::changes.append(\n            make_change(\n                ChangeKind.TYPE_BASE_CHANGED,\n                symbol=name,\n                description=f"Base classes changed: {name}",\n                old_value=str(t_old.bases),\n                new_value=str(t_new.bases),\n            )\n        )::t_new.bases::1',
-        'abicheck/diff_types.py::_diff_type_bases::bases::changes.append(\n            make_change(\n                ChangeKind.TYPE_BASE_CHANGED,\n                symbol=name,\n                description=f"Base classes changed: {name}",\n                old_value=str(t_old.bases),\n                new_value=str(t_new.bases),\n            )\n        )::t_old.bases::1',
-        "abicheck/diff_types.py::_diff_type_bases::bases::old_bases_set == new_bases_set and t_old.bases != t_new.bases::t_new.bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::old_bases_set == new_bases_set and t_old.bases != t_new.bases::t_old.bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::set(t_new.bases)::t_new.bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::set(t_old.bases)::t_old.bases::1",
-        'abicheck/diff_types.py::_diff_type_bases::virtual_bases::changes.append(\n                make_change(\n                    ChangeKind.TYPE_BASE_CHANGED,\n                    symbol=name,\n                    description=f"Virtual base classes changed: {name}",\n                    old_value=str(t_old.virtual_bases),\n                    new_value=str(t_new.virtual_bases),\n                )\n            )::t_new.virtual_bases::1',
-        'abicheck/diff_types.py::_diff_type_bases::virtual_bases::changes.append(\n                make_change(\n                    ChangeKind.TYPE_BASE_CHANGED,\n                    symbol=name,\n                    description=f"Virtual base classes changed: {name}",\n                    old_value=str(t_old.virtual_bases),\n                    new_value=str(t_new.virtual_bases),\n                )\n            )::t_old.virtual_bases::1',
-        'abicheck/diff_types.py::_diff_type_bases::virtual_bases::changes.append(\n            make_change(\n                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,\n                symbol=name,\n                name=name,\n                detail="; ".join(desc_parts),\n                old_value=str(sorted(t_old.virtual_bases)),\n                new_value=str(sorted(t_new.virtual_bases)),\n            )\n        )::t_new.virtual_bases::1',
-        'abicheck/diff_types.py::_diff_type_bases::virtual_bases::changes.append(\n            make_change(\n                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,\n                symbol=name,\n                name=name,\n                detail="; ".join(desc_parts),\n                old_value=str(sorted(t_old.virtual_bases)),\n                new_value=str(sorted(t_new.virtual_bases)),\n            )\n        )::t_old.virtual_bases::1',
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::set(t_new.virtual_bases)::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::set(t_old.virtual_bases)::t_old.virtual_bases::1",
-        'abicheck/diff_types.py::_diff_type_vtable::vtable::f"vtable reordered: {name}"\n        if Counter(t_old.vtable) == Counter(t_new.vtable)\n        else f"vtable changed: {name}"::t_new.vtable::1',
-        'abicheck/diff_types.py::_diff_type_vtable::vtable::f"vtable reordered: {name}"\n        if Counter(t_old.vtable) == Counter(t_new.vtable)\n        else f"vtable changed: {name}"::t_old.vtable::1',
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::len(t_old.vtable) == len(t_new.vtable) and all(\n        vtable_slot_is_override_reuse(\n            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types\n        )\n        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)\n    )::t_new.vtable::1",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::len(t_old.vtable) == len(t_new.vtable) and all(\n        vtable_slot_is_override_reuse(\n            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types\n        )\n        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)\n    )::t_new.vtable::2",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::len(t_old.vtable) == len(t_new.vtable) and all(\n        vtable_slot_is_override_reuse(\n            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types\n        )\n        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)\n    )::t_old.vtable::1",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::len(t_old.vtable) == len(t_new.vtable) and all(\n        vtable_slot_is_override_reuse(\n            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types\n        )\n        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)\n    )::t_old.vtable::2",
-        'abicheck/diff_types.py::_diff_type_vtable::vtable::make_change(\n        ChangeKind.TYPE_VTABLE_CHANGED,\n        symbol=name,\n        description=description,\n        old_value=", ".join(t_old.vtable),\n        new_value=", ".join(t_new.vtable),\n    )::t_new.vtable::1',
-        'abicheck/diff_types.py::_diff_type_vtable::vtable::make_change(\n        ChangeKind.TYPE_VTABLE_CHANGED,\n        symbol=name,\n        description=description,\n        old_value=", ".join(t_old.vtable),\n        new_value=", ".join(t_new.vtable),\n    )::t_old.vtable::1',
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable == t_new.vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable == t_new.vtable::t_old.vtable::1",
-        "abicheck/diff_types.py::_new_field_change_kind::virtual_bases::bool(t_new.vtable or t_new.virtual_bases)::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_new_field_change_kind::vtable::bool(t_new.vtable or t_new.virtual_bases)::t_new.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_old.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::vtable::t_old.vtable and t_new.vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::vtable::t_old.vtable and t_new.vtable::t_old.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::bases::list(t_old.bases) != list(t_new.bases)::t_new.bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::bases::list(t_old.bases) != list(t_new.bases)::t_old.bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_old.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::vtable::t_old.vtable and t_new.vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::vtable::t_old.vtable and t_new.vtable::t_old.vtable::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::n.bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::o.bases::1",
-        'abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::changes.append(\n                make_change(\n                    ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED,\n                    symbol=name,\n                    name=name,\n                    old=", ".join(o.virtual_bases),\n                    new=", ".join(n.virtual_bases),\n                )\n            )::n.virtual_bases::1',
-        'abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::changes.append(\n                make_change(\n                    ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED,\n                    symbol=name,\n                    name=name,\n                    old=", ".join(o.virtual_bases),\n                    new=", ".join(n.virtual_bases),\n                )\n            )::o.virtual_bases::1',
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::n.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::n.virtual_bases::2",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::o.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::o.virtual_bases::2",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::o.virtual_bases::3",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::n.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::o.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_is_polymorphic::bases::rec.bases::rec.bases::1",
-        "abicheck/diff_vtable_layout.py::_is_polymorphic::virtual_bases::rec.vtable or rec.virtual_bases::rec.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_is_polymorphic::vtable::rec.vtable or rec.virtual_bases::rec.vtable::1",
-        "abicheck/diff_vtable_layout.py::_secondary_groups::bases::rec.bases::rec.bases::1",
-        "abicheck/diff_vtable_layout.py::_secondary_groups::virtual_bases::rec.virtual_bases::rec.virtual_bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::bases::{\n        _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases\n    }::header.bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::bases::{_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}::dwarf.bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::virtual_bases::{\n        _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases\n    }::header.virtual_bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::virtual_bases::{_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}::dwarf.virtual_bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::vtable::header.has_anonymous_aggregate_fields and not dwarf.vtable::dwarf.vtable::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::vtable::not dwarf.vtable and (\n            not header.fields or header.has_anonymous_aggregate_fields\n        )::dwarf.vtable::1",
-        "abicheck/dumper_scoping.py::_kept_signature_haystack::bases::texts.extend(rec.bases)::rec.bases::1",
-        "abicheck/dumper_scoping.py::_kept_signature_haystack::virtual_bases::texts.extend(rec.virtual_bases)::rec.virtual_bases::1",
-        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._filter_types_by_reachability::bases::rec.bases + rec.virtual_bases::rec.bases::1",
-        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._filter_types_by_reachability::virtual_bases::rec.bases + rec.virtual_bases::rec.virtual_bases::1",
-        "abicheck/export_surface.py::_unresolved_type_edges::bases::(*rec.bases, *rec.virtual_bases)::rec.bases::1",
-        "abicheck/export_surface.py::_unresolved_type_edges::virtual_bases::(*rec.bases, *rec.virtual_bases)::rec.virtual_bases::1",
-        "abicheck/idioms.py::_collect_base_targets::bases::rec.bases::rec.bases::1",
-        "abicheck/idioms.py::_detect_non_virtual_dtor::vtable::not rec.vtable::rec.vtable::1",
-        "abicheck/idioms.py::_has_virtual_destructor::vtable::rec.vtable::rec.vtable::1",
-        "abicheck/idioms.py::_recognise_factory::vtable::rec is not None and rec.vtable::rec.vtable::1",
-        "abicheck/internal_leak.py::_enqueue_record_children::bases::rec.bases::rec.bases::1",
-        "abicheck/internal_leak.py::_enqueue_record_children::virtual_bases::rec.virtual_bases::rec.virtual_bases::1",
-        "abicheck/surface.py::_walk_exact_type_closure::bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.bases::1",
-        "abicheck/surface.py::_walk_exact_type_closure::virtual_bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.virtual_bases::1",
-        "abicheck/surface.py::_walk_type_closure::bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.bases::1",
-        "abicheck/surface.py::_walk_type_closure::virtual_bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.virtual_bases::1",
-        "abicheck/surface_graph.py::_build_type_refs::bases::rec.bases::rec.bases::1",
-        "abicheck/surface_graph.py::_build_type_refs::virtual_bases::rec.virtual_bases::rec.virtual_bases::1",
-        "abicheck/type_reachability.py::_walk_reached_records::bases::[f.type for f in rec.fields] + [\n                *rec.bases,\n                *rec.virtual_bases,\n            ]::rec.bases::1",
-        "abicheck/type_reachability.py::_walk_reached_records::virtual_bases::[f.type for f in rec.fields] + [\n                *rec.bases,\n                *rec.virtual_bases,\n            ]::rec.virtual_bases::1",
-    }
-)
+#: **Empty as of ADR-063 Phase 0's detector-migration completion.** Every
+#: reader this baseline ever recorded (the plan doc's own "nine distinct
+#: modules, ten call sites" table, the primary detectors --
+#: `diff_layout.py`/`diff_types.py`/`diff_vtable_layout.py`/
+#: `diff_param_qualifiers.py`/`diff_cxx_rules.py` -- and every additional
+#: reader this check's own construction found:
+#: `buildsource/header_graph.py`, `buildsource/source_extractors/base.py`,
+#: `idioms.py`, `contract_evidence_collect.py`, `diff_time64.py`,
+#: `diff_stdlib_impl.py`, `diff_cpp_patterns.py`, `dumper_scoping.py`,
+#: `export_surface.py`, `internal_leak.py`, `surface.py`, `surface_graph.py`,
+#: `type_reachability.py`, and the two decision functions living inside
+#: otherwise-exempt producer modules --
+#: `dwarf_snapshot._DwarfSnapshotBuilder._filter_types_by_reachability` and
+#: `dumper_layout_backfill._fields_corroborate`) has migrated to read the
+#: `Fact[...]` sibling via `model.resolved_fact_value()` instead of the bare
+#: legacy attribute -- see `docs/contribute/plans/one-semantic-pipeline.md`
+#: Phase 0's own "Detector migration -- landed" note. This stays a real,
+#: live, repo-wide scan (not a `diff_*.py` glob), not a stub: a genuinely
+#: new direct read of one of the five bridged fields anywhere in
+#: `abicheck/` still fails this gate on sight, with nothing left to hide
+#: behind. `KNOWN_UNMIGRATED_READERS` remains the mechanism's name (and
+#: stays a `frozenset[str]`, not deleted) since a future producer/detector
+#: change could legitimately reintroduce a reviewed, temporarily-unmigrated
+#: site the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does.
+KNOWN_UNMIGRATED_READERS: frozenset[str] = frozenset()
 
 
 class Findings(Protocol):
