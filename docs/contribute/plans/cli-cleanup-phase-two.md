@@ -76,11 +76,13 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > `execute_dump_request` — see its own section's closing status note
 > ("Slice landed: the real ELF run is migrated") for the account; the
 > section's own long investigation history above that note remains as the
-> record of why this was not attempted sooner. PR C's PE/Mach-O half
-> (`handle_non_elf_dump`) is unmigrated — no PE/Mach-O toolchain was
-> available where this was done — and PR F/3C's removal itself still needs
-> that half closed too, per 3C's own "all three resolvers" ordering rule
-> (its own section, unchanged by this update).
+> record of why this was not attempted sooner. **Update (2026-09-01, PR
+> #980): PR C's PE/Mach-O half (`handle_non_elf_dump`) is migrated too**
+> — see that section's own "Update (2026-09-01, PR #980)" paragraph for
+> the account; verified only via mock-based CLI/unit tests, no real
+> PE/Mach-O toolchain was available to verify against. PR F/3C's removal
+> is no longer blocked on this half specifically, per 3C's own "all three
+> resolvers" ordering rule (its own section).
 >
 > **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
 > + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
@@ -2148,10 +2150,21 @@ pipelines a fourth time.
   > PE/Mach-O closes item 1 in full, per this entry's own "all three
   > resolvers" rule.
   >
+  > **Update (2026-09-01, PR #980): item 1 is now fully closed, PE/Mach-O
+  > included.** `handle_non_elf_dump` no longer executes independently —
+  > it routes through `execute_dump_request` the identical way ELF's real
+  > run and `scan`'s candidate resolution already do (see PR C's own
+  > section above for the account; verified only via mock-based CLI/unit
+  > tests, no PE/Mach-O toolchain was available to verify against a real
+  > binary). **3C's removal is therefore no longer blocked by item 1 at
+  > all — only item 2 (the L4 extractor default divergence, still not
+  > attempted, deliberately) remains open** before this entry's "all three
+  > resolvers" condition is fully satisfied.
+  >
   > **What still blocks the removal**, restated precisely because "3A is not
-  > done" is now too coarse to act on (numbered list below predates the
-  > update immediately above; item 1's `dump`-side/ELF half is superseded by
-  > it, not by anything in this list):
+  > done" is now too coarse to act on (numbered list below predates both
+  > updates immediately above; item 1's `dump`-side half, ELF and PE/Mach-O
+  > alike, is superseded by them, not by anything in this list):
   >
   > 1. **Neither real run routes through the shared pipeline yet.** The ELF/
   >    PE/Mach-O `dump` executes through `perform_elf_dump`/
@@ -3222,6 +3235,31 @@ pipelines a fourth time.
   > `seen["allow_build_query"] is True` (verified to fail against the
   > pre-fix code the same way).
 
+  > **Update (2026-09-01, PR #980): PE/Mach-O is now migrated too, closing
+  > this section's own "What this does not close" gap.** The design this
+  > section already worked out for ELF above carried over mechanically —
+  > `execute_dump_request`/`_resolve_side_snapshot_impl` were already
+  > format-generic (confirmed by reading the real code: `is_elf=True if
+  > fmt == "elf" else None`, the ADR-039 build-context collector and
+  > `embed_side_build_source` both called unconditionally regardless of
+  > format), the same pipeline `compare`'s implicit-dump operand and
+  > `scan`'s candidate resolution already used for PE/Mach-O input — so no
+  > second structural investigation was needed the way the ELF slice above
+  > required. `handle_non_elf_dump` is retired from `dump_cmd`'s real
+  > dispatch the same way `perform_elf_dump` was (still defined, for its
+  > own direct unit tests). **Verified only via mock-based CLI/unit tests,
+  > not real `g++`/clang/castxml** — no PE/Mach-O toolchain was available
+  > in this environment either, so unlike the ELF slice's own
+  > `test_dump_cli_typed_api_parity.py` corpus, there is no byte-for-bit
+  > confirmation against a real compiled DLL/dylib. PR F/3C's removal
+  > itself is therefore no longer blocked on this half specifically, per
+  > 3C's own "all three resolvers" ordering rule below — see that rule's
+  > own text for what (if anything) it still needs. Root `AGENTS.md`'s own
+  > PR C entry, `docs/contribute/known-gaps.md`'s "PR C" entry, and
+  > `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 1 status
+  > bullet are all updated to match (Codex review on PR #980 caught this
+  > section's own conclusion left stale after that PR's initial push).
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,
@@ -3540,6 +3578,36 @@ second top-level spelling of the same fact.
 > full cross-front-end parity pass (typed API, Action), and stage 2 (the
 > atomic removal — deleting `--exit-code-scheme` and updating CLI/API/
 > Action/`aggregate` parity together).
+>
+> **Update (2026-09-01): a first Action-side parity slice.** The
+> cross-front-end parity pass found a real gap on the very axis this
+> section just finished wiring: `action/run.sh`'s `scan` verdict mapping
+> could not tell an `_EvidenceContractError` abort apart from a genuine CLI
+> usage error, since `cli_scan.py` raises it as a `click.ClickException` —
+> identical `Error: ...` stderr to a bad flag or a crash — so the Action
+> folded a well-formed, evidence-incomplete scan into the generic `ERROR`
+> bucket, discarding the distinguishable `verdict:
+> "EVIDENCE_CONTRACT_ERROR"` JSON envelope this section's own native-CLI
+> work had just started emitting. Fixed with a new `_evidence_contract_
+> gated()` helper (JSON-verdict-first, mirroring `_coverage_gated`/
+> `_assurance_gated`) consulted ahead of `_is_cli_error`, a matching
+> `EVIDENCE_CONTRACT_ERROR` output verdict (job summary, `action.yml`
+> docs, and the same unconditional step-failure block `NOT_COMPARABLE`/
+> `BUDGET_OVERFLOW` already have — but deliberately **not** their
+> `_maybe_post_pr_comment` skip: a Codex review round caught that the
+> analogy to `BUDGET_OVERFLOW`'s skip doesn't hold here, since reaching
+> this verdict already proves a readable JSON report exists, and
+> `pr_comment_scan_abort.scan_abort_incomplete_reason` already renders it
+> correctly — see ADR-064's own update for the full account), and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py` (including an
+> executing malicious-fixture test the `bugfix-test-contract` CI gate
+> required for this trust-boundary diff). See
+> [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md)'s own
+> matching update for the full account, including the one gap this leaves:
+> `--format text` with no JSON secondary output still reads as `ERROR`,
+> since `cli_scan.py` writes no report at all on that path. Still open:
+> the `GateOptions` rewrite, the typed-API half of the parity pass, and
+> that `--format text` gap.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 

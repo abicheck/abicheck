@@ -470,7 +470,7 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         nodes.add(node)
         for fld in rec.fields:
             link(node, index.resolve_type_string(fld.type))
-        for base in list(rec.bases) + list(rec.virtual_bases):
+        for base in [*rec.resolved_bases(), *rec.resolved_virtual_bases()]:
             link(node, index.resolve_type_string(base))
         _link_type_aliases(rec, node, nodes, edges)
 

@@ -5716,6 +5716,167 @@ posture. `python scripts/check_docs_contract.py` and `python scripts/
 check_ai_readiness.py` both re-run clean at their existing baselines
 (0 errors, 2/148 warnings respectively) after the addition.
 
+**Detector migration (fourth slice) — landed, closing this phase.** Every
+site the `KNOWN_UNMIGRATED_READERS` baseline recorded — 104 keys across 20
+modules at the point this slice started — has migrated off the bare legacy
+attribute onto its `Fact[...]` sibling; the baseline is now the literal
+empty set (`frozenset()`), and the scan (`unmigrated_fact_reader_sites`/
+`check_fact_field_readers`) stays exactly as live as before — a genuinely
+new direct read anywhere under `abicheck/` still fails the gate on sight,
+with nothing left to exempt it. This is the exact gap the Status section of
+`docs/contribute/adr/063-one-semantic-pipeline.md` previously recorded
+("No detector has migrated to read the converted fields' `Fact[...]`
+siblings yet") — closed, not deferred.
+
+**The migration is representation-only, per this phase's own Design
+section and Acceptance criteria stated above — it does not change any
+detector's emitted findings.** The mechanism is a single, provable
+invariant `bridge_legacy_and_fact` (this phase's own compatibility bridge,
+landed in the first slice) already establishes for every constructed
+`RecordType`/`Param` instance: the retained legacy field always equals
+`<field>_fact.value` when `<field>_fact.is_present`, and the field's own
+normal resting value (`[]` for `bases`/`virtual_bases`/`vtable`, `None` for
+`vptr_offset_bits`, `False` for `is_va_list`) otherwise — by construction,
+not by convention, since `__post_init__` is the only place either
+representation is ever written after construction. `abicheck/model/fact.py`
+gained one new function, `resolved_fact_value(fact: Fact[T] | None,
+default: T) -> T`, expressing exactly this: `fact.value_or(default)` when
+`fact` is not `None`, else `default` (the `Fact[T] | None` union on the
+parameter — not `Fact[T]` alone — matches the field's own declared type;
+see below for why that union matters). Every migrated call site replaces
+`rec.bases` with `resolved_fact_value(rec.bases_fact, [])` — a pure
+re-spelling of the identical value the legacy field already held, verified
+by the full test suite staying green (mypy 0 errors, ruff clean, the
+complete non-integration/non-slow/non-golden suite unchanged) and by the
+FP-rate/tier-accuracy gates staying at their existing baselines with no
+new corpus case needed. **This is deliberately not the same thing as
+`Fact.value_or(...)`'s own documented "not detector-safe" warning
+(Design section, above) being quietly ignored** — that warning is about a
+detector *inventing* a collapsed default that discards information the raw
+legacy field never had ("`old.vtable_fact.value_or([]) != new.vtable_fact.
+value_or([])` reintroduces... the exact ambiguity"); `resolved_fact_value`
+used at one of these 104 sites reproduces a value that already existed,
+observable at the exact same fidelity, one hop away, on the still-live
+`.status` of the very `Fact[...]` object each call reads from. A future
+caller wanting genuine per-status handling still matches on `.status`
+directly — this phase does not remove that capability, only stops forcing
+every reader to go through the ambiguous legacy name to get an ordinary
+value.
+
+**Why `resolved_fact_value` takes `Fact[T] | None`, not `Fact[T]` — a real
+mypy gap the first attempt at this slice missed.** `RecordType.bases_fact`
+(and its four siblings) are declared `Fact[list[str]] | None`, not
+`Fact[list[str]]` — required by this phase's own direct-construction
+compatibility bridge (Design section: the field's real default is `None`,
+distinct from `Fact.not_collected()`, so `__post_init__` can tell "caller
+passed nothing" apart from "caller explicitly asserted no evidence"). A
+first pass at each migrated call site wrote the natural-looking
+`rec.bases_fact.value if rec.bases_fact.is_present else []` directly —
+`mypy` correctly rejected essentially every one of them
+(`Item "None" of "Fact[list[str]] | None" has no attribute "is_present"`):
+the field is provably never `None` on a fully-constructed instance
+(`__post_init__` always resolves it), but mypy has no cross-instance view
+of that invariant and must assume the declared type. `resolved_fact_value`
+closes this once, centrally, rather than repeating an `assert fact is not
+None` (or an equivalent `... or []` narrowing hack) at every one of the 104
+sites — a real, if narrower, instance of this phase's own governing
+principle (one concept, one representation) applied to the *narrowing*
+step itself, not only to availability.
+
+**Two modules crossed the AI-readiness `file-size` hard cap purely from
+this slice's added local-variable lines, and both were split the same way
+this codebase already splits an oversized module — a fifth slice, not a
+new design.** `diff_types.py` (2018 lines) and `dwarf_snapshot.py` (2041
+lines) each exceeded the unconditional 2000-line limit once every migrated
+site's `resolved_fact_value(...)` assignment line was added; `diff_types.py`
+already had three such sibling splits before this phase
+(`diff_types_abicc_parity.py`/`diff_types_field_facts.py`/
+`diff_types_surface.py`), so this is the same pattern, not a new one.
+`diff_types_vtable.py` takes the self-contained `TYPE_VTABLE_CHANGED`
+evidence-gating cluster (`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/
+`_layout_evidence_is_unverifiable`/`_owned_virtual_signatures`/
+`_owned_virtual_signatures_for_record`/`_diff_type_vtable`) — every one of
+these six functions was already only ever called from within this same
+cluster or from the one external call `diff_types.py` makes into
+`_diff_type_vtable`, so the split needed only one import back
+(`from .diff_types_vtable import _diff_type_vtable as _diff_type_vtable`),
+mirroring the `as`-aliased re-export convention the three pre-existing
+siblings already use. `dwarf_snapshot_datasources.py` takes
+`show_data_sources` and its three private formatting helpers
+(`_evidence_layer_line`/`_coverage_row_summary`/`_evidence_payload_summary`)
+— a human-readable L0-L5 diagnostic renderer with zero dependency on
+`_DwarfSnapshotBuilder` or anything else in `dwarf_snapshot.py` — with
+`show_data_sources` re-exported (`as`-aliased) from `dwarf_snapshot.py` so
+`cli_datasources.py`/`cli_dump_helpers.py`/`workflows/extraction.py` and
+their tests, all of which import it as `from abicheck.dwarf_snapshot import
+show_data_sources`, are unaffected. Neither split changes any behavior,
+only which module owns the code; both land at 1579 and 1915 lines
+respectively, with headroom under the cap.
+
+**A second, narrower growth surface -- ADR-061's own `architecture/debt.yaml`
+no-growth ledger, not the AI-readiness `file-size` cap above -- needed a
+different fix, not a module split.** Six already-`no_growth`-tracked files
+(`contract_evidence_collect.py`/`dumper_scoping.py`/`export_surface.py`/
+`internal_leak.py`/`surface.py`/`type_reachability.py`) each grew 2-9 lines
+past their frozen adoption baseline purely from the two-line
+`bases = resolved_fact_value(...)` / `virtual_bases = resolved_fact_value
+(...)` local-variable pattern this migration otherwise uses everywhere --
+`architecture/debt.yaml`'s own README states the ledger "should only
+shrink," so raising six baselines to absorb this migration's own overhead
+would be exactly the kind of undocumented exception this ADR's Governing
+Invariant section rejects. Splitting a module was not the fix here either
+(none of the six is anywhere near the 2000-line hard cap the split above
+addresses; `architecture/debt.yaml`'s own per-file ceiling is a stricter,
+independent budget the same file can be tracked under well before that).
+The actual fix: `RecordType` gained two short, import-free convenience
+methods, `resolved_bases()`/`resolved_virtual_bases()` (`model/entities.py`,
+right after `__post_init__`, each a one-line call to the identical
+`resolved_fact_value` primitive) -- a call site with an already-typed
+`RecordType` in hand writes `rec.resolved_bases()` instead of
+`resolved_fact_value(rec.bases_fact, [])`, which needs no new `from .model
+import resolved_fact_value` line at all (the six files above already import
+`RecordType` for their own type annotations) and is short enough to often
+collapse the two-line local-variable pattern back to the original
+single-line call site the pre-migration code used. This is not a second
+representation of the same concept -- both spellings resolve through the
+one `resolved_fact_value` primitive in `model/fact.py`, and the method
+exists purely to avoid an import cost at space-constrained call sites, the
+same reasoning `Fact.value_or()`/`bridge_legacy_and_fact()` already coexist
+under in that same module. The free-function form remains correct and used
+elsewhere (`diff_cpp_patterns.py`'s `_is_empty_record(t: object)` cannot
+call a `RecordType` method at all, since `t` is deliberately typed `object`
+there). All six files land exactly at their recorded adoption baseline
+(1183/1289/1312/1651/1507/1504 lines respectively) with this migration's
+reads included -- confirmed via `python scripts/check_architecture.py
+--base <this-branch's-actual-base-commit>`, which is what isolates a PR's
+own growth from unrelated already-on-`main` debt the same way CI's own
+`ARCHITECTURE_BASE` does (a bare local run with no resolvable
+`origin/main` tracking ref, as in a stale/shallow sandbox checkout, can
+misattribute pre-existing debt to an unrelated PR -- passing `--base`
+explicitly is the fix, not a ledger change).
+
+With the empty baseline, the empty-baseline test
+(`tests/test_fact_field_readers.py::test_baseline_entries_are_real_sites`)
+is vacuously satisfied (there is nothing left to check is "real"), and
+`tests/test_fact_field_readers.py`'s own synthetic-violation tests continue
+to pin the scan's real behavior against a throwaway `abicheck/`-shaped tree,
+independent of the baseline's size. Phase 0 is therefore complete per its
+own stated scope in this document's Goal/Design/Acceptance-criteria
+sections above: `Fact[T]` exists, every one of the five converted fields'
+producers construct it directly, every currently-known reader consults it
+instead of the ambiguous legacy attribute, and both AI-readiness gates
+(`fact-detector-misuse`/`fact-field-readers`) are live with nothing left in
+either baseline for a *known* violation to hide behind. What remains
+explicitly outside this phase's scope, unchanged: a detector *branching* on
+`FactStatus` to actually change which findings it emits (Phase 5's job);
+converting any field beyond the five this phase named (also Phase 5,
+registry-driven); and removing the four retained legacy attributes
+themselves, which Phase 10's own checklist already schedules for once the
+widened reader check reports zero remaining readers outside the
+compatibility bridge's own `__post_init__` and serialization — true as of
+this slice, but Phase 10 is where that removal actually happens, not here.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
@@ -5993,6 +6154,63 @@ either. This phase's Acceptance criteria section remains unmet for the
 routing half; closing it now has two named prerequisites (the seed-cleanup
 ownership redesign, and a decision on where `dump`'s embed/enforce/scope
 stanza belongs) rather than being a mechanical restructuring.
+
+**Update (landed, ELF): `dump`'s real ELF run now routes through
+`execute_dump_request`.** Both blockers A and B above were closed —
+`frontends/cli/commands/dump.py`'s ELF branch now builds a second,
+execution-scoped `ResolvedDumpRequest` (re-pointed at the normalized
+`so_path`, `requested_depth` nulled so the shared pipeline's own depth gate
+never fires ahead of `_write_snapshot_output`'s existing one) and calls
+`frontends.cli.dump_execute.execute_dump_cli_run`, which runs
+`service_dump_pipeline.execute_dump_request` — `perform_elf_dump` is
+retired for this call site (kept defined for its own direct unit tests).
+Landed as commit `0b69fc3` ("refactor(cli): migrate dump's real ELF run
+onto execute_dump_request (PR C)") plus three Codex-review follow-up
+commits (collect-mode/folded-compiler forwarding, keeping the new module
+out of the CLI-registration import cycle, and treating an explicit
+`dump --config`/`--build-query` as trusted operator input). See
+`docs/contribute/known-gaps.md`'s "PR C" entry for the exact mechanism
+each blocker's fix uses.
+
+**Update (2026-09-01, landed): the PE/Mach-O half is closed the identical
+way, completing this phase's routing half for both binary formats.** The
+same structural finding that blocked a from-scratch PE/Mach-O migration
+above no longer applies once the ELF slice had already resolved blockers A
+and B for the shared pipeline itself — `execute_dump_request`/
+`_resolve_side_snapshot_impl` were already format-generic
+(`fmt`-parameterized: `is_elf=True if fmt == "elf" else None`,
+`pdb_path=side.pdb` unconditional, `attach_build_context_for_parsed_headers`/
+`embed_side_build_source` both format-unconditional), so no second design
+investigation was needed — only the *caller* was still routing PE/Mach-O
+around it. `frontends/cli/commands/dump.py`'s PE/Mach-O branch now builds
+the identical execution-scoped `ResolvedDumpRequest` and calls the same
+`execute_dump_cli_run`; `handle_non_elf_dump` is retired for this call
+site (kept defined, unchanged, for its own direct unit tests — the same
+discipline `perform_elf_dump` already follows). The shared real-run tail
+(execute, stamp provenance, write the snapshot) both formats now need was
+factored into a new `frontends/cli/dump_execute.
+execute_and_write_dump_cli_run` so `commands/dump.py` — already at the
+architecture gate's 800-line production cap — did not grow net lines when
+the PE/Mach-O branch stopped being a single delegating call to
+`handle_non_elf_dump`. Verified via the existing mock-based CLI/unit test
+suite (four CLI-dispatch tests that previously monkeypatched
+`handle_non_elf_dump` were rewritten to patch
+`abicheck.service_dump_native._dump_pe`/`_dump_macho` instead, the same
+depth below the format dispatch the pre-existing ELF-side precedent,
+`test_compile_context_parity.py::test_dump_reads_compile_block_from_config`,
+already patches `abicheck.dumper.dump` at) — **not** a real PE/Mach-O
+toolchain end-to-end run: no PE/Mach-O toolchain was available in this
+environment to do a byte-for-bit parity check the way the ELF migration's
+own `tests/test_dump_cli_typed_api_parity.py` corpus does for ELF. This
+phase's Acceptance criteria section's routing half is therefore now met
+for both binary formats that execute through this pipeline at all. The
+one remaining, permanent exception is unchanged from this phase's own
+Design section: `cli_buildsource.dump_source_only()` (the binary-less
+`dump --sources`/`--build-info` path) is explicitly out of scope for this
+phase and was not touched — it has no `execute_dump_request()` call to
+route through at all (`ResolvedDumpRequest`'s own docstring: a
+binary-less request has no `InputSpec.path` for `execute_dump_request` to
+resolve), and remains its own separate pipeline.
 
 ---
 
@@ -9540,6 +9758,201 @@ items unchanged by this slice: exhaustive `entity_id` population beyond
 the function-diff path, the post-parse consumer migrations, and promoting
 the new `entity:` alias into a real alias-match reconciliation tier once
 `EntityId.key`'s stability question above is resolved.
+
+**Landed (ninth slice, 2026-09-01): `entity_id` reaches the non-`diff_types.py`
+tail of exhaustive population, plus one hardening attempt explicitly not
+taken.** First part: every remaining `make_change()`/`bool_transition()`
+call site in `diff_layout.py`, `diff_vtable_layout.py`, and
+`diff_symbols_variables.py` now carries `entity_id` -- all ten sites
+across those three files (`diff_layout.py`'s six layout-descriptor findings,
+`diff_vtable_layout.py`'s two vtable-group findings,
+`diff_symbols_variables.py`'s `VAR_ACCESS_CHANGED`/`WIDENED` and
+`VAR_ALIGNMENT_CHANGED`), each keyed off the two matched `RecordType`/
+`Variable` objects already in scope at the call site
+(`old_rec.entity_id or new_rec.entity_id`, following the seventh/eighth
+slice's old-preferred/new-fallback convention). `diff_symbols.py`'s own
+remaining gap closed too: `_check_variable`'s `VAR_TYPE_CHANGED` and its
+`bool_transition` const-flip pair, `_var_removed`/`_var_added`
+(`VAR_REMOVED`/`VAR_ADDED`, one-sided), `_check_field_access_changes`
+(`FIELD_ACCESS_CHANGED`, attributed to the containing `RecordType` since a
+`TypeField` carries no `EntityId` of its own), `_check_anon_field_at_offset`
+(`ANON_FIELD_CHANGED`, both branches -- the containing-record identity is
+now threaded through as an explicit parameter from
+`_check_anon_fields_for_type`, since the field-level helper itself never
+had a `RecordType` in scope), and `_diff_var_deprecated`
+(`VAR_DEPRECATED_ADDED`/`REMOVED`). Nine sites in `diff_symbols.py`, all
+regression-tested by the existing `compare=False` invariant (no equality
+based test can regress) and confirmed by a direct code-level count
+(`make_change`/`bool_transition` call-site keyword arguments vs. the file's
+total `make_change`/`bool_transition` call count, distinguishing an actual
+call-site `entity_id=` keyword from the one signature parameter declaration
+and the one local `entity_id = ...` variable assignment this slice also
+added). Three sites deliberately stay unwired, all in `diff_symbols.py`'s
+`_diff_constants` (`CONSTANT_REMOVED`/`CHANGED`/`ADDED`): `AbiSnapshot.
+constants` is a plain `dict[str, str]`, with no parsed declaration object
+behind either side to carry an `EntityId` -- fabricating one was explicitly
+out of scope. Second part: the `type_reachability.py`/
+`type_reachability_spelling.py` hardening this slice was scoped to look at
+(`_record_identity(name, qualified_name)`'s three call sites --
+`_partition_snapshot_types`, and the two `snapshot.enums`-keyed
+`enum_identities` sites in `directly_referenced_stdlib_types`/its sibling)
+was investigated and **not taken**: every one of those three call sites'
+output strings feed directly into `_non_stdlib_signature_spellings`, which
+is consumed by `_StdlibReferenceScan`'s own substring/spelling-matching
+machinery -- the exact "core signature-spelling substring-matching
+machinery" this slice's own scope explicitly excluded. There is no
+`_record_identity` call site in either module that is an independent
+RecordType/EnumType-keyed anchor separable from that string-spelling
+domain; swapping any of the three to prefer `.entity_id.key` would mix
+opaque `EntityId` keys into a domain whose whole contract is "a spellable
+string that can appear inside a rendered `Function.return_type`/
+`Param.type`/`TypeField.type`", breaking the matching algorithm for any
+type that happens to carry a populated `entity_id`. Verification: full fast
+unit suite green, `mypy abicheck/` clean at the documented 0-error
+baseline, `ruff check`/`ruff format --check` clean on every file this
+slice touched (two pre-existing, unrelated formatting violations were
+independently confirmed present on the base commit before this slice's own
+changes, via `git stash`). Remaining Phase 2 items unchanged by this
+slice: `entity_id` population for DWARF/PDB/ELF-only tiers (still always
+`None` there, an out-of-scope gap noted since the background section
+above), the post-parse consumer migrations, and promoting the `entity:`
+alias into a real alias-match reconciliation tier.
+
+**Landed (tenth slice, 2026-09-01): `entity_id` reaches `diff_types.py`/
+`diff_types_field_facts.py`, closing exhaustive population for the
+type-diff detector family.** Every `make_change()` call site in
+`diff_types.py` (43 sites) and `diff_types_field_facts.py` (16 sites) now
+carries `entity_id`, following the same old-preferred/new-fallback
+convention (`t_old.entity_id or t_new.entity_id` for a matched
+`RecordType`/`EnumType`/`Function` pair; the single available side's own
+`entity_id` for a one-sided add/removal). Field-level findings (a struct/
+union field or enum member gaining, losing, or changing a property)
+attribute to the *containing* `RecordType`/`EnumType`'s `entity_id`, since
+`TypeField` carries no `EntityId` of its own (`EntityKind.FIELD` is
+declared but unimplemented -- the same conclusion the ninth slice reached
+for `diff_symbols.py`'s field-level detectors). Four helper functions that
+previously had no record object in scope at all at their own call sites
+(`_try_match_reserved_field`, `_diff_removed_field`, and
+`_diff_type_field_pair` in `diff_types.py`; `_check_field_qualifier_pair`
+in `diff_types_field_facts.py`) gained an explicit `entity_id`
+keyword-only parameter threaded down from their caller (`_diff_type_fields`/
+`_diff_field_qualifiers`, both of which do have the matched `RecordType`
+pair in scope), mirroring the existing `qualified_name` threading pattern
+already established at those same call sites. 56 of 59 `make_change()`
+sites wired (40/43 in `diff_types.py`, 16/16 in
+`diff_types_field_facts.py`); three sites deliberately stay unwired --
+`diff_types.py::_diff_typedefs`'s `TYPEDEF_VERSION_SENTINEL`/
+`TYPEDEF_REMOVED`/`TYPEDEF_BASE_CHANGED` -- since `_typedef_diff_maps`
+produces plain `str -> str` alias maps with no parsed declaration object
+behind either side to carry an `EntityId` (matching the ninth slice's
+identical conclusion for `diff_symbols.py::_diff_constants`;
+`entity_id_for_typedef` in `model/identity.py` still has zero confirmed
+production callers). One `OVERLOAD_ADDED` site in
+`_diff_overload_additions` is a genuine new shape not seen in earlier
+slices: its "new" side is a *group* of overload `Function`s rather than a
+single matched object, so it is stamped with only the still-present
+old-side declaration's own `entity_id`. Verification: full fast unit suite
+green (one pre-existing, unrelated failure --
+`test_platform_matrix.py::test_type_param_diff_implies_symbol_diff`, a
+`dataclasses`/`sys.modules` introspection error confirmed present on the
+base commit via `git stash` -- and one pre-existing mypy error in
+`frontends/cli/commands/dump.py` from concurrent, unrelated work in
+progress on this branch; neither touched by this slice); `mypy abicheck/`
+clean except that one pre-existing, unrelated error; `ruff check`/`ruff
+format --check` clean on both files this slice touched. Remaining Phase 2
+items unchanged by this slice: `entity_id` population for DWARF/PDB/
+ELF-only tiers, the post-parse consumer migrations, and promoting the
+`entity:` alias into a real alias-match reconciliation tier.
+
+**Landed (eleventh slice, 2026-09-01): `diff_types.py` split into
+`diff_types_bases_vtable.py` — a mechanical AI-readiness follow-up, not
+new ADR-063 semantic work.** The tenth slice's `entity_id=` wiring pushed
+`diff_types.py` from 1999 to 2066 lines, past the AI-readiness gate's
+2000-line hard cap (`file-size`, no allowlist mechanism), and shifted the
+line numbers thirteen `fact-field-readers` `KNOWN_UNMIGRATED_READERS`
+baseline entries in `diff_layout.py`/`diff_types.py`/
+`diff_vtable_layout.py` were keyed against. Fixed by extracting the
+largest genuinely self-contained function group in `diff_types.py` --
+base-class diffing (`_diff_type_bases`) and the vtable-diffing group
+feeding `_diff_type_vtable` (`_vtable_transition_is_evidenced`,
+`_vtable_transition_rests_on_unresolved_evidence`,
+`_layout_evidence_is_unverifiable`, `_owned_virtual_signatures`,
+`_owned_virtual_signatures_for_record`) -- 501 lines, into a new sibling
+leaf module, `abicheck/diff_types_bases_vtable.py`, following the exact
+precedent `diff_types_field_facts.py`/`diff_types_abicc_parity.py`/
+`diff_types_surface.py` already established for this same file: `diff_types.py`
+imports the moved names back with the same `as`-aliased re-export
+convention (so `from .diff_types import _vtable_transition_is_evidenced`,
+which `tests/test_vtable_evidence_guard.py` uses directly, keeps
+resolving), and the new module imports nothing from `diff_types.py`
+itself, so no import cycle is introduced. `diff_types.py` now sits at
+1566 lines (well under the cap, restoring margin), and the new module is
+553 lines. Registered in `architecture/modules.yaml`'s `compare` layer
+`legacy_paths` and `frozen_root_families.diff_` allowlist alongside its
+three siblings -- required since ADR-061's architecture gate
+(`scripts/check_architecture.py`) independently forbids an unregistered
+new flat `diff_*.py` root module; the new module is exempt from
+`compare/`'s own `may_import: [model]` restriction the same way its
+already-registered siblings are, since that restriction only applies to
+files physically inside `abicheck/compare/`, not to a `legacy_paths`-listed
+flat file (verified against the checker's own `_source_layer_for`/
+`migrated_source` logic before registering, rather than assumed).
+
+The thirteen `fact-field-readers` baseline entries were updated in
+`scripts/fact_field_readers.py`'s `KNOWN_UNMIGRATED_READERS` (a 37-key
+swap covering every entry whose file, containing-expression text, or both
+moved: the ten in `diff_types.py` for `_diff_type_bases`/
+`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/`_diff_type_vtable` now
+key off `diff_types_bases_vtable.py` with the `entity_id=`-bearing
+call-site text, plus the twenty-two sibling reads in that same moved
+block the task's own error list didn't enumerate individually, plus the
+three genuinely-stale entries in `diff_layout.py`/`diff_vtable_layout.py`
+whose exact text shifted from the tenth slice's `entity_id=` insertion
+without moving file) -- derived mechanically via
+`fact_field_readers.unmigrated_fact_reader_sites()` run against the
+post-split tree rather than hand-edited, so the new keys are exactly what
+the scanner itself would produce. No reader's own logic changed; this is
+purely baseline-key bookkeeping for code that already existed pre-split.
+
+Verification: `python scripts/check_ai_readiness.py` back to the
+documented 3 pre-existing `adr-status-sync` errors only (zero new
+`file-size`/`fact-field-readers` errors); `ruff check`/`ruff format
+--check`/`mypy abicheck/` clean; `python scripts/check_architecture.py`
+clean except one pre-existing, unrelated `debt-no-growth` finding on
+`diff_symbols.py` from the tenth slice's own concurrent, uncommitted
+`entity_id=` wiring (not touched by this slice); targeted tests
+(`test_diff_types_deep.py`, `test_vtable_evidence_guard.py`,
+`test_vtable_severity.py`, `test_checker.py`,
+`test_ai_readiness.py`, `test_fact_field_readers.py`, plus a
+type/layout/enum/vtable-keyed slice of the full suite, ~4370 tests) green
+-- the same one pre-existing, unrelated `test_platform_matrix.py`
+test-isolation failure the tenth slice's own entry already names
+reproduces only under that large combined run and passes standalone,
+confirming it predates this slice too.
+
+**Update (2026-09-01, merge with main): `diff_types_bases_vtable.py` no
+longer exists — folded into main's independently-landed
+`diff_types_vtable.py`.** Merging this branch's PR against `main` surfaced
+that `a2cc048` ("feat(model): complete ADR-063 Phase 0 detector migration")
+had, concurrently and independently, split the identical base-class/vtable
+function group out of `diff_types.py` into its own new sibling module --
+`diff_types_vtable.py` (same functions, same rationale, already Fact-migrated
+per Phase 0) -- landing on `main` before this slice's own extraction merged.
+Rather than keep two near-duplicate modules, the merge conflict was resolved
+by keeping `main`'s `diff_types_vtable.py` (it already carries the Phase 0
+`resolved_fact_value()` migration this slice's own copy did not) and layering
+only this slice's `entity_id=` addition onto its `_diff_type_vtable`; `_diff_
+type_bases` itself stayed where `main` already had it, inline in
+`diff_types.py` (also Fact-migrated), with `entity_id=` added to its three
+`make_change()` calls. `diff_types_bases_vtable.py` was deleted along with
+its `architecture/modules.yaml` registrations; the `fact-field-readers`
+baseline resolved to `main`'s side (now empty -- Phase 0 migrated every
+known reader, so there is nothing left for this slice's raw-field version of
+these functions to add back). No behavior change beyond what each side
+already carried; `tests/test_vtable_evidence_guard.py`'s existing `from
+abicheck.diff_types_vtable import _vtable_transition_is_evidenced` import
+was the confirming signal for which filename to keep.
 
 ---
 

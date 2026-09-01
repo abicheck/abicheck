@@ -203,10 +203,35 @@ def entity_from_function(fn: Function) -> SourceEntity:
 
 def entity_from_record(rec: RecordType) -> SourceEntity:
     """Map a parsed :class:`RecordType` (struct/class/union) to a ``record`` entity."""
+    # Fact[T]-bridged reads (ADR-063 Phase 0): `bases_fact`/`vtable_fact`
+    # and their legacy siblings are kept in lockstep by `RecordType.
+    # __post_init__`, so resolving through the sibling here is exactly
+    # value-preserving. Each `*_fact` field is declared `Fact[list[str]] |
+    # None` (only `__init__`-time callers may omit it); `__post_init__`
+    # always backfills a real `Fact`, so the leading `is not None` check
+    # never actually fails at runtime — it, and the trailing `.value is
+    # not None` (mirroring `bridge_legacy_and_fact`'s own resolution),
+    # exist to narrow the type for mypy.
+    bases_fact = rec.bases_fact
+    rec_bases = (
+        bases_fact.value
+        if bases_fact is not None
+        and bases_fact.is_present
+        and bases_fact.value is not None
+        else []
+    )
+    vtable_fact = rec.vtable_fact
+    rec_vtable = (
+        vtable_fact.value
+        if vtable_fact is not None
+        and vtable_fact.is_present
+        and vtable_fact.value is not None
+        else []
+    )
     field_repr = ";".join(f"{f.name}:{f.type}@{f.offset_bits}" for f in rec.fields)
     type_repr = (
         f"{rec.kind}|size={rec.size_bits}|align={rec.alignment_bits}"
-        f"|bases={','.join(rec.bases)}|vt={','.join(rec.vtable)}|{field_repr}"
+        f"|bases={','.join(rec_bases)}|vt={','.join(rec_vtable)}|{field_repr}"
     )
     return SourceEntity(
         id=_content_hash("record", rec.name, type_repr),

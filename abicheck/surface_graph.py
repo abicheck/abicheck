@@ -35,7 +35,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .checker_policy import EvidenceTier
-from .model import AbiSnapshot, Function, RecordType, ScopeOrigin, Variable, Visibility
+from .model import (
+    AbiSnapshot,
+    Function,
+    RecordType,
+    ScopeOrigin,
+    Variable,
+    Visibility,
+    resolved_fact_value,
+)
 from .surface import _type_identifiers
 
 if TYPE_CHECKING:
@@ -166,9 +174,11 @@ def _build_type_refs(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
         refs: set[str] = set()
         for f in rec.fields:
             refs |= _type_identifiers(f.type)
-        for base in rec.bases:
+        bases = resolved_fact_value(rec.bases_fact, [])
+        virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
+        for base in bases:
             refs |= _type_identifiers(base)
-        for base in rec.virtual_bases:
+        for base in virtual_bases:
             refs |= _type_identifiers(base)
         type_refs[rec.name] = frozenset(refs)
     for alias, target in snap.typedefs.items():

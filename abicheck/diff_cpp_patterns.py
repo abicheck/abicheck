@@ -70,7 +70,7 @@ from .diff_templates import (  # noqa: F401
     _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
-from .model import AccessLevel
+from .model import AccessLevel, resolved_fact_value
 from .model.binary_naming import strip_vendor_hash
 
 if TYPE_CHECKING:
@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 def _is_empty_record(t: object) -> bool:
     """An empty tag struct: no fields, no vtable, size 0 or 1 byte."""
     fields = getattr(t, "fields", None) or []
-    vtable = getattr(t, "vtable", None) or []
+    vtable = resolved_fact_value(getattr(t, "vtable_fact", None), None)
     size_bits = getattr(t, "size_bits", None)
     if fields or vtable:
         return False

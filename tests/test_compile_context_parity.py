@@ -1516,14 +1516,18 @@ def test_compare_config_include_dirs_survive_per_side_include(
     assert cfg_inc in new_inc
 
 
+def _capture_dump_pe(captured: dict[str, object], **kwargs: object) -> AbiSnapshot:
+    """Shared fake for `abicheck.service_dump_native._dump_pe` (ADR-063 Phase 1)."""
+    captured.update(kwargs)
+    return AbiSnapshot(library="foo.dll", version="1.0")
+
+
 def test_dump_pe_threads_compile_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A PE/Mach-O dump now folds the compile: block into header scoping too — the
     context is resolved before the format dispatch and threaded into the non-ELF
     path (Codex review). Previously --gcc-options were warned-and-ignored there."""
-    import abicheck.frontends.cli.commands.dump as cli_mod
-
     pe = tmp_path / "foo.dll"
     pe.write_bytes(b"MZ" + b"\x00" * 128)
     header = tmp_path / "foo.h"
@@ -1532,31 +1536,26 @@ def test_dump_pe_threads_compile_context(
     cfg.write_text("compile:\n  std: c++20\n  frontend: clang\n", encoding="utf-8")
 
     captured: dict[str, object] = {}
-
-    def _fake_non_elf(*args: object, **kwargs: object) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr(cli_mod, "handle_non_elf_dump", _fake_non_elf)
+    monkeypatch.setattr(
+        "abicheck.service_dump_native._dump_pe",
+        lambda *a, **k: _capture_dump_pe(captured, **k),
+    )
     result = CliRunner().invoke(
         main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
     )
     assert result.exit_code == 0, result.output
-    # The merged compile context reaches the PE path (frontend folded from config)...
-    cc = captured["compile_context"]
+    cc = captured["compile"]
     assert cc is not None
     assert getattr(cc, "frontend") == "clang"
     assert getattr(cc, "gcc_options") is None
     assert getattr(cc, "gcc_option_tokens") == ("-std=c++20",)
     assert captured["header_backend"] == "clang"
-    # ...and the old "gcc-options ignored on the native path" warning is gone.
     assert "will be ignored" not in result.output
 
 
 def test_dump_pe_explicit_gcc_options_no_longer_warns(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import abicheck.frontends.cli.commands.dump as cli_mod
-
     pe = tmp_path / "foo.dll"
     pe.write_bytes(b"MZ" + b"\x00" * 128)
     header = tmp_path / "foo.h"
@@ -1564,14 +1563,15 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        "abicheck.service_dump_native._dump_pe",
+        lambda *a, **k: _capture_dump_pe(captured, **k),
     )
     result = CliRunner().invoke(
         main, ["dump", str(pe), "-H", str(header), "--compiler-option", "-DPE=1"]
     )
     assert result.exit_code == 0, result.output
     assert "will be ignored" not in result.output
-    assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DPE=1",)
+    assert getattr(captured["compile"], "gcc_option_tokens") == ("-DPE=1",)
 
 
 def test_fallback_flag_is_scoped_to_one_cli_invocation(

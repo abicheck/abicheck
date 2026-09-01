@@ -5334,6 +5334,28 @@ looked like the obvious fix and wasn't.
   toolchain was available in this environment to verify a migration
   against, so it stays exactly where this entry's "Blocker B (both ELF and
   PE/Mach-O)" heading already scoped it: open.
+
+  **Update (2026-09-01, PR #980): PE/Mach-O is now migrated too, closing
+  this entry's remaining half.** The design this entry already worked out
+  for ELF (null out `requested_depth` before calling
+  `execute_dump_request`, keep `_write_snapshot_output`'s embed/enforce/
+  scope stanza as the sole enforcement point, thread the legacy `-p`/
+  `--compile-db` auto-match through as an explicit pass-through) carried
+  over to PE/Mach-O mechanically, with no second structural investigation
+  needed — `execute_dump_request`/`_resolve_side_snapshot_impl` were
+  already format-generic (`is_elf=True if fmt == "elf" else None`,
+  `attach_build_context_for_parsed_headers`/`embed_side_build_source`
+  called unconditionally regardless of format), the same pipeline
+  `compare`'s implicit-dump operand and `scan`'s candidate resolution
+  already used for PE/Mach-O input. `handle_non_elf_dump` is retired from
+  the CLI's real dispatch the same way `perform_elf_dump` was (still
+  defined, for its own direct unit tests). **Verified only via mock-based
+  CLI/unit tests, not a real end-to-end parity run** — no PE/Mach-O
+  toolchain was available in this environment either, so unlike ELF's own
+  `test_dump_cli_typed_api_parity.py` corpus, there is no byte-for-bit
+  confirmation against a real compiled DLL/dylib. `AGENTS.md`'s own
+  `service_dump_pipeline.py` entry is updated to match.
+
   One real, user-visible behavior change falls out of the migration rather
   than being a side effect nobody decided: `dump`'s L4 source-extractor
   default flips from an accidental **clang** (`perform_elf_dump` forwarded
