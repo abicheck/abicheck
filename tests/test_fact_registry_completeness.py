@@ -151,6 +151,26 @@ class TestFactRegistry:
         assert record_entries
         assert all(e.owner == "RecordType" for e in record_entries)
 
+    def test_len_counts_entries(self) -> None:
+        entry = FactDefinition(
+            owner="RecordType",
+            field="is_final",
+            value_type="bool | None",
+            producing_backends=("castxml",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+        )
+        assert len(FactRegistry([])) == 0
+        assert len(FactRegistry([entry])) == 1
+
+    def test_contains_checks_membership_by_id(self) -> None:
+        assert "RecordType.is_final" in FACT_REGISTRY
+        assert "NoSuchOwner.no_such_field" not in FACT_REGISTRY
+
     def test_get_returns_none_for_unknown_id(self) -> None:
         assert FACT_REGISTRY.get("NoSuchOwner.no_such_field") is None
 
