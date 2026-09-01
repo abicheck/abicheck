@@ -1795,11 +1795,15 @@ def scan_cmd(
     # --build-target + pre-captured Bazel jsonproto combination
     # `_build_new_snapshot` rejects during real execution -- run here too,
     # before the dry-run preview below can render an unscoped-but-claimed-
-    # scoped estimate for a request the real run would then reject.
-    from .workflows.plan import bazel_target_scoping_failure
+    # scoped estimate for a request the real run would then reject. Uses
+    # the scan-aware `scan_bazel_scoping_failure` (Codex review), not the
+    # bare check -- the latter has no headers/collect-mode exemption.
+    from .workflows.plan import scan_bazel_scoping_failure
 
-    if _bf := bazel_target_scoping_failure(
-        "candidate",
+    if _bf := scan_bazel_scoping_failure(
+        headers,
+        eff_depth_enum,
+        collect_mode,
         effective_build_info,
         build_targets,
         sources=sources,

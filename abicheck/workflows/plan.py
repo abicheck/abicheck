@@ -242,21 +242,28 @@ def _discovered_config_build_targets(
     (exit 64 either way), and duplicating that diagnosis pre-flight would be
     exactly the second-copy drift this phase exists to avoid, for a case
     that already fails loudly downstream. Auto-discovery returns ``()`` (not
-    scoped) for a pack directory too -- ``embed_build_source``'s own
-    ``raw_sources`` is ``None`` for one, so it never reaches
-    ``discover_build_config`` for real either (a pack dir is
+    scoped) for *either* pack shape too (Codex review) -- a classic
+    ``BuildSourcePack`` *or* a Flow-2 ``abicheck_inputs`` pack
+    (:func:`~abicheck.buildsource.inputs_pack.is_any_pack_dir`) --
+    ``embed_build_source``'s own ``raw_sources`` is ``None`` for both (its
+    ``src_is_pack``/``src_is_inputs`` pair), so real execution never reaches
+    ``discover_build_config`` for either shape: a pack dir is
     content-addressed evidence, not a source checkout to scan for a project
-    config); an *explicit* *build_config* is honored regardless, since it
-    names the config file directly rather than searching *sources* for one.
+    config, and a Flow-2 pack's own `.abicheck.yml`, if it happens to carry
+    one, is likewise never consulted. Checking only the classic shape here
+    would falsely reject a Flow-2 pack whose bundled config declares targets
+    the real run never looks at. An *explicit* *build_config* is honored
+    regardless, since it names the config file directly rather than
+    searching *sources* for one.
     """
     if build_config is not None:
         cfg_path: Path | None = build_config
     else:
         if sources is None:
             return ()
-        from ..buildsource.pack_shape import is_pack_dir
+        from ..buildsource.inputs_pack import is_any_pack_dir
 
-        if is_pack_dir(sources):
+        if is_any_pack_dir(sources):
             return ()
         from ..config_paths import discover_build_config
 

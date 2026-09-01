@@ -575,6 +575,43 @@ def test_scan_cli_real_run_rejects_the_identical_combination(tmp_path: Path) -> 
     assert "pre-captured Bazel aquery" in result.output
 
 
+def test_scan_cli_headerless_depth_headers_exempts_the_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence (ADR-063 Phase 4's second slice): the
+    single-binary `scan` pre-flight check was routed through the bare
+    `bazel_target_scoping_failure`, not the scan-aware
+    `scan_bazel_scoping_failure` -- so it carried none of the
+    headers/collect-mode exemption the latter applies. `--depth headers`
+    with no `-H` inputs resolves to collect_mode "off": neither
+    `embed_build_source` nor the L2 seed ever consult `build_info` at that
+    combination, so an explicit `--build-target` + pre-captured Bazel
+    jsonproto must be exempt here too, matching what `run_scan_core`'s own
+    (already scan-aware) check downstream would accept -- not rejected by
+    this earlier, less-aware CLI pre-flight before it ever gets there."""
+    monkeypatch.setattr(embed_mod, "embed_build_source", lambda *a, **kw: None)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            str(_artifact(tmp_path)),
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+            "--depth",
+            "headers",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pre-captured Bazel aquery" not in result.output
+
+
 def test_scan_cli_artifact_set_dry_run_rejects_build_target_with_precaptured_aquery(
     monkeypatch, tmp_path: Path
 ) -> None:

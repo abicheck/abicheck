@@ -259,6 +259,35 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
+    def test_flow2_inputs_pack_with_bundled_config_is_unaffected(self, tmp_path: Path):
+        """Codex review, fresh evidence: auto-discovery must recognize
+        *both* pack shapes (a classic ``BuildSourcePack`` and a Flow-2
+        ``abicheck_inputs`` pack), not just the classic one --
+        ``embed_build_source``'s own ``raw_sources`` is ``None`` for either
+        shape (``src_is_pack``/``src_is_inputs``), so real execution never
+        discovers a config at *either* kind of pack directory. A first
+        version of this check used ``is_pack_dir`` alone, which only
+        recognizes the classic shape -- a Flow-2 pack whose bundled
+        ``.abicheck.yml`` happens to declare ``build.targets:`` was
+        therefore falsely treated as a source checkout and rejected, even
+        though the real run never looks at that file."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        (pack / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=pack, build_info=aquery),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
     def test_no_abicheck_yml_present_is_unaffected(self, tmp_path: Path):
         """No config file at ``sources`` at all -- the auto-discovery
         fallback must not raise/crash and must leave an otherwise-valid,
