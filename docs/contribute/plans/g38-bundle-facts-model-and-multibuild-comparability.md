@@ -2129,186 +2129,129 @@ not replaced with an import-edge requirement). All three positive cases
 confirmed to fail against the pre-fix `bundle.py` (`git stash` on that
 one file); the negative-reachability control passes on both.
 
-### Phase 15 — Declarative-pipeline wiring: `check-project.yml`/Action/CLI for `BundleFacts` and variants
+### Phase 15 — Declarative-pipeline wiring: `check-project.yml`/Action/CLI for `BundleFacts` and variants (SHIPPED — via G30, not via this phase's own original design)
 
-**Origin:** same external review, item 8. Narrower than it may first read:
-Phase 13/13-follow-up above already shipped the *Python-API* half of
-exactly what item 8 asks for — `BundleSideInput`/`resolve_bundle_side()`/
-`compare_bundle_sides()` (live/live, stored/live, live/stored, stored/
-stored all through one `analyze_bundle()` orchestrator), plus
-`bundle_variants_config.parse_bundle_variants_config()`/
-`run_bundle_variant_pairing()`, which already implement the exact
-`bundle_variants:` shape (`target_triple`/`feature_toggles`/`required`)
-the review's own sketch proposes, including the "never union, pair only
-matching variants" invariant and the fingerprint-verification check from
-the Phase 13 follow-up. **This is not still to design — it is shipped and
-tested, just not reachable from the CLI or a real `.abicheck.yml`.**
+**Origin:** same external review, item 8. Phase 13/13-follow-up above
+shipped the *Python-API* half of item 8 — `BundleSideInput`/
+`resolve_bundle_side()`/`compare_bundle_sides()` (live/live, stored/live,
+live/stored, stored/stored all through one `analyze_bundle()`
+orchestrator), plus `bundle_variants_config.parse_bundle_variants_config()`/
+`run_bundle_variant_pairing()`, implementing the exact `bundle_variants:`
+shape (`target_triple`/`feature_toggles`/`required`) the review's own
+sketch proposes.
 
-What remains, restated against the review's own five-step sequence — **step
-(2) is real, missing work for the declarative-pipeline scenario, not
-already-done infrastructure; an earlier draft of this phase claimed
-otherwise and a fresh review round confirmed that claim was wrong by
-reading the actual mechanisms it pointed to.**
+**This section previously described the CI-declarative half as blocked on
+a real, unsolved "cross-job assembly problem": no mechanism for one
+`check-project.yml` matrix cell's snapshot to reach a later "bundle
+dispatch" job, and no `DiffResult.to_dict()`/`from_dict()` to reconstruct a
+per-member comparison result across a job boundary. That framing was
+itself stale — the third time this document's own prose has drifted from
+shipped reality (after Phase 17's operand-kind-detection sketch and this
+same phase's own file-split-blocker text, both corrected earlier). A
+separate initiative, **G30 P1.4/P1.5** (`abicheck/buildsource/run_plan.py`,
+`abicheck/buildsource/project_targets.py`) plus **ADR-047**'s declarative
+`targets:`/`bundles:`/`profiles:`/`baseline:` `.abicheck.yml` schema, wired
+into `check-project.yml`, landed after this phase's text was written and
+was never cross-referenced here. It already satisfies this phase's own
+acceptance bar — via a fundamentally different design than the one this
+section used to assume, which is why the "assembly problem" it worried
+about turns out not to apply.**
 
-(1) run each member's ordinary target check once — already how
-`check-project.yml` works per target, each running as its own matrix cell.
+**Why no cross-job assembly is needed.** The blocked design this section
+used to describe assumed one job must capture a snapshot for a *later* job
+to reassemble. The shipped design instead makes each `(bundle, profile)`
+pair its own independent `check-project.yml` matrix cell —
+`run_plan.py`'s `generate_run_plan()` loops `for check in bundle.checks:
+for profile_id in profile_ids: ...` (`run_plan.py:825-911`), emitting one
+`RunPlanCheck` per cell, each carrying exactly one `profile_id` — and each
+cell resolves its **own baseline live, in-job**, via `resolve-baseline`
+(`actions/check-target/action.yml:604`: `old-library: ... inputs.kind ==
+'bundle' && steps.resolve.outputs.binaries-dir`). Baseline resolution
+never crosses a job boundary in this design, so "cell A's snapshot must
+reach cell B" — the problem `DiffResult` serialization/recompute would
+have solved — never arises for it. This is not a smaller version of the
+same problem; it is a different architecture that doesn't have the
+problem.
 
-(2) **persist/retain each member's snapshot and baseline `BundleFacts` —
-not already covered by `--bundle-facts-out`/`StoredBundleFactsInput` for
-this scenario.** `--bundle-facts-out` is a `compare-release`/
-`cli_compare_release.py` producer flag: it captures the *old*-side
-snapshots of one directory/package `compare-release` invocation, not
-something any of `check-project.yml`'s per-member matrix cells (each a
-separate, independent `actions/check-target` job for one target) emits
-today — there is no existing mechanism by which one member's job output
-reaches another member's job, or a later bundle-dispatch job, at all.
-Worse, even where `--bundle-facts-out` *is* reachable, `BundleFacts`
-itself (`bundle_facts.py`) stores `per_library_snapshots: dict[str,
-AbiSnapshot]`, `manifest`, `filesystem_aliases`, `library_filenames` —
-snapshot-level facts only, with **no `DiffResult` field and no assurance
-field at all**. A member's own `DiffResult`/assurance never had anywhere
-in `BundleFacts` to be stored even if a producer tried. A later bundle
-dispatch therefore has, today, no candidate snapshots assembled from
-separate matrix cells, no baseline `BundleFacts` to compare against, and
-no per-member comparison results to build the promised topology/
-signature-evidence/diff-result graphs from (step 4) — this is genuine,
-new workflow-owned publication/assembly work: each `check-project.yml`
-member cell must upload its own snapshot as a real artifact, and a
-bundle-dispatch step must download and assemble them into one
-`BundleFacts` before step (4) can run against real data.
+**The acceptance bar, checked against what this shipped design actually
+proves:**
 
-**`BundleFacts` itself must stay snapshot-only — extending its own schema
-to also carry per-member comparison outcomes, an earlier draft of this
-correction floated as a parenthetical, is architecturally wrong, and a
-fresh review round caught it.** `BundleFacts` is a *reusable, one-release*
-facts artifact by design (its own docstring: "everything `compare_bundle()`
-needs, decoupled from live `.so` files") — it describes one release's
-snapshots, nothing about any particular comparison of them. A member's
-`DiffResult`/assurance result, by contrast, is inherently specific to one
-*old/new pairing* plus the candidate and policy that produced it —
-`compare_bundle_sides()` already receives `per_library_results` as a
-*separate* parameter precisely because the stored `BundleFacts` snapshots
-are the reusable input those results get computed *from*, not a place to
-cache one particular computation's output. Folding comparison outcomes
-into `BundleFacts`'s own schema would either permanently bind a baseline
-artifact to whichever specific candidate/policy happened to produce it —
-so a *different* later candidate compared against the same stored
-baseline would find stale, wrong-context results sitting in what should
-be a policy-neutral facts artifact — or require re-deriving/discarding
-those fields on every new comparison, defeating the point of storing them
-at all. The correct shape: member snapshots publish as `BundleFacts`
-(facts only, exactly as Phase 2 already defines it); per-member reports/
-`DiffResult`/assurance results are never folded into `BundleFacts`'s own
-schema.
+- **"Old CPU pairs only with new CPU, old DPC pairs only with new DPC,
+  never unioned"** — true by construction: a generated `RunPlanCheck` cell
+  carries exactly one `profile_id`, with its own independent
+  baseline/candidate resolution, so no code path can union two profiles'
+  facts even accidentally. Proven for a bundle spanning two sibling
+  required ELF profiles by
+  `tests/test_run_plan_bundle_multi_profile.py::TestBundleAcrossTwoRequiredVariantProfiles::test_two_required_variant_profiles_produce_two_independent_bundle_checks`
+  (added alongside this correction — the pre-existing `test_run_plan.py`
+  bundle tests only exercised one ELF profile plus a non-participating
+  Windows profile, not two profiles both required).
+- **"Missing required DPC is a coverage regression"** — a hard,
+  run-plan-generation-time error, **provided the bundle's check declares
+  an explicit `checks[].profiles:` selector** naming every mandatory
+  profile (e.g. `profiles: [cpu, dpc]`). Proven by
+  `tests/test_run_plan.py::TestBundleChecks::test_bundle_check_errors_when_a_member_is_missing_and_profile_is_explicit`
+  and `::test_bundle_check_missing_build_output_for_an_explicit_profile_is_an_error`
+  (single-profile shape, pre-existing) plus
+  `test_run_plan_bundle_multi_profile.py`'s
+  `test_missing_required_variant_profile_is_a_hard_run_plan_error`/
+  `test_required_variant_profile_entirely_absent_is_a_hard_run_plan_error`
+  (two-required-profile shape, added alongside this correction). **The one
+  real authoring requirement this phase's own investigation surfaced**:
+  omitting `profiles:` (the "implicit sweep") instead treats a
+  non-participating profile as a silent, valid skip — correct for "this
+  profile legitimately doesn't build this bundle" (a Windows-only profile
+  skipping a Linux-only bundle), wrong for "this variant is mandatory and
+  went missing." A project author declaring a genuinely mandatory
+  multi-variant bundle must use the explicit selector, not the implicit
+  sweep — a config-authoring convention to document (`docs/reference/
+  project-targets-schema.md`), not a missing capability.
+  `generate_run_plan()`'s failure is also partial, not atomic worth noting
+  precisely: a still-valid profile's cell (e.g. `cpu`) stays in
+  `plan.checks` even when a sibling required profile (`dpc`) fails — but
+  `report.ok` is `False` either way, and `cli_project.py`'s `project plan`
+  command does `sys.exit(0 if report.ok else 1)` regardless of
+  `plan.checks`'s contents, so the `plan` job (and, via `check-project.yml`'s
+  own `needs:` chain, the whole run) still fails loudly.
+- **"Facts from variants are never unioned"** — same structural guarantee
+  as the first bullet; nothing to add.
+- **"Live/live and stored/live runs produce equivalent normalized
+  findings"** — Phase 12's own guarantee, extended by Phase 13,
+  independent of this phase's CI-wiring question.
 
-**"Transport the ordinary per-target reports" (the previous paragraph's
-own closing parenthetical) is not itself a working mechanism, and a
-fresh review round caught it: there is nowhere for the dispatch job to
-turn a transported report back into the `list[DiffResult]`
-`compare_bundle_sides()`/`compare_bundle_from_facts()` actually require.**
-`DiffResult` (`checker_types.py`) has neither `to_dict()` nor
-`from_dict()` — this codebase has report-to-JSON *writers*
-(`reporter.py`) and the aggregate's own report *readers*, but no loader
-that reconstructs a real `DiffResult` object from either shape.
-`compare_bundle_from_facts()` itself confirms this is a real, unsolved
-gap rather than an oversight to patch trivially: it already takes
-`per_library_results: list[DiffResult]` as a required, caller-supplied
-parameter — it has never needed to reconstruct one from disk, because
-its only caller today computes it live, in-process, in the same
-`compare --release` invocation. Two genuine fixes, not one — pick
-whichever this phase's own implementation finds simpler once attempted:
-- **Recompute rather than transport**: since the bundle-dispatch job
-  already assembles both old and new `BundleFacts`/snapshots for every
-  member (step 2 above), it can call `compare()` itself, once per member,
-  from the assembled old/new snapshot pair — producing a fresh
-  `DiffResult` directly, with no serialization round-trip needed at all.
-  This avoids inventing a new format, at the cost of re-running the
-  (already-extracted, snapshot-level) diff computation at dispatch time
-  rather than reusing whatever diff each member's own matrix cell already
-  computed.
-- **Define a real lossless `DiffResult` serializer/loader**: add
-  `to_dict()`/`from_dict()` (or an equivalent envelope) to `DiffResult`
-  itself, transported as its own artifact per member cell, letting the
-  dispatch job reuse each cell's own already-computed diff instead of
-  recomputing it. This is new, real serialization work on a core model
-  type (`checker_types.py`) that would need its own scoped design and
-  compatibility considerations (schema version, `Change`'s own nested
-  shape) — not a small addition to fold into this phase's plumbing
-  without deciding it deliberately.
-Either way, "the per-member reports already flow to `check-project.yml`'s
-aggregate step" is not, by itself, a solved problem for this use — the
-aggregate consumes the JSON report shape for its own summary/gate
-purposes, which is a different consumer with different requirements than
-`compare_bundle_sides()`'s typed `DiffResult` input.
-
-(3) build/restore `BundleFacts` from an already-assembled input — done
-(Phase 2), *once step (2)'s assembly problem above is solved*.
-
-(4) run bundle analysis over member topology/signature evidence/diff
-results/variant identity — done (`compare_bundle_sides`), for whatever
-`BundleFacts`/per-member results step (2) actually manages to assemble.
-
-(5) produce one bundle report referencing the member reports it consumed
-— a real dispatch site is still needed, but it is not "the one piece that
-remains": it is downstream of, and depends on, step (2)'s assembly work
-existing first.
-
-**The file-split prerequisite Phase 13's table diagnosed has since landed
-(post-ADR-061; re-measured 2026-09-01) — this phase is no longer blocked on
-file size.** `cli.py` is now a 131-line registration facade,
-`cli_compare_release.py` 820 lines, `cli_options.py` 1504 lines,
-`buildsource/inline.py` 1424 lines (baseline 1984, split out its own
-`.abicheck.yml` config-schema parsing into `build_config_schema.py`), and
-`bundle.py` 877 lines — every one of them now has real headroom under its
-`architecture/debt.yaml` no-growth pin (or, for `cli.py`, under the general
-800-line production cap). G38 Phase 17's own single-invocation
-`--old-bundle-facts` CLI surface confirms a new dispatch branch fits
-comfortably in this post-split layout (`abicheck/frontends/cli/commands/
-compare_bundle_facts.py`, a new leaf module with room to spare).
-
-**What still blocks this phase is the step (2) assembly work itself, not
-file size** — a real, separate, unstarted design problem: persisting and
-transporting each `check-project.yml` matrix cell's own snapshot and
-`DiffResult` across CI jobs, for which no mechanism exists today
-(`DiffResult` has no `to_dict()`/`from_dict()`, and `BundleFacts` is
-deliberately snapshot-only — see step (2)'s own analysis above for why
-extending its schema to also carry comparison outcomes is the wrong fix).
-Landing this phase means solving that assembly problem first — a
-`.abicheck.yml` `bundle_variants:` block parser and a new CLI/Action
-dispatch branch are no longer blocked once it is, but they are not
-themselves the remaining work.
+**Why `bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec`
+(Phase 13) stay unwired into `.abicheck.yml` — a deliberate design fact,
+not a lingering gap.** They solve a genuinely different problem than the
+one `check-project.yml`'s declarative pipeline has: pairing two
+already-*captured*, already-serialized `BundleFacts` documents for a
+caller with **no live access to the old binaries** — the Python-API/
+stored-facts consumer G38 Phase 17's `compare --old-bundle-facts` surface
+serves. The CI declarative pipeline always has live baseline access (via
+`resolve-baseline`), so it never needs that pairing mechanism; wiring
+`bundle_variants:` into `.abicheck.yml` on top of the already-sufficient
+`profiles:`/`bundles:` mechanism would be a second, redundant way to
+express the same declaration, not a missing one.
 
 **Do not implement `depth: source` for bundles by simply passing headers
-and sources to a directory operand** (the review's own explicit caution) —
-that reintroduces exactly the per-binary extraction-cost regression Phase
-9 was written to close and the mixed-toolchain per-library-compile-context
-gap Phase 13-follow-up's fix #3 closed. Route `depth: source` bundle checks
-through the already-shipped `compare_release_against_bundle_facts()`/
-per-library override maps instead.
+and sources to a directory operand** (the review's own explicit caution,
+still holds) — that reintroduces exactly the per-binary extraction-cost
+regression Phase 9 was written to close and the mixed-toolchain
+per-library-compile-context gap Phase 13-follow-up's fix #3 closed. Route
+`depth: source` bundle checks through the already-shipped
+`compare_release_against_bundle_facts()`/per-library override maps
+instead.
 
-**Acceptance test (unchanged from the review, now restated against what's
-already shipped vs. still open):** for a CPU/DPC release — old CPU pairs
-only with new CPU, old DPC pairs only with new DPC (already true today via
-`pair_variants()`); missing required DPC is a coverage regression (already
-true today via the `required: true/false` escalation); facts from variants
-are never unioned (already true — `pair_variants()`'s whole design);
-live/live and stored/live runs produce equivalent normalized findings
-(already true, Phase 12's guarantee, extended by Phase 13). What is **not**
-yet demonstrable end to end: declaring all of the above from a real
-`.abicheck.yml`/`check-project.yml` invocation with no hand-written Python
-driver step. That is this phase's actual, remaining acceptance bar.
+**Out of scope, unchanged:** the measurement-harness and SARIF-output
+items the original review also raised for this phase remain genuinely
+separate, unstarted work — nothing in this correction touches them.
 
-**Effort:** L — **the step (2) correction above is real, new workflow/schema
-work, not already-tested logic waiting on a dispatch site.** The Python-API
-orchestration (`compare_bundle_sides`, `bundle_variants_config`) is
-genuinely already tested, keeping that part low-risk, but the
-per-member-snapshot/baseline-`BundleFacts` assembly across separate
-`check-project.yml` matrix cells has no existing mechanism to build on —
-confirmed by reading `BundleFacts`'s own field list (no `DiffResult`/
-assurance storage at all) and `--bundle-facts-out`'s actual scope
-(`compare-release`-only, not per-member-matrix-cell). The file-split
-prerequisite this estimate used to carry is done (see above); the effort
-stays L on the strength of the step (2) assembly design work alone.
+**Effort:** none remaining — every acceptance-bar invariant is proven by an
+existing or newly-added test against already-shipped code (G30 P1.4/P1.5 +
+ADR-047), with no new production code needed. The only artifact this
+phase's finalization produced is the missing test coverage for the
+two-required-profile shape
+(`tests/test_run_plan_bundle_multi_profile.py`) and this section's own
+correction.
 
 ### Phase 16 — Thread a resolved `PolicyFile` into the release fan-out's own bundle analysis (SHIPPED)
 
