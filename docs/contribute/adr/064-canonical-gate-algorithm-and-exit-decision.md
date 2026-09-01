@@ -683,10 +683,34 @@ lands in two stages rather than one atomic change:
       way: named the axis generically, listed both raise sites where a
       concrete example was still useful, and swept the rest of this PR's
       own diff for the same narrow phrasing rather than waiting for a
-      sixth round to find the next copy. Still open: the release fan-out's
-      `GateOptions` unification, the typed-API half of this parity pass,
-      the `--format text` gap named above, and a real `--artifact-set`
-      member-level evidence-contract signal for the Action to consume.
+      sixth round to find the next copy. **A sixth review round (Codex,
+      fresh evidence) found a fourth uncovered escape hatch in the same
+      JSON-detection family, distinct from the three the `verdict`
+      description already names:** `_STDOUT_JSON_FILE` (the primary-output
+      stdout capture immediately above `_json_report_src`) is gated on
+      `"${FORMAT:-}" == "json"` -- this Action's own `format` input, read
+      *before* the CLI runs -- not on what the invocation actually
+      produced. `extra-args: --format json` under `format: text` makes the
+      real CLI invocation emit JSON on stdout (the later flag wins, same
+      as any CLI argv), but the wrapper's own capture never notices,
+      since it never re-derives the effective format from the actual
+      command it built. Unlike the fifth round, this is a real detection
+      gap, not wording -- but it is the same *shape* of gap as the
+      `--write`-collision findings (three and five), so it gets the same
+      treatment for the same reason: teaching this wrapper to track an
+      effective-format override needs its own parsing of `extra-args` and
+      its own hostile-input test, the bar the first `_evidence_contract_
+      gated` addition was already held to, and this PR would rather record
+      an accurate limitation than add that under-tested. Folded into the
+      `verdict` description's existing generic pointer at
+      `action/run.sh`'s own JSON-detection logic, now naming
+      `_STDOUT_JSON_FILE` alongside `_json_report_src` and updating the
+      combination count from three to four. Still open: the release
+      fan-out's `GateOptions` unification, the typed-API half of this
+      parity pass, the `--format text` gap named above, a real
+      `--artifact-set` member-level evidence-contract signal for the
+      Action to consume, and this round's own effective-format-override
+      gap.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
