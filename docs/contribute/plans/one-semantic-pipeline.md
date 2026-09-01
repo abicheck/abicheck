@@ -9956,6 +9956,150 @@ was the confirming signal for which filename to keep.
 
 ---
 
+**Landed (twelfth slice, 2026-09-01): typedefs and constants — the last
+`Change`-producing detector families with no `entity_id` at all — now carry
+one.** `entity_id_for_typedef`/`entity_id_for_constant` had existed in
+`model/identity.py` since the first slice with zero production callers,
+because `AbiSnapshot.typedefs`/`typedefs_qualified`/`constants` are plain
+`dict[str, str]` with no parsed declaration object to hang a carrier field
+on, the way `RecordType`/`EnumType`/`Function`/`Variable` have. The scope
+was not missing, only discarded: both header-AST backends already walk it
+(clang's `_Decl.scope_path`, castxml's `_scope_path(el)`) at the exact point
+those three dicts are built. So this slice reads it one step earlier rather
+than extending any AST walk.
+
+Two additive `AbiSnapshot` sidecars carry it — `typedef_entity_ids` (keyed
+like `typedefs_qualified`) and `constant_entity_ids` (keyed like
+`constants`), both `kw_only`, both defaulting to `{}`. Producers:
+`dumper_clang.parse_typedef_entity_ids`/`parse_constant_entity_ids` and
+`dumper_castxml`'s same-named pair. On both backends the constant sidecar
+shares one filtering pass with `parse_constants` itself (clang gained a
+`_iter_public_constants()` helper; castxml's existing one now yields the
+element too), so the two maps cannot disagree about which constants qualify
+— the property the join depends on. The castxml typedef sidecar calls the
+resolver from `dumper_castxml.py` itself, iterating
+`dumper_castxml_typedefs.iter_typedef_entries` rather than adding a resolver
+call to that helper module, since `tests/test_entity_id_carrier.py`'s
+`_ALLOWED_RESOLVER_CALLERS` confines `entity_id_for_*` to the two backend
+front doors.
+
+Plumbing, all of it in the same direction as the dict each sidecar
+annotates: `TuFragment`/`MergedTuFragments`/`ElfHeaderAstResult` carry them
+so a manifest (and the legacy single-header ELF path, which also routes
+through `TuFragment`) does not lose what a direct PE/Mach-O parse keeps;
+`tu_merge.merge_fragments` unions them plainly rather than through
+`_merge_scalar_group` (that helper diagnoses two TUs disagreeing about a
+key's *value*, and an `EntityId` is derived entirely from the key's own
+scope and leaf name, so there is no disagreement to report);
+`dumper_hybrid` unions them castxml-wins, matching `typedefs_qualified`;
+`storage/entity_id_codec.py` gained an `encode_sidecar_entity_ids`/
+`decode_sidecar_entity_ids` pair (a dict-of-documents encode, not the
+positional-list pairing the declaration carrier uses) and lost its
+now-false "typedefs/constants get no carrier" comment;
+`serialization.py` bumped `SCHEMA_VERSION` 30 → 31, with an absent sidecar
+loading as `{}` — no migration adapter, the identical reasoning v25's
+`typedefs_qualified` used; `snapshot_cache.py` bumped its own cache version
+22 → 23, since the same TU inputs now produce a different snapshot.
+
+One non-obvious asymmetry, worth not rediscovering: `typedef_entity_ids`
+joins `qualified_name_segments._LAMBDA_IDENTITY_FIELDS` and
+`constant_entity_ids` deliberately does not. A sidecar's keys must be
+renumbered exactly when its partner's are — `typedefs_qualified` is
+rewritten by that walk, so its sidecar must be; `constants` is excluded
+from it (its values are payload literals a closure marker could legitimately
+appear in), so renumbering *only* its sidecar is what would desynchronize
+the pair. The reasoning lives on the two `AbiSnapshot` fields themselves,
+since `qualified_name_segments.py` had one line of headroom against the
+architecture gate's 800-line production maximum.
+
+Consumers: `diff_types._diff_typedefs` (all three of `TYPEDEF_REMOVED`/
+`TYPEDEF_BASE_CHANGED`/`TYPEDEF_VERSION_SENTINEL`) and
+`diff_symbols._diff_constants` (`CONSTANT_REMOVED`/`CONSTANT_CHANGED`/
+`CONSTANT_ADDED`), old-side-preferred with a new-side fallback, the same
+convention every slice above uses, and `.get`-based so an absent sidecar
+degrades to today's identity-less `Change` rather than fabricating one from
+a flat key.
+
+Tests: `tests/test_entity_id_carrier.py` gained `TestSidecarFieldShape`
+(dataclass contract plus the partner-key-space property),
+`TestSidecarIsPersisted` (round trip, a `Record("ns")`-vs-`Namespace("ns")`
+counterexample the wire form must keep apart, and a pre-v31 snapshot loading
+with both sidecars empty and its partner dicts untouched), a typedef
+assertion inside the shared `_assert_probe_identities` both live backends
+run, and two new live-backend constant tests
+(`test_live_{clang,castxml}_populates_the_constant_sidecar`, split out
+because `parse_constants` is provenance-gated and needs a parser configured
+with a real public-header set). `tests/test_change_entity_id_carrier.py`
+gained `TestTypedefAndConstantSidecarsReachTheChange`, covering all five
+reachable finding kinds plus the absent-sidecar degradation.
+
+Verification (all run, not assumed): `ruff check abicheck/ tests/` clean;
+`mypy abicheck/` clean (0 errors, 562 files); `python
+scripts/check_ai_readiness.py` 0 errors (`doc-count-sync` caught the schema
+bump against `docs/reference/snapshot-format.md`, which was updated in the
+same pass); `python scripts/check_architecture.py` back to the single
+pre-existing `cli_buildsource_helpers.py` `debt-no-growth` finding;
+`pytest tests/test_entity_id_carrier.py` 47 passed and its
+`-m integration` lane 12 passed against real `castxml` 0.7.0 and `clang`,
+including both new constant-sidecar tests; `tests/test_change_entity_id_
+carrier.py` 32 passed; the full fast unit lane green apart from one
+pre-existing, unrelated failure
+(`test_action_run_sh_baseline_set_fallback.py::TestBaselineSetFallback::
+test_extraction_and_resolution_work_when_python3_is_absent`, confirmed to
+fail identically on the base commit under `git stash`). `ruff format
+--check` fails broadly on this tree (580 files at the base commit), a
+pre-existing condition; every file this slice touched is either
+format-clean or was already unformatted before it.
+
+Six `architecture/debt.yaml` no-growth baselines were raised, each by the
+exact plumbing this slice adds and each with its own rationale line, in the
+same style and for the same reason commit `09de29f` raised
+`cli_scan.py`/`scan_engine.py`: `dumper.py` 1985 → 1991 (two sidecar
+keywords at each of three `AbiSnapshot` construction sites),
+`dumper_hybrid.py` 979 → 989, `serialization.py` 1737 → 1747 (call-site
+plumbing only — the codec itself lives in `storage/`), `tu_merge.py`
+1552 → 1566, and on the test side `tests/test_dumper_manifest.py`
+1765 → 1771 (its stub parser gained the two new methods) and
+`tests/test_tu_merge.py` 1888 → 1890. No smaller diff was found that still
+populates both fields on every producing path without hiding the field names
+behind a spread helper. `qualified_name_segments.py` was the one file held
+under its cap rather than raised — it had a single line of headroom against
+the 800-line production maximum, which is why the reasoning for its one-line
+addition lives on the `AbiSnapshot` fields instead of beside the tuple entry.
+
+Three test stubs and one generated-fixture set needed updating, all
+mechanically: `tests/test_dumper_manifest.py`/`tests/test_dumper_phase1.py`'s
+fake header-AST parsers gained the two new methods (they already implemented
+`parse_typedefs_qualified`/`parse_constants` for the same reason),
+`tests/test_tu_merge.py`'s empty-merge expected value gained the two
+keywords, and `python scripts/gen_g20_fixtures.py` re-emitted the eleven
+`examples/case*/…abi.json` snapshots whose `schema_version` and field set
+this bump changes (both new keys serialize as `{}` there — none of those
+cases has header-resolved typedef/constant identity).
+
+**Still genuinely deferred after this slice — exactly two items, unchanged
+by it.** (1) Every DWARF/PE/Mach-O/ELF-symbol-table-only detector
+(`diff_platform.py`'s DWARF-tier functions, `diff_elf_layout.py`,
+`diff_platform_elf_dynamic.py`, `diff_platform_elf_symbols.py`,
+`diff_versioning.py`, `diff_sycl.py`) still has no `EntityId`-carrying
+object behind it, because only the header-AST (L2) backends resolve one;
+closing that needs `EntityId` extended to the DWARF backend (a `ScopePath`
+built from a DIE's parent chain), a separate extraction-side project, not a
+diff-site wiring pass. This slice deliberately did not touch
+`dwarf_snapshot.py`/`dwarf_metadata.py`/`dwarf_unified.py`: a DWARF-only
+snapshot leaves both new sidecars empty, exactly as it already leaves
+`typedefs_qualified`. (2) Promoting the `entity:` alias in
+`finding_identity.resolve_change_identity` into a real alias-match
+reconciliation tier stays blocked on `EntityId.key`'s cross-release
+stability, which is not established — `Anonymous`/`LocalToFunction`
+ordinals are stable only within one process's lifetime, and two prior
+attempts at ordinal stability were each designed and reverted (see
+`model/identity.py`'s own docstring). Neither was attempted here.
+`buildsource/*.py`'s L5 source-graph sites remain out of ADR-063's scope by
+design, as before.
+
+---
+
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
 
 **Landed (thirteen slices, 2026-08-31): the plumbing, not the traversal

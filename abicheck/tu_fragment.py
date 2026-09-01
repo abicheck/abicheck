@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .model import EnumType, Function, RecordType, Variable
+from .model.identity import EntityId
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,11 @@ class TuFragment:
     # folds ``typedefs`` itself.
     typedefs_qualified: dict[str, str] = field(default_factory=dict)
     constants: dict[str, str] = field(default_factory=dict)
+    # ``EntityId`` sidecars for the two dicts above (ADR-063 Phase 2, schema
+    # v31 — see ``AbiSnapshot.typedef_entity_ids``), carried per-fragment for
+    # the same reason ``typedefs_qualified`` is.
+    typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict)
+    constant_entity_ids: dict[str, EntityId] = field(default_factory=dict)
     ast_producer: str = "castxml"
     ast_toolchain: dict[str, str] = field(default_factory=dict)
     ast_fallback_reason: str | None = None
@@ -91,6 +97,8 @@ class MergedTuFragments:
     typedefs: dict[str, str]
     typedefs_qualified: dict[str, str]
     constants: dict[str, str]
+    typedef_entity_ids: dict[str, EntityId]
+    constant_entity_ids: dict[str, EntityId]
     ast_producer: str
     ast_toolchain: dict[str, str]
     ast_fallback_reason: str | None

@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "22"
+_SNAPSHOT_CACHE_VERSION: str = "23"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -279,6 +279,13 @@ _SNAPSHOT_CACHE_VERSION: str = "22"
 # the chance to. Bumped for the identical reason v21 above was: the same TU
 # inputs now produce a different AbiSnapshot, with no change to any
 # caller-supplied cache-key input.
+#
+# v23 (ADR-063 Phase 2 closing slice): both header backends now also
+# populate ``AbiSnapshot.typedef_entity_ids``/``constant_entity_ids``
+# (schema v31) -- the same TU inputs produce a different snapshot, with no
+# change to any caller-supplied cache-key input, so a warm pre-v23 entry
+# would keep replaying empty sidecars and identity-less typedef/constant
+# findings. Bumped for the identical reason v22/v21 below were.
 #
 # v21 (PR C item 3, Codex review): castxml/direct-clang started stamping
 # ``Function.is_compiler_generated`` (schema v27) from castxml's own

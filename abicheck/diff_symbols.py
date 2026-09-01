@@ -1859,6 +1859,7 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     old_value=old_val,
+                    entity_id=old.constant_entity_ids.get(name),
                 )
             )
         elif new_val != old_val:
@@ -1875,6 +1876,8 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new=repr(new_val),
                     old_value=old_val,
                     new_value=new_val,
+                    entity_id=old.constant_entity_ids.get(name)
+                    or new.constant_entity_ids.get(name),
                 )
             )
 
@@ -1886,6 +1889,7 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     new_value=new_val,
+                    entity_id=new.constant_entity_ids.get(name),
                 )
             )
     return changes

@@ -70,6 +70,7 @@ from .dumper_toolchain import (
     _parser_frontend_context_kind,
 )
 from .model import EnumType, Function, RecordType, Variable
+from .model.identity import EntityId
 from .tu_fragment import (
     MergedTuFragments as MergedTuFragments,
     TuFragment as TuFragment,
@@ -267,6 +268,8 @@ def run_tu_fragment(
         typedefs=parser.parse_typedefs(),
         typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
+        typedef_entity_ids=parser.parse_typedef_entity_ids(),
+        constant_entity_ids=parser.parse_constant_entity_ids(),
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
@@ -602,6 +605,8 @@ class ElfHeaderAstResult:
     typedefs: dict[str, str]
     typedefs_qualified: dict[str, str]
     constants: dict[str, str]
+    typedef_entity_ids: dict[str, EntityId]
+    constant_entity_ids: dict[str, EntityId]
     ast_producer: str
     ast_toolchain: dict[str, str]
     ast_fallback_reason: str | None
@@ -716,6 +721,8 @@ def resolve_header_ast_result(
             typedefs=fragment.typedefs,
             typedefs_qualified=fragment.typedefs_qualified,
             constants=fragment.constants,
+            typedef_entity_ids=fragment.typedef_entity_ids,
+            constant_entity_ids=fragment.constant_entity_ids,
             ast_producer=fragment.ast_producer,
             ast_toolchain=fragment.ast_toolchain,
             ast_fallback_reason=fragment.ast_fallback_reason,
@@ -733,6 +740,8 @@ def resolve_header_ast_result(
         typedefs=merged.typedefs,
         typedefs_qualified=merged.typedefs_qualified,
         constants=merged.constants,
+        typedef_entity_ids=merged.typedef_entity_ids,
+        constant_entity_ids=merged.constant_entity_ids,
         ast_producer=merged.ast_producer,
         ast_toolchain=merged.ast_toolchain,
         ast_fallback_reason=merged.ast_fallback_reason,
