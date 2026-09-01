@@ -111,5 +111,6 @@ __all__ = [
     "record_layout_facts",
     "replace_with_fact_sync",
     "resolve_vptr_offset_bits",
+    "resolved_fact_value",
     "stdlib_namespaces_excluded",
 ]
