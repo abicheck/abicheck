@@ -275,10 +275,13 @@ class TestScanModelDataclasses:
         # (no Optional shape), which is exactly why REFERENCE_FLAG_COVERAGE
         # is checked independently in the real gate. Function.deprecated
         # IS Optional-shaped with a documented marker and is found here.
+        # Function.exception_spec is Phase 5's second batch's own remaining
+        # scope (RecordType's own case-(b) fields, including is_abstract,
+        # converted in that batch — see fact_registry.py's FACT_REGISTRY).
         found = scan_model_dataclasses()
         assert ("Function", "deprecated") in found
         assert ("Function", "contract_attributes") in found
-        assert ("RecordType", "is_abstract") in found
+        assert ("Function", "exception_spec") in found
 
 
 # ---------------------------------------------------------------------------

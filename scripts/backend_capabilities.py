@@ -570,6 +570,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
         ),
     ),
     FactRow("RecordType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "RecordType",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5: `Fact[str | None]` sibling of `source_header`. "
+            "Same non-header ownership as the legacy field — `provenance."
+            "tag_provenance()` keeps both representations in sync via an "
+            "explicit post-construction update (mirroring "
+            "`resolve_vptr_offset_bits()`'s pattern), since it sets "
+            "`source_header` by plain attribute assignment, which never "
+            "re-runs `RecordType.__post_init__`'s bridge."
+        ),
+    ),
     FactRow("RecordType", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
         "RecordType",
@@ -580,6 +595,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note=(
             "The tail-padding-excluded size. Neither backend's own parse "
             "computes it; it arrives from the layout companion tool or DWARF."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "data_size_bits_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[int | None]` sibling of `data_size_bits`. "
+            "Unlike `bases_fact`/`vtable_fact`/`is_final_fact`, neither "
+            "backend passes this keyword literally at `RecordType(...)` "
+            "construction — it is correctly derived by the generic "
+            "`bridge_legacy_and_fact` bridge in `__post_init__` from "
+            "whatever legacy value the constructor call (or a later "
+            "`replace_with_fact_sync` layout backfill — "
+            "`dumper_layout_backfill.py`, `clang_layout_tool.py`) actually "
+            "supplies, so `NONE` here reflects literal-keyword evidence, "
+            "not runtime behavior (see fact_registry.py's own entry for "
+            "this field's real, correct availability semantics)."
         ),
     ),
     FactRow(
@@ -597,11 +631,31 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "is_standard_layout_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[bool | None]` sibling of "
+            "`is_standard_layout`. Same shape as `data_size_bits_fact` "
+            "above — derived by the generic `__post_init__` bridge, not a "
+            "literal constructor keyword, so `NONE` reflects scan evidence "
+            "only."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "is_trivially_copyable",
         _NONE,
         _FULL,
         hybrid_backfilled=True,
         note="Same shape as `is_standard_layout`; activated `TRIVIALLY_COPYABLE_LOST`.",
+    ),
+    FactRow(
+        "RecordType",
+        "is_trivially_copyable_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as `is_standard_layout_fact` — see that row's own note.",
     ),
     FactRow(
         "RecordType",
@@ -645,6 +699,20 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("RecordType", "qualified_name", _FULL, _FULL),
     FactRow(
         "RecordType",
+        "qualified_name_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[str | None]` sibling of `qualified_name`. "
+            "Neither backend passes this keyword literally — derived by the "
+            "generic `__post_init__` bridge from `qualified_name` itself, so "
+            "`NONE` reflects literal-keyword scan evidence only, not runtime "
+            "behavior. See `data_size_bits_fact`'s own note for the general "
+            "shape."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "is_abstract",
         _FULL,
         _FULL,
@@ -654,6 +722,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "`definitionData.isAbstract` (`dumper_clang._clang_record_is_abstract`) "
             "— real semantic computation (an inherited-and-unoverridden pure "
             "virtual counts), not just a direct-declaration check."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "is_abstract_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[bool | None]` sibling of `is_abstract`. "
+            "Deliberately NOT constructed as an explicit "
+            "`Fact.present(is_abstract)` keyword the way `is_final_fact` is "
+            "-- `is_abstract` is genuinely `None` on castxml for an opaque/"
+            "incomplete record (no member list to judge from), so an "
+            "explicit `Fact.present(None)` there would misreport a real "
+            "not-collected case as a confirmed determination. The generic "
+            "`__post_init__` bridge already gets this right (`None` legacy "
+            "value -> `not_collected()`, a real bool -> `present(...)`), so "
+            "`NONE` here reflects literal-keyword scan evidence only, not "
+            "runtime behavior."
         ),
     ),
     FactRow(

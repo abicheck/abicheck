@@ -45,6 +45,12 @@ _TYPE_FACT_KEYS = (
     "vtable_fact",
     "vptr_offset_bits_fact",
     "is_final_fact",
+    "is_abstract_fact",
+    "data_size_bits_fact",
+    "is_standard_layout_fact",
+    "is_trivially_copyable_fact",
+    "qualified_name_fact",
+    "source_header_fact",
 )
 
 
@@ -83,6 +89,14 @@ _FACT_FIELDS_SCHEMA_VERSION = 26
 # this key at all, the same way a pre-v26 document never carried any *_fact
 # key. See decode_fact's own docstring for why this threshold matters.
 _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT = 30
+
+# ADR-063 Phase 5 (second batch): the schema_version RecordType's remaining
+# case-(b) *_fact siblings (is_abstract/data_size_bits/is_standard_layout/
+# is_trivially_copyable/qualified_name/source_header) started being
+# persisted at — one shared threshold, since all six land together in the
+# same schema bump. Same reasoning as _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT
+# above: a document below this version never carried these keys at all.
+_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 31
 
 
 def decode_fact(
@@ -136,6 +150,36 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
             t.get("is_final_fact"),
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
+        ),
+        "is_abstract_fact": decode_fact(
+            t.get("is_abstract_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "data_size_bits_fact": decode_fact(
+            t.get("data_size_bits_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "is_standard_layout_fact": decode_fact(
+            t.get("is_standard_layout_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "is_trivially_copyable_fact": decode_fact(
+            t.get("is_trivially_copyable_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "qualified_name_fact": decode_fact(
+            t.get("qualified_name_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "source_header_fact": decode_fact(
+            t.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
         ),
     }
 

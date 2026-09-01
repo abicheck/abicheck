@@ -35,7 +35,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
-from .model import AbiSnapshot, ScopeOrigin, Visibility
+from .model import AbiSnapshot, Fact, ScopeOrigin, Visibility
 
 # Directory prefixes that mark a header as belonging to the toolchain or the
 # operating system rather than the project under test.  Matched as path-segment
@@ -738,6 +738,18 @@ def tag_provenance(
     sh = header_from_location(loc)
     export_only = getattr(decl, "visibility", None) == Visibility.ELF_ONLY
     decl.source_header = sh  # type: ignore[attr-defined]
+    # ADR-063 Phase 5: this function sets source_header via plain
+    # post-construction attribute assignment, which never re-runs
+    # __post_init__'s Fact[T] bridge (model/fact.py's own documented trap —
+    # see bridge_legacy_and_fact's docstring) -- so for any decl type whose
+    # source_header has already been converted (RecordType, as of this
+    # phase's second batch), the sibling must be kept in sync here
+    # explicitly, the same way resolve_vptr_offset_bits() does for a
+    # post-construction vptr resolution. hasattr-gated (not a hardcoded
+    # owner list) since this function runs generically across all four
+    # declaration types and only some carry the sibling today.
+    if hasattr(decl, "source_header_fact"):
+        decl.source_header_fact = Fact.present(sh)  # type: ignore[attr-defined]
     if origin_cache is None:
         origin = classify_origin(
             sh, header_segs, dir_segs, have_public_set=have_set, export_only=export_only

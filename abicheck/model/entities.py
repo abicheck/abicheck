@@ -240,6 +240,28 @@ class RecordType:
     # bridges directly off the literal None.
     is_final_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
 
+    # ADR-063 Phase 5 (second registered batch): Fact[...] siblings for the
+    # remaining RecordType case-(b) fields the plan's Scope section names —
+    # every one of them already tri-state (`X | None`) at its own declared
+    # type, with a documented backend/schema-dependence comment, and no
+    # separate `*_facts_reliable` snapshot flag. Identical shape to
+    # is_final_fact above: __post_init__ bridges directly off the literal
+    # None (the field's own None already unambiguously means "dumper/loader
+    # could not determine" — there is no separate "confirmed no evidence"
+    # state distinct from the field simply being unset). Appended last, in
+    # the same declaration order as the legacy fields they describe, per
+    # this file's own "append new fields at the end" convention.
+    is_abstract_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    data_size_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
+    is_standard_layout_fact: Fact[bool | None] | None = field(
+        default=None, kw_only=True
+    )
+    is_trivially_copyable_fact: Fact[bool | None] | None = field(
+        default=None, kw_only=True
+    )
+    qualified_name_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+
     def __post_init__(self) -> None:
         self.bases, self.bases_fact = bridge_legacy_and_fact(
             self.bases, self.bases_fact, _OMITTED_BASES, []
@@ -261,6 +283,26 @@ class RecordType:
         # `is_final` mean the identical thing (see the field's own comment).
         self.is_final, self.is_final_fact = bridge_legacy_and_fact(
             self.is_final, self.is_final_fact, None, None
+        )
+        self.is_abstract, self.is_abstract_fact = bridge_legacy_and_fact(
+            self.is_abstract, self.is_abstract_fact, None, None
+        )
+        self.data_size_bits, self.data_size_bits_fact = bridge_legacy_and_fact(
+            self.data_size_bits, self.data_size_bits_fact, None, None
+        )
+        self.is_standard_layout, self.is_standard_layout_fact = bridge_legacy_and_fact(
+            self.is_standard_layout, self.is_standard_layout_fact, None, None
+        )
+        self.is_trivially_copyable, self.is_trivially_copyable_fact = (
+            bridge_legacy_and_fact(
+                self.is_trivially_copyable, self.is_trivially_copyable_fact, None, None
+            )
+        )
+        self.qualified_name, self.qualified_name_fact = bridge_legacy_and_fact(
+            self.qualified_name, self.qualified_name_fact, None, None
+        )
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
         )
 
     def resolved_bases(self) -> list[str]:

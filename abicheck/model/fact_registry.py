@@ -296,11 +296,6 @@ _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
 #: example) is deliberately absent here — see ``FACT_REGISTRY`` below, it
 #: is this phase's first real conversion.
 _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
-    ("RecordType", "is_abstract"),
-    ("RecordType", "data_size_bits"),
-    ("RecordType", "is_standard_layout"),
-    ("RecordType", "is_trivially_copyable"),
-    ("RecordType", "qualified_name"),
     ("AbiSnapshot", "ast_resolved_standard"),
     ("EnumType", "qualified_name"),
     ("Function", "contract_attributes"),
@@ -324,7 +319,6 @@ _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
     # here from manual inspection, not the scan.
     ("Function", "source_header"),
     ("Variable", "source_header"),
-    ("RecordType", "source_header"),
     ("EnumType", "source_header"),
     # Schema-version-driven (not backend-driven) tri-state fields on the
     # three binary-format dataclasses — the identical "resting value can't
@@ -442,6 +436,117 @@ FACT_REGISTRY = FactRegistry(
                 "flag: the field's own None already unambiguously means "
                 "'dumper/loader could not determine' (DWARF/symbols-only "
                 "mode, older snapshots) — a plain case (b) conversion."
+            ),
+        ),
+        # ── Phase 5's second batch: RecordType's remaining case-(b) fields ──
+        _E(
+            owner="RecordType",
+            field="is_abstract",
+            value_type="bool | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Declares >=1 pure virtual function. Tri-state like "
+                "is_final; None already unambiguously means 'dumper/loader "
+                "could not determine' — a plain case (b) conversion."
+            ),
+        ),
+        _E(
+            owner="RecordType",
+            field="data_size_bits",
+            value_type="int | None",
+            producing_backends=("clang",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Itanium 'data size' (dsize/nvsize), excluding trailing "
+                "tail padding. Neither castxml's own parse nor DWARF "
+                "computes this (dwarf_snapshot.py deliberately leaves it "
+                "None — no sound DWARF-only signal, see that module's own "
+                "comment); it arrives from the layout companion tool under "
+                "clang (backend_capabilities.py's COMPANION row) — a plain "
+                "case (b) conversion."
+            ),
+        ),
+        _E(
+            owner="RecordType",
+            field="is_standard_layout",
+            value_type="bool | None",
+            producing_backends=("clang",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Governs tail-padding reuse. castxml's schema does not "
+                "expose this trait at all, and DWARF has no sound signal "
+                "for it either (dwarf_snapshot.py's own comment) — clang "
+                "only. Plain case (b) conversion."
+            ),
+        ),
+        _E(
+            owner="RecordType",
+            field="is_trivially_copyable",
+            value_type="bool | None",
+            producing_backends=("clang",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Governs how the type is passed by value. Same shape as "
+                "is_standard_layout — clang only. Plain case (b) "
+                "conversion."
+            ),
+        ),
+        _E(
+            owner="RecordType",
+            field="qualified_name",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Namespace/enclosing-class-qualified spelling. None at "
+                "global scope or when the dumper couldn't determine it. "
+                "The DWARF backend folds the qualified spelling into "
+                "RecordType.name itself (dwarf_snapshot.py) rather than "
+                "populating this separate field, so it is not a producer "
+                "here — a plain case (b) conversion."
+            ),
+        ),
+        _E(
+            owner="RecordType",
+            field="source_header",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Provenance (ADR-015, schema v6): defining header. Not "
+                "populated by the DWARF backend. Plain case (b) "
+                "conversion."
             ),
         ),
     ]
