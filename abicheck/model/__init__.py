@@ -71,6 +71,11 @@ from .fact import (
     replace_with_fact_sync as replace_with_fact_sync,
     resolved_fact_value as resolved_fact_value,
 )
+from .fact_registry import (
+    FACT_REGISTRY as FACT_REGISTRY,
+    FactDefinition as FactDefinition,
+    FactLifecycle as FactLifecycle,
+)
 from .snapshot import AbiSnapshot as AbiSnapshot
 from .stdlib_surface import stdlib_namespaces_excluded as stdlib_namespaces_excluded
 from .vocabulary import (
@@ -90,7 +95,10 @@ __all__ = [
     "EnumMember",
     "EnumType",
     "ExtractionContract",
+    "FACT_REGISTRY",
     "Fact",
+    "FactDefinition",
+    "FactLifecycle",
     "FactStatus",
     "Function",
     "Param",

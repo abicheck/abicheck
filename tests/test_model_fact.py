@@ -231,6 +231,24 @@ class TestPlainReplaceIsUnsafeForFactBridgedFields:
         assert r2.bases == ["OldBase"]
 
 
+class TestPostConstructionMutationIsUnsafeForFactBridgedFields:
+    """A second, related trap `bridge_legacy_and_fact`'s docstring names
+    (Codex review, confirmed to reproduce identically across every bridged
+    field, not something one conversion introduces): plain attribute
+    assignment after construction never re-runs `__post_init__` at all, so
+    the sibling Fact[T] is never re-derived and the pair goes out of sync
+    silently -- there is no `replace_with_fact_sync`-shaped escape hatch
+    for this path; the guidance is to treat a bridged field as effectively
+    immutable after construction."""
+
+    def test_mutating_the_legacy_field_leaves_the_fact_sibling_stale(self) -> None:
+        r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
+        r.bases = ["NewBase"]
+        assert r.bases == ["NewBase"]
+        assert r.bases_fact is not None
+        assert r.bases_fact.value == ["OldBase"]
+
+
 class TestReplaceWithFactSync:
     """The safe alternative to dataclasses.replace() for these fields."""
 

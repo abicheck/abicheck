@@ -228,6 +228,18 @@ class RecordType:
     #   has committed to the semantics of.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
+    # ADR-063 Phase 5 (D7's first registered conversion): Fact[bool | None]
+    # sibling of is_final, appended last per this file's own "append new
+    # fields at the end" convention (see model/AGENTS.md) rather than
+    # grouped next to the other Fact[T] siblings above, which predate it.
+    # Unlike bases/virtual_bases/vtable/vptr_offset_bits above, is_final
+    # needs no private omission sentinel and no snapshot-level reliability
+    # flag — its own None already unambiguously means "dumper/loader could
+    # not determine" (there is no separate "confirmed no evidence" state
+    # distinct from the field simply being unset), so __post_init__
+    # bridges directly off the literal None.
+    is_final_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+
     def __post_init__(self) -> None:
         self.bases, self.bases_fact = bridge_legacy_and_fact(
             self.bases, self.bases_fact, _OMITTED_BASES, []
@@ -243,6 +255,12 @@ class RecordType:
             self.vptr_offset_bits_fact,
             _OMITTED_VPTR_OFFSET_BITS,
             None,
+        )
+        # `None` itself is the omission marker here — no private sentinel
+        # needed, since a caller-supplied `is_final=None` and an omitted
+        # `is_final` mean the identical thing (see the field's own comment).
+        self.is_final, self.is_final_fact = bridge_legacy_and_fact(
+            self.is_final, self.is_final_fact, None, None
         )
 
     def resolved_bases(self) -> list[str]:

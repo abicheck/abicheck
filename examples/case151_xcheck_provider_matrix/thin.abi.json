@@ -131,7 +131,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 29,
+  "schema_version": 30,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
@@ -156,6 +156,11 @@
       "has_anonymous_aggregate_fields": false,
       "is_abstract": null,
       "is_final": null,
+      "is_final_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_opaque": false,
       "is_standard_layout": null,
       "is_template_pattern": false,

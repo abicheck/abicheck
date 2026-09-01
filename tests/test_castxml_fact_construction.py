@@ -126,6 +126,11 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.vtable != []
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value == rec.vptr_offset_bits == 0
+    # ADR-063 Phase 5: is_final_fact is constructed directly too, the same
+    # convention as the four fields above — Widget has no `final` attribute.
+    assert rec.is_final is False
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is False
 
 
 def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
@@ -142,6 +147,30 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.vtable_fact.status is FactStatus.PRESENT
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value is None
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is False
+
+
+def test_final_record_is_final_fact_present_true() -> None:
+    root = _base_root()
+    SubElement(
+        root,
+        "Struct",
+        attrib={
+            "id": "_30",
+            "name": "Sealed",
+            "context": "_1",
+            "file": "f1",
+            "location": "f1:9",
+            "size": "8",
+            "align": "8",
+            "attributes": "final",
+        },
+    )
+    rec = _record(root, "Sealed")
+    assert rec.is_final is True
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is True
 
 
 def test_param_is_va_list_fact_is_unsupported_not_not_collected() -> None:

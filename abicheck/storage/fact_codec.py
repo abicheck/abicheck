@@ -44,6 +44,7 @@ _TYPE_FACT_KEYS = (
     "virtual_bases_fact",
     "vtable_fact",
     "vptr_offset_bits_fact",
+    "is_final_fact",
 )
 
 
@@ -76,26 +77,43 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
 # persisting a *_fact sibling for every legacy field it emits (serialization.py).
 _FACT_FIELDS_SCHEMA_VERSION = 26
 
+# ADR-063 Phase 5: the schema_version RecordType.is_final_fact started being
+# persisted at — independent of _FACT_FIELDS_SCHEMA_VERSION above, since a
+# document between the two thresholds (v26..v29) genuinely never carried
+# this key at all, the same way a pre-v26 document never carried any *_fact
+# key. See decode_fact's own docstring for why this threshold matters.
+_MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT = 30
 
-def decode_fact(raw: Any, schema_version: int) -> Fact[Any] | None:
+
+def decode_fact(
+    raw: Any, schema_version: int, min_schema_version: int = _FACT_FIELDS_SCHEMA_VERSION
+) -> Fact[Any] | None:
     """Reconstruct a ``Fact[T]`` from its serialized dict form, or ``None``.
 
-    A missing key means one of two different things depending on
-    ``schema_version``, and conflating them would misread absent evidence as
-    confirmed. Below :data:`_FACT_FIELDS_SCHEMA_VERSION`, it means "this
-    snapshot predates Fact[T]" — returning ``None`` here lets
-    :func:`apply_legacy_fact_backfill`'s own reliability-aware correction run
-    afterward. At or above it, the document already commits to serializing
-    this sibling whenever the owning dataclass emits one, so a missing key
-    means a malformed/truncated/hand-authored document — returning ``None``
-    here would let the owning dataclass's ``__post_init__`` bridge read the
-    caller-supplied legacy default (e.g. ``bases=[]`` from
-    ``t.get("bases", [])``) as a confirmed, freshly-supplied value rather
-    than missing evidence (Codex review), so this returns
-    :meth:`Fact.not_collected` explicitly instead.
+    A missing key means one of two different things depending on whether
+    ``schema_version`` reaches ``min_schema_version`` — the schema_version
+    *this field's own* ``*_fact`` sibling started being unconditionally
+    persisted at (``_FACT_FIELDS_SCHEMA_VERSION`` for the five siblings
+    Phase 0 introduced; a later, field-specific threshold for anything a
+    later phase adds, since that field's sibling genuinely didn't exist in
+    the document format before its own conversion, independent of when the
+    *first* ``Fact[T]`` sibling shipped) — and conflating them would misread
+    absent evidence as confirmed. Below ``min_schema_version``, a missing key
+    means "this snapshot predates this field's Fact[T] conversion" —
+    returning ``None`` here lets the owning dataclass's own
+    ``__post_init__`` bridge (or, for the original four fields,
+    :func:`apply_legacy_fact_backfill`'s reliability-aware correction) derive
+    the right ``Fact[T]`` from the legacy value instead. At or above it, the
+    document already commits to serializing this sibling whenever the owning
+    dataclass emits one, so a missing key means a malformed/truncated/
+    hand-authored document — returning ``None`` here would let the owning
+    dataclass's ``__post_init__`` bridge read the caller-supplied legacy
+    default (e.g. ``bases=[]`` from ``t.get("bases", [])``) as a confirmed,
+    freshly-supplied value rather than missing evidence (Codex review), so
+    this returns :meth:`Fact.not_collected` explicitly instead.
     """
     if not raw:
-        return Fact.not_collected() if schema_version >= _FACT_FIELDS_SCHEMA_VERSION else None
+        return Fact.not_collected() if schema_version >= min_schema_version else None
     return Fact(
         status=FactStatus(raw["status"]),
         value=raw.get("value"),
@@ -104,16 +122,21 @@ def decode_fact(raw: Any, schema_version: int) -> Fact[Any] | None:
 
 
 def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any]:
-    """Decode all four ``RecordType`` ``Fact[...]`` siblings from one type dict.
+    """Decode every ``RecordType`` ``Fact[...]`` sibling from one type dict.
 
     One call, spread into the ``RecordType(**decode_record_facts(t), ...)``
-    constructor call, in place of four individual keyword arguments.
+    constructor call, in place of one individual keyword argument per field.
     """
     return {
         "bases_fact": decode_fact(t.get("bases_fact"), schema_version),
         "virtual_bases_fact": decode_fact(t.get("virtual_bases_fact"), schema_version),
         "vtable_fact": decode_fact(t.get("vtable_fact"), schema_version),
         "vptr_offset_bits_fact": decode_fact(t.get("vptr_offset_bits_fact"), schema_version),
+        "is_final_fact": decode_fact(
+            t.get("is_final_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
+        ),
     }
 
 

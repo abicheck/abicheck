@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -318,3 +319,45 @@ def test_every_row_is_rendered(gen, caps) -> None:
     text = gen.OUT_PATH.read_text(encoding="utf-8")
     for row in caps.FACT_ROWS:
         assert f"| `{row.field}` |" in text, f"{row.owner}.{row.field} not rendered"
+
+
+# ── Union-type pipes in a row's free-text note (CodeRabbit review) ──────────
+#
+# A `FactRow.note` quoting a union type (e.g. `Fact[bool | None]`, real for
+# `is_final_fact`/`vptr_offset_bits_fact`) puts a raw `|` inside a Markdown
+# table cell; GFM parses that as an extra column delimiter even inside
+# backticks, silently shifting every later column in that row.
+
+
+def test_escape_table_cell_escapes_pipe(gen) -> None:
+    assert gen._escape_table_cell("Fact[bool | None]") == "Fact[bool \\| None]"
+    assert gen._escape_table_cell("no pipes here") == "no pipes here"
+
+
+def test_real_union_notes_are_escaped_in_the_rendered_file(gen) -> None:
+    text = gen.OUT_PATH.read_text(encoding="utf-8")
+    assert "Fact[bool \\| None]" in text
+    assert "Fact[int \\| None]" in text
+    assert "Fact[bool | None]" not in text
+    assert "Fact[int | None]" not in text
+
+
+def _unescaped_pipe_count(text: str) -> int:
+    """Count real GFM column-delimiter pipes -- an escaped ``\\|`` (what
+    ``_escape_table_cell`` produces for a union-type note) is not a
+    delimiter and must not count as one, or this check would be blind to
+    exactly the bug it exists to catch."""
+    return len(re.findall(r"(?<!\\)\|", text))
+
+
+def test_every_owner_table_row_has_consistent_cell_count(gen, caps) -> None:
+    """The actual invariant the bug broke: an unescaped `|` in a note gives
+    that row one more pipe-delimited cell than its header, silently
+    misaligning every later column -- checked structurally across every
+    owner table, not just the two known-union rows."""
+    for owner in caps.COVERED_MODEL_CLASSES:
+        table = gen._render_owner(owner)
+        lines = [line for line in table.splitlines() if line.startswith("|")]
+        header_cells = _unescaped_pipe_count(lines[0])
+        for row in lines[2:]:  # skip header + "---" separator row
+            assert _unescaped_pipe_count(row) == header_cells, row

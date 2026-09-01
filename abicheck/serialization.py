@@ -320,7 +320,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 29  # v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 30  # v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9

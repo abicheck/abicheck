@@ -23,6 +23,29 @@ whose name sounds policy/report-shaped* — the catalog itself is exactly the
 kind of "what is this fact" (which `ChangeKind` defaults to which verdict,
 under which override) D1 already assigns here.
 
+**A second deliberate, ADR-063 D7-sanctioned exception: `fact_registry.py`.**
+D7 names `abicheck/model/fact_registry.py` explicitly as the fact/capability
+registry's home, and its `FactDefinition.producing_backends` field names
+which extraction backend(s) populate a fact (e.g. `("castxml", "clang")` for
+`RecordType.is_final`). Read narrowly, that looks like "how was it
+produced" — the one question this package's own Purpose section says it
+never answers. It survives the same test `change_catalog/` above does:
+`producing_backends` is a closed, fixed-vocabulary string tag
+(`KNOWN_PRODUCING_BACKENDS`), not the *code* that extracts a fact or
+imports an extractor — `fact_registry.py` has zero first-party imports
+beyond `model/` itself, same as `change_catalog/`. The actual extraction
+logic (what `dumper_castxml.py`/`dumper_clang.py`/etc. do) stays entirely
+in `extract/`; this registry only records, as data, which of those modules
+a fact's own producer flag already names elsewhere in this package
+(`AbiSnapshot.ast_producer`). A hybrid (`--ast-frontend hybrid`) snapshot
+is deliberately **not** a fourth member of that vocabulary — `ast_producer
+="hybrid"` is a snapshot-level *merge mode*, and the real per-fact producer
+on such a snapshot is still `"castxml"` or `"clang"` (whichever
+`dumper_hybrid.merge_snapshots()` kept), recorded per-declaration by
+`fact_provenance.py` — mirroring `backend_capabilities.py`'s own identical
+"the hybrid column is derived, never hand-typed" stance for the same
+question one layer up.
+
 ## Permitted imports
 
 Per ADR-061 D1, `model/` may import **nothing** first-party except the public

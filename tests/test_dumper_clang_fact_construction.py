@@ -65,6 +65,28 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.vtable_fact.value == rec.vtable
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value == rec.vptr_offset_bits
+    # ADR-063 Phase 5: is_final_fact is constructed directly too, the same
+    # convention as the fields above — no FinalAttr child means False.
+    assert rec.is_final is False
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is False
+
+
+def test_final_record_is_final_fact_present_true() -> None:
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Sealed",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 20},
+            "completeDefinition": True,
+            "inner": [{"kind": "FinalAttr"}],
+        }
+    )
+    (rec,) = [t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Sealed"]
+    assert rec.is_final is True
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is True
 
 
 def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
@@ -85,6 +107,8 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.vtable_fact.status is FactStatus.PRESENT
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value is None
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is False
 
 
 def test_param_is_va_list_fact_is_partial_not_unsupported_or_present() -> None:
