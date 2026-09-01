@@ -745,7 +745,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(985,),
         seed_tests=(
             "tests/test_param_kind_enum_identity.py",
-            "tests/test_lambda_identity_ordinal.py",
+            "tests/test_str_enum_downcast_walk.py",
         ),
     ),
 )
