@@ -297,14 +297,27 @@ def _build_compile_context(
             f"{type(gcc_options).__name__}"
         )
     str_fields: dict[str, str | None] = {}
-    for key, default in (
-        ("gcc_path", None),
-        ("gcc_prefix", None),
-        ("sysroot", None),
-        ("frontend", "auto"),
-        ("frontend_context", "host"),
+    for key, default, nullable in (
+        ("gcc_path", None, True),
+        ("gcc_prefix", None, True),
+        ("sysroot", None, True),
+        ("frontend", "auto", False),
+        ("frontend_context", "host", False),
     ):
         value = fields.get(key, default)
+        if value is None and not nullable:
+            # Codex review: `frontend`/`frontend_context` are given real
+            # defaults above, not "absent means None" the way gcc_path/
+            # gcc_prefix/sysroot are -- an explicit `frontend: null` in the
+            # manifest is present-but-wrong-type, not "key omitted." Without
+            # this check it sailed past the `isinstance` check below (`value
+            # is not None` is False) and only failed later, at the
+            # `assert frontend is not None` a few lines down -- an
+            # AssertionError, not the clean BundleFactsLibraryOverridesError
+            # every other malformed-field case here raises.
+            raise BundleFactsLibraryOverridesError(
+                f"{where}.{key}: must be a string, got null"
+            )
         if value is not None and not isinstance(value, str):
             raise BundleFactsLibraryOverridesError(
                 f"{where}.{key}: must be a string, got {type(value).__name__}"

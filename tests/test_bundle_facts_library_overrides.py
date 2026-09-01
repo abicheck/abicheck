@@ -147,6 +147,19 @@ class TestParseBundleFactsLibraryOverrides:
         with pytest.raises(BundleFactsLibraryOverridesError):
             parse_bundle_facts_library_overrides({"libfoo.so": {field_name: bad_value}})
 
+    @pytest.mark.parametrize("field_name", ["frontend", "frontend_context"])
+    def test_explicit_null_is_rejected_cleanly_not_a_raw_assertionerror(
+        self, field_name: str
+    ) -> None:
+        """Codex review: ``frontend``/``frontend_context`` are non-nullable
+        fields with real defaults ("auto"/"host") -- an explicit YAML
+        ``null`` (as opposed to the key being absent) used to sail past the
+        ``value is not None and not isinstance(...)`` type check and only
+        fail later at ``assert frontend is not None``, an ``AssertionError``
+        instead of the promised ``BundleFactsLibraryOverridesError``."""
+        with pytest.raises(BundleFactsLibraryOverridesError, match="must be a string"):
+            parse_bundle_facts_library_overrides({"libfoo.so": {field_name: None}})
+
     def test_empty_library_name_is_rejected(self) -> None:
         with pytest.raises(BundleFactsLibraryOverridesError, match="non-empty strings"):
             parse_bundle_facts_library_overrides({"": {"headers": ["x"]}})

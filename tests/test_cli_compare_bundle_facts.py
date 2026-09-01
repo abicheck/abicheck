@@ -524,7 +524,7 @@ class TestBundleFactsLibraryManifest:
             "json",
         )
 
-        assert code == 1, out
+        assert code == 64, out
         assert "typo_lib.so" in out
         assert "not a library in this bundle" in out
 
@@ -554,7 +554,7 @@ class TestBundleFactsLibraryManifest:
             "json",
         )
 
-        assert code == 1, out
+        assert code == 64, out
         assert "must be a mapping" in out
 
     def test_per_library_headers_reach_compare_release_against_bundle_facts(
@@ -708,7 +708,7 @@ class TestBundleFactsLibraryManifest:
             "json",
         )
 
-        assert code == 1, out
+        assert code == 64, out
         assert "duplicate key" in out
         assert "libreal.so" in out
 

@@ -108,20 +108,33 @@ def _load_library_overrides(
     here, since it needs ``dump_manifest``'s duplicate-key-checking strict
     YAML loader (classified ``extract``) and ``frontends`` may not import
     ``extract`` directly (only ``workflows`` may -- ``architecture/
-    modules.yaml``). Raises :class:`~abicheck.workflows.bundle_facts_library_
-    overrides.BundleFactsLibraryOverridesError` (a ``ValueError`` subclass,
-    caught alongside every other malformed-input case by ``dispatch()``'s own
-    ``except (SnapshotError, ValueError, OSError)`` clause) on invalid YAML, a
-    duplicate manifest key, an unrecognized key, or a library name outside
-    *known_libraries*.
+    modules.yaml``).
+
+    Translates :class:`~abicheck.workflows.bundle_facts_library_overrides.
+    BundleFactsLibraryOverridesError` (a ``ValueError`` subclass) into
+    :class:`click.UsageError` here, rather than letting it reach
+    ``dispatch()``'s own ``except (SnapshotError, ValueError, OSError)``
+    clause (Codex review): invalid YAML, a duplicate manifest key, an
+    unrecognized key, or a library name outside *known_libraries* is a
+    malformed CLI input -- AGENTS.md's exit-code table reserves ``64`` for
+    exactly that (``cli._EXIT_USAGE_ERROR``, via ``_AbicheckGroup``'s
+    UsageError-exit-2-to-64 remap) -- not the generic operational-failure
+    exit ``1`` that clause produces for e.g. a malformed OLD_FACTS document.
+    Mirrors ``dump.py``'s own ``_load_dump_manifest_or_reject()``, which
+    does the identical translation for ``--dump-manifest``'s
+    ``ManifestValidationError``.
     """
     from ....workflows.bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
         load_bundle_facts_library_overrides,
     )
 
-    overrides = load_bundle_facts_library_overrides(
-        manifest_path, known_libraries=known_libraries
-    )
+    try:
+        overrides = load_bundle_facts_library_overrides(
+            manifest_path, known_libraries=known_libraries
+        )
+    except BundleFactsLibraryOverridesError as exc:
+        raise click.UsageError(str(exc)) from exc
     return overrides.headers, overrides.includes, overrides.compile
 
 
