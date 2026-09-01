@@ -658,13 +658,14 @@ class TestPersistedEncodeDecodeWiring:
         decode_wired = fact_registry_completeness._decode_wired_fact_attrs()
         for entry in FACT_REGISTRY.entries.values():
             if entry.persisted:
-                assert entry.fact_attr in encode_wired, (
+                key = (entry.owner, entry.fact_attr)
+                assert key in encode_wired, (
                     f"{entry.id} claims persisted=True but "
-                    f"{entry.fact_attr!r} has no real encode wiring"
+                    f"{key!r} has no real encode wiring"
                 )
-                assert entry.fact_attr in decode_wired, (
+                assert key in decode_wired, (
                     f"{entry.id} claims persisted=True but "
-                    f"{entry.fact_attr!r} has no real decode wiring"
+                    f"{key!r} has no real decode wiring"
                 )
 
     def test_encode_wired_finds_type_fact_keys_membership(self, tmp_path: Path) -> None:
@@ -682,14 +683,14 @@ class TestPersistedEncodeDecodeWiring:
             wired = fact_registry_completeness._encode_wired_fact_attrs()
         finally:
             fact_registry_completeness._FACT_CODEC_PATH = original
-        assert "widget_fact" in wired
+        assert ("RecordType", "widget_fact") in wired
 
     def test_encode_wired_finds_hardcoded_get_call(self, tmp_path: Path) -> None:
         codec = tmp_path / "fact_codec.py"
         codec.write_text(
             "def encode_fact_fields(d):\n"
-            "    for p in d.get('params', []):\n"
-            '        p.get("gadget_fact")\n'
+            "    for param_dict in d.get('params', []):\n"
+            '        param_dict.get("gadget_fact")\n'
         )
         original = fact_registry_completeness._FACT_CODEC_PATH
         fact_registry_completeness._FACT_CODEC_PATH = codec
@@ -697,7 +698,28 @@ class TestPersistedEncodeDecodeWiring:
             wired = fact_registry_completeness._encode_wired_fact_attrs()
         finally:
             fact_registry_completeness._FACT_CODEC_PATH = original
-        assert "gadget_fact" in wired
+        assert ("Param", "gadget_fact") in wired
+
+    def test_encode_wired_ignores_a_get_call_on_an_unrecognized_receiver(
+        self, tmp_path: Path
+    ) -> None:
+        """A `.get(fact_attr)` call whose receiver name isn't in
+        `_OWNER_ENCODE_RECEIVER` is not evidence for any owner (Codex
+        review: the whole point of owner-scoping is that an unrecognized
+        receiver must not silently count)."""
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text(
+            "def encode_fact_fields(d):\n"
+            "    for some_other_dict in d.get('widgets', []):\n"
+            '        some_other_dict.get("gadget_fact")\n'
+        )
+        original = fact_registry_completeness._FACT_CODEC_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        try:
+            wired = fact_registry_completeness._encode_wired_fact_attrs()
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original
+        assert not any(fact_attr == "gadget_fact" for _owner, fact_attr in wired)
 
     def test_decode_wired_requires_a_real_decode_fact_call(
         self, tmp_path: Path
@@ -715,7 +737,25 @@ class TestPersistedEncodeDecodeWiring:
         finally:
             fact_registry_completeness._FACT_CODEC_PATH = original_codec
             fact_registry_completeness._SERIALIZATION_PATH = original_ser
-        assert wired == {"widget_fact"}
+        assert wired == {("RecordType", "widget_fact")}
+
+    def test_decode_wired_ignores_an_unrecognized_receiver(
+        self, tmp_path: Path
+    ) -> None:
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text('decode_fact(some_other_dict.get("widget_fact"), v)\n')
+        serialization = tmp_path / "serialization.py"
+        serialization.write_text("# nothing here\n")
+        original_codec = fact_registry_completeness._FACT_CODEC_PATH
+        original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        fact_registry_completeness._SERIALIZATION_PATH = serialization
+        try:
+            wired = fact_registry_completeness._decode_wired_fact_attrs()
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original_codec
+            fact_registry_completeness._SERIALIZATION_PATH = original_ser
+        assert wired == set()
 
     def test_gate_flags_a_persisted_entry_wired_encode_only(
         self, tmp_path: Path
@@ -775,6 +815,64 @@ class TestPersistedEncodeDecodeWiring:
             fact_registry_completeness._SERIALIZATION_PATH = original_ser
         assert any(
             "RecordType.is_final" in msg and "persisted=True" in msg
+            for _, msg in findings.errors
+        )
+
+    def test_gate_does_not_let_one_owners_wiring_satisfy_another_owner(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario the review named: two owners share a
+        fact_attr name ("deprecated_fact"), only one owner's wiring is
+        real, and the gate must flag the other -- not silently pass it
+        because the bare string appears somewhere in the files."""
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text(
+            '_TYPE_FACT_KEYS = ("is_final_fact", "deprecated_fact")\n'
+            "def encode_fact_fields(d):\n"
+            "    pass\n"
+        )
+        serialization = tmp_path / "serialization.py"
+        serialization.write_text(
+            'decode_fact(t.get("is_final_fact"), v)\n'
+            'decode_fact(t.get("deprecated_fact"), v)\n'
+        )
+        original_codec = fact_registry_completeness._FACT_CODEC_PATH
+        original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        fact_registry_completeness._SERIALIZATION_PATH = serialization
+        import abicheck.model.fact_registry as fr
+
+        wrong_owner_entry = FactDefinition(
+            owner="Variable",
+            field="deprecated",
+            value_type="bool",
+            producing_backends=("clang",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+        )
+        try:
+            # "deprecated_fact" is fully wired for RecordType (via
+            # _TYPE_FACT_KEYS + decode_fact(t.get(...))) but Variable has no
+            # Variable-shaped receiver anywhere -- the bare-string version
+            # of this check would have treated RecordType's wiring as
+            # satisfying Variable's entry too.
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(
+                    fr,
+                    "FACT_REGISTRY",
+                    FactRegistry([*FACT_REGISTRY.entries.values(), wrong_owner_entry]),
+                )
+                findings = _LocalFindings()
+                check_fact_registry_completeness(findings)
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original_codec
+            fact_registry_completeness._SERIALIZATION_PATH = original_ser
+        assert any(
+            "Variable.deprecated" in msg and "persisted=True" in msg
             for _, msg in findings.errors
         )
 

@@ -49,7 +49,8 @@ different way a registry could go silently stale:
    (``decode_record_facts``, or a same-shaped ``decode_fact(...)`` call in
    ``serialization.py`` for the one non-``RecordType``-owned field,
    ``Param.is_va_list_fact``) — checked independently, not as a combined
-   occurrence count. Closes a real gap a Codex review round found
+   occurrence count, and *owner-scoped* — checked as an ``(owner,
+   fact_attr)`` pair. Closes a real gap a Codex review round found
    directions 1-2 above miss entirely: they only compare model attribute
    *names* against registry keys, so a registry entry claiming
    ``persisted=True`` with no matching encode/decode wiring at all would
@@ -66,7 +67,21 @@ different way a registry could go silently stale:
    full data-flow proof, but real enough to fail on the exact scenario
    both review rounds named (a new ``Fact[T]`` sibling + registry entry
    landing with no matching ``fact_codec.py``/``serialization.py``
-   change, on either side).
+   change, on either side). A *third* review round found even the
+   two-sided version wasn't enough: a bare ``fact_attr`` string match lets
+   one owner's real wiring silently satisfy every *other* owner sharing
+   the same field name — a real, named risk, since "deprecated" is
+   already tracked as a case-(a) field on five different owners
+   (``Function``/``Variable``/``TypeField``/``RecordType``/``EnumType``),
+   so a future ``Function.deprecated_fact`` wired alone would otherwise
+   also satisfy a still-unwired ``Variable.deprecated_fact``. Each
+   ``.get("<name>")`` call site's own receiver variable name is now
+   resolved against :data:`_OWNER_ENCODE_RECEIVER`/
+   :data:`_OWNER_DECODE_RECEIVER` — a small, closed, reviewed table (the
+   identical allowlist-and-shrink shape ``_TYPE_FACT_KEYS`` already is) —
+   and a receiver not listed there contributes no evidence for *any*
+   owner, rather than being silently attributed to whichever owner shares
+   the field name.
 5. For the six declaration classes ``backend_capabilities.py``'s own
    AST-verified ``FACT_ROWS`` matrix already tracks, a registry entry's
    ``producing_backends`` must agree with it — not merely name a real
@@ -132,6 +147,26 @@ module with a direction 4-shaped check for ``suppressible``/``reportable``
 is real, valuable follow-up work, but it is gated on suppression/report
 consumer wiring landing first (a separate, later phase per the plan's own
 scope) — tracked here rather than attempted as a vacuous check today.
+
+**A second acknowledged, deliberately deferred gap (Codex review, not yet
+closed).** Direction 5's cross-check is scoped to
+:data:`_HEADER_AST_BACKENDS` (``castxml``/``clang``) by construction — a
+registry entry claiming a non-header producer (``dwarf``/``pdb``/``btf``/
+``ctf``/``elf``/``pe``/``macho``) is neither confirmed nor denied, so a
+wrong claim there (e.g. ``"elf"`` on a header-AST-only fact) is not caught.
+Closing this fully needs a per-backend, AST-verified evidence source
+*equivalent to* ``backend_capabilities.FACT_ROWS`` for each of those seven
+producers — real infrastructure ``backend_capabilities.py`` itself only
+built for the two header-AST backends, deliberately, as its own stated
+scope. Building six or seven more such matrices (one per real non-header
+producer, each requiring its own parser-source AST scan the way
+``backend_capabilities.scan_backend_evidence()`` does for castxml/clang) is
+a substantial, separately-justified undertaking, not a natural extension of
+this direction — and every current registry entry's non-header claims
+(``dwarf`` on the four Phase 0 ``RecordType`` facts) are already
+independently verified by hand against ``dwarf_snapshot.py`` at review
+time. Tracked here as real follow-up work, not attempted as a partial
+check that would only cover one of the seven backends arbitrarily.
 
 **Case (b) heuristic, stated precisely.** A field is a case-(b) candidate
 when its annotation textually contains ``| None`` (or ``Optional[``) *and*
@@ -504,22 +539,66 @@ def _get_call_key(node: ast.expr) -> str | None:
     return None
 
 
-def _encode_wired_fact_attrs() -> set[str]:
-    """Every ``fact_attr`` name ``fact_codec.encode_fact_fields()`` actually
-    reaches — real encode-side evidence only (Codex review: the combined
-    quoted-occurrence count this replaced could not tell an encode-only or
-    decode-only reference apart from real wiring on both sides).
+def _call_receiver_name(node: ast.expr) -> str | None:
+    """If ``node`` is ``<name>.get(...)``, return ``<name>``'s identifier."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Name)
+    ):
+        return node.func.value.id
+    return None
+
+
+#: For each Fact-registry ``owner``, the receiver variable name a real
+#: ``.get("<fact_attr>")`` call must use, on the encode side and the decode
+#: side respectively, to count as wiring evidence *for that owner*
+#: specifically (Codex review, fresh evidence: a bare ``fact_attr`` string
+#: match previously let one owner's wiring silently satisfy every *other*
+#: owner sharing the same field name — "deprecated" is already a tracked
+#: case-(a) field on five different owners, so a future
+#: ``Function.deprecated_fact`` wired alone would otherwise also satisfy a
+#: still-unwired ``Variable.deprecated_fact``). ``RecordType`` is
+#: deliberately included even though its *encode* side has no literal
+#: ``.get(fact_attr)`` call at all (``_TYPE_FACT_KEYS`` membership is
+#: checked directly instead, in :func:`_encode_wired_fact_attrs`) — only
+#: its decode-side receiver (``decode_record_facts``'s own parameter name)
+#: is needed here.
+#:
+#: A new owner's wiring must be added here, reviewed, alongside its own
+#: real call sites — the identical discipline ``_TYPE_FACT_KEYS`` already
+#: requires for a new ``RecordType``-owned fact. An owner absent from the
+#: relevant table cannot satisfy Direction 4 through that path at all,
+#: which is the point: an unrecognized receiver name is unresolved
+#: evidence, not silently-accepted evidence.
+_OWNER_ENCODE_RECEIVER: dict[str, str] = {"Param": "param_dict"}
+_OWNER_DECODE_RECEIVER: dict[str, str] = {"RecordType": "t", "Param": "p"}
+
+
+def _encode_wired_fact_attrs() -> set[tuple[str, str]]:
+    """Every ``(owner, fact_attr)`` pair ``fact_codec.encode_fact_fields()``
+    actually reaches — real, *owner-scoped* encode-side evidence only
+    (Codex review: the combined quoted-occurrence count this replaced could
+    not tell an encode-only or decode-only reference apart from real wiring
+    on both sides; a later review round found the bare-string version of
+    this function couldn't tell one owner's wiring apart from another
+    owner's sharing the same ``fact_attr`` name either).
 
     Two shapes: membership in the ``_TYPE_FACT_KEYS`` tuple (the
-    ``RecordType``-owned fields, looped over in the function body), and a
-    literal ``.get("<name>")`` call directly inside ``encode_fact_fields``
-    itself (the one hardcoded ``Param.is_va_list_fact`` line).
+    ``RecordType``-owned fields, looped over in the function body — always
+    owner ``"RecordType"``, since that tuple is by construction
+    RecordType-only), and a literal ``.get("<name>")`` call directly inside
+    ``encode_fact_fields`` itself whose receiver name resolves to a known
+    owner via :data:`_OWNER_ENCODE_RECEIVER` (the one hardcoded
+    ``Param.is_va_list_fact`` line today). A ``.get(...)`` call whose
+    receiver isn't in that table contributes no evidence for any owner.
     """
     source = _read(_FACT_CODEC_PATH)
     if not source:
         return set()
     tree = ast.parse(source, filename=str(_FACT_CODEC_PATH))
-    wired: set[str] = set()
+    wired: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "_TYPE_FACT_KEYS" for t in node.targets
@@ -528,43 +607,64 @@ def _encode_wired_fact_attrs() -> set[str]:
                 for elt in node.value.elts:
                     name = _string_constant(elt)
                     if name is not None:
-                        wired.add(name)
+                        wired.add(("RecordType", name))
         if isinstance(node, ast.FunctionDef) and node.name == "encode_fact_fields":
             for call in ast.walk(node):
-                if isinstance(call, ast.Call):
-                    name = _get_call_key(call)
-                    if name is not None:
-                        wired.add(name)
+                if not isinstance(call, ast.Call):
+                    continue
+                name = _get_call_key(call)
+                if name is None:
+                    continue
+                receiver = _call_receiver_name(call)
+                owner = next(
+                    (o for o, r in _OWNER_ENCODE_RECEIVER.items() if r == receiver),
+                    None,
+                )
+                if owner is not None:
+                    wired.add((owner, name))
     return wired
 
 
-def _decode_wired_fact_attrs() -> set[str]:
-    """Every ``fact_attr`` name some real ``decode_fact(...)`` call reaches,
-    across both files that call it — ``storage/fact_codec.py``'s own
-    ``decode_record_facts`` (the ``RecordType``-owned fields) and
-    ``serialization.py``'s one direct call site (``Param.is_va_list_fact``,
-    decoded inline rather than through ``decode_record_facts``).
+def _decode_wired_fact_attrs() -> set[tuple[str, str]]:
+    """Every ``(owner, fact_attr)`` pair some real ``decode_fact(...)`` call
+    reaches, across both files that call it — ``storage/fact_codec.py``'s
+    own ``decode_record_facts`` (the ``RecordType``-owned fields, receiver
+    ``t``) and ``serialization.py``'s one direct call site
+    (``Param.is_va_list_fact``, receiver ``p``, decoded inline rather than
+    through ``decode_record_facts``) — owner-scoped the same way
+    :func:`_encode_wired_fact_attrs` is (Codex review).
 
-    A field is decode-wired when ``decode_fact(...)``'s own first
-    (positional) argument is itself a ``<expr>.get("<name>")`` call naming
-    it — the shape every real call site in this codebase uses.
+    A field is decode-wired for a given owner when ``decode_fact(...)``'s
+    own first (positional) argument is itself a ``<name>.get("<field>")``
+    call naming it, where ``<name>`` resolves to that owner via
+    :data:`_OWNER_DECODE_RECEIVER` — the shape every real call site in this
+    codebase uses. A receiver not in that table contributes no evidence for
+    any owner.
     """
-    wired: set[str] = set()
+    wired: set[tuple[str, str]] = set()
     for path in (_FACT_CODEC_PATH, _SERIALIZATION_PATH):
         source = _read(path)
         if not source:
             continue
         tree = ast.parse(source, filename=str(path))
         for node in ast.walk(tree):
-            if (
+            if not (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "decode_fact"
                 and node.args
             ):
-                name = _get_call_key(node.args[0])
-                if name is not None:
-                    wired.add(name)
+                continue
+            name = _get_call_key(node.args[0])
+            if name is None:
+                continue
+            receiver = _call_receiver_name(node.args[0])
+            owner = next(
+                (o for o, r in _OWNER_DECODE_RECEIVER.items() if r == receiver),
+                None,
+            )
+            if owner is not None:
+                wired.add((owner, name))
     return wired
 
 
@@ -738,27 +838,34 @@ def check_fact_registry_completeness(f: Findings) -> None:
     # encode path and a real decode path — checked independently, not as a
     # combined occurrence count (Codex review: a count alone can't tell an
     # encode-only or decode-only reference apart from real wiring on both
-    # sides).
-    encode_wired = _encode_wired_fact_attrs()
+    # sides), and *owner-scoped* (a later Codex review round: a bare
+    # fact_attr-name match let one owner's wiring silently satisfy every
+    # other owner sharing the same field name, e.g. a future
+    # Function.deprecated_fact wired alone would also satisfy a
+    # still-unwired Variable.deprecated_fact).
+    encode_wired = _encode_wired_fact_attrs()  # {(owner, fact_attr)}
     decode_wired = _decode_wired_fact_attrs()
     for entry in FACT_REGISTRY.entries.values():
         if not entry.persisted:
             continue
+        key = (entry.owner, entry.fact_attr)
         missing = [
             side
             for side, wired in (("encode", encode_wired), ("decode", decode_wired))
-            if entry.fact_attr not in wired
+            if key not in wired
         ]
         if missing:
             f.err(
                 "fact-registry-completeness",
                 f"{entry.id}: registered with persisted=True, but "
                 f"{entry.fact_attr!r} has no real {' or '.join(missing)} "
-                f"wiring in storage/fact_codec.py/serialization.py (see "
-                f"_TYPE_FACT_KEYS/decode_record_facts, or the "
+                f"wiring for owner {entry.owner!r} in "
+                f"storage/fact_codec.py/serialization.py (see "
+                f"_TYPE_FACT_KEYS/decode_record_facts, the "
                 f"Param.is_va_list_fact pattern for a non-RecordType "
-                f"owner) — this snapshot field would silently fail to "
-                f"round-trip",
+                f"owner, or _OWNER_ENCODE_RECEIVER/_OWNER_DECODE_RECEIVER "
+                f"if this owner's wiring idiom is new) — this snapshot "
+                f"field would silently fail to round-trip",
             )
 
     # Direction 5: for the six declaration classes backend_capabilities.py's
