@@ -473,3 +473,15 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             "with --old-bundle-facts: OLD_FACTS is already a resolved, "
             "stored snapshot with no header re-extraction available."
         )
+    if kwargs.get("old_header_backend") is not None:
+        # Codex review, fresh evidence: normalize_sided_options puts an
+        # old=-scoped --ast-frontend into old_header_backend, but
+        # compare_bundle_facts.dispatch() only ever reads the new=-scoped/
+        # uniform header_backend value (same root cause as the old=-scoped
+        # --header/--include rejection just above) -- OLD_FACTS is already
+        # resolved and cannot be re-extracted under a different frontend.
+        raise click.UsageError(
+            "--ast-frontend old=... is not supported together with "
+            "--old-bundle-facts: OLD_FACTS is already a resolved, stored "
+            "snapshot with no header re-extraction available."
+        )

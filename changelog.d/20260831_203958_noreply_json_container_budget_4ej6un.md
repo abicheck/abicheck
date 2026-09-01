@@ -121,6 +121,16 @@
   header could be silently auto-detected away from the caller's request,
   changing the extracted API and findings.
 
+  `-o`/`--write`'s output writes now route through the shared
+  `_safe_write_output()` every other CLI output path uses, instead of a
+  direct `write_text()` -- creates a missing parent directory instead of
+  raising an uncaught `FileNotFoundError`, and translates any other write
+  failure into a clean `ClickException`. `--ast-frontend old=...` is now
+  rejected too, same root cause as the other `old=`-scoped rejections
+  (`--header`/`--include`/`--debug-info`/`--devel-pkg`): OLD_FACTS is
+  already a resolved, stored snapshot with no header re-extraction
+  available.
+
   Separately, `run_plan.py`'s newline-join fix for `RunPlanCheck.header`
   (public_headers reaching a generated run-plan cell) missed the
   single-element case: `"\n".join([x])` for a one-item list contains no

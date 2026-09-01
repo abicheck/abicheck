@@ -98,6 +98,31 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--include" in out
 
+    def test_old_side_ast_frontend_operand_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: normalize_sided_options puts an old=-scoped
+        # --ast-frontend into old_header_backend, but dispatch() only ever
+        # reads the new=-scoped/uniform header_backend value -- OLD_FACTS
+        # is already a resolved, stored snapshot with no header
+        # re-extraction available.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--ast-frontend",
+            "old=clang",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--ast-frontend" in out
+
     def test_report_mode_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: every nested per-library report is rendered via
         # reporter.to_json(diff) with no report_mode argument -- always the

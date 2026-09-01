@@ -307,10 +307,18 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             "the same release."
         )
 
+    # Codex review, fresh evidence: route both writes through the shared
+    # CLI-safe writer every other output/--write path uses -- a direct
+    # write_text() raises an uncaught FileNotFoundError when -o/--write
+    # names a file under a nonexistent parent directory, where
+    # _safe_write_output() creates the missing parent and translates any
+    # write failure into a concise ClickException instead.
+    from ..runtime import _safe_write_output
+
     text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     output = kwargs.get("output")
     if output is not None:
-        Path(output).write_text(text)
+        _safe_write_output(Path(output), text)
     else:
         click.echo(text)
     if secondary_output is not None:
@@ -322,7 +330,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         secondary_text = _render(
             result, secondary_fmt, old_facts_path=old_facts_path, new_dir=new_dir
         )
-        secondary_output.write_text(secondary_text)
+        _safe_write_output(Path(secondary_output), secondary_text)
     output_dir = kwargs.get("output_dir")
     if output_dir is not None:
         # Codex review: NEW_INPUT is a release-style operand here, so

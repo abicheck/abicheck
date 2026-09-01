@@ -593,6 +593,48 @@ class TestCompareOldBundleFactsEarlyRejections:
         payload = json.loads(lib_report.read_text())
         assert payload["library"] == "libreal.so"
 
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="Uses the GNU ld flag -Wl,-soname via _build_so; ELF/Linux-only "
+        "bundle analysis (matches TestCompareOldBundleFacts's identical guard "
+        "in test_cli_compare_bundle_facts.py).",
+    )
+    @pytest.mark.integration
+    def test_output_to_a_missing_parent_directory_creates_it(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a direct Path(output).write_text(text) raised an
+        # uncaught FileNotFoundError when -o named a file under a
+        # nonexistent parent directory, unlike every other compare/scan/
+        # project output path, which routes through the shared
+        # _safe_write_output() (creates the missing parent, translates any
+        # write failure into a clean ClickException).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        out_path = tmp_path / "nonexistent_dir" / "out.json"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "-o",
+            str(out_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        assert out_path.exists()
+
     def test_extraction_failure_does_not_leak_temp_dir(self, tmp_path: Path) -> None:
         # Codex review: a malformed archive (a real recognized extension,
         # bad content) raised from inside _extract_if_package *after*
