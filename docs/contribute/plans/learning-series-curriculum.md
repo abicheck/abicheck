@@ -315,10 +315,15 @@ Two content gaps within the area:
 - **The AST as an artifact.** The series explains *what* L2 sees but not
   what a header AST dump *is*: that `dump -H` produces a castxml or clang
   AST, that the compile context (include paths, defines, `-std`) decides
-  what that AST contains, that castxml emits instantiations only while the
-  clang backend can see uninstantiated templates (`case122`,
-  `reference/header-backend-capabilities.md`), and that the same header
-  under two contexts is two different surfaces (`build-profile-comparability.md`).
+  what that AST contains, that castxml emits template *instantiations*
+  only while the clang L2 backend also records the uninstantiated
+  *pattern* (`reference/header-backend-capabilities.md`), and that the
+  same header under two contexts is two different surfaces
+  (`build-profile-comparability.md`). The L4 lesson is separate and must
+  stay so: a change to an uninstantiated template's *signature*
+  (`case122`, `min_evidence: L4`) is found by the source-ABI replay
+  extractor over compile-unit evidence, not by switching the L2 frontend
+  — the header backend does not model that template at all.
   The backend facts are already owned: `topics.yaml`'s
   `ast-frontend-resolution` topic has `reference/header-backend-capabilities.md`
   as canonical page. So the fix is not a new full section on the (already
@@ -504,8 +509,16 @@ The `level:` front matter should carry the tier's level (mapped as above)
 on every page in the learning tree (today 16 pages have none). Level
 alone cannot reconstruct the ladder (tiers 2–6 are all `intermediate`),
 so tier membership and order get one machine-readable owner:
-`docs/_meta/learning-ladder.yaml`, listing each tier's pages in reading
-order, next to `topics.yaml`. The hub's ladder table is then *generated*
+`docs/_meta/learning-ladder.yaml`, next to `topics.yaml`. It holds
+**two ordered sequences**, one per track: `educational` (tiers 0–8, the
+ABI/API Compatibility tab) and `concepts` (the tool track, in its own
+simple-to-expert order starting at `verdicts.md`). Every learn page
+belongs to exactly one sequence; a page a tier merely *links* (the
+evidence trio from Tier 4, the baseline page from Tier 5) is listed as
+a link in that tier, not as a member, so it is never counted twice.
+Monotonicity is checked per sequence — the tool track restarting at
+`intermediate` after the educational track ends at `advanced` is two
+ladders, not a regression. The hub's ladder table is then *generated*
 by joining that file with each page's `level:` — a small script splicing
 between sentinels with a `--check` mode, the pattern ADR-051 established
 for the platform matrix — so neither the badge column nor the tier rows
@@ -514,8 +527,8 @@ ladder and is explicitly exempt from it (the one documented exception,
 stated in the ladder file). Branch pages (Tier 2's "go deeper" deep dives) are marked as such in the
 ladder file and checked only against their parent Part. `--check` fails on any other learn page missing from the
 ladder, on a ladder entry that is not a page, and on any level regression
-along the ladder's full reading order (not only within a nav group). The
-hub renders the result as a badge per row so the ladder is visible in the
+along either sequence's full reading order (not only within a nav
+group). The hub renders the result as a badge per row so the ladder is visible in the
 navigator, not only in this plan.
 
 ---
@@ -530,9 +543,10 @@ well as breaks; and what changes when the product is several binaries or
 a template library. Checkable form:
 
 - every page under the ABI/API Compatibility tab carries `level:` and a
-  previous/next footer, every learn page is in
-  `docs/_meta/learning-ladder.yaml`, and level is non-decreasing along
-  the ladder's full reading order and within each nav group;
+  previous/next footer, every learn page is in exactly one of
+  `docs/_meta/learning-ladder.yaml`'s two sequences, and level is
+  non-decreasing along each sequence's full reading order and within
+  each nav group;
 - every ★ page in §5 exists, is registered in `topics.yaml` per §4.6's
   three cases, and has at least one runnable invocation and one linked
   case;
@@ -562,7 +576,7 @@ The existing gates are the tests: `scripts/check_docs_contract.py`
 (`mkdocs-nav-coverage`, `doc-count-sync`, `changekind-docs`), and
 `scripts/check_docs_review_triggers.py` (`depends_on`). Phase 1 adds two:
 the ladder generator's `--check` mode (ladder completeness and level
-monotonicity along the whole reading order), and a test that each
+monotonicity along each sequence's whole reading order), and a test that each
 learning nav group is non-decreasing in `level:` — the acceptance
 criterion above, made executable. Anchor rewrites in Phase 1 need a one-off fragment check,
 since `mkdocs build --strict` does not validate anchors.
