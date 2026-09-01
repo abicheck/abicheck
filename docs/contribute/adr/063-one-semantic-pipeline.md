@@ -223,28 +223,68 @@
   by CI on this phase's own PR). `build_public_surface_facts()` stays
   available for a caller that does need those facts to populate onto the
   same shared instance explicitly.
-  **Deliberately not landed, and recorded here rather than left for a
-  later phase to rediscover as a gap:** `surface.py`'s own closure-walk
-  traversal and `export_surface.py`'s independent one are **not**
-  deleted — `PublicSurfaceQuery` delegates to both unchanged rather than
-  reimplementing either as a literal graph traversal, a scoped,
-  documented risk decision given the demonstrated fragility of that exact
-  algorithm (see `docs/contribute/known-gaps.md`); consequently there is
-  no lazy, graph-reading legacy-snapshot backfill path either, since
-  `compute_public_surface()`'s signature was never changed to accept a
-  structured resolution. `compare/surface_graph.py`'s own node ids
-  (`canonical_key(occurrence_id)`/`approx::`/`typedef::` fallbacks) and
-  `buildsource/header_graph.py`'s pre-existing L5 node ids
-  (`decl://<identity>`/`type://<identity>`) are two independent
-  namespaces — sharing one `SourceGraphSummary` instance is real and
-  tested, but the two schemes do not currently dedup onto one node for a
+  **Phase 3 is complete.** A first landing (thirteen slices, 2026-08-31)
+  shipped the plumbing above without migrating `surface.py`'s own
+  closure-walk traversal — `PublicSurfaceQuery` delegated to it
+  unchanged, a scoped, documented risk decision given the demonstrated
+  fragility of that exact algorithm (see `docs/contribute/known-gaps.md`).
+  A second round (2026-09-01) did migrate it: `surface.py`'s
+  `_index_surface_types`/`_seed_public_roots`/`_walk_type_closure`/
+  `_walk_exact_type_closure`/`_record_exact_identities`/
+  `_record_nested_in_known_record`/`_record_is_confirmed_public_seed` and
+  the `PublicSurface` type moved to `policy/public_surface.py` (the
+  dataclass + indexing) and `policy/public_surface_closure.py` (the walk
+  itself, plus `resolve_public_surface()`); `surface.py`'s own copies were
+  **deleted**, not kept alongside, and `surface.compute_public_surface()`
+  is now a thin re-exporting wrapper. `export_surface.py`'s own
+  root-seeding (the export-table-matching logic) was left unchanged, but
+  its final type-closure step calls the same migrated `_walk_type_closure`
+  the header domain uses, so that domain became graph-native for free.
+  `PublicSurfaceQuery` itself moved again, to `policy/public_surface_query.py`,
+  since it is the one module depending on both the closure module and
+  `export_surface.py` at once and keeping it in either would have closed
+  a real, `check_architecture.py`-detected import cycle.
+
+  That migration went through three review rounds before landing on a
+  design that never trusts `AbiSnapshot.surface_graph`/`GraphNode.attrs`
+  for the closure walk at all — full account in
+  `docs/contribute/known-gaps.md`. In short: round 1 read a graph node's
+  `referenced_identifiers`/`identifiers_collision` attrs as stamped once
+  at graph-build time; round 2 (Codex, PR #979) found an attached-but-
+  unenriched graph (the ordinary, default dump path) silently read as
+  "references nothing," and the enrichment fix that closed it introduced
+  both a measured 30-100%+ performance regression and a second security
+  hazard (a stale/adversarial persisted fact could outrank a freshly
+  recomputed one through `merge_graph_facts`'s confidence precedence).
+  The shipped fix removes the graph from the computation entirely:
+  `compare/surface_graph.py`'s `referenced_identifiers_by_node()` — a
+  pure function of the snapshot's own declarations, computed before any
+  `GraphNode` is built — is what `policy/public_surface_closure.py` and
+  `export_surface.py`'s closure-walk entry points call directly, never
+  touching `snap.surface_graph` at all. Confirmed resolved by CI's own
+  `Performance` workflow "Baseline regression (PR vs base)" job (PR #979,
+  commit `5544540`, `conclusion: success`), not just an ad hoc local
+  timing.
+
+  **Two scope boundaries remain, both deliberate:** `export_surface.py`'s
+  own root-seeding logic was never reimplemented as a graph traversal (only
+  the type-closure step it shares with the header domain became
+  graph-native); and `type_reachability.directly_referenced_stdlib_types()`
+  was not migrated into `policy/public_surface.py` — doing so would require
+  reclassifying `type_reachability.py` into the `policy` layer, which would
+  introduce a genuine new `policy -> extract` architecture violation (that
+  module imports two already-`extract`-classified siblings). **One item
+  remains genuinely open, not deliberately deferred:** `compare/
+  surface_graph.py`'s own node ids (`canonical_key(occurrence_id)`/
+  `approx::`/`typedef::` fallbacks) and `buildsource/header_graph.py`'s
+  pre-existing L5 node ids (`decl://<identity>`/`type://<identity>`) remain
+  two independent namespaces — sharing one `SourceGraphSummary` instance is
+  real and tested, but the two schemes do not dedup onto one node for a
   declaration both builders see (see `compare/surface_graph.py`'s own
-  module docstring). `type_reachability.directly_referenced_stdlib_types()`
-  was not migrated into `policy/public_surface.py` either: doing so would
-  require reclassifying `type_reachability.py` into the `policy` layer,
-  which would introduce a genuine new `policy -> extract` architecture
-  violation (that module imports two already-`extract`-classified
-  siblings) — a real, separate migration, not attempted reactively here.
+  module docstring). This is real, separate follow-up work, not
+  silently-abandoned scope. FP-rate gate and per-tier accuracy gate both
+  show zero regression from any part of this phase.
+
   Two corrections to the implementation plan's own text, found during this
   phase's implementation rather than assumed from the design prose: the
   plan's Phase 3 section describes `surface.py`/`export_surface.py`/
