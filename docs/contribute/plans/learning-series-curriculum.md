@@ -482,9 +482,11 @@ badge — not a replacement for the nav's by-question groups, which are a
 recorded decision (`docs/AGENTS.md` "Layout", `mkdocs.yml`'s nav comments,
 ADR-051) this plan keeps. Within each group the order becomes
 non-decreasing in level, and a page changes *tab* only when it carries no
-internal module names in prose (`contract-aware-compatibility.md` and
-`environment-drift.md` were checked and are clean; the evidence trio is
-not, and stays on the Concepts tab — the ladder links across tabs). The
+internal module names in prose (`environment-drift.md` was checked and is
+clean; `contract-aware-compatibility.md` is not — it names
+`ExportSurface.exclusion_is_provable` and the reason-code registry — so
+it stays on the Concepts tab with the evidence trio, and the ladder links
+across tabs). The
 level column uses the four values the docs gate accepts — novice =
 `beginner`, practitioner = `intermediate`, then `advanced` and `expert` —
 so every page can carry its tier without changing the gate.
@@ -494,7 +496,7 @@ so every page can carry its tier without changing the gate.
 | **0 · Orientation** | beginner | ABI in Five Minutes · ★ How a break shows up (symptom → mechanism → level) · Cheat Sheet · Glossary (↻ absorbs Part 1 §8) |
 | **1 · Foundations** | beginner → intermediate | Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Part 1 Foundations (the spine's own 0 → 7 order is kept) · Your ABI Surface |
 | **2 · Mechanics** | intermediate (branches: advanced) | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as optional "go deeper" branches, `advanced`, outside the spine's monotonicity check (Part 4 shortens its inline summaries to a sentence and a link) |
-| **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · ↻ Contract-Aware Compatibility (from Concepts) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
+| **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · Contract-Aware Compatibility (linked; stays on the Concepts tab) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
 | **4 · Evidence & detection** | intermediate | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
 | **5 · Practice** | intermediate | Baselines as contracts (`use/baseline-management.md`, linked from the ladder, stays in the tool track — §4.6 case 1) · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
 | **6 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
@@ -628,9 +630,9 @@ gate all of this).
   from `intermediate` to `advanced`; and the Tier 2 "go deeper" pages
   keep `advanced` but are marked as *branches* in the ladder file, which
   the monotonicity check skips (a branch is read optionally, off the
-  spine, and must only be ≥ the Part it hangs from). Pages that change tab are limited to
-  the two verified clean of internal names (§5); `docs/AGENTS.md` "Layout"
-  is updated for those two moves in the same change.
+  spine, and must only be ≥ the Part it hangs from). The one page that changes tab is
+  `environment-drift.md`, verified clean of internal names (§5);
+  `docs/AGENTS.md` "Layout" is updated for that move in the same change.
 
 **Phase 2 — de-duplicate (content moves, no new topics).**
 
@@ -639,8 +641,18 @@ gate all of this).
   registered as such; the trio banner goes on all three trio pages.
 - Part 4 shortens the inline summaries of its three split-out sections to
   one sentence and a link each (they stay registered `allowed_summaries`).
-- Part 1 §8 → `glossary.md`; one numeric verdict/exit-code table
-  (`verdicts.md`), with `architecture.md` linking instead of restating.
+- Class layout gets one owner: `class-layout-abi.md` is registered as
+  `canonical_page` of a new `class-layout` topic (it is the page that maps
+  each layout change to its `ChangeKind` and evidence tier). Part 3 keeps
+  the C-level fundamentals (size, offset, alignment, enums, unions,
+  bitfields) and hands C++ class layout to that page with a summary and a
+  link; Part 4 §7 becomes the same. Both Parts are registered as
+  `allowed_summaries` of the new topic.
+- Part 1 §8 → `glossary.md`. Verdicts get one table: `verdicts.md` keeps
+  the numeric verdict/exit-code table; `architecture.md` links instead of
+  restating; `abi-cheat-sheet.md` and `07-designing-for-stability.md`
+  shrink their verdict-meaning tables to a one-line legend plus a link
+  and are added to the `verdicts` topic's `allowed_summaries`.
 - The four "cannot decide this" pages stay four pages (`topics.yaml`
   records that decision under criterion 4, with four registered topics).
   The repeated argument gets one owner — `evidence-and-detectability.md`
