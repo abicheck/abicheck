@@ -140,10 +140,17 @@ class TestProfileEndToEnd:
             main, ["compare", str(old_p), str(new_p), "--profile", "quick"]
         )
         assert result.exit_code == 0, result.output
-        # --profile quick sets --stat: output is the compact one-line summary
-        # (e.g. "NO_CHANGE: no changes (0 total)"), not the full report.
-        assert "total)" in result.output
-        assert result.output.strip().count("\n") == 0
+        # --profile quick sets --stat: stdout is the compact one-line summary
+        # (e.g. "NO_CHANGE: no changes (0 total)"), not the full report. Checked
+        # on `result.stdout`, not the stderr-mixed `result.output`: `quick`'s
+        # `depth=binary` (ADR-063 Phase 8's ceiling fix) means these synthetic
+        # header-derived fixtures no longer resolve a public-header surface at
+        # that depth either -- the resulting scope-fallback warning is by
+        # design routed to stderr specifically so it never corrupts this
+        # one-line stdout contract (see `frontends/cli/runtime.py`'s own
+        # comment on that `click.echo(..., err=True)` call).
+        assert "total)" in result.stdout
+        assert result.stdout.strip().count("\n") == 0
 
     def test_explicit_format_overrides_profile_e2e(self, tmp_path: Path) -> None:
         old_p, new_p = _write_snapshots(tmp_path)

@@ -6202,23 +6202,40 @@ looked like the obvious fix and wasn't.
   already-trusted reference implementation of this idea:
   `scripts/check_tier_accuracy.py`'s `project()`, which the per-tier
   accuracy gate runs against a real (if synthetic) labelled corpus.
-  `classify_compare_pair` (`service_compare_pipeline.py`) applies it to a
-  local `old`/`new` view, gated on `request.depth is not None` — the same
-  "no explicit depth, no effect" contract `enforce_requested_depth` already
-  has — right after that function confirms the floor; `pair.old`/`pair.new`
-  themselves are never mutated, so a caller reading the unprojected
-  snapshot elsewhere is unaffected. `dump` deliberately does **not** apply
-  this at write time, for the exact reason given above (it would discard
-  evidence a later, deeper comparison might want) — `--depth` on `dump`
-  stays floor-only, unchanged. See `project_snapshot_to_depth`'s own
-  docstring for the precise field-by-field scope (deliberately mirrors what
-  the validated reference implementation degrades — visibility/origin
-  scoping, macro/constexpr constants, the Python-API stub surface, the
-  header-AST `SemanticIR`, `build_mode`, the `BuildSourcePack` L3/L4/L5
-  split, `surface_graph` — and just as deliberately leaves untouched what
-  that reference implementation never validated: platform container facts,
-  `kabi`/`sycl`/`python_ext`/`numpy_capi`, `typedefs`, dependency/contract/
-  provenance metadata).
+  `classify_compare_pair` (`service_compare_pipeline.py`) applies it (via
+  `project_pair_to_depth`) to a local `old`/`new` view, gated on
+  `request.depth is not None` — the same "no explicit depth, no effect"
+  contract `enforce_requested_depth` already has — right after that
+  function confirms the floor; `pair.old`/`pair.new` themselves are never
+  mutated, so a caller reading the unprojected snapshot elsewhere is
+  unaffected. `dump` deliberately does **not** apply this at write time,
+  for the exact reason given above (it would discard evidence a later,
+  deeper comparison might want) — `--depth` on `dump` stays floor-only,
+  unchanged. See `project_snapshot_to_depth`'s own docstring for the
+  precise field-by-field scope (visibility/origin scoping, macro/constexpr
+  constants, the Python-API stub surface, the header-AST `SemanticIR`, the
+  header-only `surface_graph`, `build_mode`, the `BuildSourcePack`
+  L3/L4/L5 split; below `headers` with no DWARF backing (`dwarf.has_dwarf`
+  false), `types`/`enums`/`typedefs`/signatures are fully stripped too,
+  not merely re-scoped — matching a real DWARF-less binary-only dump
+  exactly, per `extract/export_symbol_identity.py`'s own production
+  behavior).
+
+  **A second review round (Codex, same PR) found two more real gaps in the
+  first cut of this fix, both now closed:** (1) the projection was wired
+  only into `classify_compare_pair` — the typed-API/release-fan-out
+  chokepoint — while the *native* `abicheck compare` CLI
+  (`cli_compare_helpers.run_compare`) and `scan --against`'s baseline path
+  (`cli_scan_baseline._run_baseline_compare`) each call
+  `compare_snapshots()` directly and never saw it; both now apply
+  `project_pair_to_depth` themselves, right after resolving their own
+  pair, mirroring `classify_compare_pair`'s placement. (2) the `binary`
+  rung's structural-fact handling was fixed at DWARF-informed (L1)
+  behavior unconditionally — a purely header-derived snapshot with no
+  DWARF at all still leaked full `types`/`enums`/function-signature data
+  through a `binary`-depth projection; `_snapshot_has_native_debug_info`
+  now picks L0 (fully stripped) vs. L1 (structural facts kept) per
+  snapshot, not fixed to one or the other.
 
 ### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
 

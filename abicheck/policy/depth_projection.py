@@ -41,33 +41,43 @@ function's ``Tier`` axis (L0-L3) is finer than the public ``EvidenceDepth``
 ladder (``binary``/``headers``/``build``/``source``, ``BINARY`` covering both
 L0 and L1: "no L2 AST", not "no debug info"); this module maps onto the
 coarser public ladder a caller actually requests through ``--depth``,
-keeping DWARF-derived layout/signatures at the ``binary`` rung the way a
-real DWARF-informed binary dump would.
+picking L0 or L1 **per snapshot** (not fixed to L1) based on whether *that*
+snapshot actually carries DWARF debug info — see
+:func:`_snapshot_has_native_debug_info` — so a headers-only snapshot with no
+DWARF strips down to L0 (no structural facts survive at all) exactly the way
+the reference implementation's own L0 branch does, while a DWARF-informed
+one keeps layout/signatures at ``binary`` the way a real DWARF-informed
+binary dump would (Codex review, PR #1020: an earlier version of this
+module fixed every ``binary``-rung projection to the reference
+implementation's L1 branch unconditionally, so a purely header-derived
+snapshot with no DWARF at all still carried full ``types``/``enums``/
+function-signature data through a ``binary``-depth projection and could
+still emit e.g. ``type_field_type_changed``).
 
 **Deliberately in scope** (the same fields the tier-accuracy gate's
-validated ``project()`` degrades, plus the ``BuildSourcePack``/
-``surface_graph`` L3-L5 split that synthetic corpus never populates):
-``functions``/``variables`` visibility+origin, ``types``/``enums`` origin,
-``constants``, ``python_api``, ``from_headers``, ``semantic_ir`` (an L2+
-header-AST fact, gated the same as ``from_headers``), ``build_mode``,
-``build_source`` (nulled below ``build``; degraded to its L3-only
-``build_evidence`` — ``source_abi``/``source_graph`` cleared — between
-``build`` and ``source``), and ``surface_graph`` (an L5 fact, nulled below
-``source``).
+validated ``project()`` degrades, plus the ``BuildSourcePack`` L3-L5 split
+that synthetic corpus never populates): ``functions``/``variables``
+visibility+origin, ``types``/``enums``/``typedefs`` (fully stripped, not
+merely re-scoped, when no DWARF backs them — see above), ``constants``,
+``python_api``, ``from_headers``, ``semantic_ir`` and ``surface_graph``
+(both L2+ header-AST/header-graph facts, gated the same as
+``from_headers`` — ``_attach_header_graph``'s own docstring: "the
+header-only (L2) semantic graph", not an L4/L5 fact despite a first
+version of this module gating it to ``source`` on that wrong assumption),
+``build_mode``, and ``build_source`` (nulled below ``build``; degraded to
+its L3-only ``build_evidence`` — ``source_abi``/``source_graph`` cleared —
+between ``build`` and ``source``).
 
 **Deliberately out of scope, not silently assumed handled**: platform
-container facts (``elf``/``pe``/``macho``/``dwarf``/``dwarf_advanced``),
-``kabi``/``sycl``/``python_ext``/``numpy_capi``, ``typedefs`` (DWARF also
-carries typedef DIEs, so — like ``types``/``enums`` — these survive a
-``binary``-rung projection the same way the validated reference
-implementation keeps them below its own L0), ``dependency_info``,
-``contract``/``fact_provenance``/``ast_*``/entity-id maps, and
-``elf_only_mode`` (left exactly as resolved — forcing it ``True`` would
-misreport a projection of a real DWARF-informed snapshot as symbols-only,
-which the reference implementation itself only does at its fully-stripped
-L0, not at the L1-equivalent this module's ``binary`` rung maps to). A
-future extension of this module's scope is real, separately-justified work,
-not a residual of this docstring's own account.
+container facts (``elf``/``pe``/``macho``/``dwarf``/``dwarf_advanced``
+themselves are never cleared — only what they *justify keeping* in
+``functions``/``types``/... changes), ``kabi``/``sycl``/``python_ext``/
+``numpy_capi``, ``dependency_info``, ``contract``/``fact_provenance``/
+``ast_*``/entity-id maps, and ``elf_only_mode`` (left exactly as resolved
+except where the no-DWARF L0 branch below sets it ``True`` itself, matching
+the reference implementation's identical choice at its own L0). A future
+extension of this module's scope is real, separately-justified work, not a
+residual of this docstring's own account.
 """
 
 from __future__ import annotations
@@ -81,17 +91,40 @@ from ..model import ScopeOrigin, Visibility
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
-__all__ = ["project_snapshot_to_depth"]
+__all__ = ["project_pair_to_depth", "project_snapshot_to_depth"]
+
+
+def _snapshot_has_native_debug_info(snap: AbiSnapshot) -> bool:
+    """Whether *snap* carries DWARF debug info independent of any header AST.
+
+    The same signal ``confidence.py``/``analysis_assurance.py`` already use
+    for "does this snapshot have debug info" (``dwarf is not None and
+    dwarf.has_dwarf``) — not restated, reused, so this module cannot silently
+    disagree with those about what counts. Deliberately does not also probe
+    PE/Mach-O-specific debug carriers (PDB, ...): matching that same existing
+    precedent exactly rather than inventing a wider, unvalidated heuristic —
+    a real PDB-aware extension is separately-justified future work, not a
+    residual of this function's own scope.
+    """
+    return snap.dwarf is not None and snap.dwarf.has_dwarf
 
 
 def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
     """Blank every L2+ (header-AST) fact on *snap*, in place.
 
-    Keeps DWARF-derived structural facts (layout, signatures, typedefs) —
-    those are an L0/L1 fact regardless of whether headers were also parsed —
-    and blanks only what a header AST alone contributes: scoping
-    (visibility/origin), macro/constexpr constant values, the Python-API
-    stub surface, and the header-AST-only ``SemanticIR``.
+    When *snap* carries real DWARF debug info, this keeps DWARF-derived
+    structural facts (layout, signatures, typedefs) — those are an L1 fact
+    independent of whether headers were also parsed — and blanks only what a
+    header AST alone contributes: scoping (visibility/origin), macro/
+    constexpr constant values, the Python-API stub surface, and the
+    header-AST-only ``SemanticIR``.
+
+    When *snap* has no DWARF at all, every one of those structural facts
+    came *only* from the header AST — nothing else in the snapshot could
+    have produced them — so this additionally strips to L0: no types, no
+    enums, no typedefs, and functions/variables degrade to bare symbol
+    identity (no signature/type/value evidence), matching
+    ``scripts/check_tier_accuracy.py``'s own L0 branch exactly.
     """
     for f in snap.functions:
         f.visibility = Visibility.ELF_ONLY
@@ -107,6 +140,23 @@ def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
     snap.from_headers = False
     snap.python_api = None
     snap.semantic_ir = None
+    # `_attach_header_graph`'s own docstring: "the header-only (L2) semantic
+    # graph" -- an L2 fact like the others above, not the L4/L5
+    # `build_source.source_graph` this function leaves untouched.
+    snap.surface_graph = None
+
+    if not _snapshot_has_native_debug_info(snap):
+        snap.types = []
+        snap.enums = []
+        snap.typedefs = {}
+        for f in snap.functions:
+            f.return_type = "?"
+            f.params = []
+        for v in snap.variables:
+            v.type = "?"
+            v.is_const = False
+            v.value = None
+        snap.elf_only_mode = True
 
 
 def project_snapshot_to_depth(snap: AbiSnapshot, depth: str | None) -> AbiSnapshot:
@@ -148,6 +198,16 @@ def project_snapshot_to_depth(snap: AbiSnapshot, depth: str | None) -> AbiSnapsh
         # drop the L4 source-ABI replay and L5 source-graph payloads.
         out.build_source.source_abi = None
         out.build_source.source_graph = None
-    if rank < source_rank:
-        out.surface_graph = None
     return out
+
+
+def project_pair_to_depth(
+    old: AbiSnapshot, new: AbiSnapshot, depth: str | None
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """:func:`project_snapshot_to_depth` applied to both sides of a comparison.
+
+    The one-line convenience every ``compare_snapshots()`` call site with two
+    resolved sides and an optional ``depth`` needs, so each keeps its own
+    call site to a single statement rather than two.
+    """
+    return project_snapshot_to_depth(old, depth), project_snapshot_to_depth(new, depth)

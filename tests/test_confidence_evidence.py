@@ -657,8 +657,13 @@ class TestNoteIfSameBinaryCompared:
             main, ["compare", str(old_p), str(new_p), "--profile", "quick"]
         )
         assert result.exit_code == 0, result.output
-        assert result.output.strip().count("\n") == 0, result.output
-        assert "Warning:" not in result.output, result.output
+        # stdout, not the stderr-mixed `result.output`: `quick`'s
+        # `depth=binary` (ADR-063 Phase 8's ceiling fix) means this
+        # unscoped-headers fixture no longer resolves a public-header
+        # surface at that depth either, and that scope-fallback warning is
+        # by design routed to stderr so it never corrupts this contract.
+        assert result.stdout.strip().count("\n") == 0, result.output
+        assert "Warning:" not in result.stdout, result.output
 
     def test_native_compare_cli_hashes_through_a_multi_hop_linker_script_chain(
         self, tmp_path, monkeypatch

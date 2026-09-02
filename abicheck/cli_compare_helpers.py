@@ -1850,6 +1850,18 @@ def run_compare(
         lang_explicit=lang_explicit,
     )
 
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
+    # #1020): this native CLI path calls `compare_snapshots()` directly, not
+    # `classify_compare_pair`, so it needs the identical capped view applied
+    # here too -- before every subsequent reader of `old`/`new` below
+    # (`fold_l0_hard_removals`, the build-source diff, `compare_snapshots`
+    # itself). Imported from `service_compare_pipeline` (`workflows`), not
+    # `.policy.depth_projection` directly: ADR-061 forbids `frontends ->
+    # policy`, and this CLI module is `frontends`.
+    from .service_compare_pipeline import project_pair_to_depth
+
+    old, new = project_pair_to_depth(old, new, depth)
+
     suppression, pf = _load_suppression_and_policy(
         suppress, policy, policy_file_path,
         strict_suppressions=strict_suppressions,

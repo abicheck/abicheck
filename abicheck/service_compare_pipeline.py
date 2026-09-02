@@ -67,6 +67,7 @@ from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
+from .policy.depth_projection import project_pair_to_depth, project_snapshot_to_depth
 from .workflows.artifact.execute import (
     enforce_requested_depth,
     resolve_side_snapshot,
@@ -81,6 +82,8 @@ if TYPE_CHECKING:
 __all__ = [
     "ResolvedComparePair",
     "classify_compare_pair",
+    "project_pair_to_depth",
+    "project_snapshot_to_depth",
     "resolve_compare_request",
     "resolve_sides_sequentially",
     "run_compare",
@@ -426,19 +429,15 @@ def classify_compare_pair(
         attach_evidence_metrics,
         prepare_embedded_build_source,
     )
-    from .policy.depth_projection import project_snapshot_to_depth
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
     # request`'s own `enforce_requested_depth` call already confirmed both
     # sides' *resolved* evidence meets `request.depth` as a floor -- this is
     # the ceiling half, filtering what this classification is allowed to see
     # down to that same rung. Deliberately a *view*, not a mutation of
-    # `pair.old`/`pair.new` themselves (see `project_snapshot_to_depth`'s own
-    # docstring) -- `pair` may still be read elsewhere for its unprojected
-    # snapshots. A no-op when `request.depth` is `None` (the overwhelming
-    # majority of calls), matching `enforce_requested_depth`'s identical gate.
-    old = project_snapshot_to_depth(pair.old, request.depth)
-    new = project_snapshot_to_depth(pair.new, request.depth)
+    # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
+    # `pair` may still be read elsewhere for its unprojected snapshots.
+    old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
     suppression, pf = service.load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
