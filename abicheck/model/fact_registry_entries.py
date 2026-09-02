@@ -685,5 +685,107 @@ FACT_REGISTRY = FactRegistry(
                 "LC_RPATH commands'. Plain case (b) conversion."
             ),
         ),
+        _E(
+            owner="TypeField",
+            field="is_const",
+            value_type="bool",
+            producing_backends=("castxml", "clang", "dwarf"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Whether the member is const-qualified. Case (a): guarded by "
+                "AbiSnapshot.header_cv_facts_reliable, whose False marks a "
+                "pre-fix castxml snapshot's blanket False values as "
+                "placeholders rather than facts -- the plain bool cannot "
+                "distinguish those from a genuinely unqualified member. "
+                "DWARF resolves it from the member's own const/volatile "
+                "type DIE."
+            ),
+        ),
+        _E(
+            owner="TypeField",
+            field="is_volatile",
+            value_type="bool",
+            producing_backends=("castxml", "clang", "dwarf"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Whether the member is volatile-qualified. Case (a): guarded by "
+                "AbiSnapshot.header_cv_facts_reliable, whose False marks a "
+                "pre-fix castxml snapshot's blanket False values as "
+                "placeholders rather than facts -- the plain bool cannot "
+                "distinguish those from a genuinely unqualified member. "
+                "DWARF resolves it from the member's own const/volatile "
+                "type DIE."
+            ),
+        ),
+        _E(
+            owner="TypeField",
+            field="is_mutable",
+            value_type="bool",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Whether the member is declared `mutable`. Case (a): guarded "
+                "by AbiSnapshot.header_cv_facts_reliable, whose False "
+                "marks a pre-fix castxml snapshot's blanket False values "
+                "as placeholders rather than facts. DWARF has no DW_AT for "
+                "`mutable` at all and states Fact.unsupported() explicitly "
+                "(dwarf_snapshot.py), so it is not a producer here."
+            ),
+        ),
+        _E(
+            owner="TypeField",
+            field="default",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Default member initializer expression, verbatim. Case (a) "
+                "even though the field is already `str | None`: None is a "
+                'real value here ("this member has no initializer"), so '
+                "availability is carried by AbiSnapshot.clang_field_"
+                "initializer_facts_reliable, whose False marks a pre-v20 "
+                "clang snapshot's blanket None as a placeholder."
+            ),
+        ),
+        _E(
+            owner="TypeField",
+            field="deprecated",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "[[deprecated]] message string. Case (a) for the same "
+                'reason as `default` above -- None means "not '
+                'deprecated" as well as "not captured" -- guarded by '
+                "AbiSnapshot.clang_deprecation_facts_reliable, the flag "
+                "that also covers every other surface kind's own "
+                "`deprecated` field."
+            ),
+        ),
     ]
 )

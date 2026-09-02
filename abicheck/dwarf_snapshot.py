@@ -1417,6 +1417,20 @@ class _DwarfSnapshotBuilder:
                 is_const=is_const,
                 is_volatile=is_volatile,
                 access=access,
+                # ADR-063 Phase 5 (eighth batch): DWARF resolves const/
+                # volatile from the member's own type DIE (above), but has
+                # no representation for `mutable` at all -- there is no
+                # DW_AT for it -- so this is a permanent producer
+                # limitation, not evidence that the member isn't mutable.
+                # Same shape as this module's is_va_list_fact=Fact.
+                # unsupported() below. `default` (a default member
+                # initializer) and `deprecated` are the same permanent
+                # limitation: neither survives into DWARF at all, so a
+                # blanket None here is a producer limitation, not a
+                # confirmed "no initializer"/"not deprecated".
+                is_mutable_fact=Fact.unsupported(),
+                default_fact=Fact.unsupported(),
+                deprecated_fact=Fact.unsupported(),
             )
         ]
 

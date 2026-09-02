@@ -547,8 +547,45 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("TypeField", "is_bitfield", _FULL, _FULL),
     FactRow("TypeField", "bitfield_bits", _FULL, _FULL),
     FactRow("TypeField", "is_const", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "is_const_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (eighth batch): Fact[bool] sibling of is_const, "
+            "and the phase's first case-(a) conversion. NONE for both "
+            "backends because neither names the keyword: each passes the "
+            "real is_const value and TypeField.__post_init__'s generic "
+            "bridge derives Fact.present(...) from it -- the same honest "
+            "reading this matrix already records for RecordType's own "
+            "bridge-derived case-(b) siblings. Availability for this field "
+            "is carried by AbiSnapshot.header_cv_facts_reliable, not by "
+            "either backend's own construction."
+        ),
+    ),
     FactRow("TypeField", "is_volatile", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "is_volatile_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_const_fact -- see that row's own note.",
+    ),
     FactRow("TypeField", "is_mutable", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "is_mutable_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as is_const_fact -- see that row's own note. DWARF "
+            "(outside this matrix's own header-AST scope) states Fact."
+            "unsupported() explicitly here: it has no DW_AT for `mutable` "
+            "at all, so its blanket False is a producer limitation, not a "
+            "determined fact."
+        ),
+    ),
     FactRow("TypeField", "access", _FULL, _FULL),
     FactRow(
         "TypeField",
@@ -566,11 +603,36 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "TypeField",
+        "default_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (eighth batch): Fact[str | None] sibling of "
+            "default. NONE for both backends for the same reason as "
+            "is_const_fact -- each passes the real value and TypeField."
+            "__post_init__'s bridge derives the Fact. Availability is "
+            "carried by AbiSnapshot.clang_field_initializer_facts_"
+            "reliable."
+        ),
+    ),
+    FactRow(
+        "TypeField",
         "deprecated",
         _FULL,
         _FULL,
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "TypeField",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as default_fact -- see that row's own note; "
+            "guarded by AbiSnapshot.clang_deprecation_facts_reliable "
+            "instead."
+        ),
     ),
     # ── RecordType ─────────────────────────────────────────────────────────
     FactRow("RecordType", "name", _FULL, _FULL),

@@ -67,6 +67,7 @@ from .storage.fact_codec import (
     apply_legacy_fact_backfill,
     decode_enum_facts,
     decode_fact,
+    decode_field_facts,
     decode_function_facts,
     decode_record_facts,
     decode_snapshot_facts,
@@ -341,7 +342,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 37  # v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 38  # v38: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -669,6 +670,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     access=AccessLevel(f.get("access", "public")),
                     default=f.get("default"),
                     deprecated=f.get("deprecated"),
+                    **decode_field_facts(f, _schema_version),
                 )
                 for f in t.get("fields", [])
             ],
@@ -991,7 +993,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
         )
 
-    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
+    # ADR-063 Phase 0 (schema v26) and Phase 5's own case-(a) batches: see
+    # storage/fact_codec.py. One call, not one per converted field -- every
+    # rule it applies is "a document predating this field's own Fact[T]
+    # conversion carries a value its snapshot-level reliability flag says
+    # cannot be trusted", and every such flag is resolved by the time we get
+    # here.
     apply_legacy_fact_backfill(
         d,
         types,
@@ -1000,6 +1007,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_vtable_facts_reliable_value,
         clang_va_list_facts_reliable_value,
         ast_producer_value,
+        header_cv_facts_reliable_value=header_cv_facts_reliable_value,
+        clang_field_initializer_facts_reliable_value=clang_field_initializer_facts_reliable_value,
+        clang_deprecation_facts_reliable_value=clang_deprecation_facts_reliable_value,
     )
 
     if "castxml_var_access_facts_reliable" in d:

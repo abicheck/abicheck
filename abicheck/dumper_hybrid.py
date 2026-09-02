@@ -604,7 +604,13 @@ def _merge_field(
         and clang_f.offset_bits is not None
     ):
         updates["offset_bits"] = clang_f.offset_bits
-    return replace(f, **updates) if updates else f
+    # replace_with_fact_sync, not a bare dataclasses.replace: since ADR-063
+    # Phase 5's eighth batch both backfilled attrs above ("default",
+    # "deprecated") carry a Fact[...] sibling, and a plain replace() would
+    # hand __post_init__ the *stale* sibling alongside the new legacy value
+    # -- which that bridge resolves in favour of the sibling, silently
+    # reverting the merge (model/fact.py's own documented trap).
+    return replace_with_fact_sync(f, **updates) if updates else f
 
 
 def _merge_record_type(

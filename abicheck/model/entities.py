@@ -35,6 +35,23 @@ _OMITTED_VIRTUAL_BASES: list[str] = cast("list[str]", _Omitted())
 _OMITTED_VTABLE: list[str] = cast("list[str]", _Omitted())
 _OMITTED_VPTR_OFFSET_BITS: int | None = cast("int | None", _Omitted())
 
+# ADR-063 Phase 5 (eighth batch): TypeField's own case-(a) CV facts. `bool`
+# has only two instances, so a bare False cannot double as an omission
+# marker the way an empty list can — same shape as Param._OMITTED_IS_VA_LIST
+# (model/declarations.py), and the same cast() so the declared field type
+# never widens to `bool | None`.
+_OMITTED_IS_CONST: bool = cast("bool", _Omitted())
+_OMITTED_IS_VOLATILE: bool = cast("bool", _Omitted())
+_OMITTED_IS_MUTABLE: bool = cast("bool", _Omitted())
+# TypeField's other two case-(a) fields. Unlike every case-(b) field on
+# RecordType/EnumType/Variable/Function, `None` here is a real, meaningful
+# value ("this member has no default initializer" / "this member is not
+# deprecated"), so it cannot double as the omission marker either -- the
+# availability signal is AbiSnapshot.clang_field_initializer_facts_reliable
+# / clang_deprecation_facts_reliable, not the value.
+_OMITTED_FIELD_DEFAULT: str | None = cast("str | None", _Omitted())
+_OMITTED_FIELD_DEPRECATED: str | None = cast("str | None", _Omitted())
+
 
 @dataclass
 class TypeField:
@@ -43,9 +60,17 @@ class TypeField:
     offset_bits: int | None = None
     is_bitfield: bool = False
     bitfield_bits: int | None = None
-    is_const: bool = False
-    is_volatile: bool = False
-    is_mutable: bool = False
+    # ADR-063 Phase 5 (eighth batch): the three CV facts default to a private
+    # omission sentinel (identity-compared in __post_init__), not a plain
+    # False — an omitted field and an explicitly-confirmed-false one must
+    # backfill their *_fact sibling differently (not_collected() vs.
+    # present(False)). These are case-(a) fields: their availability is
+    # carried by AbiSnapshot.header_cv_facts_reliable, not by their own
+    # value, which is exactly why a bare False cannot answer "did anyone
+    # look?" See is_const_fact/is_volatile_fact/is_mutable_fact below.
+    is_const: bool = _OMITTED_IS_CONST
+    is_volatile: bool = _OMITTED_IS_VOLATILE
+    is_mutable: bool = _OMITTED_IS_MUTABLE
     access: AccessLevel = AccessLevel.PUBLIC
     # Default member initializer expression, verbatim (value not evaluated).
     # None = no initializer, or the dumper does not capture this (older
@@ -55,9 +80,37 @@ class TypeField:
     # so the detector gates on header-tier confirmation at the *snapshot*
     # level (mirroring Param.default/param_defaults) rather than skipping
     # per-pair on either side being None.
-    default: str | None = None
+    default: str | None = _OMITTED_FIELD_DEFAULT
     # See Function.deprecated for the message-string convention.
-    deprecated: str | None = None
+    deprecated: str | None = _OMITTED_FIELD_DEPRECATED
+    # ADR-063 Phase 5 (eighth batch): Fact[bool] siblings for the three CV
+    # facts above — a detector reads these, never the plain fields, once it
+    # needs to tell "this producer never determined CV qualification"
+    # (a DWARF/PDB record, or a pre-fix castxml snapshot whose blanket False
+    # AbiSnapshot.header_cv_facts_reliable already marks untrustworthy) apart
+    # from a genuinely non-const field.
+    is_const_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    is_volatile_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    is_mutable_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    default_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        self.is_const, self.is_const_fact = bridge_legacy_and_fact(
+            self.is_const, self.is_const_fact, _OMITTED_IS_CONST, False
+        )
+        self.is_volatile, self.is_volatile_fact = bridge_legacy_and_fact(
+            self.is_volatile, self.is_volatile_fact, _OMITTED_IS_VOLATILE, False
+        )
+        self.is_mutable, self.is_mutable_fact = bridge_legacy_and_fact(
+            self.is_mutable, self.is_mutable_fact, _OMITTED_IS_MUTABLE, False
+        )
+        self.default, self.default_fact = bridge_legacy_and_fact(
+            self.default, self.default_fact, _OMITTED_FIELD_DEFAULT, None
+        )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_FIELD_DEPRECATED, None
+        )
 
 
 @dataclass
