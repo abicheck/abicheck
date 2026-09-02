@@ -164,6 +164,38 @@ class TestImportLegacySnapshot:
         # already applies before hashing/comparing it.
         assert canonical_form(rebuilt) == canonical_form(doc)
 
+    @pytest.mark.parametrize("malformed", [0, -1, -38])
+    def test_export_refuses_an_unstated_source_schema_version(
+        self, malformed: int
+    ) -> None:
+        """`StorageVersions.source_schema_version` normalizes a missing or
+        malformed `manifest.json` value to `0`, its own 'unstated' sentinel
+        -- `export_legacy_snapshot` must not inject that sentinel as a real
+        legacy `schema_version` (it would silently change which reliability
+        backfills `serialization.snapshot_from_dict` applies), so it must
+        refuse a non-positive value outright rather than writing it into the
+        rebuilt document (Codex review)."""
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        with pytest.raises(ValueError, match="positive"):
+            export_legacy_snapshot(
+                manifest.artifact_refs[0],
+                store=store,
+                source_schema_version=malformed,
+            )
+
+    def test_export_refuses_a_non_int_source_schema_version(self) -> None:
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        with pytest.raises(ValueError, match="must be an int"):
+            export_legacy_snapshot(
+                manifest.artifact_refs[0],
+                store=store,
+                source_schema_version="3",  # type: ignore[arg-type]
+            )
+
     def test_artifact_kind_defaults_to_elf_when_the_document_states_no_platform(
         self,
     ) -> None:

@@ -169,7 +169,7 @@ def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
 
     try:
         document = read_legacy_snapshot_document(path)
-    except (SnapshotError, OSError, KeyError, ValueError) as exc:
+    except (SnapshotError, OSError, KeyError, ValueError, TypeError) as exc:
         raise SnapshotError(
             f"Failed to load ProjectSnapshot package '{path}': {exc}"
         ) from exc

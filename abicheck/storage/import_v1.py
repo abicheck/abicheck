@@ -302,10 +302,32 @@ def export_legacy_snapshot(
 
     Raises `ValueError` if *artifact* names a section kind this module does
     not recognize (`legacy_section_from_dto`/`join_legacy_document` refuse
-    it), or if the store cannot produce a section's referenced object
+    it), if the store cannot produce a section's referenced object
     (surfaces as whatever `store.get()` itself raises — `KeyError`/
-    `ValueError` for `DirectoryObjectStore`).
+    `ValueError` for `DirectoryObjectStore`), or if *source_schema_version*
+    is not a positive int -- `StorageVersions.source_schema_version`
+    normalizes a missing or malformed `manifest.json` value to `0`, its own
+    "unstated" sentinel (the same convention `import_legacy_snapshot`'s own
+    schema_version validation documents); injecting that sentinel as if it
+    were a real legacy `schema_version` would silently change which
+    reliability backfills `serialization.snapshot_from_dict` applies (Codex
+    review) rather than failing loudly on the corrupted/hand-edited manifest
+    that produced it.
     """
+    if not isinstance(source_schema_version, int) or isinstance(
+        source_schema_version, bool
+    ):
+        raise ValueError(
+            "source_schema_version must be an int, not "
+            f"{type(source_schema_version).__name__} ({source_schema_version!r})"
+        )
+    if source_schema_version <= 0:
+        raise ValueError(
+            "source_schema_version must be a positive int, got "
+            f"{source_schema_version!r} -- 0 is StorageVersions' own "
+            "'unstated' sentinel, not a value this function may inject as a "
+            "real legacy schema_version"
+        )
     legacy_sections: dict[str, dict[str, Any]] = {}
     document: dict[str, Any] = {}
     for section_kind, ref in artifact.sections.items():

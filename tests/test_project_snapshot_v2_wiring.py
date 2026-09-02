@@ -72,6 +72,29 @@ class TestProjectSnapshotLegacyRoundTrip:
         with pytest.raises(SnapshotError):
             resolve_input(root)
 
+    def test_resolve_input_translates_a_malformed_artifact_ref_type_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A wrong-container-type field (`"sections": []` instead of a
+        mapping) makes `ArtifactRef.from_dict` raise `TypeError` --
+        `resolve_input`'s directory branch must translate that into its
+        documented `SnapshotError`, the same way every other malformed-
+        package case already is, rather than leaking a raw `TypeError` to a
+        typed-API caller (Codex review)."""
+        import json
+
+        from abicheck.storage.package import artifact_ref_relpath
+        from abicheck.workflows.input_resolution import resolve_input
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        root = _write_package(tmp_path, snap)
+        art_path = root / artifact_ref_relpath("libfoo.so.1")
+        art = json.loads(art_path.read_text(encoding="utf-8"))
+        art["sections"] = []
+        art_path.write_text(json.dumps(art), encoding="utf-8")
+        with pytest.raises(SnapshotError):
+            resolve_input(root)
+
     def test_read_legacy_snapshot_document_rejects_a_stale_variant_ref(
         self, tmp_path: Path
     ) -> None:
