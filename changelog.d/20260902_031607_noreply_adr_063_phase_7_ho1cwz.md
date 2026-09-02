@@ -18,3 +18,26 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   falling back to decoding the legacy `exit_code`/`severity` only for a
   report that predates this change. Report schema bumped to 2.48
   (`compare`/release) and 1.24 (`scan`).
+
+### Fixed
+
+- **`compare --used-by`/`--required-symbol`'s JSON `run_outcome` now
+  reflects the scoped gate, not the full-library one.** `run_outcome` is
+  computed before scoping runs, so a scoped-compatible run whose full
+  library carries an unrelated real break previously left a stale,
+  blocking `run_outcome.gate` in the JSON body — and since the reader
+  above prefers `run_outcome` over `severity`, an aggregate consuming that
+  report could fail on a target whose actual, scoped process exit passed.
+  The scoped gate now replaces `run_outcome` the same way it already
+  replaces `verdict`/`severity`; the full-library value moves to
+  `full_run_outcome`.
+- **`scan`'s legacy-scheme `run_outcome.gate` no longer counts a
+  coverage-only failure as a compatibility break.** ADR-049 Phase 7's
+  contract-coverage axis folds a `1` onto an otherwise-compatible `0` via
+  `max()` on the *same* top-level `exit_code` `run_outcome` was reading —
+  under the legacy scan scheme (whose own native codes are 0/2/4/5/6) a
+  bare `1` is always that orthogonal contribution, never a real
+  `ADDITION_QUALITY`-level compatibility gate. The writer now reads the
+  report's own declared `contract_coverage_exit_contribution` (as
+  `GateInfo.from_scan_report`'s raw-code fallback already does) and emits
+  `gate: none` when confirmed, fail-closed to the prior behavior otherwise.

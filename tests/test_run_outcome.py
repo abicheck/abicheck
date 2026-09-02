@@ -155,6 +155,45 @@ class TestRunOutcomeForScanFields:
         outcome = run_outcome_for_scan_fields("COMPATIBLE", 1, severity_exit_code=2)
         assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
 
+    def test_legacy_scheme_coverage_only_exit_1_is_not_a_compatibility_gate(self):
+        """Codex review (P1): under the legacy scan scheme (no
+        severity_exit_code), a raw top-level exit_code of 1 is ambiguous --
+        legacy scan's own native codes are 0/2/4/5/6, so a bare 1 can only be
+        ADR-049 Phase 7's orthogonal contract-coverage contribution folded
+        onto an otherwise-compatible 0. Confirmed via the report's own
+        declared contribution, the gate must read NONE, not
+        ADDITION_QUALITY -- mirroring GateInfo.from_scan_report's own
+        identical raw-code special case (COVERAGE_INCOMPLETE_EXIT branch)."""
+        outcome = run_outcome_for_scan_fields(
+            "COMPATIBLE", 1, contract_coverage_contribution=1,
+        )
+        assert outcome.gate is PolicyGateDecision.NONE
+        assert outcome.operational is OperationalStatus.NONE
+
+    def test_legacy_scheme_exit_1_without_declared_coverage_stays_blocking(self):
+        """Fail-closed counterpart: an undeclared/unconfirmed contribution
+        must not be assumed to be coverage-only -- the gate stays whatever
+        the raw code says, exactly like the reader this mirrors."""
+        outcome = run_outcome_for_scan_fields("COMPATIBLE", 1)
+        assert outcome.gate is PolicyGateDecision.ADDITION_QUALITY
+
+    def test_legacy_scheme_real_break_unaffected_by_coverage_contribution(self):
+        # A genuine break (2/4) must never be zeroed by an orthogonal
+        # coverage contribution riding along on the same folded exit code.
+        outcome = run_outcome_for_scan_fields(
+            "API_BREAK", 2, contract_coverage_contribution=1,
+        )
+        assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
+
+    def test_severity_scheme_ignores_coverage_contribution_entirely(self):
+        # Under the severity scheme, the nested severity_exit_code is
+        # already compatibility-only -- the coverage-only special case must
+        # never fire there (it isn't ambiguous in the first place).
+        outcome = run_outcome_for_scan_fields(
+            "COMPATIBLE", 1, severity_exit_code=1, contract_coverage_contribution=1,
+        )
+        assert outcome.gate is PolicyGateDecision.ADDITION_QUALITY
+
 
 # ---------------------------------------------------------------------------
 # GateInfo structured-first reading (workflows/aggregate/gate.py)
@@ -510,6 +549,34 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = result.to_dict()
         assert report["run_outcome"]["operational"] == "budget_overflow"
         self._assert_structured_path_taken(report)
+
+    def test_scan_outcome_coverage_only_exit_1_reads_gate_none_end_to_end(self):
+        """Codex review (P1), end-to-end through the real writer: a legacy-
+        scheme scan whose own compatibility is clean but whose contract
+        coverage is incomplete folds to a top-level exit_code of 1
+        (cli_scan_baseline's own max() fold) -- the writer must read its own
+        diff_summary's declared contract_coverage_exit_contribution and emit
+        gate: none, not addition_quality, matching GateInfo.from_scan_
+        report's identical raw-code special case."""
+        from abicheck.buildsource.risk import RiskScore
+        from abicheck.scan_engine import ScanOutcome
+
+        outcome = ScanOutcome(
+            mode="ci",
+            resolved_method="s3",
+            depth="headers",
+            collect_mode="target",
+            risk=RiskScore(total=0),
+            auto=False,
+            changed_path_count=0,
+            changed_path_source="none",
+            verdict="COMPATIBLE",
+            exit_code=1,
+            diff_summary={"contract_coverage_exit_contribution": 1},
+        )
+        report = outcome.to_dict()
+        assert report["run_outcome"]["gate"] == "none"
+        assert report["run_outcome"]["operational"] == "none"
 
 
 # ---------------------------------------------------------------------------

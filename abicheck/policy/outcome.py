@@ -324,11 +324,23 @@ _SCAN_EXIT_CODE_OPERATIONAL: dict[int, OperationalStatus] = {
 }
 
 
+def _is_valid_coverage_contribution(raw: object) -> bool:
+    """Whether *raw* is a usable ``0``/``1`` contract-coverage contribution.
+
+    Mirrors ``workflows.aggregate.gate._is_valid_contribution``'s own
+    bool-before-int check exactly (``True == 1`` in Python, so the ``bool``
+    exclusion has to come first) -- duplicated here rather than imported
+    since that module may depend on this leaf, never the reverse.
+    """
+    return not isinstance(raw, bool) and isinstance(raw, int) and raw in (0, 1)
+
+
 def run_outcome_for_scan_fields(
     verdict: str,
     exit_code: int,
     *,
     severity_exit_code: int | None = None,
+    contract_coverage_contribution: object = None,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
@@ -343,6 +355,24 @@ def run_outcome_for_scan_fields(
     the orthogonal contract-coverage/analysis-assurance contributions
     (mirrors ``workflows.aggregate.gate._scan_severity_gate``'s own
     preference for the identical nested block).
+
+    *contract_coverage_contribution*, when given, is the report's own
+    declared ADR-049 Phase 7 contract-coverage exit contribution (``0``/
+    ``1``, schema field ``contract_coverage_exit_contribution``). Under the
+    *legacy* scan scheme (no *severity_exit_code*), a raw top-level
+    ``exit_code`` of ``1`` is ambiguous on its own -- legacy scan's own
+    native codes are 0/2/4/5/6, so a bare ``1`` can only be this orthogonal
+    axis folded onto an otherwise-compatible ``0`` by ``max()``, never a
+    real compatibility contribution (Codex review: without this, a scan
+    that only failed contract coverage was recorded as an
+    ``ADDITION_QUALITY``-level compatibility gate here, and
+    ``GateInfo.from_scan_report``'s own structured-first read -- which
+    trusts this field over re-deriving it -- then treated the target as a
+    compatibility blocker, bypassing its raw-code fallback's identical,
+    already-correct special case). Confirmed via the report's own declared
+    contribution, never guessed: an unconfirmed ``1`` stays a
+    compatibility-gate contribution, fail-closed, exactly like the reader
+    this mirrors (``workflows.aggregate.gate._contract_coverage_exit``).
     """
     operational = _SCAN_ABORT_VERDICT_OPERATIONAL.get(verdict, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE:
@@ -357,6 +387,13 @@ def run_outcome_for_scan_fields(
     compat_exit_code = (
         severity_exit_code if severity_exit_code is not None else exit_code
     )
+    if (
+        severity_exit_code is None
+        and compat_exit_code == 1
+        and _is_valid_coverage_contribution(contract_coverage_contribution)
+        and contract_coverage_contribution == 1
+    ):
+        compat_exit_code = 0
     if compat_exit_code not in _GATE_EXIT_CODE.values():
         # An operational-only code (5/6, or anything else this scheme
         # doesn't natively produce) -- the compatibility axis itself
@@ -396,6 +433,24 @@ def scan_report_severity_exit_code(report: object) -> int | None:
     )
 
 
+def scan_report_coverage_contribution(report: object) -> object:
+    """A scan report dict's own nested ``diff.contract_coverage_exit_
+    contribution`` (ADR-049 Phase 7's raw ``0``/``1`` axis value), or
+    ``None`` when absent -- the identical ``report.get("diff")`` traversal
+    :func:`scan_report_severity_exit_code` uses, for the sibling field.
+    Returned unvalidated (``object``, not ``int | None``):
+    :func:`run_outcome_for_scan_fields` validates it itself via
+    :func:`_is_valid_coverage_contribution`, the same fail-closed check
+    ``workflows.aggregate.gate._contract_coverage_exit`` applies on read.
+    """
+    diff = report.get("diff") if isinstance(report, dict) else None
+    return (
+        diff.get("contract_coverage_exit_contribution")
+        if isinstance(diff, dict)
+        else None
+    )
+
+
 def run_outcome_dict_for_scan_outcome(
     verdict: str, exit_code: int, diff_summary: object
 ) -> dict[str, Any]:
@@ -411,8 +466,16 @@ def run_outcome_dict_for_scan_outcome(
         if isinstance(severity, dict) and isinstance(severity.get("exit_code"), int)
         else None
     )
+    coverage_contribution = (
+        diff_summary.get("contract_coverage_exit_contribution")
+        if isinstance(diff_summary, dict)
+        else None
+    )
     return run_outcome_for_scan_fields(
-        verdict, exit_code, severity_exit_code=severity_exit_code
+        verdict,
+        exit_code,
+        severity_exit_code=severity_exit_code,
+        contract_coverage_contribution=coverage_contribution,
     ).to_dict()
 
 
@@ -433,6 +496,7 @@ def run_outcome_dict_for_scan(
         verdict,
         exit_code,
         severity_exit_code=scan_report_severity_exit_code(report),
+        contract_coverage_contribution=scan_report_coverage_contribution(report),
         lifecycle=lifecycle,
     ).to_dict()
 

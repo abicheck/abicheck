@@ -1355,6 +1355,51 @@ class TestUsedByScoping:
         result = _invoke("compare", str(old), str(new), "--used-by", str(app))
         assert result.exit_code == 2
 
+    def test_json_run_outcome_reflects_scoped_gate_not_full_library(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """ADR-063 Phase 7 regression (Codex review, P1): the full-library
+        compare below removes `foo` (a real, unrelated ABI break), but the
+        app-scoped gate is stubbed compatible -- the app never actually
+        called `foo`. `run_outcome` must describe the *scoped* gate (the one
+        the process exit code actually reflects), not the stale full-library
+        one `report_run_outcome.run_outcome_dict_for_diff_result` computed
+        before scoping ran; the full-library value moves to
+        `full_run_outcome`, mirroring the existing `verdict`/`full_verdict`
+        and `severity`/`full_severity` swap."""
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        # NEW drops `foo` entirely -- a real, unscoped ABI break.
+        monkeypatch.setattr(
+            dumper_mod,
+            "dump",
+            MagicMock(side_effect=[_snap("1.0"), _snap("2.0", funcs=[])]),
+        )
+        # The app itself never used `foo` -- scoped gate stays compatible.
+        res = self._result(verdict=Verdict.COMPATIBLE)
+        self._patch_scope(monkeypatch, res)
+
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+
+        assert "run_outcome" in data
+        assert "full_run_outcome" in data
+        assert data["full_run_outcome"]["gate"] == "abi_breaking"
+        assert data["run_outcome"]["gate"] == "none"
+        assert data["run_outcome"]["compatibility"] == "COMPATIBLE"
+
     def test_full_mode_output_to_file(self, tmp_path, monkeypatch) -> None:
         res = self._result()
         app, old, new = self._setup(tmp_path, monkeypatch)
