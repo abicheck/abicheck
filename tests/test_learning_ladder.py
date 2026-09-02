@@ -575,6 +575,45 @@ def test_sibling_branches_out_of_ladder_order_is_an_error(tmp_path: Path) -> Non
     assert any("go-deeper pages are not in ladder order" in m for m in msgs)
 
 
+def test_branch_between_later_members_is_an_error(tmp_path: Path) -> None:
+    """After its parent but before a later member is a position the ladder
+    has no reading for: neither the parent's own tail nor the step's
+    trailing go-deeper block."""
+    ladder_text = BASE_LADDER.replace(
+        "          - learn/d.md\n", "          - learn/d.md\n          - learn/e.md\n"
+    )
+    levels = {**LEVELS, "learn/e.md": "advanced"}
+    docs, ladder = _build(tmp_path, ladder_text=ladder_text, levels=levels)
+    nav = NAV_OK.replace(
+        "      - D: learn/d.md\n      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
+        "      - D: learn/d.md\n      - CB: learn/c-branch.md\n      - E: learn/e.md\n",
+    )
+    (docs.parent / "mkdocs.yml").write_text(nav, encoding="utf-8")
+    msgs = _run(docs, ladder)
+    assert any("learn/c-branch.md sits between later members" in m for m in msgs)
+    trailing = NAV_OK.replace(
+        "      - D: learn/d.md\n", "      - D: learn/d.md\n      - E: learn/e.md\n"
+    )
+    (docs.parent / "mkdocs.yml").write_text(trailing, encoding="utf-8")
+    assert _run(docs, ladder) == []
+
+
+def test_hub_must_sit_directly_under_the_first_sequences_tab(
+    tmp_path: Path,
+) -> None:
+    moved = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
+        "  - Concepts:\n", "  - Concepts:\n    - Overview: learn/hub.md\n"
+    )
+    msgs = _run_with_nav(tmp_path, moved)
+    assert any("Learn: the hub learn/hub.md must sit directly under" in m for m in msgs)
+    assert any("Concepts / Concepts: the hub" in m for m in msgs)
+    inside = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
+        '    - "0. Start":\n', '    - "0. Start":\n      - Overview: learn/hub.md\n'
+    )
+    msgs = _run_with_nav(tmp_path, inside)
+    assert any("Learn / 0. Start: the hub" in m for m in msgs)
+
+
 def test_branch_right_after_its_parent_is_also_accepted(tmp_path: Path) -> None:
     """The branch may follow its parent directly instead of closing the step."""
     nav = NAV_OK.replace(

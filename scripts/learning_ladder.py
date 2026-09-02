@@ -48,8 +48,10 @@ Rules the file encodes (each is an ERROR):
   carries one nav group per step — titled `<id>. <title>`, in step order,
   holding exactly that step's members in ladder order, each branch
   somewhere after its parent and branches in ladder order among
-  themselves — or lists the whole sequence flat in the same order (the
-  Concepts tab). The hub may sit directly under its tab.
+  themselves, each branch either directly after its parent or in the
+  trailing go-deeper block — or lists the whole sequence flat in the same
+  order (the Concepts tab). The hub sits directly under the first
+  sequence's tab, as its overview, and nowhere else.
   This is what keeps the sidebar, the hub's step list, and every page's
   footer telling one reading order instead of three.
 
@@ -433,6 +435,25 @@ def _order_findings(
             f"{label}: go-deeper pages are not in ladder order (expected "
             f"{' → '.join(placed_branches)})"
         )
+    # A branch sits in one of two places the hub also renders: directly
+    # after the page it hangs from (with only that page's other branches in
+    # between) or in the trailing "go deeper" block after the step's last
+    # member. Anywhere else -- between two later members -- is a position
+    # the ladder has no reading for.
+    last_member = max((position[m] for m in placed_members), default=-1)
+    for parent, bs in branches.items():
+        if parent not in position:
+            continue
+        for branch in bs:
+            if branch not in position or position[branch] < position[parent]:
+                continue
+            between = pages[position[parent] + 1 : position[branch]]
+            if position[branch] > last_member or all(p in bs for p in between):
+                continue
+            out.append(
+                f"{label}: {branch} sits between later members; a go-deeper page "
+                f"follows {parent} directly or closes the step after its last member"
+            )
     return out
 
 
@@ -440,6 +461,22 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
     """Every way `mkdocs.yml`'s learning tabs disagree with the ladder."""
     groups = nav_groups(mkdocs_text, tabs=tuple(s.tab for s in ladder.sequences))
     out: list[str] = []
+    # The hub renders the ladder, so it belongs directly under the first
+    # sequence's tab as that tab's overview -- not inside a step, and not on
+    # another learning tab.
+    home = ladder.sequences[0].tab
+    home_key = f"{home} / {home}"
+    if ladder.hub not in groups.get(home_key, []):
+        out.append(
+            f"{home}: the hub {ladder.hub} must sit directly under this tab, "
+            "as its overview"
+        )
+    for key, pages in groups.items():
+        if key != home_key and ladder.hub in pages:
+            out.append(
+                f"{key}: the hub {ladder.hub} belongs directly under the {home} "
+                "tab, nowhere else"
+            )
     for seq in ladder.sequences:
         prefix = f"{seq.tab} / "
         flat_key = f"{seq.tab} / {seq.tab}"  # pages directly under the tab
