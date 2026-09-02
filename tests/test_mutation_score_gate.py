@@ -68,15 +68,28 @@ def test_parse_survivors_returns_none_when_unmeasurable(text: str) -> None:
 
 
 def test_mutmut_subprocess_timeout_matches_the_workflow_ceiling() -> None:
-    """The Python cap must not pre-empt the GitHub Actions job deadline."""
+    """The Python cap must stay close to, but strictly below, the GitHub
+    Actions job deadline.
+
+    Not equal to it: the job's checkout/dependency-install/parser-
+    verification steps run *before* this subprocess call and its own "Save
+    mutmut results"/"Upload mutmut results" steps run *after* -- a
+    subprocess timeout equal to the full job budget leaves no room for any
+    of that, so GitHub kills the whole job mid-subprocess before those
+    steps can produce a receipt or upload anything (Codex review). Not too
+    far below it either, or the cap wastes job budget the run could have
+    used.
+    """
     workflow = (
         Path(__file__).resolve().parent.parent
         / ".github"
         / "workflows"
         / "mutation.yml"
     ).read_text(encoding="utf-8")
-    assert "timeout-minutes: 240" in workflow
-    assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 240 * 60
+    assert "timeout-minutes: 355" in workflow
+    job_timeout_seconds = 355 * 60
+    headroom_seconds = job_timeout_seconds - gate.MUTMUT_RUN_TIMEOUT_SECONDS
+    assert 5 * 60 <= headroom_seconds <= 15 * 60
 
 
 def test_stats_without_a_survivor_count_are_not_a_completion_witness(
