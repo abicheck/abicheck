@@ -2,6 +2,15 @@
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
+**Related rule:** same `symbol-version-node-removed` rule as
+[case65_symbol_version_removed](../case65_symbol_version_removed/README.md)
+(the canonical case for this rule) — this variant adds the "symbol name
+persists, folded into a different node" nuance. Kept distinct from
+[case183_internal_version_node_churn](../case183_internal_version_node_churn/README.md),
+whose private/internal-node naming convention changes the verdict to
+`COMPATIBLE_WITH_RISK`, not just the demo. See `examples/CLAUDE.md`'s
+"Taxonomy" section.
+
 ## Verdict and consumer impact
 
 Any downstream binary that links against `beta` records a dependency on

@@ -343,9 +343,16 @@
     "severity": {
       "$ref": "#/$defs/severity"
     },
+    "run_outcome": {
+      "$ref": "#/$defs/run_outcome"
+    },
     "full_severity": {
       "description": "Schema 2.9. The full-library severity gate result, present alongside severity only for a scoped (--used-by/--required-symbol(s)) compare whose gating result was recomputed for the scoped changes array -- mirrors the verdict/full_verdict split.",
       "$ref": "#/$defs/severity"
+    },
+    "full_run_outcome": {
+      "description": "ADR-063 Phase 7. The full-library run_outcome, present alongside run_outcome only for a scoped (--used-by/--required-symbol(s)) compare whose run_outcome was recomputed for the scoped changes array -- mirrors the verdict/full_verdict and severity/full_severity splits.",
+      "$ref": "#/$defs/run_outcome"
     },
     "changes": {
       "type": "array",
@@ -1455,6 +1462,71 @@
               "addition"
             ]
           }
+        }
+      }
+    },
+    "run_outcome": {
+      "type": "object",
+      "description": "ADR-063 Phase 7: the report's independent-axis outcome (policy.outcome.RunOutcome), additive alongside the unchanged verdict/exit_code/severity fields. compatibility/assurance are null for a report that never ran a real comparison (a bootstrap/new-target/operational-error synthetic report).",
+      "required": [
+        "schema_version",
+        "compatibility",
+        "assurance",
+        "gate",
+        "operational",
+        "lifecycle"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "compatibility": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING",
+            null
+          ]
+        },
+        "assurance": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "gate": {
+          "type": "string",
+          "enum": [
+            "none",
+            "addition_quality",
+            "potential_breaking",
+            "abi_breaking"
+          ]
+        },
+        "operational": {
+          "type": "string",
+          "enum": [
+            "none",
+            "budget_overflow",
+            "not_comparable",
+            "evidence_contract_error",
+            "extraction_error"
+          ]
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "existing",
+            "bootstrap",
+            "new_target"
+          ]
         }
       }
     },

@@ -47,6 +47,7 @@ from .cxx20_pair_dialect import (
 )
 from .errors import PlanningError, ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
+from .policy.outcome import run_outcome_dict_for_scan
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
 
@@ -205,8 +206,8 @@ class ScanRequest:
     lang: str = "c++"
     # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
     compile: CompileContext = field(default_factory=CompileContext)
-    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be scoped/suppressed/policy-classified the
-    # same way a direct `compare` run is, instead of always using the fixed policy="strict_abi"/suppression=None/scope_to_public_surface=True the engine previously hardcoded.
+    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be
+    # scoped/suppressed/policy-classified like a direct `compare` run, instead of the engine's old fixed defaults.
     suppression: SuppressionList | None = None
     policy: str = "strict_abi"
     policy_file: PolicyFile | None = None
@@ -215,16 +216,13 @@ class ScanRequest:
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
     collapse_versioned_symbols: bool = False
-    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side among the fields the two commands must
-    # agree on -- which a `scan --against` result could not carry at all while only `compare` could ask for the
-    # shadow evaluator. Same advisory contract as `compare`: stamping a decision never changes verdict or exit code.
+    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side among the fields the two commands
+    # must agree on. Same advisory contract as `compare`: stamping a decision never changes verdict or exit code.
     contract_evaluation: bool = False
     contract_mode: str | None = None
     # ADR-056: options the single-binary CLI path (cli_scan.py) already forwards straight to run_scan_core,
-    # bypassing ScanRequest entirely. Both run_scan and run_scan_set (--artifact-set) honor these when set directly
-    # on a ScanRequest (P2 regression, Codex review: run_scan used to silently ignore them, so a direct Python API
-    # caller passing abi3_floor/enabled_checks/severities/ build_config/allow_build_query/risk_rules_path got a
-    # differently-gated result than requested).
+    # bypassing ScanRequest entirely. Both run_scan and run_scan_set (--artifact-set) honor these when set
+    # directly on a ScanRequest (P2 regression, Codex review: run_scan used to silently ignore them).
     abi3_floor: tuple[int, int] | None = None
     enabled_checks: frozenset[str] | None = None  # None = ALL_CHECKS default
     severities: dict[str, str] = field(default_factory=dict)
@@ -233,10 +231,9 @@ class ScanRequest:
     risk_rules_path: Path | None = None
     # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
-    # ADR-056: real changed-path provenance (e.g. "--since origin/main" or "--changed-path"), as computed by
-    # cli_scan._resolve_changed_seed. run_scan_set forwards this into each member's report instead of a hardcoded
-    # placeholder; unused by run_scan (which threads its own changed_src through _run_scan_one_member's caller
-    # directly).
+    # ADR-056: real changed-path provenance (e.g. "--since origin/main"), as computed by
+    # cli_scan._resolve_changed_seed. run_scan_set forwards this into each member's report instead
+    # of a hardcoded placeholder; unused by run_scan (which threads its own directly).
     changed_src: str = "run_scan_set"
     # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
     max_findings: int | None = None
@@ -823,9 +820,8 @@ class ScanResult:
             "exit_code": self.exit_code,
             "findings": len(self.findings),
             "layers": [layer.to_dict() for layer in self.layers],
-            "confidence": {k: list(v) for k, v in self.confidence.items()},
-            "estimate": [e.to_dict() for e in self.estimate],
-            "report": dict(self.report),
+            "confidence": {k: list(v) for k, v in self.confidence.items()}, "estimate": [e.to_dict() for e in self.estimate],
+            "report": dict(self.report), "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code, report=self.report),
         }
 
     @staticmethod
@@ -886,6 +882,10 @@ def _aggregate_scan_set_verdict(
        without lowering a worse one from step 2, and becomes the reported
        verdict only when step 2's worst was NO_CHANGE/COMPATIBLE/
        COMPATIBLE_WITH_RISK; a stronger API_BREAK/BREAKING keeps that string.
+    4. Any member ``NOT_COMPARABLE`` becomes the reported verdict/exit 6
+       under that same condition, outranking step 3 (Codex review:
+       previously exited 0 here, dropping the run_outcome.operational
+       signal ``to_dict()`` already emits for this case).
     """
     if any(a.result.verdict == "BUDGET_OVERFLOW" for a in per_artifact):
         return "BUDGET_OVERFLOW", 5
@@ -901,14 +901,16 @@ def _aggregate_scan_set_verdict(
             worst_rank = rank
             worst_verdict = v
     exit_code = _SCAN_SET_COMPAT_EXIT.get(worst_verdict, 0)
+    no_stronger_break = worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]
 
-    has_evidence_error = any(
-        a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact
-    )
-    if has_evidence_error:
+    if any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact):
         exit_code = max(exit_code, 1)
-        if worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]:
+        if no_stronger_break:
             worst_verdict = "EVIDENCE_CONTRACT_ERROR"
+    if no_stronger_break and any(
+        a.result.verdict == "NOT_COMPARABLE" for a in per_artifact
+    ):
+        worst_verdict, exit_code = "NOT_COMPARABLE", 6
 
     return worst_verdict, exit_code
 
@@ -933,10 +935,9 @@ class ScanSetResult:
             "verdict": self.verdict,
             "exit_code": self.exit_code,
             "per_artifact": [a.to_dict() for a in self.per_artifact],
-            # Full finding records (kind/symbol/consumer/provider/description), not just a count -- mirrors
-            # cli_compare_release_helpers.py's summary["bundle_findings"] JSON shape for the two-sided release path, so a
-            # machine consumer of either can identify and act on the condition that produced bundle_verdict, not just its
-            # count (Codex review).
+            # Full finding records, not just a count -- mirrors cli_compare_release_helpers.py's
+            # summary["bundle_findings"] shape, so a consumer of either can act on what produced
+            # bundle_verdict, not just its count (Codex review).
             "bundle_findings": [
                 {
                     "kind": f.kind.value,
@@ -952,7 +953,7 @@ class ScanSetResult:
             ],
             "bundle_finding_count": len(self.bundle_findings),
             "bundle_verdict": self.bundle_verdict,
-            "bundle_incomplete": self.bundle_incomplete,
+            "bundle_incomplete": self.bundle_incomplete, "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code, member_evidence_contract_error=any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in self.per_artifact), member_not_comparable=any(a.result.verdict == "NOT_COMPARABLE" for a in self.per_artifact), bundle_incomplete=self.bundle_incomplete, member_verdicts=[*(a.result.verdict for a in self.per_artifact), self.bundle_verdict]),
         }
 
 
@@ -1295,8 +1296,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         raise ValidationError(
             f"ScanRequest.max_findings must be positive, got {req.max_findings}"
         )
-    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls
-    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
+    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
     else:

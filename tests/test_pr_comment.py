@@ -1279,16 +1279,16 @@ def test_large_diff_condensed_note_links_report():
 
 
 def test_comment_hard_truncated_when_even_summary_overflows(monkeypatch):
-    import abicheck.pr_comment as pc
+    import abicheck.pr_comment_render as pcr
 
-    monkeypatch.setattr(pc, "_BODY_BUDGET", 220)
+    monkeypatch.setattr(pcr, "_BODY_BUDGET", 220)
     body = render_comment(
         build_model(_compare_report()), sha="x", detail="full",
         report_url="https://e/run/1",
     )
     assert "truncated to fit" in body
     assert "https://e/run/1" in body
-    assert len(body) <= pc._BODY_BUDGET
+    assert len(body) <= pcr._BODY_BUDGET
 
 
 def test_comment_stays_under_github_size_limit():

@@ -97,6 +97,9 @@ from gen_agent_skills import (  # noqa: E402
     discover_skills as _discover_generated_skills,
 )
 from learning_nav_order import check_learning_nav_order  # noqa: E402
+from no_inline_gate_computation import (  # noqa: E402
+    check_no_inline_gate_computation,
+)
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -3131,6 +3134,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "fact-detector-misuse": check_fact_detector_misuse,
     "fact-field-readers": check_fact_field_readers,
     "fact-registry-completeness": check_fact_registry_completeness,
+    "no-inline-gate-computation": check_no_inline_gate_computation,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
 }

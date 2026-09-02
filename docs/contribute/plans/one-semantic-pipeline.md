@@ -13281,6 +13281,37 @@ reference two phases back with no phase left to claim it.
 
 ### Phase 7 — `RunOutcome` and the last inline exit-code computation
 
+**Landed (2026-09-02).** `abicheck/policy/outcome.py` (new) implements
+`RunOutcome`/`PolicyGateDecision`/`OperationalStatus`/`TargetLifecycle`
+exactly per this section's corrected design below (`severity.GateDecision`
+untouched). Every writer this section's Files list names emits the new
+`run_outcome` block additively: `reporter.py`'s four JSON entry points
+(via a new leaf, `report_run_outcome.py`, threaded through
+`reporter_contract_blocks.render_json_with_side_facts`'s shared tail —
+split out purely to keep `reporter.py`/`service_scan.py` under the
+file-size hard cap, not a design change); the three `buildsource/
+check_report.py` synthetic builders; `scan_engine.ScanOutcome.to_dict()`
+and `service_scan.ScanResult.to_dict()`/`ScanSetResult.to_dict()`; and all
+three real callers of the not-comparable refusal document
+(`report/not_comparable.py`'s two functions, `cli_compare_helpers.py`'s
+JSON branch, and `cli_compare_release_pairwise.py`'s per-library refusal
+branch — this last one is the file the plan's own Files list named
+`cli_compare_release.py` for, corrected here against the real call site).
+`workflows/aggregate/gate.py` reads structured-first with legacy decode as
+the named fallback, exactly as designed; `fold.py` needed no change, as
+predicted. `buildsource/check_report.py`'s `_neutralize_gate()`/
+`_escalate_removed_library_severity()` both gained the identical
+`run_outcome.gate` treatment described below. Report schema bumped to
+2.48 (`compare`/release)/1.24 (`scan`); the package schema gained the
+`run_outcome` definition, republished to the docs mirror via
+`scripts/publish_schemas.py`. The `no-inline-gate-computation` AI-readiness
+check landed as `scripts/no_inline_gate_computation.py` (WARN), scoped per
+this section's own Acceptance Criteria text (does not flag `fold.py`'s
+`GateInfo.exit_code` aggregation). All of this section's own Tests are
+implemented in `tests/test_run_outcome.py`/`tests/test_no_inline_gate_
+computation.py`. `action/run.sh` is untouched, exactly as this section's
+own explicit exception states.
+
 **Goal.** The multi-target *aggregate* path (`gate.py`/`fold.py`) stops
 decoding and re-aggregating raw `exit_code` integers as semantic data;
 every front end encodes `RunOutcome`'s independent axes exactly once, at

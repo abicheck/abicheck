@@ -622,7 +622,63 @@
   acceptance-criteria fixture (a closure-parameterized template, which
   needs function/template-argument normalization) — see the plan's own
   "Still not landed" list for this slice.
-- **Phases 7–10** are still unimplemented design text.
+- **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
+  is **implemented**: `abicheck/policy/outcome.py` (new) defines
+  `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`
+  — the same circular-import-workaround typing
+  `checker_types.DiffResult.analysis_assurance` already uses,
+  `gate: PolicyGateDecision`, `operational: OperationalStatus`,
+  `lifecycle: TargetLifecycle = EXISTING`), the new exit-code-free
+  `PolicyGateDecision` (`NONE < ADDITION_QUALITY < POTENTIAL_BREAKING <
+  ABI_BREAKING`, mapping onto the shared 0/1/2/4 scheme via
+  `policy_gate_decision_exit_code`/`policy_gate_decision_for_exit_code`),
+  and `OperationalStatus` (`NONE`/`BUDGET_OVERFLOW`/`NOT_COMPARABLE`/
+  `EVIDENCE_CONTRACT_ERROR`/`EXTRACTION_ERROR`, each non-`NONE` member
+  contributing `1` to that same scheme via `operational_status_exit_code`).
+  `severity.GateDecision` is untouched. Every JSON report producer this
+  phase's Files list names now emits an additive `run_outcome` block
+  alongside the unchanged `verdict`/`exit_code`/`severity` fields:
+  `reporter.py`'s four JSON entry points (via the new leaf
+  `report_run_outcome.py`, threaded through `reporter_contract_blocks.
+  render_json_with_side_facts`'s shared tail so all four stay a one-line
+  change); the three `buildsource/check_report.py` synthetic builders
+  (`build_operational_error_report`/`build_bootstrap_report`/
+  `build_new_target_report`, each with `compatibility=None`); the three
+  scan writers (`scan_engine.ScanOutcome.to_dict()`,
+  `service_scan.ScanResult.to_dict()`/`ScanSetResult.to_dict()`, via the
+  shared `policy.outcome.run_outcome_for_scan_fields`/
+  `run_outcome_dict_for_scan`); and the three real callers of the ADR-050
+  D2 not-comparable refusal document (`report/not_comparable.
+  not_comparable_document()`/`render_not_comparable_json()` — `operational`
+  is now a required keyword parameter, and `cli_compare_helpers.py`'s
+  render-json branch and `cli_compare_release_pairwise.py`'s per-library
+  refusal branch both pass `operational=NOT_COMPARABLE` explicitly).
+  `workflows/aggregate/gate.py`'s `GateInfo.from_report_data`/
+  `from_scan_report` read a fresh report's `run_outcome` block
+  structured-first (folding `.gate`/`.operational` together by `max()` over
+  the shared scheme), falling back to the legacy `severity`/raw
+  `exit_code` decode only for a report that predates this field —
+  `workflows/aggregate/fold.py` needed no change, exactly as the plan's
+  own correction states. `buildsource/check_report.py`'s
+  `_neutralize_gate()` additionally zeroes `run_outcome.gate`'s blocking
+  contribution for `gate-mode: advisory` (never `.operational`, per
+  `final_exit_code()`'s own "operational errors always fail the job"
+  invariant), and `_escalate_removed_library_severity()` additionally
+  writes `run_outcome.gate = ABI_BREAKING` at the same `analysis_exit_code
+  == 8` call site. Report schema bumped to 2.48 (`compare`/release) and
+  1.24 (`scan`); `abicheck/schemas/compare_report.schema.json` gained the
+  `run_outcome` property/`$defs` entry, republished to
+  `docs/reference/schemas/v1/` via `scripts/publish_schemas.py`. A new
+  `check_ai_readiness.py` check, `no-inline-gate-computation` (WARN,
+  `scripts/no_inline_gate_computation.py`), flags a `.gate`/`.operational`
+  attribute read compared or `max()`-folded against a raw integer literal
+  outside the four boundary encoders this decision names.
+  **Deliberately out of scope, named explicitly rather than left as a
+  silent gap**: `action/run.sh`'s own raw-`$ABICHECK_EXIT` branching is
+  unmigrated, exactly as the plan's own corrected Phase 7 text scopes it —
+  a real, separately-justified rewrite of a shell script this phase's
+  Python-only tooling cannot test-cover.
+- **Phases 8–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this
