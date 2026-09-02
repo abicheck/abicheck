@@ -31,23 +31,41 @@ what, until when* instead of quietly hiding it.
 ## 1. Advisory first
 
 Run the check for real, publish the report for real, and fail nothing. The
-per-target Action does this with one input, and the composite Action with
-its gate switched off:
+per-target Action has an advisory mode for exactly this; the composite
+Action has no advisory mode of its own, so every gate it carries has to be
+switched off by hand:
 
 ```yaml
-# actions/check-target
+# actions/check-target: the same check as any scenario, with its gate off
 - uses: abicheck/abicheck/actions/check-target@main
   with:
     name: libfoo
+    profile: linux-gcc              # a profiles: id from .abicheck.yml
+    baseline-channel: accepted-main
+    requested-depth: headers
+    new-library: build/libfoo.so
     gate-mode: advisory
 
-# the composite Action
+# the composite Action: relax the break gate and make every category advisory
 - uses: abicheck/abicheck@v1
   with:
     old-library: baseline/libfoo.so
     new-library: build/libfoo.so
+    new-header: include/
     fail-on-breaking: false
+    severity-preset: info-only
 ```
+
+`fail-on-breaking: false` on its own relaxes only the binary-break gate: a
+severity category configured as `error`, a contract-coverage or
+analysis-assurance failure under those opt-in inputs, and a removed
+library under its own input still fail the step. `severity-preset:
+info-only` is what makes every finding advisory, and as an explicit input
+it outranks a `severity:` block in `.abicheck.yml` — which is why the
+`addition: error` line in [§6](#6-a-minimal-abicheckyml) belongs to the
+gated stage, not to this one. An operational error (a missing baseline, an
+unreadable binary) still fails either Action, as it should: advisory covers
+the *compatibility* verdict, never a broken check.
 
 An advisory run still records its real gate decision in the report; it
 only never turns it into a red check. Keep whatever gate you have today
