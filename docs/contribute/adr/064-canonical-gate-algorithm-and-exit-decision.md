@@ -973,8 +973,10 @@ lands in two stages rather than one atomic change:
       changes no CLI surface and no externally observable exit code --
       verified by the existing severity/exit-code test suite
       (`tests/test_config_review.py`, `tests/test_cov95_cli.py`,
-      `tests/test_pack_application.py`, `tests/test_compare_release.py`)
-      passing unchanged against the new call shape, so it did not need to
+      `tests/test_pack_application.py`, `tests/test_compare_release.py`):
+      their call sites were updated to build a `GateOptions` instead of
+      passing the six raw strings directly, and every expected result
+      stayed the same against the new call shape, so this did not need to
       wait for stage 2. Still open, unchanged by this landing: the typed-API
       half of the parity pass, the `--format text` gap named above, and a
       real `--artifact-set` member-level evidence-contract signal for the
@@ -1035,11 +1037,17 @@ alongside the flag deletion itself.
   the CLI flag's removal turned out to be separable: nothing about
   replacing raw-string re-derivation with one resolved object depends on
   the flag still existing, and the rewrite provably changes no externally
-  observable exit code (verified by the existing test suite passing
-  unchanged against the new call shape) independent of whether
-  `--exit-code-scheme` itself is later deleted. Both steps still change no
-  externally observable exit code, which is the invariant this paragraph
-  was stating; only which stage each belongs to was wrong.
+  observable exit code for any invocation the CLI supports today (verified
+  by the existing test suite's call sites, updated to build a `GateOptions`
+  instead of passing the six raw strings directly, still producing every
+  expected result unchanged) -- independent of whether `--exit-code-scheme`
+  itself is later deleted. That eventual stage-2 removal is its own,
+  separately visible exit-code change for the one, no-longer-supported
+  invocation spelling (exit `64`, "No such option"), not something this
+  internal rewrite causes or forecloses. So both steps change no
+  externally observable exit code *for the invocations each one leaves
+  supported*, which is the invariant this paragraph was stating; only
+  which stage the internal rewrite belongs to was wrong.
 
 ## Cross-references
 

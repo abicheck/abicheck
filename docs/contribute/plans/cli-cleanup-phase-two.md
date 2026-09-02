@@ -3764,13 +3764,16 @@ second top-level spelling of the same fact.
 > corrections `compare_release_cmd` used to apply inline at its own call
 > site), and the two downstream functions now take the resulting
 > `GateOptions` object. Landed additively: no CLI surface and no externally
-> observable exit code changed (the existing severity/exit-code test suite
-> passes unchanged against the new call shape), so — contrary to this ADR's
+> observable exit code changed (the existing severity/exit-code test suite's
+> call sites were updated to build a `GateOptions` instead of passing the
+> six raw strings directly, and every expected result stayed the same
+> against the new call shape), so — contrary to this ADR's
 > own original assumption that the shape change had to be atomic-stage work
 > alongside `--exit-code-scheme`'s removal — it did not need to wait for
 > stage 2. See ADR-064's own matching correction for the full account.
-> Still open: the typed-API half of the parity pass, and the `--format
-> text` gap.
+> Still open: the typed-API half of the parity pass, the `--format
+> text` gap, and a real `--artifact-set` member-level evidence-contract
+> signal for the Action to consume.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
