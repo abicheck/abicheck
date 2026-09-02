@@ -48,7 +48,8 @@ Leaf module: depends only on ``model.fact``/``model.availability``/
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import ast
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
 
@@ -61,6 +62,8 @@ __all__ = [
     "CanonicalEntity",
     "SemanticIR",
     "canonical_cv_qualification",
+    "conflict_value_strings",
+    "renumber_conflict_keys",
     "semantic_ir_conflict_key",
 ]
 
@@ -243,3 +246,168 @@ def semantic_ir_conflict_key(occurrence_id: OccurrenceId, fact_name: str) -> str
     would silently discard the first.
     """
     return _packed(canonical_key(occurrence_id), fact_name)
+
+
+def renumber_conflict_keys(
+    conflicts: dict[str, str],
+    old_occurrence_ids: Iterable[OccurrenceId],
+    new_semantic_ir: SemanticIR,
+    rewrite_value: Callable[[str], str] = lambda value: value,
+) -> None:
+    """Re-key *conflicts* (``AbiSnapshot.semantic_ir_conflicts``) after its
+    matching ``SemanticIR.occurrences`` keys were renumbered elsewhere
+    (``qualified_name_segments.renumber_anonymous_closure_identities``,
+    ADR-063 Phase 6 second slice, Codex review, PR #1001).
+
+    Each conflict key is :func:`semantic_ir_conflict_key` — a
+    length-prefixed packed string — that an in-place substring rewrite of
+    an embedded closure/anonymous-marker (the same rewrite already correctly
+    applied to ``CanonicalEntity.canonical_spelling`` and every legacy
+    field) would corrupt: the outer length prefix would no longer match the
+    rewritten text's real length, producing a string that equals neither
+    the original key nor a freshly-recomputed one for the renumbered
+    occurrence. This function instead recomputes each affected key fresh
+    from the paired old/new :class:`~abicheck.model.occurrence.OccurrenceId`
+    and the fact names *new_semantic_ir*'s own matching entity actually
+    carries (:meth:`CanonicalEntity.fact_items` — the exhaustive set
+    :func:`semantic_ir_conflict_key` is ever called with; see
+    ``extract/semantic_ir_merge.py``, this dict's only writer).
+
+    *rewrite_value* is applied to every matched conflict's own **value** —
+    the ``repr()`` of the *discarded* backend's own spelling
+    (``extract/semantic_ir_merge.py``'s only writer of this dict) can embed
+    the identical closure/anonymous marker the *retained* spelling does
+    (Codex review, PR #1001, second round): unlike the key, a value is
+    plain free text with no packed-length encoding to corrupt, so it is
+    safe to rewrite the ordinary way (the caller's own
+    ``apply_anonymous_type_ordinals``-backed callable, matching how every
+    other reachable string in the snapshot is rewritten). *rewrite_value*
+    itself receives the **decoded** value, never the raw ``repr()`` text —
+    :func:`_rewrite_conflict_value` below un-reprs it first and re-reprs
+    the result (Codex review, PR #1001, fifth round): a value whose text
+    contains an apostrophe makes Python's own ``repr()`` switch to
+    double-quoting, and this walk's own marker-detection deliberately
+    ignores text inside a double-quoted literal (so a real C++ NTTP string
+    argument spelled like a marker is never corrupted) — rewriting the raw
+    ``repr()`` text directly would therefore have that same protection
+    silently swallow the *entire* value merely because ``repr()`` happened
+    to quote it that way, not because it was ever a real string literal in
+    the source. Applied whether or
+    not the *key* itself changed — a third review round caught exactly the
+    gap an earlier revision left: an occurrence whose own ``EntityId`` has
+    no marker (so its key is unchanged) can still carry a conflicting
+    ``canonical_spelling`` that names a *different*, marker-bearing type
+    (e.g. a typedef aliasing a closure-parameterized template), so gating
+    the value rewrite on "the key changed" skipped exactly the case that
+    needed it. Defaults to a no-op so a caller with nothing to rewrite (or
+    that intentionally wants only the keys moved) need not pass one.
+
+    *old_occurrence_ids* must be ``new_semantic_ir.occurrences``'s own keys
+    *before* they were rewritten, in the identical order (both built by
+    iterating one dict, before and after its keys were replaced) — paired
+    positionally. A no-op if the two sequences differ in length (a rare
+    post-renumber key collision onto one entity: bail rather than guess a
+    wrong correspondence, the same fail-closed posture this module's
+    matching logic already takes elsewhere). Mutates *conflicts* in place;
+    an entry whose key and rewritten value both come out unchanged
+    contributes nothing (checked by equality, not identity, so this is safe
+    to call whether or not the caller already knows which pairs changed).
+    """
+    old_ids = list(old_occurrence_ids)
+    new_ids = list(new_semantic_ir.occurrences)
+    if not conflicts or len(old_ids) != len(new_ids):
+        return
+    rewritten: dict[str, str] = {}
+    stale_keys: list[str] = []
+    for old_occ_id, new_occ_id in zip(old_ids, new_ids):
+        entity = new_semantic_ir.occurrences.get(new_occ_id)
+        if entity is None:
+            continue
+        for fact_name, _fact in entity.fact_items():
+            old_key = semantic_ir_conflict_key(old_occ_id, fact_name)
+            old_value = conflicts.get(old_key)
+            if old_value is None:
+                continue
+            new_key = semantic_ir_conflict_key(new_occ_id, fact_name)
+            new_value = _rewrite_conflict_value(old_value, rewrite_value)
+            if new_key == old_key and new_value == old_value:
+                continue
+            stale_keys.append(old_key)
+            rewritten[new_key] = new_value
+    for key in stale_keys:
+        del conflicts[key]
+    conflicts.update(rewritten)
+
+
+def conflict_value_strings(value: str) -> tuple[str, ...]:
+    """Decode a ``semantic_ir_conflicts`` entry (``repr()`` of the discarded
+    backend's own fact value -- the same shape :func:`_rewrite_conflict_value`
+    decodes) and return the real string component(s) it carries, without
+    re-encoding anything.
+
+    For an ordinal-collection *preflight* only (Codex review, PR #1001,
+    sixth round): a hybrid conflict's discarded spelling can be the ONLY
+    place a closure/anonymous marker appears in a whole snapshot -- the
+    *retained* occurrence and its ``OccurrenceId`` key may carry no marker
+    at all, e.g. one backend resolved ``Wrapper<(lambda:x.h:20:4)>`` to a
+    real type while the other's raw, unresolved spelling became the
+    conflict value. ``qualified_name_segments.py``'s own preflight (what
+    :func:`collect_anonymous_type_ordinals` assigns ordinals from) only
+    scanned ``_LAMBDA_IDENTITY_FIELDS``' current values, never
+    ``semantic_ir_conflicts`` -- so such a marker never got an ordinal,
+    and :func:`renumber_conflict_keys`'s rewrite silently left it in raw
+    ``:line:col`` form forever, permanently out of step with everything
+    else that *did* get renumbered.
+
+    Returns an empty tuple for anything that doesn't literal-eval to one of
+    the two known shapes (a ``str``, or a ``tuple[str, ...]``) -- same
+    fail-closed posture as :func:`_rewrite_conflict_value`: this dict's
+    contract is "some backend's own discarded fact value", and a shape this
+    function doesn't recognize contributes nothing to the ordinal map
+    rather than risk guessing wrong.
+    """
+    try:
+        decoded = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return ()
+    if isinstance(decoded, str):
+        return (decoded,)
+    if isinstance(decoded, tuple) and all(isinstance(item, str) for item in decoded):
+        return decoded
+    return ()
+
+
+def _rewrite_conflict_value(value: str, rewrite: Callable[[str], str]) -> str:
+    """Decode *value* (a ``semantic_ir_conflicts`` entry — ``repr()`` of the
+    discarded backend's own fact value: a ``str`` for ``canonical_spelling``,
+    a ``tuple[str, ...]`` for ``template_arguments``/``cv_qualification`` —
+    ``extract/semantic_ir_merge.py``'s ``_merge_entity`` is the only
+    writer), apply *rewrite* to each real string component, and re-encode.
+
+    Decoding first is necessary, not cosmetic (Codex review, PR #1001, fifth
+    round): *rewrite*'s own marker-detection deliberately skips text inside
+    a double-quoted string literal, so a real C++ NTTP string argument
+    spelled like a marker is never corrupted — but ``repr()`` itself
+    switches to double-quoting whenever the underlying text contains a
+    single quote, which has nothing to do with the source language at all.
+    Rewriting the raw ``repr()`` text directly would let that same
+    protection misfire on ``repr()``'s own quoting choice, silently leaving
+    a value with an apostrophe in it (a string template argument, a header
+    basename) permanently unrenumbered.
+
+    Falls back to leaving *value* untouched for anything that doesn't
+    literal-eval to one of the two shapes above — this dict's contract is
+    "some backend's own discarded fact value", not an arbitrary string, so
+    anything else means this function's own assumption about the writer no
+    longer holds, and guessing at a rewrite would risk corrupting a value
+    it doesn't actually understand.
+    """
+    try:
+        decoded = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return value
+    if isinstance(decoded, str):
+        return repr(rewrite(decoded))
+    if isinstance(decoded, tuple) and all(isinstance(item, str) for item in decoded):
+        return repr(tuple(rewrite(item) for item in decoded))
+    return value

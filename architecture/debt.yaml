@@ -723,12 +723,12 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1991,
+      "baseline_lines": 1992,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper. Raised by 1 for ADR-063 Phase 6's second slice: the ELF AbiSnapshot construction site gained the semantic_ir=ast_result.semantic_ir keyword (the ElfHeaderAstResult field a shared choke point in dumper_manifest.py now computes for both the legacy single-TU and manifest paths) -- the PE/Mach-O construction sites were deliberately left unwired in this slice rather than adding their own inline normalize_header_ast() calls here, precisely to avoid a second, larger growth of this already-capped file.",
       "review_by": "2026-11-30"
     },
     {
@@ -783,12 +783,12 @@
     },
     {
       "path": "abicheck/dumper_scoping.py",
-      "baseline_lines": 1289,
+      "baseline_lines": 1381,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 61 for ADR-063 Phase 6's second slice (Codex review, PR #1001): scope_snapshot_excluding_dependencies()'s dataclasses.replace() carried snap.semantic_ir over unfiltered, so an excluded dependency type/enum stayed reachable through the filtered snapshot's own canonical IR even though the flat types/enums lists correctly dropped it. _scoped_semantic_ir() closes the gap the same header-origin-filter way the existing flat-field filtering already does. Raised by 31 more in the same PR (second Codex review round): the same function's own semantic_ir_conflicts dict was still left unfiltered for an excluded occurrence -- _scoped_semantic_ir() now returns both the scoped IR and a semantic_ir_conflicts filtered by exact key membership (never a text rewrite, so no risk of the packed-key corruption model.semantic_ir.renumber_conflict_keys was built to avoid for the unrelated renumbering case).",
       "review_by": "2026-11-30"
     },
     {

@@ -586,19 +586,42 @@
   pair *is* one `OccurrenceId`, hence one dict key), so the guard is
   tested at the matcher's own list-taking entry point and the reachability
   limit is stated rather than left implied by a test that only appears to
-  cover it. **Deliberately not in this slice, and therefore not yet
-  observable to any user:** no backend produces an IR yet
-  (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/
-  `pdb_metadata.py`/`btf_metadata.py`/`ctf_metadata.py` are unchanged),
-  `extract/semantic_normalizer.py` does not exist, and none of the five
-  assembly call sites projects through it — so `semantic_ir` is `None` on
-  every snapshot a real `dump` produces, every v38 document is
-  identical to the v37 one it would have been apart from the version stamp
-  itself (the `semantic_ir_conflicts` map is written only when a hybrid merge
-  recorded one, never as an empty object), and the snapshot cache
-  version is deliberately *not* bumped (no dumping-pipeline output
-  changed). The parser narrowing, the normalizer, and the per-call-site
-  parity tests are the remainder of this phase.
+  cover it.
+  **Second slice landed: `extract/semantic_normalizer.py`, and `semantic_ir`
+  is now observable on a real `dump`/`compare`.** Phase 2's implementation
+  PR resolved its own open identity-timing question as option (a) —
+  `EntityId` computed once at parse time and carried as a field on the
+  parsed declaration — which turned out to make the originally-planned
+  raw-fact parser narrowing unnecessary for identity specifically: both
+  header-AST backends (`dumper_castxml.py`, `dumper_clang.py`) already
+  attach a real `entity_id` to every `RecordType`/`EnumType`/typedef they
+  produce. `normalize_header_ast` is therefore a normalizer over each
+  backend's own already-parsed, already-identified output — records, enums,
+  and typedefs only in this slice; functions/variables/constants remain
+  unnormalized, named as an open gap rather than silently deferred (a
+  function's/variable's canonical *signature* spelling is the still-open
+  "two backends, two readings of canonical" problem this phase exists to
+  solve, and reusing either backend's pre-existing spelling here would
+  unify nothing). Wired at one shared choke point —
+  `dumper_manifest.resolve_header_ast_result()` — that already backs both
+  the legacy single-header ELF dump and a real `--dump-manifest` dump, so
+  one normalizer call covers both; PE/Mach-O header-AST assembly and the
+  BTF/CTF/PDB backends are not wired (`dumper.py` sits at its
+  `architecture/debt.yaml` no-growth baseline). With both backends now
+  populating real data, `--ast-frontend hybrid`'s first-slice reconciliation
+  logic runs against real occurrences for the first time — a fixture with a
+  namespaced record, enum, and a partially-qualified-nested-type typedef
+  confirms identity agreeing across backends (this phase's actual point)
+  while a genuine typedef-spelling disagreement is correctly kept as
+  castxml's value plus a recorded conflict, not silently resolved either
+  way. No `SCHEMA_VERSION` bump (the v38 wire shape is unchanged, only its
+  content); `snapshot_cache._SNAPSHOT_CACHE_VERSION` **is** bumped (23→24),
+  since a stale cache entry would otherwise silently keep serving
+  `semantic_ir=None` forever. Still not landed: functions, variables,
+  constants, DWARF/PDB/BTF/CTF backends, PE/Mach-O assembly, and the full
+  acceptance-criteria fixture (a closure-parameterized template, which
+  needs function/template-argument normalization) — see the plan's own
+  "Still not landed" list for this slice.
 - **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
   is **implemented**: `abicheck/policy/outcome.py` (new) defines
   `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`

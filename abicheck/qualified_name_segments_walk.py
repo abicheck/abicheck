@@ -119,6 +119,17 @@ def _collect_strings(value: object, out: list[str]) -> None:
         for k, v in value.items():
             if isinstance(k, str) and not isinstance(k, _Enum):
                 out.append(k)
+            elif _dataclasses.is_dataclass(k) and not isinstance(k, type):
+                # ADR-063 Phase 6 (second slice, Codex review): a dict key
+                # can itself be a dataclass carrying identity-bearing text
+                # (`SemanticIR.occurrences`'s `OccurrenceId` key wraps an
+                # `EntityId` whose `leaf_name`/`extra` can embed the exact
+                # same closure/anonymous-marker spelling `types`/`enums`
+                # carry as plain field values) -- recursing here is what
+                # lets the cheap "does anything embed a marker at all"
+                # check below actually see a marker that lives only in a
+                # key, not any reachable value.
+                _collect_strings(k, out)
             _collect_strings(v, out)
 
 
@@ -250,7 +261,20 @@ def _walk_rewrite_strings(
         rewritten: dict[object, object] = {}
         changed = False
         for k, v in value.items():
-            new_k = rewrite(k) if isinstance(k, str) and not isinstance(k, _Enum) else k
+            if isinstance(k, str) and not isinstance(k, _Enum):
+                new_k: object = rewrite(k)
+            elif _dataclasses.is_dataclass(k) and not isinstance(k, type):
+                # See the identical branch in `_collect_strings` above: a
+                # dataclass key (e.g. `SemanticIR.occurrences`'s
+                # `OccurrenceId`) can carry the same marker text a plain
+                # field value does, and must be rebuilt the same way a
+                # frozen dataclass reached via a value position already is
+                # -- never left stale while its own paired value gets
+                # rewritten underneath it (Codex review: exactly this gap,
+                # for `semantic_ir`'s own occurrence keys).
+                new_k = _walk_rewrite_strings(k, rewrite, field_name=field_name)
+            else:
+                new_k = k
             new_v = _walk_rewrite_strings(v, rewrite, field_name=field_name)
             rewritten[new_k] = new_v
             if new_k != k or new_v is not v:
