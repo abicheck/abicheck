@@ -631,6 +631,23 @@ def _lambda_identity_containers_and_strings(
     strings: list[str] = []
     for container in containers:
         _collect_strings(container, strings)
+    # ADR-063 Phase 6 (second slice, Codex review, PR #1001, sixth round):
+    # a hybrid conflict's DISCARDED spelling can be the only place a
+    # closure/anonymous marker appears at all -- the retained occurrence
+    # and its OccurrenceId key may carry no marker of their own. Since this
+    # is the preflight collect_anonymous_type_ordinals() below assigns
+    # ordinals from, leaving semantic_ir_conflicts out of it meant such a
+    # marker never got an ordinal, so renumber_conflict_keys()'s rewrite
+    # (called further down in renumber_anonymous_closure_identities) left it
+    # in raw :line:col form forever. Only extends the ordinal-collection
+    # string pool -- renumber_conflict_keys() still owns the actual
+    # decode/rewrite/re-encode of each conflict value.
+    conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
+    if conflicts:
+        from .model.semantic_ir import conflict_value_strings
+
+        for value in conflicts.values():
+            strings.extend(conflict_value_strings(value))
     markers = ("(lambda", "(unnamed ", "(anonymous ")
     if not any(m in s for s in strings for m in markers):
         return None

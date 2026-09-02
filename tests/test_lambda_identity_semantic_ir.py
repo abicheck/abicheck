@@ -239,6 +239,51 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
             "clang::Wrapper<(lambda:task_group.h#1)>"
         )
 
+    def test_semantic_ir_conflict_value_is_the_only_marker_in_the_snapshot(
+        self,
+    ) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, sixth
+        round): a hybrid conflict's discarded spelling can be the ONLY place
+        a closure/anonymous marker appears in the whole snapshot -- the
+        retained occurrence, its key, and every ``_LAMBDA_IDENTITY_FIELDS``
+        value can all be marker-free. The preflight that decides whether
+        there is anything to renumber at all (and what ordinal each marker
+        gets) used to scan only those fields, never
+        ``semantic_ir_conflicts`` -- so this marker was invisible to it and
+        stayed in raw ``:line:col`` form forever, unlike every sibling test
+        above where a real marker exists *somewhere else* to make the walk
+        run at all. Confirmed to fail (the conflict value is left completely
+        untouched) against a version of the preflight that didn't scan
+        ``semantic_ir_conflicts``' own values."""
+        eid = entity_id_for_type((), "Alias")  # no marker -> key is stable
+        occ_id = OccurrenceId(eid)
+        key = semantic_ir_conflict_key(occ_id, "canonical_spelling")
+        semantic_ir = SemanticIR(
+            occurrences={
+                occ_id: CanonicalEntity(canonical_spelling=Fact.present("Alias"))
+            }
+        )
+        marker = _closure("task_group.h", 20, 4)
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            # No `types`/other field carries a marker anywhere -- the
+            # conflict value below is the ONLY marker in the snapshot.
+            semantic_ir=semantic_ir,
+            semantic_ir_conflicts={key: repr(f"clang::Wrapper<{marker}>")},
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        assert snap.semantic_ir is not None
+        (unchanged_occ_id,) = snap.semantic_ir.occurrences.keys()
+        assert unchanged_occ_id == occ_id  # the key really didn't move
+
+        assert key in snap.semantic_ir_conflicts
+        assert ":20:4" not in snap.semantic_ir_conflicts[key]
+        assert snap.semantic_ir_conflicts[key] == repr(
+            "clang::Wrapper<(lambda:task_group.h#1)>"
+        )
+
     def test_semantic_ir_conflicts_untouched_when_nothing_needs_renumbering(
         self,
     ) -> None:

@@ -62,6 +62,7 @@ __all__ = [
     "CanonicalEntity",
     "SemanticIR",
     "canonical_cv_qualification",
+    "conflict_value_strings",
     "renumber_conflict_keys",
     "semantic_ir_conflict_key",
 ]
@@ -336,6 +337,44 @@ def renumber_conflict_keys(
     for key in stale_keys:
         del conflicts[key]
     conflicts.update(rewritten)
+
+
+def conflict_value_strings(value: str) -> tuple[str, ...]:
+    """Decode a ``semantic_ir_conflicts`` entry (``repr()`` of the discarded
+    backend's own fact value -- the same shape :func:`_rewrite_conflict_value`
+    decodes) and return the real string component(s) it carries, without
+    re-encoding anything.
+
+    For an ordinal-collection *preflight* only (Codex review, PR #1001,
+    sixth round): a hybrid conflict's discarded spelling can be the ONLY
+    place a closure/anonymous marker appears in a whole snapshot -- the
+    *retained* occurrence and its ``OccurrenceId`` key may carry no marker
+    at all, e.g. one backend resolved ``Wrapper<(lambda:x.h:20:4)>`` to a
+    real type while the other's raw, unresolved spelling became the
+    conflict value. ``qualified_name_segments.py``'s own preflight (what
+    :func:`collect_anonymous_type_ordinals` assigns ordinals from) only
+    scanned ``_LAMBDA_IDENTITY_FIELDS``' current values, never
+    ``semantic_ir_conflicts`` -- so such a marker never got an ordinal,
+    and :func:`renumber_conflict_keys`'s rewrite silently left it in raw
+    ``:line:col`` form forever, permanently out of step with everything
+    else that *did* get renumbered.
+
+    Returns an empty tuple for anything that doesn't literal-eval to one of
+    the two known shapes (a ``str``, or a ``tuple[str, ...]``) -- same
+    fail-closed posture as :func:`_rewrite_conflict_value`: this dict's
+    contract is "some backend's own discarded fact value", and a shape this
+    function doesn't recognize contributes nothing to the ordinal map
+    rather than risk guessing wrong.
+    """
+    try:
+        decoded = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return ()
+    if isinstance(decoded, str):
+        return (decoded,)
+    if isinstance(decoded, tuple) and all(isinstance(item, str) for item in decoded):
+        return decoded
+    return ()
 
 
 def _rewrite_conflict_value(value: str, rewrite: Callable[[str], str]) -> str:
