@@ -56,7 +56,13 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
+
+if TYPE_CHECKING:
+    from .pack_application import PackApplication
+    from .workflows.gate import SeverityConfig
 
 #: The ``compare`` kwargs that feed the compatibility configuration. Named
 #: here so the caller forwards exactly the mapping
@@ -782,3 +788,161 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     # disagreeing "resolved" configs on the same result (Codex review, fresh
     # evidence).
     result.evaluation_config = config
+
+
+def _release_summary_effective_config_block(
+    severity_config: SeverityConfig | None,
+    *,
+    policy: str = DEFAULT_POLICY_PROFILE,
+    policy_file_path: Path | None = None,
+    suppress: Path | None = None,
+    pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
+) -> tuple[str, dict[str, str]]:
+    """The ``(digest, fields)`` pair for a release-level *summary* document
+    (the primary release JSON and ``--output-dir``'s ``summary.json``
+    alike) -- narrower than a per-library sidecar's own digest, since no
+    ``CompatibilityEvaluationConfig`` exists at release-summary scope at
+    all, so this always resolves the *baseline* tier (see
+    ``effective_config_digest.py``'s own docstring for the two tiers).
+
+    P1 (CLI-audit): this used to compute the baseline tier from a bare,
+    empty ``SimpleNamespace()`` -- carrying only *severity_config* -- so
+    ``policy.base``/``policy.reclassify``/``policy.overrides``/
+    ``suppressions`` all read empty regardless of the real
+    ``--policy``/``--policy-file``/``--suppress`` every library was
+    actually compared under, as if no policy existed at all. Every library
+    shares one such input (the per-library fan-out reloads it once per
+    library), so resolving it once more here the same way
+    (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
+    folding *pack_application* like
+    :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
+    does) reproduces what any one library's own report shows for these
+    fields. Reloaded rather than threaded down because no per-library
+    ``PolicyFile`` is retained at this scope -- the reload runs inside the
+    same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
+    opens, so it doesn't duplicate a warning already logged per-library.
+
+    Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``
+    -- lives here since both callers are at their own ``no_growth`` cap.
+
+    *scope_public_headers* (found by a generalized parity test, PR #1016,
+    once the ``policy.base`` fix above showed the class was worth searching
+    for systematically): the same bug shape as ``policy`` above, just for a
+    second field. ``effective_config_fields_from_diff_result`` reads
+    ``result.scope_to_public_surface``/``.scope_to_public_surface_requested``
+    off whatever it's given; a bare ``SimpleNamespace`` that never sets them
+    falls back to that function's own ``getattr(..., default)`` -- ``False``/
+    ``True`` respectively -- regardless of what ``--scope-public-headers``/
+    ``--no-scope-public-headers`` actually resolved to for this run, exactly
+    as ``policy``/``policy_file`` did before P1. The release fan-out has no
+    ``--post-manifest``/forced-public-symbols concept of its own (unlike a
+    single-pair ``compare``, where ``scope_to_public_surface`` can diverge
+    from ``scope_to_public_surface_requested`` when a forced-public-symbols
+    allowlist is active), so both fields are simply the raw CLI value here.
+    """
+    from types import SimpleNamespace
+
+    from .contract_context import suppression_config_for
+    from .effective_config_digest import (
+        effective_config_digest,
+        effective_config_fields,
+    )
+    from .frontends.cli.options.params import _load_suppression_and_policy
+
+    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if pack_application is not None:
+        from .pack_application import policy_file_with_packs
+
+        pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
+    suppression_config = suppression_config_for(suppression)
+    # `pf.base_policy`, not the raw `policy` argument, when a `--policy-file`
+    # resolved one (Codex review, PR #1016): `checker.compare`'s own
+    # `effective_policy = policy_file.base_policy if policy_file is not None
+    # else policy` is what a real per-library report's `policy.base` field
+    # reflects, so a policy document naming a non-default `base_policy:`
+    # (e.g. `sdk_vendor`) produced a release-summary digest still reading
+    # the CLI default (`strict_abi`) while every per-library report agreed
+    # on the real base -- this stand-in must resolve the identical way.
+    effective_policy = pf.base_policy if pf is not None else policy
+    ec_result = SimpleNamespace(
+        policy=effective_policy,
+        policy_file=pf,
+        suppression_source_sha256=(
+            suppression_config.sha256 if suppression_config is not None else None
+        ),
+        scope_to_public_surface=scope_public_headers,
+        scope_to_public_surface_requested=scope_public_headers,
+    )
+    ec_scheme = "severity" if severity_config is not None else "legacy"
+    ec_fields = effective_config_fields(
+        ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
+    )
+    return effective_config_digest(ec_fields), ec_fields
+
+
+def _release_md_library_findings(library_results: list[dict[str, object]]) -> list[str]:
+    """Per-library findings (kind/symbol/description) -- symbol names
+    included. R2 (CLI-audit): the release Markdown report's own
+    ``## Libraries`` table is counts only; reuses ``entry["findings"]`` --
+    the same capped list ``cli_compare_release_matrix._release_finding_dicts``
+    already projects, built regardless of output format -- mirroring
+    ``cli_compare_release_helpers``'s existing per-finding sections
+    (``_release_md_bundle_findings``/``_release_md_matrix_findings``, which
+    call this). Notes a truncated list (``entry["findings_truncated"]``)
+    rather than presenting it as complete. Lives here (not next to its
+    callers) for the identical reason as
+    :func:`_release_summary_effective_config_block` above -- both
+    ``cli_compare_release_helpers.py``/``cli_compare_release_matrix.py``
+    are at their own ``no_growth`` cap.
+
+    **Not routed through ``report/`` (Codex review, PR #1016), checked
+    rather than assumed fine:** AGENTS.md's task-routing table says a new
+    output-format section belongs in ``report/``, and this genuinely is one.
+    Two things stop a clean move today, though -- this function's own real
+    siblings, not just this one: neither ``_release_md_bundle_findings`` nor
+    ``_release_md_matrix_findings`` (the two existing per-finding sections
+    this mirrors) lives in ``report/`` either (``cli_compare_release_helpers.py``/
+    ``bundle.py``), so this is an already-unmigrated neighborhood, not one
+    function breaking an otherwise-followed rule. More fundamentally, this
+    function's input is *not* the shape ``report/``'s ``compute_*``/``render_*``
+    split is built around: every per-library ``DiffResult`` is deliberately
+    discarded before this ever runs (``cli_compare_release_matrix.
+    _strip_diff_results_and_adjust_verdict``, to bound peak memory across a
+    whole release run's ``library_results``), so this reads an already-
+    flattened ``list[dict]`` projection, not a live ``DiffResult``/
+    ``ReportDocument``. Moving only the rendering half into ``report/``
+    while leaving that flattening decision here would be a new, unreviewed
+    input shape for the package to accept, not a mechanical relocation --
+    real, separately-justified follow-up work (migrating this whole
+    three-function neighborhood together, once its memory-lifecycle
+    constraint has a place in that package's own model), not a same-PR fix.
+    """
+    lines: list[str] = []
+    for lib in library_results:
+        findings = lib.get("findings")
+        if not findings:
+            continue
+        lines += ["", f"### `{lib['library']}` Findings", ""]
+        for f in cast(list[dict[str, object]], findings):
+            symbol = f.get("symbol")
+            lines.append(
+                f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
+            )
+            description = f.get("description")
+            if description:
+                lines.append(f"  - {description}")
+        if lib.get("findings_truncated"):
+            # `--format json` is *not* a complete-list source (Codex review,
+            # PR #1016): the release JSON's own `findings` field is this
+            # same `_MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection --
+            # a reader following that advice would see the identical
+            # truncated list again. `--output-dir` is the only source that
+            # writes each library's real, uncapped `DiffResult` in the same
+            # shape (a per-library `compare` re-run is the other option).
+            lines.append(
+                "  - _...additional findings omitted; see `--output-dir` "
+                "(or compare this library individually) for the complete "
+                "list._"
+            )
+    return ["", "## Per-Library Findings", *lines] if lines else []

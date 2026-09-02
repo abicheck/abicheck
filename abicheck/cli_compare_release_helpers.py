@@ -29,7 +29,6 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import click
@@ -37,6 +36,7 @@ import click
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
+from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .model import AbiSnapshot
 from .workflows.gate import resolve_release_exit_decision_for_report
 
@@ -1003,6 +1003,9 @@ def _format_release_summary(
     severity_config: SeverityConfig | None = None, severity_exit_code: int | None = None,
     contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
     fail_on_removed: bool = False,
+    policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
+    suppress: Path | None = None, pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
@@ -1018,6 +1021,9 @@ def _format_release_summary(
             contract_coverage_exit_contribution=contract_coverage_exit_contribution,
             contract_coverage_failure_count=contract_coverage_failure_count,
             fail_on_removed=fail_on_removed,
+            policy=policy, policy_file_path=policy_file_path,
+            suppress=suppress, pack_application=pack_application,
+            scope_public_headers=scope_public_headers,
         )
     return _format_release_markdown(
         worst_verdict,
@@ -1095,6 +1101,9 @@ def _format_release_json(
     severity_exit_code: int | None = None,
     contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
     fail_on_removed: bool = False,
+    policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
+    suppress: Path | None = None, pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
@@ -1224,41 +1233,21 @@ def _format_release_json(
     # `to_json` sidecar files, which reach `add_contract_context` on their
     # own -- so the release-fan-out parity this digest exists to provide
     # needs its own, explicit stamp here too. `_release_summary_effective_
-    # config_block` is the one shared helper both this function and
-    # `_write_release_summary_file` (`cli_compare_release.py`, the
-    # `--output-dir` sibling of this same primary-report gap) call, so the
-    # two release-level summary documents can never independently drift.
-    digest, fields = _release_summary_effective_config_block(severity_config)
+    # config_block` (`cli_compare_receipt.py` -- this module is at its
+    # `no_growth` line-count cap, P1/CLI-audit) is the one shared helper
+    # both this function and `_write_release_summary_file`
+    # (`cli_compare_release_matrix.py`) call, so the two summary documents
+    # can never independently drift.
+    from .cli_compare_receipt import _release_summary_effective_config_block
+
+    digest, fields = _release_summary_effective_config_block(
+        severity_config, policy=policy, policy_file_path=policy_file_path,
+        suppress=suppress, pack_application=pack_application,
+        scope_public_headers=scope_public_headers,
+    )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
     return json.dumps(summary, indent=2)
-
-
-def _release_summary_effective_config_block(
-    severity_config: SeverityConfig | None,
-) -> tuple[str, dict[str, str]]:
-    """The ``(digest, fields)`` pair for a release-level *summary* document
-    (the primary release JSON and ``--output-dir``'s ``summary.json``
-    alike) -- narrower than a per-library sidecar's own digest, since no
-    ``CompatibilityEvaluationConfig``/``PolicyFile``/suppression object
-    exists at release-summary scope at all (see
-    ``effective_config_digest.py``'s own module docstring for the two
-    tiers and this known, documented gap), but real: two releases
-    resolving different severity configuration no longer collide on this
-    field. Computed from a lightweight stand-in (`SimpleNamespace`)
-    carrying only what this scope actually has -- *severity_config*.
-    """
-    from .effective_config_digest import (
-        effective_config_digest,
-        effective_config_fields,
-    )
-
-    ec_result = SimpleNamespace()
-    ec_scheme = "severity" if severity_config is not None else "legacy"
-    ec_fields = effective_config_fields(
-        ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
-    )
-    return effective_config_digest(ec_fields), ec_fields
 
 
 def _release_json_scope(scoped_libs: list[dict[str, object]]) -> dict[str, object]:
@@ -1294,6 +1283,8 @@ def _format_release_markdown(
     matrix_result: DiffResult | None,
 ) -> str:
     """Render the release summary as a Markdown document."""
+    from .cli_compare_receipt import _release_md_library_findings
+
     _VERDICT_EMOJI = {
         "NO_CHANGE": "✅",
         "COMPATIBLE": "✅",
@@ -1322,6 +1313,7 @@ def _format_release_markdown(
     lines += _release_md_libraries_table(library_results, _VERDICT_EMOJI)
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
+    lines += _release_md_library_findings(library_results)
     lines += _release_md_bundle_findings(bundle_result)
     lines += _release_md_matrix_findings(matrix_result)
     return "\n".join(lines)

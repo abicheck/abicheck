@@ -1040,7 +1040,7 @@ def _reject_flags_unsupported_for_set_inputs(
     include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
-) -> None:
+) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
     The per-library fan-out (``compare-release`` backend) consumes the
@@ -1053,6 +1053,11 @@ def _reject_flags_unsupported_for_set_inputs(
     after this call. ``--write`` (``secondary_fmt``/``secondary_output``) is
     not rejected either -- the release engine supports it directly, so it is
     simply forwarded to ``_dispatch_release_compare``.
+
+    Returns the ``--depth`` value the caller should forward to the fan-out
+    (D1: currently always ``"binary"`` or ``None`` --
+    :func:`~abicheck.cli_resolve._reject_depth_for_set_inputs` rejects
+    everything else outright).
     """
     _reject_set_input_flags(
         exit_code_scheme, reconcile_build_context, env_matrix_path,
@@ -1064,7 +1069,7 @@ def _reject_flags_unsupported_for_set_inputs(
         require_complete_analysis=require_complete_analysis,
     )
     _reject_compile_context_for_set_inputs(ctx)
-    _reject_evidence_flags_for_set_inputs(ctx)
+    return _reject_evidence_flags_for_set_inputs(ctx)
 
 
 def _report_compare_result(
@@ -1532,8 +1537,9 @@ def run_compare(
     # release/directory one with no --pack; resolved just below (ahead of the
     # --dry-run emit) otherwise, so a dry run and the real run agree.
     release_pack_application = None
+    release_depth: str | None = None
     if {old_kind, new_kind} & {"directory", "package"}:
-        _reject_flags_unsupported_for_set_inputs(
+        release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
             exit_code_scheme=exit_code_scheme,
             reconcile_build_context=reconcile_build_context,
@@ -1679,6 +1685,7 @@ def run_compare(
             secondary_fmt=secondary_fmt, secondary_output=secondary_output,
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
+            depth=release_depth,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

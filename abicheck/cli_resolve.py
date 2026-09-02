@@ -679,38 +679,37 @@ def _resolve_compare_snapshots(
 # under one shared context) — so it stays rejected below.
 
 
-#: Build/source evidence flags (param dest → flag). ``depth`` is the
-#: evidence-depth dial; the four per-side --sources/--build-info are the
-#: inline evidence inputs.
+#: Build/source evidence *input* flags (param dest → flag): the four
+#: per-side --sources/--build-info. ``--depth`` deliberately isn't here
+#: (D1): see :func:`~abicheck.cli_compare_options._reject_depth_for_set_inputs`.
 #: ADR-040 L1: keyed on the *side-aware* CLI param dests (``sources`` /
 #: ``build_info``) — the rejection runs on the raw Click params (before the
 #: sided values are normalised into per-side kwargs), so it must check the
 #: dest the user actually typed to.
 _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
-    "depth": "--depth",
     "sources": "--sources",
     "build_info": "--build-info",
     "dump_manifest": "--dump-manifest",
 }
 
 
-def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
+def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
     """Reject inline build/source evidence flags for directory/package compares.
 
-    The release fan-out forwards only release-comparison kwargs, so
-    ``--depth`` and the per-side ``--old/new-sources`` / ``--old/new-build-info``
-    would be accepted and silently dropped (no L3-L5 collected). Fail loudly
-    so the user knows to compare libraries individually to collect deep
-    evidence (Codex review).
+    The release fan-out forwards only release-comparison kwargs, so the
+    per-side ``--old/new-sources`` / ``--old/new-build-info`` would be
+    accepted and silently dropped (no L3-L5 collected). Fail loudly so the
+    user knows to compare libraries individually to collect deep evidence
+    (Codex review). ``--depth`` is handled separately (D1, moved to
+    :mod:`abicheck.cli_compare_options`); its return is returned here too.
 
-    G29 Phase A: the L2 header-only semantic graph no longer has a CLI flag
-    to reject here — it is structurally skipped for directory/package
-    (set-input) compares instead, since the per-library fan-out never calls
-    ``resolve_input``/``run_dump`` with a graph-attaching single-pair path in
-    the first place (unchanged from before this change); see
-    ``docs/contribute/plans/g31-header-graph-default-on-followup.md`` for
-    the Phase B+ plan to extend graph coverage to set inputs.
+    G29 Phase A: the L2 header-only semantic graph is structurally skipped
+    for directory/package (set-input) compares instead of rejected here,
+    since the fan-out never calls a graph-attaching single-pair path
+    (unchanged); see ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
     """
+    from .cli_compare_options import _reject_depth_for_set_inputs
+
     used = [
         flag
         for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()
@@ -726,6 +725,7 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
             "Compare the libraries individually (or pre-dump snapshots with "
             "`dump --sources/--build-info`) to collect L3-L5 evidence."
         )
+    return _reject_depth_for_set_inputs(ctx)
 
 
 def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:

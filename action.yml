@@ -738,7 +738,11 @@ outputs:
   verdict:
     description: >
       ABI verdict. For compare (single-pair or directory/package operands):
-      COMPATIBLE, SEVERITY_ERROR (with the severity-preset input, or when a
+      COMPATIBLE, COMPATIBLE_WITH_RISK (a real, exit-0 tier -- the report
+      found a compatible-but-risky change, e.g. a toolchain-floor raise; R1,
+      CLI-audit: this was previously laundered into plain COMPATIBLE at exit
+      0, silently dropping every risk finding from this Action's own output),
+      SEVERITY_ERROR (with the severity-preset input, or when a
       `severity.addition: error` key in the repository's .abicheck.yml
       detects new public API additions),
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
@@ -753,7 +757,8 @@ outputs:
       BREAKING, REMOVED_LIBRARY (directory/package operands with
       fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
-      For scan: COMPATIBLE, SEVERITY_ERROR (with --against and a
+      For scan: COMPATIBLE, COMPATIBLE_WITH_RISK (same exit-0 risk tier as
+      compare's, above), SEVERITY_ERROR (with --against and a
       severity or `--exit-code-scheme` setting, when an error-level
       category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
       (with --against and the require-complete-analysis input, same

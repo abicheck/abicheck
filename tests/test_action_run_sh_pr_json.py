@@ -264,6 +264,45 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --show-only added --for
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
 
+    def test_sarif_primary_with_no_json_anywhere_reruns_rather_than_reusing_sarif(
+        self, tmp_path
+    ):
+        # Codex review, fresh evidence, PR #1016: `format: sarif` combined
+        # with a suppressed JSON sidecar (see _report_compat_verdict's own
+        # SARIF fallback) is well-formed JSON, but `_json_report_src`
+        # deliberately does NOT treat OUTPUT_FILE as reusable here -- an
+        # earlier version of this fix widened `_json_report_src` itself,
+        # which made `_can_reuse_primary_json` `cp` the bare SARIF document
+        # straight into PR_JSON for `cli_pr_comment` to misparse as an
+        # empty compare report. Must fall through to a real rerun instead,
+        # exactly like any other non-json/non-reusable primary format.
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text("", encoding="utf-8")
+        output_file = tmp_path / "primary.sarif"
+        output_file.write_text(
+            '{"runs": [{"properties": {"abiVerdict": "COMPATIBLE_WITH_RISK"}}]}',
+            encoding="utf-8",
+        )
+        stub = tmp_path / "stub.sh"
+        stub.write_text('echo rerun-sentinel > "${@: -1}"\n', encoding="utf-8")
+        harness = """
+PR_JSON="$TEST_PR_JSON"
+_EFFECTIVE_FORMAT=sarif
+FORMAT=sarif
+OUTPUT_FILE="$TEST_OUTPUT_FILE"
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format sarif -o "$TEST_OUTPUT_FILE")
+"""
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_OUTPUT_FILE": str(output_file),
+                "TEST_STUB": str(stub),
+                "TEST_BASH": _bash_executable(),
+            },
+        )
+        assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
+
     def test_reuses_stdout_json_when_no_output_file(self, tmp_path):
         # Codex review: format: json with no output-file is the CLI's
         # documented stdout mode -- the primary JSON lands only in

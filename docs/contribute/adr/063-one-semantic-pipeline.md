@@ -818,16 +818,17 @@ by different PRs, at different times:
 | Fact support | a model field, a parser, a serializer, a detector, a provenance entry, a capability-matrix row |
 | Persistence | per-library snapshot, baseline set, `BundleFacts`, `BuildSourcePack` |
 | Compiler context | CLI flags, a compile database, a captured evidence pack, L4 replay argv, the resolved `CompileContext` |
+| Evidence scope | requested `--depth`, `enforce_requested_depth`'s resolved-rank check, a resolved snapshot's actually-embedded facts, `analysis_assurance.requested_depth` |
 
 AGENTS.md's own "Known gaps" section is the best evidence for this claim,
 not an assertion made here: dozens of numbered findings there are the same
 shape — a fact is folded into one of these representations but not a
 sibling, or two independently-maintained implementations of the same
-decision quietly diverge. One of those findings is cited below by name;
+decision quietly diverge. Two of those findings are cited below by name;
 the other two examples are independently verifiable in the repository's
 own merged-commit history (`git log --grep`) rather than in AGENTS.md —
 stated that way deliberately, so a reader checking a citation against the
-wrong source doesn't read it as unsupported. All three are real, not
+wrong source doesn't read it as unsupported. All four are real, not
 illustrative:
 
 - **ELF binding** (commit `e5fabd403` / PR #734, `feat(model): expose ELF
@@ -857,6 +858,19 @@ illustrative:
   because the regression was caught before merge, not because the
   dependency was made impossible. The exit code was being used *inside
   the system* as semantic data, not only as an external contract.
+- **`--depth` as a floor for live extraction vs. a ceiling for a pre-built
+  snapshot** (the `docs/contribute/known-gaps.md` entry by that name,
+  surfaced by a Codex review round on PR #1016): `enforce_requested_depth`
+  fails a run when *resolved* evidence falls short of an explicit
+  `--depth`, but nothing projects a requested depth back down onto an
+  already-serialized JSON snapshot carrying richer embedded evidence —
+  `resolve_input`'s `fmt == "json"` branch returns `load_snapshot(path)`
+  verbatim regardless of what was asked for. Real on both operand shapes a
+  request can name (a single pre-built snapshot pair, or a directory/
+  package of them), not introduced by the PR that happened to surface it:
+  extending `--depth binary`'s acceptance to a second operand shape merely
+  made an existing, single-pair-only instance of the disagreement
+  reachable from a second code path.
 
 None of these are bugs in the PR that shipped the fix. They are evidence
 that **the integration surface for one new fact, one new config value, or

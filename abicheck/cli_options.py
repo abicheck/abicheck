@@ -1302,7 +1302,9 @@ def set_input_options(func: F) -> F:
         default=0,
         show_default=True,
         help="Parallel library comparisons for directory/package inputs "
-        "(0 = auto-detect CPU count, the default).",
+        "(0 = auto-detect CPU count, clamped to fit available memory -- see "
+        "ABICHECK_RELEASE_JOB_MEM_GIB -- the default). An explicit positive "
+        "value is never memory-clamped.",
     )(func)
     return func
 

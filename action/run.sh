@@ -1220,6 +1220,15 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
+    # review): INPUT_DEPTH is a raw, unvalidated Action input string, so a
+    # workflow spelling `depth: BUILD`/`BINARY`/etc. previously matched none
+    # of the case-sensitive comparisons below -- silently skipping the
+    # fail-loud guard for build/source (defeating its entire purpose) and
+    # silently dropping `binary` with no forwarding and no ::notice:: either.
+    # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
+    # Not `local` -- this runs in the top-level script body, not a function.
+    _depth_lc=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
     # A caller that explicitly asked for build/source-depth evidence (via
     # --depth build/source, or by supplying --sources/--build-info/
     # --compile-db directly) against a directory/package operand would
@@ -1227,12 +1236,26 @@ elif [[ "$MODE" == "compare" ]]; then
     # skipped rather than forwarded, so the comparison would quietly run
     # without the requested evidence and could miss a source-only break
     # while still reporting a clean/normal result -- fail loud instead
-    # (Codex review; --depth binary/headers is fine to drop silently, since
-    # nothing was actually requested that this shape can't provide).
-    if [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" \
+    # (Codex review).
+    if [[ "$_depth_lc" == "build" || "$_depth_lc" == "source" \
        || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
       echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
       exit 1
+    fi
+    # --depth binary requests *less* evidence than the fan-out already
+    # collects by default, and the CLI now accepts and honours it per
+    # library on this path (D1) -- forward it, same as the single-pair
+    # branch below. --depth headers is still rejected by the CLI here (the
+    # per-library fan-out has no per-library evidence-floor enforcement
+    # yet), so it is dropped rather than forwarded -- but with a visible
+    # ::notice:: instead of the previous silent drop (D2: that silent drop
+    # was asymmetric with the compile-context guard above, which fails loud
+    # for everything it can't honour rather than swallowing part of the
+    # request unannounced).
+    if [[ "$_depth_lc" == "binary" ]]; then
+      add_single_flag "--depth" "$_depth_lc"
+    elif [[ "$_depth_lc" == "headers" ]]; then
+      echo "::notice::mode: compare with a directory/package operand (a release/bundle comparison) does not honour --depth headers yet -- the per-library fan-out has no per-library evidence-floor enforcement, so the request is dropped rather than forwarded (the comparison still runs, using whatever headers -H/--include-dir/.abicheck.yml already resolve for each library). Compare the libraries individually (mode: compare with single-file operands) to require header-level evidence."
     fi
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
@@ -1995,6 +2018,19 @@ _json_report_src() {
     # rather than falling through to "no report").
     echo "$_extra_write_json_path"
   fi
+  # Deliberately NOT a further fallback to a `format: sarif` OUTPUT_FILE
+  # here, even though SARIF is well-formed JSON (Codex review, fresh
+  # evidence, PR #1016): this function's contract is "a faithful,
+  # unfiltered abicheck-native JSON report" -- `_can_reuse_primary_json`
+  # trusts a non-empty answer here enough to `cp` it straight into
+  # `PR_JSON` for `cli_pr_comment` to parse as one, and several `_report_
+  # query` callers (severity_exit, coverage_where, annotations,
+  # blocking_categories) would silently misread SARIF's absence of their
+  # expected keys as "definitely no severity gate/no coverage gap/no
+  # annotations" rather than "cannot tell". A SARIF document answers
+  # `compat_verdict` alone; see `_report_compat_verdict`'s own SARIF
+  # fallback below, which reads `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly
+  # rather than routing through this shared function.
 }
 
 # Read one derived value out of the JSON report, whatever shape produced it.
@@ -2096,7 +2132,25 @@ elif query == "compat_verdict":
     # alone when the gate demotes the exit code, and `compare` reports
     # `result.verdict` unconditionally. It is therefore the only signal that
     # tells a genuinely clean run from a break the user chose not to gate on.
-    print(_either("verdict", "") or "")
+    verdict = _either("verdict", "") or ""
+    if not verdict:
+        # SARIF has no top-level/nested "verdict" key -- abicheck's SARIF
+        # renderer instead stamps the identical value at
+        # runs[0].properties.abiVerdict (sarif.py's own `_result_for`).
+        # Reached here only as the true last resort: `_json_report_src`
+        # hands this function a SARIF file at all solely when no PR_JSON,
+        # stdout-JSON, or extra_write_json_path source exists for this run
+        # -- which happens when `format: sarif` is paired with an
+        # `extra-args --write <non-json>=...` that both suppresses the
+        # automatic JSON sidecar and occupies the one `--write` slot the
+        # CLI accepts per invocation (Codex review, PR #1016, fresh
+        # evidence -- see `_json_report_src`'s own SARIF branch).
+        runs = report.get("runs")
+        if isinstance(runs, list) and runs and isinstance(runs[0], dict):
+            props = runs[0].get("properties")
+            if isinstance(props, dict):
+                verdict = props.get("abiVerdict") or ""
+    print(verdict)
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
 elif query == "coverage_where":
@@ -2521,6 +2575,35 @@ _report_compat_verdict() {
     echo "$_answer"
     return
   fi
+  # `format: sarif` fallback, deliberately scoped to THIS function alone
+  # rather than a `_json_report_src` branch every other reader shares
+  # (Codex review, fresh evidence, PR #1016): a first version of this fix
+  # did widen `_json_report_src` itself, which made `_can_reuse_primary_
+  # json` treat a bare SARIF document as a faithful abicheck-native JSON
+  # report and `cp` it straight into `PR_JSON` for `cli_pr_comment` to
+  # parse -- silently posting/overwriting the sticky PR comment with an
+  # empty-looking report instead of the real findings, and letting
+  # `_severity_gate_categories`/coverage/annotation readers misread SARIF's
+  # missing keys as "definitely none" rather than "cannot tell". SARIF is
+  # only ever consulted here, for `compat_verdict` specifically, and only
+  # once `_json_report_src` already came back with nothing to read (no
+  # PR_JSON/stdout-JSON/extra_write_json_path -- see that function's own
+  # docstring for why: `format: sarif` paired with an `extra-args --write
+  # <non-json>=...` occupies the CLI's one `--write` slot and suppresses
+  # the automatic JSON sidecar, leaving no other JSON anywhere in this
+  # run's output). SARIF's own `runs[0].properties.abiVerdict` (`sarif.py`)
+  # carries the identical native verdict string `_report_query`'s
+  # `compat_verdict` case reads from ordinary abicheck JSON.
+  if [[ -z "$_src" && "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" \
+        && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+     && { [[ -z "${_output_file_pre_fp+x}" ]] \
+          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
+    _answer=$(_report_query "$OUTPUT_FILE" compat_verdict)
+    if [[ -n "$_answer" ]]; then
+      echo "$_answer"
+      return
+    fi
+  fi
   # `sed -E`, not the basic-regex `\(a\|b\)` the other readers here get away
   # with not needing: BSD sed (macOS runners, which this Action supports and
   # CI covers) has no alternation in BRE at all, so the pattern silently
@@ -2537,7 +2620,15 @@ _report_compat_verdict() {
   # the whole thing this reconciliation exists to prevent (Codex review). The
   # delimiter is still required rather than dropped -- a bare `Verdict`
   # followed by uppercase-free filler would match prose.
-  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING).*/\2/p' \
+  #
+  # COMPATIBLE_WITH_RISK is a third alternative for the same reason R1
+  # (CLI-audit) added it to `_resolve_clean_exit_verdict`'s JSON-sourced
+  # branch: `extra-args: --write markdown=...` suppresses the JSON sidecar
+  # (per action/AGENTS.md), so a run whose *only* report is rendered
+  # markdown/text reaches this fallback for that tier too -- without it, a
+  # report the CLI classified COMPATIBLE_WITH_RISK still fell through to
+  # `sed` matching nothing and silently reported COMPATIBLE (Codex review).
+  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING|COMPATIBLE_WITH_RISK).*/\2/p' \
     <<<"$(_text_report_content)" | head -1
 }
 
@@ -2569,16 +2660,31 @@ _resolve_clean_exit_verdict() {
     VERDICT="$_v"
     ADVISORY_BREAK=true
     echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+  elif [[ "$_v" == "COMPATIBLE_WITH_RISK" ]]; then
+    # R1 (CLI-audit): exit 0 was previously hard-mapped to VERDICT=COMPATIBLE
+    # unconditionally, only escalating when the report said BREAKING/
+    # API_BREAK -- so a report the CLI itself classified
+    # COMPATIBLE_WITH_RISK (a real, gate-worthy tier the CLI's own exit-code
+    # doc names alongside COMPATIBLE/NO_CHANGE as "0 = compatible") still
+    # published `verdict: COMPATIBLE` and a "No binary ABI break detected"
+    # summary, silently dropping every risk finding from the Action's own
+    # output even though the JSON report carried them in full. This is not
+    # an advisory *break* the severity policy demoted (ADVISORY_BREAK stays
+    # false: nothing here is gated by fail-on-breaking/fail-on-api-break,
+    # which never match this tier), just a verdict the exit-0 branch must
+    # not silently launder into a plain COMPATIBLE.
+    VERDICT="$_v"
   fi
 }
 
-# Compatibility tiers, most severe last. Only these three are ranked: every
+# Compatibility tiers, most severe last. Only these four are ranked: every
 # other verdict (ERROR, BUDGET_OVERFLOW, SEVERITY_ERROR, ...) is a different
 # axis and must never be escalated away by this comparison.
 _verdict_rank() {
   case "$1" in
-    BREAKING) echo 3 ;;
-    API_BREAK) echo 2 ;;
+    BREAKING) echo 4 ;;
+    API_BREAK) echo 3 ;;
+    COMPATIBLE_WITH_RISK) echo 2 ;;
     COMPATIBLE) echo 1 ;;
     *) echo 0 ;;
   esac
@@ -2979,6 +3085,15 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     case $VERDICT in
       COMPATIBLE)
         echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
+        ;;
+      COMPATIBLE_WITH_RISK)
+        # R1 follow-up (Codex review, PR #1016): VERDICT can carry this tier
+        # since _resolve_clean_exit_verdict stopped laundering it into plain
+        # COMPATIBLE, but this dispatch had no matching arm -- a bash `case`
+        # with no match and no `*)` default silently omits the whole banner,
+        # so `add-job-summary: true` published a summary with every finding
+        # table but no verdict line at all for this tier.
+        echo "> **Verdict: COMPATIBLE_WITH_RISK** ⚠️ — Binary-compatible, but carries deployment risk; review advised (see findings below)."
         ;;
       SEVERITY_ERROR)
         # SEVERITY_ERROR (exit code 1) means a severity-config category is

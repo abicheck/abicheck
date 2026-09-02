@@ -6146,3 +6146,112 @@ looked like the obvious fix and wasn't.
   own "generalize, or record the gap" convention — this was a direct
   timeout-value bump for an observed cancellation, not a verified capacity
   fix.
+
+- **`--depth` is a floor for live extraction, not a ceiling for a pre-built
+  snapshot — real, cross-cutting, and previously undocumented outside one
+  function's own docstring.** `enforce_requested_depth`
+  (`workflows/artifact/execute.py`) already fails a run when the *resolved*
+  evidence falls short of an explicit `--depth`, and its own docstring has
+  long carried this note: "this is a floor, not a ceiling. An input that is
+  an already-serialized JSON snapshot with richer embedded evidence than
+  `depth` requested still carries all of it — `resolve_input`'s `fmt ==
+  "json"` branch returns `load_snapshot(path)` verbatim... which `--depth`
+  has never projected down for a pre-built snapshot either." A Codex review
+  round on PR #1016 (D1: accepting `--depth binary` for a directory/package
+  compare) reproduced this concretely and flagged it as if newly
+  introduced: `compare old_dir new_dir --depth binary` over a directory of
+  saved JSON snapshots (rather than live binaries) still emits real
+  header-derived findings and can still publish `BREAKING`, because nothing
+  strips a snapshot's already-embedded evidence down to what was requested.
+  Checked and confirmed **not** a regression from that PR — a *single-pair*
+  `compare old.json new.json --depth binary` over two plain snapshots
+  reproduces the identical behavior today, unrelated to any directory/
+  package handling; PR #1016 only extended `--depth binary`'s
+  *acceptance* to a second operand shape that inherits a limitation the
+  single-pair path has always had. `cli_compare_options.
+  _reject_depth_for_set_inputs`'s docstring now cross-references this
+  entry so the directory/package path states the same acknowledged
+  limitation explicitly rather than silently inheriting an undocumented
+  one.
+  **Not fixed here, and the two obvious-looking fixes are each wrong for a
+  reason worth recording so they aren't re-attempted as the "obvious"
+  patch:** stripping a resolved snapshot's higher-level facts down to the
+  requested depth *before* comparing would work for this one call site, but
+  would also discard evidence a caller legitimately wants to keep on a
+  snapshot that gets reused for a *later* comparison at a higher depth —
+  `--depth` is meant to gate what a comparison *uses*, not to mutate a
+  snapshot's own persisted content. Rejecting `--depth binary` outright for
+  any operand backed by a pre-built snapshot (matching the pre-#1016
+  directory/package behavior) would reintroduce exactly the asymmetry D1
+  closed, since the single-pair path already accepts and silently
+  under-enforces the same combination. The real fix needs a
+  comparison-time projection — resolve the snapshot as today, then filter
+  what `checker.compare()` is allowed to see down to the requested rung,
+  keeping the resolved `AbiSnapshot` itself untouched — which is a real,
+  separate design question (which facts a given depth "sees" needs the
+  same explicit mapping `evidence_depth.py`'s own rank table already gives
+  requested-vs-resolved comparison, just applied the other direction), not
+  a one-line patch to either `resolve_input` or the two call sites that
+  triggered this entry.
+
+### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
+
+A Codex review round on PR #1016 (R1: teaching `action/run.sh`'s verdict
+readers about `COMPATIBLE_WITH_RISK`) found a sibling gap one level up:
+`_json_report_src`/`_report_compat_verdict` (and every other reader built
+on them — `_severity_gate_categories`, the coverage/annotation queries)
+have exactly two sources to fall back through when the automatic JSON
+sidecar isn't available — a JSON report (`_report_query`, schema-aware) or
+rendered markdown/text (`_text_report_content`, one shared regex). Both
+assume the *primary* report, when there's no JSON at all, is text-shaped.
+`format: sarif`/`format: html` break that assumption, and the automatic
+JSON sidecar is suppressed whenever the step's own `extra-args` already
+supplies a `--write` (any format) — the CLI's `--write` option is
+single-valued (`secondary_output.py`'s `--write FORMAT=PATH`, not
+`multiple=True`), so a step can't ask for both its own secondary format
+*and* the Action's internal JSON sidecar in the same invocation; something
+has to lose, and today the sidecar does.
+
+**SARIF is fixed** (this same PR, same review round): SARIF is itself
+well-formed JSON, and abicheck's SARIF renderer already stamps the native
+verdict string as `runs[0].properties.abiVerdict` (`sarif.py`'s
+`_result_for`) — so `_report_compat_verdict` gained its own, narrowly
+scoped last-resort branch that hands `format: sarif`'s own `OUTPUT_FILE`
+to `_report_query` when `_json_report_src` came back with nothing, and
+`compat_verdict`'s query gained a fallback reading that same property.
+Deliberately **not** a `_json_report_src` branch, even though a first
+version of this fix put it there: a Codex follow-up review caught that
+shape treating the bare SARIF document as a faithful abicheck-native JSON
+report for every other reader sharing that function too —
+`_can_reuse_primary_json` would `cp` it straight into `PR_JSON` for
+`cli_pr_comment` to misparse as an empty compare report, silently
+posting/overwriting the sticky PR comment with none of the real findings.
+`_json_report_src`'s contract stays exactly what it always was ("a
+faithful, unfiltered abicheck-native JSON report"); SARIF is consulted
+only from inside `_report_compat_verdict` itself, for `compat_verdict`
+alone. Every *other* query (annotations, severity_exit, coverage_where,
+blocking_categories, assurance_*) never sees the SARIF document at all —
+this extension is additive, not a behavior change for the common case
+where a full JSON sidecar already exists, and cannot regress a reader
+that never receives the SARIF path in the first place.
+
+**HTML is not fixed, and is a materially different problem, not the same
+one degree further:** HTML is not JSON. Recovering a verdict from
+abicheck's rendered HTML report needs real markup parsing (locating a
+`<th>Verdict</th>` cell and reading its sibling, per Codex's own finding —
+`html_report.py` owns that exact shape and could change it without notice)
+rather than a `json.load` call, which is a different, larger class of work
+than the SARIF fix above — not a "one more elif" the SARIF pattern
+generalizes into. It also compounds with the "single `--write` slot"
+constraint noted above: even a correct HTML parser only closes this one
+combination (`format: html` + a conflicting `extra-args --write`), while
+the root constraint (`--write` cannot name two formats in one invocation)
+is itself unaddressed and would need to be fixed first for a *general*
+solution rather than one more per-format special case bolted onto a
+single reader function. Not attempted here. If this combination becomes a real reported problem
+rather than a review-found edge case, the honest fix is one of: (a) make
+`--write` accept multiple `FORMAT=PATH` operands (a real CLI capability
+change touching `secondary_output.py` and every command that declares the
+option, not just this Action script), or (b) give `action/run.sh` a real,
+tested HTML-verdict extractor rather than reusing the markdown/text regex
+against markup it was never meant to parse.

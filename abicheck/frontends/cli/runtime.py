@@ -85,12 +85,33 @@ from ...model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck")
 
+# Marker attribute (P3, CLI-audit) stamped on every handler `_setup_verbosity`
+# installs, so a repeated call within one process (the `compare-release`
+# fan-out invokes each library comparison's CLI entry point in-process, and
+# any test harness that calls a command function more than once in the same
+# session does too) can find and remove its own prior handler before adding a
+# new one. Without this, `_logger.addHandler` accumulates one duplicate
+# `StreamHandler(sys.stderr)` per call, so every `-v`/warning message after
+# the first invocation prints once per accumulated handler.
+_VERBOSITY_HANDLER_MARKER = "_abicheck_verbosity_handler"
 
 
 def _setup_verbosity(verbose: bool) -> None:
-    """Configure logging verbosity for native commands."""
+    """Configure logging verbosity for native commands.
+
+    Idempotent (P3, CLI-audit): removes any handler this function previously
+    installed (identified via ``_VERBOSITY_HANDLER_MARKER``) before adding a
+    new one, so calling it more than once in the same process — as the
+    ``compare-release`` fan-out and some test harnesses do — never
+    accumulates duplicate stderr handlers that would each re-emit the same
+    log line.
+    """
+    for existing in list(_logger.handlers):
+        if getattr(existing, _VERBOSITY_HANDLER_MARKER, False):
+            _logger.removeHandler(existing)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    setattr(handler, _VERBOSITY_HANDLER_MARKER, True)
     _logger.addHandler(handler)
     _logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
 

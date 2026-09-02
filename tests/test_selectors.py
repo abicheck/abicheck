@@ -97,6 +97,38 @@ class TestSelectorSetValidation:
         s = SelectorSet(finding_id="abc123")
         assert s.finding_id == "abc123"
 
+    def test_binding_alone_is_still_rejected(self) -> None:
+        """P2 (CLI-audit): `binding` stays conjunctive-only by design (see
+        Suppression.binding's own docstring) -- a binding-only rule would
+        suppress every change with that ELF linkage across the whole
+        comparison, with nothing else scoping it. This is not the bug;
+        the confusing generic error message naming every selector *except*
+        binding was."""
+        with pytest.raises(ValueError, match="conjunctive-only"):
+            SelectorSet(binding="weak")
+
+    def test_binding_alone_gets_a_dedicated_actionable_message(self) -> None:
+        """The message must name `binding` explicitly and point at both
+        intentional workarounds -- the generic "at least one of" list
+        (which doesn't even mention binding) reads as though the field
+        were unrecognized rather than deliberately excluded."""
+        with pytest.raises(ValueError, match="binding") as exc_info:
+            SelectorSet(binding="weak")
+        message = str(exc_info.value)
+        assert "conjunctive-only" in message
+        assert "symbol_pattern" in message
+        assert "namespace" in message
+
+    def test_binding_with_symbol_pattern_wildcard_is_accepted(self) -> None:
+        """The documented workaround this message points to must actually
+        work (regression guard, not just an error-message claim)."""
+        s = SelectorSet(binding="weak", symbol_pattern=".*")
+        assert s.binding == "weak"
+
+    def test_binding_with_a_real_narrowing_selector_is_accepted(self) -> None:
+        s = SelectorSet(binding="weak", namespace="my::ns::*")
+        assert s.binding == "weak"
+
     def test_datetime_expires_is_normalized_to_date(self) -> None:
         s = SelectorSet(symbol="foo", expires=datetime(2026, 1, 1, 12, 0))
         assert s.expires == date(2026, 1, 1)

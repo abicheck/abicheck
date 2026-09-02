@@ -412,6 +412,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/cli_compare_receipt.py",
+      "baseline_lines": 948,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Crossed the 800-line production cap for a new-to-the-ledger file (D1/P1/R2, CLI-audit): two functions moved here from cli_compare_release_helpers.py/cli_compare_release_matrix.py, both of which sat at their own no_growth baseline (below) with zero headroom left. _release_summary_effective_config_block (the release-level compare summary's policy.base/policy.overrides/policy.reclassify computation, previously wrong -- it read a bare, policy-less SimpleNamespace) and _release_md_library_findings (the release Markdown report's per-library finding list, previously entirely absent -- the report carried counts only, no symbol names) needed a shared home neither original owner had room for. Also ruled out cli_compare_release_matrix.py as that home: cli_compare_release_helpers.py is a deliberate import leaf (its own module docstring: 'must not import from abicheck.cli or abicheck.cli_compare_release'), and cli_compare_release_matrix.py already imports it at module load -- routing either function back through cli_compare_release_matrix.py would have closed a fresh two-module cycle absorbing cli_compare_release_helpers.py into the big CLI-registration SCC (scripts/check_ai_readiness.py's IMPORT_CYCLE_ALLOWLIST), which that module was deliberately kept out of. This module was the only reachable, cycle-free home with room: it already owns the analogous single-pair record_resolved_config/record_release_resolved_config receipt functions the digest one is a release-summary sibling of, and imports nothing from either original owner.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/cli_compare_release.py",
       "baseline_lines": 1995,
       "target": "workflows-or-frontends",
