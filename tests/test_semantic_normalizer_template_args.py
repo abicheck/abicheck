@@ -125,3 +125,42 @@ def test_whitespace_around_each_argument_is_trimmed() -> None:
 
 def test_empty_string_is_not_a_template() -> None:
     assert split_template_arguments("") is None
+
+
+def test_char_literal_comma_is_not_a_separator() -> None:
+    """GCC's own real DWARF/castxml record spelling for a
+    character-valued non-type template argument (Codex review, fresh
+    evidence: an earlier revision produced ``("'", "'")`` here, corrupting
+    the argument in two)."""
+    assert split_template_arguments("CharBox<','>") == ("','",)
+
+
+def test_string_literal_comma_is_not_a_separator() -> None:
+    assert split_template_arguments('Tag<"a,b">') == ('"a,b"',)
+
+
+def test_string_literal_containing_an_embedded_single_quote() -> None:
+    assert split_template_arguments("""Tag<"it's", 2>""") == ('"it\'s"', "2")
+
+
+def test_quoted_literal_inside_a_nested_template_argument() -> None:
+    assert split_template_arguments("Box<CharBox<','>, 3>") == (
+        "CharBox<','>",
+        "3",
+    )
+
+
+def test_quoted_literal_does_not_confuse_the_leaf_scope_separator_search() -> None:
+    """A ``::`` inside a quoted argument (not a real scope separator) must
+    not be mistaken for the boundary between an enclosing scope and this
+    declaration's own leaf segment."""
+    assert split_template_arguments('Tag<"a::b">') == ('"a::b"',)
+
+
+def test_unterminated_quote_degrades_gracefully_rather_than_hanging() -> None:
+    """Malformed/truncated input (an unterminated quote) must not loop
+    forever or crash -- it degrades to treating the rest of the string as
+    still inside the quoted span, the same "never raise, degrade on
+    malformed input" discipline this module's other functions already
+    follow."""
+    assert split_template_arguments("Box<'x>") is None

@@ -93,16 +93,46 @@ __all__ = ["split_template_arguments"]
 
 _OPEN_TO_CLOSE = {"<": ">", "(": ")", "[": "]"}
 _CLOSERS = frozenset(_OPEN_TO_CLOSE.values())
+_QUOTES = frozenset({"'", '"'})
+
+
+def _quoted_span_end(text: str, start: int) -> int:
+    """*text[start]* is a quote character (``'``/``"``) -- return the index
+    one past its matching closing quote, so a caller can skip the whole
+    span without its bracket/comma/``::``-separator characters (a real,
+    reachable case: GCC spells a char-literal non-type template argument
+    verbatim in a record's own name, e.g. ``CharBox<','>``, and a
+    string-valued one similarly, e.g. ``Tag<"a,b">`` -- neither's internal
+    ``,``/``<``/``>`` is a real bracket or argument separator). Honors a
+    backslash escape (``'\\''``, ``"a\\"b"``) so an escaped quote never ends
+    the span early. Unterminated (malformed/truncated input) degrades to
+    "consumes to the end of *text*" rather than looping forever or leaving
+    the rest of the string misread as still-quoted.
+    """
+    quote = text[start]
+    i = start + 1
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if ch == quote:
+            return i + 1
+        i += 1
+    return n
 
 
 def _find_last_top_level_scope_separator(name: str) -> int | None:
     """Index of the ``::`` that separates a qualified name's enclosing
-    scope from its own leaf segment -- the LAST one at bracket depth 0, so
-    a ``::`` inside a template argument (``Box<std::string>``) or inside a
-    nested specialization's own scope (``Outer<int>::Inner<double>`` --
-    this must find the ``::`` before ``Inner``, not before ``string``) is
-    never mistaken for the top-level separator. ``None`` when *name* has no
-    top-level ``::`` at all (an unscoped name).
+    scope from its own leaf segment -- the LAST one at bracket depth 0 and
+    outside any quoted span, so a ``::`` inside a template argument
+    (``Box<std::string>``), inside a quoted non-type argument
+    (``Tag<"a::b">``), or inside a nested specialization's own scope
+    (``Outer<int>::Inner<double>`` -- this must find the ``::`` before
+    ``Inner``, not before ``string``) is never mistaken for the top-level
+    separator. ``None`` when *name* has no top-level ``::`` at all (an
+    unscoped name).
     """
     stack: list[str] = []
     last_sep: int | None = None
@@ -110,6 +140,9 @@ def _find_last_top_level_scope_separator(name: str) -> int | None:
     n = len(name)
     while i < n:
         ch = name[i]
+        if ch in _QUOTES:
+            i = _quoted_span_end(name, i)
+            continue
         if ch in _OPEN_TO_CLOSE:
             stack.append(ch)
             i += 1
@@ -128,9 +161,12 @@ def _find_last_top_level_scope_separator(name: str) -> int | None:
 
 
 def _split_top_level_commas(text: str) -> tuple[str, ...]:
-    """Split *text* on commas at bracket depth 0 only -- a comma inside a
-    nested template argument list, a function-pointer parameter list, or an
-    array bound is never a top-level argument separator (``Box<pair<int,
+    """Split *text* on commas at bracket depth 0 and outside any quoted
+    span only -- a comma inside a nested template argument list, a
+    function-pointer parameter list, an array bound, or a quoted non-type
+    argument (a char literal, e.g. ``CharBox<','>``, or a string literal,
+    e.g. ``Tag<"a,b">`` -- both real, GCC-observed DWARF/castxml record
+    spellings) is never a top-level argument separator (``Box<pair<int,
     int>, 3>`` has exactly two top-level arguments, not four).
     """
     parts: list[str] = []
@@ -140,6 +176,9 @@ def _split_top_level_commas(text: str) -> tuple[str, ...]:
     n = len(text)
     while i < n:
         ch = text[i]
+        if ch in _QUOTES:
+            i = _quoted_span_end(text, i)
+            continue
         if ch in _OPEN_TO_CLOSE:
             stack.append(ch)
         elif ch in _CLOSERS:
@@ -204,6 +243,10 @@ def split_template_arguments(name: str) -> tuple[str, ...] | None:
     ('void (*)(int, int)', '3')
     >>> split_template_arguments("Wrapper<(lambda at f.cpp:7:14)>")
     ('(lambda at f.cpp:7:14)',)
+    >>> split_template_arguments("CharBox<','>")
+    ("','",)
+    >>> split_template_arguments('Tag<"a,b">')
+    ('"a,b"',)
     """
     sep = _find_last_top_level_scope_separator(name)
     leaf = name[sep + 2 :] if sep is not None else name
@@ -216,6 +259,9 @@ def split_template_arguments(name: str) -> tuple[str, ...] | None:
     n = len(leaf)
     while i < n:
         ch = leaf[i]
+        if ch in _QUOTES:
+            i = _quoted_span_end(leaf, i)
+            continue
         if ch in _OPEN_TO_CLOSE:
             stack.append(ch)
         elif ch in _CLOSERS:
