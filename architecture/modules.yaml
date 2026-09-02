@@ -667,6 +667,7 @@
     "comparability_fields.py",
     "comparability_json.py",
     "comparability_language_mode.py",
+    "comparability_profile.py",
     "comparability_sequences.py",
     "compatibility_evaluation_config.py",
     "compatibility_evaluation_frontend.py",
