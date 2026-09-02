@@ -4871,15 +4871,13 @@
   },
   "case143_audit_accidental_export": {
    "entity": "rule",
-   "scenario_kind": "audit",
+   "scenario_kind": null,
    "ecosystem": "generic",
    "topics": [
     "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -4889,15 +4887,13 @@
   },
   "case144_audit_private_header_leak": {
    "entity": "rule",
-   "scenario_kind": "audit",
+   "scenario_kind": null,
    "ecosystem": "generic",
    "topics": [
     "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -4907,15 +4903,13 @@
   },
   "case145_audit_unversioned_export": {
    "entity": "rule",
-   "scenario_kind": "audit",
+   "scenario_kind": null,
    "ecosystem": "generic",
    "topics": [
     "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -4925,15 +4919,13 @@
   },
   "case146_audit_rtti_for_internal": {
    "entity": "rule",
-   "scenario_kind": "audit",
+   "scenario_kind": null,
    "ecosystem": "generic",
    "topics": [
     "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -4946,11 +4938,10 @@
    "scenario_kind": "capability",
    "ecosystem": "generic",
    "topics": [
+    "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -4963,11 +4954,10 @@
    "scenario_kind": "capability",
    "ecosystem": "generic",
    "topics": [
+    "audit",
     "build"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -4980,11 +4970,10 @@
    "scenario_kind": "capability",
    "ecosystem": "generic",
    "topics": [
+    "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -5014,11 +5003,10 @@
    "scenario_kind": "capability",
    "ecosystem": "generic",
    "topics": [
+    "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -5031,11 +5019,10 @@
    "scenario_kind": "capability",
    "ecosystem": "generic",
    "topics": [
+    "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
@@ -5050,12 +5037,10 @@
    "topics": [
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5067,12 +5052,10 @@
    "topics": [
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5084,12 +5067,10 @@
    "topics": [
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5101,12 +5082,10 @@
    "topics": [
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5118,12 +5097,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5135,12 +5112,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5152,12 +5127,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5186,12 +5159,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5203,12 +5174,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5220,12 +5189,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5254,12 +5221,10 @@
    "topics": [
     "controls"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "snapshot-pair",
+   "validation_owner": "reconcile",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5374,12 +5339,10 @@
     "build",
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "snapshot-pair",
+   "validation_owner": "snapshot-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5459,12 +5422,10 @@
    "topics": [
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "kabi-pair",
+   "validation_owner": "kabi",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5476,12 +5437,10 @@
    "topics": [
     "platform"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "kabi-pair",
+   "validation_owner": "kabi",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5576,14 +5535,13 @@
    "scenario_kind": null,
    "ecosystem": "generic",
    "topics": [
+    "audit",
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
-   "validation_owner": "snapshot-pair",
+   "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -5734,12 +5692,10 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
-   "validation_owner": "compiler-pair",
+   "artifact_shape": "fixture-pair",
+   "validation_owner": "fixture-pair",
    "related_rules": [],
    "rule_slug": null,
    "variant_of": null
@@ -7188,11 +7144,9 @@
    "topics": [
     "symbols"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
+   "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,
@@ -7205,11 +7159,9 @@
    "topics": [
     "symbols"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
+   "artifact_shape": "snapshot-pair",
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,
@@ -7222,11 +7174,9 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
+   "artifact_shape": "fixture-pair",
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,
@@ -7239,11 +7189,9 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
+   "artifact_shape": "fixture-pair",
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,
@@ -7256,11 +7204,9 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
+   "artifact_shape": "fixture-pair",
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,
@@ -7273,11 +7219,9 @@
    "topics": [
     "source"
    ],
-   "languages": [
-    "c"
-   ],
+   "languages": [],
    "scope": "single-library",
-   "artifact_shape": "compiled-pair",
+   "artifact_shape": "fixture-pair",
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": null,

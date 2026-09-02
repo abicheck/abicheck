@@ -34,7 +34,7 @@ are orthogonal to implementation language and independent of the physical
                      fixtures ship
     scope           "single-library" | "multi-library"
     artifact_shape  "compiled-pair" | "snapshot-pair" | "stub-pair" |
-                     "btf-pair" | "bundle"
+                     "btf-pair" | "kabi-pair" | "fixture-pair" | "bundle"
     validation_owner the runner family that exercises this case (mirrors
                      examples/CLAUDE.md's "owner families" list)
     related_rules   rule slugs a scenario composes (only populated for the
@@ -130,7 +130,15 @@ def _kind_to_topic() -> dict[str, str]:
     return mapping
 
 
-def _languages(case_dir: Path) -> list[str]:
+def _languages(case_dir: Path, has_committed_fixtures: bool) -> list[str]:
+    """Derive language(s) from which source-file extensions the case's own
+    fixtures ship. A case whose only committed artifacts are fixture data
+    (a `fixtures:` list in ground_truth.json -- .abi.json/.symvers/.json
+    snapshots, never compiled source) carries no source extension to derive
+    a language from, so it's left `[]` rather than guessed at: several such
+    cases (e.g. case192/193) model C++ constructs in their fixture despite
+    shipping no .cpp file.
+    """
     names = {p.name.lower() for p in case_dir.rglob("*") if p.is_file()}
     langs = []
     if any(n.endswith((".c", ".h")) for n in names) and not any(
@@ -143,19 +151,34 @@ def _languages(case_dir: Path) -> list[str]:
         "stub" in n for n in names if n.endswith(".py")
     ):
         langs.append("python")
-    if not langs and any(n.endswith(".btf") for n in names):
+    if any(n.endswith(".btf") for n in names):
         langs.append("c")  # kernel BTF fixtures describe C types
-    return langs or ["c"]
+    if langs or has_committed_fixtures:
+        return langs
+    return ["c"]  # a compiled-pair case with no recognized source extension
 
 
-def _artifact_shape(case_dir: Path, case_num: int) -> str:
-    names = {p.name for p in case_dir.iterdir() if p.is_file()}
+def _artifact_shape(case_dir: Path, case_num: int, fixtures: list[str]) -> str:
+    """Derive the fixture shape. `fixtures` (ground_truth.json's own
+    `fixtures:` list, when the case declares one) is authoritative over any
+    file-scan heuristic -- it's what the case's own owner already committed
+    to, and covers every naming convention a committed-fixture case uses
+    (`snapshot.abi.json`, `old.abi.json`/`new.abi.json`,
+    `v1.abi.json`/`v2.abi.json`, `v1.symvers`/`v2.symvers`,
+    `old.json`/`new.json` build/source-graph fixtures) without hard-coding
+    each one.
+    """
     if case_num in BUNDLE_SCENARIOS:
         return "bundle"
+    if fixtures:
+        if any(f.endswith(".abi.json") for f in fixtures):
+            return "snapshot-pair"
+        if any(f.endswith(".symvers") for f in fixtures):
+            return "kabi-pair"
+        return "fixture-pair"  # committed non-.abi.json data (build/source-graph JSON, ...)
+    names = {p.name for p in case_dir.iterdir() if p.is_file()}
     if any(n.endswith(".btf") for n in names):
         return "btf-pair"
-    if "snapshot.abi.json" in names:
-        return "snapshot-pair"
     if any(n.endswith(".pyi") for n in names):
         # A Python-stub-only fixture (no v1/v2 or old/new *compiled* pair) --
         # currently just case163. `old`/`new` subdirectories are also used as
@@ -166,17 +189,21 @@ def _artifact_shape(case_dir: Path, case_num: int) -> str:
     return "compiled-pair"
 
 
-def _validation_owner(case_num: int, artifact_shape: str) -> str:
+def _validation_owner(case_num: int, artifact_shape: str, mode: str | None) -> str:
     if artifact_shape == "bundle":
         return "bundle-runner"
-    if case_num in AUDIT_RULES or case_num in CAPABILITY_SCENARIOS:
+    if mode == "reconcile":
+        return "reconcile"
+    if mode == "audit" or case_num in AUDIT_RULES or case_num in CAPABILITY_SCENARIOS:
         return "g20-audit"
     if artifact_shape == "btf-pair":
         return "btf"
     if artifact_shape == "stub-pair":
         return "python-api"
-    if artifact_shape == "snapshot-pair":
-        return "snapshot-pair"
+    if artifact_shape == "kabi-pair":
+        return "kabi"
+    if artifact_shape in ("snapshot-pair", "fixture-pair"):
+        return artifact_shape
     return "compiler-pair"
 
 
@@ -185,8 +212,6 @@ def _entity_and_scenario_kind(case_num: int) -> tuple[str, str | None]:
         return "scenario", "project-topology"
     if case_num in CAPABILITY_SCENARIOS:
         return "scenario", "capability"
-    if case_num in AUDIT_RULES:
-        return "rule", "audit"
     if (
         case_num in ONETBB_CASE_STUDIES
         or case_num in SYCL_CASE_STUDIES
@@ -194,6 +219,10 @@ def _entity_and_scenario_kind(case_num: int) -> tuple[str, str | None]:
         or case_num in LINUX_KERNEL_CASE_STUDIES
     ):
         return "scenario", "case-study"
+    # AUDIT_RULES (143-146) stay entity == "rule": `scenario_kind` is only
+    # ever set for entity == "scenario" (contract asserted by
+    # build_taxonomy's own invariant check below); audit-ness is instead
+    # carried by the "audit" topics entry these cases already get.
     return "rule", None
 
 
@@ -223,11 +252,14 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
         case_dir = EXAMPLES / case_name
         entity, scenario_kind = _entity_and_scenario_kind(case_num)
 
+        mode = entry.get("mode")
+        fixtures = entry.get("fixtures") or []
+
         expected_kinds = entry.get("expected_kinds") or []
         topics = sorted(
             {kind_to_topic[k] for k in expected_kinds if k in kind_to_topic}
         )
-        if case_num in AUDIT_RULES and "audit" not in topics:
+        if mode == "audit" and "audit" not in topics:
             topics.append("audit")
             topics.sort()
         if not expected_kinds and entry.get("expected") == "NO_CHANGE":
@@ -236,18 +268,25 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             # "controls" is its own topic (design doc section 5/8).
             topics = ["controls"]
 
-        artifact_shape = _artifact_shape(case_dir, case_num)
+        artifact_shape = _artifact_shape(case_dir, case_num, fixtures)
         rule_slug, variant_of = RULE_FAMILIES.get(case_name, (None, None))
+
+        assert scenario_kind is None or entity == "scenario", (
+            f"{case_name}: scenario_kind is set ({scenario_kind!r}) but "
+            f"entity is {entity!r}, not 'scenario' -- contract violation"
+        )
 
         taxonomy[case_name] = {
             "entity": entity,
             "scenario_kind": scenario_kind,
             "ecosystem": _ecosystem(case_num),
             "topics": topics,
-            "languages": _languages(case_dir) if case_dir.is_dir() else [],
+            "languages": _languages(case_dir, bool(fixtures))
+            if case_dir.is_dir()
+            else [],
             "scope": _scope(case_num),
             "artifact_shape": artifact_shape,
-            "validation_owner": _validation_owner(case_num, artifact_shape),
+            "validation_owner": _validation_owner(case_num, artifact_shape, mode),
             "related_rules": RELATED_RULES.get(case_name, []),
             "rule_slug": rule_slug,
             "variant_of": variant_of,

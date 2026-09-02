@@ -60,7 +60,7 @@ unaffected. Each of the 197 entries carries:
 | `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for the four G20 audit rules |
 | `languages` | derived from which source-file extensions the case's own fixtures ship |
 | `scope` | `single-library` or `multi-library` (the five bundle cases) |
-| `artifact_shape` | `compiled-pair`, `snapshot-pair`, `stub-pair`, `btf-pair`, or `bundle` |
+| `artifact_shape` | `compiled-pair`, `snapshot-pair`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:` list when a case declares one (authoritative over any file-scan heuristic), else from what the case directory actually ships |
 | `validation_owner` | which runner family exercises the case (mirrors `examples/CLAUDE.md`'s "owner families" list) |
 | `related_rules` | rule slugs a scenario composes — populated only for the scenarios the design discussion named explicitly (see the module docstring's "Known gaps") |
 | `rule_slug` / `variant_of` | the Phase 2 worked example below |
@@ -132,14 +132,17 @@ Not attempted in this change (from the original six-phase migration):
 
 ## Tests
 
-`scripts/gen_catalog_taxonomy.py --check` is the drift gate; run it after
-any `ground_truth.json`/case change. No new pytest module — the generator
-is pure derivation from already-tested data (`change_registry`,
-`ground_truth.json`), so its own `--check` invocation is the executable
-contract; a future phase adding hand-curated fields (full `rule_slug`
-coverage, `related_rules`) should add `tests/test_catalog_taxonomy.py`
-asserting the classification invariants (every case has exactly one
-`entity`, every `variant_of` names a real case, etc.) at that point.
+`tests/test_catalog_taxonomy.py` mirrors `gen_platform_matrix.py`/
+`test_platform_matrix.py`'s pattern: it re-derives the taxonomy from
+`gen_catalog_taxonomy.build_taxonomy()` and asserts it matches the
+committed block, so drift fails the ordinary fast pytest lane rather than
+only a `--check` someone has to remember to run. It also pins the
+classification invariants directly — `scenario_kind` is set only for
+`entity == "scenario"`, every `variant_of` names a real case whose own
+`rule_slug` matches and which is not itself a variant, and `related_rules`
+entries are non-empty strings. `scripts/gen_catalog_taxonomy.py --check` is
+the equivalent manual/CI drift gate; run either after any
+`ground_truth.json`/case change.
 
 ## Out of scope
 
