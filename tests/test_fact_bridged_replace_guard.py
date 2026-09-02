@@ -135,6 +135,20 @@ def _module_paths() -> list[Path]:
     return sorted(_PKG.rglob("*.py"))
 
 
+def _rel(path: Path) -> str:
+    """Repo-relative path with **forward slashes on every platform**.
+
+    ``str(Path)`` renders ``abicheck\\tu_merge.py`` on Windows, which matches
+    no key in either allowlist below — so every allowlisted call site read as
+    unreviewed and all four tests failed there while passing on Linux (real
+    CI failure, `unit-tests (windows-latest, 3.13)`). The allowlists are
+    written with POSIX separators because that is how this repo names files
+    everywhere else, so the normalization belongs here rather than in
+    twelve hand-written keys.
+    """
+    return path.relative_to(_PKG.parent).as_posix()
+
+
 def _enclosing_function(tree: ast.Module, node: ast.AST) -> str:
     best = "<module>"
     for candidate in ast.walk(tree):
@@ -179,12 +193,7 @@ def _named_violations() -> list[tuple[str, int, str, list[str]]]:
             )
             if not unsynced:
                 continue
-            # .as_posix(), not str(): the allowlist keys are hardcoded
-            # forward-slash paths, and str() on Windows yields backslash
-            # separators -- that mismatch made every allowlist entry read
-            # as stale (and every real call site as unreviewed) on the
-            # windows-latest CI lane regardless of which PR ran it.
-            rel = path.relative_to(_PKG.parent).as_posix()
+            rel = _rel(path)
             func = _enclosing_function(tree, node)
             unreviewed = [
                 name
@@ -208,13 +217,7 @@ def _starred_calls() -> list[tuple[str, int, str]]:
             if not _is_replace_call(node):
                 continue
             if any(kw.arg is None for kw in node.keywords):
-                # .as_posix(), not str(): the allowlist keys are hardcoded
-                # forward-slash paths, and str() on Windows yields backslash
-                # separators -- that mismatch made every allowlist entry
-                # read as stale (and every real call site as unreviewed)
-                # on the windows-latest CI lane regardless of which PR
-                # ran it.
-                rel = path.relative_to(_PKG.parent).as_posix()
+                rel = _rel(path)
                 found.append((rel, node.lineno, _enclosing_function(tree, node)))
     return found
 
@@ -251,12 +254,7 @@ class TestNoUnsyncedReplace:
         live: set[tuple[str, str, str]] = set()
         for path in _module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            # .as_posix(), not str(): the allowlist keys are hardcoded
-            # forward-slash paths, and str() on Windows yields backslash
-            # separators -- that mismatch made every allowlist entry read
-            # as stale (and every real call site as unreviewed) on the
-            # windows-latest CI lane regardless of which PR ran it.
-            rel = path.relative_to(_PKG.parent).as_posix()
+            rel = _rel(path)
             for node in ast.walk(tree):
                 if not _is_replace_call(node):
                     continue

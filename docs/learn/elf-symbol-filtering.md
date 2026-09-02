@@ -132,4 +132,4 @@ abicheck's practical boundary list, and
 
 ---
 
-**Ladder:** ← [What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md) · Concepts c2 · The evidence model · [Limitations & Known Boundaries](limitations.md) →
+**Ladder:** ← [What Each Level Sees](what-each-level-sees.md) · Concepts c2 · The evidence model · [Limitations & Known Boundaries](limitations.md) →

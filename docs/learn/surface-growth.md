@@ -112,4 +112,4 @@ claims a tool for that beyond the fields themselves.
 
 ---
 
-**Ladder:** ← [Where in the Pipeline](where-in-the-pipeline.md) · Tier 5 · Practice · [Rollout and Governance](rollout-and-governance.md) →
+**Ladder:** ← [Where in the Pipeline](where-in-the-pipeline.md) · Step 7 · In Practice · [Rollout and Governance](rollout-and-governance.md) →

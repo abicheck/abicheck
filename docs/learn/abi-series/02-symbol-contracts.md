@@ -17,8 +17,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -306,4 +305,4 @@ shifting one offset is a whole second family of silent breaks.
 
 ---
 
-**Ladder:** ← [What Is Part of Your ABI Surface?](../abi-surface.md) · Tier 2 · Mechanics · [Part 3 — Type Layout Breaks](03-type-layout.md) →
+**Ladder:** ← [What Is Part of Your ABI Surface?](../abi-surface.md) · Step 3 · How Breaks Happen · [Part 3 — Type Layout Breaks](03-type-layout.md) →

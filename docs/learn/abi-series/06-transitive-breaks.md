@@ -18,8 +18,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > **6. Transitive Breaks** ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -263,11 +262,11 @@ SONAME bump — but they should fail CI when you promise source compatibility.
 
 ## Next
 
-You've now seen every family of break. Before the design playbook that keeps
-them out ([Part 7](07-designing-for-stability.md)), the ladder turns to the
-contract itself: which side of the boundary promises what, and to whom.
+You've now seen every family of break. The last Part is the design playbook
+that keeps them out: every pattern in it is a variation on one move — stop
+publishing the fact the caller would bake in.
 
-➡️ **[Compatibility Direction](../compatibility-direction.md)**
+➡️ **[Part 7 — Designing for Stability](07-designing-for-stability.md)**
 
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [BREAKING examples](../../reference/examples/by-verdict/breaking.md) ·
@@ -275,4 +274,4 @@ contract itself: which side of the boundary promises what, and to whom.
 
 ---
 
-**Ladder:** ← [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) · Tier 2 · Mechanics · [Compatibility Direction](../compatibility-direction.md) →
+**Ladder:** ← [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) · Step 3 · How Breaks Happen · [Part 7 — Designing for Stability](07-designing-for-stability.md) →

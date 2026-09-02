@@ -114,4 +114,4 @@ how long.
 
 ---
 
-**Ladder:** ← [Ownership & Lifetime Contracts](ownership-and-lifetime.md) · Tier 8 · Beyond static ABI · [Series overview](abi-api-handling.md) →
+**Ladder:** ← [Ownership & Lifetime Contracts](ownership-and-lifetime.md) · Step 9 · Beyond Static ABI · [Series overview](abi-api-handling.md) →

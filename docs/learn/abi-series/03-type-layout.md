@@ -19,8 +19,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -277,4 +276,4 @@ silently flips the calling convention.
 
 ---
 
-**Ladder:** ← [Part 2 — Symbol Contract Breaks](02-symbol-contracts.md) · Tier 2 · Mechanics · [Part 4 — C++ ABI Specifics](04-cpp-abi.md) →
+**Ladder:** ← [Part 2 — Symbol Contract Breaks](02-symbol-contracts.md) · Step 3 · How Breaks Happen · [Part 4 — C++ ABI Specifics](04-cpp-abi.md) →

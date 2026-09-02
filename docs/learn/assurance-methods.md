@@ -140,4 +140,4 @@ TSAN_OPTIONS=halt_on_error=1 ./consumer-tsan --threads 16 --stress
 
 ---
 
-**Ladder:** ← [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) · Tier 4 · Evidence and detection · [Where in the Pipeline](where-in-the-pipeline.md) →
+**Ladder:** ← [Detecting Breaks](abi-series/08-detection.md) · Step 6 · Detect Breaks · [Where in the Pipeline](where-in-the-pipeline.md) →

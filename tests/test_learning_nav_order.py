@@ -71,6 +71,71 @@ def test_nav_groups_reads_grouped_and_flat_tabs_only() -> None:
     }
 
 
+def test_nav_subgroups_keep_the_nesting_nav_groups_folds() -> None:
+    nav = NAV.replace(
+        "      - Part 5: learn/p5.md\n",
+        "      - Part 5: learn/p5.md\n      - Go Deeper (optional):\n        - X: learn/x.md\n        - Y: learn/y.md\n      - Part 6: learn/p6.md\n",
+    )
+    assert lno.nav_subgroups(nav) == {
+        "ABI/API Compatibility / Mechanics": [
+            ("Go Deeper (optional)", ["learn/x.md", "learn/y.md"])
+        ]
+    }
+    # the flat view still lists every page in nav order
+    assert lno.nav_groups(nav)["ABI/API Compatibility / Mechanics"] == [
+        "learn/p2.md",
+        "learn/deep.md",
+        "learn/p5.md",
+        "learn/x.md",
+        "learn/y.md",
+        "learn/p6.md",
+    ]
+    assert lno.nav_subgroups(NAV) == {}
+
+
+def test_nav_page_count_sees_every_tab() -> None:
+    assert lno.nav_page_count(NAV, "learn/hub.md") == 1
+    everywhere = NAV.replace(
+        "    - CLI: reference/cli.md\n",
+        "    - CLI: reference/cli.md\n    - Hub: learn/hub.md\n",
+    )
+    assert lno.nav_page_count(everywhere, "learn/hub.md") == 2
+    assert lno.nav_page_count(NAV, "learn/nope.md") == 0
+    quoted = NAV.replace(
+        "    - CLI: reference/cli.md\n",
+        "    - CLI: reference/cli.md\n    - Hub: \"learn/hub.md\"\n    - Again: 'learn/hub.md'\n",
+    )
+    assert lno.nav_page_count(quoted, "learn/hub.md") == 3
+
+
+def test_quoted_page_values_are_read_unquoted() -> None:
+    quoted = NAV.replace(
+        "      - Part 2: learn/p2.md\n", '      - Part 2: "learn/p2.md"\n'
+    )
+    assert (
+        lno.nav_groups(quoted)["ABI/API Compatibility / Mechanics"][0] == "learn/p2.md"
+    )
+
+
+def test_duplicate_nav_groups_are_named_once_in_order() -> None:
+    nav = NAV.replace(
+        "    - Mechanics:   # a comment\n",
+        "    - Start:\n      - Extra: learn/extra.md\n    - Mechanics:   # a comment\n",
+    )
+    assert lno.duplicate_nav_groups(nav) == ["ABI/API Compatibility / Start"]
+    assert lno.duplicate_nav_groups(NAV) == []
+    twice = NAV.replace(
+        "  - Reference:\n", "  - Concepts:\n    - Y: learn/y.md\n  - Reference:\n"
+    )
+    assert lno.duplicate_nav_groups(twice) == ["Concepts"]
+    # the merged view still holds both halves, in order
+    assert lno.nav_groups(nav)["ABI/API Compatibility / Start"] == [
+        "learn/hub.md",
+        "learn/five.md",
+        "learn/extra.md",
+    ]
+
+
 def _docs(tmp_path: Path, levels: dict[str, str | None]) -> Path:
     docs = tmp_path / "docs"
     for page, level in levels.items():
