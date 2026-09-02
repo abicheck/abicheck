@@ -71,6 +71,28 @@ def test_nav_groups_reads_grouped_and_flat_tabs_only() -> None:
     }
 
 
+def test_nav_subgroups_keep_the_nesting_nav_groups_folds() -> None:
+    nav = NAV.replace(
+        "      - Part 5: learn/p5.md\n",
+        "      - Part 5: learn/p5.md\n      - Go Deeper (optional):\n        - X: learn/x.md\n        - Y: learn/y.md\n      - Part 6: learn/p6.md\n",
+    )
+    assert lno.nav_subgroups(nav) == {
+        "ABI/API Compatibility / Mechanics": [
+            ("Go Deeper (optional)", ["learn/x.md", "learn/y.md"])
+        ]
+    }
+    # the flat view still lists every page in nav order
+    assert lno.nav_groups(nav)["ABI/API Compatibility / Mechanics"] == [
+        "learn/p2.md",
+        "learn/deep.md",
+        "learn/p5.md",
+        "learn/x.md",
+        "learn/y.md",
+        "learn/p6.md",
+    ]
+    assert lno.nav_subgroups(NAV) == {}
+
+
 def test_duplicate_nav_groups_are_named_once_in_order() -> None:
     nav = NAV.replace(
         "    - Mechanics:   # a comment\n",

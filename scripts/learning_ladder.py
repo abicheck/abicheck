@@ -49,12 +49,12 @@ Rules the file encodes (each is an ERROR):
   own step.
 - **The sidebar is the ladder.** In `mkdocs.yml`, a numbered sequence's
   tab carries one nav group per step — titled `<id>. <title>`, in step order,
-  holding exactly that step's members in ladder order, each branch
-  somewhere after its parent and branches in ladder order among
-  themselves, each branch either directly after its parent or in the
-  trailing go-deeper block; any other sequence's tab lists it flat in the
-  same order (the Concepts tab) — the shape is declared by the sequence,
-  not read off whatever the nav contains. The hub is the first entry directly under the
+  holding exactly that step's members in ladder order and, when the step
+  has go-deeper branches, exactly one nested group titled
+  `DEEPER_GROUP_TITLE` closing the step with exactly those branches in
+  ladder order; any other sequence's tab lists it flat in the same order
+  (the Concepts tab) — the shape is declared by the sequence, not read
+  off whatever the nav contains. The hub is the first entry directly under the
   first sequence's tab, as its overview, and appears nowhere else.
   This is what keeps the sidebar, the hub's step list, and every page's
   footer telling one reading order instead of three.
@@ -70,12 +70,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-from learning_nav_order import duplicate_nav_groups, nav_groups
+from learning_nav_order import duplicate_nav_groups, nav_groups, nav_subgroups
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 DOCS = REPO_DIR / "docs"
 LADDER_PATH = DOCS / "_meta" / "learning-ladder.yaml"
 CHECK = "learning-ladder"
+#: The one nested nav group a step may carry: its go-deeper branches, in
+#: ladder order, closing the step. The title is part of the contract, since
+#: it is what tells a reader in the sidebar that these pages are optional.
+DEEPER_GROUP_TITLE = "Go Deeper (optional)"
 
 LEVEL_RANK: dict[str, int] = {
     "beginner": 0,
@@ -495,10 +499,50 @@ def _order_findings(
     return out
 
 
+def _deeper_group_findings(
+    label: str,
+    pages: list[str],
+    tier: Tier,
+    subs: list[tuple[str, list[str]]],
+) -> list[str]:
+    """A step's go-deeper branches live in exactly one nested nav group
+    titled `DEEPER_GROUP_TITLE`, holding exactly those branches in ladder
+    order and closing the step; a step without branches has no nested
+    group. `_order_findings` sees the flattened list and cannot tell a
+    nested group from loose pages, so this is where the wrapper itself is
+    checked (a member demoted into it, the wrapper renamed or removed, or
+    an extra nested group)."""
+    out: list[str] = []
+    branches = [b for m in tier.members for b in tier.branches.get(m, [])]
+    if not branches:
+        for title, _ in subs:
+            out.append(
+                f"{label}: nested group {title!r} is not allowed; this step has no "
+                "go-deeper pages"
+            )
+        return out
+    if len(subs) != 1 or subs[0][0] != DEEPER_GROUP_TITLE:
+        out.append(
+            f"{label}: go-deeper pages must sit in exactly one nested group titled "
+            f"{DEEPER_GROUP_TITLE!r} (found {[title for title, _ in subs]})"
+        )
+        return out
+    _, sub_pages = subs[0]
+    if sub_pages != branches:
+        out.append(
+            f"{label}: {DEEPER_GROUP_TITLE!r} holds {sub_pages}; expected exactly "
+            f"{branches}, in ladder order"
+        )
+    elif pages[-len(sub_pages) :] != sub_pages:
+        out.append(f"{label}: {DEEPER_GROUP_TITLE!r} must close the step")
+    return out
+
+
 def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
     """Every way `mkdocs.yml`'s learning tabs disagree with the ladder."""
     tabs = tuple(s.tab for s in ladder.sequences)
     groups = nav_groups(mkdocs_text, tabs=tabs)
+    subgroups = nav_subgroups(mkdocs_text, tabs=tabs)
     out: list[str] = []
     for key in duplicate_nav_groups(mkdocs_text, tabs=tabs):
         what = "tab" if key in tabs else "nav group"
@@ -563,6 +607,10 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
             members = seq.ordered_members()
             branches = {p: bs for t in seq.tiers for p, bs in t.branches.items()}
             out.extend(_order_findings(seq.tab, flat, members, branches))
+            for title, _ in subgroups.get(flat_key, []):
+                out.append(
+                    f"{seq.tab}: nested group {title!r} is not allowed on a flat tab"
+                )
             continue
         for page in flat:
             out.append(
@@ -585,13 +633,10 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
             pages = by_title.get(nav_group_title(tier))
             if pages is None:
                 continue
+            label = f"{seq.tab} / {nav_group_title(tier)}"
+            out.extend(_order_findings(label, pages, tier.members, tier.branches))
             out.extend(
-                _order_findings(
-                    f"{seq.tab} / {nav_group_title(tier)}",
-                    pages,
-                    tier.members,
-                    tier.branches,
-                )
+                _deeper_group_findings(label, pages, tier, subgroups.get(label, []))
             )
     return out
 

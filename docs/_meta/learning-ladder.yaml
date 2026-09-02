@@ -21,9 +21,10 @@
 #
 # **The sidebar is this file.** `mkdocs.yml`'s "ABI/API Compatibility" tab
 # carries one nav group per educational step, titled "<id>. <title>" and
-# holding that step's members in this order (branches may sit right after
-# their parent or, grouped as "Go Deeper", at the end of the step), and the
-# Concepts tab lists the `concepts` sequence's members flat, in this order.
+# holding that step's members in this order and, when the step has
+# branches, one nested "Go Deeper (optional)" group closing the step with
+# exactly those branches in this order; the Concepts tab lists the
+# `concepts` sequence's members flat, in this order.
 # `scripts/learning_ladder.py`'s nav rule enforces that, so a reader sees
 # the same order in the sidebar, on the hub, and in every page's footer.
 #

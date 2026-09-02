@@ -85,16 +85,19 @@ def _nav_events(
     mkdocs_text: str, tabs: tuple[str, ...]
 ) -> list[tuple[str, str, str | None]]:
     """The nav block as ordered events: `("tab", tab, None)` when one of
-    `tabs` opens, `("group", key, None)` when a group under it opens and
-    `("page", key, path)` for each page, where `key` is `"<tab> / <group>"`
-    (`"<tab> / <tab>"` for a page directly under the tab). Deeper nesting
-    folds into the nearest enclosing group."""
+    `tabs` opens, `("group", key, None)` when a group under it opens,
+    `("subgroup", key, title)` when a group nested inside that group opens,
+    `("subpage", key, path)` for a page inside such a nested group and
+    `("page", key, path)` for a page directly in the group, where `key` is
+    `"<tab> / <group>"` (`"<tab> / <tab>"` for a page directly under the
+    tab). Nesting below a subgroup folds into that subgroup."""
     lines = mkdocs_text.split("\n")
     in_nav = False
     events: list[tuple[str, str, str | None]] = []
     tab_indent: int | None = None
     current_tab: str | None = None
     current_group: str | None = None
+    sub_indent: int | None = None  # indent of the open nested group's title
     for raw in lines:
         line = _strip_comment(raw)
         if not line.strip():
@@ -116,12 +119,14 @@ def _nav_events(
         if indent == tab_indent:
             current_tab = title if title in tabs and not value else None
             current_group = None
+            sub_indent = None
             if current_tab is not None:
                 events.append(("tab", current_tab, None))
             continue
         if current_tab is None:
             continue
         if indent == tab_indent + 2:
+            sub_indent = None
             if value:
                 # a page directly under the tab: the tab is the group
                 events.append(("page", f"{current_tab} / {current_tab}", value))
@@ -130,9 +135,19 @@ def _nav_events(
                 current_group = f"{current_tab} / {title}"
                 events.append(("group", current_group, None))
             continue
+        key = current_group or f"{current_tab} / {current_tab}"
+        if sub_indent is not None and indent <= sub_indent:
+            sub_indent = None  # back out of the nested group
         if value:
-            key = current_group or f"{current_tab} / {current_tab}"
-            events.append(("page", key, value))
+            events.append(("subpage" if sub_indent is not None else "page", key, value))
+        elif sub_indent is None:
+            sub_indent = indent
+            events.append(("subgroup", key, title))
+        else:
+            # a group nested inside the nested group: recorded as another
+            # subgroup opening (the rule rejects more than one), its pages
+            # folding into the enclosing nested group
+            events.append(("subgroup", key, title))
     return events
 
 
@@ -152,9 +167,24 @@ def nav_groups(
         if kind == "tab":
             continue
         pages = groups.setdefault(key, [])
-        if kind == "page" and value is not None:
+        if kind in ("page", "subpage") and value is not None:
             pages.append(value)
     return groups
+
+
+def nav_subgroups(
+    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
+) -> dict[str, list[tuple[str, list[str]]]]:
+    """Per group key, the nested groups opened inside it as `(title, pages)`
+    in nav order — the structure `nav_groups` folds away. A page inside a
+    nested group is listed under the most recently opened nested group."""
+    subs: dict[str, list[tuple[str, list[str]]]] = {}
+    for kind, key, value in _nav_events(mkdocs_text, tabs):
+        if kind == "subgroup" and value is not None:
+            subs.setdefault(key, []).append((value, []))
+        elif kind == "subpage" and value is not None and subs.get(key):
+            subs[key][-1][1].append(value)
+    return subs
 
 
 def duplicate_nav_groups(
@@ -167,7 +197,7 @@ def duplicate_nav_groups(
     seen: list[str] = []
     dupes: list[str] = []
     for kind, key, _ in _nav_events(mkdocs_text, tabs):
-        if kind == "page":
+        if kind not in ("tab", "group"):
             continue
         if key in seen and key not in dupes:
             dupes.append(key)

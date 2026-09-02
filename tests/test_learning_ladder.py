@@ -714,13 +714,72 @@ def test_hub_inside_a_step_group_is_an_error(tmp_path: Path) -> None:
     assert any("Learn / 1. Start: the hub" in m for m in msgs)
 
 
-def test_branch_right_after_its_parent_is_also_accepted(tmp_path: Path) -> None:
-    """The branch may follow its parent directly instead of closing the step."""
+def test_branch_outside_the_go_deeper_group_is_an_error(tmp_path: Path) -> None:
+    """A branch loose in the step, even directly after its parent, is not the
+    nested optional group the sidebar contract names."""
     nav = NAV_OK.replace(
         "      - C: learn/c.md\n      - D: learn/d.md\n      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
         "      - C: learn/c.md\n      - CB: learn/c-branch.md\n      - D: learn/d.md\n",
     )
-    assert _run_with_nav(tmp_path, nav) == []
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any(
+        "exactly one nested group titled 'Go Deeper (optional)'" in m for m in msgs
+    )
+
+
+def test_go_deeper_group_renamed_or_flattened_is_an_error(tmp_path: Path) -> None:
+    renamed = NAV_OK.replace("Go Deeper (optional):", "Advanced:")
+    msgs = _run_with_nav(tmp_path, renamed)
+    assert any("(found ['Advanced'])" in m for m in msgs)
+
+
+def test_go_deeper_group_flattened_away_is_an_error(tmp_path: Path) -> None:
+    flattened = NAV_OK.replace(
+        "      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
+        "      - CB: learn/c-branch.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, flattened)
+    assert any("(found [])" in m for m in msgs)
+
+
+def test_member_demoted_into_the_go_deeper_group_is_an_error(tmp_path: Path) -> None:
+    nav = NAV_OK.replace(
+        "      - D: learn/d.md\n      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
+        "      - Go Deeper (optional):\n        - D: learn/d.md\n        - CB: learn/c-branch.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any(
+        "holds ['learn/d.md', 'learn/c-branch.md']; expected exactly" in m for m in msgs
+    )
+
+
+def test_go_deeper_group_not_closing_the_step_is_an_error(tmp_path: Path) -> None:
+    nav = NAV_OK.replace(
+        "      - D: learn/d.md\n      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
+        "      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n      - D: learn/d.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("must close the step" in m for m in msgs)
+
+
+def test_nested_group_where_no_branches_exist_is_an_error(tmp_path: Path) -> None:
+    nav = NAV_OK.replace(
+        "      - B: learn/b.md\n",
+        "      - Go Deeper (optional):\n        - B: learn/b.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any(
+        "1. Start: nested group 'Go Deeper (optional)' is not allowed" in m
+        for m in msgs
+    )
+
+
+def test_nested_group_on_the_flat_tab_is_an_error(tmp_path: Path) -> None:
+    flat_tab = NAV_OK.replace(
+        "    - X: learn/x.md\n", "    - More:\n      - X: learn/x.md\n"
+    )
+    msgs = _run_with_nav(tmp_path, flat_tab)
+    assert any("Concepts: this sequence is listed flat" in m for m in msgs)
 
 
 def test_page_directly_under_the_tab_other_than_the_hub_is_an_error(
