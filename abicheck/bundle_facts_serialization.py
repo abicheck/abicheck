@@ -212,11 +212,16 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
                 f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
             )
     else:
-        raw_schema_version = d.get("schema_version")
-        try:
-            is_legacy_v1 = raw_schema_version is None or int(raw_schema_version) == 1
-        except (TypeError, ValueError):
-            is_legacy_v1 = False
+        # No try/except needed here (unlike looks_like_bundle_facts_document's
+        # own copy of this check below): by this point `schema_version` is
+        # already the normalized int the top-of-function `int(d.get(...))`
+        # call produced -- if that hadn't been coercible, it would already
+        # have raised before reaching here. "schema_version" absent from
+        # *d* is the one case that int(...) call defaulted rather than
+        # parsed, so it's checked for directly rather than re-deriving it
+        # from the (already-defaulted, no-longer-"absent"-shaped)
+        # `schema_version` value.
+        is_legacy_v1 = "schema_version" not in d or schema_version == 1
         if not is_legacy_v1:
             raise ValueError(
                 f"bundle facts: schema_version {schema_version} requires an "

@@ -196,3 +196,14 @@ class TestLooksLikeBundleFactsDocument:
 
     def test_false_for_a_dict_with_neither_key(self) -> None:
         assert not looks_like_bundle_facts_document({"schema_version": 2})
+
+    def test_false_for_a_non_coercible_schema_version(self) -> None:
+        # A pure classifier over untrusted, already-decoded JSON must not
+        # raise for a schema_version that int(...) can't parse -- it's
+        # simply not eligible for the v1 shape fallback.
+        assert not looks_like_bundle_facts_document(
+            {"schema_version": ["not", "coercible"], "per_library_snapshots": {}}
+        )
+        assert not looks_like_bundle_facts_document(
+            {"schema_version": "not-a-number", "per_library_snapshots": {}}
+        )
