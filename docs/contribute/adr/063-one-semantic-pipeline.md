@@ -25,9 +25,12 @@ per-concept status, use:*
   the same PR that changes a concept's status, exactly like the plan
   and this pointer), for a quick "who's authoritative today" check
   without reading the whole plan;*
-- *`docs/contribute/adr/index.md`'s own ADR-063 row — a short paraphrase
-  for readers browsing the ADR index, kept in sync with the two sources
-  above rather than restating them.*
+- *`docs/contribute/adr/index.md`'s own ADR-063 row — a paraphrase for
+  readers browsing the ADR index (this file's own established convention
+  for an actively-evolving ADR is a detailed row, not a one-liner — see
+  ADR-061's/058's own rows — so this one stays that detailed too), kept in
+  sync with the plan and ledger above rather than independently
+  re-deriving a status claim.*
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this

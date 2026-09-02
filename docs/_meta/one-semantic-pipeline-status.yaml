@@ -132,10 +132,11 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Markdown's leaf/root-cause render modes converged onto
-      ReportDocument (per ADR-061's own item 1/Phase 2 accounting, not
-      ADR-036 Increment 3, which is the unrelated, already-optional
-      html_report.py/pr_comment.py-via-ReportModel cleanup) — Markdown's
+      Markdown's leaf/root-cause render modes must still converge onto
+      ReportDocument -- not yet done, and tracked under ADR-061's own
+      item 1/Phase 2 accounting, not ADR-036 Increment 3 (the unrelated,
+      already-optional html_report.py/pr_comment.py-via-ReportModel
+      cleanup). Markdown's
       full mode and review digest are already on it
       (build_markdown_document/build_review_digest_document); not
       currently assigned to a numbered ADR-063 phase.

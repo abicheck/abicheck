@@ -54,9 +54,7 @@ _PIPELINE_STATUS_STATES = frozenset({"not_started", "partial", "complete"})
 #: `authority` names which representation actually decides behavior today --
 #: see the ledger file's own header comment for what each value means.
 _PIPELINE_AUTHORITY_VALUES = frozenset({"self", "legacy", "mixed"})
-#: Fields every concept entry must carry. `persistence` is deliberately not
-#: required -- only `facts` (the one concept with a genuine on-disk
-#: durability question distinct from "is it produced/consumed") has it.
+#: Fields every concept entry must carry.
 _PIPELINE_REQUIRED_CONCEPT_FIELDS = (
     "primitive",
     "producers",
@@ -66,6 +64,16 @@ _PIPELINE_REQUIRED_CONCEPT_FIELDS = (
 )
 #: Fields whose value must be one of `_PIPELINE_STATUS_STATES`.
 _PIPELINE_STATUS_FIELDS = ("primitive", "producers", "consumers", "persistence")
+#: Concept -> extra field(s) that concept specifically must carry, beyond
+#: `_PIPELINE_REQUIRED_CONCEPT_FIELDS`. Only `facts` has a genuine on-disk
+#: durability question distinct from "is it produced/consumed", so only it
+#: requires `persistence` -- but "not required anywhere" would let this one
+#: real durability status silently go missing with zero findings (a real
+#: review finding on PR #1019), so the requirement is concept-scoped rather
+#: than dropped to "optional everywhere."
+_PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "facts": ("persistence",),
+}
 #: The full roadmap concept inventory this ledger exists to track (ADR-063's
 #: seven primitives plus the two identity systems D3 explicitly separates --
 #: see the ledger file's own header). Checked as an exact set, not just "is
@@ -190,7 +198,10 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
                 f"{rel}: concepts.{name}: must be a mapping",
             )
             continue
-        for required in _PIPELINE_REQUIRED_CONCEPT_FIELDS:
+        required_fields = _PIPELINE_REQUIRED_CONCEPT_FIELDS + (
+            _PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS.get(name, ())
+        )
+        for required in required_fields:
             if required not in entry:
                 f.err(
                     "pipeline-status-ledger",

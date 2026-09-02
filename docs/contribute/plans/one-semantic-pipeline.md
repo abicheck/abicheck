@@ -162,9 +162,13 @@ detector migration and legacy-projection retirement are separate future
 work it does not itself schedule. The six sub-phases below close that gap.
 
 **Adopted sub-phases** — each slots after the parent phase it extends in
-the numbering, and each starts at status `not_started` (tracked in
-`docs/_meta/one-semantic-pipeline-status.yaml`) until a first PR lands
-against it:
+the numbering, and each starts at status `not_started`. This table is the
+status owner for the six sub-phases themselves; the ledger
+(`docs/_meta/one-semantic-pipeline-status.yaml`) tracks status one level
+up, per *concept* (`facts`/`identity`/`semantic_ir`/…), and each
+concept's own `removal_gate` names which sub-phase closes it — the two are
+complementary, not the same data twice. Update the `Status` column below
+when a first PR lands against a sub-phase:
 
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
