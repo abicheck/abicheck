@@ -31,8 +31,11 @@ from typing import TYPE_CHECKING
 
 from .dumper_elf_symbols import _populate_elf_visibility
 from .dumper_toolchain import _safe_mtime, _safe_size
-from .model import AbiSnapshot, Function, RecordType, Variable, Visibility
-from .model.identity import entity_id_for_function, entity_id_for_variable
+from .extract.export_symbol_identity import (
+    itanium_export_function as _elf_export_function,
+    itanium_export_variable as _elf_export_variable,
+)
+from .model import AbiSnapshot, RecordType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -110,33 +113,6 @@ def _try_dwarf_snapshot(
     return None, list(snap.types)
 
 
-def _elf_fallback_mangled_name(sym: str) -> str | None:
-    """The genuine ``mangled_name`` to offer ``entity_id_for_function``/
-    ``entity_id_for_variable`` for a raw ELF dynamic-symbol-table export
-    (ADR-063 Phase 2).
-
-    Symbol-table-only evidence carries no signal beyond the bare symbol
-    string itself, unlike DWARF's own ``DW_AT_linkage_name``
-    presence/absence (see ``dwarf_scope.function_entity_id``'s docstring)
-    -- so a genuine plain-C export (e.g. ``add``) and a real, explicitly-
-    linked non-Itanium C++ export (e.g. an ``asm("custom_name")``-labeled
-    function) are structurally indistinguishable here: both are just an
-    identifier with no ``_Z`` prefix. Gating on the ``_Z`` prefix, as this
-    producer's own ``is_extern_c`` field does, is therefore not a
-    correctness bug to "fix" either direction picks a real trade-off, not
-    a clean win (Codex review, PR #1015, two rounds): treating every
-    export as genuinely mangled correctly identifies the rare asm-labeled
-    case but disagrees with the two header-AST/DWARF backends' own
-    ``("extern_c",)`` tagging for the far more common plain-C case, and
-    vice versa. This function defaults to matching that more common case
-    -- ``None`` (no genuine mangling) whenever *sym* lacks the ``_Z``
-    prefix, an accepted, documented residual gap for the asm-labeled
-    case rather than a heuristic tuned to "fix" it at the common case's
-    expense.
-    """
-    return sym if sym.startswith("_Z") else None
-
-
 def _build_symbol_only_snapshot(
     so_path: Path,
     version: str,
@@ -185,51 +161,11 @@ def _build_symbol_only_snapshot(
         source_mtime=_so_mtime,
         source_mtime_epoch=_so_mtime_epoch,
         source_size=_safe_size(so_path),
-        functions=[
-            Function(
-                name=sym,
-                mangled=sym,
-                return_type="?",
-                visibility=Visibility.ELF_ONLY,
-                # Absence of Itanium _Z prefix is strong evidence of C linkage
-                is_extern_c=not sym.startswith("_Z"),
-                # ADR-063 Phase 2 (ELF-symbol-only slice). `_elf_fallback_
-                # mangled_name`'s own docstring has the full "why": unlike
-                # DWARF (a real DW_AT_linkage_name presence/absence signal
-                # -- see dwarf_scope.function_entity_id), symbol-table-only
-                # evidence cannot distinguish a genuine plain-C export from
-                # a real, explicitly-linked non-Itanium C++ export (e.g. an
-                # `asm("custom_name")`-labeled function) at all -- both are
-                # just a bare identifier string with no `_Z` prefix. This
-                # producer defaults to matching the two header-AST/DWARF
-                # backends' own extern-"C" convention for the (far more
-                # common) plain-C case, an accepted, documented residual
-                # gap for the rarer asm-labeled case (Codex review, PR
-                # #1015, two rounds: the first fix traded this common-case
-                # regression for that rare-case fix, which review correctly
-                # judged the wrong direction to default).
-                entity_id=entity_id_for_function(
-                    (),
-                    sym,
-                    mangled_name=_elf_fallback_mangled_name(sym),
-                    is_extern_c=not sym.startswith("_Z"),
-                ),
-            )
-            for sym in sorted(exported_dynamic_funcs)
-        ],
+        # ADR-063 Phase 2 -- see extract.export_symbol_identity's own module
+        # docstring for entity_id's mangled-vs-extern_c gate.
+        functions=[_elf_export_function(sym) for sym in sorted(exported_dynamic_funcs)],
         variables=[
-            Variable(
-                name=sym,
-                mangled=sym,
-                type="?",
-                visibility=Visibility.ELF_ONLY,
-                entity_id=entity_id_for_variable(
-                    (),
-                    sym,
-                    mangled_name=_elf_fallback_mangled_name(sym),
-                    is_extern_c=not sym.startswith("_Z"),
-                ),
-            )
+            _elf_export_variable(sym)
             for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
         ],
         # Preserve DWARF-derived types (with bases / vtable) when the

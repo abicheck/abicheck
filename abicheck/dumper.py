@@ -157,13 +157,12 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
-from .model import (
-    AbiSnapshot,
-    Function,
-    RecordType,
-    Variable,
-    Visibility,
+from .extract.export_symbol_identity import (
+    itanium_export_function as _itanium_export_function,
+    itanium_export_variable as _itanium_export_variable,
+    msvc_export_function as _msvc_export_function,
 )
+from .model import AbiSnapshot, RecordType
 
 log = logging.getLogger(__name__)
 
@@ -1727,6 +1726,7 @@ def _dump_macho(
         macho_vars = [exp for exp in _relevant if exp.is_data]
 
         _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
+        # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
         return AbiSnapshot(
             library=dylib_path.name,
             version=version,
@@ -1735,25 +1735,11 @@ def _dump_macho(
             source_mtime_epoch=_dylib_mtime_epoch,
             source_size=_safe_size(dylib_path),
             functions=[
-                Function(
-                    name=_normalize_macho_sym(exp.name),
-                    mangled=_normalize_macho_sym(exp.name),
-                    return_type="?",
-                    # ELF_ONLY: marks symbols as export-table-only (no header
-                    # confirmation). This lets the checker distinguish
-                    # binary-only removals as FUNC_REMOVED_ELF_ONLY.
-                    visibility=Visibility.ELF_ONLY,
-                    is_extern_c=not _normalize_macho_sym(exp.name).startswith("_Z"),
-                )
+                _itanium_export_function(_normalize_macho_sym(exp.name))
                 for exp in sorted(macho_funcs, key=lambda e: e.name)
             ],
             variables=[
-                Variable(
-                    name=_normalize_macho_sym(exp.name),
-                    mangled=_normalize_macho_sym(exp.name),
-                    type="?",
-                    visibility=Visibility.ELF_ONLY,
-                )
+                _itanium_export_variable(_normalize_macho_sym(exp.name))
                 for exp in sorted(macho_vars, key=lambda e: e.name)
             ],
             macho=macho_meta,
@@ -1882,16 +1868,8 @@ def _dump_pe(
             source_mtime=_dll_mtime,
             source_mtime_epoch=_dll_mtime_epoch,
             source_size=_safe_size(dll_path),
-            functions=[
-                Function(
-                    name=sym,
-                    mangled=sym,
-                    return_type="?",
-                    visibility=Visibility.ELF_ONLY,
-                    is_extern_c=not sym.startswith("?"),
-                )
-                for sym in sorted(exported_dynamic)
-            ],
+            # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
+            functions=[_msvc_export_function(sym) for sym in sorted(exported_dynamic)],
             pe=pe_meta,
             elf_only_mode=True,
             platform="pe",

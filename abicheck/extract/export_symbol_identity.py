@@ -1,0 +1,140 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""``EntityId``-construction helper shared by every export-table-only
+producer -- ELF (``dumper_elf_fallback.py``), Mach-O and PE
+(``dumper.py``'s own header-less ``_dump_macho``/``_dump_pe`` branches)
+(ADR-063 Phase 2).
+
+Each of these producers only ever constructs a ``Function``/``Variable``
+FROM an actual, observed dynamic-export-table entry -- unlike a header-AST/
+DWARF producer's own ``mangled = linkage_name or name`` fallback (a real
+non-distinguishing spelling used when no genuine linkage evidence exists at
+all), there is no "no real distinguishing spelling" case here to guard
+against: the raw exported string is always real, observed evidence.
+
+The one open question each of these producers shares is whether that raw
+string is *genuinely mangled* (``entity_id``'s "mangled" branch, scope-free,
+unique by construction) or a plain, unmangled export (the "extern_c" branch,
+matching what a header-AST/DWARF producer would resolve the identical
+genuinely-extern-"C" declaration to). Export-table-only evidence carries no
+signal beyond the string's own shape to answer that -- a real, explicitly-
+relabeled export (e.g. GCC/Clang's ``asm("custom_name")``, or an MSVC
+``/EXPORT:custom_name=realname`` alias) is structurally indistinguishable
+from a genuine plain-C/extern-"C" export; both are just an identifier with
+no mangling prefix. This is a genuinely irreducible ambiguity (confirmed
+against real DWARF evidence too -- see ``extract/dwarf_scope.
+function_entity_id``'s own docstring for the identical conclusion reached
+from a *different* evidence source), not a heuristic waiting on a smarter
+check: every producer here defaults to the structural-mangling-prefix
+gate, matching the two header-AST backends' own convention for the
+overwhelmingly common (non-relabeled) case, with the relabeled case an
+accepted, documented residual gap.
+
+Also builds the full ``Function``/``Variable`` objects for the common
+shape all three producers share (name/mangled/return_type/visibility/
+is_extern_c/entity_id) -- one construction site instead of three
+independently-drifting copies.
+
+Leaf module: depends only on ``model``/``model.identity`` (allowed:
+``extract -> model``, ADR-061).
+"""
+
+from __future__ import annotations
+
+from ..model import Function, Variable, Visibility
+from ..model.identity import entity_id_for_function, entity_id_for_variable
+
+__all__ = [
+    "itanium_export_function",
+    "itanium_export_mangled_name",
+    "itanium_export_variable",
+    "msvc_export_function",
+    "msvc_export_mangled_name",
+]
+
+
+def itanium_export_mangled_name(sym: str) -> str | None:
+    """The genuine ``mangled_name`` to offer ``entity_id_for_function``/
+    ``entity_id_for_variable`` for a raw ELF/Mach-O dynamic-export-table
+    entry, keyed on the Itanium ``_Z`` mangling prefix -- see this module's
+    own docstring for the full "why". ``None`` (take the extern-"C"
+    branch) for anything not ``_Z``-prefixed, including a genuine plain-C
+    export and a relabeled one alike.
+    """
+    return sym if sym.startswith("_Z") else None
+
+
+def msvc_export_mangled_name(sym: str) -> str | None:
+    """The PE/COFF counterpart of :func:`itanium_export_mangled_name`,
+    keyed on the MSVC ``?`` mangling prefix instead of Itanium ``_Z``."""
+    return sym if sym.startswith("?") else None
+
+
+def itanium_export_function(name: str) -> Function:
+    """An export-table-only ``Function`` for an ELF/Mach-O *name* already
+    normalized to its bare exported spelling (Mach-O's own leading
+    underscore stripped by the caller) -- shared by
+    ``dumper_elf_fallback.py`` and ``dumper.py``'s Mach-O export-only path.
+    """
+    is_extern_c = not name.startswith("_Z")
+    return Function(
+        name=name,
+        mangled=name,
+        return_type="?",
+        # ELF_ONLY: marks symbols as export-table-only (no header
+        # confirmation), so the checker can distinguish a binary-only
+        # removal as FUNC_REMOVED_ELF_ONLY.
+        visibility=Visibility.ELF_ONLY,
+        is_extern_c=is_extern_c,
+        entity_id=entity_id_for_function(
+            (),
+            name,
+            mangled_name=itanium_export_mangled_name(name),
+            is_extern_c=is_extern_c,
+        ),
+    )
+
+
+def itanium_export_variable(name: str) -> Variable:
+    """The :func:`itanium_export_function` counterpart for a variable."""
+    is_extern_c = not name.startswith("_Z")
+    return Variable(
+        name=name,
+        mangled=name,
+        type="?",
+        visibility=Visibility.ELF_ONLY,
+        entity_id=entity_id_for_variable(
+            (),
+            name,
+            mangled_name=itanium_export_mangled_name(name),
+            is_extern_c=is_extern_c,
+        ),
+    )
+
+
+def msvc_export_function(sym: str) -> Function:
+    """The PE/COFF counterpart of :func:`itanium_export_function`."""
+    is_extern_c = not sym.startswith("?")
+    return Function(
+        name=sym,
+        mangled=sym,
+        return_type="?",
+        visibility=Visibility.ELF_ONLY,
+        is_extern_c=is_extern_c,
+        entity_id=entity_id_for_function(
+            (), sym, mangled_name=msvc_export_mangled_name(sym), is_extern_c=is_extern_c
+        ),
+    )
