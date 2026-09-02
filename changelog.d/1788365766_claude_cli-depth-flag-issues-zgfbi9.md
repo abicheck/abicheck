@@ -92,3 +92,16 @@
   banner.** Its verdict dispatch had no matching arm (and no default), so a
   bash `case` with nothing to match silently omitted the whole verdict line
   from the summary for this tier, even with `add-job-summary: true`.
+- **`COMPATIBLE_WITH_RISK` is now declared in `action.yml`'s `verdict`
+  output contract, the generated Action reference, and the user guide.**
+  It was a real, reachable value the Action could publish, but every
+  documented enumeration of `verdict` still listed only the pre-existing
+  tiers.
+- **The composite Action's directory/package `--depth` handling
+  (forwarding `binary`, rejecting `build`/`source`, and the `headers`
+  notice) is now case-insensitive,** matching the CLI's own
+  `DepthParam.convert()`. `depth: BUILD`/`BINARY`/etc. (any case Action
+  YAML happens to use) previously matched none of the bash comparisons:
+  `BUILD`/`SOURCE` silently skipped the fail-loud guard entirely (running
+  the comparison without the requested evidence instead of refusing to),
+  and `BINARY` was silently dropped with no forwarding and no notice.

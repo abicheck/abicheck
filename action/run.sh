@@ -1220,6 +1220,15 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
+    # review): INPUT_DEPTH is a raw, unvalidated Action input string, so a
+    # workflow spelling `depth: BUILD`/`BINARY`/etc. previously matched none
+    # of the case-sensitive comparisons below -- silently skipping the
+    # fail-loud guard for build/source (defeating its entire purpose) and
+    # silently dropping `binary` with no forwarding and no ::notice:: either.
+    # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
+    # Not `local` -- this runs in the top-level script body, not a function.
+    _depth_lc=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
     # A caller that explicitly asked for build/source-depth evidence (via
     # --depth build/source, or by supplying --sources/--build-info/
     # --compile-db directly) against a directory/package operand would
@@ -1228,7 +1237,7 @@ elif [[ "$MODE" == "compare" ]]; then
     # without the requested evidence and could miss a source-only break
     # while still reporting a clean/normal result -- fail loud instead
     # (Codex review).
-    if [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" \
+    if [[ "$_depth_lc" == "build" || "$_depth_lc" == "source" \
        || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
       echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
       exit 1
@@ -1243,9 +1252,9 @@ elif [[ "$MODE" == "compare" ]]; then
     # was asymmetric with the compile-context guard above, which fails loud
     # for everything it can't honour rather than swallowing part of the
     # request unannounced).
-    if [[ "${INPUT_DEPTH:-}" == "binary" ]]; then
-      add_single_flag "--depth" "${INPUT_DEPTH:-}"
-    elif [[ "${INPUT_DEPTH:-}" == "headers" ]]; then
+    if [[ "$_depth_lc" == "binary" ]]; then
+      add_single_flag "--depth" "$_depth_lc"
+    elif [[ "$_depth_lc" == "headers" ]]; then
       echo "::notice::mode: compare with a directory/package operand (a release/bundle comparison) does not honour --depth headers yet -- the per-library fan-out has no per-library evidence-floor enforcement, so the request is dropped rather than forwarded (the comparison still runs, using whatever headers -H/--include-dir/.abicheck.yml already resolve for each library). Compare the libraries individually (mode: compare with single-file operands) to require header-level evidence."
     fi
   else

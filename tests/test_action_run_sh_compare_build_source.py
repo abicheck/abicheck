@@ -397,3 +397,43 @@ class TestCompareModeDirectoryDepthAsymmetry:
         assert "--depth headers" in result.stdout
         cmd = captured.read_text(encoding="utf-8").strip()
         assert "--depth" not in cmd
+
+    def test_depth_binary_uppercase_is_still_forwarded(self, tmp_path: Path) -> None:
+        """Codex review, PR #1016: INPUT_DEPTH is a raw, unvalidated Action
+        input string, and the CLI's own DepthParam.convert() accepts every
+        case variant -- a case-sensitive bash comparison here previously
+        matched none of them, silently dropping `depth: BINARY` with no
+        forwarding and no ::notice:: either."""
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        cmd = _run_compare(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "BINARY"}, tmp_path
+        )
+        assert "--depth binary" in cmd
+
+    def test_depth_build_uppercase_against_directory_operand_still_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """The fail-loud guard for build/source must not be case-sensitive
+        either -- a case mismatch there would silently skip the guard
+        entirely (defeating its purpose) rather than merely dropping the
+        flag, letting the comparison run without the requested evidence."""
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        result, captured = _run_compare_raw(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "BUILD"}, tmp_path
+        )
+        assert result.returncode != 0
+        assert not captured.is_file(), "abicheck stub must never be invoked"
+
+    def test_depth_headers_uppercase_still_emits_notice(self, tmp_path: Path) -> None:
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        result, captured = _run_compare_raw(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "Headers"}, tmp_path
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::notice::" in result.stdout
+        assert "--depth headers" in result.stdout
+        cmd = captured.read_text(encoding="utf-8").strip()
+        assert "--depth" not in cmd
