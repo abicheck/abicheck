@@ -3,6 +3,17 @@
 **Date:** 2026-08-27
 **Status:** Proposed — roadmap ADR, partially implemented.
 
+*The per-phase bullets below are a consolidated, point-in-time summary —
+not the primary source. They have drifted from the implementation plan's
+own per-slice status before (PR #1019 found and fixed two stale
+paragraphs) because a commit updating the plan is not required to also
+touch this file. For a concept's current status, prefer
+`docs/_meta/one-semantic-pipeline-status.yaml` (machine-readable,
+per-concept: primitive/producers/consumers/authority/removal_gate) or
+the implementation plan's own per-phase "Landed"/"Still not landed" notes
+over this block; update all three together when a phase's status
+changes, but treat this block as the one most likely to lag.*
+
 - **Phase 0** (`Fact[T]`/`FactStatus` infrastructure) is **complete**: the
   five converted `RecordType`/`Param` fields, producer-side construction,
   serialization round-trip, the `fact-detector-misuse`/`fact-field-readers`
@@ -390,10 +401,15 @@
   considered, reviewed departure from the decision as written, not an
   oversight — recorded here rather than papered over with "complete," per
   this same document's own governing invariant against one concept getting
-  two disagreeing descriptions. If D5's authoritative-graph requirement is
-  still wanted for the closure walk specifically, it is unimplemented scope
-  for a future phase to pick back up, informed by why three rounds already
-  concluded the graph-reading version is unsafe as designed.
+  two disagreeing descriptions. **Update (2026-09-02, accepted): D5's own
+  text is now amended to match this shipped design rather than left
+  stating an unimplemented requirement — see D5's own "Amendment" note
+  below** for the accepted `SemanticReferenceIndex`-vs-evidence-graph
+  split that formally replaces "one authoritative graph, queried by
+  traversal" as this decision's target state for the public-surface
+  closure walk specifically. The evidence graph itself (`AbiSnapshot.
+  surface_graph`) remains built and persisted with no closure-walk
+  reader, by design, not as an open gap for a future phase.
 
   Two corrections to the implementation plan's own text, found during this
   phase's implementation rather than assumed from the design prose: the
@@ -885,6 +901,25 @@
   score gates show no regression, matching this phase's own acceptance
   criteria that it moves matching logic without changing what matches.
 - **Phase 10** is still unimplemented design text.
+- **Phases 2B/4B/5B/6B/7B/8B (adopted 2026-09-02)** extend Phases 2, 4, 5,
+  6, 7, and 8 respectively, closing the gap an external structural review
+  named: each of those phases' own primitives are built, but mostly sit
+  *alongside* the legacy representation they were meant to replace rather
+  than having become that representation's sole authority (`SemanticIR`
+  computed and persisted but never read by the checker being the largest
+  single instance). None of this contradicts any individual phase's own
+  "Landed"/"Still not landed" accounting above — every phase met its own
+  stated acceptance criteria — but the phase list did not, until this
+  update, contain a phase whose job is consumer cutover and legacy-path
+  removal for these six primitives; only Phase 9 (selectors) and Phase 10
+  were framed around deletion/authority at all. All six are `not_started`
+  as of this update; see the implementation plan's own "Phase 2B-8B"
+  section for each sub-phase's goal, and
+  `docs/_meta/one-semantic-pipeline-status.yaml` for the machine-readable,
+  per-concept authority ledger that tracks their progress going forward
+  (update it in the same PR that changes a concept's status, rather than
+  letting it drift the way this ADR's own Phase 2/6 status paragraphs
+  briefly did before PR #1019 caught it).
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this
@@ -1440,6 +1475,40 @@ after this decision's first implementation phase ships, an accepted,
 named limitation rather than a silently-assumed-closed one. See the
 implementation plan's Phase 3 for the full accounting and what a real fix
 would require.
+
+**Amendment (2026-09-02, accepted): the shipped design does not read this
+graph for the public-surface closure walk, and this decision's own text is
+amended to match rather than left describing a design that was tried and
+rejected.** Three independent review rounds on the traversal migration
+(Phase 3's own status block above; full account in
+`docs/contribute/known-gaps.md`) each found reading `AbiSnapshot.
+surface_graph` for `compute_public_surface()` unsafe — stale/unenriched
+node attrs on the ordinary dump path, a measured 30-100%+ performance
+regression once enrichment was added to fix that, and a confidence-merge
+precedence hazard that let a stale or adversarial persisted fact win over
+a freshly-derived one even with enrichment in place. The shipped fix
+removes the graph from this one computation entirely:
+`compare/surface_graph.py::referenced_identifiers_by_node()` is a pure
+function of the snapshot's own current declarations, computed *before*
+any `GraphNode` is built, and is what `policy/public_surface_closure.py`/
+`export_surface.py` call directly. This decision's "one authoritative
+graph, queried by traversal" premise is therefore split into two concepts
+going forward, formally amending D5's own text: a
+**`SemanticReferenceIndex`** (deterministic, sourced from
+`SemanticIR`/snapshot declarations alone, authoritative for the
+public-surface closure walk — what `referenced_identifiers_by_node()`
+already computes today, not yet re-sourced from `SemanticIR`
+specifically) is the query this decision's motivating case actually
+needs, and the shared evidence graph (`GraphNode`/`GraphEdge`/
+`merge_graph_facts`, multi-producer, provenance/confidence-bearing)
+remains for explanation and L5 analysis — never for a decision with
+exactly one legitimate source, which is what a mergeable, multi-producer
+structure structurally cannot safely be. Re-sourcing
+`referenced_identifiers_by_node()` from `SemanticIR` instead of raw
+declarations is tracked under Phase 6B (SemanticIR checker cutover) in
+the implementation plan, not as a residual of this decision. The
+twelve-L5-call-site node-id-collision gap above is unaffected by this
+amendment — it was never about this closure walk.
 
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 

@@ -66,13 +66,22 @@ assume:
 | ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; `scan`'s candidate resolution already converges on the shared `workflows.artifact.execute._resolve_side_snapshot_impl` primitive that `execute_dump_request` itself calls internally (`resolve_dump_request` only validates evidence and builds a `ResolvedDumpRequest` — it never calls the primitive; `service_input_resolution` is only a delegating facade re-exporting this module's owner), but `dump`'s own real ELF/PE/Mach-O execution still runs the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C" for the `dump` half, not a new design |
 
-## Independent progress review (2026-09-02) — proposed follow-on phases, not yet accepted
+## Phase 2B-8B: consumer-cutover extension (accepted 2026-09-02)
 
 An external review of the codebase as of merge commit `aa78c37` (PR #1015)
 assessed this plan against ADR-063's own governing invariant rather than
-against each phase's individually-scoped acceptance criteria, and reached a
-conclusion worth recording even though none of its proposed additions are
-adopted decisions yet: **the primitives this plan calls for — `Fact[T]`,
+against each phase's individually-scoped acceptance criteria. Its findings
+and its six proposed sub-phases were reviewed and **accepted** on
+2026-09-02 (this PR) — they are now part of this plan's roadmap, not a
+standing proposal. A per-concept, machine-readable summary of "who is
+authoritative today, and what has to land before the legacy representation
+can be removed" now lives in
+`docs/_meta/one-semantic-pipeline-status.yaml`; update it in the same PR
+that changes a concept's status rather than letting this prose and that
+ledger drift apart the way ADR-063's own Phase 2/6 status paragraphs
+briefly did (see PR #1019).
+
+The review's conclusion: **the primitives this plan calls for — `Fact[T]`,
 `EntityId`/`ScopePath`, `SemanticIR`, `AnalysisPlan`, `RunOutcome`, sectioned
 storage, `ReportDocument` — are, in large part, built, but they have
 mostly been added *alongside* the legacy representations they were meant to
@@ -130,28 +139,29 @@ removal under 15% done. Concretely, the review found:
 **None of this contradicts any individual phase's own "Landed"/"Still not
 landed" accounting above or in ADR-063** — every phase's own acceptance
 criteria were met as stated. The review's point is that the plan's phase
-list, read end to end, does not currently contain a phase whose job is
-"make the new representation the *only* one a consumer can reach" for
+list, read end to end, did not until this update contain a phase whose job
+is "make the new representation the *only* one a consumer can reach" for
 `SemanticIR`, `Fact` semantics, or a single resolved runtime context — only
-Phase 9 (selectors) and Phase 10 (title only, unimplemented) are framed
-around deletion/authority at all, and Phase 10 itself documents that
+Phase 9 (selectors) and Phase 10 (title only, unimplemented) were framed
+around deletion/authority at all, and Phase 10 itself still documents that
 detector migration and legacy-projection retirement are separate future
-work it does not schedule either.
+work it does not itself schedule. The six sub-phases below close that gap.
 
-**Proposed additions (not yet accepted — each needs the maintainer sign-off
-ADR-063's own "Don't" section requires before a phase or sub-phase is added
-to that ADR's Decision text):**
+**Adopted sub-phases** — each slots after the parent phase it extends in
+the numbering, and each starts at status `not_started` (tracked in
+`docs/_meta/one-semantic-pipeline-status.yaml`) until a first PR lands
+against it:
 
-| Proposed sub-phase | Closes | One-line goal |
-|---|---|---|
-| **2B — Identity consumer migration** | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
-| **4B — Resolved execution context** | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme |
-| **5B — Fact semantic consumption** | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of `resolved_fact_value`'s uniform legacy-default collapse; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
-| **6B — SemanticIR checker cutover** | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
-| **7B — Boundary consumer migration** | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
-| **8B — Multi-artifact canonical storage** | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+| Sub-phase | Status | Closes | One-line goal |
+|---|---|---|---|
+| **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
+| **4B — Resolved execution context** | not started | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme |
+| **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of `resolved_fact_value`'s uniform legacy-default collapse; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
+| **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
+| **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
+| **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
-**Recommended sequencing, if and when these are accepted:** 2B and 6B are
+**Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
 gap 6B's own migration would otherwise trip on, and 6B is what actually
 starts retiring the legacy `AbiSnapshot.functions`/`types`/… read path
@@ -166,9 +176,9 @@ cutover increases the number of representations to keep in sync faster than
 it retires any of them, which is precisely the failure mode ADR-063 exists
 to stop.
 
-**A mechanical definition of done for the whole ADR**, proposed for
-eventual inclusion once 6B (or an equivalent) has landed at least one real
-cohort: the pipeline is complete only when (1) every front end builds one
+**A mechanical definition of done for the whole ADR**, accepted as the
+target — evaluated once 6B (or an equivalent) has landed at least one real
+cohort, not before: the pipeline is complete only when (1) every front end builds one
 request type; (2) every real execution resolves one execution context;
 (3) every extractor's output reaches one `SemanticSnapshot`; (4) the checker
 reads no backend-specific or legacy snapshot collection directly;
@@ -194,7 +204,7 @@ post-merge verification on this repository, so today's AI-readiness/
 architecture gates are informative only and do not themselves block a
 regression from merging.
 
-**Phase 3 (D5) amendment, proposed:** rather than a further attempt to make
+**Phase 3 (D5) amendment — accepted:** rather than a further attempt to make
 `compute_public_surface()` read the mergeable evidence graph (three review
 rounds already found that unsafe for the reasons ADR-063's own Phase 3
 status block and `docs/contribute/known-gaps.md` record), formally split
@@ -207,10 +217,9 @@ sourced from `SemanticIR`) and the existing **evidence graph**
 analysis, never for a decision with exactly one legitimate source). This
 would formally close D5's own literal "traversal over one authoritative
 graph" text with a decision that matches what already shipped, rather than
-leaving that text describing a design three review rounds rejected. Landing
-this needs an explicit ADR-063 amendment (a `**Verified:**`-eligible
-maintainer sign-off), not a further status-paragraph correction — this plan
-records the proposal so it isn't lost, but does not itself amend the ADR.
+leaving that text describing a design three review rounds rejected.
+Recorded here as accepted; ADR-063's own D5 text and Phase 3 status block
+(this same PR) carry the matching amendment note.
 
 **On this plan document's own size and structure:** this document has grown
 past fifteen thousand lines, carrying multi-round PR review history inline
