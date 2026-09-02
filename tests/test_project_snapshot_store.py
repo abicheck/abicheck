@@ -349,6 +349,35 @@ class TestReadManifestSummaryValidation:
         with pytest.raises(ValueError, match="not readable by this build"):
             read_manifest_summary(tmp_path)
 
+    def test_a_duplicate_variant_id_is_refused(self, tmp_path: Path) -> None:
+        """`PackageManifest.__post_init__` already refuses a duplicate id,
+        but only on the eager `read_project_manifest` path -- the lazy
+        `read_manifest_summary`/`variant_and_artifact_ids` primitives never
+        construct a `PackageManifest` and so let a manifest naming the same
+        variant twice through unchecked (Codex review)."""
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": ["default", "default"],
+                "artifact_ids": [],
+            },
+        )
+        with pytest.raises(ValueError, match="duplicate id"):
+            read_manifest_summary(tmp_path)
+
+    def test_a_duplicate_artifact_id_is_refused(self, tmp_path: Path) -> None:
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": [],
+                "artifact_ids": ["libfoo", "libfoo"],
+            },
+        )
+        with pytest.raises(ValueError, match="duplicate id"):
+            read_manifest_summary(tmp_path)
+
     def test_an_ordinary_current_manifest_is_still_readable(
         self, tmp_path: Path
     ) -> None:

@@ -341,6 +341,18 @@ def _required_string_id_list(
     writes both fields, even as `[]` when a package genuinely has no
     variants/artifacts, so "key absent" is a fact about the *document*, not
     about a package this module ever produces.
+
+    Also refuses a duplicate id. `PackageManifest.__post_init__` already
+    catches this, but only on the *eager* `read_project_manifest` path,
+    after both this function and every named `refs/*.json` document have
+    already been loaded -- `read_manifest_summary`/`variant_and_artifact_ids`
+    (the lazy primitives D8 exists for, and the ones a real section-aware
+    reader is meant to use directly) never construct a `PackageManifest` at
+    all, so a manifest listing the same variant or artifact id twice passed
+    silently through them and could be processed more than once by a caller
+    that trusts `variant_ids`/`artifact_ids` to name a package's membership
+    (Codex review). Checked here, the one place both read paths already
+    share, rather than duplicating the check in each caller.
     """
     if field_name not in data:
         raise ValueError(f"{record} is missing required field {field_name!r}")
@@ -355,6 +367,16 @@ def _required_string_id_list(
                 f"{field_name}[{index}] must be a string, got "
                 f"{type(entry).__name__} ({entry!r})"
             )
+    if len(set(raw)) != len(raw):
+        counts: dict[str, int] = {}
+        for entry in raw:
+            counts[entry] = counts.get(entry, 0) + 1
+        duplicates = sorted(entry for entry, count in counts.items() if count > 1)
+        raise ValueError(
+            f"{record} {field_name} contains duplicate id(s): {duplicates} -- "
+            "a package's declared membership cannot name the same variant or "
+            "artifact twice"
+        )
     return tuple(raw)
 
 
