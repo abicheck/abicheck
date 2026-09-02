@@ -172,3 +172,28 @@ class TestMaxKnownSchemaVersion:
             _import_legacy_snapshot(
                 doc, store=store, artifact_id="libfoo", max_known_schema_version=4
             )
+
+    @pytest.mark.parametrize(
+        "malformed",
+        [38.9, "38", True, None, [38], {"v": 38}],
+    )
+    def test_a_non_integral_schema_version_is_refused_not_truncated(
+        self, malformed: object
+    ) -> None:
+        """`int(38.9)` truncates to `38`, which would silently manufacture a
+        smaller, fabricated version that evades `max_known_schema_version`
+        entirely -- a malformed value must be refused outright, never
+        coerced into a plausible-looking int (Codex review, a second
+        finding on this same field)."""
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = malformed
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="schema_version"):
+            import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+
+    def test_a_real_integer_schema_version_is_still_accepted(self) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = 3
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert manifest.versions.source_schema_version == 3

@@ -236,6 +236,28 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     rather than a durable `manifest.json` naming refs that were never
     written, which every subsequent reader would treat as a corrupted
     package (Codex review).
+
+    **A known, deliberately deferred gap** (flagged in the same review
+    round as a distinct, further finding once the ordering above was
+    fixed): this ordering makes *first publication* of a set of ids safe,
+    but not *republishing changed content under ids that are already
+    live*. Calling this function a second time against a package another
+    reader might concurrently be loading — with a `VariantRef`/
+    `ArtifactRef` whose `variant_id`/`artifact_id` repeats but whose
+    content differs — can overwrite a `refs/*.json` file the *currently
+    published* `manifest.json` still names, so a concurrent reader (or an
+    interruption before this call's own final `manifest.json` write lands)
+    can observe a mix of the old manifest and the new ref content, which
+    neither commit represents. Closing this needs either a staged-
+    directory-then-atomic-root-swap publish protocol or content-addressed
+    (never-overwritten) ref paths — a real design decision, not a small
+    fix, and out of scope for A1.1's first landing: nothing in this
+    package today calls this function more than once against one root
+    (every current caller — the tests, `storage.import_v1`'s own tests —
+    creates a fresh package once), so there is no real update/republish
+    caller yet to design the fix against. Revisit once A1.6/A1.7
+    (variant capture, stored/live comparison) gives this a real caller
+    that republishes an existing package.
     """
     root_path = Path(root)
     for variant in manifest.variant_refs:

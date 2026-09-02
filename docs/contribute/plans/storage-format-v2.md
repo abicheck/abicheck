@@ -372,6 +372,19 @@ operating on an already-serialized document does not have. Real, separately-
 scoped future work for whichever caller has the binary in hand at import
 time.
 
+**A third, deliberately deferred gap**: `write_project_manifest` writes
+`refs/*.json` before `manifest.json` (the previous gap's own fix), which
+makes *first publication* of a set of ids safe but not *republishing
+changed content under ids that are already live* — a second call against
+a package another reader might concurrently be loading can overwrite a
+ref file the currently-published manifest still names. Closing it needs
+either a staged-directory-then-atomic-root-swap publish protocol or
+content-addressed (never-overwritten) ref paths, and no caller in this
+landing republishes an existing package (every current caller creates a
+fresh one), so there is no real update caller yet to design the fix
+against — see the function's own docstring. Revisit once A1.6/A1.7
+(variant capture, stored/live comparison) gives this a real caller.
+
 Tests live in `tests/unit/storage/test_project_package.py` (the object
 model), `tests/unit/storage/test_dto.py` (the DTO envelope, including a
 property test that payload key insertion order never changes the persisted

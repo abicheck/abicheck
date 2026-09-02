@@ -140,7 +140,31 @@ def import_legacy_snapshot(
     Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
     _mapping(legacy_document, "legacy_document")
-    source_schema_version = int(legacy_document.get("schema_version", 1) or 0)
+    if "schema_version" in legacy_document:
+        raw_schema_version = legacy_document["schema_version"]
+        # `int(38.9)` truncates to `38` -- a non-integral or otherwise
+        # malformed value would then silently pass as a smaller, fabricated
+        # version, defeating the max_known_schema_version check just added
+        # above it rather than being caught by it (Codex review, a second
+        # finding on this same field: the ceiling closed "too new", but a
+        # coercion ahead of it could still manufacture "not too new" from a
+        # value that was never a real schema version at all). `bool` is
+        # rejected too, per this package's own "never coerce a value a
+        # decision reads" convention (`storage/AGENTS.md` invariant 6) --
+        # this value gates the refusal above, so it is not informational.
+        if isinstance(raw_schema_version, bool) or not isinstance(
+            raw_schema_version, int
+        ):
+            raise ValueError(
+                "legacy_document schema_version must be an int, not "
+                f"{type(raw_schema_version).__name__} ({raw_schema_version!r})"
+            )
+        source_schema_version = raw_schema_version
+    else:
+        # Absent key: `serialization.snapshot_from_dict`'s own pre-
+        # versioning convention (every snapshot predates schema_version is
+        # read as v1).
+        source_schema_version = 1
     if source_schema_version > max_known_schema_version:
         raise ValueError(
             f"legacy_document schema_version {source_schema_version} is newer "
