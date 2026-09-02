@@ -8,10 +8,16 @@ This leaf owns report gate validation. It does not load files or fold targets.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, TypeGuard
 
 from abicheck.change_registry_types import Verdict
+from abicheck.policy.outcome import (
+    OperationalStatus,
+    PolicyGateDecision,
+    fold_gate_and_operational,
+    operational_status_exit_code,
+)
 
 COVERAGE_INCOMPLETE_EXIT = 1
 _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
@@ -22,6 +28,46 @@ _LEGACY_SEVERITY: dict[Verdict, int] = {
     Verdict.API_BREAK: 2,
     Verdict.BREAKING: 4,
 }
+
+
+def _run_outcome_gate_and_operational(
+    data: Mapping[str, Any],
+) -> tuple[PolicyGateDecision, OperationalStatus] | None:
+    """The report's own top-level ``run_outcome`` block (ADR-063 Phase 7),
+    parsed to its ``(gate, operational)`` axes, or ``None`` when absent or
+    unparseable.
+
+    This -- and :meth:`GateInfo.from_report_data`/`from_scan_report`, which
+    call it -- is the one place a fresh report's ``RunOutcome`` axes are
+    read back structured-first; legacy ``severity``/``exit_code`` decoding
+    is the named fallback for a report that predates this field, never the
+    only path for one that carries it (ADR-063 D6).
+    """
+    from abicheck.policy.outcome import RunOutcome
+
+    outcome = RunOutcome.from_dict(data.get("run_outcome"))
+    if outcome is None:
+        return None
+    return outcome.gate, outcome.operational
+
+
+def _run_outcome_blocking_categories(
+    gate: PolicyGateDecision, operational: OperationalStatus
+) -> tuple[str, ...]:
+    """Label(s) explaining a structured-fields-derived :class:`GateInfo`'s
+    ``blocking_categories`` -- the ``PolicyGateDecision``/``OperationalStatus``
+    value(s) that are actually non-``NONE``, mirroring the existing
+    ``severity`` gate's own category-string convention (``"abi_breaking"``
+    etc. -- ``PolicyGateDecision``'s values are spelled identically on
+    purpose) without recomputing the granular per-category counts a
+    ``severity`` block alone carries.
+    """
+    cats: list[str] = []
+    if gate is not PolicyGateDecision.NONE:
+        cats.append(gate.value)
+    if operational is not OperationalStatus.NONE:
+        cats.append(operational.value)
+    return tuple(cats)
 
 
 class _MalformedGate(ValueError):
@@ -63,8 +109,18 @@ class GateInfo:
         policy-blocked report must never silently revert to the greener legacy
         verdict path.
         """
+        run_outcome = _run_outcome_gate_and_operational(data)
         if "severity" not in data:
-            return None
+            if run_outcome is None:
+                return None
+            gate, operational = run_outcome
+            outcome_exit_code = fold_gate_and_operational(gate, operational)
+            return cls(
+                exit_code=outcome_exit_code,
+                blocking=outcome_exit_code != 0,
+                blocking_categories=_run_outcome_blocking_categories(gate, operational),
+                from_report=True,
+            )
         sev = data.get("severity")
         if not isinstance(sev, dict):
             raise _MalformedGate("'severity' is not an object")
@@ -88,12 +144,34 @@ class GateInfo:
             raise _MalformedGate(
                 "'severity.blocking_categories' is not a list of strings"
             )
-        return cls(
+        result = cls(
             exit_code=exit_code,
             blocking=blocking,
             blocking_categories=tuple(cats),
             from_report=True,
         )
+        # ADR-063 Phase 7: fold in `RunOutcome.operational`, the one axis
+        # the `severity` block above never carried at all. `gate` is not
+        # re-folded here -- the `severity` block is already the precise,
+        # policy-aware compatibility gate (including its granular
+        # `blocking_categories`), and `RunOutcome.gate` is derived from the
+        # identical computation (see `reporter._run_outcome_for_result`), so
+        # the two can never disagree on a fresh report; only a real
+        # operational failure can raise this result beyond what `severity`
+        # alone already stated.
+        if run_outcome is not None:
+            _, operational = run_outcome
+            op_exit = operational_status_exit_code(operational)
+            if op_exit > result.exit_code:
+                result = replace(
+                    result,
+                    exit_code=op_exit,
+                    blocking=True,
+                    blocking_categories=tuple(
+                        sorted({*result.blocking_categories, operational.value})
+                    ),
+                )
+        return result
 
     @classmethod
     def from_scan_report(cls, data: Mapping[str, Any]) -> GateInfo | None:
@@ -129,6 +207,24 @@ class GateInfo:
         nested = _scan_severity_gate(data)
         if nested is not None:
             return nested
+        # ADR-063 Phase 7: a fresh scan report's own top-level `run_outcome`
+        # (`ScanOutcome.to_dict()`/`ScanResult.to_dict()`/
+        # `ScanSetResult.to_dict()`) is preferred over decoding the raw
+        # legacy `exit_code` below -- structured-first, legacy decode as the
+        # named fallback for a report that predates this field. This is
+        # exactly what lets a `BUDGET_OVERFLOW`/`NOT_COMPARABLE` abort keep
+        # blocking without this reader having to reverse-engineer which
+        # raw exit code (5/6) it came from.
+        run_outcome = _run_outcome_gate_and_operational(data)
+        if run_outcome is not None:
+            gate, operational = run_outcome
+            exit_code = fold_gate_and_operational(gate, operational)
+            return cls(
+                exit_code=exit_code,
+                blocking=exit_code != 0,
+                blocking_categories=_run_outcome_blocking_categories(gate, operational),
+                from_report=True,
+            )
         code = data.get("exit_code")
         if not isinstance(code, int) or isinstance(code, bool):
             raise _MalformedGate("scan report 'exit_code' is missing or not an integer")

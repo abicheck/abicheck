@@ -62,9 +62,11 @@ from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
+from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
+from .check_report_run_outcome import synthetic_run_outcome
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
@@ -271,6 +273,10 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
+    # ADR-063 Phase 7: zero `run_outcome.gate` too, never `.operational` (see `final_exit_code`'s invariant).
+    run_outcome = report.get("run_outcome")
+    if isinstance(run_outcome, dict):
+        report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
     # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
     # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
     # *prefers* it over the top-level `exit_code` zeroed just above -- so
@@ -504,6 +510,10 @@ def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
         "blocking": True,
         "blocking_categories": cats,
     }
+    # ADR-063 Phase 7: fold the identical escalation into `run_outcome.gate` (no-op if absent).
+    run_outcome = out.get("run_outcome")
+    if isinstance(run_outcome, dict):
+        out["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.ABI_BREAKING.value}
 
 
 def _classify_verdict(
@@ -656,6 +666,7 @@ def build_operational_error_report(
         "operational_errors": [{"kind": resolve_outcome, "message": resolve_message}],
         "publication": {"state": "skipped", "channels": []},
         "verdict": OPERATIONAL_ERROR_VERDICT,
+        "run_outcome": synthetic_run_outcome(operational=OperationalStatus.EXTRACTION_ERROR),
     }
     if project is not None:
         report["project"] = project
@@ -706,6 +717,7 @@ def build_bootstrap_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": BOOTSTRAP_VERDICT,
         "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.BOOTSTRAP),
     }
     if project is not None:
         report["project"] = project
@@ -763,6 +775,7 @@ def build_new_target_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": NEW_TARGET_VERDICT,
         "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET),
     }
     if project is not None:
         report["project"] = project

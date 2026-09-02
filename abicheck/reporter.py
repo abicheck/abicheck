@@ -229,7 +229,7 @@ def to_stat_json(
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
@@ -562,7 +562,7 @@ def _to_json_leaf(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
 
 
 def _add_entries_to_root_causes(
@@ -770,7 +770,7 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1216,7 +1216,7 @@ def to_json(
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

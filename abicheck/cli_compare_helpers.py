@@ -463,13 +463,15 @@ def _report_not_comparable(
     )
     refusal = (old.library, old.version, new.version, kind, message)
     if fmt == "json":
-        from .report.not_comparable import render_not_comparable_json
+        from .report.not_comparable import OperationalStatus, render_not_comparable_json
         from .schemas import REPORT_SCHEMA_VERSION
 
         _write_or_echo(
             output,
             render_not_comparable_json(
-                *refusal, report_schema_version=REPORT_SCHEMA_VERSION
+                *refusal,
+                report_schema_version=REPORT_SCHEMA_VERSION,
+                operational=OperationalStatus.NOT_COMPARABLE,
             ),
         )
     elif fmt == "sarif":

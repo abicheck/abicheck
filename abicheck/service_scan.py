@@ -47,6 +47,7 @@ from .cxx20_pair_dialect import (
 )
 from .errors import PlanningError, ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
+from .policy.outcome import run_outcome_dict_for_scan
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
 
@@ -823,9 +824,8 @@ class ScanResult:
             "exit_code": self.exit_code,
             "findings": len(self.findings),
             "layers": [layer.to_dict() for layer in self.layers],
-            "confidence": {k: list(v) for k, v in self.confidence.items()},
-            "estimate": [e.to_dict() for e in self.estimate],
-            "report": dict(self.report),
+            "confidence": {k: list(v) for k, v in self.confidence.items()}, "estimate": [e.to_dict() for e in self.estimate],
+            "report": dict(self.report), "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code, report=self.report),
         }
 
     @staticmethod
@@ -952,7 +952,7 @@ class ScanSetResult:
             ],
             "bundle_finding_count": len(self.bundle_findings),
             "bundle_verdict": self.bundle_verdict,
-            "bundle_incomplete": self.bundle_incomplete,
+            "bundle_incomplete": self.bundle_incomplete, "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code),
         }
 
 

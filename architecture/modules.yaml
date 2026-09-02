@@ -341,6 +341,7 @@
         "abicheck/report_classifications.py",
         "abicheck/report_correlation.py",
         "abicheck/report_model.py",
+        "abicheck/report_run_outcome.py",
         "abicheck/report_summary.py",
         "abicheck/reporter.py",
         "abicheck/reporter_contract_blocks.py",
