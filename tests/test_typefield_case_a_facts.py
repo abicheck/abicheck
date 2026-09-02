@@ -51,6 +51,7 @@ from abicheck.model import (
     TypeField,
 )
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
+from abicheck.storage.fact_backfill import _HEADER_AST_BACKENDS
 from abicheck.storage.fact_codec import (
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     CaseAFactRule,
@@ -282,6 +283,7 @@ class TestCaseAFactBackfillContract:
         raw, rec, func = self._doc()
         apply_case_a_fact_backfill(
             raw,
+            evidenced=_HEADER_AST_BACKENDS,
             schema_version=10,
             rules=(CaseAFactRule(owner, field, 38, False, default),),
             types=[rec],
@@ -301,6 +303,7 @@ class TestCaseAFactBackfillContract:
         raw, rec, func = self._doc()
         apply_case_a_fact_backfill(
             raw,
+            evidenced=_HEADER_AST_BACKENDS,
             schema_version=schema_version,
             rules=(
                 CaseAFactRule("TypeField", "is_const", 38, reliable, False),
@@ -319,6 +322,7 @@ class TestCaseAFactBackfillContract:
         raw["types"][0]["fields"][0]["is_const_fact"] = {"status": "partial"}
         apply_case_a_fact_backfill(
             raw,
+            evidenced=_HEADER_AST_BACKENDS,
             schema_version=10,
             rules=(CaseAFactRule("TypeField", "is_const", 38, False, False),),
             types=[rec],
@@ -331,6 +335,7 @@ class TestCaseAFactBackfillContract:
         with pytest.raises(ValueError, match="no raw-document navigation"):
             apply_case_a_fact_backfill(
                 raw,
+                evidenced=_HEADER_AST_BACKENDS,
                 schema_version=10,
                 rules=(CaseAFactRule("Nonexistent", "x", 38, False, None),),
                 types=[rec],
@@ -343,6 +348,7 @@ class TestCaseAFactBackfillContract:
         raw["types"].append({"name": "Bar", "kind": "class", "fields": []})
         apply_case_a_fact_backfill(
             raw,
+            evidenced=_HEADER_AST_BACKENDS,
             schema_version=10,
             rules=(CaseAFactRule("TypeField", "is_const", 38, False, False),),
             types=[rec],

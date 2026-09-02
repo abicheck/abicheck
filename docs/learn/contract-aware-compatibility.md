@@ -280,4 +280,4 @@ for that last one).
 
 ---
 
-**Ladder:** ← [Verdicts](verdicts.md) · Concepts c1 · Reading a result · [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) →
+**Ladder:** ← [Verdicts](verdicts.md) · Concepts c1 · Reading a result · [Evidence & Detectability](evidence-and-detectability.md) →

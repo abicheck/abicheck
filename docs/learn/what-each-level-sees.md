@@ -513,4 +513,4 @@ choice.
 
 ---
 
-**Ladder:** ← [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) · Concepts c2 · The evidence model · [ELF-Only Mode and Symbol Filtering](elf-symbol-filtering.md) →
+**Ladder:** ← [Evidence & Detectability](evidence-and-detectability.md) · Concepts c2 · The evidence model · [ELF-Only Mode and Symbol Filtering](elf-symbol-filtering.md) →

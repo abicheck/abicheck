@@ -40,6 +40,7 @@ from .fact_backfill import (
     CaseAFactRule as CaseAFactRule,
     apply_case_a_fact_backfill as apply_case_a_fact_backfill,
     apply_legacy_fact_backfill as apply_legacy_fact_backfill,
+    evidenced_producers as evidenced_producers,
 )
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
@@ -62,6 +63,7 @@ __all__ = [
     "CaseAFactRule",
     "apply_case_a_fact_backfill",
     "apply_legacy_fact_backfill",
+    "evidenced_producers",
     "decode_enum_facts",
     "decode_fact",
     "decode_fact_with_legacy_presence",

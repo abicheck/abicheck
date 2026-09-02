@@ -17,8 +17,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -36,7 +35,7 @@ generated: false
 - Why the *same* technical change can be a release-blocking break for one
   product and a non-event for another.
 
-This is the **prologue** (part 0) of the nine-part series. The later parts teach the
+This is the **prologue** (Part 0) of the eight numbered Parts, 0–7. The later Parts teach the
 *mechanisms* (what bytes move, what the loader does). This part teaches the
 *framing* that makes those mechanisms matter: a change is only a "break" if it
 breaks something you promised.
@@ -361,4 +360,4 @@ _See also: [Verdicts](../verdicts.md) · [Policy Profiles](../../use/policies.md
 
 ---
 
-**Ladder:** ← [Glossary](glossary.md) · Tier 1 · Foundations · [Part 1 — Foundations: From Source Code to a Running Process](01-foundations.md) →
+**Ladder:** ← [Glossary](glossary.md) · Step 2 · Foundations · [Part 1 — Foundations](01-foundations.md) →

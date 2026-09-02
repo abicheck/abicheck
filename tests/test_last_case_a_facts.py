@@ -38,6 +38,8 @@ from abicheck.model import (
     FactStatus,
     Function,
     Param,
+    RecordType,
+    TypeField,
     Variable,
 )
 from abicheck.model.fact_registry import FACT_REGISTRY, KNOWN_UNCONVERTED_ELIGIBLE_FACTS
@@ -333,13 +335,150 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         assert got.access is AccessLevel.PRIVATE
         assert got.access_fact.status is FactStatus.PRESENT
 
+    @pytest.mark.parametrize(
+        "label,extra,expected",
+        [
+            # A PE/PDB document evidences no CV producer: PDB is not one
+            # (pdb_model states UNSUPPORTED outright), and the `dwarf` in
+            # is_const's registry entry is a producer this document has no
+            # trace of. Codex review, third round — the "could produce it in
+            # principle" reading kept this one PRESENT.
+            ("pe-pdb", {"platform": "pe"}, FactStatus.NOT_COLLECTED),
+            # Nor does a *populated* debug block, on any platform. The
+            # dwarf/dwarf_advanced blocks are debug storage, not a format
+            # claim: BtfMetadata.to_dwarf_metadata and its CTF sibling and
+            # parse_pdb_debug_info all write into them with has_dwarf=True,
+            # so a legacy document cannot say which producer ran. Codex
+            # review, fifth and sixth rounds narrowed this inference twice
+            # before the seventh established the inference itself is the bug.
+            (
+                "pe-with-debug",
+                {"platform": "pe", "dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
+            (
+                "elf-debug-block",
+                {"platform": "elf", "dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
+            (
+                "elf-debug-advanced-block",
+                {"platform": "elf", "dwarf_advanced": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
+            (
+                "macho-debug-block",
+                {"platform": "macho", "dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
+            (
+                "no-platform-debug-block",
+                {"dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
+            # ELF alone, no debug block: nothing that produces CV facts ran.
+            ("elf-symbols-only", {"platform": "elf"}, FactStatus.NOT_COLLECTED),
+            # The one shape that *does* keep the fact: recorded header
+            # provenance, which names its producer explicitly.
+            (
+                "header-castxml",
+                {"from_headers": True, "ast_producer": "castxml"},
+                FactStatus.PRESENT,
+            ),
+        ],
+    )
+    def test_cv_facts_follow_the_documents_own_evidenced_producers(
+        self, label: str, extra: dict, expected: FactStatus
+    ) -> None:
+        base: dict = {
+            "from_headers": False,
+            "types": [
+                {
+                    "name": "W",
+                    "kind": "class",
+                    "fields": [{"name": "m", "type": "int", "is_const": False}],
+                }
+            ],
+        }
+        d = _minimal_dict(schema_version=_PRE_CASE_A, **{**base, **extra})
+        f = snapshot_from_dict(d).types[0].fields[0]
+        assert f.is_const_fact.status is expected
+
+    def test_no_debug_block_is_producer_evidence(self) -> None:
+        """Neither a placeholder debug block nor a populated one.
+
+        Codex review, PR #995, across three rounds. First: a symbols-only ELF
+        dump still persists a fully-populated ``DwarfMetadata()``/
+        ``AdvancedDwarfMetadata()`` with ``has_dwarf: false``
+        (``dumper_elf_fallback._build_symbol_only_snapshot``), whose
+        serialized form is a **non-empty mapping** -- so "the block is truthy"
+        read as evidence when there was none. Then: a PE document's block is
+        filled by ``pdb_metadata.parse_pdb_debug_info`` with
+        ``has_dwarf=True``. Then: so is a BTF or CTF one, via
+        ``BtfMetadata.to_dwarf_metadata`` -- and
+        ``dwarf_presence._section_presence_metadata`` sets
+        ``dwarf_advanced.has_dwarf`` for those too, so neither block nor flag
+        names a producer. The contract is therefore the simple one: a legacy
+        document's debug block evidences nothing at all.
+
+        Built by serializing a real snapshot rather than hand-writing the
+        blocks, because the placeholder's real shape is exactly what a
+        hand-written fixture would get wrong.
+        """
+        from abicheck.model.dwarf_facts import (
+            AdvancedDwarfMetadata,
+            DwarfMetadata,
+        )
+
+        snap = AbiSnapshot(
+            library="l.so",
+            version="1",
+            from_headers=False,
+            platform="elf",
+            dwarf=DwarfMetadata(),
+            dwarf_advanced=AdvancedDwarfMetadata(),
+            types=[
+                RecordType(
+                    name="W",
+                    kind="class",
+                    fields=[TypeField(name="m", type="int", is_const=False)],
+                )
+            ],
+        )
+        d = snapshot_to_dict(snap)
+        d["schema_version"] = _PRE_CASE_A
+        for raw_field in d["types"][0]["fields"]:  # a pre-conversion document
+            for key in [k for k in raw_field if k.endswith("_fact")]:
+                del raw_field[key]
+
+        assert d["dwarf"], "the placeholder block must stay non-empty"
+        assert d["dwarf"]["has_dwarf"] is False
+
+        # Every flag combination a real writer can emit — the placeholder,
+        # a DWARF dump, a BTF/CTF conversion, a PDB parse — is the same
+        # answer, because none of them is distinguishable from the others.
+        for basic, advanced in (
+            (False, False),
+            (True, True),
+            (True, False),
+            (False, True),
+        ):
+            d["dwarf"]["has_dwarf"] = basic
+            d["dwarf_advanced"]["has_dwarf"] = advanced
+            got = snapshot_from_dict(json.loads(json.dumps(d)))
+            assert (
+                got.types[0].fields[0].is_const_fact.status is FactStatus.NOT_COLLECTED
+            ), f"has_dwarf={basic}/{advanced} was treated as producer evidence"
+
     def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
-        # TypeField.is_const names dwarf among its producers, so a
-        # non-header document's value for it is real evidence — the
-        # producer-capability gate reads the registry, not a hand list.
+        # A *non-resting* value survives on any document: the downgrade
+        # narrows the claim, never the value. `is_const: true` was set by
+        # something, and discarding it would lose data — so this stays
+        # PRESENT even though the debug block evidences no producer.
         d = _minimal_dict(
             schema_version=_PRE_CASE_A,
             from_headers=False,
+            dwarf={"has_dwarf": True},
             types=[
                 {
                     "name": "W",
@@ -386,3 +525,484 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         )
         got = snapshot_from_dict(d).functions[0]
         assert got.deprecated_fact.status is FactStatus.PRESENT
+
+
+class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
+    """The general contract, over the whole small domain.
+
+    Every test above pins one field against one document shape. This one
+    states the invariant the fix actually restores -- *after a legacy load,
+    a case-(a) fact is PRESENT only if the document evidences at least one
+    of that fact's registered producers* -- and checks it by exhaustively
+    enumerating (every case-(a) field) x (every document shape that varies
+    an evidence axis).
+
+    The oracle is written out here from what each producer's writer does,
+    read off the loaded snapshot's own public attributes. It deliberately
+    does not call ``evidenced_producers`` or consult ``FACT_REGISTRY`` the
+    way the implementation does, so this cannot agree with a wrong
+    implementation the way #699's window-size test agreed with its own
+    wrong formula (AGENTS.md, "A bug fix's regression test targets the bug
+    class").
+    """
+
+    #: (owner, field, collection, raw entry at the field's *resting* value,
+    #: raw entry at a *non-resting* value). The second is the control: the
+    #: downgrade narrows the claim, never the value, so a real answer must
+    #: survive on the very same evidence-free document.
+    _FIELDS: tuple[tuple[str, str, str, dict, dict], ...] = (
+        ("TypeField", "is_const", "types", {"is_const": False}, {"is_const": True}),
+        (
+            "TypeField",
+            "is_volatile",
+            "types",
+            {"is_volatile": False},
+            {"is_volatile": True},
+        ),
+        (
+            "TypeField",
+            "is_mutable",
+            "types",
+            {"is_mutable": False},
+            {"is_mutable": True},
+        ),
+        ("TypeField", "default", "types", {"default": None}, {"default": "0"}),
+        (
+            "TypeField",
+            "deprecated",
+            "types",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "Function",
+            "deprecated",
+            "functions",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "Variable",
+            "deprecated",
+            "variables",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "Variable",
+            "access",
+            "variables",
+            {"access": "public"},
+            {"access": "private"},
+        ),
+        (
+            "RecordType",
+            "deprecated",
+            "types",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "EnumType",
+            "deprecated",
+            "enums",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        # `is_scoped` is `bool | None`: `None` is omission, `False` a real
+        # answer ("a plain C enum") — so `False` is its non-resting value.
+        ("EnumType", "is_scoped", "enums", {"is_scoped": None}, {"is_scoped": False}),
+        (
+            "Param",
+            "is_restrict",
+            "functions",
+            {"is_restrict": False},
+            {"is_restrict": True},
+        ),
+        # ADR-063 Phase 0's own bridged fields. They are in the same rule
+        # table and equally reached by the producer gate — this list omitted
+        # them at first because it was written from the fields Phase 5
+        # *converted* rather than from the table (Codex review, PR #995,
+        # eighth round). `test_the_enumeration_covers_every_applied_rule`
+        # below is what stops that recurring.
+        ("RecordType", "vtable", "types", {"vtable": []}, {"vtable": ["f"]}),
+        (
+            "RecordType",
+            "vptr_offset_bits",
+            "types",
+            {"vptr_offset_bits": None},
+            {"vptr_offset_bits": 0},
+        ),
+        (
+            "Param",
+            "is_va_list",
+            "functions",
+            {"is_va_list": False},
+            {"is_va_list": True},
+        ),
+    )
+
+    #: Document shapes, one per point in the evidence domain.
+    _SHAPES: tuple[tuple[str, dict], ...] = (
+        ("nothing", {"from_headers": False}),
+        ("elf", {"from_headers": False, "platform": "elf"}),
+        (
+            "elf-placeholder-debug",
+            {"from_headers": False, "platform": "elf", "dwarf": {"has_dwarf": False}},
+        ),
+        (
+            "elf-debug-block",
+            {"from_headers": False, "platform": "elf", "dwarf": {"has_dwarf": True}},
+        ),
+        (
+            # What BtfMetadata.to_dwarf_metadata emits: the basic block set,
+            # the advanced one left at its default.
+            "elf-btf-shaped",
+            {
+                "from_headers": False,
+                "platform": "elf",
+                "dwarf": {"has_dwarf": True},
+                "dwarf_advanced": {"has_dwarf": False},
+            },
+        ),
+        (
+            "elf-debug-advanced-block",
+            {
+                "from_headers": False,
+                "platform": "elf",
+                "dwarf_advanced": {"has_dwarf": True},
+            },
+        ),
+        (
+            "macho-debug-block",
+            {"from_headers": False, "platform": "macho", "dwarf": {"has_dwarf": True}},
+        ),
+        ("pe", {"from_headers": False, "platform": "pe"}),
+        (
+            "pe-debug-block",
+            {"from_headers": False, "platform": "pe", "dwarf": {"has_dwarf": True}},
+        ),
+        ("header-castxml", {"from_headers": True, "ast_producer": "castxml"}),
+        ("header-clang", {"from_headers": True, "ast_producer": "clang"}),
+        ("header-hybrid", {"from_headers": True, "ast_producer": "hybrid"}),
+        ("header-inferred", {}),  # from_headers guessed, not recorded
+    )
+
+    @staticmethod
+    def _expected_evidenced(snap: AbiSnapshot) -> set[str]:
+        """Which producers this snapshot shows ran — the independent oracle.
+
+        Written from what each writer does, not from the implementation:
+        a header-AST backend only under *recorded* provenance, and the
+        container format from the platform itself. A debug block names no
+        producer, so none is credited from one.
+        """
+        evidenced: set[str] = set()
+        if snap.from_headers and not snap.from_headers_inferred:
+            if snap.ast_producer in {"castxml", "clang"}:
+                evidenced.add(snap.ast_producer)
+            else:
+                evidenced |= {"castxml", "clang"}
+        # No debug producer, on any platform or flag combination: the
+        # dwarf/dwarf_advanced blocks are debug *storage* that BTF, CTF and
+        # PDB all write into with has_dwarf=True, so a legacy document names
+        # no producer at all (see evidenced_producers' own docstring).
+        if snap.platform in {"elf", "pe", "macho"}:
+            evidenced.add(snap.platform)
+        return evidenced
+
+    @classmethod
+    def _document(cls, owner: str, collection: str, entry: dict, shape: dict) -> dict:
+        """One raw legacy document holding *owner* at *field*'s resting value.
+
+        Dispatches on the owner, not on which keys *entry* happens to
+        carry: ``TypeField.deprecated`` and ``RecordType.deprecated`` are
+        the same key at two different nesting depths.
+        """
+        if owner == "TypeField":
+            raw: dict = {
+                "name": "W",
+                "kind": "class",
+                "fields": [{"name": "m", "type": "int", **entry}],
+            }
+        elif owner == "RecordType":
+            raw = {"name": "W", "kind": "class", **entry}
+        elif owner == "EnumType":
+            raw = {"name": "E", **entry}
+        elif owner == "Param":
+            raw = {
+                "name": "f",
+                "mangled": "_Z1fPi",
+                "return_type": "void",
+                "params": [{"name": "p", "type": "int*", **entry}],
+            }
+        elif owner == "Function":
+            raw = {"name": "f", "mangled": "_Z1fv", "return_type": "void", **entry}
+        else:  # Variable
+            raw = {"name": "g", "mangled": "g", "type": "int", **entry}
+        return _minimal_dict(schema_version=_PRE_CASE_A, **{collection: [raw]}, **shape)
+
+    @staticmethod
+    def _loaded(snap: AbiSnapshot, owner: str, collection: str) -> object:
+        obj = getattr(snap, collection)[0]
+        if owner == "TypeField":
+            return obj.fields[0]
+        if owner == "Param":
+            return obj.params[0]
+        return obj
+
+    @pytest.mark.parametrize(
+        "owner,field,collection,entry",
+        [(o, f, c, e) for o, f, c, e, _n in _FIELDS],
+        ids=[f"{o}.{f}" for o, f, _c, _e, _n in _FIELDS],
+    )
+    @pytest.mark.parametrize("label,shape", _SHAPES, ids=[s[0] for s in _SHAPES])
+    def test_present_implies_an_evidenced_producer(
+        self,
+        label: str,
+        shape: dict,
+        owner: str,
+        field: str,
+        collection: str,
+        entry: dict,
+    ) -> None:
+        d = self._document(owner, collection, entry, shape)
+        snap = snapshot_from_dict(json.loads(json.dumps(d)))
+        obj = self._loaded(snap, owner, collection)
+        status = getattr(obj, f"{field}_fact").status
+        if status is not FactStatus.PRESENT:
+            return
+        entry_def = FACT_REGISTRY.get(f"{owner}.{field}")
+        assert entry_def is not None, f"{owner}.{field} is not registered"
+        producers = set(entry_def.producing_backends)
+        evidenced = self._expected_evidenced(snap)
+        assert producers & evidenced, (
+            f"{owner}.{field} is PRESENT on a {label!r} document, but none of "
+            f"its producers {sorted(producers)} is evidenced by it "
+            f"({sorted(evidenced)})"
+        )
+
+    def test_the_enumeration_is_not_vacuous(self) -> None:
+        """The control for the whole enumeration.
+
+        ``test_present_implies_an_evidenced_producer`` returns early on a
+        non-PRESENT status, so an implementation that downgraded *every*
+        fact would satisfy it trivially. These assertions are the opposite
+        pressure, stated once per rule on the most evidence-free document in
+        the domain.
+
+        The second half is the pairing rule ``CaseAFactRule`` states: a
+        downgrade must never leave a placeholder value standing beside a
+        ``NOT_COLLECTED`` status, and must never discard a value it still
+        reports as ``PRESENT``. Which of the two branches a rule takes there
+        depends on its own reliability signal -- the *unreliable* branch
+        resets the value because it is known to be a placeholder, the
+        *unproduceable* branch keeps it because it came from somewhere the
+        registry does not model -- so the invariant is stated over the pair
+        rather than over either branch alone. Asserting "a non-resting value
+        always survives" instead is what this test did first, and
+        ``RecordType.vtable`` falsified it.
+        """
+        nothing = dict(self._SHAPES[0][1])
+        assert self._SHAPES[0][0] == "nothing"
+        statuses: set[FactStatus] = set()
+        for owner, field, collection, resting, non_resting in self._FIELDS:
+            d = self._document(owner, collection, resting, nothing)
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            got = getattr(obj, f"{field}_fact").status
+            assert got is FactStatus.NOT_COLLECTED, (
+                f"{owner}.{field} at its resting value {resting} on an "
+                f"evidence-free document: expected NOT_COLLECTED, got {got}"
+            )
+
+            [(_key, real)] = non_resting.items()
+            d = self._document(owner, collection, non_resting, nothing)
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            got = getattr(obj, f"{field}_fact").status
+            statuses.add(got)
+            kept = getattr(obj, field) == real
+            assert kept is (got is FactStatus.PRESENT), (
+                f"{owner}.{field}: value and status disagree — "
+                f"value {'kept' if kept else 'reset'} beside status {got}"
+            )
+
+        assert FactStatus.PRESENT in statuses, (
+            "no rule preserved a real value on an evidence-free document — "
+            "the downgrade is discarding data, not narrowing a claim"
+        )
+
+    def test_the_enumeration_covers_every_applied_rule(self) -> None:
+        """`_FIELDS` must be the rule table, not a hand-kept subset of it.
+
+        The list above was first written from the fields ADR-063 Phase 5
+        converted, and silently omitted the three ADR-063 Phase 0 rules the
+        same table carries (`RecordType.vtable`/`vptr_offset_bits`,
+        `Param.is_va_list`) — so the whole-domain invariant was not
+        whole-domain, and nothing failed anywhere. That is the #753 -> #759
+        shape exactly (AGENTS.md, "Adding a new ChangeKind" step 5): a
+        missing entry in a hand-maintained list produces no failure.
+
+        So this reads the rules a *real* load actually applies, rather than
+        restating them, and a rule added to `apply_legacy_fact_backfill`
+        without a row above fails here.
+        """
+        from abicheck.storage import fact_backfill
+
+        applied: list[tuple[str, str]] = []
+        real = fact_backfill.apply_case_a_fact_backfill
+
+        def spy(*args: object, **kwargs: object) -> object:
+            rules = kwargs["rules"]
+            assert isinstance(rules, tuple)
+            applied.extend((r.owner, r.field) for r in rules)
+            return real(*args, **kwargs)
+
+        monkeypatched = getattr(fact_backfill, "apply_case_a_fact_backfill")
+        try:
+            fact_backfill.apply_case_a_fact_backfill = spy  # type: ignore[assignment]
+            snapshot_from_dict(_minimal_dict(schema_version=_PRE_CASE_A))
+        finally:
+            fact_backfill.apply_case_a_fact_backfill = monkeypatched  # type: ignore[assignment]
+
+        assert applied, "no case-(a) rules were applied — the spy saw nothing"
+        enumerated = {(o, f) for o, f, _c, _r, _n in self._FIELDS}
+        assert set(applied) == enumerated, (
+            "the enumeration and the rule table disagree; missing from "
+            f"_FIELDS: {sorted(set(applied) - enumerated)}; not applied: "
+            f"{sorted(enumerated - set(applied))}"
+        )
+
+    #: Every falsy `<field>_fact` payload a malformed, truncated or
+    #: hand-authored document can carry. `decode_fact` treats each as "no
+    #: fact" (`if not raw`), so the backfill must too.
+    _EMPTY_FACT_PAYLOADS: tuple[tuple[str, object], ...] = (
+        ("empty-mapping", {}),
+        ("null", None),
+        ("empty-list", []),
+        ("empty-string", ""),
+        ("false", False),
+        ("zero", 0),
+    )
+
+    @pytest.mark.parametrize(
+        "payload_label,payload",
+        _EMPTY_FACT_PAYLOADS,
+        ids=[label for label, _p in _EMPTY_FACT_PAYLOADS],
+    )
+    def test_an_empty_fact_payload_does_not_bypass_the_producer_gate(
+        self, payload_label: str, payload: object
+    ) -> None:
+        """A falsy `<field>_fact` is not a fact, for every rule in the table.
+
+        The backfill skipped any entry whose `<field>_fact` *key* was
+        present, which is not the same question as whether the document
+        carries a usable fact: `decode_fact` returns nothing for a falsy
+        payload, the owning dataclass's bridge then derives `PRESENT` from
+        the legacy value, and the producer gate never ran — so a
+        hand-authored or truncated document reached exactly the confirmed
+        claim this whole mechanism exists to prevent (CodeRabbit review, PR
+        #995). Stated over every rule and every falsy payload rather than
+        the `{}` that was reported, since the presence test was wrong for
+        all of them equally.
+        """
+        for owner, field, collection, resting, _non_resting in self._FIELDS:
+            entry = dict(resting)
+            entry[f"{field}_fact"] = payload
+            d = self._document(owner, collection, entry, self._SHAPES[0][1])
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            got = getattr(obj, f"{field}_fact").status
+            assert got is FactStatus.NOT_COLLECTED, (
+                f"{owner}.{field} with a {payload_label} fact payload on an "
+                f"evidence-free document resolved {got}, not NOT_COLLECTED"
+            )
+
+    def test_a_real_fact_payload_is_still_honoured(self) -> None:
+        """The control: a document that does carry a fact keeps it.
+
+        Without this, making the skip test stricter could simply ignore
+        every persisted fact and re-derive it, which would pass the test
+        above for the wrong reason.
+        """
+        for owner, field, collection, resting, _non_resting in self._FIELDS:
+            entry = dict(resting)
+            entry[f"{field}_fact"] = {"status": "present", "value": entry[field]}
+            d = self._document(owner, collection, entry, self._SHAPES[0][1])
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            assert getattr(obj, f"{field}_fact").status is FactStatus.PRESENT, (
+                f"{owner}.{field}: a persisted PRESENT fact was discarded"
+            )
+
+    #: (ast_producer, whether a header-AST backend is evidenced by it).
+    #: `ast_producer` has held exactly castxml/clang/hybrid at every write
+    #: site, so anything else is a document this build cannot interpret.
+    _AST_PRODUCERS: tuple[tuple[object, bool], ...] = (
+        ("castxml", True),
+        ("clang", True),
+        ("hybrid", True),
+        (None, True),  # the field predates this document's schema
+        ("gcc-xml", False),  # a producer this build does not know
+        ("CASTXML", False),  # right backend, wrong spelling
+        ("castxml ", False),  # ... and with stray whitespace
+        ("", False),  # malformed/empty
+        ("dwarf", False),  # a real producer name, but not an AST one
+    )
+
+    @pytest.mark.parametrize(
+        "producer,evidences_header",
+        _AST_PRODUCERS,
+        ids=[repr(p) for p, _e in _AST_PRODUCERS],
+    )
+    def test_only_a_recognized_ast_producer_evidences_a_header_backend(
+        self, producer: object, evidences_header: bool
+    ) -> None:
+        """An unrecognized `ast_producer` credits neither backend.
+
+        The `else` branch here covered three different states at once —
+        "hybrid", "the format didn't record it yet", and "the document names
+        something this build has never heard of" — and credited both
+        backends for all three. The third is not a header-AST backend at
+        all, so a header-only fact stayed `PRESENT` on a document naming
+        neither (Codex review, PR #995).
+
+        `None` deliberately still credits both: the document format did not
+        carry the field, and its *recorded* `from_headers` still says a
+        header backend ran. Stated over every rule, with the known spellings
+        as controls so a fix that simply rejected everything fails.
+        """
+        statuses: dict[tuple[str, str], FactStatus] = {}
+        for owner, field, collection, resting, _non_resting in self._FIELDS:
+            shape = {"from_headers": True}
+            if producer is not None:
+                shape["ast_producer"] = producer
+            d = self._document(owner, collection, resting, shape)
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            statuses[owner, field] = getattr(obj, f"{field}_fact").status
+
+        if evidences_header:
+            # Not "every rule stays PRESENT": `Variable.access` names only
+            # castxml and `Param.is_va_list` only clang, so a recognized
+            # producer legitimately fails to evidence some of them, and each
+            # rule's own reliability flag can downgrade independently. The
+            # control is that a recognized producer still credits *something*
+            # — without it, a fix that rejected every producer would satisfy
+            # the negative half below.
+            assert FactStatus.PRESENT in statuses.values(), (
+                f"ast_producer {producer!r} is a recognized header-AST "
+                f"producer but evidenced no rule at all"
+            )
+        else:
+            assert set(statuses.values()) == {FactStatus.NOT_COLLECTED}, (
+                f"ast_producer {producer!r} evidences no backend, but "
+                f"{[k for k, v in statuses.items() if v is not FactStatus.NOT_COLLECTED]}"
+                f" resolved PRESENT"
+            )

@@ -149,4 +149,4 @@ meaning, stayed the same.
 
 ---
 
-**Ladder:** ← [Behavioral & Semantic Compatibility](behavioral-compatibility.md) · Tier 8 · Beyond static ABI · [Ownership & Lifetime Contracts](ownership-and-lifetime.md) →
+**Ladder:** ← [Behavioral & Semantic Compatibility](behavioral-compatibility.md) · Step 9 · Beyond Static ABI · [Ownership & Lifetime Contracts](ownership-and-lifetime.md) →

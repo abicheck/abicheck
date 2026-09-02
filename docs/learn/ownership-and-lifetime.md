@@ -171,4 +171,4 @@ a stable, checkable ABI boundary.
 
 ---
 
-**Ladder:** ← [Data, Wire & Storage Compatibility](data-wire-compatibility.md) · Tier 8 · Beyond static ABI · [Concurrency & Initialization Contracts](concurrency-and-initialization.md) →
+**Ladder:** ← [Data, Wire & Storage Compatibility](data-wire-compatibility.md) · Step 9 · Beyond Static ABI · [Concurrency & Initialization Contracts](concurrency-and-initialization.md) →
