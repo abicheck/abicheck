@@ -427,6 +427,16 @@ pytest_add_cli_args = [
     "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
     "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
     "--ignore=tests/test_action_check_target.py",
+    # Split out of the file directly above for a `no_growth` file-size
+    # reason (its own docstring), inheriting the identical re-entrant-
+    # subprocess class via a shared `_run_finalize` helper imported from
+    # it -- the split predates this entry and was never added alongside
+    # it (Codex review, PR #1016, discovered because this PR's diff
+    # touches enough tests/ paths to trip --scope-run-to-diff's own
+    # "refuse to scope" fallback to a full, unscoped run, exercising this
+    # gap for the first time; not caused by anything this PR's own diff
+    # changed).
+    "--ignore=tests/test_action_check_target_explicit_id.py",
     "--ignore=tests/test_action_collect_facts.py",
     # Same "subprocess re-enters the mutated tree with no mutmut config"
     # failure as the two entries above, discovered via this repo's own G38
