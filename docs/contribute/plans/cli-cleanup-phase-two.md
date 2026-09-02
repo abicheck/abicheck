@@ -208,6 +208,21 @@ SHA), which is precisely what item 4 exists to make detectable.
 > a fourth hand-copied one. This closes every part of PR 0B/P0 that can be
 > closed from inside a PR; the ruleset still has to actually be applied and
 > the negative test actually run by an admin before this item is done.
+>
+> **Superseded (2026-09).** The Ruleset described above *was* applied by an
+> admin and did block merges on CI completion, as designed. The maintainer
+> then decided that trade-off isn't wanted going forward — see
+> `.github/AGENTS.md`'s "Required-status-check configuration" section,
+> whose heading now reads "deliberately not enforced" — and reversed both
+> halves of this item: the Ruleset's `required_status_checks` rule was
+> removed (only `non_fast_forward` remains in
+> `.github/branch-protection-ruleset.json`), and `verify-merge-checks.yml`
+> plus its dedicated tests were deleted outright, since an audit that fires
+> on every merge under the new, accepted policy is noise, not a finding.
+> PR 0B/P0 as originally scoped is therefore closed by reversal rather than
+> by completion; this section's history above stays as the record of the
+> design this repo built and later chose not to keep enforcing, and
+> `.github/AGENTS.md` is the up-to-date source for the current policy.
 
 **The required-check list must match `.github/AGENTS.md`'s own required-vs-
 informational classification, not the set of workflow names visible in a run

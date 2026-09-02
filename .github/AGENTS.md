@@ -6,8 +6,14 @@ project-wide contract — this file only covers what's specific to this tree.
 
 ## Required vs. informational workflows
 
-Not every workflow here blocks a merge. Before assuming a red check means
-"fix this before merging," check which bucket it's in:
+Not every workflow here blocks a merge — and, per the decision below, as of
+2026-09 **none of them mechanically can**: `main` carries no
+`required_status_checks` Ruleset rule, so GitHub's merge button is never
+disabled by CI state. The table's "Required?" column is retained as
+*guidance* — which checks a human (or reviewing agent) should treat as
+"fix this before merging" — not as a description of an enforced gate.
+Before assuming a red check means "fix this before merging," check which
+bucket it's in:
 
 | Workflow | Required on every PR? | Notes |
 |----------|------------------------|-------|
@@ -30,115 +36,61 @@ Not every workflow here blocks a merge. Before assuming a red check means
 | `test-action.yml` | Yes, when `action/**`/`action.yml` changes | See `action/AGENTS.md` |
 | `bugfix-test-contract.yml` | Yes, on `fix:`/`perf:`/`security:` PRs | Structural half: a fix changing shipped code must change a test. Declared half: the PR body must answer the bug-fix test contract, plus any conditional the diff triggers. Bypass with the `skip-test-contract` label. See `scripts/check_bugfix_test_contract.py` for what each answer is for. |
 | `publish.yml` / `pages.yml` | N/A (release/deploy only) | Not PR gates |
-| `verify-merge-checks.yml` | N/A (post-merge only, `push: main`) | Not a PR gate — see "Required-status-check configuration" below. |
 
-## Required-status-check configuration (CLI cleanup phase two, PR A / PR 0B)
+## Required-status-check configuration — deliberately not enforced (2026-09)
 
-The table above states which workflows are *supposed to* gate a merge; this
-section is the mechanical rule for turning that into a real GitHub
-required-status-checks list (Ruleset or classic branch protection), and the
-two things this repo added so a path-filtered "Yes, when X changes" row can
-actually be required without stranding every PR that doesn't touch X.
+**Decision: `main` does not require status checks to pass before a merge,
+and this is intentional, not an oversight or an outstanding admin TODO.**
 
-**The rule**, applied fresh against the table above at configuration time —
-not a hand-copied snapshot, which drifted wrong three times in a row before
-this was written down as a rule instead of a list (see the CLI cleanup
-phase-two plan's own PR 0B section for that history):
+CLI cleanup phase two's PR A / PR 0B originally built toward the opposite —
+a real GitHub required-status-checks Ruleset that would block the merge
+button until every check in a derived 14-name list passed on the PR's head
+SHA, plus `verify-merge-checks.yml` as a post-merge audit to catch a merge
+that slipped through before that Ruleset was actually applied. Both pieces
+were built, tested, and the Ruleset was eventually applied by an admin. It
+worked as designed: merges to `main` were blocked until CI finished.
 
-1. For every workflow the table marks required (unconditionally or "when X
-   changes"), read its own `on: pull_request:` block.
-2. **No `paths:` filter** (the workflow always runs on a PR against `main`;
-   an internal diff check or label decides applicability instead) → require
-   its own check name directly. `changelog-check.yml`/`cli-interface-check.yml`/
-   `bugfix-test-contract.yml`/`dependency-review.yml`/`security.yml`/`ci.yml`
-   are all in this bucket.
-3. **Has a `paths:` filter** (the workflow may not run at all on an
-   unrelated PR) → never require its own check name directly — no native
-   GitHub mechanism (classic branch protection or a Ruleset's required-
-   status-checks rule) conditions "required" on which paths a given PR
-   touched, so doing so strands every PR that doesn't touch that path.
-   `docs-pr.yml` and `test-action.yml` are in this bucket, and each has a
-   **neutral-aggregate gate job living in `ci.yml`** instead
-   (`docs-pr-required`/`test-action-required`, both unconditioned like every
-   other `ci.yml` job): each re-evaluates the exact same `paths:` filter its
-   target workflow's own trigger uses; when the paths don't match, there is
-   nothing to gate and the job succeeds immediately; when they do match, the
-   target workflow is guaranteed to have been triggered by the same
-   `pull_request` event, so the gate job polls that workflow's own aggregate
-   check (`build-docs` for `docs-pr.yml`; the added `test-action-summary`
-   job's `test-action summary` check for `test-action.yml`, since that
-   workflow fans out to 17+ independent jobs with no single existing
-   pass/fail check to point at) for the same head SHA and mirrors its
-   conclusion. **Require the gate jobs' own emitted check names in the
-   Ruleset — `docs-pr (required)`/`test-action (required)` (each job's own
-   `name:` override, not its job id `docs-pr-required`/`test-action-required`;
-   GitHub Rulesets match a required status check by its reported check-run
-   name, not by workflow job id) — never `build-docs`/`test-action summary`
-   directly.** The whole point is that the wrapper is unconditionally present
-   while the wrapped check may not be.
-4. Anything the table marks **not required** stays out of the required set
-   entirely — this rule does not change that classification.
+The maintainer then decided that trade-off isn't wanted going forward —
+waiting for CI to complete before a push/merge can land is a real cost to
+iteration speed, and this repo chooses to accept the risk of an occasional
+red or incomplete merge over paying it on every merge. Concretely:
 
-**The required-check list, applying this rule to the table above (2026-08,
-`main` at the CLI cleanup phase-two governance PR):** `ai-readiness`,
-`fair-metadata` (check name `FAIR metadata and packaging`), `lint-and-types`,
-`unit-tests (ubuntu-latest, 3.13, false)` (the canonical Linux/3.13 lane —
-not every matrix leg, see "one stable aggregate check" below),
-`packaging (ubuntu-latest)`, `packaging (windows-latest)`,
-`changelog-fragment`, `cli-interface-diff`, `test-contract`,
-`Dependency Review`, `Security Scan`, `CodeQL Analysis (python)`,
-`docs-pr (required)`, `test-action (required)` (the `name:` values of
-`ci.yml`'s `docs-pr-required`/`test-action-required` jobs — see the note in
-rule step 3 above on why the check name, not the job id, is what a Ruleset
-actually requires).
+- The Ruleset's `required_status_checks` rule has been removed.
+  `.github/branch-protection-ruleset.json` now carries only a
+  `non_fast_forward` rule (no force-pushes/history rewrites on `main`) —
+  see `.github/branch-protection-ruleset.md` for the current runbook.
+- `.github/workflows/verify-merge-checks.yml` has been **removed outright**,
+  along with its dedicated tests (`tests/test_verify_merge_checks_race_logic.py`,
+  `tests/verify_merge_checks_harness.mjs`). That workflow's entire purpose
+  was catching a merge whose required checks hadn't actually finished before
+  `merged_at` — the ADR-style problem statement was "a required check that
+  didn't block a merge is a detectable gap, not a policy". Once the policy
+  itself became "don't require checks to block a merge," every merge it
+  used to flag as a finding became expected, normal behavior instead — an
+  audit that fires on every single merge, correctly, is not an audit
+  anymore, it's noise. There is no compensating mechanism to re-add in its
+  place; the absence of merge-blocking is the accepted state, not a gap.
+- The rest of this file's "Required vs. informational workflows" table is
+  kept as-is and still means what it says as *review guidance* — which
+  checks a human or reviewing agent should treat as "fix this before
+  merging" — it just no longer describes anything GitHub itself enforces
+  mechanically on the merge button.
 
-**This document states the rule and the resulting list; it does not itself
-turn the list into an enforced Ruleset.** That configuration step is a
-repository-admin action (GitHub Settings → Rules, or the REST/GraphQL
-Rulesets API with an admin-scoped token) outside what an automated PR can
-carry out — apply the list above there by hand, or with `gh api` /
-equivalent tooling that holds that access, and re-derive it from this
-section's rule (not by re-copying this list verbatim) if the table above has
-since changed.
-
-**`branch-protection-ruleset.json`/`branch-protection-ruleset.md`** in this
-same directory are the ready-to-apply artifact for that step: an exact
-Rulesets API payload for the 14-name list above, one `gh api` command to
-apply it, and a negative-test procedure to confirm enforcement is real (not
-just configured). `tests/test_required_checks_governance.py`'s
-`TestBranchRulesetArtifact` keeps the JSON's context list in lockstep with
-this section's prose and `verify-merge-checks.yml`'s own `REQUIRED_CHECKS`
-array, so this is a third mechanically-checked copy of the list, not a
-fourth hand-copied one. The admin action itself is still outstanding — see
-`docs/contribute/plans/cli-cleanup-phase-two.md`'s PR 0B status note.
-
-**Prefer one stable aggregate required check per always-required workflow**
-over requiring every matrix leg individually — a matrix-leg-level required
-list goes stale on every matrix edit and is the usual reason required checks
-get turned back off. `test-action.yml`'s own `test-action-summary` job
-(`needs:` every job in that workflow, `if: always()`) is exactly this for a
-fan-out workflow with no single existing pass/fail check; `docs-pr.yml`
-already has only one job (`build-docs`) and needed no separate aggregate.
-
-**Exact-merge-SHA verification (item 4).** `verify-merge-checks.yml` runs on
-every push to `main` and looks up the PR GitHub associates with that commit
-(covers squash/merge/rebase merges alike), then re-checks that PR's own
-already-recorded *tested head SHA* — not the new merge commit, which most of
-the required workflows above never re-run against (`pull_request`-only
-triggers) and which wouldn't prove anything about what was reviewed even if
-they did — against the required-check list above, including the two
-neutral-aggregate gate checks themselves (`docs-pr (required)`/
-`test-action (required)`, which are unconditioned and so exist on every PR
-head SHA); only the *path-filtered* checks those gates wrap (`build-docs`,
-`test-action summary`) are deliberately excluded from this second pass, since
-whether those exist at all depends on the same path filter the gate job
-already re-evaluated as a required check on the PR itself — see the
-workflow's own header comment for the full reasoning. It cannot block an
-already-completed merge; it fails loudly on `main`'s own Actions tab instead,
-which is what makes a merge that slipped through a misconfigured or
-momentarily-disabled Ruleset *detectable* rather than invisible — the exact
-gap that let the PR #782 merge SHA go out with no full `ci.yml` sweep having
-run against it.
+**If this decision is ever reversed**, the mechanical pieces this repo built
+for it are still intact and don't need to be reinvented — see the
+now-historical "PR 0 — restore a green CI baseline first" section of
+`docs/contribute/plans/cli-cleanup-phase-two.md` for the full original
+design (the required-check derivation rule, the `docs-pr (required)`/
+`test-action (required)` neutral-aggregate gate jobs in `ci.yml` that make a
+path-filtered workflow requirable without stranding unrelated PRs, and the
+one-stable-aggregate-check-per-workflow principle). Re-deriving the
+required-check list from this file's "Required vs. informational workflows"
+table, adding a `required_status_checks` rule with that list to
+`branch-protection-ruleset.json`, and applying it is enough on its own —
+re-adding a `verify-merge-checks.yml`-style post-merge audit is optional at
+that point (it only earns its keep while the Ruleset's enforcement itself is
+still being rolled out or is unverified, per its original design rationale),
+not a required companion piece.
 
 ## Local equivalence (CLAUDE.md "M0-3")
 
