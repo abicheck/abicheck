@@ -1131,18 +1131,25 @@ def _scoped_semantic_ir(
     semantic_ir_conflicts: dict[str, str],
     kept_types: list[RecordType],
     kept_enums: list[EnumType],
+    kept_functions: list[Function],
+    kept_variables: list[Variable],
 ) -> tuple[SemanticIR | None, dict[str, str]]:
     """The ``SemanticIR``/``semantic_ir_conflicts`` counterpart of this
     module's flat functions/variables/types/enums filtering (ADR-063 Phase
-    6, second slice).
+    6, second/third slices).
 
-    Keeps exactly the occurrences whose ``EntityId`` names a record/enum
-    that survived the same header-origin filter *kept_types*/*kept_enums*
-    already applied -- an excluded dependency type/enum's occurrence is
-    dropped from the IR the identical way it is dropped from the flat
-    lists, so a ``SemanticIR``-aware consumer cannot see more than a
-    ``functions``/``types``-reading one does. Typedef occurrences are
-    intentionally left untouched: this module's own docstring already
+    Keeps exactly the occurrences whose ``EntityId`` names a record/enum/
+    function/variable that survived the same header-origin filter
+    *kept_types*/*kept_enums*/*kept_functions*/*kept_variables* already
+    applied -- an excluded dependency declaration's occurrence is dropped
+    from the IR the identical way it is dropped from the flat lists, so a
+    ``SemanticIR``-aware consumer cannot see more than a
+    ``functions``/``types``-reading one does (Codex review: the third
+    slice's own functions/variables addition left this function only ever
+    checking `EntityKind.TYPE`/`EntityKind.ENUM`, so a dependency-header
+    function/variable's occurrence stayed reachable through `semantic_ir`
+    after its flat counterpart was already excluded). Typedef occurrences
+    are intentionally left untouched: this module's own docstring already
     states typedefs carry no ``source_header`` and are never filtered by
     this function at all (the legacy ``typedefs``/``typedefs_qualified``
     fields stay unfiltered for the identical reason), so a typedef
@@ -1167,9 +1174,12 @@ def _scoped_semantic_ir(
     """
     if semantic_ir is None:
         return None, semantic_ir_conflicts
-    kept_entity_ids = {t.entity_id for t in kept_types if t.entity_id is not None} | {
-        e.entity_id for e in kept_enums if e.entity_id is not None
-    }
+    kept_entity_ids = (
+        {t.entity_id for t in kept_types if t.entity_id is not None}
+        | {e.entity_id for e in kept_enums if e.entity_id is not None}
+        | {f.entity_id for f in kept_functions if f.entity_id is not None}
+        | {v.entity_id for v in kept_variables if v.entity_id is not None}
+    )
     kept_occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     excluded_occurrences: list[tuple[OccurrenceId, CanonicalEntity]] = []
     for occ_id, entity in semantic_ir.occurrences.items():
@@ -1178,6 +1188,8 @@ def _scoped_semantic_ir(
             not in (
                 EntityKind.TYPE,
                 EntityKind.ENUM,
+                EntityKind.FUNCTION,
+                EntityKind.VARIABLE,
             )
             or occ_id.entity_id in kept_entity_ids
         ):
@@ -1340,7 +1352,12 @@ def scope_snapshot_excluding_dependencies(
         if f.mangled and f.mangled not in kept_mangled
     }
     scoped_semantic_ir, scoped_semantic_ir_conflicts = _scoped_semantic_ir(
-        snap.semantic_ir, snap.semantic_ir_conflicts, kept_types, kept_enums
+        snap.semantic_ir,
+        snap.semantic_ir_conflicts,
+        kept_types,
+        kept_enums,
+        kept_functions,
+        kept_variables,
     )
     return dataclasses.replace(
         snap,

@@ -617,13 +617,13 @@ class ElfHeaderAstResult:
     is_clang: bool
     provenance_headers: tuple[Path, ...]
     frontend_context_kind: str | None = None
-    # ADR-063 Phase 6 (second slice): the canonical SemanticIR projection of
-    # this same merged result -- computed once, here, so both the legacy
-    # single-TU dump (`_dump_elf`) and a real manifest dump share one
-    # normalizer call instead of each format handler recomputing it from
-    # `types`/`enums`/`typedefs_qualified`/`typedef_entity_ids` above. See
-    # `extract/semantic_normalizer.py`'s own docstring for this slice's
-    # scope (records/enums/typedefs only).
+    # ADR-063 Phase 6 (second/third/fourth slices): the canonical SemanticIR
+    # projection of this same merged result -- computed once, here, so both
+    # the legacy single-TU dump (`_dump_elf`) and a real manifest dump share
+    # one normalizer call instead of each format handler recomputing it from
+    # `functions`/`variables`/`types`/`enums`/`typedefs_qualified`/
+    # `typedef_entity_ids`/`constants`/`constant_entity_ids` above. See
+    # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
     semantic_ir: SemanticIR | None = None
 
 
@@ -766,5 +766,9 @@ def resolve_header_ast_result(
             typedefs_qualified=merged.typedefs_qualified,
             typedef_entity_ids=merged.typedef_entity_ids,
             producer=merged.ast_producer,
+            functions=merged.functions,
+            variables=merged.variables,
+            constants=merged.constants,
+            constant_entity_ids=merged.constant_entity_ids,
         ),
     )

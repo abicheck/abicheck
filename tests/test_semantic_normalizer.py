@@ -14,24 +14,28 @@
 # limitations under the License.
 
 """``extract.semantic_normalizer.normalize_header_ast`` (ADR-063 Phase 6,
-second slice).
+second and third slices).
 
 Unit-level: exercises the normalizer directly against hand-built
-``RecordType``/``EnumType``/typedef inputs, independent of any real
-castxml/clang parse (that end-to-end wiring is covered by
-``test_dumper_castxml_integration.py::test_semantic_ir_populated_end_to_end``
-and its clang/hybrid counterparts, which need the real toolchains).
+``RecordType``/``EnumType``/typedef/``Function``/``Variable`` inputs,
+independent of any real castxml/clang parse (that end-to-end wiring is
+covered by ``test_semantic_ir_end_to_end.py``, which needs the real
+toolchains).
 """
 
 from __future__ import annotations
 
 from abicheck.extract.semantic_normalizer import normalize_header_ast
+from abicheck.model.declarations import Function, Param, Variable
 from abicheck.model.entities import EnumType, RecordType
 from abicheck.model.identity import (
     Namespace,
+    entity_id_for_constant,
     entity_id_for_enum,
+    entity_id_for_function,
     entity_id_for_type,
     entity_id_for_typedef,
+    entity_id_for_variable,
 )
 from abicheck.model.occurrence import OccurrenceId
 
@@ -209,3 +213,538 @@ def test_normalize_header_ast_is_producer_agnostic() -> None:
     )
     (entity,) = ir.occurrences.values()
     assert entity.producer == "clang"
+
+
+# --- Third slice: functions and variables -----------------------------------
+
+
+def _function(
+    name: str,
+    return_type: str,
+    param_types: tuple[str, ...] = (),
+    *,
+    is_const: bool = False,
+    is_volatile: bool = False,
+    is_compiler_generated: bool | None = False,
+    mangled: str | None = None,
+) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled or f"_Z{len(name)}{name}v",
+        return_type=return_type,
+        params=[Param(name="", type=t) for t in param_types],
+        is_const=is_const,
+        is_volatile=is_volatile,
+        is_compiler_generated=is_compiler_generated,
+        entity_id=entity_id_for_function(
+            (), name, mangled_name=mangled, param_types=param_types
+        ),
+    )
+
+
+def test_normalize_header_ast_canonicalizes_function_signature_spelling() -> None:
+    """A function's ``canonical_spelling`` is built from the same
+    canonicalizers ``entity_id_for_function`` itself uses -- cross-backend
+    spelling differences (elaborated-type-specifiers, pointer/reference
+    sigil spacing) collapse to one canonical string, and a top-level
+    by-value parameter cv-qualifier is dropped (it is not a real overload
+    discriminator)."""
+    fn = _function("f", "struct Widget *", ("const int", "char const*"))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget *(int, char const *)"
+    assert entity.producer == "castxml"
+
+
+def test_normalize_header_ast_function_cv_qualification() -> None:
+    """A member function's ``is_const``/``is_volatile`` populate
+    ``cv_qualification`` in canonical order, separately from the spelling
+    text."""
+    fn = _function("m", "void", is_const=True, is_volatile=True)
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const", "volatile")
+
+
+def test_normalize_header_ast_non_cv_function_has_empty_cv_qualification() -> None:
+    fn = _function("f", "void")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+    assert entity.cv_qualification.is_present
+
+
+def test_normalize_header_ast_includes_synthetic_ctor_key_functions() -> None:
+    """A castxml constructor with no recoverable real mangled name gets a
+    synthetic snapshot key (``model.synthetic_key.SYNTHETIC_CTOR_KEY_PREFIX``)
+    -- not a stable cross-backend identity, and one `dumper_hybrid.
+    _merge_functions` can later rewrite it to a real clang-matched mangled
+    name/entity_id during a hybrid merge. That rewrite is now propagated
+    into `semantic_ir` too (`dumper_hybrid._rewrite_semantic_ir_entity_ids`),
+    so this per-backend normalizer no longer needs to guess and exclude --
+    a single-backend (non-hybrid) dump has no rewrite step at all, and this
+    occurrence is exactly as real as any other function's (Codex review,
+    third round: an earlier revision of this slice excluded every
+    synthetic-keyed function here, unconditionally losing this evidence
+    even for a plain castxml-only dump)."""
+    fn = _function(
+        "Widget",
+        "void",
+        mangled="__abicheck_ctor__Widget()",
+        is_compiler_generated=True,
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "void()"
+
+
+def test_normalize_header_ast_includes_synthetic_dtor_key_functions() -> None:
+    """The identical treatment applies to a synthetic destructor key
+    (``"~Class"`` -- ``model.synthetic_key.is_synthetic_dtor_key``)."""
+    fn = _function("~Widget", "void", mangled="~Widget", is_compiler_generated=True)
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "void()"
+
+
+def test_normalize_header_ast_includes_compiler_generated_with_real_mangled_name() -> (
+    None
+):
+    """A compiler-generated function that DOES get a real mangled name (e.g.
+    a synthesized ``operator=`` -- ``Function.is_compiler_generated``'s own
+    docstring) has none of the synthetic-key hazard and must be normalized
+    like any other function -- ``AbiSnapshot.functions`` already includes
+    it, so excluding it from ``semantic_ir`` too would itself be a
+    representation disagreement (Codex review, second round: an earlier
+    revision of this slice skipped every ``is_compiler_generated`` function
+    regardless of whether its mangled name was synthetic)."""
+    fn = _function(
+        "operator=",
+        "Widget &",
+        ("const Widget &",),
+        mangled="_ZN6WidgetaSERKS_",
+        is_compiler_generated=True,
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget &(Widget const &)"
+
+
+def test_normalize_header_ast_skips_function_without_entity_id() -> None:
+    fn = Function(name="f", mangled="_Z1fv", return_type="void")
+    assert fn.entity_id is None
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_canonicalizes_variable_type_spelling() -> None:
+    """``"struct Widget const*"`` is a MUTABLE pointer to const data -- the
+    pointee is const, the pointer/variable itself is not, so
+    ``cv_qualification`` must be empty (Codex review, fourth round, fresh
+    evidence: this previously asserted ``("const",)``, reproducing the
+    exact pointee-vs-value conflation the finding named)."""
+    var = Variable(
+        name="g_widget",
+        mangled="g_widget",
+        type="struct Widget const*",
+        is_const=True,
+        entity_id=entity_id_for_variable((), "g_widget", mangled_name="g_widget"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget const *"
+    assert entity.cv_qualification.value == ()
+    assert entity.producer == "clang"
+
+
+def test_normalize_header_ast_const_pointer_variable_is_top_level_const() -> None:
+    """A CONST pointer to mutable data (``"int * const"``) -- the pointer
+    itself is const -- IS the declaration's own top-level qualification,
+    unlike the mutable-pointer-to-const-data case above."""
+    var = Variable(
+        name="g_ptr",
+        mangled="g_ptr",
+        type="int * const",
+        entity_id=entity_id_for_variable((), "g_ptr", mangled_name="g_ptr"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_by_value_const_variable_is_top_level_const() -> None:
+    """A plain by-value const variable (no pointer at all) -- the whole
+    string IS the top-level qualification, matching the pre-existing
+    by-value behavior."""
+    var = Variable(
+        name="g_n",
+        mangled="g_n",
+        type="const int",
+        entity_id=entity_id_for_variable((), "g_n", mangled_name="g_n"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_const_template_argument_is_not_top_level() -> None:
+    """A ``const`` inside a template argument list belongs to that
+    argument's own type, not this pointer's qualification (mirrors
+    ``model.declarator_qualifiers._extract_top_level_cv``'s identical
+    discipline)."""
+    var = Variable(
+        name="g_vec",
+        mangled="g_vec",
+        type="vector<const int> *",
+        entity_id=entity_id_for_variable((), "g_vec", mangled_name="g_vec"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_const_function_pointer_variable_is_top_level_const() -> (
+    None
+):
+    """A const function-pointer variable wraps its own sigil in a real
+    declarator-grouping paren (clang's own spelling for ``int (* const
+    fp)(int)`` is ``"int (*const)(int)"``) -- that paren must be transparent
+    to the top-level-sigil search, not counted as an ordinary opaque
+    nesting level the way a parameter list or ``decltype(...)`` is (Codex
+    review, fifth round, fresh evidence: an earlier revision found no
+    top-level sigil at all here, since the sigil sits INSIDE the
+    declarator-grouping paren, and silently reported ``()`` instead of
+    ``("const",)``)."""
+    var = Variable(
+        name="g_fp",
+        mangled="g_fp",
+        type="int (*const)(int)",
+        entity_id=entity_id_for_variable((), "g_fp", mangled_name="g_fp"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_restrict_variable_is_deliberately_not_recognized() -> (
+    None
+):
+    """``restrict`` is deliberately NOT recognized for a variable, even
+    though clang's own qualType spells it verbatim (``"int *restrict"`` for
+    ``int * restrict gp``) and ``CanonicalEntity.cv_qualification``'s
+    vocabulary names it alongside ``const``/``volatile`` (Codex review,
+    sixth round, fresh evidence -- reverting a fifth-round addition):
+    castxml's ``type_name_uncached`` never emits the word at all (a
+    deliberate choice on castxml's own side, unlike a function *parameter*'s
+    ``Param.is_restrict``, which both backends populate structurally), so a
+    plain text scan reports a clang-only, backend-asymmetric answer -- a
+    castxml-produced entity would claim a CONFIRMED absence of a qualifier
+    its own backend structurally cannot see, which `merge_semantic_ir`'s
+    backfill then treats as a genuine two-sided disagreement against
+    clang's real ``("restrict",)`` instead of backfilling it. See this
+    module's own `_CV_KEYWORD_RE` comment for the full reasoning and what a
+    real fix needs (a structural, reliability-tracked ``Variable.
+    is_restrict`` fact, not a normalizer-only change)."""
+    var = Variable(
+        name="g_ptr",
+        mangled="g_ptr",
+        type="int *restrict",
+        entity_id=entity_id_for_variable((), "g_ptr", mangled_name="g_ptr"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_member_function_pointer_variable_excludes_pointee_qualifier() -> (
+    None
+):
+    """A mutable pointer to a cv-qualified member function (``void
+    (C::*pmf)(int) const``) reports NO top-level qualification of its own --
+    the ``const`` after the parameter list qualifies the POINTED-TO member
+    function, not the ``pmf`` pointer variable itself (Codex review, sixth
+    round, fresh evidence: an earlier revision scanned the whole text after
+    the sigil and wrongly attributed the member function's own ``const`` to
+    the pointer variable, so a mutable and a genuinely const member-function
+    pointer both reported ``("const",)``)."""
+    var = Variable(
+        name="g_pmf",
+        mangled="g_pmf",
+        type="void (C::*)(int) const",
+        entity_id=entity_id_for_variable((), "g_pmf", mangled_name="g_pmf"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_member_function_pointer_variable_keeps_own_qualifier() -> (
+    None
+):
+    """A genuinely CONST member-function-pointer variable (``void (C::*
+    const)(int)``) -- the qualifier sits BEFORE the trailing parameter list,
+    directly after the declarator's own sigil, so it is correctly attributed
+    to the pointer variable itself, unlike the pointed-to function's own
+    trailing qualifier in the sibling test above."""
+    var = Variable(
+        name="g_pmf",
+        mangled="g_pmf",
+        type="void (C::* const)(int)",
+        entity_id=entity_id_for_variable((), "g_pmf", mangled_name="g_pmf"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_comparison_operator_in_template_argument_variable() -> (
+    None
+):
+    """A real comparison ``<``/``>`` pair inside a parenthesized non-type
+    template argument does not throw off the sigil search (Codex review,
+    twelfth round, fresh evidence: confirmed against clang's real
+    ``qualType`` spelling for ``template<int N> extern S<(N < 0)> * const
+    gp``, ``"S<(N < 0)> *const"``). A flat depth counter treats the
+    comparison ``<`` as another template opener, so after the real
+    ``)``/``>`` closers the running depth never returns to zero and the
+    sigil search never finds the real top-level ``*`` at all, silently
+    reporting no qualification for a genuinely const pointer."""
+    var = Variable(
+        name="gp",
+        mangled="gp",
+        type="S<(N < 0)> *const",
+        entity_id=entity_id_for_variable((), "gp", mangled_name="gp"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_typedef_hidden_qualifier_is_a_known_limitation() -> None:
+    """A top-level qualifier hidden behind a typedef alias is NOT detected
+    -- a documented, accepted limitation, not a silent wrong answer (Codex
+    review, eighth round, fresh evidence): for ``typedef int * const
+    ConstPtr; extern ConstPtr p;``, both backends pass this normalizer the
+    ALIAS spelling (``"ConstPtr"``), which carries no sigil/keyword for the
+    text scan to find. Pins the current, honest ``()`` so a future fix
+    threading real desugared/structural evidence through has a test that
+    fails once it lands, rather than this gap silently persisting
+    unnoticed. See `_variable_top_level_cv_qualification`'s own docstring
+    ("Known, accepted limitation...") for what a real fix needs."""
+    var = Variable(
+        name="p",
+        mangled="p",
+        type="ConstPtr",
+        entity_id=entity_id_for_variable((), "p", mangled_name="p"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_non_const_variable_has_empty_cv_qualification() -> None:
+    var = Variable(
+        name="g_widget",
+        mangled="g_widget",
+        type="int",
+        entity_id=entity_id_for_variable((), "g_widget", mangled_name="g_widget"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_functions_and_variables_default_to_empty() -> None:
+    """*functions*/*variables* default to ``()`` -- a caller that has not
+    migrated to this slice's scope yet needs no change."""
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_projects_constant_value_verbatim() -> None:
+    """A constant's ``canonical_spelling`` is its raw ``parse_constants()``
+    value text, unchanged -- there is no established cross-backend
+    canonicalization for a constant's value expression to apply (this
+    module's own docstring, "Scope of the fourth slice"), so this mirrors
+    ``diff_symbols._diff_constants``'s own long-standing raw-string
+    comparison rather than inventing one."""
+    eid = entity_id_for_constant((), "kMaxWidgets")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        constants={"kMaxWidgets": "42"},
+        constant_entity_ids={"kMaxWidgets": eid},
+    )
+    (entity,) = ir.occurrences.values()
+    assert set(ir.occurrences) == {OccurrenceId(eid)}
+    assert entity.canonical_spelling.value == "42"
+    assert entity.producer == "castxml"
+    # No captured type, so no cv_qualification/template_arguments fact --
+    # both stay at their `Fact.not_collected()` default.
+    assert not entity.cv_qualification.is_present
+    assert not entity.template_arguments.is_present
+
+
+def test_normalize_header_ast_constant_with_no_matching_value_is_skipped() -> None:
+    """A ``constant_entity_ids`` entry with no matching ``constants`` value
+    is tolerated defensively, mirroring the typedef branch's identical
+    treatment of a missing sidecar entry."""
+    eid = entity_id_for_constant((), "kOrphan")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        constants={},
+        constant_entity_ids={"kOrphan": eid},
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_constants_default_to_empty() -> None:
+    """*constants*/*constant_entity_ids* default to ``{}`` -- a caller that
+    has not migrated to this slice's scope yet needs no change."""
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    assert ir.occurrences == {}

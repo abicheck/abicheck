@@ -188,23 +188,55 @@ Core pipeline (in order of data flow):
    pair is never collapsed; `CanonicalEntity` holds only the non-identity
    payload). Persisted as `AbiSnapshot.semantic_ir` (schema v38,
    `storage/semantic_ir_codec.py`) and reconciled across the two header-AST
-   backends by `extract/semantic_ir_merge.py`. **Second slice landed:**
+   backends by `extract/semantic_ir_merge.py`. **Third slice landed:**
    `extract/semantic_normalizer.py`'s `normalize_header_ast` projects each
-   header-AST backend's already-parsed `RecordType`/`EnumType`/typedef
-   output (both `dumper_castxml.py` and `dumper_clang.py` already carry a
-   real `entity_id` on each, per Phase 2's option (a)) into a real
-   `SemanticIR`, wired through `dumper_manifest.resolve_header_ast_result`
-   so both the legacy single-TU ELF dump and a real manifest dump populate
-   it — a real `dump()`/`compare()` now carries a non-empty `semantic_ir`,
-   including through `--ast-frontend hybrid`'s reconciliation. Functions,
-   variables, and constants are not normalized yet (a function's/variable's
-   canonical *signature* spelling is exactly the still-open cross-backend
-   canonicalization problem, not a mechanical projection — see that
-   module's own docstring), and the PE/Mach-O header-AST assembly sites in
-   `dumper.py` are not yet wired (that file sits at its `architecture/
-   debt.yaml` no-growth baseline — see the ELF site's own comment there).
-   BTF/CTF/PDB remain fully unmigrated: those backends do not populate
-   `entity_id` at all yet.
+   header-AST backend's already-parsed `RecordType`/`EnumType`/typedef/
+   `Function`/`Variable` output (all already carry a real `entity_id`, per
+   Phase 2's option (a)) into a real `SemanticIR` — functions/variables
+   reuse the same cross-backend spelling primitives `entity_id_for_function`/
+   `resolve_function_identity` already apply
+   (`model.signature_normalization.
+   canonicalize_function_signature_param_type` per parameter,
+   `name_classification.canonicalize_type_name` for the return/variable
+   type), with `is_const`/`is_volatile` carried via `CanonicalEntity.
+   cv_qualification`. Wired through `dumper_manifest.
+   resolve_header_ast_result` (legacy single-TU ELF dump and a real
+   manifest dump) and, via the new `extract/header_ast_fields.
+   parse_header_ast_fields` choke point, `dumper.py`'s `_dump_pe`/
+   `_dump_macho` too — every header-AST platform now populates
+   `semantic_ir`, including through `--ast-frontend hybrid`'s
+   reconciliation (`dumper_hybrid.py`'s own Mach-O mangled-name and
+   ctor/dtor synthetic-key identity rewrites are propagated into
+   `semantic_ir` via `_rewrite_semantic_ir_entity_ids`, so a hybrid merge
+   never leaves one representation keyed under a retired identity another
+   already moved past). **Fourth slice landed:** constants too — both
+   backends already attach a real `entity_id` to every public constant
+   (`parse_constant_entity_ids()`, Phase 2), so the identity half was
+   already done; the normalizer projects `parse_constants()`'s raw value
+   text verbatim as `canonical_spelling`, deliberately uncanonicalized
+   (mirrors `diff_symbols._diff_constants`'s own long-standing raw-string
+   `!=` comparison — there is no *observed* cross-backend value-spelling
+   disagreement the way there is for a function/variable's type spelling,
+   so inventing a canonicalizer here would be a heuristic in search of a
+   bug, not a fix for one) — **except** clang's own compound-initializer
+   value, which is a build-stable structural fingerprint
+   (`dumper_clang_expr._expr_fingerprint`'s `"expr:" + sha256(...)[:16]`),
+   not a spelling of the source text at all; that one case is `Fact.
+   unsupported()` rather than a raw-value `Fact.present(...)`, matched by
+   the exact fingerprint shape (not merely its `"expr:"` prefix, which
+   would also misfire on a real castxml `expr::`-namespaced qualified
+   name). A castxml-only value that resolves to its own opaque
+   `FunctionType` tag (a direct function-pointer parameter/variable/return
+   type castxml's resolver has no dedicated rendering for) gets the same
+   `Fact.unsupported()` treatment. A clang-only lone boolean literal
+   (`dumper_clang_expr._initializer_value` stringifies a captured Python
+   `bool` via plain `str(...)`, spelling `"True"`/`"False"` — never the
+   real `true`/`false` source text) gets the same treatment too, gated on
+   `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
+   identifier spellings a castxml `init` text could genuinely carry
+   verbatim, so the exception applies only to clang's own artifact, not to
+   every occurrence of those two strings. BTF/CTF/PDB remain fully
+   unmigrated: those backends do not populate `entity_id` at all yet.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

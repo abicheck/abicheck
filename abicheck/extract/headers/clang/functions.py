@@ -81,8 +81,10 @@ from .context import (
     access_level as _access_level,
     clang_deprecated_message as _clang_deprecated_message,
     is_builtin_file,
+    is_darwin_target as _is_darwin_target,
     qualtype as _qualtype,
     source_location as _source_location,
+    symbol_candidates as _symbol_candidates,
     visibility as _visibility,
 )
 from .return_type import return_type as _return_type
@@ -535,8 +537,76 @@ def parse_functions(
         # variable's own comment above) -- without the gate, an
         # uninstantiated template's fallback-to-`name` mangling reads as
         # false C linkage.
-        is_extern_c = entry.extern_c or (
-            raw_mangled is not None and raw_mangled == name
+        #
+        # The plain `raw_mangled == name` case stays UNGATED -- it holds on
+        # every platform for a plain-C declaration clang mangles as its own
+        # bare name, with no leading-underscore stripping involved at all.
+        # The Darwin-gated `symbol_candidates` de-prefixing is a SEPARATE,
+        # additional fallback layered on top (Codex review, ADR-063 Phase
+        # 6, fifteenth AND sixteenth rounds, fresh evidence each time): a
+        # genuinely plain-C compilation unit has no `LinkageSpecDecl` at
+        # all (that node only exists in C++'s grammar), so `entry.extern_c`
+        # never becomes True for it, and on Mach-O clang's own
+        # `mangledName` carries the Darwin linker's leading underscore
+        # ("_foo" for source-level "foo") that castxml's "pure" convention
+        # never does -- so the bare-equality check alone always missed
+        # this case even though castxml correctly recognizes the identical
+        # declaration as extern "C". Left unfixed, this function's
+        # `entity_id` stayed tagged `("mangled", "_foo")`
+        # (`dumper_hybrid.py`'s own Mach-O underscore-stripping rewrite
+        # only re-spells the mangled tag's VALUE, not its KIND) while
+        # castxml's tags the same declaration `("extern_c",)`, so a hybrid
+        # merge's bare-`EntityId` matching never recognized the two as one
+        # declaration and retained it twice in `semantic_ir` even though
+        # the flat `functions` list (which matches on the bare mangled
+        # string, not `EntityId`) already unified it.
+        #
+        # The Darwin gate on the de-prefixed fallback is NOT optional
+        # (sixteenth round, fresh evidence, a real regression an earlier,
+        # UNGATED revision of this same fallback introduced): on a
+        # NON-Darwin target, a real, explicit `asm("_foo")` label
+        # genuinely produces `raw_mangled == "_foo"` while `name ==
+        # "foo"` and `entry.extern_c` stays False -- that IS a real,
+        # distinct mangled identity (an asm label), not a linker-
+        # decoration artifact, and castxml's own resolver keeps it tagged
+        # `("mangled", "_foo")` for the identical declaration. Gating the
+        # de-prefixed fallback ALONE on Darwin -- rather than the whole
+        # check, which would also have broken the plain-equality case
+        # above on every non-Darwin platform -- is what fixes this
+        # without reintroducing a different regression. `symbol_
+        # candidates` itself stays target-agnostic (it is the identical
+        # tolerant-match helper `visibility()` already uses for pure
+        # export-table membership, where trying the de-prefixed form is
+        # always safe); the identity decision built on top of it is what
+        # needs the platform gate.
+        #
+        # The Darwin gate ALONE is still not enough (nineteenth round,
+        # fresh evidence): a real, explicit `asm("_foo")` label is just
+        # as possible ON Darwin as off it, and this fallback's whole
+        # justification -- "a genuinely plain-C compilation unit has no
+        # `LinkageSpecDecl`" -- only holds for a declaration with NO
+        # enclosing scope at all; C has no namespaces, so a plain-C
+        # function is always global-scope. A NAMESPACED Darwin C++
+        # declaration (`namespace n { void foo() asm("_foo"); }`) is
+        # never plain C regardless of platform, so `entry.scope` gates
+        # the fallback the same way `entry.extern_c`/`raw_mangled ==
+        # name` already implicitly are for a real extern-"C" block (a
+        # `LinkageSpecDecl` always resets `entry.scope` too, since it
+        # is not itself a scope-introducing node). Requiring `not entry.
+        # scope` also preserves both the genuine asm-label identity AND
+        # the namespace `dumper_hybrid.py`'s Mach-O rewrite would
+        # otherwise have silently dropped by retagging the declaration
+        # `("extern_c",)` (whose own `entity_id_for_function` contract
+        # always resolves `scope=()`, discarding it outright).
+        is_extern_c = (
+            entry.extern_c
+            or raw_mangled == name
+            or (
+                raw_mangled is not None
+                and not entry.scope
+                and _is_darwin_target(target_triple)
+                and name in _symbol_candidates(raw_mangled)
+            )
         )
         is_const = bool(re.search(r"\bconst\b", quals))
         is_volatile = bool(re.search(r"\bvolatile\b", quals))
