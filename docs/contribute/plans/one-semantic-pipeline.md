@@ -12982,6 +12982,32 @@ same as the unresolved-sentinel check) and mark `Fact.unsupported()`
 instead, which `merge_semantic_ir`'s backfill treats as absent and
 correctly prefers clang's real evidence with no conflict recorded.
 
+**Two follow-up fixes to the `FunctionType`/`expr:` artifact checks, plus a
+file split (Codex review, tenth/eleventh rounds, fresh evidence each).**
+(1) The clang expr-fingerprint check now matches the FULL shape
+(`^expr:[0-9a-f]{16}$`) rather than merely the `"expr:"` prefix -- a plain
+prefix test also matched castxml's own raw, verbatim source-text
+initializer whenever it happened to spell a qualified name whose next
+component is literally `expr` (`"expr::NAMESPACE_VALUE"`), mirroring
+`diff_default_value_reliability._is_expr_fingerprint`'s identical fix for
+the identical mistake (PR #720). (2) The `FunctionType` check is anchored
+to the WHOLE (cv/sigil-stripped) string and gated on `producer ==
+"castxml"`, not a bare substring test: a naive `"FunctionType" in
+raw_type` also matched a real, legitimately-named type
+(`"MyFunctionTypeWrapper*"`) and fired for clang too, even though clang
+never emits this literal tag text at all. Neither fix fully eliminates
+every theoretical collision (a real type named EXACTLY `"FunctionType"`
+still collides, the same accepted residual `idioms._is_callback_type`
+already carries) -- closing that needs real structural evidence from the
+parser, not a normalizer-only text fix. These three artifact-recognition
+functions (`has_unresolved_component`, `is_castxml_opaque_function_type`,
+`CLANG_EXPR_FINGERPRINT_RE`) were split out into a new sibling leaf module,
+`extract/semantic_normalizer_artifacts.py`, once their accumulated
+docstrings pushed `semantic_normalizer.py` itself past the AI-readiness
+gate's 800-line cap for a new file -- mirroring `model.declarator_
+qualifiers.py`'s own split from `model.signature_normalization.py` for the
+identical reason.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

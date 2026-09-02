@@ -131,3 +131,13 @@
   whenever it happened to spell a qualified name whose next component is
   literally `expr` (e.g. `"expr::NAMESPACE_VALUE"`), silently discarding
   real castxml constant evidence as if it were a clang fingerprint.
+  The `FunctionType` opaque-tag check is now anchored to the WHOLE
+  (cv/sigil-stripped) string and gated on `producer == "castxml"`, not a
+  bare substring test — a naive `"FunctionType" in raw_type` also matched
+  a real, legitimately-named type (`"MyFunctionTypeWrapper*"`) and fired
+  for clang too, even though clang never emits this literal tag text.
+  `has_unresolved_component`/`is_castxml_opaque_function_type`/
+  `CLANG_EXPR_FINGERPRINT_RE` moved into a new sibling leaf module,
+  `extract/semantic_normalizer_artifacts.py`, once their accumulated
+  docstrings pushed `semantic_normalizer.py` past the AI-readiness gate's
+  800-line cap for a new file.

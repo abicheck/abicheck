@@ -372,6 +372,48 @@ def test_normalize_header_ast_castxml_opaque_function_type_variable_is_unsupport
     assert entity.canonical_spelling.status.value == "unsupported"
 
 
+def test_normalize_header_ast_real_type_named_functiontype_wrapper_is_present() -> None:
+    """A real, legitimately-named type like ``"MyFunctionTypeWrapper*"``
+    (castxml's ``Struct``/``Class`` branch resolves such a name correctly
+    and verbatim, no opacity involved at all) must NOT be rejected -- a
+    naive ``"FunctionType" in raw_type`` substring test also matches this
+    (Codex review, eleventh round, fresh evidence: an earlier revision did
+    exactly that). The opaque fallback's own contribution is always
+    exactly the bare tag text with nothing else glued onto it, so this
+    must require the WHOLE (cv/sigil-stripped) string to match, not a
+    substring anywhere."""
+    fn = _function("f", "void", ("MyFunctionTypeWrapper*",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+
+
+def test_normalize_header_ast_functiontype_tag_on_clang_is_present() -> None:
+    """Clang never emits the literal ``"FunctionType"`` tag text at all --
+    a clang-produced spelling matching this shape can only be a real,
+    legitimately-named type, so the check is gated on ``producer ==
+    "castxml"`` (Codex review, eleventh round, fresh evidence: an earlier
+    revision fired for clang too)."""
+    fn = _function("f", "void", ("FunctionType*",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     """A real, fully-resolved type spelling can legally contain a literal
     ``"?"`` -- clang emits one verbatim for a dependent ternary expression

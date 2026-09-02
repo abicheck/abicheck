@@ -168,17 +168,13 @@ from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR, canonical_cv_qualification
 from ..model.signature_normalization import canonicalize_function_signature_param_type
 from ..name_classification import canonicalize_type_name
+from .semantic_normalizer_artifacts import (
+    CLANG_EXPR_FINGERPRINT_RE,
+    has_unresolved_component,
+    is_castxml_opaque_function_type,
+)
 
 __all__ = ["normalize_header_ast"]
-
-#: Both header-AST backends use this literal as their type-resolution
-#: placeholder when a type couldn't be followed -- a typedef's underlying
-#: type, a function's return/parameter type, or a variable's own type
-#: (``dumper_castxml.py``/``dumper_castxml_typedefs.py``/``dumper_clang.py``,
-#: verified directly) -- never a real, structurally-fixed type spelling. See
-#: its use in :func:`normalize_header_ast`, :func:`_function_spelling_fact`,
-#: and :func:`_variable_spelling_fact` below.
-_UNRESOLVED_TYPE_SENTINEL = "?"
 
 #: Whole-word ``const``/``volatile`` matcher for
 #: :func:`_variable_top_level_cv_qualification`'s own depth-aware scan --
@@ -222,176 +218,8 @@ _UNRESOLVED_TYPE_SENTINEL = "?"
 #: reported) here rather than reported unreliably.
 _CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile)\b")
 
-#: castxml's own literal wrapper prefix for an ``_Atomic`` type
-#: (``extract/headers/castxml/type_resolution.py``'s ``AtomicType`` branch)
-#: -- see :func:`_has_unresolved_component`'s own docstring for why this
-#: is treated as transparent rather than a real, depth-increasing paren.
-_ATOMIC_WRAPPER_PREFIX = "_Atomic("
 
-#: ``dumper_clang_expr._expr_fingerprint``'s own literal prefix
-#: (``"expr:" + sha256(...)[:16]``) -- the value it stamps onto a
-#: constant's compound initializer (anything beyond a lone literal) is a
-#: build-stable STRUCTURAL fingerprint, not a spelling of the source text,
-#: and that module's own docstring is explicit that "cross-backend constant
-#: *values* are not expected to match" for exactly this case (castxml's
-#: `init` always carries the raw source-text initializer, never a
-#: fingerprint). Used in :func:`normalize_header_ast`'s constants loop
-#: (Codex review, sixth round, fresh evidence) to recognize this one
-#: producer-specific encoding structurally -- by the value's own shape, not
-#: by branching on ``producer == "clang"`` -- and mark it
-#: ``Fact.unsupported()`` rather than ``Fact.present(...)``, the same
-#: "state genuinely incomparable evidence honestly" discipline ADR-063
-#: Phase 0 established: publishing the fingerprint as a confirmed spelling
-#: would make `merge_semantic_ir` report a spurious conflict against
-#: castxml's real initializer text for every unchanged compound constant.
-#:
-#: Matches the FULL fingerprint shape -- ``"expr:"`` plus exactly 16
-#: lowercase hex digits -- not merely the ``"expr:"`` prefix (Codex review,
-#: tenth round, fresh evidence: a plain prefix test also matches castxml's
-#: raw, verbatim source-text initializer whenever it happens to spell a
-#: qualified name whose next component is literally ``expr``, e.g.
-#: ``"expr::NAMESPACE_VALUE"`` for an expression-template library's
-#: ``expr::`` namespace -- no fingerprint involved at all, and misreading it
-#: as one would silently discard real castxml constant evidence). Mirrors
-#: ``diff_default_value_reliability._is_expr_fingerprint``'s identical
-#: shape check, duplicated rather than imported since that module is a
-#: `compare`-layer detector-reliability leaf, not one `extract/` depends on
-#: for anything else (same "two leaf modules, one shared shape, no new
-#: cross-boundary edge" reasoning already applied to `_CV_KEYWORD_RE`
-#: above) -- that module already fixed this identical prefix-vs-full-shape
-#: mistake once (PR #720); this is the second, independent site it applies
-#: to.
-_CLANG_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
-
-#: castxml's own opaque-tag fallback (``extract/headers/castxml/
-#: type_resolution.py``'s ``type_name_uncached``, final ``return
-#: el.get("name", tag)`` line) for an anonymous ``FunctionType`` node --
-#: castxml's resolver has no dedicated branch for one (unlike
-#: ``Struct``/``Class``/``Union``/``Typedef``/... above it), so a direct
-#: function-pointer parameter/variable/return type resolves to the literal
-#: tag string ``"FunctionType"`` wrapped in whatever pointer/reference sigil
-#: surrounds it (``"FunctionType*"``), never a real declarator spelling like
-#: clang's own ``"void (*)(int)"``. The identical shape is already a named,
-#: worked-around castxml limitation elsewhere in this codebase --
-#: ``idioms._is_callback_type`` checks for this exact substring for the same
-#: reason. Used in :func:`_function_spelling_fact`/:func:`_variable_spelling_
-#: fact` (Codex review, ninth round, fresh evidence) to mark such a spelling
-#: ``Fact.unsupported()`` rather than ``Fact.present(...)``: castxml did not
-#: fail to resolve the type (this is not `_UNRESOLVED_TYPE_SENTINEL`'s "?"
-#: at all -- the resolver ran and produced a real, if useless, answer), it
-#: structurally cannot render a comparable spelling for it -- publishing the
-#: opaque tag as canonical made `merge_semantic_ir` report a spurious
-#: conflict against clang's real, useful spelling for an unchanged callback
-#: parameter, the same class of "state genuinely incomparable evidence
-#: honestly" fix as the clang expr-fingerprint constant case above.
-_CASTXML_OPAQUE_FUNCTION_TYPE_MARKER = "FunctionType"
-
-
-def _has_unresolved_component(raw_type: str) -> bool:
-    """Whether *raw_type* embeds castxml's unresolved-type sentinel
-    anywhere, not only as the WHOLE string (Codex review, second round,
-    fresh evidence).
-
-    castxml's own type resolver (``extract/headers/castxml/type_resolution.
-    py``'s ``type_name_uncached``) composes an unresolved nested type into
-    the ENCLOSING spelling rather than only ever returning the bare
-    ``"?"`` itself — a pointer/reference/array wrapping an unresolvable
-    pointee renders as ``"?*"``/``"?&"``/``"?[]"``, and a cv-qualified one
-    as ``"const ?"`` -- so an exact-equality check (correct for the
-    typedef branch's own ``underlying`` value, which is always the
-    OUTERMOST ``type_name()`` call's result with nothing further wrapped
-    around it) misses every one of these composite shapes for a function/
-    parameter/variable type.
-
-    **A plain substring test is NOT safe (Codex review, third round, fresh
-    evidence): a real, fully-resolved type spelling CAN legally contain a
-    literal ``"?"`` character** -- clang emits one verbatim for a
-    dependent, unevaluated ternary expression inside a `decltype(...)` (a
-    non-type template argument/parameter's own spelling, e.g.
-    ``"S<decltype(flag ? A{} : B{})>"``). Distinguishing the two requires
-    exactly the discriminator that makes this safe again: every
-    ``"?"`` this resolver's own sentinel ever produces sits at NESTING
-    DEPTH ZERO in the string -- the recursive wrapping above only ever
-    prepends/appends a bare pointer/reference sigil, array brackets, or a
-    cv keyword directly beside it, never inside a `(...)`/`<...>`
-    grouping -- while a ternary's ``"?"`` is, by C++ grammar, only ever
-    reachable inside an expression context, which for a *type* spelling
-    means inside a `decltype(...)`'s parens or a template argument list's
-    angle brackets (both already open by the time such a ``"?"`` is
-    reached). So this function walks *raw_type* tracking depth over
-    ``()``/``[]``/``<>``, and reports unresolved only for a ``"?"`` found
-    at depth 0 -- never one already inside a bracketed grouping.
-
-    **One wrapper is a deliberate, named exception (Codex review, fourth
-    round, fresh evidence): castxml's own ``_Atomic(...)`` composition.**
-    ``type_name_uncached``'s ``AtomicType`` branch renders an unresolved
-    wrapped type as the literal ``"_Atomic(?)"`` -- genuine sentinel
-    output, using a REAL parenthesis pair as part of the resolver's own
-    grammar, not an expression context a real, resolved ``"?"`` could ever
-    be found inside instead. Depth-tracking alone would treat that
-    ``"("`` exactly like a `decltype(...)`'s, hiding the sentinel at depth
-    1 and wrongly reporting the composite as resolved. ``"_Atomic("`` is
-    therefore recognized as a transparent token -- skipped without
-    incrementing depth -- so a sentinel directly inside it is still caught
-    at its effective depth 0, the same treatment a bare `"?"` already gets.
-    ``_Atomic(...)`` is also real, valid C11 syntax for an otherwise
-    fully-resolved type (``"_Atomic(int)"``), which this special-casing
-    does not disturb: only a literal ``"?"`` inside it is ever flagged.
-
-    **Tracks a bracket-kind-aware STACK, not a flat depth counter (Codex
-    review, seventh round, fresh evidence): a real right-shift operator
-    inside a parenthesized non-type template argument is not two template
-    closers.** For a resolved dependent type like ``"S<(N >> 1 ? 1 :
-    2)>"``, a flat counter treats each ``>`` in the ``>>`` independently --
-    decrementing depth twice for what is actually one shift-operator token
-    sitting inside the `(...)` grouping, not two nested `<...>` closes --
-    which drops the running depth to zero WHILE STILL INSIDE the
-    parenthesized expression and misreads the ternary's own ``"?"`` as the
-    sentinel, at real depth > 0. A ``">"`` legitimately closes a template
-    level only when the innermost still-open bracket is itself a ``"<"``
-    (``vector<vector<int>>``'s own ``>>`` closes two, since each one's
-    innermost open bracket at the time it's processed IS a ``"<"``); when
-    the innermost open bracket is a ``"("``/``"["`` instead, a ``">"`` is a
-    real, resolved operator character belonging to that expression --
-    comparison or shift -- and must not be popped as a bracket at all. A
-    ``")"``/``"]"`` still pops unconditionally (matching this function's
-    existing "never raise, degrade gracefully on malformed/adversarial
-    input" discipline for every other close), and every genuinely
-    ambiguous ``"<"`` (a real less-than operator, not a template open) is
-    an accepted, PRE-EXISTING residual this fix does not attempt to
-    solve -- doing so needs real expression parsing, and no concrete
-    evidence of that specific shape has been found the way this ``">>"``
-    shape was (Codex review, with a real ``clang++ -Xclang
-    -ast-dump=json`` repro).
-    """
-    stack: list[str] = []
-    i = 0
-    n = len(raw_type)
-    while i < n:
-        if raw_type.startswith(_ATOMIC_WRAPPER_PREFIX, i):
-            i += len(_ATOMIC_WRAPPER_PREFIX)
-            continue
-        ch = raw_type[i]
-        if ch in "([":
-            stack.append(ch)
-        elif ch in ")]":
-            if stack:
-                stack.pop()
-        elif ch == "<":
-            stack.append(ch)
-        elif ch == ">":
-            if stack and stack[-1] == "<":
-                stack.pop()
-            # else: a real comparison/shift-operator character sitting
-            # inside a paren/bracket expression context, not a template
-            # closer -- leave the stack untouched.
-        elif ch == _UNRESOLVED_TYPE_SENTINEL and not stack:
-            return True
-        i += 1
-    return False
-
-
-def _function_spelling_fact(fn: Function) -> Fact[str]:
+def _function_spelling_fact(fn: Function, producer: str) -> Fact[str]:
     """``"<return>(<param>, ...)"`` for *fn*, both canonicalized with the
     identical primitives ``entity_id_for_function`` already applies for the
     same cross-backend spelling problem — see this module's own docstring
@@ -400,7 +228,7 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
 
     ``Fact.failed(...)`` — not ``Fact.present(...)`` — whenever the RAW
     return type or any raw parameter type embeds castxml's unresolved-type
-    sentinel (:func:`_has_unresolved_component`; Codex review): treating an
+    sentinel (:func:`has_unresolved_component`; Codex review): treating an
     unresolved (or partially-unresolved) spelling as confirmed would both
     misrepresent the placeholder as canonical and permanently block a
     hybrid merge's backfill the moment clang resolves the same declaration
@@ -410,9 +238,9 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
     canonicalizer to interpret a placeholder as a type.
 
     ``Fact.unsupported(...)`` — a DIFFERENT non-present status, not
-    ``Fact.failed(...)`` -- whenever a raw component instead embeds
-    castxml's opaque ``FunctionType`` tag (:data:`_CASTXML_OPAQUE_FUNCTION_
-    TYPE_MARKER`; Codex review, ninth round, fresh evidence). This is not
+    ``Fact.failed(...)`` -- whenever a raw component instead IS castxml's
+    opaque ``FunctionType`` tag (:func:`is_castxml_opaque_function_type`;
+    Codex review, ninth/eleventh rounds, fresh evidence each). This is not
     an unresolved type at all -- castxml's resolver ran and produced a
     real, structurally-final answer, it just has no dedicated rendering
     for an anonymous function type, unlike the genuinely-unresolvable ``"?"``
@@ -420,12 +248,13 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
     (``FactStatus.UNSUPPORTED``: "this producer cannot express this family
     at all... a different producer might" -- exactly castxml vs. clang
     here), while still backfilling from clang's real spelling the same way
-    a failed/unresolved fact would.
+    a failed/unresolved fact would. *producer* is threaded through only for
+    this check -- clang never emits the literal ``"FunctionType"`` tag text.
     """
     raw_components = (fn.return_type, *(p.type for p in fn.params))
-    if any(_has_unresolved_component(t) for t in raw_components):
+    if any(has_unresolved_component(t) for t in raw_components):
         return Fact.failed("return or parameter type not resolved")
-    if any(_CASTXML_OPAQUE_FUNCTION_TYPE_MARKER in t for t in raw_components):
+    if any(is_castxml_opaque_function_type(t, producer) for t in raw_components):
         return Fact.unsupported(
             "castxml's opaque FunctionType tag is not a comparable spelling"
         )
@@ -436,7 +265,7 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
     return Fact.present(f"{canonical_return}({canonical_params})")
 
 
-def _variable_spelling_fact(var: Variable) -> Fact[str]:
+def _variable_spelling_fact(var: Variable, producer: str) -> Fact[str]:
     """``canonicalize_type_name(var.type)``, or a non-present ``Fact``
     when the raw type embeds either castxml artifact -- see
     :func:`_function_spelling_fact`'s own docstring for the identical
@@ -444,9 +273,9 @@ def _variable_spelling_fact(var: Variable) -> Fact[str]:
     applied to a variable's single type instead of a function's
     return/parameter types.
     """
-    if _has_unresolved_component(var.type):
+    if has_unresolved_component(var.type):
         return Fact.failed("type not resolved")
-    if _CASTXML_OPAQUE_FUNCTION_TYPE_MARKER in var.type:
+    if is_castxml_opaque_function_type(var.type, producer):
         return Fact.unsupported(
             "castxml's opaque FunctionType tag is not a comparable spelling"
         )
@@ -720,7 +549,7 @@ def normalize_header_ast(
             continue
         spelling_fact = (
             Fact.failed("underlying type not resolved")
-            if _has_unresolved_component(underlying)
+            if has_unresolved_component(underlying)
             else Fact.present(underlying)
         )
         _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
@@ -740,7 +569,7 @@ def normalize_header_ast(
         _add_occurrence(
             occurrences,
             fn.entity_id,
-            _function_spelling_fact(fn),
+            _function_spelling_fact(fn, producer),
             producer=producer,
             cv_qualification=Fact.present(
                 canonical_cv_qualification(
@@ -755,7 +584,7 @@ def normalize_header_ast(
         _add_occurrence(
             occurrences,
             var.entity_id,
-            _variable_spelling_fact(var),
+            _variable_spelling_fact(var, producer),
             producer=producer,
             cv_qualification=Fact.present(
                 _variable_top_level_cv_qualification(var.type)
@@ -776,7 +605,7 @@ def normalize_header_ast(
                 "clang's compound-initializer fingerprint is not a "
                 "cross-backend-comparable value spelling"
             )
-            if _CLANG_EXPR_FINGERPRINT_RE.match(value)
+            if CLANG_EXPR_FINGERPRINT_RE.match(value)
             else Fact.present(value)
         )
         _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
