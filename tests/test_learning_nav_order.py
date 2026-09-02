@@ -71,6 +71,21 @@ def test_nav_groups_reads_grouped_and_flat_tabs_only() -> None:
     }
 
 
+def test_duplicate_nav_groups_are_named_once_in_order() -> None:
+    nav = NAV.replace(
+        "    - Mechanics:   # a comment\n",
+        "    - Start:\n      - Extra: learn/extra.md\n    - Mechanics:   # a comment\n",
+    )
+    assert lno.duplicate_nav_groups(nav) == ["ABI/API Compatibility / Start"]
+    assert lno.duplicate_nav_groups(NAV) == []
+    # the merged view still holds both halves, in order
+    assert lno.nav_groups(nav)["ABI/API Compatibility / Start"] == [
+        "learn/hub.md",
+        "learn/five.md",
+        "learn/extra.md",
+    ]
+
+
 def _docs(tmp_path: Path, levels: dict[str, str | None]) -> Path:
     docs = tmp_path / "docs"
     for page, level in levels.items():

@@ -149,9 +149,18 @@ def _write_footers(docs: Path, ladder_path: Path) -> None:
         if not path.is_file():
             continue
         prev, nxt = ladder.neighbours(page)
+        seq = ladder.sequences[ladder.index[page].sequence_index]
+        tier = ladder.tier_of(page)
+
+        def label(neighbour: str) -> str:
+            npath = docs / neighbour
+            ntext = npath.read_text(encoding="utf-8") if npath.is_file() else ""
+            return ll.footer_label(ladder, neighbour, ntext)
+
         footer = (
-            f"**Ladder:** ← [{prev}]({ll.relative_href(page, prev)}) · Tier · "
-            f"[{nxt}]({ll.relative_href(page, nxt)}) →\n"
+            f"**Ladder:** ← [{label(prev)}]({ll.relative_href(page, prev)}) · "
+            f"{ll.step_label(seq, tier)} · {tier.title} · "
+            f"[{label(nxt)}]({ll.relative_href(page, nxt)}) →\n"
         )
         path.write_text(
             path.read_text(encoding="utf-8") + "\n---\n\n" + footer,
@@ -437,6 +446,46 @@ def test_footer_pointing_at_the_wrong_neighbour_is_an_error(tmp_path: Path) -> N
     )
     msgs = _run(docs, ladder)
     assert any("learn/b.md" in m and "do not match" in m for m in msgs)
+
+
+def test_stale_step_label_in_a_footer_is_an_error(tmp_path: Path) -> None:
+    """Renumbering or retitling a step must not leave footers behind: the
+    words between the two links are checked, not only the link targets."""
+    docs, ladder = _build(tmp_path)
+    page = docs / "learn" / "c.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(
+            "· Step 2 · Deeper ·", "· Tier 2 · Deeper ·"
+        ),
+        encoding="utf-8",
+    )
+    msgs = _run(docs, ladder)
+    assert any("learn/c.md" in m and "expected 'Step 2 · Deeper'" in m for m in msgs)
+
+
+def test_wrong_neighbour_text_in_a_footer_is_an_error(tmp_path: Path) -> None:
+    docs, ladder = _build(tmp_path)
+    page = docs / "learn" / "c.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("[learn/d.md](", "[Old Title](", 1),
+        encoding="utf-8",
+    )
+    msgs = _run(docs, ladder)
+    assert any("learn/c.md" in m and "short titles" in m for m in msgs)
+
+
+def test_duplicate_step_group_in_the_sidebar_is_an_error(tmp_path: Path) -> None:
+    """Two groups with one title fold together in the nav reader, so their
+    combined pages could pass the per-step check; the duplicate itself is
+    reported."""
+    nav = NAV_OK.replace(
+        '    - "2. Deeper":\n      - C: learn/c.md\n      - D: learn/d.md\n',
+        '    - "2. Deeper":\n      - C: learn/c.md\n    - "2. Deeper":\n      - D: learn/d.md\n',
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any(
+        "Learn / 2. Deeper: this nav group appears more than once" in m for m in msgs
+    )
 
 
 def test_neighbours_follow_members_then_hub_and_branches_rejoin(tmp_path: Path) -> None:

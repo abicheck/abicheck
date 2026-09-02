@@ -43,7 +43,10 @@ Rules the file encodes (each is an ERROR):
   sibling branches keep their YAML order) and that index is strictly
   increasing along the entry.
 - **Footers match the ladder.** Every member/branch page carries one
-  `**Ladder:**` footer line whose two links are its ladder neighbours.
+  `**Ladder:**` footer line whose two links are its ladder neighbours,
+  whose link texts are their short titles (the hub as "Series overview"),
+  and whose words between the links are `Step N · <title>` for the page's
+  own step.
 - **The sidebar is the ladder.** In `mkdocs.yml`, a numbered sequence's
   tab carries one nav group per step — titled `<id>. <title>`, in step order,
   holding exactly that step's members in ladder order, each branch
@@ -67,7 +70,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-from learning_nav_order import nav_groups
+from learning_nav_order import duplicate_nav_groups, nav_groups
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 DOCS = REPO_DIR / "docs"
@@ -372,6 +375,9 @@ def step_label(seq: Sequence, tier: Tier) -> str:
     return f"Step {tier.id}" if seq.numbered else f"{seq.tab} {tier.id}"
 
 
+HUB_FOOTER_LABEL = "Series overview"
+
+
 def footer_links(page: str, text: str) -> list[str] | None:
     """The docs-relative targets of the page's `**Ladder:**` footer links, in
     order, or None when the page carries no footer. Hrefs are resolved
@@ -385,6 +391,30 @@ def footer_links(page: str, text: str) -> list[str] | None:
         href = href.split("#", 1)[0]
         targets.append(Path(os.path.normpath(base / href)).as_posix())
     return targets
+
+
+def footer_texts(text: str) -> tuple[list[str], list[str]] | None:
+    """The footer's link texts and the ` · `-separated words between its
+    two links (`["Step 3", "How Breaks Happen"]`), or None without a footer.
+    A footer with other than two links yields empty lists."""
+    m = _FOOTER_LINE_RE.search(text)
+    if not m:
+        return None
+    rest = m.group(1)
+    links = list(_MD_LINK_RE.finditer(rest))
+    if len(links) != 2:
+        return [], []
+    between = rest[links[0].end() : links[1].start()]
+    middle = [part.strip() for part in between.split("·") if part.strip()]
+    return [link.group(1) for link in links], middle
+
+
+def footer_label(ladder: Ladder, page: str, text: str) -> str:
+    """How a neighbour is named in a footer link: the hub as
+    `HUB_FOOTER_LABEL`, any other page by its `short_title`."""
+    if page == ladder.hub:
+        return HUB_FOOTER_LABEL
+    return short_title(page_title(text))
 
 
 def relative_href(from_page: str, to_page: str) -> str:
@@ -467,8 +497,13 @@ def _order_findings(
 
 def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
     """Every way `mkdocs.yml`'s learning tabs disagree with the ladder."""
-    groups = nav_groups(mkdocs_text, tabs=tuple(s.tab for s in ladder.sequences))
+    tabs = tuple(s.tab for s in ladder.sequences)
+    groups = nav_groups(mkdocs_text, tabs=tabs)
     out: list[str] = []
+    for key in duplicate_nav_groups(mkdocs_text, tabs=tabs):
+        out.append(
+            f"{key}: this nav group appears more than once; a step is exactly one group"
+        )
     # The hub renders the ladder, so it belongs directly under the first
     # sequence's tab as that tab's overview -- not inside a step, and not on
     # another learning tab.
@@ -723,4 +758,34 @@ def check_learning_ladder(
                 CHECK,
                 f"{page}: ladder footer links {found} do not match the ladder neighbours "
                 f"[{prev}, {nxt}]",
+            )
+            continue
+        # The footer's words are checked too, not only its link targets: a
+        # renamed or renumbered step, or a retitled neighbour, would
+        # otherwise leave every footer telling a stale order while the
+        # sidebar and the hub moved on.
+        texts_found = footer_texts(text)
+        if texts_found is None:
+            continue
+        link_texts, middle = texts_found
+        seq = ladder.sequences[ladder.index[page].sequence_index]
+        tier = ladder.tier_of(page)
+        expected_middle = [step_label(seq, tier), tier.title]
+        expected_links = []
+        for neighbour in (prev, nxt):
+            ntext = read(neighbour)
+            expected_links.append(
+                footer_label(ladder, neighbour, ntext if ntext is not None else "")
+            )
+        if middle != expected_middle:
+            f.err(
+                CHECK,
+                f"{page}: ladder footer reads {' · '.join(middle)!r} between its links; "
+                f"expected {' · '.join(expected_middle)!r}",
+            )
+        if link_texts != expected_links:
+            f.err(
+                CHECK,
+                f"{page}: ladder footer link texts {link_texts} should be "
+                f"{expected_links} (the neighbours' short titles)",
             )

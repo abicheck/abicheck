@@ -81,19 +81,16 @@ def _strip_comment(line: str) -> str:
     return "".join(out).rstrip()
 
 
-def nav_groups(
-    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
-) -> dict[str, list[str]]:
-    """Map `"<tab> / <group>"` to the ordered page paths under it.
-
-    Only groups under `tabs` are returned. A tab whose direct children are
-    pages (the Concepts tab) is one group named after the tab itself; a tab
-    whose children are groups yields one entry per group. Deeper nesting
-    folds into the nearest enclosing group.
-    """
+def _nav_events(
+    mkdocs_text: str, tabs: tuple[str, ...]
+) -> list[tuple[str, str, str | None]]:
+    """The nav block as ordered events: `("group", key, None)` when a group
+    under one of `tabs` opens and `("page", key, path)` for each page, where
+    `key` is `"<tab> / <group>"` (`"<tab> / <tab>"` for a page directly under
+    the tab). Deeper nesting folds into the nearest enclosing group."""
     lines = mkdocs_text.split("\n")
     in_nav = False
-    groups: dict[str, list[str]] = {}
+    events: list[tuple[str, str, str | None]] = []
     tab_indent: int | None = None
     current_tab: str | None = None
     current_group: str | None = None
@@ -118,25 +115,57 @@ def nav_groups(
         if indent == tab_indent:
             current_tab = title if title in tabs and not value else None
             current_group = None
-            if current_tab and not value:
-                pass
             continue
         if current_tab is None:
             continue
         if indent == tab_indent + 2:
             if value:
                 # a page directly under the tab: the tab is the group
-                key = f"{current_tab} / {current_tab}"
-                groups.setdefault(key, []).append(value)
+                events.append(("page", f"{current_tab} / {current_tab}", value))
                 current_group = None
             else:
                 current_group = f"{current_tab} / {title}"
-                groups.setdefault(current_group, [])
+                events.append(("group", current_group, None))
             continue
         if value:
             key = current_group or f"{current_tab} / {current_tab}"
-            groups.setdefault(key, []).append(value)
+            events.append(("page", key, value))
+    return events
+
+
+def nav_groups(
+    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
+) -> dict[str, list[str]]:
+    """Map `"<tab> / <group>"` to the ordered page paths under it.
+
+    Only groups under `tabs` are returned. A tab whose direct children are
+    pages (the Concepts tab) is one group named after the tab itself; a tab
+    whose children are groups yields one entry per group. Deeper nesting
+    folds into the nearest enclosing group. Two groups with the same title
+    fold into one key too — `duplicate_nav_groups` names them.
+    """
+    groups: dict[str, list[str]] = {}
+    for kind, key, value in _nav_events(mkdocs_text, tabs):
+        pages = groups.setdefault(key, [])
+        if kind == "page" and value is not None:
+            pages.append(value)
     return groups
+
+
+def duplicate_nav_groups(
+    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
+) -> list[str]:
+    """Group keys that open more than once under one of `tabs`, in order of
+    first appearance — `nav_groups` would silently merge their pages."""
+    seen: list[str] = []
+    dupes: list[str] = []
+    for kind, key, _ in _nav_events(mkdocs_text, tabs):
+        if kind != "group":
+            continue
+        if key in seen and key not in dupes:
+            dupes.append(key)
+        seen.append(key)
+    return dupes
 
 
 def page_level(docs: Path, page: str) -> str | None:
