@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate the `taxonomy` block of examples/ground_truth.json.
 
-Phase 1 of the examples/catalog split (see
+Phase 1 (taxonomy metadata) and Phase 2 (rule/variant classification) of
+the examples/catalog split (see
 docs/contribute/plans/examples-catalog-split.md): the 197-entry catalog under
 `examples/` currently presents a single flat "case" shape for several
 genuinely different entities -- an atomic compatibility *rule*, a *scenario*
@@ -41,9 +42,10 @@ are orthogonal to implementation language and independent of the physical
     related_rules   rule slugs a scenario composes (only populated for the
                      handful of scenarios explicitly named in the design doc
                      so far -- an incomplete but honest starting set)
-    rule_slug       canonical slug for a rule family (only populated for the
-                     case01/12 and case08/20 worked-example consolidation --
-                     see "Known gaps" in the design doc for the rest)
+    rule_slug       canonical slug for a rule family -- set on every
+                     "rule"-entity case (mechanically derived by default,
+                     see _default_rule_slug; a hand-reviewed shared slug for
+                     a confirmed duplicate, see RULE_FAMILIES)
     variant_of      the canonical case this one is a variant of, or null
 
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` fails
