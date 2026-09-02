@@ -30,6 +30,14 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.fact import Fact
+from abicheck.model.identity import entity_id_for_type
+from abicheck.model.occurrence import OccurrenceId
+from abicheck.model.semantic_ir import (
+    CanonicalEntity,
+    SemanticIR,
+    semantic_ir_conflict_key,
+)
 
 _SYSTEM_HEADER = "/usr/include/c++/11/string"
 _OWN_HEADER = "/src/myproject/include/api.h"
@@ -100,6 +108,106 @@ class TestExcludesDependencies:
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.name for t in scoped.types] == ["Own"]
+
+    def test_semantic_ir_occurrence_is_dropped_alongside_its_flat_type(self):
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001):
+        dataclasses.replace() used to carry ``snap.semantic_ir`` over
+        unfiltered, so an excluded dependency type's occurrence stayed
+        reachable through the "filtered" snapshot's own canonical IR even
+        though ``types`` correctly dropped it -- a SemanticIR-aware
+        consumer could see more than a flat-field one does, defeating this
+        function's whole size/surface contract.
+        """
+        own = _rec("Own")
+        dep = _rec("basic_string", source_header=_SYSTEM_HEADER)
+        own.entity_id = entity_id_for_type((), "Own")
+        dep.entity_id = entity_id_for_type((), "basic_string")
+        semantic_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(own.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("Own")
+                ),
+                OccurrenceId(dep.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("basic_string")
+                ),
+            }
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[own, dep],
+            semantic_ir=semantic_ir,
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+
+        assert [t.name for t in scoped.types] == ["Own"]
+        assert scoped.semantic_ir is not None
+        assert list(scoped.semantic_ir.occurrences) == [OccurrenceId(own.entity_id)]
+
+    def test_semantic_ir_is_untouched_when_nothing_is_excluded(self):
+        """No excluded type/enum -> the same SemanticIR object, not a
+        rebuilt-but-equal copy (matches this module's own dataclasses.
+        replace() convention of only touching what actually changed)."""
+        own = _rec("Own")
+        own.entity_id = entity_id_for_type((), "Own")
+        semantic_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(own.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("Own")
+                ),
+            }
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[own],
+            semantic_ir=semantic_ir,
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.semantic_ir is semantic_ir
+
+    def test_semantic_ir_conflict_for_an_excluded_occurrence_is_dropped_too(self):
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, second
+        round): a hybrid-merge conflict recorded against an excluded
+        dependency occurrence must not survive in the "filtered" snapshot
+        either -- it names a declaration that snapshot cannot otherwise see
+        at all, the same leak the occurrence-filtering fix above closes for
+        ``semantic_ir.occurrences`` itself. A conflict for a *kept*
+        occurrence is untouched.
+        """
+        own = _rec("Own")
+        dep = _rec("basic_string", source_header=_SYSTEM_HEADER)
+        own.entity_id = entity_id_for_type((), "Own")
+        dep.entity_id = entity_id_for_type((), "basic_string")
+        own_occ, dep_occ = OccurrenceId(own.entity_id), OccurrenceId(dep.entity_id)
+        semantic_ir = SemanticIR(
+            occurrences={
+                own_occ: CanonicalEntity(canonical_spelling=Fact.present("Own")),
+                dep_occ: CanonicalEntity(
+                    canonical_spelling=Fact.present("basic_string")
+                ),
+            }
+        )
+        own_conflict_key = semantic_ir_conflict_key(own_occ, "canonical_spelling")
+        dep_conflict_key = semantic_ir_conflict_key(dep_occ, "canonical_spelling")
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[own, dep],
+            semantic_ir=semantic_ir,
+            semantic_ir_conflicts={
+                own_conflict_key: "'kept discarded value'",
+                dep_conflict_key: "'excluded discarded value'",
+            },
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+
+        assert scoped.semantic_ir_conflicts == {
+            own_conflict_key: "'kept discarded value'"
+        }
 
     def test_keeps_private_declaration_from_own_header(self):
         """This is the point of the flag, distinct from the old

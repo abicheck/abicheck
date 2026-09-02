@@ -217,29 +217,42 @@ DEFAULT_REPORT_PREFIX = "abi-report-"
 #: fan-in preserves it as a blocking gate rather than a verdictless report.
 _OPERATIONAL_ERROR_VERDICT = "ERROR"
 
-#: ``scan``'s own two abort verdicts (ADR-064 stage 1b's native-CLI abort
-#: report, ``cli_scan._emit_scan_abort_report``) -- neither is a
-#: :class:`Verdict` enum member, so like ``_OPERATIONAL_ERROR_VERDICT`` above
-#: (and unlike ``_BOOTSTRAP_VERDICT``/``_NEW_TARGET_VERDICT`` below, which are
-#: legitimately tolerated) both must force a blocking gate rather than fall
-#: through to an unavailable/verdictless report: an unfinished scan is a real
-#: failure a required-target policy must not silently treat as "nothing to
-#: compare yet" (Codex review, fresh evidence -- the earlier envelope fix made
-#: `GateInfo.from_scan_report` accept these payloads in isolation, but
+#: ``scan``'s own four abort verdicts (ADR-064 stage 1b's native-CLI abort
+#: report, ``cli_scan._emit_scan_abort_report``, plus the two ADR-050 D2/P2
+#: sentinels below) -- none is a :class:`Verdict` enum member, so like
+#: ``_OPERATIONAL_ERROR_VERDICT`` above (and unlike
+#: ``_BOOTSTRAP_VERDICT``/``_NEW_TARGET_VERDICT`` below, which are
+#: legitimately tolerated) all four must force a blocking gate rather than
+#: fall through to an unavailable/verdictless report: an unfinished scan is a
+#: real failure a required-target policy must not silently treat as "nothing
+#: to compare yet" (Codex review, fresh evidence -- the earlier envelope fix
+#: made `GateInfo.from_scan_report` accept these payloads in isolation, but
 #: `_load_report_file` never reaches it, since it only calls that after
-#: `parse_report_verdict` succeeds, and neither string is a `Verdict` member).
-#: Unlike `_OPERATIONAL_ERROR_VERDICT`, though, the target stays *unavailable*
-#: for the compatibility axis (`compatibility_verdict=None`) rather than a
-#: synthetic `Verdict.BREAKING` -- a scan that aborted before comparing never
-#: produced an ABI-break finding, so counting it as one, or as an "analyzed"
-#: target, fabricates information a reader would reasonably trust (Codex
-#: review, fresh evidence: `AggregateResult.to_dict()` reported
-#: `compatibility.verdict: "BREAKING"` and a complete `analyzed_targets` count
-#: for a comparison that never ran). See `TargetReport`'s own docstring and
+#: `parse_report_verdict` succeeds, and none of these four strings is a
+#: `Verdict` member). Unlike `_OPERATIONAL_ERROR_VERDICT`, though, the target
+#: stays *unavailable* for the compatibility axis
+#: (`compatibility_verdict=None`) rather than a synthetic `Verdict.BREAKING`
+#: -- a scan that aborted before comparing never produced an ABI-break
+#: finding, so counting it as one, or as an "analyzed" target, fabricates
+#: information a reader would reasonably trust (Codex review, fresh evidence:
+#: `AggregateResult.to_dict()` reported `compatibility.verdict: "BREAKING"`
+#: and a complete `analyzed_targets` count for a comparison that never ran).
+#: See `TargetReport`'s own docstring and
 #: `AggregateResult._forced_gate_targets` for how the gate still counts
 #: without inventing that verdict.
 _SCAN_BUDGET_OVERFLOW_VERDICT = "BUDGET_OVERFLOW"
 _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT = "EVIDENCE_CONTRACT_ERROR"
+#: ADR-050 D2's comparability refusal (`scan_engine.run_baseline_diff`'s own
+#: `ProfileMismatchError`/`ScopeMismatchError` handling) -- scan's legacy
+#: exit 6, mirroring `OperationalStatus.NOT_COMPARABLE`.
+_SCAN_NOT_COMPARABLE_VERDICT = "NOT_COMPARABLE"
+#: `service_scan.run_scan_set`'s P2 sentinel: the cross-library bundle audit
+#: itself never ran even though every member scanned clean, so the set's own
+#: outcome must still block rather than read as a full pass (Codex review,
+#: fresh evidence -- this and `_SCAN_NOT_COMPARABLE_VERDICT` were the two
+#: `run_outcome`-blocking sentinels this dict was still missing, discarding
+#: `run_outcome.operational` for either one).
+_SCAN_BUNDLE_INCOMPLETE_VERDICT = "BUNDLE_INCOMPLETE"
 
 #: ``actions/check-target``'s two advisory, never-a-compatibility-verdict
 #: sentinels (``check_report.BOOTSTRAP_VERDICT``/``NEW_TARGET_VERDICT`` —

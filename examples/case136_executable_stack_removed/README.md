@@ -2,6 +2,12 @@
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
+**Related rule:** same `executable-stack-flag-changed` rule as
+[case49_executable_stack](../case49_executable_stack/README.md) (the
+canonical case for this rule) — identical GNU_STACK RWE→RW transition and
+library source, framed as the fix direction. See `examples/CLAUDE.md`'s
+"Taxonomy" section.
+
 ## Verdict and consumer impact
 
 This is the fix counterpart to case49 (which goes the bad direction). v1 has

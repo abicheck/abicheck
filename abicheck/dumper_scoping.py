@@ -103,6 +103,9 @@ from typing import Any
 from .dumper_clang_streaming import suppress_streaming_prune
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+from .model.identity import EntityKind
+from .model.occurrence import OccurrenceId
+from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .provenance import is_dependency_header
 from .type_reachability import (
     _NON_PUBLIC_ORIGINS,
@@ -1123,6 +1126,82 @@ def wrap_run_dump_with_dependency_scope(
     return run_dump
 
 
+def _scoped_semantic_ir(
+    semantic_ir: SemanticIR | None,
+    semantic_ir_conflicts: dict[str, str],
+    kept_types: list[RecordType],
+    kept_enums: list[EnumType],
+) -> tuple[SemanticIR | None, dict[str, str]]:
+    """The ``SemanticIR``/``semantic_ir_conflicts`` counterpart of this
+    module's flat functions/variables/types/enums filtering (ADR-063 Phase
+    6, second slice).
+
+    Keeps exactly the occurrences whose ``EntityId`` names a record/enum
+    that survived the same header-origin filter *kept_types*/*kept_enums*
+    already applied -- an excluded dependency type/enum's occurrence is
+    dropped from the IR the identical way it is dropped from the flat
+    lists, so a ``SemanticIR``-aware consumer cannot see more than a
+    ``functions``/``types``-reading one does. Typedef occurrences are
+    intentionally left untouched: this module's own docstring already
+    states typedefs carry no ``source_header`` and are never filtered by
+    this function at all (the legacy ``typedefs``/``typedefs_qualified``
+    fields stay unfiltered for the identical reason), so a typedef
+    occurrence would be inconsistent with the *legacy* fields if dropped
+    here.
+
+    Every ``semantic_ir_conflicts`` entry belonging to an excluded
+    occurrence is dropped too (Codex review, PR #1001, on an earlier
+    revision that left this dict unfiltered) -- computed as an exact key
+    set via :func:`~abicheck.model.semantic_ir.semantic_ir_conflict_key`
+    over each excluded occurrence's own :meth:`~abicheck.model.semantic_ir.
+    CanonicalEntity.fact_items`, not a text/substring operation, so there is
+    no risk of the packed-key corruption
+    :func:`~abicheck.model.semantic_ir.renumber_conflict_keys` was built to
+    avoid for the *renumbering* case (this is a pure membership filter, not
+    a rewrite).
+
+    ``None`` in, ``None`` out for the IR half (a binary-only/DWARF-only
+    snapshot, or one a backend that doesn't populate ``semantic_ir`` yet
+    produced) -- *semantic_ir_conflicts* passes through unchanged in that
+    case, matching every other field this function leaves alone.
+    """
+    if semantic_ir is None:
+        return None, semantic_ir_conflicts
+    kept_entity_ids = {t.entity_id for t in kept_types if t.entity_id is not None} | {
+        e.entity_id for e in kept_enums if e.entity_id is not None
+    }
+    kept_occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    excluded_occurrences: list[tuple[OccurrenceId, CanonicalEntity]] = []
+    for occ_id, entity in semantic_ir.occurrences.items():
+        if (
+            occ_id.entity_id.kind
+            not in (
+                EntityKind.TYPE,
+                EntityKind.ENUM,
+            )
+            or occ_id.entity_id in kept_entity_ids
+        ):
+            kept_occurrences[occ_id] = entity
+        else:
+            excluded_occurrences.append((occ_id, entity))
+    if not excluded_occurrences:
+        return semantic_ir, semantic_ir_conflicts
+    scoped_ir = dataclasses.replace(semantic_ir, occurrences=kept_occurrences)
+    if not semantic_ir_conflicts:
+        return scoped_ir, semantic_ir_conflicts
+    excluded_keys = {
+        semantic_ir_conflict_key(occ_id, fact_name)
+        for occ_id, entity in excluded_occurrences
+        for fact_name, _fact in entity.fact_items()
+    }
+    scoped_conflicts = {
+        key: value
+        for key, value in semantic_ir_conflicts.items()
+        if key not in excluded_keys
+    }
+    return scoped_ir, scoped_conflicts
+
+
 def scope_snapshot_excluding_dependencies(
     snap: AbiSnapshot,
     header_roots: Sequence[Path | str] | None = None,
@@ -1260,6 +1339,9 @@ def scope_snapshot_excluding_dependencies(
         for f in excluded_functions
         if f.mangled and f.mangled not in kept_mangled
     }
+    scoped_semantic_ir, scoped_semantic_ir_conflicts = _scoped_semantic_ir(
+        snap.semantic_ir, snap.semantic_ir_conflicts, kept_types, kept_enums
+    )
     return dataclasses.replace(
         snap,
         functions=kept_functions,
@@ -1270,6 +1352,16 @@ def scope_snapshot_excluding_dependencies(
         dwarf_advanced=_scoped_dwarf_advanced(
             snap.dwarf_advanced, kept_identifiers, excluded_symbols
         ),
+        # ADR-063 Phase 6 (second slice, Codex review, PR #1001): without
+        # this, dataclasses.replace() below carries snap.semantic_ir/
+        # semantic_ir_conflicts over verbatim -- every excluded dependency
+        # record/enum (and any hybrid-merge conflict recorded against it)
+        # stays reachable through the "filtered" snapshot's own canonical
+        # IR even though the flat kept_types/kept_enums lists above
+        # correctly dropped it, defeating this function's whole
+        # size/surface contract for any SemanticIR-aware consumer.
+        semantic_ir=scoped_semantic_ir,
+        semantic_ir_conflicts=scoped_semantic_ir_conflicts,
         # Records that this snapshot went through dependency-exclusion —
         # comparability.check_contracts_comparable uses this to refuse to
         # compare a filtered snapshot against an unfiltered one (see
