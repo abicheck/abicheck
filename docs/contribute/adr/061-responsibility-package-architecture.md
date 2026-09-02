@@ -1920,19 +1920,29 @@ is not yet decided; nothing has assigned it `model` (or anywhere else) in
 what `cli_params.py`'s move still waits on.
 
 **Update: `cli_params.py`'s physical move is now done, and every module named
-above as its blocker is now classified.** `buildsource.scan_levels` and
-`abicheck/policies/__init__.py` (the tiny, dependency-free built-in-policy-name
-lookup `cli_params.py` needs alongside it) both landed as `model` in
-`architecture/modules.yaml`, and `policy_file`/`suppression`'s own
-`frontends -> policy` edges were already closed by the `workflows/policy_file.py`
-and `workflows/suppression.py` facades this section's "PolicyFile" and
-"`service.py`-thinning" investigations describe below. With every prerequisite
-satisfied, `abicheck/cli_params.py` moved to
-`abicheck/frontends/cli/options/params.py` (git `554276cc`) — not a documented
-public Python API path (absent from `service.__all__` and the generated
-`python-api-reference.md`), so migration rule 3 applied without a compatibility
-shim: every internal caller (10 production modules, 4 test files) now imports
-the new location directly, and `frontends/cli/moved.py`'s `cli.__getattr__`
+above as its blocker is now classified.** `buildsource.scan_levels` landed as
+`model` in `architecture/modules.yaml`. `abicheck/policies/__init__.py` (the
+tiny, dependency-free built-in-policy-name lookup `cli_params.py` needs
+alongside it) briefly carried a `model` classification during the same
+migration — accepted by the architecture checker, but the wrong layer for
+policy-owned data (Codex review on this same slice): it is policy documents'
+own discovery data, so it belongs in `policy`'s `legacy_paths` beside
+`policy_file.py`, which is where it is classified today, reached through
+`workflows.policy_file.builtin_policy_names` rather than imported directly
+(see `frontends/AGENTS.md`'s own "next candidate" paragraph for the corrected
+account). `policy_file`/`suppression`'s own `frontends -> policy` edges were
+already closed by the `workflows/policy_file.py` and `workflows/suppression.py`
+facades this section's "PolicyFile" and "`service.py`-thinning" investigations
+describe below. With every prerequisite satisfied, `abicheck/cli_params.py`
+moved to `abicheck/frontends/cli/options/params.py` (git `554276cc`) — not a
+documented public Python API path (absent from `service.__all__` and the
+generated `python-api-reference.md`), so migration rule 3 applied without a
+compatibility shim: every internal caller now imports the new location
+directly (a repository-wide search finds it reached from production modules
+across `frontends`/`workflows` plus a handful of test files — a hand-counted
+figure here would only go stale the way this section's other counts already
+have, so it is left uncounted rather than repeating that mistake), and
+`frontends/cli/moved.py`'s `cli.__getattr__`
 lazy-resolution table was repointed too (its `_load_suppression_and_policy`
 entry still named the retired `abicheck.cli_params` string, invisible to a
 plain import-statement grep). `python scripts/check_architecture.py` reports 0
