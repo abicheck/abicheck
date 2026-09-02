@@ -114,16 +114,28 @@ def function_entity_id(
     ``dwarf_snapshot.py``'s own ``mangled`` is already ``linkage_name or
     name`` (a fallback bare spelling when no real ``DW_AT_linkage_name``
     exists) -- offered to ``entity_id_for_function`` as a genuine mangling
-    only when a real ``DW_AT_linkage_name``/``DW_AT_MIPS_linkage_name`` was
-    present AND it is not the extern-"C" case, mirroring the two header-AST
-    backends' own ``raw_mangled is not None and not is_extern_c`` gate
-    (``extract.headers.clang.functions.parse_functions``): passing the
-    bare-``name`` fallback through as a real mangling would let two
-    genuinely distinct extern-"C"-shaped functions sharing a name in
-    different scopes collapse onto one ``EntityId`` (the mangled branch
-    drops scope entirely). *is_extern_c* is passed regardless, so the
-    constructor still takes its own signature-free branch when there is no
-    real mangling.
+    whenever a real ``DW_AT_linkage_name``/``DW_AT_MIPS_linkage_name`` was
+    present, unconditionally on *is_extern_c*. Deliberately NOT the two
+    header-AST backends' own ``raw_mangled is not None and not is_extern_c``
+    gate: their ``is_extern_c`` is a real language-linkage signal read off
+    the AST node itself, so it is trustworthy enough to override a
+    genuinely-present mangled spelling; DWARF's own *is_extern_c* here is
+    only ``not mangled.startswith("_Z")`` -- a real, explicitly-linked
+    non-Itanium name (e.g. ``int f(int) asm("custom_name")`` on an ordinary
+    C++ function) would satisfy that heuristic while still being a
+    genuinely distinct, real linkage name, and gating on it would wrongly
+    collapse the function onto the scope-free ``extern_c`` tag instead of
+    identifying it by its own real (if unusually-spelled) linkage name --
+    exactly the cross-backend divergence a header-AST dump of the identical
+    declaration would not produce (Codex review, PR #1015). A genuinely
+    extern-"C" function has no distinct linkage name to mangle at all, so
+    GCC/Clang emit no ``DW_AT_linkage_name`` for it -- *has_linkage_name*
+    being ``False`` is already the correct signal for that case, without
+    needing the unreliable prefix check at all; ``entity_id_for_function``'s
+    own contract makes this safe regardless (*mangled_name*, when present,
+    wins outright over *is_extern_c*). *is_extern_c* is still passed
+    through for the one case it remains meaningful: no real linkage name at
+    all, where the constructor falls back to its own extern-"C" tag.
 
     DWARF does not carry a method's own cv-qualification, ref-qualifier, or
     variadic-ness here (unlike the two header-AST backends' own AST-node
@@ -139,7 +151,7 @@ def function_entity_id(
     return entity_id_for_function(
         scope_path,
         name,
-        mangled_name=(mangled if (has_linkage_name and not is_extern_c) else None),
+        mangled_name=(mangled if has_linkage_name else None),
         is_extern_c=is_extern_c,
         param_types=param_types,
         is_const=False,
@@ -153,17 +165,18 @@ def variable_entity_id(
 ) -> EntityId:
     """``EntityId`` for a ``DW_TAG_variable`` DIE's declaration.
 
-    Same "offer a mangled name only when it is genuinely mangled, else fall
-    back to the extern-"C" branch" gate :func:`function_entity_id` uses --
-    ``entity_id_for_variable`` has no dedicated *is_extern_c* concept of its
-    own on the ``Variable`` model (unlike ``Function.is_extern_c``), so this
-    derives the identical "no real Itanium mangling" signal locally from
-    *mangled*'s own spelling.
+    Same "a real linkage name always wins, regardless of its own spelling"
+    rule :func:`function_entity_id` uses (see that function's own docstring
+    for the full reasoning) -- *has_linkage_name* alone gates the mangled
+    branch; a variable with no real ``DW_AT_linkage_name`` at all falls back
+    to the extern-"C"-like branch, derived from *mangled*'s own spelling
+    since ``entity_id_for_variable`` has no dedicated *is_extern_c* concept
+    of its own (unlike ``Function.is_extern_c``).
     """
     is_extern_c_like = not mangled.startswith("_Z")
     return entity_id_for_variable(
         scope_path,
         name,
-        mangled_name=(mangled if (has_linkage_name and not is_extern_c_like) else None),
+        mangled_name=(mangled if has_linkage_name else None),
         is_extern_c=is_extern_c_like,
     )

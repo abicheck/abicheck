@@ -166,3 +166,56 @@ class TestDwarfEntityIdCppNamespacedRecords:
         assert base.entity_id.leaf_name == "Base"
         assert derived.entity_id.leaf_name == "Derived"
         assert base.entity_id != derived.entity_id
+
+
+@pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
+class TestDwarfEntityIdNonItaniumLinkageName:
+    """A real, explicit linkage name that doesn't start with ``_Z`` (an
+    ``asm("...")`` label on an ordinary C++ function) must still take the
+    mangled-identity branch, not the scope-free extern-"C" one --
+    ``Function.is_extern_c``'s own ``not mangled.startswith("_Z")`` heuristic
+    is not a trustworthy is-genuinely-extern-"C" signal the way the two
+    header-AST backends' real language-linkage read is (Codex review, PR
+    #1015)."""
+
+    @pytest.fixture()
+    def asm_label_lib(self, tmp_path: Path) -> Path:
+        cpp = tmp_path / "lib.cpp"
+        cpp.write_text(
+            'int cppfunc(int x) asm("custom_cpp_name");\n'
+            "int cppfunc(int x) { return x + 1; }\n"
+        )
+        so_path = tmp_path / "libasmlabel_entity.so"
+        result = subprocess.run(
+            [
+                _GCC.replace("gcc", "g++"),
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-o",
+                str(so_path),
+                str(cpp),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_real_non_itanium_linkage_name_takes_mangled_branch(
+        self, asm_label_lib: Path
+    ) -> None:
+        elf_meta = parse_elf_metadata(asm_label_lib)
+        dwarf_meta, dwarf_adv = parse_dwarf(asm_label_lib)
+        snap = build_snapshot_from_dwarf(asm_label_lib, elf_meta, dwarf_meta, dwarf_adv)
+
+        func = next((f for f in snap.functions if f.mangled == "custom_cpp_name"), None)
+        assert func is not None
+        # Pre-existing, unrelated heuristic: still (wrongly) reads this as
+        # extern-"C" -- not this PR's to fix, only entity_id's own handling
+        # of it.
+        assert func.is_extern_c is True
+        assert func.entity_id is not None
+        assert func.entity_id.kind == EntityKind.FUNCTION
+        assert func.entity_id.extra == ("mangled", "custom_cpp_name")
