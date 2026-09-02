@@ -26,13 +26,20 @@ own signature canonicalization; ``Change`` gaining its own ``entity_id``
 carrier, populated across the function-diff path; and, as this module's own
 ``EntityId.key`` property, the first read of that carrier by a real
 consumer (``finding_identity.resolve_change_identity``'s new alias --
-additive only, no existing primary/canonical id changes). Still open:
-the mangled-name-is-genuine determination stays owned by
-``finding_identity.is_real_mangled_name``/``normalize_mangled_name``
-(``compare -> model`` stays the only allowed edge); exhaustive
-``entity_id`` population beyond the function-diff path; and the post-parse
-consumer migrations (``diff_filtering.py``/``type_reachability.py``'s
-string-based ambiguity machinery).
+additive only, no existing primary/canonical id changes).
+``dwarf_snapshot.py``'s DIE walk (``extract/dwarf_scope.py``) and
+``dumper_elf_fallback.py``'s export-only path now populate the identical
+carrier -- three real producers agreeing on one identity, not just the two
+header-AST backends. Still open: the mangled-name-is-genuine determination
+stays owned by ``finding_identity.is_real_mangled_name``/
+``normalize_mangled_name`` (``compare -> model`` stays the only allowed
+edge); PE/Mach-O producers still carry no ``entity_id`` at all; the
+post-parse consumer migrations (``diff_filtering.py``/
+``type_reachability.py``'s string-based ambiguity machinery); and
+promoting ``entity:`` from an additive alias to a real match tier, blocked
+on cross-release stability of ``Anonymous``/``LocalToFunction`` ordinals
+(twice reverted -- see this module's own ``Anonymous`` docstring for the
+accepted, documented limitation).
 
 ``EntityKind``/``ObservationKind`` relocated here from ``storage.
 entity_ids`` (domain vocabulary belongs in ``model``, not the storage wire

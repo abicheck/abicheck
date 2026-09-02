@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 from .dumper_elf_symbols import _populate_elf_visibility
 from .dumper_toolchain import _safe_mtime, _safe_size
 from .model import AbiSnapshot, Function, RecordType, Variable, Visibility
+from .model.identity import entity_id_for_function, entity_id_for_variable
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -165,6 +166,23 @@ def _build_symbol_only_snapshot(
                 visibility=Visibility.ELF_ONLY,
                 # Absence of Itanium _Z prefix is strong evidence of C linkage
                 is_extern_c=not sym.startswith("_Z"),
+                # ADR-063 Phase 2 (ELF-symbol-only slice). `mangled=sym` here
+                # is the raw exported symbol reused for BOTH fields, exactly
+                # the shape model.identity's own module docstring names as
+                # the reason a header/DWARF observation of the identical
+                # symbol must still merge with this one -- see
+                # entity_id_for_variable's docstring for the confirmed
+                # `leaf_name` interaction this offers `mangled_name=sym`
+                # (never `leaf_name`) to guard against. Offered as a genuine
+                # mangling only for the real Itanium-mangled case; a bare C
+                # symbol takes the extern-"C" branch instead, same rule
+                # every other producer in this codebase applies.
+                entity_id=entity_id_for_function(
+                    (),
+                    sym,
+                    mangled_name=(sym if sym.startswith("_Z") else None),
+                    is_extern_c=not sym.startswith("_Z"),
+                ),
             )
             for sym in sorted(exported_dynamic_funcs)
         ],
@@ -174,6 +192,12 @@ def _build_symbol_only_snapshot(
                 mangled=sym,
                 type="?",
                 visibility=Visibility.ELF_ONLY,
+                entity_id=entity_id_for_variable(
+                    (),
+                    sym,
+                    mangled_name=(sym if sym.startswith("_Z") else None),
+                    is_extern_c=not sym.startswith("_Z"),
+                ),
             )
             for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
         ],

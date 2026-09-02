@@ -611,6 +611,14 @@ _ALLOWED_RESOLVER_CALLERS = (
     "dumper_clang.py",
     "dumper_castxml.py",
     "extract/headers/",
+    # ADR-063 Phase 2: dwarf_snapshot.py/extract/dwarf_scope.py build a typed
+    # ScopePath the same way both header-AST backends do -- a third
+    # legitimate front door, not a bypass. dumper_elf_fallback.py's
+    # export-only Function/Variable only exercises the scope-free
+    # mangled-name/extern-C branches.
+    "dwarf_snapshot.py",
+    "extract/dwarf_scope.py",
+    "dumper_elf_fallback.py",
 )
 
 _RESOLVER_NAMES = frozenset(

@@ -10098,6 +10098,85 @@ attempts at ordinal stability were each designed and reverted (see
 `buildsource/*.py`'s L5 source-graph sites remain out of ADR-063's scope by
 design, as before.
 
+**Landed (fourteenth slice, 2026-09-02): item (1)'s extraction-side half,
+for DWARF and the ELF-symbol-only fallback — the object each of them
+carries, not the detector wiring on top of it.** `dwarf_snapshot.py`'s DIE
+walk threads a typed `ScopePath` alongside the pre-existing flat `scope`
+string, built at the exact points a `DW_TAG_namespace`/`DW_TAG_structure_
+type`/`DW_TAG_class_type`/`DW_TAG_union_type` DIE is entered — the same
+"widen the walker's own scope representation, don't reconstruct it from a
+flattened spelling" fix this phase's own Design section required for the
+two header-AST backends. `RecordType`/`EnumType`/`Function`/`Variable`
+gain a populated `entity_id`, and a new `typedef_entity_ids` sidecar on the
+builder (wired into `AbiSnapshot.typedef_entity_ids`, keyed identically to
+`typedefs`) mirrors the two header-AST backends' own — `AbiSnapshot.
+constant_entity_ids` stays empty for a DWARF-only snapshot, since a
+constexpr initializer is a header-AST-only fact DWARF does not carry.
+`dumper_elf_fallback.py`'s header-less, export-table-only `Function`/
+`Variable` construction gets the same treatment with an empty `ScopePath`
+(a raw exported symbol carries no scope information at all) — the case
+`model/identity.py`'s own docstring already named as needing this
+`mangled_name`/`leaf_name` interaction (`entity_id_for_variable`'s
+`mangled=sym` reused for both fields, so the mangled branch drops
+`leaf_name` rather than let a header/DWARF observation of the identical
+symbol fail to merge with it). The DWARF-specific construction (the
+mangled-name-vs-extern-C gate, the two scope-segment builders) lives in a
+new leaf module, `abicheck/extract/dwarf_scope.py`, under `extract/` per
+ADR-061 D9's task routing even though its one caller, `dwarf_snapshot.py`,
+is itself still a legacy root module; `tests/test_entity_id_carrier.py`'s
+`_ALLOWED_RESOLVER_CALLERS` was extended to name it (and
+`dumper_elf_fallback.py`) as legitimate `entity_id_for_*` front doors,
+alongside the two header-AST backends. `abicheck/extract/dwarf_records.py`
+(four small, dependency-free DWARF record/access helpers, previously
+inline in `dwarf_snapshot.py`) was split out in the same slice purely to
+keep that file under its `architecture/debt.yaml` no-growth baseline —
+unrelated to identity, a byproduct of "move responsibility instead of
+raising the baseline."
+
+Anonymous DWARF scopes get no `Anonymous` segment in this slice: an
+anonymous namespace (`namespace { ... }`, no `DW_AT_name`) contributes no
+scope segment at all, matching this walker's own pre-existing flat-scope
+behavior (its members were already treated as declared directly in the
+parent scope); an anonymous struct/union/enum DIE is skipped by
+`dwarf_snapshot.py`'s own pre-existing logic unless reached through a
+typedef (`typedef struct { ... } Point;`), which borrows the typedef's own
+name — so no bare-unnamed record/enum ever reaches this slice's
+`entity_id_for_type`/`entity_id_for_enum` call sites at all. This is
+narrower than the two header-AST backends (which do construct `Anonymous`
+segments, ordinal-tracked per parent), a documented gap rather than a
+silent one: DWARF exposes no per-block merge signal for a reopened
+anonymous namespace the way clang's `originalNamespace`/`previousDecl`
+does, so extending this slice to attempt one was not pursued. A method's
+own cv-qualification, ref-qualifier, and variadic-ness are similarly not
+read from DWARF here (unlike the two header-AST backends' own AST-node
+reads) — inert in practice, since they only feed `entity_id_for_function`'s
+"sig" fallback branch, reached only by a non-`extern "C"` function with no
+real `DW_AT_linkage_name` at all; every ordinarily-mangled C++ overload
+takes the mangled branch instead and never touches them.
+
+**Still open after this slice**, narrower than before: PE/Mach-O producers
+carry no `EntityId` at all (item (1)'s remaining extraction-side gap); the
+flat detector modules named above (`diff_platform.py`'s DWARF-tier
+functions, `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
+`diff_platform_elf_symbols.py`, `diff_versioning.py`, `diff_sycl.py`) still
+key on their own string-based matching rather than reading the now-real
+`entity_id` this slice populates — wiring them is the diff-site pass item
+(1)'s own text already distinguished from the extraction-side work this
+slice closes. `diff_filtering.py`/`type_reachability.py`'s bespoke
+string-suffix ambiguity trackers remain unmigrated, unattempted this slice
+given that module's own extensive, multiply-reviewed fragility (see its own
+module docstring) — a real rewrite risk this slice judged not worth taking
+on without the same adversarial review rigor that code's prior fixes
+received. Item (2), the `entity:` alias promotion, was investigated for a
+third time this slice and still has no accepted design: the same
+`Anonymous`/`LocalToFunction` within-one-parse-only ordinal limitation this
+phase's Design section already names blocks it identically for DWARF as
+for the two header-AST backends (DWARF's own DIE walk assigns no ordinals
+at all in this slice, so it inherits the identical gap rather than closing
+it) — left as the accepted, documented limitation this phase's own
+discipline calls for after two prior reverted attempts, not attempted a
+third time under review pressure.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
