@@ -189,9 +189,21 @@ jobs:
     # subsequent "Run slow tests" step, the durations/coverage uploads, and
     # normal runner variance — which twice cancelled that step mid-run at
     # the identical ~73% completion point (PR #940) despite every test up
-    # to that point passing. 20 matches the headroom other multi-step jobs
-    # in this file already carry.
-    timeout-minutes: 20
+    # to that point passing. 20 was raised to match the headroom other
+    # multi-step jobs in this file already carry, but PR #1002 (which added
+    # tests/test_selectors.py, tests/test_selectors_namespace_glob.py, and
+    # tests/test_reclassify_leaf_import_contract.py) pushed the canonical
+    # leg's total wall time right back up against that same 20-minute wall
+    # twice in a row on 2026-09-02 — once cancelled mid "Run slow tests"
+    # (14m42s into the coverage step alone), once cancelled at exactly
+    # 20m01s with every single step, coverage floor included, already
+    # reporting success (a job-level timeout racing its own last step, not
+    # a real failure). The lesson generalizes: the canonical leg's total
+    # cost (coverage-collecting suite + slow/hypothesis tests + uploads)
+    # grows with the whole test suite, so a fixed budget with days-old
+    # headroom keeps re-drifting to zero as tests are added anywhere in the
+    # fast lane. 30 restores real headroom over the ~20m1s observed here.
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
