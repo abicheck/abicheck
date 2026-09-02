@@ -460,6 +460,83 @@ def test_release_lowercase_not_comparable_is_recognized_as_a_blocking_refusal(
     assert loaded.gate.blocking_categories == ("not_comparable",)
 
 
+def test_pre_2_48_release_refusal_with_no_severity_or_run_outcome_still_blocks(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a genuinely pre-2.48 `compare-release`
+    summary (neither `severity` nor `run_outcome`) still refused the
+    comparison via the legacy `"not_comparable"` sentinel. `GateInfo.
+    from_report_data` legitimately returns `None` for that shape -- that
+    must not read as gate-less/unavailable, letting an optional or
+    tolerated-unexpected target pass."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "not_comparable",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "exit": {"not_comparable_contribution": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("not_comparable",)
+
+
+def test_release_refusal_preserves_findings_from_a_completed_sibling(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: when one library refuses comparison but
+    a sibling library or the global bundle/matrix comparison completed,
+    `run_outcome.compatibility` is non-null and the target is marked
+    analyzed -- `_format_release_json` can still emit real `bundle_
+    findings`/`matrix_findings` in this state, and dropping them (mirroring
+    the `ERROR`/scan-abort branches' own incomplete-findings preservation)
+    would lose them from cross-profile reconciliation."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "not_comparable",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "bundle_findings": [
+                    {
+                        "kind": "func_removed",
+                        "symbol": "sym",
+                        "description": "d",
+                        "affected_libraries": ["a.so"],
+                    }
+                ],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "BREAKING",
+                    "assurance": None,
+                    "gate": "abi_breaking",
+                    "operational": "not_comparable",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.findings is not None
+    assert not loaded.findings.complete
+    assert len(loaded.findings.findings) == 1
+
+
 @pytest.mark.parametrize("prior_contribution", [2, 4])
 def test_late_budget_overflow_preserves_a_real_prior_break_in_the_gate_exit_code(
     tmp_path: Path, prior_contribution: int

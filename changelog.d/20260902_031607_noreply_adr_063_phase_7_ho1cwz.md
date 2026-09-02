@@ -526,6 +526,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   verdict genuinely is the `not_comparable` sentinel — the old
   key-presence-only check skipped inference entirely for that shape,
   letting the refusal normalize to `operational: none`.
+- **A `compare-release` summary's lowercase `"not_comparable"` refusal now
+  falls back to a blocking gate, and preserves a completed sibling's
+  findings, instead of reading gate-less/unavailable** (Codex review, fresh
+  evidence): `GateInfo.from_report_data` legitimately returns `None` for a
+  genuinely pre-2.48 legacy release report (neither `severity` nor
+  `run_outcome`) that still refused the comparison — that `None` previously
+  read as "no gate decision available," letting a warn/optional/
+  tolerated-unexpected target policy pass a refused comparison; it now
+  falls back to the same forced exit-4/blocking `GateInfo` the native
+  `compare` refusal branch already uses for this shape. Separately, when a
+  sibling library or the global bundle/matrix comparison completed even
+  though this library refused (`run_outcome.compatibility` non-null), real
+  `bundle_findings`/`matrix_findings` the release writer can still emit in
+  this state were unconditionally dropped — now preserved, mirroring the
+  `ERROR`/scan-abort branches' own incomplete-findings preservation.
 
 ### Changed
 

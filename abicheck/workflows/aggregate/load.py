@@ -160,22 +160,19 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
 def _run_outcome_compatibility_verdict(data: Mapping[str, Any]) -> Verdict | None:
     """The report's own top-level ``run_outcome.compatibility``, parsed as a
     real :class:`Verdict`, or ``None``. Distinct from :func:`parse_report_
-    verdict`, which reads the sibling top-level ``verdict`` key: for a
-    report whose root ``verdict`` is a non-``Verdict`` sentinel string (a
-    `scan --artifact-set`'s ``BUNDLE_INCOMPLETE``, a `compare-release`
-    summary's lowercase ``"not_comparable"``), ``run_outcome.compatibility``
-    may still carry a real, already-established result the sentinel string
-    discards (Codex review, fresh evidence).
+    verdict` (the sibling top-level ``verdict`` key): for a report whose root
+    ``verdict`` is a non-``Verdict`` sentinel (`scan --artifact-set`'s
+    ``BUNDLE_INCOMPLETE``, `compare-release`'s lowercase ``"not_comparable"``),
+    ``run_outcome.compatibility`` may still carry a real result the sentinel
+    discards.
 
-    Requires the *whole* block to be schema-valid (:func:`_is_schema_valid_
-    run_outcome`), not merely that ``compatibility`` itself parses
-    (CodeRabbit review, fresh evidence): a truncated ``{"run_outcome":
-    {"compatibility": "BREAKING"}}`` -- missing ``gate``/``operational``/
-    ``schema_version``/``lifecycle`` -- previously still earned this
-    opportunistic recovery. A present-but-invalid block is treated the same
-    as an absent one (returns ``None``, no raised ``_MalformedGate``): this
-    is purely opportunistic verdict recovery, and every call site already
-    has its own fully-validated, fail-closed gate independent of this value.
+    Requires the *whole* block to be schema-valid
+    (:func:`_is_schema_valid_run_outcome`), not merely that ``compatibility``
+    itself parses: a truncated ``{"run_outcome": {"compatibility":
+    "BREAKING"}}`` must not earn this opportunistic recovery. A present-but-
+    invalid block is treated the same as absent (``None``, never raises
+    ``_MalformedGate``) -- every call site has its own fail-closed gate
+    independent of this value.
     """
     run_outcome = data.get("run_outcome")
     if not isinstance(run_outcome, Mapping) or not _is_schema_valid_run_outcome(
@@ -519,16 +516,13 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         blocking_categories = frozenset(
             {scan_abort_category}
         ) | _member_abort_categories(data)
-        # `BUNDLE_INCOMPLETE` typically has a real completed comparison
-        # (unlike a true abort): it fires only after every member scanned
-        # cleanly and just the bundle audit never ran, and `run_outcome_
-        # dict_for_scan` preserves the worst completed member's verdict at
-        # `run_outcome.compatibility`. A *late* `BUDGET_OVERFLOW`/`EVIDENCE_
-        # CONTRACT_ERROR` abort can carry one too (Codex review, fresh
-        # evidence, second round) -- read unconditionally for all four
-        # sentinels rather than only `BUNDLE_INCOMPLETE`; `_run_outcome_
-        # compatibility_verdict` still returns `None` when nothing genuinely
-        # completed, so this is a pure widening, no regression there.
+        # `BUNDLE_INCOMPLETE` typically has a real completed comparison: it
+        # fires after every member scanned cleanly and just the bundle audit
+        # never ran, and `run_outcome_dict_for_scan` preserves the worst
+        # completed member's verdict. A *late* `BUDGET_OVERFLOW`/`EVIDENCE_
+        # CONTRACT_ERROR` abort can carry one too -- read unconditionally for
+        # all four sentinels; `_run_outcome_compatibility_verdict` still
+        # returns `None` when nothing genuinely completed.
         compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
@@ -555,12 +549,9 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 _contract_coverage_declared(data) or contract_declared
             ),
             analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
-            # No comparison ran at all for a true abort -- there is no
-            # partial finding set to preserve, and this target is not
-            # "analyzed" for the finding matrix either. `BUNDLE_INCOMPLETE`
-            # (compat_verdict resolved above) is the one exception: its
-            # members did complete, so their findings are real, just not
-            # exhaustive (the bundle audit itself never ran).
+            # No comparison ran at all for a true abort -- no partial finding
+            # set to preserve. `BUNDLE_INCOMPLETE` (compat_verdict resolved
+            # above) is the exception: its members did complete.
             findings=(
                 _incomplete_findings(data) if compat_verdict is not None else None
             ),
@@ -596,6 +587,15 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 reason=f"report gate decision is malformed: {exc}",
                 path=path,
             )
+        if release_gate is None:
+            # Pre-2.48 legacy report (no `severity`/`run_outcome`) that still
+            # refused: `None` here must not read as gate-less/unavailable.
+            release_gate = GateInfo(
+                exit_code=4,
+                blocking=True,
+                blocking_categories=("not_comparable",),
+                from_report=True,
+            )
         compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
@@ -613,6 +613,10 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
+            # A completed sibling/global comparison still leaves real
+            # bundle_findings/matrix_findings even though this library
+            # refused -- mirrors the ERROR/scan-abort branches.
+            findings=_incomplete_findings(data) if compat_verdict is not None else None,
             effective_config_digest=(
                 effective_config_digest if compat_verdict is not None else None
             ),
