@@ -71,6 +71,35 @@ class TestExportSymbolIdentityHelpers:
         assert fn.entity_id is not None
         assert fn.entity_id.extra == ("mangled", "_Z3addii")
 
+    def test_msvc_export_function_stdcall_decoration_stripped(self) -> None:
+        # extern "C" __stdcall int f(int) exports as "_f@4" on 32-bit x86 --
+        # the identity's leaf must be the undecorated "f" to agree with the
+        # header-AST producer's own EntityId for the identical declaration.
+        fn = msvc_export_function("_f@4")
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra == ("extern_c",)
+        assert fn.entity_id.leaf_name == "f"
+        # The raw, decorated evidence is preserved on the Function itself.
+        assert fn.name == "_f@4"
+
+    def test_msvc_export_function_fastcall_decoration_stripped(self) -> None:
+        fn = msvc_export_function("@f@4")
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "f"
+
+    def test_msvc_export_function_cdecl_underscore_stripped(self) -> None:
+        # extern "C" int f(int) (default __cdecl) exports as "_f" on
+        # 32-bit x86 -- leading underscore only, no "@N" suffix.
+        fn = msvc_export_function("_f")
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "f"
+
+    def test_msvc_export_function_x64_no_decoration_unaffected(self) -> None:
+        # x64 PE has no calling-convention decoration at all.
+        fn = msvc_export_function("f")
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "f"
+
     def test_two_distinct_exports_never_collide(self) -> None:
         ids = {
             itanium_export_function(n).entity_id

@@ -54,6 +54,8 @@ Leaf module: depends only on ``model``/``model.identity`` (allowed:
 
 from __future__ import annotations
 
+import re
+
 from ..model import Function, Variable, Visibility
 from ..model.identity import entity_id_for_function, entity_id_for_variable
 
@@ -64,6 +66,39 @@ __all__ = [
     "msvc_export_function",
     "msvc_export_mangled_name",
 ]
+
+# 32-bit x86 PE/COFF's C-calling-convention export decoration -- distinct
+# from (and orthogonal to) C++ name mangling: __stdcall appends "@N" (N =
+# argument-list size in bytes) to a leading-underscore-prefixed name,
+# __fastcall does the same but with a leading "@" instead of "_", and plain
+# __cdecl gets only the leading underscore. None of this exists on x64 PE
+# (no decoration at all, any calling convention). A raw export string here
+# is real, observed evidence -- like this module's other builders -- but
+# unlike a mangled name, it is not the identity itself: the header-AST
+# producer's own EntityId for the identical declaration carries the
+# undecorated name as its leaf (its own AST read never sees the linker's
+# decoration), so an un-decorated leaf here is required for the two
+# evidence modes to agree, not merely cosmetic.
+_PE_FASTCALL_DECORATION_RE = re.compile(r"^@(.+)@\d+$")
+_PE_STDCALL_DECORATION_RE = re.compile(r"^_(.+)@\d+$")
+
+
+def _strip_pe_c_decoration(sym: str) -> str:
+    """Undo 32-bit x86 PE/COFF's __stdcall/__fastcall/__cdecl export
+    decoration -- see this module's own comment above for the "why". Only
+    meaningful for an already-extern-"C"-classified export (a mangled C++
+    name is never decorated this way); leaves anything not matching one of
+    the three shapes unchanged.
+    """
+    match = _PE_FASTCALL_DECORATION_RE.match(sym)
+    if match:
+        return match.group(1)
+    match = _PE_STDCALL_DECORATION_RE.match(sym)
+    if match:
+        return match.group(1)
+    if sym.startswith("_"):
+        return sym[1:]
+    return sym
 
 
 def itanium_export_mangled_name(sym: str) -> str | None:
@@ -142,9 +177,14 @@ def msvc_export_function(sym: str) -> Function:
 
     Handles both PE mangling conventions in use -- see
     :func:`msvc_export_mangled_name` for why a bare ``?``-prefix check
-    alone misses MinGW/GCC's Itanium-mangled C++ exports.
+    alone misses MinGW/GCC's Itanium-mangled C++ exports -- and, for the
+    extern-"C" branch only, undoes 32-bit x86's __stdcall/__fastcall/
+    __cdecl export decoration before building the identity (see
+    :func:`_strip_pe_c_decoration`'s own docstring for why the *identity*,
+    not ``Function.name``/``mangled``, is what must be undecorated here).
     """
     is_extern_c = not (sym.startswith("?") or sym.startswith("_Z"))
+    leaf_name = _strip_pe_c_decoration(sym) if is_extern_c else sym
     return Function(
         name=sym,
         mangled=sym,
@@ -152,6 +192,6 @@ def msvc_export_function(sym: str) -> Function:
         visibility=Visibility.ELF_ONLY,
         is_extern_c=is_extern_c,
         entity_id=entity_id_for_function(
-            (), sym, mangled_name=msvc_export_mangled_name(sym), is_extern_c=is_extern_c
+            (), leaf_name, mangled_name=msvc_export_mangled_name(sym), is_extern_c=is_extern_c
         ),
     )
