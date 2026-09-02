@@ -507,6 +507,29 @@ def test_normalize_header_ast_clang_python_bool_literal_constant_is_unsupported(
     assert entity.canonical_spelling.status.value == "unsupported"
 
 
+def test_normalize_header_ast_castxml_true_named_identifier_stays_present() -> None:
+    """The boolean-literal exception is gated on ``producer == "clang"``
+    (Codex review, fifteenth round, fresh evidence): ``"True"``/``"False"``
+    are legal, if unusual, case-sensitive C++ identifier spellings --
+    ``constexpr bool True = true; constexpr bool k = True;`` is real,
+    compilable C++ -- so castxml's verbatim ``init`` text for ``k`` (which
+    genuinely reads ``"True"``) must NOT be discarded as if it were
+    clang's own Python-``str(bool)`` artifact; only clang's own
+    stringification is producer-specific here."""
+    eid = entity_id_for_constant((), "k")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        constants={"k": "True"},
+        constant_entity_ids={"k": eid},
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "True"
+
+
 def test_normalize_header_ast_decimal_integer_constant_stays_present() -> None:
     """The known, accepted residual: a plain decimal-digit value (like
     clang's normalized form of a hex/char/float literal) has no safe

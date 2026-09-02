@@ -1179,8 +1179,33 @@ class _ClangAstParser:
             if not mangled:
                 continue
             type_name = _qualtype(node)
+            # `name in symbol_candidates(raw_mangled)` -- not a bare
+            # `raw_mangled == name` -- so a Mach-O plain-C variable is
+            # recognized too (Codex review, ADR-063 Phase 6, fresh
+            # evidence): a genuinely plain-C compilation unit has no
+            # `LinkageSpecDecl` at all (that node only exists in C++'s
+            # grammar), so `entry.extern_c` never becomes True for it, and
+            # Darwin's linker prepends a leading underscore to clang's own
+            # `mangledName` ("_foo" for source-level "foo") that castxml's
+            # own "pure" convention never carries -- so the bare equality
+            # check always failed on this platform even though castxml
+            # correctly recognizes the identical declaration as extern
+            # "C". Left unfixed, this variable's `entity_id` stayed tagged
+            # `("mangled", "_foo")` (never retagged by `dumper_hybrid.py`'s
+            # own Mach-O underscore-stripping rewrite, which only
+            # re-spells the mangled tag's VALUE, not its KIND) while
+            # castxml's tags the same declaration `("extern_c",)`, so a
+            # hybrid merge's bare-`EntityId` matching never recognized the
+            # two as one declaration and retained it twice in
+            # `semantic_ir` even though the flat `variables` list (which
+            # matches on the bare mangled string, not `EntityId`) already
+            # unified it. `symbol_candidates` is the same tolerant-match
+            # helper `_visibility` already uses for the identical Mach-O
+            # underscore quirk, reused here instead of a second,
+            # independently-spelled check.
             is_extern_c = entry.extern_c or (
-                raw_mangled is not None and raw_mangled == name
+                raw_mangled is not None
+                and name in _clang_context.symbol_candidates(raw_mangled)
             )
             variables.append(
                 Variable(

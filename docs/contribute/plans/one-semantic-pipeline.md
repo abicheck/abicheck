@@ -13088,6 +13088,63 @@ expression fingerprint, and the two boolean-literal tests just added) moved
 to a new sibling file, `tests/test_semantic_normalizer_artifacts.py`,
 leaving the general projection/canonicalization tests in the original file.
 
+**The bool-literal exception is gated on `producer == "clang"` (Codex
+review, fifteenth round, fresh evidence): `"True"`/`"False"` are legal
+C++ identifier spellings, not exclusively a clang artifact.** The
+fourteenth-round fix above discarded any constant value spelling exactly
+`"True"`/`"False"` regardless of which backend produced it, but
+`constexpr bool True = true; constexpr bool k = True;` is real,
+case-sensitive, compilable C++ -- castxml's verbatim `init` text for `k`
+genuinely reads `"True"` too, and the producer-agnostic check discarded
+that real castxml evidence outright (in a castxml-only snapshot) or left
+no way for a hybrid merge to backfill it (clang's own value for the same
+identifier reference is itself an unsupported expression fingerprint, not
+a bare `"True"`/`"False"` the old check could match). Restricting the
+exception to `producer == "clang"` closes the gap: the capitalization
+signal is safe once scoped to clang's own `str(bool)`-derived
+stringification specifically, since no *clang-parsed* boolean literal is
+ever spelled this way -- only a clang-parsed identifier REFERENCE could
+theoretically collide, and that case already routes through the
+expression-fingerprint branch instead (`dumper_clang_expr._initializer_value`
+only stringifies a bare `bool` for a literal, not an identifier
+reference). Pinned by `test_normalize_header_ast_castxml_true_named_identifier_stays_present`.
+
+**A Mach-O plain-C hybrid dump's `entity_id` mismatched castxml's own
+`extern "C"` tag with clang's mangled-name tag (Codex review, fifteenth
+round, fresh evidence) -- fixed at the identity source, not by patching
+the Mach-O `semantic_ir` rewrite.** A genuinely plain-C compilation unit
+has no `LinkageSpecDecl` at all (that AST node exists only in C++'s
+grammar), so `dumper_clang.py`'s `entry.extern_c` -- set only by walking
+into one -- never becomes `True` for a plain-C declaration. The existing
+`raw_mangled == name` fallback still recovers this on most platforms
+(clang's `mangledName` for a plain-C declaration is otherwise the bare
+source name), but Mach-O is the one platform where it doesn't: Darwin's
+linker prepends a leading underscore to every global symbol (`"_foo"` for
+source-level `"foo"`), so clang's own `mangledName` for the identical
+plain-C declaration is `"_foo"`, and the bare-equality check never
+matches. Left unfixed, such a declaration's `entity_id` stayed tagged
+`("mangled", "_foo")` while castxml -- which observes no `mangledName`
+XML attribute at all for a plain-C `Function`/global `Variable` -- tags
+the identical declaration `("extern_c",)`, so `merge_semantic_ir`'s
+bare-`EntityId` matching never recognized the two as one declaration and
+retained it TWICE in the merged `semantic_ir`, even though the flat
+`functions`/`variables` lists (matched on the bare mangled string, not
+`EntityId`, via `dumper_hybrid._merge_functions`'s own `clang_by_mangled`
+lookup) already unified it. `dumper_hybrid.py`'s own Mach-O
+underscore-stripping rewrite (`_macho_normalize_semantic_ir`) could not
+have closed this even in principle: it only re-spells the `"mangled"`
+tag's VALUE, never its KIND, so a `("mangled", "_foo")` identity stays
+tagged `"mangled"` no matter how the trailing string is normalized. The
+real fix is upstream, in both `extract.headers.clang.functions.
+parse_functions` and `dumper_clang._ClangAstParser.parse_variables`:
+`raw_mangled == name` becomes `name in symbol_candidates(raw_mangled)`,
+reusing `extract.headers.clang.context.symbol_candidates` -- the identical
+tolerant-match helper `visibility()` already uses for this exact Mach-O
+underscore quirk -- instead of a second, independently-spelled check.
+Pinned by `tests/test_dumper_clang_extern_c_identity.py` (a new, dedicated
+file rather than added to `test_dumper_clang.py`, which already sits at
+its `architecture/debt.yaml` `no_growth` baseline).
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

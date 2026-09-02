@@ -175,3 +175,29 @@
   AI-readiness gate's 1200-line cap for a new test file: the artifact-
   recognition-primitive tests now live in a new sibling file,
   `tests/test_semantic_normalizer_artifacts.py`.
+  The boolean-literal exception above is gated on `producer == "clang"`:
+  `"True"`/`"False"` are legal, if unusual, case-sensitive C++ identifier
+  spellings a castxml `init` text could genuinely carry verbatim
+  (`constexpr bool True = true; constexpr bool k = True;` is real,
+  compilable C++), so the producer-agnostic version of the check discarded
+  real castxml evidence as if it were clang's own artifact.
+  A Mach-O plain-C hybrid dump's `entity_id` also mismatched: a genuinely
+  plain-C compilation unit has no `LinkageSpecDecl` (that AST node is
+  C++-only), so clang's existing `entry.extern_c`/`raw_mangled == name`
+  extern-"C" recognition never fires for it, and on Mach-O clang's own
+  `mangledName` carries Darwin's leading underscore (`"_foo"` for
+  source-level `"foo"`) that the bare-equality fallback never matches —
+  such a declaration's `entity_id` stayed tagged `("mangled", "_foo")`
+  while castxml tags the identical declaration `("extern_c",)`, so a
+  hybrid merge retained it twice in `semantic_ir` even though the flat
+  `functions`/`variables` lists already unified it. Fixed at the identity
+  source (`extract.headers.clang.functions.parse_functions` and
+  `dumper_clang._ClangAstParser.parse_variables` now check
+  `name in symbol_candidates(raw_mangled)`, reusing the same tolerant-match
+  helper `visibility()` already uses for this exact quirk) rather than by
+  patching `dumper_hybrid.py`'s Mach-O `semantic_ir` rewrite, which could
+  not have closed this even in principle — it only re-spells the
+  `"mangled"` tag's value, never its kind. Pinned by a new, dedicated test
+  file, `tests/test_dumper_clang_extern_c_identity.py` (added rather than
+  growing `test_dumper_clang.py`, which already sits at its
+  `architecture/debt.yaml` `no_growth` baseline).

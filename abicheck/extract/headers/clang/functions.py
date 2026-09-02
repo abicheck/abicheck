@@ -83,6 +83,7 @@ from .context import (
     is_builtin_file,
     qualtype as _qualtype,
     source_location as _source_location,
+    symbol_candidates as _symbol_candidates,
     visibility as _visibility,
 )
 from .return_type import return_type as _return_type
@@ -535,8 +536,30 @@ def parse_functions(
         # variable's own comment above) -- without the gate, an
         # uninstantiated template's fallback-to-`name` mangling reads as
         # false C linkage.
+        #
+        # `name in symbol_candidates(raw_mangled)`, not bare equality
+        # (Codex review, ADR-063 Phase 6, fresh evidence): a genuinely
+        # plain-C compilation unit has no `LinkageSpecDecl` at all (that
+        # node only exists in C++'s grammar), so `entry.extern_c` never
+        # becomes True for it, and on Mach-O clang's own `mangledName`
+        # carries the Darwin linker's leading underscore ("_foo" for
+        # source-level "foo") that castxml's "pure" convention never
+        # does -- so the bare-equality check always missed this case even
+        # though castxml correctly recognizes the identical declaration as
+        # extern "C". Left unfixed, this function's `entity_id` stayed
+        # tagged `("mangled", "_foo")` (`dumper_hybrid.py`'s own Mach-O
+        # underscore-stripping rewrite only re-spells the mangled tag's
+        # VALUE, not its KIND) while castxml's tags the same declaration
+        # `("extern_c",)`, so a hybrid merge's bare-`EntityId` matching
+        # never recognized the two as one declaration and retained it
+        # twice in `semantic_ir` even though the flat `functions` list
+        # (which matches on the bare mangled string, not `EntityId`)
+        # already unified it. `symbol_candidates` is the same
+        # tolerant-match helper `visibility()` already uses for the
+        # identical Mach-O underscore quirk, reused here instead of a
+        # second, independently-spelled check.
         is_extern_c = entry.extern_c or (
-            raw_mangled is not None and raw_mangled == name
+            raw_mangled is not None and name in _symbol_candidates(raw_mangled)
         )
         is_const = bool(re.search(r"\bconst\b", quals))
         is_volatile = bool(re.search(r"\bvolatile\b", quals))

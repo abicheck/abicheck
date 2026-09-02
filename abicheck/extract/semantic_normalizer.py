@@ -647,14 +647,28 @@ def normalize_header_ast(
         # round, fresh evidence): a boolean literal's clang AST JSON `value`
         # deserializes to a Python `bool`, and `str(True)`/`str(False)`
         # capitalizes it -- never the lowercase `"true"`/`"false"` C++
-        # keyword spelling castxml's verbatim `init` text carries. This
-        # exact capitalization is a safe, structural signal (no real C++
-        # source spells a bool literal this way, the same "producer-
-        # specific artifact recognized by its own shape" treatment already
-        # applied to the compound fingerprint and the opaque `FunctionType`
-        # tag) -- marked `Fact.unsupported()` rather than `Fact.present`,
-        # the identical class of "state genuinely incomparable evidence
-        # honestly" fix.
+        # keyword spelling castxml's verbatim `init` text carries. Gated on
+        # `producer == "clang"` (Codex review, fifteenth round, fresh
+        # evidence): unlike the compound-initializer fingerprint's
+        # `"expr:"` + 16 hex digits shape, which no real identifier can
+        # spell, `"True"`/`"False"` ARE legal, if unusual, C++ identifier
+        # spellings -- `constexpr bool True = true; constexpr bool k =
+        # True;` is real, case-sensitive C++, and castxml's verbatim `init`
+        # text for `k` would genuinely read `"True"` too. Without the
+        # producer gate this branch discarded that real castxml evidence as
+        # if it were clang's own artifact, losing the fact outright in a
+        # castxml-only snapshot (and leaving nothing for a hybrid merge to
+        # backfill from, since clang's own value for such an identifier
+        # reference is itself an unsupported expression fingerprint, not a
+        # bare `"True"`/`"False"` this branch could otherwise match). This
+        # exact capitalization IS a safe, structural signal once restricted
+        # to clang's own output (no real C++ source spells a *clang-parsed*
+        # bool LITERAL this way -- only clang's Python-`str(bool)`
+        # stringification does), the same "producer-specific artifact
+        # recognized by its own shape" treatment already applied to the
+        # compound fingerprint and the opaque `FunctionType` tag -- marked
+        # `Fact.unsupported()` rather than `Fact.present`, the identical
+        # class of "state genuinely incomparable evidence honestly" fix.
         #
         # **Known, accepted residual, NOT fixed here:** clang's numeric/
         # character literal normalization (a hex/octal/binary/suffixed
@@ -678,7 +692,7 @@ def normalize_header_ast(
                 "clang's compound-initializer fingerprint is not a "
                 "cross-backend-comparable value spelling"
             )
-        elif value in ("True", "False"):
+        elif producer == "clang" and value in ("True", "False"):
             spelling_fact = Fact.unsupported(
                 "clang's Python-bool-derived literal spelling is not a "
                 "cross-backend-comparable value spelling"

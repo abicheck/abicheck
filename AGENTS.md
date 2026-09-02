@@ -228,8 +228,15 @@ Core pipeline (in order of data flow):
    name). A castxml-only value that resolves to its own opaque
    `FunctionType` tag (a direct function-pointer parameter/variable/return
    type castxml's resolver has no dedicated rendering for) gets the same
-   `Fact.unsupported()` treatment. BTF/CTF/PDB remain fully unmigrated:
-   those backends do not populate `entity_id` at all yet.
+   `Fact.unsupported()` treatment. A clang-only lone boolean literal
+   (`dumper_clang_expr._initializer_value` stringifies a captured Python
+   `bool` via plain `str(...)`, spelling `"True"`/`"False"` — never the
+   real `true`/`false` source text) gets the same treatment too, gated on
+   `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
+   identifier spellings a castxml `init` text could genuinely carry
+   verbatim, so the exception applies only to clang's own artifact, not to
+   every occurrence of those two strings. BTF/CTF/PDB remain fully
+   unmigrated: those backends do not populate `entity_id` at all yet.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info
