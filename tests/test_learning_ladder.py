@@ -152,7 +152,10 @@ def _write_footers(docs: Path, ladder_path: Path) -> None:
             f"**Ladder:** ← [{prev}]({ll.relative_href(page, prev)}) · Tier · "
             f"[{nxt}]({ll.relative_href(page, nxt)}) →\n"
         )
-        path.write_text(path.read_text(encoding="utf-8") + "\n---\n\n" + footer)
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\n---\n\n" + footer,
+            encoding="utf-8",
+        )
 
 
 def _run(docs: Path, ladder_path: Path) -> list[str]:
@@ -273,7 +276,9 @@ def test_link_that_is_nowhere_a_member_is_an_error(tmp_path: Path) -> None:
     )
     docs, ladder = _build(tmp_path, ladder_text=text)
     # the stray page exists but is not placed; it is reported both ways
-    (docs / "learn" / "stray.md").write_text(_page("advanced", "stray"))
+    (docs / "learn" / "stray.md").write_text(
+        _page("advanced", "stray"), encoding="utf-8"
+    )
     msgs = _run(docs, ladder)
     assert any("learn/stray.md" in m and "member of no tier" in m for m in msgs)
 
@@ -396,7 +401,10 @@ def test_footer_pointing_at_the_wrong_neighbour_is_an_error(tmp_path: Path) -> N
     docs, ladder = _build(tmp_path)
     page = docs / "learn" / "b.md"
     page.write_text(
-        page.read_text().replace("[learn/c.md](c.md)", "[learn/d.md](d.md)")
+        page.read_text(encoding="utf-8").replace(
+            "[learn/c.md](c.md)", "[learn/d.md](d.md)"
+        ),
+        encoding="utf-8",
     )
     msgs = _run(docs, ladder)
     assert any("learn/b.md" in m and "do not match" in m for m in msgs)

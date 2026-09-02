@@ -89,7 +89,9 @@ class TestPayloadTextIsNeverCorrupted:
             library="lib.so",
             version="1.0",
             types=[
-                replace(_record("Widget", qualified="ns::Widget"), deprecated=message)
+                replace_with_fact_sync(
+                    _record("Widget", qualified="ns::Widget"), deprecated=message
+                )
             ],
         )
         renumber_anonymous_closure_identities(snap)
@@ -118,7 +120,10 @@ class TestPayloadTextIsNeverCorrupted:
         only at rewrite time."""
         closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
         message = f"avoid {_closure('x.h', 1, 1)}"
-        rec = replace(
+        # replace_with_fact_sync, not replace: `deprecated` is Fact[...]-
+        # bridged (ADR-063 Phase 5), so a bare replace() would carry the
+        # stale sibling forward and silently revert this write.
+        rec = replace_with_fact_sync(
             _record(closure_type, qualified=f"ns::{closure_type}"),
             deprecated=message,
         )

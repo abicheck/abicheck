@@ -597,6 +597,10 @@ _OWNER_DECODE_RECEIVER: dict[str, str] = {
     "ElfMetadata": "elf",
     "PeMetadata": "pe",
     "MachoMetadata": "macho",
+    # ADR-063 Phase 5 (eighth batch): decode_field_facts()'s own receiver --
+    # deliberately not "f" (already Function's, above), the same collision
+    # the three binary-format receivers just above were renamed to avoid.
+    "TypeField": "fld",
 }
 
 #: Module-level fact-key tuples in fact_codec.py, each owning exactly one
@@ -612,6 +616,8 @@ _OWNER_FACT_KEY_TUPLES: dict[str, str] = {
     "_ELF_FACT_KEYS": "ElfMetadata",
     "_PE_FACT_KEYS": "PeMetadata",
     "_MACHO_FACT_KEYS": "MachoMetadata",
+    "_FIELD_FACT_KEYS": "TypeField",
+    "_PARAM_FACT_KEYS": "Param",
 }
 
 
@@ -683,7 +689,10 @@ def _decode_wired_fact_attrs() -> set[tuple[str, str]]:
 
     A field is decode-wired for a given owner when ``decode_fact(...)``'s
     own first (positional) argument is itself a ``<name>.get("<field>")``
-    call naming it, where ``<name>`` resolves to that owner via
+    call naming it -- or, for a case-(a) field, when ``decode_fact_with_
+    legacy_presence(<name>, "<legacy field>", ...)`` names it (that decoder
+    reads the legacy key as well as the ``_fact`` one, so it takes the raw
+    dict itself rather than a pre-fetched ``.get()`` result), where ``<name>`` resolves to that owner via
     :data:`_OWNER_DECODE_RECEIVER` — the shape every real call site in this
     codebase uses. A receiver not in that table contributes no evidence for
     any owner.
@@ -698,9 +707,30 @@ def _decode_wired_fact_attrs() -> set[tuple[str, str]]:
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
-                and node.func.id == "decode_fact"
+                and node.func.id in ("decode_fact", "decode_fact_with_legacy_presence")
                 and node.args
             ):
+                continue
+            if node.func.id == "decode_fact_with_legacy_presence":
+                # The case-(a) shape: `decode_fact_with_legacy_presence(
+                # <receiver>, "<legacy field>", ...)` -- the raw dict is the
+                # receiver itself (this decoder consults the legacy key too,
+                # so it cannot be handed a pre-fetched `.get()` result), and
+                # the key names the LEGACY field, whose `_fact` sibling is
+                # what gets wired.
+                if len(node.args) < 2 or not isinstance(node.args[0], ast.Name):
+                    continue
+                legacy = _string_constant(node.args[1])
+                if legacy is None:
+                    continue
+                name = f"{legacy}_fact"
+                receiver = node.args[0].id
+                owner = next(
+                    (o for o, r in _OWNER_DECODE_RECEIVER.items() if r == receiver),
+                    None,
+                )
+                if owner is not None:
+                    wired.add((owner, name))
                 continue
             name = _get_call_key(node.args[0])
             if name is None:

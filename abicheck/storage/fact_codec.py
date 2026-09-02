@@ -28,15 +28,45 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..model import Fact, FactStatus, SymbolBinding
+from ..model import AccessLevel, Fact, FactStatus, SymbolBinding
+
+# ADR-061's 800-line production ceiling: the case-(a) legacy-load
+# corrections live in ``fact_backfill.py`` and are re-exported here, so
+# ``serialization.py`` and every test importing them from this module are
+# unaffected by that split. One-directional: ``fact_backfill`` imports the
+# per-field schema-version thresholds from the ``fact_schema_versions.py``
+# leaf, never from here, so this re-export forms no cycle.
+from .fact_backfill import (
+    CaseAFactRule as CaseAFactRule,
+    apply_case_a_fact_backfill as apply_case_a_fact_backfill,
+    apply_legacy_fact_backfill as apply_legacy_fact_backfill,
+)
+from .fact_schema_versions import (
+    _FACT_FIELDS_SCHEMA_VERSION,
+    _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
+    _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+)
 
 if TYPE_CHECKING:
-    from ..model import Function, RecordType
+    pass
 
 __all__ = [
+    "CaseAFactRule",
+    "apply_case_a_fact_backfill",
     "apply_legacy_fact_backfill",
     "decode_enum_facts",
     "decode_fact",
+    "decode_fact_with_legacy_presence",
+    "decode_field_facts",
+    "decode_param_facts",
     "decode_function_facts",
     "decode_record_facts",
     "decode_snapshot_facts",
@@ -56,6 +86,19 @@ _TYPE_FACT_KEYS = (
     "is_trivially_copyable_fact",
     "qualified_name_fact",
     "source_header_fact",
+    "deprecated_fact",
+)
+
+# ADR-063 Phase 5 (eighth batch): TypeField's own case-(a) *_fact siblings.
+# Nested one level deeper than every tuple below -- a TypeField dict lives
+# under a type dict's own "fields" list, not directly under a top-level
+# collection -- so `encode_fact_fields` loops it inside the "types" loop.
+_FIELD_FACT_KEYS = (
+    "is_const_fact",
+    "is_volatile_fact",
+    "is_mutable_fact",
+    "default_fact",
+    "deprecated_fact",
 )
 
 # ADR-063 Phase 5 (third batch): EnumType's own qualified_name_fact/
@@ -64,6 +107,8 @@ _TYPE_FACT_KEYS = (
 _ENUM_FACT_KEYS = (
     "qualified_name_fact",
     "source_header_fact",
+    "deprecated_fact",
+    "is_scoped_fact",
 )
 
 # ADR-063 Phase 5 (fourth batch): Variable's own case-(b) *_fact siblings --
@@ -73,6 +118,8 @@ _VARIABLE_FACT_KEYS = (
     "source_header_fact",
     "alignment_bits_fact",
     "elf_binding_fact",
+    "deprecated_fact",
+    "access_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -89,6 +136,7 @@ _FUNCTION_FACT_KEYS = (
     "hidden_friend_owner_fact",
     "elf_binding_fact",
     "is_compiler_generated_fact",
+    "deprecated_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -102,6 +150,15 @@ _ELF_FACT_KEYS = (
     "has_init_fact",
     "has_fini_fact",
 )
+# ADR-063 Phase 5 (tenth batch): Param's own *_fact siblings -- nested one
+# level below "functions", the same shape _FIELD_FACT_KEYS has under
+# "types". Phase 0's is_va_list_fact was encoded by a single hardcoded
+# .get() line until this batch gave Param a second one.
+_PARAM_FACT_KEYS = (
+    "is_va_list_fact",
+    "is_restrict_fact",
+)
+
 _PE_FACT_KEYS = ("delay_imports_fact",)
 _MACHO_FACT_KEYS = ("rpaths_fact",)
 
@@ -118,6 +175,9 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     for type_dict in d.get("types", []):
         for fact_key in _TYPE_FACT_KEYS:
             _encode_one(type_dict.get(fact_key))
+        for field_dict in type_dict.get("fields", []):
+            for fact_key in _FIELD_FACT_KEYS:
+                _encode_one(field_dict.get(fact_key))
     for enum_dict in d.get("enums", []):
         for fact_key in _ENUM_FACT_KEYS:
             _encode_one(enum_dict.get(fact_key))
@@ -128,7 +188,8 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
         for fact_key in _FUNCTION_FACT_KEYS:
             _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):
-            _encode_one(param_dict.get("is_va_list_fact"))
+            for fact_key in _PARAM_FACT_KEYS:
+                _encode_one(param_dict.get(fact_key))
     # AbiSnapshot's own case-(b) field -- a single top-level key, not
     # nested in a list like the four declaration dataclasses above.
     _encode_one(d.get("ast_resolved_standard_fact"))
@@ -152,44 +213,6 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
     status = fact_dict.get("status")
     if isinstance(status, FactStatus):
         fact_dict["status"] = status.value
-
-
-# The schema_version this phase bumped SCHEMA_VERSION to when it started
-# persisting a *_fact sibling for every legacy field it emits (serialization.py).
-_FACT_FIELDS_SCHEMA_VERSION = 26
-
-# ADR-063 Phase 5: the schema_version RecordType.is_final_fact started being
-# persisted at — independent of _FACT_FIELDS_SCHEMA_VERSION above, since a
-# document between the two thresholds (v26..v29) genuinely never carried
-# this key at all, the same way a pre-v26 document never carried any *_fact
-# key. See decode_fact's own docstring for why this threshold matters.
-_MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT = 30
-
-# ADR-063 Phase 5 (second batch): the schema_version RecordType's remaining
-# case-(b) *_fact siblings (is_abstract/data_size_bits/is_standard_layout/
-# is_trivially_copyable/qualified_name/source_header) started being
-# persisted at — one shared threshold, since all six land together in the
-# same schema bump. Same reasoning as _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT
-# above: a document below this version never carried these keys at all.
-_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 32
-
-# ADR-063 Phase 5 (third batch): the schema_version EnumType's own
-# qualified_name_fact/source_header_fact siblings started being persisted
-# at.
-_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 33
-
-# ADR-063 Phase 5 (fourth batch): the schema_version Variable's own
-# source_header_fact/alignment_bits_fact/elf_binding_fact siblings started
-# being persisted at.
-_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 34
-
-# ADR-063 Phase 5 (fifth batch): the schema_version Function's own ten
-# case-(b) *_fact siblings started being persisted at.
-_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 35
-
-# ADR-063 Phase 5 (sixth batch): the schema_version AbiSnapshot's own
-# ast_resolved_standard_fact sibling started being persisted at.
-_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 36
 
 
 def decode_fact(
@@ -276,6 +299,9 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
         ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            t, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
     }
 
 
@@ -295,6 +321,12 @@ def decode_enum_facts(e: dict[str, Any], schema_version: int) -> dict[str, Any]:
             e.get("source_header_fact"),
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+        ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            e, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
+        "is_scoped_fact": decode_fact_with_legacy_presence(
+            e, "is_scoped", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
         ),
     }
 
@@ -324,6 +356,16 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
         elf_binding_fact = replace(
             elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
         )
+    access_fact = decode_fact_with_legacy_presence(
+        v, "access", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
+    )
+    if access_fact is not None and access_fact.value is not None:
+        # Same non-JSON-native value-type reconstruction elf_binding_fact
+        # needs just above: AccessLevel is a str-Enum, so a decoded value is
+        # a bare str until it is rebuilt, and `bridge_legacy_and_fact` then
+        # carries this same object back into the legacy `access` field --
+        # where every reader expects a real AccessLevel member.
+        access_fact = replace(access_fact, value=AccessLevel(access_fact.value))
     return {
         "source_header_fact": decode_fact(
             v.get("source_header_fact"),
@@ -336,6 +378,10 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
         ),
         "elf_binding_fact": elf_binding_fact,
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            v, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
+        "access_fact": access_fact,
     }
 
 
@@ -405,6 +451,9 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
         ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            f, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
     }
 
 
@@ -425,65 +474,94 @@ def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, A
     }
 
 
-def apply_legacy_fact_backfill(
-    d: dict[str, Any],
-    types: list[RecordType],
-    funcs: list[Function],
+def decode_fact_with_legacy_presence(
+    owner_dict: dict[str, Any],
+    legacy_key: str,
     schema_version: int,
-    clang_vtable_facts_reliable_value: bool,
-    clang_va_list_facts_reliable_value: bool,
-    ast_producer_value: str | None,
-) -> None:
-    """Correct the legacy (pre-v26) backfill for vtable/vptr/is_va_list.
+    min_schema_version: int,
+) -> Fact[Any] | None:
+    """:func:`decode_fact` for a case-(a) field, honouring the *legacy* key too.
 
-    A pre-v26 snapshot carries no ``vtable_fact``/``vptr_offset_bits_fact``/
-    ``is_va_list_fact`` keys at all, so each ``RecordType``/``Param``'s own
-    ``__post_init__`` bridge already backfilled these to
-    ``Fact.present(raw_value)`` unconditionally (there is no sentinel to
-    distinguish "legacy, key absent" from "legacy, key present" here — both
-    look like an ordinary explicit value to that bridge). That is correct
-    for ``bases``/``virtual_bases`` (no independent reliability signal —
-    see AGENTS.md's ``type_base_changed`` entry), but wrong for
-    ``vtable``/``vptr_offset_bits``/``is_va_list`` when the *existing*
-    reliability flags say this producer's own facts for this snapshot are
-    untrustworthy: ``Fact.present(raw)`` would misread a placeholder value
-    as a confirmed fact, exactly the bug this phase exists to make
-    unrepresentable. Only runs for a legacy (pre-v26) load — a fresh v26+
-    snapshot's ``*_fact`` keys were decoded explicitly at construction time
-    via :func:`decode_fact` and must not be overridden here.
-
-    ``is_va_list`` needs an extra gate ``vtable``/``vptr_offset_bits`` don't
-    (Codex review, fresh evidence): CastXML never determines va_list-ness at
-    all — its own ``is_va_list`` is always a blanket ``False`` placeholder,
-    not a computed fact the way CastXML's vtable *is* one (see
-    ``clang_vtable_facts_reliable_value``'s own computation in
-    ``serialization.py``: "a castxml... snapshot's own vtable extraction
-    predates this field entirely, so it's always reliable"). But
-    ``clang_va_list_facts_reliable_value`` reads ``True`` for a CastXML
-    snapshot too, since that flag's actual meaning is "safe to trust
-    `False` as not-wrong" (CastXML never reports a real va_list parameter
-    as anything but `False`, so the polarity is never wrong) — a different
-    question from "was this fact actually collected". Reusing that flag
-    alone would silently turn "never observed" into "confirmed not
-    va_list" on every legacy CastXML load. Gated here on
-    ``ast_producer_value == "clang"`` in addition to the reliability flag,
-    so only an actual clang-family load can reach ``Fact.present(...)``.
+    A case-(a) field's own resting value (``False``, ``AccessLevel.PUBLIC``)
+    is a legitimate value, so a document that omits the legacy key entirely
+    is genuinely saying "no evidence", not "confirmed false" — but the
+    caller's own ``f.get("is_const", False)`` default hands the owning
+    dataclass a real ``False`` regardless, which its ``__post_init__``
+    bridge then reads as an explicitly-supplied value and backfills to
+    ``Fact.present(False)``. Returning :meth:`Fact.not_collected` here for
+    that case is what keeps "the document never carried this fact" from
+    being laundered into a confirmed one. Every other case defers to
+    :func:`decode_fact` unchanged.
     """
-    if schema_version >= 26:
-        return
-    if not clang_vtable_facts_reliable_value:
-        for type_dict, record in zip(d.get("types", []), types, strict=False):
-            if "vtable_fact" not in type_dict:
-                record.vtable = []
-                record.vtable_fact = Fact.not_collected()
-            if "vptr_offset_bits_fact" not in type_dict:
-                record.vptr_offset_bits = None
-                record.vptr_offset_bits_fact = Fact.not_collected()
-    if ast_producer_value != "clang" or not clang_va_list_facts_reliable_value:
-        for func_dict, func in zip(d.get("functions", []), funcs, strict=False):
-            for param_dict, param in zip(
-                func_dict.get("params", []), func.params, strict=False
-            ):
-                if "is_va_list_fact" not in param_dict:
-                    param.is_va_list = False
-                    param.is_va_list_fact = Fact.not_collected()
+    raw = owner_dict.get(f"{legacy_key}_fact")
+    if not raw and schema_version < min_schema_version and legacy_key not in owner_dict:
+        return Fact.not_collected()
+    return decode_fact(raw, schema_version, min_schema_version=min_schema_version)
+
+
+def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``Param`` ``Fact[...]`` sibling from one param dict.
+
+    One call, spread into the ``Param(**decode_param_facts(p), ...)``
+    constructor call, mirroring :func:`decode_record_facts` and siblings.
+    ``is_va_list_fact`` (ADR-063 Phase 0) was decoded by a single inline
+    ``decode_fact`` call in ``serialization.py`` until Phase 5's tenth
+    batch gave ``Param`` a second sibling; both live here now, so this
+    owner's decode wiring is one place rather than two.
+    """
+    return {
+        "is_va_list_fact": decode_fact(p.get("is_va_list_fact"), schema_version),
+        "is_restrict_fact": decode_fact_with_legacy_presence(
+            p, "is_restrict", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
+        ),
+    }
+
+
+def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``TypeField`` ``Fact[...]`` sibling from one field dict.
+
+    One call, spread into the ``TypeField(**decode_field_facts(fld), ...)``
+    constructor call, mirroring :func:`decode_record_facts` and siblings --
+    the ``fld`` parameter name, rather than the ``f`` this module's
+    neighbours use for a raw dict, is deliberate: ``scripts/fact_registry_
+    completeness.py`` resolves a decode call's owner from its receiver
+    *name*, and ``f`` already means ``Function`` there (the same collision
+    the binary-format batch's own ``elf``/``pe``/``macho`` renames avoided).
+    Unlike those, every field here is case-(a) — availability is carried by
+    ``AbiSnapshot.header_cv_facts_reliable``, not by the value — so each
+    routes through :func:`decode_fact_with_legacy_presence`, and a legacy
+    document whose flag says its blanket ``False``s are untrustworthy is
+    corrected afterwards by :func:`apply_case_a_fact_backfill`.
+    """
+    return {
+        "is_const_fact": decode_fact_with_legacy_presence(
+            fld,
+            "is_const",
+            schema_version,
+            _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
+        ),
+        "is_volatile_fact": decode_fact_with_legacy_presence(
+            fld,
+            "is_volatile",
+            schema_version,
+            _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
+        ),
+        "is_mutable_fact": decode_fact_with_legacy_presence(
+            fld,
+            "is_mutable",
+            schema_version,
+            _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
+        ),
+        "default_fact": decode_fact_with_legacy_presence(
+            fld,
+            "default",
+            schema_version,
+            _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
+        ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            fld,
+            "deprecated",
+            schema_version,
+            _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
+        ),
+    }

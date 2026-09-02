@@ -267,22 +267,20 @@ class TestScanModelDataclasses:
         found = scan_model_dataclasses(model_dir=tmp_path)
         assert ("Widget", "label") not in found
 
-    def test_real_repo_finds_function_deprecated_and_variable_access_via_flag(
-        self,
-    ) -> None:
-        # Variable.access is a case (a) field (plain enum, flag-guarded) —
-        # the scan_model_dataclasses() heuristic itself can never find it
-        # (no Optional shape), which is exactly why REFERENCE_FLAG_COVERAGE
-        # is checked independently in the real gate. Function.deprecated
-        # and EnumType.is_scoped ARE Optional-shaped with a documented
-        # marker and are found here -- both remain genuinely unconverted
-        # (ElfMetadata.dynamic_flags/has_init/has_fini, PeMetadata.
-        # delay_imports, and MachoMetadata.rpaths -- the binary-format
-        # case-(b) fields -- converted in Phase 5's seventh batch; see
-        # fact_registry_entries.py's FACT_REGISTRY).
-        found = scan_model_dataclasses()
-        assert ("Function", "deprecated") in found
-        assert ("EnumType", "is_scoped") in found
+    def test_real_repo_scan_reports_only_already_converted_fields(self) -> None:
+        # ADR-063 Phase 5's field-by-field conversion is complete, so this
+        # scan's own real-repo answer is now "every eligible field it finds
+        # already has a Fact[...] sibling" -- checked against
+        # _model_fact_siblings() rather than a hard-coded field list, so a
+        # future *new* eligible field lands here (and in the gate) instead
+        # of silently passing. `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` is empty
+        # for the same reason; see fact_registry_schema.py.
+        found = set(scan_model_dataclasses())
+        converted = {
+            (owner, attr[: -len("_fact")])
+            for owner, attr in fact_registry_completeness._model_fact_siblings()
+        }
+        assert not (found - converted), sorted(found - converted)
 
 
 # ---------------------------------------------------------------------------
@@ -876,8 +874,12 @@ class TestPersistedEncodeDecodeWiring:
         fact_registry_completeness._SERIALIZATION_PATH = serialization
         import abicheck.model.fact_registry as fr
 
+        # A hypothetical owner, deliberately not a real registered pair:
+        # every real (owner, "deprecated") pair is converted and registered
+        # since ADR-063 Phase 5's ninth batch, so reusing one here would
+        # collide with the real registry rather than test the gate.
         wrong_owner_entry = FactDefinition(
-            owner="Variable",
+            owner="EnumMember",
             field="deprecated",
             value_type="bool",
             producing_backends=("clang",),
@@ -890,10 +892,10 @@ class TestPersistedEncodeDecodeWiring:
         )
         try:
             # "deprecated_fact" is fully wired for RecordType (via
-            # _TYPE_FACT_KEYS + decode_fact(t.get(...))) but Variable has no
-            # Variable-shaped receiver anywhere -- the bare-string version
-            # of this check would have treated RecordType's wiring as
-            # satisfying Variable's entry too.
+            # _TYPE_FACT_KEYS + decode_fact(t.get(...))) but EnumMember has
+            # no EnumMember-shaped receiver anywhere -- the bare-string
+            # version of this check would have treated RecordType's wiring
+            # as satisfying EnumMember's entry too.
             with pytest.MonkeyPatch.context() as mp:
                 mp.setattr(
                     fr,
@@ -906,7 +908,7 @@ class TestPersistedEncodeDecodeWiring:
             fact_registry_completeness._FACT_CODEC_PATH = original_codec
             fact_registry_completeness._SERIALIZATION_PATH = original_ser
         assert any(
-            "Variable.deprecated" in msg and "persisted=True" in msg
+            "EnumMember.deprecated" in msg and "persisted=True" in msg
             for _, msg in findings.errors
         )
 

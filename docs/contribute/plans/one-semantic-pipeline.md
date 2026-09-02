@@ -12202,6 +12202,27 @@ round" entry for the full account.
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
 
+**Landed (complete, 2026-09-02): infrastructure *and* the full
+field-by-field population.** The registry, the
+`fact-registry-completeness` gate and the generated
+`docs/reference/fact-registry.md` landed first (schema v30), followed by
+nine conversion batches (schema v31-v40) — the case-(b) population first,
+then the harder case-(a) half this section's own eligibility discussion
+below exists for. `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` is now the empty set:
+every field either half of the scan finds eligible carries a `Fact[T]`
+sibling and exactly one `FactDefinition`, and a newly-added eligible field
+fails the gate outright rather than joining a baseline. Two pieces of
+shared machinery came out of the case-(a) half —
+`storage/fact_codec.apply_case_a_fact_backfill` (one navigator + a
+`CaseAFactRule` table, replacing Phase 0's three open-coded legacy-load
+corrections) and `decode_fact_with_legacy_presence` — plus fixes for five
+real merge-path mutation traps the conversions surfaced. Per-batch detail,
+including what this phase deliberately did **not** attempt (no detector
+branches on `FactStatus`; no codegen of the model field, the serialization
+pair, or suppression/report wiring), lives in
+[ADR-063](../adr/063-one-semantic-pipeline.md)'s own Status paragraph —
+not restated here, so the two cannot drift.
+
 **Goal.** A new fact requires declaring the model field plus one registry
 entry, not nine touched files spread across serialization, diff,
 suppression, and hand-maintained docs.

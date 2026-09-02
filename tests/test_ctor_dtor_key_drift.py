@@ -49,7 +49,14 @@ from abicheck.finding_identity_ctor_dtor import (
     find_ctor_dtor_key_drift_matches,
     iter_matched_function_pairs,
 )
-from abicheck.model import AbiSnapshot, AccessLevel, Function, Param, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    AccessLevel,
+    Function,
+    Param,
+    Visibility,
+    replace_with_fact_sync,
+)
 
 
 def _snap(version: str, functions: list[Function]) -> AbiSnapshot:
@@ -598,7 +605,10 @@ class TestCtorDtorReconciliationConsumersWithForcedMatch:
         old_key = "__abicheck_ctor__Calculator()"
         new_key = "__abicheck_ctor__abicheck_lab::Calculator()"
         old_ctor = _func("Calculator::Calculator", old_key)
-        new_ctor = dataclasses.replace(
+        # replace_with_fact_sync, not dataclasses.replace: `deprecated` is
+        # Fact[...]-bridged (ADR-063 Phase 5), and a bare replace() lets the
+        # stale sibling win under __post_init__'s "explicit Fact wins" rule.
+        new_ctor = replace_with_fact_sync(
             _func("Calculator::Calculator", new_key), deprecated="use Bar instead"
         )
         old = self._hybrid_snap(

@@ -322,6 +322,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (ninth batch): Fact[str | None] sibling of "
+            "deprecated. NONE for both backends because neither names the "
+            "keyword -- each passes the real value and the dataclass's own "
+            "__post_init__ bridge derives the Fact, the same honest reading "
+            "this matrix already records for every other bridge-derived "
+            "sibling. Availability is carried by AbiSnapshot.clang_"
+            "deprecation_facts_reliable."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_override",
         _FULL,
         _FULL,
@@ -449,6 +464,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "pre-v24-legacy-baseline case."
         ),
     ),
+    FactRow(
+        "Variable",
+        "access_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (tenth batch): Fact[AccessLevel] sibling of "
+            "access. NONE for both backends because neither names the "
+            "keyword -- each passes the real value and Variable."
+            "__post_init__'s bridge derives the Fact. Availability is "
+            "carried by AbiSnapshot.castxml_var_access_facts_reliable."
+        ),
+    ),
     FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
     FactRow("Variable", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
@@ -502,6 +530,16 @@ FACT_ROWS: tuple[FactRow, ...] = (
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
     ),
+    FactRow(
+        "Variable",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as Function.deprecated_fact -- see that row's "
+            "own note."
+        ),
+    ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     FactRow(
         "Variable",
@@ -547,8 +585,45 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("TypeField", "is_bitfield", _FULL, _FULL),
     FactRow("TypeField", "bitfield_bits", _FULL, _FULL),
     FactRow("TypeField", "is_const", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "is_const_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (eighth batch): Fact[bool] sibling of is_const, "
+            "and the phase's first case-(a) conversion. NONE for both "
+            "backends because neither names the keyword: each passes the "
+            "real is_const value and TypeField.__post_init__'s generic "
+            "bridge derives Fact.present(...) from it -- the same honest "
+            "reading this matrix already records for RecordType's own "
+            "bridge-derived case-(b) siblings. Availability for this field "
+            "is carried by AbiSnapshot.header_cv_facts_reliable, not by "
+            "either backend's own construction."
+        ),
+    ),
     FactRow("TypeField", "is_volatile", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "is_volatile_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_const_fact -- see that row's own note.",
+    ),
     FactRow("TypeField", "is_mutable", _FULL, _FULL),
+    FactRow(
+        "TypeField",
+        "is_mutable_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as is_const_fact -- see that row's own note. DWARF "
+            "(outside this matrix's own header-AST scope) states Fact."
+            "unsupported() explicitly here: it has no DW_AT for `mutable` "
+            "at all, so its blanket False is a producer limitation, not a "
+            "determined fact."
+        ),
+    ),
     FactRow("TypeField", "access", _FULL, _FULL),
     FactRow(
         "TypeField",
@@ -566,11 +641,36 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "TypeField",
+        "default_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (eighth batch): Fact[str | None] sibling of "
+            "default. NONE for both backends for the same reason as "
+            "is_const_fact -- each passes the real value and TypeField."
+            "__post_init__'s bridge derives the Fact. Availability is "
+            "carried by AbiSnapshot.clang_field_initializer_facts_"
+            "reliable."
+        ),
+    ),
+    FactRow(
+        "TypeField",
         "deprecated",
         _FULL,
         _FULL,
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "TypeField",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as default_fact -- see that row's own note; "
+            "guarded by AbiSnapshot.clang_deprecation_facts_reliable "
+            "instead."
+        ),
     ),
     # ── RecordType ─────────────────────────────────────────────────────────
     FactRow("RecordType", "name", _FULL, _FULL),
@@ -901,6 +1001,16 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as Function.deprecated_fact -- see that row's "
+            "own note."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "entity_id",
         _FULL,
         _FULL,
@@ -965,11 +1075,33 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "EnumType",
+        "is_scoped_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (ninth batch): Fact[bool | None] sibling of "
+            "is_scoped, guarded by the same clang_deprecation_facts_"
+            "reliable flag its own conversion batch shares. NONE for the "
+            "same bridge-derived reason as Function.deprecated_fact."
+        ),
+    ),
+    FactRow(
+        "EnumType",
         "deprecated",
         _FULL,
         _FULL,
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "EnumType",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as Function.deprecated_fact -- see that row's "
+            "own note."
+        ),
     ),
     FactRow("EnumType", "qualified_name", _FULL, _FULL),
     FactRow(
@@ -1035,6 +1167,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "only producer before that, so a cross-backend comparison of "
             "unchanged headers reported `param_restrict_changed` for every "
             "`restrict` parameter."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "is_restrict_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (tenth batch): Fact[bool] sibling of "
+            "is_restrict, bridge-derived on both backends the same way "
+            "Variable.access_fact is; guarded by AbiSnapshot."
+            "clang_restrict_facts_reliable."
         ),
     ),
     FactRow(

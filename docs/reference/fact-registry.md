@@ -27,9 +27,12 @@ Phase 5 section for the design this page's data comes from.
 | `ElfMetadata.dynamic_flags` | `frozenset[str] \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `ElfMetadata.has_fini` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `ElfMetadata.has_init` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `EnumType.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `EnumType.is_scoped` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -40,10 +43,12 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `MachoMetadata.rpaths` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
+| `Param.is_restrict` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_abstract` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_standard_layout` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -53,7 +58,14 @@ Phase 5 section for the design this page's data comes from.
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vptr_offset_bits` | `int \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vtable` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `TypeField.default` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `TypeField.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `TypeField.is_const` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `TypeField.is_mutable` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `TypeField.is_volatile` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.access` | `AccessLevel` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 
@@ -86,15 +98,3 @@ check fails if a new eligible field appears that isn't named here.
 
 | Field | Converted? |
 |-------|------------|
-| `EnumType.deprecated` | not yet — tracked gap |
-| `EnumType.is_scoped` | not yet — tracked gap |
-| `Function.deprecated` | not yet — tracked gap |
-| `Param.is_restrict` | not yet — tracked gap |
-| `RecordType.deprecated` | not yet — tracked gap |
-| `TypeField.default` | not yet — tracked gap |
-| `TypeField.deprecated` | not yet — tracked gap |
-| `TypeField.is_const` | not yet — tracked gap |
-| `TypeField.is_mutable` | not yet — tracked gap |
-| `TypeField.is_volatile` | not yet — tracked gap |
-| `Variable.access` | not yet — tracked gap |
-| `Variable.deprecated` | not yet — tracked gap |

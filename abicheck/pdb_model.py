@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .model import EnumMember, EnumType, RecordType, TypeField
+from .model import EnumMember, EnumType, Fact, RecordType, TypeField
 
 if TYPE_CHECKING:
     from .dwarf_metadata import DwarfMetadata
@@ -69,6 +69,17 @@ def _record_from_layout(name: str, layout: object) -> RecordType:
                 offset_bits=offset_bits,
                 is_bitfield=bit_size > 0,
                 bitfield_bits=bit_size if bit_size > 0 else None,
+                # ADR-063 Phase 5 (eighth batch): the PDB layout view carries
+                # names, types and offsets only -- it determines no CV
+                # qualification, no `mutable` specifier, no default member
+                # initializer and no deprecation for a member, so each reads
+                # UNSUPPORTED rather than a blanket False/None a detector
+                # could mistake for "confirmed not const"/"no initializer".
+                is_const_fact=Fact.unsupported(),
+                is_volatile_fact=Fact.unsupported(),
+                is_mutable_fact=Fact.unsupported(),
+                default_fact=Fact.unsupported(),
+                deprecated_fact=Fact.unsupported(),
             )
         )
     return RecordType(
