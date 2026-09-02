@@ -3748,9 +3748,29 @@ second top-level spelling of the same fact.
 > [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md)'s own
 > matching update for the full account, including the one gap this leaves:
 > `--format text` with no JSON secondary output still reads as `ERROR`,
-> since `cli_scan.py` writes no report at all on that path. Still open:
-> the `GateOptions` rewrite, the typed-API half of the parity pass, and
-> that `--format text` gap.
+> since `cli_scan.py` writes no report at all on that path.
+>
+> **Update (2026-09-02): the release fan-out's `GateOptions` rewrite
+> landed** (`abicheck/policy/release_gate_options.py`'s `GateOptions`/
+> `resolve_release_gate_options` -- `policy/`'s own home for gate/severity
+> decisions, reached from the release fan-out's `cli_compare_release_helpers.py`
+> through `abicheck/workflows/gate.py`'s facade), closing the item PR B's own "finalized"
+> note reassigned here. `_resolve_release_severity_config`,
+> `_compute_release_severity_exit_code`, and `_fold_release_global_severity`
+> no longer independently re-derive the same `SeverityConfig` from the same
+> six raw preset/category/scheme strings at three separate call sites —
+> `resolve_release_gate_options` resolves it exactly once (pack folding via
+> the existing `apply_release_gate_pack`, plus the two scheme-dependent
+> corrections `compare_release_cmd` used to apply inline at its own call
+> site), and the two downstream functions now take the resulting
+> `GateOptions` object. Landed additively: no CLI surface and no externally
+> observable exit code changed (the existing severity/exit-code test suite
+> passes unchanged against the new call shape), so — contrary to this ADR's
+> own original assumption that the shape change had to be atomic-stage work
+> alongside `--exit-code-scheme`'s removal — it did not need to wait for
+> stage 2. See ADR-064's own matching correction for the full account.
+> Still open: the typed-API half of the parity pass, and the `--format
+> text` gap.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4761,8 +4781,19 @@ PR F  trusted build config            = PR 3C — build.query executes only
       └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
          now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-      (ADR-064 accepted; stage 1a done,   schema / report / Action parity
-       stage 1b partially wired)
+      (ADR-064 accepted; stage 1a done,   schema / report / Action parity.
+       stage 1b: GateOptions landed       GateOptions (the release fan-out's
+       2026-09-02, rest partially wired)  own typed severity/exit-code-scheme
+                                       object) landed 2026-09-02
+                                       (abicheck/policy/release_gate_options.py,
+                                       reached from the frontends-classified
+                                       cli_compare_release_helpers.py through
+                                       workflows/gate.py's facade); still
+                                       open: the typed-API half of the
+                                       parity pass, the scan --format text
+                                       gap, a real --artifact-set member-level
+                                       evidence-contract signal for the
+                                       Action
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;
@@ -4788,11 +4819,21 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        BUNDLE_ARCHIVE_ARTIFACT_TYPE, and
                                        bundle_facts_serialization.looks_like_bundle_facts_document()
                                        as the classifier a future operand
-                                       dispatcher will call. The
-                                       BundleCompareRequest unification and
-                                       the deletion below remain blocked on
-                                       PR G2's GateOptions, which does not
-                                       exist yet
+                                       dispatcher will call. PR G2's own
+                                       GateOptions now exists too (landed
+                                       2026-09-02, see PR G2's own row) --
+                                       but scoped narrowly to the release
+                                       fan-out's own severity/exit-code-scheme
+                                       resolution, per ADR-064's actual
+                                       "GateOptions" section, not yet the
+                                       shared cross-front-end object this
+                                       row's own BundleCompareRequest sketch
+                                       implies. The BundleCompareRequest
+                                       unification and the deletion below
+                                       are not started; whether they reuse
+                                       this GateOptions class as-is or need
+                                       a broader one is this row's own design
+                                       question to resolve, not decided here
       └─ then DELETE compare --old-bundle-facts
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
       (NEW, not started)                --bundle-system-providers/--bundle-

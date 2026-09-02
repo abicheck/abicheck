@@ -21,6 +21,17 @@ release summary (JSON / Markdown / JUnit) live here, split out of
 :mod:`abicheck.cli_compare_release` to keep that module under the
 AI-readiness file-size limit. They are re-exported from
 ``cli_compare_release`` to preserve the public import surface.
+
+``GateOptions``/``resolve_release_gate_options``/``apply_release_gate_pack``/
+``_resolve_release_severity_config`` (ADR-064's release-fan-out gate
+resolution) live in :mod:`abicheck.policy.release_gate_options` instead --
+this package's own home for deciding gate/severity effect
+(``abicheck/policy/AGENTS.md``), and also outside the file-size no-growth
+budget this module is at. This (a ``frontends``-classified module) reaches
+them through :mod:`abicheck.workflows.gate`'s facade rather than importing
+``policy`` directly (``frontends -> policy`` is forbidden), and re-exports
+them here so every pre-existing import of them from this module keeps
+working.
 """
 
 from __future__ import annotations
@@ -38,7 +49,13 @@ from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .model import AbiSnapshot
-from .workflows.gate import resolve_release_exit_decision_for_report
+from .workflows.gate import (
+    GateOptions as GateOptions,  # re-exported, ADR-064
+    _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
+    apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
+    resolve_release_exit_decision_for_report,
+    resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
+)
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
@@ -680,133 +697,16 @@ def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
         click.echo(f"Extracted files kept in: {kept_paths}", err=True)
 
 
-def apply_release_gate_pack(
-    pack_application: PackApplication | None,
-    *,
-    release_exit_code_scheme: str | None,
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
-) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
-    """Fold a selected ``kind: gate`` pack's contribution into the release
-    fan-out's own raw exit-code-scheme/severity inputs (CLI cleanup phase
-    two, "PR B" slice 2).
-
-    Returns ``(release_exit_code_scheme, severity_preset,
-    severity_abi_breaking, severity_potential_breaking,
-    severity_quality_issues, severity_addition)`` -- the exact six values
-    the caller already threads through every downstream severity/exit-code
-    resolution (``_resolve_release_severity_config``,
-    ``_compute_release_severity_exit_code``,
-    ``_fold_release_global_severity``, and the per-library JSON write), so
-    calling this **once**, before any of those, is what makes every one of
-    them agree with the pack -- mirroring how ``compare_release_cmd``
-    already reassigns ``release_exit_code_scheme``/``severity_preset``
-    once, early, for the ``.abicheck.yml``-only ``exit_code_scheme:
-    severity`` case just above this function's own call site.
-
-    The release fan-out has no ``ResolvedCompareConfig``-shaped object of
-    its own to fold onto the way :func:`~abicheck.pack_application.
-    apply_to_compare_config` does for a single-pair ``compare`` -- its
-    severity/exit-code-scheme resolution is a set of raw CLI-or-config
-    strings, re-derived at several call sites. So this mirrors that
-    function's *logic* against the release fan-out's raw-string shape
-    instead: a pack-supplied ``gate.severity.<category>`` overrides the
-    matching raw string (only ever reached when nothing more explicit --
-    ``--severity-<category>``/``.abicheck.yml`` -- already stated it,
-    since :func:`~abicheck.pack_application.pack_application` already
-    excludes a field an explicit source shadowed), and a pack-supplied
-    ``gate.exit_code_scheme`` overrides *that* raw string the same way --
-    with the identical "resolver's own already-decided ``auto`` answer,
-    not a re-derivation" fallback when only a severity level moved and no
-    scheme was directly assigned (see ``apply_to_compare_config``'s own
-    docstring for why re-deriving one here would be wrong: a severity
-    level *is* severity being configured, and the resolver's own
-    ``resolved_exit_code_scheme`` already reflects that while still
-    letting an explicit ``--exit-code-scheme``/``.abicheck.yml`` value
-    outrank it).
-
-    A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
-    contributed neither field -- every pre-existing invocation reaches the
-    six inputs completely unchanged.
-    """
-    if pack_application is None:
-        return (
-            release_exit_code_scheme,
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
-    levels = pack_application.severity_levels
-    if levels:
-        severity_abi_breaking = levels.get("abi_breaking", severity_abi_breaking)
-        severity_potential_breaking = levels.get(
-            "potential_breaking", severity_potential_breaking
-        )
-        severity_quality_issues = levels.get("quality_issues", severity_quality_issues)
-        severity_addition = levels.get("addition", severity_addition)
-    scheme = pack_application.exit_code_scheme
-    if scheme is None and levels:
-        scheme = pack_application.resolved_exit_code_scheme
-    if scheme is not None:
-        release_exit_code_scheme = scheme
-    return (
-        release_exit_code_scheme,
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
-    )
-
-
-def _resolve_release_severity_config(
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
-) -> SeverityConfig | None:
-    """Resolve the severity config, or None when no severity setting was in effect."""
-    if not any(
-        v is not None
-        for v in (
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
-    ):
-        return None
-    from .workflows.gate import resolve_severity_config
-
-    return resolve_severity_config(
-        severity_preset,
-        abi_breaking=severity_abi_breaking,
-        potential_breaking=severity_potential_breaking,
-        quality_issues=severity_quality_issues,
-        addition=severity_addition,
-    )
-
-
 def _compute_release_severity_exit_code(
     library_results: list[dict[str, object]],
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
+    gate: GateOptions,
 ) -> int | None:
     """Compute the severity-aware exit code aggregated across all libraries.
 
     Returns ``None`` when no severity setting was in effect (callers
-    keep the legacy verdict-based exit). Otherwise returns the worst
-    :func:`compute_exit_code` over the per-library changes. Each library is
+    keep the legacy verdict-based exit) -- i.e. when ``gate.severity is
+    None``. Otherwise returns the worst :func:`compute_exit_code` over the
+    per-library changes. Each library is
     classified with *its own* ``DiffResult._effective_kind_sets()`` (kind-level
     ``--policy-file`` overrides) *and* its own ``policy``/``policy_file`` (the
     per-finding frozen-namespace floor — Codex review on #549: without
@@ -820,14 +720,7 @@ def _compute_release_severity_exit_code(
     entries are stripped; release-global bundle/matrix findings are folded in
     separately via :func:`_fold_release_global_severity`.
     """
-    resolved_config = _resolve_release_severity_config(
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
-    )
-    if resolved_config is None:
+    if gate.severity is None:
         return None
 
     from .workflows.gate import compute_exit_code
@@ -838,7 +731,7 @@ def _compute_release_severity_exit_code(
         if isinstance(diff, DiffResult):
             code = compute_exit_code(
                 diff.changes,
-                resolved_config,
+                gate.severity,
                 policy=diff.policy,
                 kind_sets=diff._effective_kind_sets(),
                 policy_file=diff.policy_file,
@@ -851,11 +744,7 @@ def _fold_release_global_severity(
     base_code: int,
     bundle_result: BundleDiffResult | None,
     matrix_result: DiffResult | None,
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
+    gate: GateOptions,
 ) -> int:
     """Fold release-global (bundle + matrix) findings into the severity exit.
 
@@ -864,15 +753,10 @@ def _fold_release_global_severity(
     computed later and update ``worst_verdict``. Without this, a release whose
     per-library diffs are clean but whose bundle/matrix analysis flags an
     error-level break would exit 0 under, e.g., the default preset. Returns the
-    worst of *base_code* and the bundle/matrix severity codes.
+    worst of *base_code* and the bundle/matrix severity codes. A no-op
+    (returns *base_code* unchanged) when ``gate.severity is None``.
     """
-    config = _resolve_release_severity_config(
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
-    )
+    config = gate.severity
     if config is None:
         return base_code
 
