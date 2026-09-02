@@ -72,6 +72,29 @@ _VALID_REACHABILITY: frozenset[str] = frozenset({
 
 @dataclass
 class Suppression:
+    """One suppression rule. See individual field docstrings below for the
+    selector grammar and :meth:`matches`/:meth:`selector_matches` for how
+    they're evaluated.
+
+    **Selector fields are read once, at construction time, into an internal
+    :class:`~abicheck.policy.selectors.SelectorSet` (ADR-063 D10) — mutating
+    a field after construction does not change what :meth:`matches`/
+    :meth:`selector_matches` matches.** This was already true for every
+    *compiled* selector (``symbol_pattern``/``type_pattern``/``member_name``/
+    ``source_location``/``namespace``/``entity_namespace``/``cause_namespace``)
+    before this refactor -- each was compiled once in ``__post_init__`` and
+    never recompiled on assignment; this phase only extended the same rule to
+    the two selectors that used to be a live re-read each call
+    (``symbol``, ``expires``), rather than leaving those as the sole
+    exceptions to an otherwise already-construct-once contract. Construct a
+    new ``Suppression`` instead of mutating one in place if a rule's
+    selectors need to change. (Some *non-selector* fields, e.g. ``reason``/
+    ``label``, remain safely mutable, since nothing reads them through
+    ``_selector`` -- see :mod:`abicheck.reporter_contract_blocks`'s
+    ``suppression_rule_label``, which deliberately reads via ``getattr``
+    rather than through this class's own matching path.)
+    """
+
     symbol: str | None = None
     symbol_pattern: str | None = None
     type_pattern: str | None = None

@@ -228,6 +228,13 @@ class ReclassifyRule:
         reason: Optional human-readable justification, for audit output.
         label: Optional grouping tag, mirroring
             :attr:`Suppression.label`.
+
+    **Selector fields are read once, into an internal ``SelectorSet``, at
+    construction time (``__post_init__``) -- mutating one afterward does not
+    change what :meth:`matches` matches, the identical contract
+    :class:`~abicheck.suppression.Suppression` documents for the same
+    reason.** Construct a new ``ReclassifyRule`` instead of mutating one in
+    place if a rule's selectors need to change.
     """
 
     to_verdict: Verdict
