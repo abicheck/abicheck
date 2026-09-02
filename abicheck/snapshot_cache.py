@@ -45,7 +45,12 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "24"
+_SNAPSHOT_CACHE_VERSION: str = "25"
+# v25: AbiSnapshot.semantic_ir now also canonicalizes functions/variables,
+# and PE/Mach-O header-AST dumps populate it too (ADR-063 Phase 6, third
+# slice). A snapshot cached by an older abicheck build would otherwise
+# silently keep serving the records/enums/typedefs-only (or, for PE/Mach-O,
+# entirely absent) semantic_ir forever for identical cache-key inputs.
 # v24: AbiSnapshot.semantic_ir is now genuinely populated for a real ELF
 # header-AST dump (ADR-063 Phase 6, second slice -- extract/
 # semantic_normalizer.py wired through dumper_manifest.resolve_header_ast_

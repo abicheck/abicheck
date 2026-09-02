@@ -145,26 +145,58 @@ from ..name_classification import canonicalize_type_name
 
 __all__ = ["normalize_header_ast"]
 
-#: Both header-AST backends use this literal as their typedef-resolution
-#: placeholder when the underlying type couldn't be followed
+#: Both header-AST backends use this literal as their type-resolution
+#: placeholder when a type couldn't be followed -- a typedef's underlying
+#: type, a function's return/parameter type, or a variable's own type
 #: (``dumper_castxml.py``/``dumper_castxml_typedefs.py``/``dumper_clang.py``,
 #: verified directly) -- never a real, structurally-fixed type spelling. See
-#: its use in :func:`normalize_header_ast` below.
+#: its use in :func:`normalize_header_ast`, :func:`_function_spelling_fact`,
+#: and :func:`_variable_spelling_fact` below.
 _UNRESOLVED_TYPE_SENTINEL = "?"
 
 
-def _function_canonical_spelling(fn: Function) -> str:
+def _function_spelling_fact(fn: Function) -> Fact[str]:
     """``"<return>(<param>, ...)"`` for *fn*, both canonicalized with the
     identical primitives ``entity_id_for_function`` already applies for the
     same cross-backend spelling problem — see this module's own docstring
     ("Scope of the third slice") for why each position uses a different one
     of the two.
+
+    ``Fact.failed(...)`` — not ``Fact.present(...)`` — whenever the RAW
+    return type or any raw parameter type is exactly the
+    ``_UNRESOLVED_TYPE_SENTINEL`` placeholder (Codex review): castxml emits
+    the identical ``"?"`` sentinel for a function/parameter type it could
+    not resolve the same way it does for a typedef's underlying type (see
+    the typedef branch in :func:`normalize_header_ast`), and treating that
+    as a confirmed spelling would both misrepresent the placeholder as
+    canonical and permanently block a hybrid merge's backfill the moment
+    clang resolves the same declaration (``merge_semantic_ir`` only ever
+    backfills a *non*-present base fact). Checked on the RAW components,
+    before canonicalization -- canonicalizing ``"?"`` first would not
+    change it (no known type spells literally ``"?"``), but checking raw
+    input mirrors the typedef branch's own exact-sentinel check and avoids
+    ever asking a canonicalizer to interpret a placeholder as a type.
     """
+    raw_components = (fn.return_type, *(p.type for p in fn.params))
+    if any(t == _UNRESOLVED_TYPE_SENTINEL for t in raw_components):
+        return Fact.failed("return or parameter type not resolved")
     canonical_return = canonicalize_type_name(fn.return_type)
     canonical_params = ", ".join(
         canonicalize_function_signature_param_type(p.type) for p in fn.params
     )
-    return f"{canonical_return}({canonical_params})"
+    return Fact.present(f"{canonical_return}({canonical_params})")
+
+
+def _variable_spelling_fact(var: Variable) -> Fact[str]:
+    """``canonicalize_type_name(var.type)``, or ``Fact.failed(...)`` when the
+    raw type is exactly the unresolved-type sentinel — see
+    :func:`_function_spelling_fact`'s own docstring for the identical
+    reasoning, applied to a variable's single type instead of a function's
+    return/parameter types.
+    """
+    if var.type == _UNRESOLVED_TYPE_SENTINEL:
+        return Fact.failed("type not resolved")
+    return Fact.present(canonicalize_type_name(var.type))
 
 
 def _add_occurrence(
@@ -294,7 +326,7 @@ def normalize_header_ast(
         _add_occurrence(
             occurrences,
             fn.entity_id,
-            Fact.present(_function_canonical_spelling(fn)),
+            _function_spelling_fact(fn),
             producer=producer,
             cv_qualification=Fact.present(
                 canonical_cv_qualification(
@@ -309,7 +341,7 @@ def normalize_header_ast(
         _add_occurrence(
             occurrences,
             var.entity_id,
-            Fact.present(canonicalize_type_name(var.type)),
+            _variable_spelling_fact(var),
             producer=producer,
             cv_qualification=Fact.present(
                 canonical_cv_qualification(("const",) if var.is_const else ())

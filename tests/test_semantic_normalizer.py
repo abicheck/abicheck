@@ -262,6 +262,41 @@ def test_normalize_header_ast_canonicalizes_function_signature_spelling() -> Non
     assert entity.producer == "castxml"
 
 
+def test_normalize_header_ast_unresolved_function_return_type_is_failed() -> None:
+    """castxml's own unresolved-type sentinel (``"?"``) on a function's
+    RETURN type is a failure, not a confirmed spelling (Codex review) --
+    the identical treatment the typedef branch already gives it."""
+    fn = _function("f", "?", ("int",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.value is None
+
+
+def test_normalize_header_ast_unresolved_function_param_type_is_failed() -> None:
+    """The identical sentinel on a PARAMETER type is also a failure, not
+    silently rendered as a literal ``"?"`` inside an otherwise-confirmed
+    signature string."""
+    fn = _function("f", "void", ("?",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_function_cv_qualification() -> None:
     """A member function's ``is_const``/``is_volatile`` populate
     ``cv_qualification`` in canonical order, separately from the spelling
@@ -345,6 +380,27 @@ def test_normalize_header_ast_canonicalizes_variable_type_spelling() -> None:
     assert entity.canonical_spelling.value == "Widget const *"
     assert entity.cv_qualification.value == ("const",)
     assert entity.producer == "clang"
+
+
+def test_normalize_header_ast_unresolved_variable_type_is_failed() -> None:
+    """The identical unresolved-type sentinel on a variable's own type is a
+    failure, not a confirmed ``"?"`` spelling (Codex review)."""
+    var = Variable(
+        name="g_widget",
+        mangled="g_widget",
+        type="?",
+        entity_id=entity_id_for_variable((), "g_widget", mangled_name="g_widget"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
 
 
 def test_normalize_header_ast_non_const_variable_has_empty_cv_qualification() -> None:
