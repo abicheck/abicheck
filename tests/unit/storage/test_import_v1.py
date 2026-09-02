@@ -106,6 +106,41 @@ class TestImportLegacySnapshot:
         assert LEGACY_DOCUMENT_SECTION_KIND in manifest.artifact_refs[0].sections
         assert "semantic_ir" not in manifest.versions.section_schema_versions
 
+    def test_artifact_kind_defaults_to_elf_when_the_document_states_no_platform(
+        self,
+    ) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        assert doc.get("platform") is None
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert manifest.artifact_refs[0].kind == "elf"
+
+    @pytest.mark.parametrize("platform", ["pe", "macho", "elf"])
+    def test_artifact_kind_is_derived_from_the_documents_own_platform(
+        self, platform: str
+    ) -> None:
+        snap = _snapshot_with_ir()
+        snap.platform = platform
+        doc = snapshot_to_dict(snap)
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert manifest.artifact_refs[0].kind == platform
+
+    def test_an_explicit_artifact_kind_overrides_the_documents_platform(
+        self,
+    ) -> None:
+        """A caller who already knows the real kind is never second-guessed —
+        the document's own `platform` is only consulted when the caller took
+        the default."""
+        snap = _snapshot_with_ir()
+        snap.platform = "pe"
+        doc = snapshot_to_dict(snap)
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(
+            doc, store=store, artifact_id="libfoo", artifact_kind="macho"
+        )
+        assert manifest.artifact_refs[0].kind == "macho"
+
     def test_custom_artifact_and_variant_ids_are_honored(self) -> None:
         doc = snapshot_to_dict(_snapshot_with_ir())
         store = InMemoryObjectStore()

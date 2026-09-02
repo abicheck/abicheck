@@ -119,7 +119,7 @@ def import_legacy_snapshot(
     artifact_id: str,
     max_known_schema_version: int,
     variant_id: str = "default",
-    artifact_kind: str = "elf",
+    artifact_kind: str | None = None,
 ) -> PackageManifest:
     """Import *legacy_document* (a `snapshot_to_dict()`-shaped mapping) as a
     one-artifact, one-variant `ProjectSnapshot` package, writing its content
@@ -133,6 +133,18 @@ def import_legacy_snapshot(
     about this function needs to know whether it is the only library in the
     project or one of many).
 
+    `artifact_kind` defaults to `None`, meaning "derive it from the document
+    itself": the legacy document's own `platform` field (`AbiSnapshot.
+    platform`, `"elf"`/`"pe"`/`"macho"`) is used when stated, and only a
+    document that never states a platform at all (a pre-Phase-3 snapshot, or
+    a synthetic one built without it) falls back to `"elf"`. An explicit
+    `artifact_kind` argument always wins over the document — a caller that
+    already knows the real kind (or is intentionally overriding it) is never
+    second-guessed. What this closes: silently mislabeling a PE or Mach-O
+    snapshot's `ArtifactRef.kind` as `"elf"` just because the caller took the
+    default, corrupting the package's own artifact identity even though the
+    document plainly states otherwise (Codex review).
+
     `max_known_schema_version` is the caller's own `serialization.
     SCHEMA_VERSION` (or an explicit lower ceiling) — see the module
     docstring's "A document newer than this build knows how to interpret is
@@ -140,6 +152,13 @@ def import_legacy_snapshot(
     Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
     _mapping(legacy_document, "legacy_document")
+    if artifact_kind is None:
+        stated_platform = legacy_document.get("platform")
+        artifact_kind = (
+            stated_platform
+            if isinstance(stated_platform, str) and stated_platform
+            else "elf"
+        )
     if "schema_version" in legacy_document:
         raw_schema_version = legacy_document["schema_version"]
         # `int(38.9)` truncates to `38` -- a non-integral or otherwise
