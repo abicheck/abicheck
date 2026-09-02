@@ -223,22 +223,22 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1698,
+      "baseline_lines": 1810,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (CheckSpec.id/CheckSpec.analysis_*, the checks[].id/checks[].analysis: parsing this module is the canonical owner of per its own docstring) -- reviewed growth, not a routine edit; no other module owns this project-schema surface to move it to.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/buildsource/run_plan.py",
-      "baseline_lines": 1118,
+      "baseline_lines": 1130,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (RunPlanCheck.explicit_id/analysis_* projection and the duplicate-check_id guard's analysis-aware error path) -- reviewed growth, not a routine edit; RunPlanCheck's own module is this data's canonical owner.",
       "review_by": "2026-11-30"
     },
     {
@@ -363,12 +363,12 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 803,
+      "baseline_lines": 810,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit.",
       "review_by": "2026-11-30"
     },
     {

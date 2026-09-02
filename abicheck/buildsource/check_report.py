@@ -152,19 +152,20 @@ def validate_identifier(field_name: str, value: str) -> None:
 
 
 def build_check_id(
-    name: str, profile_id: str, baseline_channel: str, requested_depth: str
+    name: str, profile_id: str, baseline_channel: str, requested_depth: str, *, environment_id: str | None = None, explicit_id: str | None = None
 ) -> str:
-    """Build the unconditional ``target@profile#baseline_channel@depth`` id.
-
-    Always includes the ``@requested_depth`` suffix -- ADR-047 §7's
-    corrected rule, not only when a collision would occur (no run-plan-level
-    collision detection is available to a standalone ``check-target`` call).
-    """
+    """Build the unconditional ``target@profile#baseline_channel@depth`` id
+    (ADR-047 §7). G42: *environment_id*/*explicit_id* append an optional,
+    composable ``!<environment_id>``/``~<explicit_id>`` tail."""
     validate_identifier("target/bundle", name)
     validate_identifier("profile_id", profile_id)
     validate_identifier("baseline_channel", baseline_channel)
     validate_evidence_depth("requested_depth", requested_depth)
     check_id = f"{name}@{profile_id}#{baseline_channel}@{requested_depth}"
+    for field, prefix, value in (("environment_id", "!", environment_id), ("explicit_id", "~", explicit_id)):
+        if value:
+            validate_identifier(field, value)
+            check_id += f"{prefix}{value}"
     validate_check_id(check_id)
     return check_id
 

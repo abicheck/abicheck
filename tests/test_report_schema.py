@@ -850,6 +850,40 @@ class TestReportIdentityEnvelope:
         with pytest.raises(ValueError, match="check_id"):
             reporter.to_json(result)
 
+    def test_explicit_id_qualified_check_id_round_trips_and_validates(self):
+        """G42 'Explicit check identifiers': the full construct
+        (build_check_id) -> validate-against-schema -> parse
+        (contracts.parse_check_id) chain for a ~<explicit_id>-qualified
+        check_id -- not just the parser in isolation, since either half of
+        the three-layer extension (checker_types/check_report vs. the
+        schema vs. contracts.py) being missed fails at a different point."""
+        from abicheck.buildsource.check_report import build_check_id
+        from abicheck.workflows.aggregate.contracts import parse_check_id
+
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = build_check_id(
+            "libfoo",
+            "linux-x86_64-gcc13",
+            "accepted-main",
+            "source",
+            explicit_id="l4-plugin-rhel8",
+        )
+        payload = json.loads(reporter.to_json(result))
+        jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        assert (
+            payload["check_id"]
+            == "libfoo@linux-x86_64-gcc13#accepted-main@source~l4-plugin-rhel8"
+        )
+        parsed = parse_check_id(payload["check_id"])
+        assert parsed is not None
+        assert parsed.target == "libfoo"
+        assert parsed.profile == "linux-x86_64-gcc13"
+        assert parsed.baseline_channel == "accepted-main"
+        assert parsed.requested_depth == "source"
+        assert parsed.explicit_id == "l4-plugin-rhel8"
+        assert parsed.environment_id is None
+
     def test_stat_mode_carries_identity_fields_too(self):
         old, new = _breaking_pair()
         result = compare(old, new)

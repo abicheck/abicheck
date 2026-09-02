@@ -688,7 +688,7 @@ from typing import Any
 #:       settings previously published an identical
 #:       ``surface.scope_to_public_surface`` value despite retaining
 #:       genuinely different findings.
-REPORT_SCHEMA_VERSION = "2.47"  #: ADR-064 stage 1b: ``ExitDecision.to_dict`` gains five additive always-``0`` keys (``operational_error_contribution``, ``evidence_contract_error_contribution``, ``budget_overflow_contribution``, ``not_comparable_contribution``, ``removed_required_library_contribution``) to every ``exit`` block.
+REPORT_SCHEMA_VERSION = "2.48"  #: G42 phase 1 (explicit check identifiers): ``check_id``'s pattern gains two optional, composable tail segments -- ``!<environment_id>`` (reserved) and ``~<explicit_id>`` (a project author's ``checks[].id``) -- additive to the existing four-component shape.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

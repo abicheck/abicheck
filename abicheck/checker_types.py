@@ -89,9 +89,19 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 # further '@'/'#' inside a component) so the delimiter-joined form stays
 # unambiguous. Mirrors the ``pattern`` in compare_report.schema.json's
 # ``check_id`` property.
+#
+# G42 adds two further optional, composable tail segments, in this fixed
+# order: "!<environment_id>" (a named-environment qualifier -- reserved here,
+# not yet produced by any generator) and "~<explicit_id>" (a project-author-
+# supplied checks[].id). Absent both, this pattern accepts exactly what it
+# accepted before G42. Mirrors
+# ``abicheck.workflows.aggregate.contracts._CHECK_ID_RE`` -- the two must
+# extend in lockstep (see that module's own comment for why).
 CHECK_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*"
-    r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)$"
+    r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)"
+    r"(?:![A-Za-z0-9._-]+)?"
+    r"(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?$"
 )
 
 
