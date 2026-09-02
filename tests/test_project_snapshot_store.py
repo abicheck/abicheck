@@ -695,3 +695,24 @@ class TestReadVariantArtifactPair:
         )
         with pytest.raises(FileNotFoundError):
             read_variant_artifact_pair(tmp_path, "v1", "a")
+
+    def test_an_unpublished_sibling_artifact_id_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The requested pair itself checks out (`v1`/`a` agree with each
+        other and are both published), but `v1.json` also lists `ghost`,
+        which `manifest.json` never published -- `variant.artifact_ids` is
+        the variant's *complete* declared membership, not just the
+        requested id, so this must be refused the same way a directly
+        unpublished id is (Codex review)."""
+        self._write_manifest_json(tmp_path, ["v1"], ["a"])
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json",
+            {"variant_id": "v1", "artifact_ids": ["a", "ghost"]},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v1", "kind": "elf"},
+        )
+        with pytest.raises(ValueError, match="not published"):
+            read_variant_artifact_pair(tmp_path, "v1", "a")

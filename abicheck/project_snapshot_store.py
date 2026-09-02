@@ -674,6 +674,23 @@ def read_variant_artifact_pair(
             f"{variant_id!r} -- the package's membership graph is "
             "self-contradictory"
         )
+    # The requested pair itself checks out, but `variant.artifact_ids` is
+    # the variant's *complete* declared membership, not just the one id
+    # this call asked about -- a sibling entry there that manifest.json
+    # never published is exactly the same "lazy path exposes membership
+    # the eager path would refuse" gap the checks above close for the
+    # requested id alone (Codex review, a third finding on this same
+    # function): `PackageManifest.__post_init__`'s own `declared == owned`
+    # invariant is over a variant's *whole* `artifact_ids`, not one
+    # element of it, so returning `variant` unchecked here would still let
+    # a caller observe -- or try to load -- an unpublished sibling id.
+    unpublished = sorted(set(variant.artifact_ids) - set(summary.artifact_ids))
+    if unpublished:
+        raise ValueError(
+            f"refs/variants/{variant_id}.json lists artifact_id(s) "
+            f"{unpublished} that are not published in this package's "
+            "manifest.json"
+        )
     return variant, artifact
 
 
