@@ -245,6 +245,20 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
                 f"bundle facts: unexpected artifact_type {given_artifact_type!r} "
                 f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
             )
+        # Codex review, fresh evidence: even the *correct* marker is
+        # self-contradictory on a document explicitly declaring
+        # schema_version 1 -- artifact_type was added in schema_version 2,
+        # so no genuinely-v1 document (predating the marker's existence)
+        # could ever carry it. A writer never produces this combination
+        # (bundle_facts_to_dict() always pairs the marker with the current
+        # schema_version); reaching here means a malformed or hand-edited
+        # document, not a real legacy one.
+        if schema_version == 1:
+            raise ValueError(
+                "bundle facts: schema_version 1 predates artifact_type "
+                "(added in schema_version 2) -- a v1 document may not "
+                "declare it"
+            )
     else:
         # No try/except needed here (unlike looks_like_bundle_facts_document's
         # own copy of this check below): by this point `schema_version` is

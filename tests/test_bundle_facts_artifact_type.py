@@ -183,6 +183,21 @@ class TestBundleFactsArtifactTypeDiscriminator:
         with pytest.raises(ValueError, match="artifact_type"):
             bundle_facts_from_dict(d)
 
+    def test_correct_artifact_type_is_rejected_on_schema_version_1(self) -> None:
+        # Codex review, fresh evidence: even the *correct* marker is
+        # self-contradictory on a document explicitly declaring
+        # schema_version 1 -- artifact_type was added in schema_version 2,
+        # so no genuinely-v1 document could ever carry it. No real writer
+        # produces this combination; reaching it means a malformed or
+        # hand-edited document.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        assert d["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
+        d["schema_version"] = 1
+
+        with pytest.raises(ValueError, match="schema_version 1"):
+            bundle_facts_from_dict(d)
+
 
 class TestLooksLikeBundleFactsDocument:
     """Two-tier classification: an explicit ``artifact_type`` key is trusted
