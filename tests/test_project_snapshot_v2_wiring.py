@@ -225,3 +225,87 @@ class TestWriteProjectSnapshotPackageEmptyLibrary:
         doc = snapshot_to_dict(AbiSnapshot(library=library, version="1.0.0"))
         root = tmp_path / "pkg"
         _write_project_snapshot_package(doc, root, library)  # must not raise
+
+
+class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
+    """`write_project_manifest`'s own docstring names its ref-then-manifest
+    publish order as safe for a *first* publication only, not for
+    republishing changed content under an already-live path --
+    `write_legacy_snapshot_package` must refuse that unsafe case outright
+    now that `dump --project-snapshot-dir` is a real caller that could
+    otherwise be run twice against the same directory (Codex review)."""
+
+    def test_a_fresh_nonexistent_root_is_accepted(self, tmp_path: Path) -> None:
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        _write_package(tmp_path, snap)  # must not raise
+
+    def test_an_existing_empty_root_is_accepted(self, tmp_path: Path) -> None:
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+
+        root = tmp_path / "pkg"
+        root.mkdir()
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        write_legacy_snapshot_package(
+            snapshot_to_dict(snap),
+            root,
+            artifact_id=snap.library,
+            max_known_schema_version=SCHEMA_VERSION,
+        )  # must not raise
+
+    def test_republishing_into_an_existing_package_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        root = _write_package(tmp_path, snap)
+        other = AbiSnapshot(library="libbar.so.1", version="2.0.0")
+        with pytest.raises(ValueError, match="already exists and is not empty"):
+            write_legacy_snapshot_package(
+                snapshot_to_dict(other),
+                root,
+                artifact_id=other.library,
+                max_known_schema_version=SCHEMA_VERSION,
+            )
+
+    def test_a_nonempty_non_package_directory_is_also_refused(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+
+        root = tmp_path / "pkg"
+        root.mkdir()
+        (root / "unrelated.txt").write_text("x", encoding="utf-8")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        with pytest.raises(ValueError, match="already exists and is not empty"):
+            write_legacy_snapshot_package(
+                snapshot_to_dict(snap),
+                root,
+                artifact_id=snap.library,
+                max_known_schema_version=SCHEMA_VERSION,
+            )
+
+
+class TestCollectMetadataSkipsDirectories:
+    """`workflows.input_resolution.collect_metadata` is the typed-API
+    counterpart of `frontends/cli/runtime._collect_metadata` -- both must
+    treat a `ProjectSnapshot` package directory as non-hashable rather than
+    calling `Path.read_bytes()` on it (Codex review: the CLI path already
+    had this guard, `service.run_compare_request`'s typed-API path did
+    not)."""
+
+    def test_returns_none_for_a_project_snapshot_directory(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.workflows.input_resolution import collect_metadata
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        root = _write_package(tmp_path, snap)
+        assert collect_metadata(root) is None
+
+    def test_returns_none_for_any_directory(self, tmp_path: Path) -> None:
+        from abicheck.workflows.input_resolution import collect_metadata
+
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert collect_metadata(empty) is None
