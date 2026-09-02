@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Executable regression tests for `verify-merge-checks.yml`'s embedded
-`actions/github-script` poll/select/decide logic (Codex review, seven
+`actions/github-script` poll/select/decide logic (Codex review, eight
 rounds on this one step: https://github.com/abicheck/abicheck/pull/1009).
 
 `tests/test_required_checks_governance.py`'s `TestVerifyMergeChecksWorkflow`
@@ -24,19 +24,36 @@ polling logic. That gap is exactly why several real bugs in that logic (a
 required check judged against the wrong reference point, a rerun selected
 by a `started_at` field that can't tell pre- from post-merge, a same-second
 timestamp read as proof of "before", a clean snapshot accepted without
-confirming it holds, a clean-streak counter that counted total attempts
-instead of consecutive ones, and a consecutive-clean-streak requirement
-fixed at a small constant that confirmed "clean" across far less time than
-the poll budget it was supposed to span) went unnoticed by every other test
-in this repository while each round's fix was itself only checked with a
-throwaway, uncommitted smoke script -- leaving each fix's own regression
-undetectable by anything that runs in CI. This file is that missing
-coverage: it runs the *real* script text extracted from the workflow file
-(never a hand-copied reimplementation, which could silently drift from what
+confirming it holds) went unnoticed by every other test in this repository
+while each round's fix was itself only checked with a throwaway,
+uncommitted smoke script -- leaving each fix's own regression undetectable
+by anything that runs in CI. This file is that missing coverage: it runs
+the *real* script text extracted from the workflow file (never a
+hand-copied reimplementation, which could silently drift from what
 actually ships) through `tests/verify_merge_checks_harness.mjs`, a Node
 harness that mocks `actions/github-script`'s `context`/`core`/`github`
 globals and a fake, script-advanced clock, against a scripted sequence of
 `checks.listForRef` responses -- one per poll attempt.
+
+Rounds six through eight all found bugs in the same mechanism: an
+early-exit "clean streak" heuristic that tried to declare success as soon
+as a clean read had been observed enough consecutive times to plausibly
+rule out a not-yet-indexed pre-merge rerun. Each fix closed one gap in that
+heuristic and opened an adjacent one (a streak length that confirmed
+"clean" across far less wall-clock time than the poll budget it was meant
+to span; a global deadline that could still cut the streak's confirmation
+short; a corrected streak length that counted *observations* instead of
+the *elapsed span* between the first and last, undercounting by one poll)
+because the streak count was approximating "has the full poll budget
+elapsed since this looked clean" without actually measuring elapsed time
+against the budget -- and once patched to close the observation/span gap,
+it left no budget left over for the very case the workflow exists to
+handle (a check still `queued`/`in_progress` at push time that completes
+moments later). The design was replaced rather than patched a fourth time:
+the loop no longer exits early on a clean read at all, only on a decisive
+failure or the full `MAX_WAIT_MS` budget elapsing -- see the workflow's own
+inline comment on the loop for the reasoning. `TestNoEarlyExitOnClean`
+below is the regression coverage for that redesign.
 """
 
 from __future__ import annotations
@@ -348,17 +365,110 @@ class TestRerunSelectionRanksByIdNotStartedAt:
         assert "run 105" in result["failedMessage"]
 
 
-class TestCleanResultMustBeConfirmed:
+def _expected_full_budget_attempts(script: str) -> int:
+    """The exact number of poll attempts the redesigned loop takes to reach
+    `deadline` when nothing is ever decisively `failed`: one attempt at
+    t=0, then a sleep-and-poll every `POLL_INTERVAL_MS` until elapsed time
+    reaches `MAX_WAIT_MS`. Derived from the script's own constants (never
+    hand-copied) so this can't silently drift from the real timing."""
+    poll_interval_ms, max_wait_ms = _poll_interval_and_max_wait_ms(script)
+    sleeps_to_exhaust_budget = -(-max_wait_ms // poll_interval_ms)  # ceil
+    return sleeps_to_exhaust_budget + 1
+
+
+class TestNoEarlyExitOnClean:
+    """Regression coverage for the loop redesign that replaced the
+    clean-streak heuristic (rounds six through eight) entirely: the loop
+    never exits early on a clean read, only on a decisive failure or the
+    full poll budget elapsing. This is a strictly simpler invariant than
+    the streak-based one it replaced, and it structurally cannot reproduce
+    any of that heuristic's three bugs, because there is no early-exit path
+    left for a bug to hide in."""
+
+    def test_a_genuinely_clean_merge_always_polls_the_full_budget_before_passing(
+        self, tmp_path: Path
+    ) -> None:
+        """A required check that is clean from the very first poll must
+        still pass -- but only once the loop has actually spent the full
+        `MAX_WAIT_MS` budget confirming it, not merely observed it once or
+        twice. This is the direct behavioral assertion that no early-exit
+        heuristic remains: `attempts` must equal exactly the number needed
+        to reach the deadline, not stop short of it."""
+        script = _extract_script()
+        clean_run = {
+            "id": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "completed_at": "2025-12-31T23:55:00Z",
+            "started_at": "2025-12-31T23:50:00Z",
+        }
+        result = _run_scenario(tmp_path, [[clean_run]])
+        assert result["failedMessage"] is None
+        assert result["attempts"] == _expected_full_budget_attempts(script)
+
+    def test_a_rerun_that_appears_only_on_the_final_poll_before_deadline_still_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """The general form of rounds six through eight: however late in
+        the poll budget a not-yet-indexed pre-merge rerun surfaces --
+        including on the very last poll before the deadline -- it must
+        still be caught. A streak-based heuristic could always be beaten
+        by delaying the rerun's appearance past whatever streak length it
+        required; polling to the full budget on every run closes that
+        class of gap structurally rather than by tuning a constant."""
+        script = _extract_script()
+        expected_attempts = _expected_full_budget_attempts(script)
+        old_pass_only = {
+            "id": 100,
+            "status": "completed",
+            "conclusion": "success",
+            "completed_at": "2025-12-31T23:55:00Z",
+            "started_at": "2025-12-31T23:50:00Z",
+        }
+        rerun_appears = {"id": 105, "status": "queued"}
+        poll_sequence = [[old_pass_only]] * (expected_attempts - 1) + [
+            [old_pass_only, rerun_appears]
+        ]
+        result = _run_scenario(tmp_path, poll_sequence)
+        assert result["failedMessage"] is not None
+        assert "run 105" in result["failedMessage"]
+        assert result["attempts"] == expected_attempts
+
+    def test_a_check_that_resolves_cleanly_on_the_final_poll_before_deadline_passes(
+        self, tmp_path: Path
+    ) -> None:
+        """The positive counterpart, and the original real-world shape
+        (PRs #991/#993/#997) pushed to its limit: a required check that
+        stays `queued` for almost the *entire* poll budget and only
+        completes, cleanly, on the very last poll before the deadline must
+        still pass. A streak-based heuristic requiring several consecutive
+        clean reads could never accept this (there's only one clean read
+        available before the deadline); polling to the full budget and
+        checking only the final state accepts it correctly."""
+        script = _extract_script()
+        expected_attempts = _expected_full_budget_attempts(script)
+        queued = {"id": 1, "status": "queued"}
+        done = {
+            "id": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "completed_at": "2025-12-31T23:59:59Z",
+            "started_at": "2025-12-31T23:59:30Z",
+        }
+        poll_sequence = [[queued]] * (expected_attempts - 1) + [[done]]
+        result = _run_scenario(tmp_path, poll_sequence)
+        assert result["failedMessage"] is None
+        assert result["attempts"] == expected_attempts
+
     def test_a_clean_snapshot_that_hides_an_unindexed_rerun_is_not_accepted_on_one_read(
         self, tmp_path: Path
     ) -> None:
-        """The symmetric false-pass case to the stale-failure handling
-        above: the first poll can look completely clean not because the
-        check is done, but because a rerun queued before the merge hasn't
-        been indexed by the API *at all* yet -- not even as a visible
-        `queued` entry. A single clean read must not end the audit; once
-        the rerun appears (still unresolved), the audit must eventually
-        fail rather than having already reported success."""
+        """The first poll can look completely clean not because the check
+        is done, but because a rerun queued before the merge hasn't been
+        indexed by the API *at all* yet -- not even as a visible `queued`
+        entry. A single clean read must not end the audit; once the rerun
+        appears (and stays unresolved for the rest of the budget), the
+        audit must fail rather than having already reported success."""
         old_pass_only = {
             "id": 100,
             "status": "completed",
@@ -372,103 +482,3 @@ class TestCleanResultMustBeConfirmed:
         )
         assert result["failedMessage"] is not None
         assert "run 105" in result["failedMessage"]
-
-    def test_clean_streak_counts_consecutive_polls_not_total_attempts(
-        self, tmp_path: Path
-    ) -> None:
-        """Direct regression test for the counting bug itself: an earlier
-        pending attempt must not count toward the confirmation streak a
-        later clean read needs. One pending poll followed by only a
-        single clean poll must not be enough to pass -- the clean result
-        must hold across MIN_CLEAN_ATTEMPTS *consecutive* polls, counted
-        from the first clean one, not from the start of the loop."""
-        pending_first = {"id": 1, "status": "queued"}
-        clean_once = {
-            "id": 1,
-            "status": "completed",
-            "conclusion": "success",
-            "completed_at": "2025-12-31T23:59:59Z",
-            "started_at": "2025-12-31T23:59:30Z",
-        }
-        # Only ONE clean read after the pending one: if the loop wrongly
-        # counted total attempts (attempt 2 >= MIN_CLEAN_ATTEMPTS), it
-        # would exit here and report success after a single clean
-        # observation. It must not -- the harness's poll sequence repeats
-        # `clean_once` for every attempt beyond this, so the real fix
-        # (a consecutive-clean-streak counter) needs several more clean
-        # polls before passing, which this assertion captures via
-        # `attempts`.
-        result = _run_scenario(tmp_path, [[pending_first], [clean_once]])
-        assert result["failedMessage"] is None
-        # The fix requires more than 2 polls total (1 pending + at least 2
-        # consecutive clean) before accepting the result -- exactly 2 would
-        # mean the bug (counting total attempts) is back.
-        assert result["attempts"] >= 3
-
-    def test_clean_streak_must_span_the_full_poll_budget_not_a_fixed_small_count(
-        self, tmp_path: Path
-    ) -> None:
-        """Direct regression test for the sixth Codex round: a fixed
-        `MIN_CLEAN_ATTEMPTS = 2` only confirms a clean read holds across
-        one `POLL_INTERVAL_MS` gap (~20s) before exiting, even though
-        `MAX_WAIT_MS` reserves a full 3 minutes for a not-yet-indexed
-        pre-merge rerun to appear. Two clean polls followed by a rerun
-        appearing on the third must still be caught -- a fixed 2-attempt
-        streak would have already declared victory after the second poll
-        and never seen it."""
-        old_pass_only = {
-            "id": 100,
-            "status": "completed",
-            "conclusion": "success",
-            "completed_at": "2025-12-31T23:55:00Z",
-            "started_at": "2025-12-31T23:50:00Z",
-        }
-        rerun_appears = {"id": 105, "status": "queued"}
-        result = _run_scenario(
-            tmp_path,
-            [[old_pass_only], [old_pass_only], [old_pass_only, rerun_appears]],
-        )
-        assert result["failedMessage"] is not None
-        assert "run 105" in result["failedMessage"]
-        # Confirming "clean" must take at least as many polls as the
-        # rerun's own appearance -- the bug this guards against exited
-        # after exactly 2 attempts, before ever polling a third time.
-        assert result["attempts"] > 2
-
-    def test_deadline_cannot_bypass_an_unconfirmed_clean_streak(
-        self, tmp_path: Path
-    ) -> None:
-        """Direct regression test for the seventh Codex round: the global
-        `deadline` check sits right after the clean-streak bookkeeping and,
-        before this fix, broke out of the loop unconditionally once reached
-        -- even when the *very first* clean read landed exactly at the
-        deadline (because several earlier, genuinely-pending polls had
-        already consumed the budget). `pending` was empty from that one
-        unconfirmed read, so `problems` ended up empty and the audit
-        reported success without ever confirming the clean state held for
-        the required number of consecutive polls. Exactly enough pending
-        polls to exhaust the poll budget, followed by one lone clean read
-        landing on the deadline, must still be reported as unresolved."""
-        script = _extract_script()
-        poll_interval_ms, max_wait_ms = _poll_interval_and_max_wait_ms(script)
-        # The number of pending polls needed so that the deadline is first
-        # reached exactly when the *next* (clean) poll's own check runs --
-        # see the module-level poll-loop timing this mirrors.
-        pending_polls_to_exhaust_budget = -(-max_wait_ms // poll_interval_ms)
-
-        stuck_rerun = {"id": 1, "status": "queued"}
-        clean_run = {
-            "id": 1,
-            "status": "completed",
-            "conclusion": "success",
-            "completed_at": "2025-12-31T23:59:59Z",
-            "started_at": "2025-12-31T23:59:00Z",
-        }
-        poll_sequence = [[stuck_rerun]] * pending_polls_to_exhaust_budget + [
-            [clean_run]
-        ]
-        result = _run_scenario(tmp_path, poll_sequence)
-
-        assert result["failedMessage"] is not None
-        assert "poll budget expired" in result["failedMessage"]
-        assert result["attempts"] == pending_polls_to_exhaust_budget + 1

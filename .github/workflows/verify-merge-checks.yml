@@ -183,23 +183,6 @@ jobs:
             const POLL_INTERVAL_MS = 20_000;
             const MAX_WAIT_MS = 3 * 60 * 1000;
             const deadline = Date.now() + MAX_WAIT_MS;
-            // A clean (`pending.length === 0`) result must hold across at
-            // least this many *consecutive* polls before being accepted --
-            // see the loop's own comment below for why a single clean read
-            // can't be trusted (Codex review). Derived from the poll budget
-            // itself, not a fixed small constant: a hardcoded
-            // `MIN_CLEAN_ATTEMPTS = 2` only confirms a clean read across
-            // ~20s (one `POLL_INTERVAL_MS` gap) before exiting, even though
-            // `MAX_WAIT_MS` reserves a full 3 minutes for a not-yet-indexed
-            // pre-merge rerun to appear -- a rerun indexed at, say, 25s
-            // would still slip past a fixed 2-attempt streak (Codex review,
-            // sixth round). Requiring the streak to span the *entire* poll
-            // budget means "clean" is only ever accepted once this
-            // workflow has spent as long confirming it as it does chasing
-            // an actual pending check -- the same asymmetric preference for
-            // an occasional false failure over any false pass this file
-            // applies throughout.
-            const MIN_CLEAN_ATTEMPTS = Math.ceil(MAX_WAIT_MS / POLL_INTERVAL_MS);
 
             // Evaluates the current snapshot of check runs against
             // REQUIRED_CHECKS. Only a `completed_at` after `merged_at` is
@@ -317,15 +300,37 @@ jobs:
             let pending = [];
             let failed = [];
             let attempt = 0;
-            // Consecutive clean observations, not total loop iterations --
-            // resets to 0 whenever a poll finds something pending, so an
-            // earlier non-clean attempt can never count toward the streak a
-            // later clean read needs to satisfy (Codex review: the original
-            // `attempt >= MIN_CLEAN_ATTEMPTS` check counted total attempts,
-            // so a single clean read after any earlier pending one already
-            // satisfied `attempt >= 2` and exited on that first clean read
-            // alone -- exactly the bug MIN_CLEAN_ATTEMPTS was meant to close).
-            let cleanStreak = 0;
+            // No early-exit-on-clean heuristic: earlier versions of this
+            // loop tried to declare success as soon as a clean read had
+            // been observed enough times in a row to plausibly rule out a
+            // not-yet-indexed pre-merge rerun (a "clean streak" of
+            // MIN_CLEAN_ATTEMPTS consecutive polls). That heuristic was
+            // the source of three separate Codex-found bugs in a row
+            // (sixth round: a fixed streak length confirmed "clean" across
+            // far less wall-clock time than the poll budget it was meant
+            // to span; seventh round: the global deadline could still cut
+            // the streak's confirmation short and accept an unconfirmed
+            // lone clean read; eighth round: even the corrected streak
+            // length counted *observations* rather than the *elapsed span*
+            // between the first and last, undercounting by one poll) --
+            // each fix closed one gap and opened an adjacent one, because
+            // the streak count was trying to approximate "has the full
+            // poll budget elapsed since this looked clean" without
+            // actually measuring elapsed time against the budget.
+            //
+            // This loop measures that directly instead: it always keeps
+            // polling until either a decisive failure is found or the
+            // *entire* MAX_WAIT_MS budget has elapsed, never accepting a
+            // clean read early. A rerun that is queued before the merge
+            // but not yet indexed, however many polls that takes to
+            // surface, gets the full budget to appear; a genuinely clean
+            // merge is only ever reported as such once every poll across
+            // that whole window agreed. This costs the same wall-clock
+            // time on every run (rather than exiting early on an
+            // uneventful merge), which is the correct trade for a
+            // compensating safety net: an audit that finishes fast by
+            // trusting an unconfirmed early read is exactly what rounds
+            // six through eight kept failing to make trustworthy.
             for (;;) {
               attempt += 1;
               // `filter: 'all'` is required, not optional: the API defaults
@@ -355,55 +360,18 @@ jobs:
                 // known-bad.
                 break;
               }
-              // A clean result (`pending.length === 0`) on a single poll
-              // does not prove there is nothing left to see: a rerun that
-              // was queued before the merge can fail to be indexed by
-              // `checks.listForRef` *at all* yet, not merely show up as
-              // `queued` -- so the response looks identical to "nothing
-              // else exists" and "the current attempt hasn't been indexed
-              // yet" (Codex review, the symmetric case to the stale-failed-
-              // snapshot handling above). Requiring `cleanStreak` (not the
-              // raw attempt count) to reach MIN_CLEAN_ATTEMPTS means the
-              // clean result must hold across that many *consecutive*
-              // polls, giving a not-yet-indexed rerun one more cycle to
-              // appear before this workflow declares victory; it cannot
-              // prove a rerun created even later doesn't exist, but a
-              // single instantaneous "looks fine" read provably can't
-              // either.
-              if (pending.length === 0) {
-                cleanStreak += 1;
-                if (cleanStreak >= MIN_CLEAN_ATTEMPTS) {
-                  break;
-                }
-              } else {
-                cleanStreak = 0;
-              }
               if (Date.now() >= deadline) {
-                // The deadline can be reached with `pending` momentarily
-                // empty but `cleanStreak` still short of MIN_CLEAN_ATTEMPTS
-                // -- e.g. several genuinely-pending polls consumed most of
-                // the budget and the *first* clean read landed right at the
-                // deadline. Breaking here with `pending` as-is would report
-                // that lone, unconfirmed clean read as a pass, exactly
-                // undoing the consecutive-streak requirement above (Codex
-                // review, seventh round): a not-yet-indexed pre-merge
-                // rerun that would have appeared on the next poll is never
-                // given the chance to. Record the confirmation itself as
-                // unresolved rather than silently accepting it.
-                if (pending.length === 0 && cleanStreak < MIN_CLEAN_ATTEMPTS) {
-                  pending.push(
-                    `clean snapshot observed, but only ${cleanStreak}/${MIN_CLEAN_ATTEMPTS} ` +
-                    `consecutive clean polls were confirmed before the ${MAX_WAIT_MS / 1000}s ` +
-                    `poll budget expired -- cannot rule out a not-yet-indexed pre-merge rerun`
-                  );
-                }
+                // The budget is exhausted: report whatever `pending` (if
+                // anything) the most recent poll found. An empty `pending`
+                // here means every poll across the *entire* MAX_WAIT_MS
+                // window agreed nothing was outstanding -- not merely that
+                // the most recent one or two reads happened to look clean.
                 break;
               }
               core.info(
                 pending.length === 0
-                  ? `Attempt ${attempt}: no problems observed yet (${cleanStreak}/` +
-                    `${MIN_CLEAN_ATTEMPTS} consecutive clean polls); ` +
-                    `retrying in ${POLL_INTERVAL_MS / 1000}s.`
+                  ? `Attempt ${attempt}: no problems observed yet; retrying in ` +
+                    `${POLL_INTERVAL_MS / 1000}s to confirm across the full poll budget.`
                   : `Attempt ${attempt}: ${pending.length} required check(s) not yet ` +
                     `observed as completed for PR #${target.number}'s head ${headSha}; ` +
                     `retrying in ${POLL_INTERVAL_MS / 1000}s (short window for API lag only).`
