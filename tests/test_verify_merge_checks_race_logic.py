@@ -93,6 +93,28 @@ def _required_check_names(script: str) -> list[str]:
     return re.findall(r"'([^']+)'", match.group(1))
 
 
+def _poll_interval_and_max_wait_ms(script: str) -> tuple[int, int]:
+    """Reads `POLL_INTERVAL_MS`/`MAX_WAIT_MS` out of the script text itself,
+    the same anti-drift reasoning as `_required_check_names` -- a test that
+    hardcoded these constants would silently stop matching reality the next
+    time either changes. `MAX_WAIT_MS`'s value is a small arithmetic
+    expression (`3 * 60 * 1000`), not a bare literal, so it's evaluated
+    (restricted to digits/whitespace/`*+-/` -- asserted before `eval` ever
+    sees it) rather than hand-copied as a number."""
+    interval_match = re.search(r"const POLL_INTERVAL_MS = ([0-9_]+);", script)
+    assert interval_match, (
+        "could not find POLL_INTERVAL_MS in verify-merge-checks.yml's script"
+    )
+    poll_interval_ms = int(interval_match.group(1).replace("_", ""))
+
+    wait_match = re.search(r"const MAX_WAIT_MS = ([0-9\s*+\-/]+);", script)
+    assert wait_match, "could not find MAX_WAIT_MS in verify-merge-checks.yml's script"
+    expr = wait_match.group(1)
+    assert re.fullmatch(r"[0-9\s*+\-/]+", expr)
+    max_wait_ms = eval(expr, {"__builtins__": {}}, {})  # noqa: S307 -- digits/operators only, asserted above
+    return poll_interval_ms, max_wait_ms
+
+
 def _run_scenario(
     tmp_path: Path,
     poll_sequence: list[list[dict[str, Any]]],
@@ -412,3 +434,41 @@ class TestCleanResultMustBeConfirmed:
         # rerun's own appearance -- the bug this guards against exited
         # after exactly 2 attempts, before ever polling a third time.
         assert result["attempts"] > 2
+
+    def test_deadline_cannot_bypass_an_unconfirmed_clean_streak(
+        self, tmp_path: Path
+    ) -> None:
+        """Direct regression test for the seventh Codex round: the global
+        `deadline` check sits right after the clean-streak bookkeeping and,
+        before this fix, broke out of the loop unconditionally once reached
+        -- even when the *very first* clean read landed exactly at the
+        deadline (because several earlier, genuinely-pending polls had
+        already consumed the budget). `pending` was empty from that one
+        unconfirmed read, so `problems` ended up empty and the audit
+        reported success without ever confirming the clean state held for
+        the required number of consecutive polls. Exactly enough pending
+        polls to exhaust the poll budget, followed by one lone clean read
+        landing on the deadline, must still be reported as unresolved."""
+        script = _extract_script()
+        poll_interval_ms, max_wait_ms = _poll_interval_and_max_wait_ms(script)
+        # The number of pending polls needed so that the deadline is first
+        # reached exactly when the *next* (clean) poll's own check runs --
+        # see the module-level poll-loop timing this mirrors.
+        pending_polls_to_exhaust_budget = -(-max_wait_ms // poll_interval_ms)
+
+        stuck_rerun = {"id": 1, "status": "queued"}
+        clean_run = {
+            "id": 1,
+            "status": "completed",
+            "conclusion": "success",
+            "completed_at": "2025-12-31T23:59:59Z",
+            "started_at": "2025-12-31T23:59:00Z",
+        }
+        poll_sequence = [[stuck_rerun]] * pending_polls_to_exhaust_budget + [
+            [clean_run]
+        ]
+        result = _run_scenario(tmp_path, poll_sequence)
+
+        assert result["failedMessage"] is not None
+        assert "poll budget expired" in result["failedMessage"]
+        assert result["attempts"] == pending_polls_to_exhaust_budget + 1
