@@ -2551,7 +2551,15 @@ _report_compat_verdict() {
   # the whole thing this reconciliation exists to prevent (Codex review). The
   # delimiter is still required rather than dropped -- a bare `Verdict`
   # followed by uppercase-free filler would match prose.
-  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING).*/\2/p' \
+  #
+  # COMPATIBLE_WITH_RISK is a third alternative for the same reason R1
+  # (CLI-audit) added it to `_resolve_clean_exit_verdict`'s JSON-sourced
+  # branch: `extra-args: --write markdown=...` suppresses the JSON sidecar
+  # (per action/AGENTS.md), so a run whose *only* report is rendered
+  # markdown/text reaches this fallback for that tier too -- without it, a
+  # report the CLI classified COMPATIBLE_WITH_RISK still fell through to
+  # `sed` matching nothing and silently reported COMPATIBLE (Codex review).
+  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING|COMPATIBLE_WITH_RISK).*/\2/p' \
     <<<"$(_text_report_content)" | head -1
 }
 

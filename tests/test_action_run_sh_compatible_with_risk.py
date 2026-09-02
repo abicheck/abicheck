@@ -194,6 +194,78 @@ class TestCompareExitZeroReportsCompatibleWithRisk:
         assert outputs["verdict"] == "COMPATIBLE", outputs
 
 
+class TestFallbackTextReportsCompatibleWithRisk:
+    """P2 (Codex review, PR #1016): ``_report_compat_verdict``'s markdown/
+    text fallback -- used whenever no JSON report exists, which is exactly
+    what happens for a directory/package release compare (``--write`` is
+    rejected for that operand) or any ``extra-args: --write markdown=...``
+    that suppresses the JSON sidecar (``action/AGENTS.md``) -- only matched
+    ``API_BREAK``/``BREAKING``. A report the CLI itself classified
+    ``COMPATIBLE_WITH_RISK`` reached this fallback and matched nothing, so
+    ``_resolve_clean_exit_verdict`` silently kept its ``VERDICT=COMPATIBLE``
+    default even though the rendered report said otherwise. Mirrors
+    ``test_action_coverage_verdict.py``'s ``TestTheReleaseTableVerdictIsRead``
+    harness (a stub that ``cat``s a fixed report to stdout, no ``-o``, so
+    ``_text_report_content`` falls back to captured stdout) rather than a
+    second copy of it.
+    """
+
+    def _summary(self, tmp_path: Path, verdict_line: str, exit_code: int) -> dict:
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        report = tmp_path / "report.md"
+        report.write_text(
+            f"# ABI report\n\n| | |\n|---|---|\n{verdict_line}\n", encoding="utf-8"
+        )
+        stub = bindir / "abicheck"
+        stub.write_text(
+            f"#!/usr/bin/env bash\ncat {report}\nexit {exit_code}\n", encoding="utf-8"
+        )
+        stub.chmod(0o755)
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "markdown",
+            },
+            bindir,
+        )
+
+    def test_the_colon_form_reports_risk_at_exit_zero(self, tmp_path: Path) -> None:
+        outputs = self._summary(
+            tmp_path,
+            "**Verdict:** ⚠️ `COMPATIBLE_WITH_RISK` "
+            "— compatible but carries deployment risk",
+            0,
+        )
+        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_the_table_row_form_reports_risk_at_exit_zero(self, tmp_path: Path) -> None:
+        """The release fan-out's table-row spelling (no colon) must also be
+        recognised, same as the existing BREAKING/API_BREAK table-row case."""
+        outputs = self._summary(
+            tmp_path, "| **Verdict** | ⚠️ `COMPATIBLE_WITH_RISK` |", 0
+        )
+        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_plain_compatible_report_is_unaffected(self, tmp_path: Path) -> None:
+        """Negative control: widening the fallback regex must not make a
+        plain COMPATIBLE report match on some later word."""
+        outputs = self._summary(tmp_path, "**Verdict:** ✅ `COMPATIBLE`", 0)
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+
+    def test_breaking_table_row_still_escalates(self, tmp_path: Path) -> None:
+        """Negative control: the pre-existing BREAKING/API_BREAK fallback
+        match (exercised at exit 2 by test_action_coverage_verdict.py) must
+        keep working unchanged now that a third alternative was added."""
+        outputs = self._summary(tmp_path, "| **Verdict** | \U0001f4a5 `BREAKING` |", 2)
+        assert outputs["verdict"] == "BREAKING", outputs
+
+
 class TestScanExitZeroReportsCompatibleWithRisk:
     def test_verdict_output_is_compatible_with_risk_not_compatible(
         self, tmp_path: Path

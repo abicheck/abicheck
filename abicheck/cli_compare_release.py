@@ -636,14 +636,27 @@ def compare_release_cmd(
                         if old_debug_dir
                         else None
                     )
+                    # `depth=binary` clears header inputs for every matched
+                    # pair (`_split_public_header_inputs_for_request`'s own
+                    # docstring); a stranded (removed-in-new) library must
+                    # get the same headerless resolution, else its BundleFacts
+                    # entry carries L2 header evidence a matched pair's
+                    # snapshot never would, silently reintroducing header/API
+                    # findings `--depth binary` was asked to exclude (Codex
+                    # review, P2).
+                    is_binary_depth = depth is not None and depth.lower() == "binary"
+                    stranded_h = [] if is_binary_depth else old_h
+                    stranded_inc = [] if is_binary_depth else old_inc
                     # old_h doubles as the public-header set, matching the
                     # normal compare path (else origin=UNKNOWN; Codex review).
-                    pub_headers, pub_dirs = extraction.split_public_header_inputs(old_h)
+                    pub_headers, pub_dirs = extraction.split_public_header_inputs(
+                        stranded_h
+                    )
                     try:
                         return _resolve_input(
                             old_path,
-                            old_h,
-                            old_inc,
+                            stranded_h,
+                            stranded_inc,
                             old_version,
                             lang,
                             pdb_path=old_dbg,

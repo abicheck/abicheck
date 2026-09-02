@@ -64,3 +64,16 @@
   count, which a very-high-core-count host or a cpu-count-vs-memory-mismatched
   container can push far past available RAM. Tunable via
   `ABICHECK_RELEASE_JOB_MEM_GIB`; an explicit `--jobs N` is never clamped.
+- **A stranded (removed-in-new) library's `--bundle-facts-out` entry now
+  honours `--depth binary` too.** Every matched pair in the release fan-out
+  already had its header inputs cleared under `--depth binary`, but the
+  separate resolver used only for a library present in the old side and
+  absent from the new one still resolved it with the full header set,
+  silently mixing an L2 (header-evidence) snapshot into an otherwise
+  binary-only `BundleFacts` output.
+- **The composite Action's markdown/text verdict fallback (used whenever no
+  JSON report exists) now recognises `COMPATIBLE_WITH_RISK`.** It only
+  matched `API_BREAK`/`BREAKING`, so a run with no JSON sidecar (a
+  directory/package release compare, or any `--write markdown=...` that
+  suppresses it) whose rendered report said `COMPATIBLE_WITH_RISK` still
+  published plain `COMPATIBLE`.
