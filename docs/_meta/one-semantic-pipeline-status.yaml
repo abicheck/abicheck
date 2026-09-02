@@ -2,9 +2,11 @@
 #
 # Not published as a site page (docs/_meta/ holds machine-only registries,
 # per docs/AGENTS.md's "Layout" section). Structurally validated by
-# scripts/check_docs_contract.py's `_check_pipeline_status_ledger` (parses,
-# required fields present, status/authority values from the declared enums,
-# no unknown fields) — a real, non-generated `docs/_meta/` registry has to
+# scripts/pipeline_status_ledger.py's `check_pipeline_status_ledger`
+# (imported and called by scripts/check_docs_contract.py, which does not
+# define it itself) — parses, required fields present, status/authority
+# values from the declared enums, no unknown fields — a real, non-generated
+# `docs/_meta/` registry has to
 # be at least checked, not merely formatted as YAML (a review finding on
 # PR #1019 caught the first version of this file claiming otherwise). It
 # exists so a concept's status is recorded once, in one shape, instead of

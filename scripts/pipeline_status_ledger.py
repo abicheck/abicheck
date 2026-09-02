@@ -101,6 +101,16 @@ _PIPELINE_REQUIRED_CONCEPTS = frozenset(
 #: logic together (or dispatch per-version), never silently accept a new
 #: version number against the old field rules.
 _PIPELINE_SUPPORTED_SCHEMA_VERSION = 1
+#: The complete top-level key set this schema version defines. Checked as
+#: an exact set the same way `_PIPELINE_REQUIRED_CONCEPTS`/
+#: `_PIPELINE_REQUIRED_CONCEPT_FIELDS` are -- a misspelled top-level key
+#: (`as_of_commmit`) or an unsupported one (`status: complete`) previously
+#: produced zero findings, since every individual field was validated by
+#: name via `.get()` with nothing checking the header's own key set (a real
+#: review finding on PR #1019).
+_PIPELINE_TOP_LEVEL_FIELDS = frozenset(
+    {"schema_version", "as_of_commit", "as_of_date", "concepts"}
+)
 _PIPELINE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PIPELINE_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
@@ -153,6 +163,15 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
     dropped or misspelled concept key) is caught immediately rather than
     silently read as `None`/absent by a future generator."""
     rel = _rel(PIPELINE_STATUS_FILE)
+    top_level_unknown = set(data) - _PIPELINE_TOP_LEVEL_FIELDS
+    if top_level_unknown:
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: unknown top-level field(s) "
+            f"{sorted(top_level_unknown, key=repr)} -- either a typo or the "
+            f"schema needs extending deliberately in "
+            f"_PIPELINE_TOP_LEVEL_FIELDS",
+        )
     schema_version = data.get("schema_version")
     # `bool` is an `int` subclass in Python, so `isinstance(True, int)` is
     # True -- excluded explicitly, or `schema_version: true` would pass this
