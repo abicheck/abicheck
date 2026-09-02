@@ -17,6 +17,7 @@ from abicheck.policy.outcome import (
     PolicyGateDecision,
     fold_gate_and_operational,
     operational_status_exit_code,
+    policy_gate_decision_exit_code,
 )
 
 COVERAGE_INCOMPLETE_EXIT = 1
@@ -169,11 +170,31 @@ class GateInfo:
         # policy-aware compatibility gate (including its granular
         # `blocking_categories`), and `RunOutcome.gate` is derived from the
         # identical computation (see `reporter._run_outcome_for_result`), so
-        # the two can never disagree on a fresh report; only a real
-        # operational failure can raise this result beyond what `severity`
-        # alone already stated.
+        # the two can never disagree on a *fresh, unscoped* report; only a
+        # real operational failure can raise this result beyond what
+        # `severity` alone already stated.
+        #
+        # A *scoped* (`--used-by`/`--required-symbol`) report is deliberately
+        # exempt from the cross-check below: `cli_compare_fold._swap_in_
+        # scoped_severity` rewrites `severity.exit_code` to `result.scoped_
+        # exit_code` -- already folded with the orthogonal contract-coverage/
+        # analysis-assurance floors -- while `_swap_in_scoped_run_outcome`
+        # rewrites `run_outcome.gate` from `result.scoped_compatibility_
+        # contribution`, the deliberately *pre*-fold, compatibility-only
+        # value D6's own axis separation requires. The two are allowed to
+        # differ by exactly that fold on a scoped report; `full_run_outcome`
+        # is present if and only if that swap ran, so its presence is what
+        # distinguishes an intentional scoped divergence from real
+        # corruption (Codex review).
         if run_outcome is not None:
-            _, operational = run_outcome
+            gate, operational = run_outcome
+            if "full_run_outcome" not in data:
+                gate_exit = policy_gate_decision_exit_code(gate)
+                if gate_exit != result.exit_code:
+                    raise _MalformedGate(
+                        f"'run_outcome.gate' ({gate.value}, exit {gate_exit}) "
+                        f"contradicts 'severity.exit_code' ({result.exit_code})"
+                    )
             op_exit = operational_status_exit_code(operational)
             if op_exit > result.exit_code:
                 result = replace(

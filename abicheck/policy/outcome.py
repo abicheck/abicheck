@@ -348,6 +348,7 @@ def run_outcome_for_scan_fields(
     severity_exit_code: int | None = None,
     contract_coverage_contribution: object = None,
     member_evidence_contract_error: bool = False,
+    bundle_incomplete: bool = False,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
@@ -394,12 +395,25 @@ def run_outcome_for_scan_fields(
     status already derived from *verdict*/*exit_code* (e.g. a set-level
     ``BUDGET_OVERFLOW``, which already dominates every member per that same
     function's own step 1).
+
+    *bundle_incomplete*, when ``True``, folds
+    :attr:`OperationalStatus.EXTRACTION_ERROR` in under the identical
+    "only when otherwise ``NONE``" rule -- the sibling gap
+    :meth:`~abicheck.service_scan.ScanSetResult`'s own
+    ``run_scan_set`` case where a *stronger* member's ``API_BREAK``/
+    ``BREAKING`` wins the reported ``verdict`` while the cross-library
+    bundle audit itself never ran (Codex review): unlike the ``BUNDLE_
+    INCOMPLETE`` sentinel *verdict* the ``_SCAN_ABORT_VERDICT_OPERATIONAL``
+    membership check above already covers, this is the case where the
+    audit still went incomplete but *verdict* itself never says so.
     """
     operational = _SCAN_ABORT_VERDICT_OPERATIONAL.get(verdict, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE:
         operational = _SCAN_EXIT_CODE_OPERATIONAL.get(exit_code, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE and member_evidence_contract_error:
         operational = OperationalStatus.EVIDENCE_CONTRACT_ERROR
+    if operational is OperationalStatus.NONE and bundle_incomplete:
+        operational = OperationalStatus.EXTRACTION_ERROR
 
     compatibility: Verdict | None
     try:
@@ -557,6 +571,7 @@ def run_outcome_dict_for_scan(
     *,
     report: object = None,
     member_evidence_contract_error: bool = False,
+    bundle_incomplete: bool = False,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> dict[str, Any]:
     """One-call convenience wrapping :func:`run_outcome_for_scan_fields` +
@@ -572,7 +587,7 @@ def run_outcome_dict_for_scan(
     are mutually exclusive report shapes (Codex review), never both present
     at once, so there is no precedence question between them in practice.
 
-    *member_evidence_contract_error* is forwarded to
+    *member_evidence_contract_error*/*bundle_incomplete* are forwarded to
     :func:`run_outcome_for_scan_fields` unchanged -- see that function's own
     docstring (:class:`~abicheck.service_scan.ScanSetResult`'s own use).
     """
@@ -585,6 +600,7 @@ def run_outcome_dict_for_scan(
         severity_exit_code=compat_exit_code,
         contract_coverage_contribution=scan_report_coverage_contribution(report),
         member_evidence_contract_error=member_evidence_contract_error,
+        bundle_incomplete=bundle_incomplete,
         lifecycle=lifecycle,
     ).to_dict()
 

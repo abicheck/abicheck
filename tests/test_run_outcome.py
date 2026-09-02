@@ -332,6 +332,51 @@ class TestGateInfoFromReportDataStructuredFirst:
         with pytest.raises(_MalformedGate):
             GateInfo.from_report_data(data)
 
+    def test_gate_contradicting_severity_fails_closed(self):
+        """Codex review (P2): both blocks individually parse, but disagree
+        on the compatibility axis itself (severity says clean, run_outcome
+        says abi_breaking) -- must fail closed rather than silently trust
+        the greener severity block."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {
+            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
+    def test_scoped_gate_divergence_from_severity_is_not_a_contradiction(self):
+        """The scoped-gate case (Codex review, fresh evidence following the
+        contradiction check above): a --used-by/--required-symbol report's
+        severity.exit_code is scoped_exit_code (already folded with the
+        orthogonal contract-coverage/analysis-assurance floors), while
+        run_outcome.gate is derived from scoped_compatibility_contribution
+        (deliberately pre-fold, compatibility-only, per D6's axis
+        separation) -- the two legitimately differ whenever a coverage/
+        assurance floor applies. full_run_outcome's presence (only set by
+        cli_compare_fold._swap_in_scoped_run_outcome) is what must exempt
+        this from the contradiction check, not silently coincide with it."""
+        data = {
+            "severity": {
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["contract_coverage"],
+            },
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.NONE, OperationalStatus.NONE
+            ),
+            "full_run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+        }
+        gate = GateInfo.from_report_data(data)
+        assert gate is not None
+        assert gate.exit_code == 1
+        assert gate.blocking is True
+
     def test_operational_failure_folds_into_an_otherwise_clean_severity_block(self):
         """The orthogonal-axes fold: RunOutcome.operational raises an
         otherwise-clean severity gate, exactly the shape ADR-049 Phase 7's
@@ -675,6 +720,24 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = result.to_dict()
         assert report["run_outcome"]["gate"] == "potential_breaking"
         assert report["run_outcome"]["operational"] == "evidence_contract_error"
+
+    def test_scan_set_result_preserves_bundle_incomplete_alongside_stronger_verdict(
+        self,
+    ):
+        """Codex review (P2): run_scan_set's own bundle-incomplete branch
+        keeps a *stronger* member's real API_BREAK/BREAKING as the reported
+        verdict (never overridden to the BUNDLE_INCOMPLETE sentinel), while
+        still setting bundle_incomplete=True -- run_outcome must surface the
+        incomplete cross-library audit via .operational even though
+        *verdict* itself never says so."""
+        from abicheck.service_scan import ScanSetResult
+
+        result = ScanSetResult(
+            verdict="API_BREAK", exit_code=2, bundle_incomplete=True,
+        )
+        report = result.to_dict()
+        assert report["run_outcome"]["gate"] == "potential_breaking"
+        assert report["run_outcome"]["operational"] == "extraction_error"
 
     def test_scan_set_result_bundle_incomplete_end_to_end(self):
         """Codex review (P2), end-to-end: run_scan_set's own BUNDLE_INCOMPLETE

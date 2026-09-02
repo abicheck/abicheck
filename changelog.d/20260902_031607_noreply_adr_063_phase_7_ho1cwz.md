@@ -77,3 +77,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `scan_schema_version` 1.24 while never emitting the new structured block
   at all, forcing a consumer back onto legacy exit-code/sentinel decoding
   for exactly the operational failures this axis exists to represent.
+- **`--artifact-set`'s `bundle_incomplete` state no longer disappears when
+  a stronger member verdict wins.** `run_scan_set()` keeps a member's real
+  `API_BREAK`/`BREAKING` as the reported verdict even when the cross-library
+  bundle audit itself never ran — `run_outcome.operational` now surfaces
+  `extraction_error` in that case too, not just when the sentinel
+  `BUNDLE_INCOMPLETE` verdict itself is reported.
+- **`GateInfo.from_report_data` now fails closed when `severity` and
+  `run_outcome` individually parse but contradict each other** (e.g.
+  `severity.exit_code: 0` alongside `run_outcome.gate: abi_breaking`) —
+  previously the structured `.operational` fold ran without ever
+  cross-checking `.gate` itself, so a corrupted-but-well-formed report
+  could silently read as the greener `severity` result. A `--used-by`/
+  `--required-symbol` scoped report is correctly exempted (its
+  `severity.exit_code`/`run_outcome.gate` intentionally diverge whenever a
+  contract-coverage/analysis-assurance floor applies), identified by the
+  presence of `full_run_outcome`.
