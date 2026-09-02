@@ -520,6 +520,11 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
             f"{home}: the hub {ladder.hub} must be the first entry directly under "
             "this tab, as its overview"
         )
+    if groups.get(home_key, []).count(ladder.hub) > 1:
+        out.append(
+            f"{home}: the hub {ladder.hub} is listed more than once under this tab; "
+            "it is the one overview entry"
+        )
     for key, pages in groups.items():
         if key != home_key and ladder.hub in pages:
             out.append(

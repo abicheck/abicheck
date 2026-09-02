@@ -691,6 +691,17 @@ def test_hub_listed_after_the_steps_is_an_error(tmp_path: Path) -> None:
     assert any("must be the first entry directly under" in m for m in msgs)
 
 
+def test_hub_listed_twice_under_the_tab_is_an_error(tmp_path: Path) -> None:
+    twice = NAV_OK.replace(
+        "    - Overview: learn/hub.md\n",
+        "    - Overview: learn/hub.md\n    - Overview again: learn/hub.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, twice)
+    assert any(
+        "Learn: the hub learn/hub.md is listed more than once" in m for m in msgs
+    )
+
+
 def test_hub_inside_a_step_group_is_an_error(tmp_path: Path) -> None:
     inside = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
         '    - "1. Start":\n', '    - "1. Start":\n      - Overview: learn/hub.md\n'
