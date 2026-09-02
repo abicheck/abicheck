@@ -14,8 +14,8 @@
 # limitations under the License.
 
 """Executable regression tests for `verify-merge-checks.yml`'s embedded
-`actions/github-script` poll/select/decide logic (Codex review, six rounds
-on this one step: https://github.com/abicheck/abicheck/pull/1009).
+`actions/github-script` poll/select/decide logic (Codex review, seven
+rounds on this one step: https://github.com/abicheck/abicheck/pull/1009).
 
 `tests/test_required_checks_governance.py`'s `TestVerifyMergeChecksWorkflow`
 deliberately only checks the workflow's YAML text, trigger shape, and
@@ -24,13 +24,15 @@ polling logic. That gap is exactly why several real bugs in that logic (a
 required check judged against the wrong reference point, a rerun selected
 by a `started_at` field that can't tell pre- from post-merge, a same-second
 timestamp read as proof of "before", a clean snapshot accepted without
-confirming it holds, and a clean-streak counter that counted total attempts
-instead of consecutive ones) went unnoticed by every other test in this
-repository while each round's fix was itself only checked with a throwaway,
-uncommitted smoke script -- leaving each fix's own regression undetectable
-by anything that runs in CI. This file is that missing coverage: it runs
-the *real* script text extracted from the workflow file (never a
-hand-copied reimplementation, which could silently drift from what
+confirming it holds, a clean-streak counter that counted total attempts
+instead of consecutive ones, and a consecutive-clean-streak requirement
+fixed at a small constant that confirmed "clean" across far less time than
+the poll budget it was supposed to span) went unnoticed by every other test
+in this repository while each round's fix was itself only checked with a
+throwaway, uncommitted smoke script -- leaving each fix's own regression
+undetectable by anything that runs in CI. This file is that missing
+coverage: it runs the *real* script text extracted from the workflow file
+(never a hand-copied reimplementation, which could silently drift from what
 actually ships) through `tests/verify_merge_checks_harness.mjs`, a Node
 harness that mocks `actions/github-script`'s `context`/`core`/`github`
 globals and a fake, script-advanced clock, against a scripted sequence of
@@ -367,15 +369,46 @@ class TestCleanResultMustBeConfirmed:
             "started_at": "2025-12-31T23:59:30Z",
         }
         # Only ONE clean read after the pending one: if the loop wrongly
-        # counted total attempts (attempt 2 >= MIN_CLEAN_ATTEMPTS(2)), it
+        # counted total attempts (attempt 2 >= MIN_CLEAN_ATTEMPTS), it
         # would exit here and report success after a single clean
         # observation. It must not -- the harness's poll sequence repeats
         # `clean_once` for every attempt beyond this, so the real fix
-        # (a consecutive-clean-streak counter) needs one more clean poll
-        # before passing, which this assertion captures via `attempts`.
+        # (a consecutive-clean-streak counter) needs several more clean
+        # polls before passing, which this assertion captures via
+        # `attempts`.
         result = _run_scenario(tmp_path, [[pending_first], [clean_once]])
         assert result["failedMessage"] is None
-        # The fix requires at least 3 polls total (1 pending + 2 consecutive
-        # clean) before accepting the result -- exactly 2 would mean the
-        # bug (counting total attempts) is back.
+        # The fix requires more than 2 polls total (1 pending + at least 2
+        # consecutive clean) before accepting the result -- exactly 2 would
+        # mean the bug (counting total attempts) is back.
         assert result["attempts"] >= 3
+
+    def test_clean_streak_must_span_the_full_poll_budget_not_a_fixed_small_count(
+        self, tmp_path: Path
+    ) -> None:
+        """Direct regression test for the sixth Codex round: a fixed
+        `MIN_CLEAN_ATTEMPTS = 2` only confirms a clean read holds across
+        one `POLL_INTERVAL_MS` gap (~20s) before exiting, even though
+        `MAX_WAIT_MS` reserves a full 3 minutes for a not-yet-indexed
+        pre-merge rerun to appear. Two clean polls followed by a rerun
+        appearing on the third must still be caught -- a fixed 2-attempt
+        streak would have already declared victory after the second poll
+        and never seen it."""
+        old_pass_only = {
+            "id": 100,
+            "status": "completed",
+            "conclusion": "success",
+            "completed_at": "2025-12-31T23:55:00Z",
+            "started_at": "2025-12-31T23:50:00Z",
+        }
+        rerun_appears = {"id": 105, "status": "queued"}
+        result = _run_scenario(
+            tmp_path,
+            [[old_pass_only], [old_pass_only], [old_pass_only, rerun_appears]],
+        )
+        assert result["failedMessage"] is not None
+        assert "run 105" in result["failedMessage"]
+        # Confirming "clean" must take at least as many polls as the
+        # rerun's own appearance -- the bug this guards against exited
+        # after exactly 2 attempts, before ever polling a third time.
+        assert result["attempts"] > 2

@@ -184,10 +184,22 @@ jobs:
             const MAX_WAIT_MS = 3 * 60 * 1000;
             const deadline = Date.now() + MAX_WAIT_MS;
             // A clean (`pending.length === 0`) result must hold across at
-            // least this many polls before being accepted -- see the loop's
-            // own comment below for why a single clean read can't be
-            // trusted (Codex review).
-            const MIN_CLEAN_ATTEMPTS = 2;
+            // least this many *consecutive* polls before being accepted --
+            // see the loop's own comment below for why a single clean read
+            // can't be trusted (Codex review). Derived from the poll budget
+            // itself, not a fixed small constant: a hardcoded
+            // `MIN_CLEAN_ATTEMPTS = 2` only confirms a clean read across
+            // ~20s (one `POLL_INTERVAL_MS` gap) before exiting, even though
+            // `MAX_WAIT_MS` reserves a full 3 minutes for a not-yet-indexed
+            // pre-merge rerun to appear -- a rerun indexed at, say, 25s
+            // would still slip past a fixed 2-attempt streak (Codex review,
+            // sixth round). Requiring the streak to span the *entire* poll
+            // budget means "clean" is only ever accepted once this
+            // workflow has spent as long confirming it as it does chasing
+            // an actual pending check -- the same asymmetric preference for
+            // an occasional false failure over any false pass this file
+            // applies throughout.
+            const MIN_CLEAN_ATTEMPTS = Math.ceil(MAX_WAIT_MS / POLL_INTERVAL_MS);
 
             // Evaluates the current snapshot of check runs against
             // REQUIRED_CHECKS. Only a `completed_at` after `merged_at` is
