@@ -60,6 +60,7 @@ topics:
       - learn/architecture.md
       - learn/abi-series/08-detection.md
       - learn/build-source-data.md
+      - learn/how-a-break-shows-up.md
       - skills-src/shared/evidence-and-depth.md
       - learn/assurance-methods.md
 
@@ -490,6 +491,14 @@ topics:
   # page had grown to answer more than one primary question). Part 4 keeps
   # the core, first-read-through mechanisms and links out to these for the
   # deep-dive material.
+  break-symptoms:
+    canonical_page: learn/how-a-break-shows-up.md
+    fact_sources:
+      - scripts/evidence_tiers.py
+    allowed_summaries:
+      - learn/abi-api-handling.md
+      - start/first-report.md
+
   class-layout:
     canonical_page: learn/class-layout-abi.md
     fact_sources:

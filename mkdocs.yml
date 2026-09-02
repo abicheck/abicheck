@@ -180,6 +180,7 @@ nav:
     - Start:
       - Overview: learn/abi-api-handling.md
       - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md
+      - How a Break Shows Up: learn/how-a-break-shows-up.md
       - ABI Cheat Sheet: learn/abi-cheat-sheet.md
     - Define Your Contract:
       - "Compatibility as a Product Contract": learn/abi-series/00-product-contract.md

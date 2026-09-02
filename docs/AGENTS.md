@@ -62,8 +62,8 @@ path, not the nav position.
     **ABI/API Compatibility** tab, grouped by the question a page answers
     rather than by page *kind* (a numbered Learning-Series Part, a
     framing page, and a split-out deep-dive page covering the same question
-    sit in the same group): **Start** (the hub, five-minute overview, cheat
-    sheet) → **Define Your Contract** (Part 0, direction, consumer models,
+    sit in the same group): **Start** (the hub, five-minute overview, how a break
+    shows up, cheat sheet) → **Define Your Contract** (Part 0, direction, consumer models,
     build-profile comparability, public surface) → **ABI Mechanics** (Parts
     1-2-3-4-5-6, plus `class-layout-abi.md`) → **Beyond ABI** (behavioral,
     data/wire, ownership, static/header-only, concurrency) → **Platforms &

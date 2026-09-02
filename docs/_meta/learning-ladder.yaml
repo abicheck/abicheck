@@ -34,6 +34,7 @@ sequences:
         floor: beginner
         members:
           - learn/abi-series/abi-in-5-minutes.md
+          - learn/how-a-break-shows-up.md
           - learn/abi-cheat-sheet.md
           - learn/abi-series/glossary.md
       - id: 1
@@ -136,6 +137,7 @@ paths:
   - role: New C/C++ library author
     pages:
       - learn/abi-series/abi-in-5-minutes.md
+      - learn/how-a-break-shows-up.md
       - learn/abi-series/00-product-contract.md
       - learn/abi-series/01-foundations.md
       - learn/abi-series/02-symbol-contracts.md
@@ -152,6 +154,7 @@ paths:
     after: start/choose-your-workflow.md
   - role: CI / release engineer
     pages:
+      - learn/how-a-break-shows-up.md
       - learn/compatibility-direction.md
       - learn/abi-series/08-detection.md
       - learn/verdicts.md                      # concepts, after the educational tiers
@@ -175,6 +178,7 @@ paths:
     after: start/choose-your-workflow.md
   - role: AI agent / automated reviewer
     pages:
+      - learn/how-a-break-shows-up.md
       - learn/verdicts.md
       - learn/evidence-and-detectability.md
     after: use/output-formats.md

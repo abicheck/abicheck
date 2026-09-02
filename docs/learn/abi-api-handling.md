@@ -10,8 +10,9 @@ the page before and after it.
 1. [**ABI in Five Minutes**](abi-series/abi-in-5-minutes.md) — the gentlest
    introduction: what an ABI is, in one sentence, and why an app can crash
    after a library upgrade nobody recompiled it for.
-2. [**ABI Cheat Sheet**](abi-cheat-sheet.md) — the two-minute card: which
-   changes are safe, risky, or breaking, each with a runnable case.
+2. [**How a Break Shows Up**](how-a-break-shows-up.md) — the eight ways a
+   break reaches you, which mechanism is behind each, and which kind of
+   evidence first reveals it.
 3. [**Part 0 — Compatibility as a Product Contract**](abi-series/00-product-contract.md)
    — the framing every later page rests on: a change is only a "break" if it
    breaks a promise, and "compatible" needs a dimension named.
@@ -31,7 +32,7 @@ reading at that point. Both tables are rendered from
 
 | Tier | Level | Pages |
 |---|---|---|
-| Tier 0 · Orientation | beginner | [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) → [ABI Cheat Sheet](abi-cheat-sheet.md) → [Glossary](abi-series/glossary.md) |
+| Tier 0 · Orientation | beginner | [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) → [How a Break Shows Up](how-a-break-shows-up.md) → [ABI Cheat Sheet](abi-cheat-sheet.md) → [Glossary](abi-series/glossary.md) |
 | Tier 1 · Foundations | beginner → intermediate | [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → [What Is Part of Your ABI Surface?](abi-surface.md) |
 | Tier 2 · Mechanics | intermediate | [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → [Part 3 — Type Layout Breaks](abi-series/03-type-layout.md) → [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) (go deeper: [Class Layout ABI & API: Problems and Detection](class-layout-abi.md), [Exception Unwinding: The Machinery Behind `noexcept`](exception-unwinding-abi.md), [Modern C/C++ and Toolchain ABI Hazards](modern-cpp-toolchain-hazards.md)) → [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) (go deeper: [The MSVC/PE ABI Model](msvc-pe-abi-model.md)) → [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) |
 | Tier 3 · Define the contract | intermediate | [Compatibility Direction](compatibility-direction.md) → [Consumer Models](consumer-models.md) → [Build Profile Comparability](build-profile-comparability.md) → [Static & Header-Only Contracts](static-and-header-only.md)<br>also: [Contract-Aware Compatibility](contract-aware-compatibility.md) (on the Concepts tab) |
@@ -61,13 +62,13 @@ back — and ends with the one tool-track page that role needs next.
 
 | Role | Path (tier · page) | Then |
 |---|---|---|
-| New C/C++ library author | 0 · [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) → 1 · [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → 1 · [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → 2 · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → 2 · [Part 3 — Type Layout Breaks](abi-series/03-type-layout.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| New C/C++ library author | 0 · [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) → 0 · [How a Break Shows Up](how-a-break-shows-up.md) → 1 · [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → 1 · [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → 2 · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → 2 · [Part 3 — Type Layout Breaks](abi-series/03-type-layout.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
 | C++ library maintainer | 1 · [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → 2 · [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) → 2 · [Class Layout ABI & API: Problems and Detection](class-layout-abi.md) → 2 · [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
-| CI / release engineer | 3 · [Compatibility Direction](compatibility-direction.md) → 4 · [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) → c1 · [Verdicts](verdicts.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| CI / release engineer | 0 · [How a Break Shows Up](how-a-break-shows-up.md) → 3 · [Compatibility Direction](compatibility-direction.md) → 4 · [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) → c1 · [Verdicts](verdicts.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
 | Distribution / package maintainer | 2 · [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) → 7 · [Dependency & Runtime Floors](dependency-floors.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
 | Product / SDK owner (several binaries) | 1 · [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → 3 · [Consumer Models](consumer-models.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
 | Plugin / SDK author | 2 · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → 3 · [Compatibility Direction](compatibility-direction.md) → 3 · [Consumer Models](consumer-models.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
-| AI agent / automated reviewer | c1 · [Verdicts](verdicts.md) → c2 · [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) | [Output Formats](../use/output-formats.md) |
+| AI agent / automated reviewer | 0 · [How a Break Shows Up](how-a-break-shows-up.md) → c1 · [Verdicts](verdicts.md) → c2 · [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) | [Output Formats](../use/output-formats.md) |
 
 <!-- END GENERATED: learning-paths -->
 

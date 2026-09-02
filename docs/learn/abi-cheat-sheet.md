@@ -277,4 +277,4 @@ All example cases: [Examples & Case Encyclopedia](../reference/examples/index.md
 
 ---
 
-**Ladder:** ← [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) · Tier 0 · Orientation · [Glossary](abi-series/glossary.md) →
+**Ladder:** ← [How a Break Shows Up](how-a-break-shows-up.md) · Tier 0 · Orientation · [Glossary](abi-series/glossary.md) →
