@@ -163,11 +163,29 @@ def evidenced_producers(
     truthiness, then PE); the third finding is that the inference itself is
     the bug, because the storage layer cannot answer a question the payload
     does not record. So a populated debug block evidences *nothing*, and a
-    fact resting on a debug producer alone downgrades. Only ``is_const`` and
-    ``is_volatile`` name ``dwarf`` at all, both alongside the two header-AST
-    backends, so this reaches exactly those two on a legacy *non-header*
-    document still holding their resting default -- and it narrows the
-    claim, never the value.
+    fact resting on a debug producer alone downgrades.
+
+    Four rules in :func:`apply_legacy_fact_backfill`'s table name ``dwarf``
+    -- ``TypeField.is_const``/``is_volatile`` and ``RecordType.vtable``/
+    ``vptr_offset_bits`` (Codex review, PR #995, eighth round: an earlier
+    draft of this docstring claimed only the first two, having enumerated
+    the fields ADR-063 Phase 5 converted rather than the whole table).
+    Every one of them also names both header-AST backends, so a *recorded*
+    header snapshot is unaffected; the reach is a legacy **non-header**
+    document still holding the resting default, where the claim narrows and
+    the value never does -- a record with a real vtable keeps it and stays
+    ``PRESENT``.
+
+    The vtable pair is deliberately not carved out. A DWARF-derived
+    ``vtable: []`` on a non-polymorphic record is a real "the producer ran
+    and established nothing is there" observation, and losing it is a cost.
+    But it is not *recoverable* here: the only way to keep it would be to
+    read ``platform == "elf"`` plus a populated debug block as DWARF, which
+    is precisely the inference the round above removed, and which a BTF or
+    CTF snapshot satisfies identically while carrying no vtable information
+    at all. On ``main`` today that same ``vtable: []`` reads ``PRESENT`` on a
+    PE/PDB and a symbols-only ELF document too, so the uniform answer
+    replaces a broader over-claim rather than a narrower correct one.
 
     A **fresh** snapshot is unaffected in every case: it persists each
     ``<field>_fact`` directly and :func:`apply_case_a_fact_backfill` skips

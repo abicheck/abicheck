@@ -619,6 +619,27 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
             {"is_restrict": False},
             {"is_restrict": True},
         ),
+        # ADR-063 Phase 0's own bridged fields. They are in the same rule
+        # table and equally reached by the producer gate — this list omitted
+        # them at first because it was written from the fields Phase 5
+        # *converted* rather than from the table (Codex review, PR #995,
+        # eighth round). `test_the_enumeration_covers_every_applied_rule`
+        # below is what stops that recurring.
+        ("RecordType", "vtable", "types", {"vtable": []}, {"vtable": ["f"]}),
+        (
+            "RecordType",
+            "vptr_offset_bits",
+            "types",
+            {"vptr_offset_bits": None},
+            {"vptr_offset_bits": 0},
+        ),
+        (
+            "Param",
+            "is_va_list",
+            "functions",
+            {"is_va_list": False},
+            {"is_va_list": True},
+        ),
     )
 
     #: Document shapes, one per point in the evidence domain.
@@ -766,24 +787,91 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
 
         ``test_present_implies_an_evidenced_producer`` returns early on a
         non-PRESENT status, so an implementation that downgraded *every*
-        fact would satisfy it trivially. These two assertions are the
-        opposite pressure, stated once per case-(a) field on the most
-        evidence-free document in the domain: its resting value must be
-        downgraded there, and a real, non-resting value must not be — the
-        downgrade narrows the claim, never the value.
+        fact would satisfy it trivially. These assertions are the opposite
+        pressure, stated once per rule on the most evidence-free document in
+        the domain.
+
+        The second half is the pairing rule ``CaseAFactRule`` states: a
+        downgrade must never leave a placeholder value standing beside a
+        ``NOT_COLLECTED`` status, and must never discard a value it still
+        reports as ``PRESENT``. Which of the two branches a rule takes there
+        depends on its own reliability signal -- the *unreliable* branch
+        resets the value because it is known to be a placeholder, the
+        *unproduceable* branch keeps it because it came from somewhere the
+        registry does not model -- so the invariant is stated over the pair
+        rather than over either branch alone. Asserting "a non-resting value
+        always survives" instead is what this test did first, and
+        ``RecordType.vtable`` falsified it.
         """
         nothing = dict(self._SHAPES[0][1])
         assert self._SHAPES[0][0] == "nothing"
+        statuses: set[FactStatus] = set()
         for owner, field, collection, resting, non_resting in self._FIELDS:
-            for entry, expected in (
-                (resting, FactStatus.NOT_COLLECTED),
-                (non_resting, FactStatus.PRESENT),
-            ):
-                d = self._document(owner, collection, entry, nothing)
-                snap = snapshot_from_dict(json.loads(json.dumps(d)))
-                obj = self._loaded(snap, owner, collection)
-                got = getattr(obj, f"{field}_fact").status
-                assert got is expected, (
-                    f"{owner}.{field} at {entry} on an evidence-free document: "
-                    f"expected {expected}, got {got}"
-                )
+            d = self._document(owner, collection, resting, nothing)
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            got = getattr(obj, f"{field}_fact").status
+            assert got is FactStatus.NOT_COLLECTED, (
+                f"{owner}.{field} at its resting value {resting} on an "
+                f"evidence-free document: expected NOT_COLLECTED, got {got}"
+            )
+
+            [(_key, real)] = non_resting.items()
+            d = self._document(owner, collection, non_resting, nothing)
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            got = getattr(obj, f"{field}_fact").status
+            statuses.add(got)
+            kept = getattr(obj, field) == real
+            assert kept is (got is FactStatus.PRESENT), (
+                f"{owner}.{field}: value and status disagree — "
+                f"value {'kept' if kept else 'reset'} beside status {got}"
+            )
+
+        assert FactStatus.PRESENT in statuses, (
+            "no rule preserved a real value on an evidence-free document — "
+            "the downgrade is discarding data, not narrowing a claim"
+        )
+
+    def test_the_enumeration_covers_every_applied_rule(self) -> None:
+        """`_FIELDS` must be the rule table, not a hand-kept subset of it.
+
+        The list above was first written from the fields ADR-063 Phase 5
+        converted, and silently omitted the three ADR-063 Phase 0 rules the
+        same table carries (`RecordType.vtable`/`vptr_offset_bits`,
+        `Param.is_va_list`) — so the whole-domain invariant was not
+        whole-domain, and nothing failed anywhere. That is the #753 -> #759
+        shape exactly (AGENTS.md, "Adding a new ChangeKind" step 5): a
+        missing entry in a hand-maintained list produces no failure.
+
+        So this reads the rules a *real* load actually applies, rather than
+        restating them, and a rule added to `apply_legacy_fact_backfill`
+        without a row above fails here.
+        """
+        from abicheck.storage import fact_backfill
+
+        applied: list[tuple[str, str]] = []
+        real = fact_backfill.apply_case_a_fact_backfill
+
+        def spy(*args: object, **kwargs: object) -> object:
+            rules = kwargs["rules"]
+            assert isinstance(rules, tuple)
+            applied.extend((r.owner, r.field) for r in rules)
+            return real(*args, **kwargs)
+
+        monkeypatched = getattr(fact_backfill, "apply_case_a_fact_backfill")
+        try:
+            fact_backfill.apply_case_a_fact_backfill = spy  # type: ignore[assignment]
+            snapshot_from_dict(_minimal_dict(schema_version=_PRE_CASE_A))
+        finally:
+            fact_backfill.apply_case_a_fact_backfill = monkeypatched  # type: ignore[assignment]
+
+        assert applied, "no case-(a) rules were applied — the spy saw nothing"
+        enumerated = {(o, f) for o, f, _c, _r, _n in self._FIELDS}
+        assert set(applied) == enumerated, (
+            "the enumeration and the rule table disagree; missing from "
+            f"_FIELDS: {sorted(set(applied) - enumerated)}; not applied: "
+            f"{sorted(enumerated - set(applied))}"
+        )
