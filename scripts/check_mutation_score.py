@@ -110,10 +110,22 @@ SURVIVOR_BASELINE: int | None = None
 #: Default per-module baseline, committed alongside the code.
 DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 
-# Must match the 355-minute GitHub Actions job limit in mutation.yml.  The
-# subprocess cap formerly stayed at 7,200 seconds, silently aborting the run
-# at 120 minutes even after the job itself was given more time.
-MUTMUT_RUN_TIMEOUT_SECONDS = 21_300
+# Bounded by, but deliberately below, the 355-minute GitHub Actions job
+# limit in mutation.yml. The subprocess cap formerly stayed at 7,200
+# seconds, silently aborting the run at 120 minutes even after the job
+# itself was given more time -- but setting it to *exactly* the job's own
+# ceiling reintroduces a different version of the same failure: the job's
+# checkout/dependency-install/parser-verification steps run *before* this
+# subprocess call and its own "Save mutmut results"/"Upload mutmut results"
+# steps run *after*, so a subprocess timeout equal to the full job budget
+# leaves no room for any of that -- GitHub kills the whole job at its own
+# timeout mid-subprocess, before the surrounding steps can produce a
+# receipt or upload anything, which is exactly the "cancelled, no receipt"
+# failure this constant exists to prevent (Codex review). 10 minutes of
+# headroom (comfortably more than the ~1 minute those surrounding steps
+# have taken in practice) keeps the cap close to the job's real ceiling
+# without eating into it.
+MUTMUT_RUN_TIMEOUT_SECONDS = 20_700
 
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
