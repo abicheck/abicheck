@@ -878,6 +878,11 @@ outputs:
     description: >
       Path to the generated report file. Set when output-file is provided,
       or auto-populated for SARIF format (defaults to abicheck-results.sarif).
+      Withheld (empty) when format: sarif and upload-sarif: true were both
+      requested but extra-args overrode --format away from sarif -- the
+      real file exists but its content isn't SARIF, and this is the exact
+      value the upload-sarif step below gates on, so withholding it skips
+      that upload rather than feeding mismatched content to CodeQL.
     value: ${{ steps.run-abicheck.outputs.report-path }}
 
 runs:

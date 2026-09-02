@@ -345,6 +345,136 @@ class TestSarifDefaultOutputFileUsesEffectiveFormat:
         assert "abicheck-results.sarif" in argv, argv
 
 
+def _compare_github_output(tmp_path: Path, env_extra: dict[str, str]) -> str:
+    """Run compare mode with a stub that actually honors ``-o PATH`` (writing
+    real content there, unlike ``_compare_argv``'s stdout-only stub, since
+    this test cares whether ``$OUTPUT_FILE`` ends up a real, non-empty file)
+    and return the ``$GITHUB_OUTPUT`` file's contents.
+    """
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    stub = fake_bin / "abicheck"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "_out=''\n"
+        'while [[ $# -gt 0 ]]; do\n'
+        '  case "$1" in\n'
+        "    -o) _out=\"$2\"; shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        'if [[ -n "$_out" ]]; then\n'
+        '  printf \'not-actually-sarif\\n\' > "$_out"\n'
+        "else\n"
+        "  echo '{\"verdict\":\"COMPATIBLE\"}'\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    old_json = tmp_path / "old.json"
+    new_json = tmp_path / "new.json"
+    old_json.write_text("{}", encoding="utf-8")
+    new_json.write_text("{}", encoding="utf-8")
+    github_output = tmp_path / "gh_output"
+    github_output.write_text("")
+
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env = {
+        **base_env,
+        "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+        "INPUT_MODE": "compare",
+        "INPUT_OLD_LIBRARY": str(old_json),
+        "INPUT_NEW_LIBRARY": str(new_json),
+        "INPUT_FORMAT": "markdown",
+        "INPUT_ADD_JOB_SUMMARY": "false",
+        "INPUT_PR_COMMENT": "false",
+        "GITHUB_OUTPUT": str(github_output),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
+        **env_extra,
+    }
+    result = subprocess.run(
+        [bash_executable(), str(RUN_SH)],
+        capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return github_output.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
+    """Codex review, PR #998, fresh evidence (second round): the earlier
+    SARIF fix only covered the no-explicit-`output-file` default path.
+    `format: sarif` + `upload-sarif: true` + an *explicit* `output-file:`
+    + `extra-args: --format json` still wrote real (non-SARIF) content to
+    that explicit path, and `report-path` -- the exact value
+    `action.yml`'s upload-sarif step's own `if:` condition gates on
+    (`steps.run-abicheck.outputs.report-path != ''`) -- was still published
+    unconditionally whenever the file existed, regardless of whether its
+    content actually matched what was requested. Withholding `report-path`
+    specifically for this dangerous combination closes both the default and
+    explicit-path cases at once, without needing a new Action output or an
+    action.yml change: the upload step already refuses to run without one.
+    """
+
+    def test_explicit_output_file_withholds_report_path_on_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        explicit = tmp_path / "myreport.sarif"
+        out = _compare_github_output(
+            tmp_path,
+            {
+                "INPUT_FORMAT": "sarif",
+                "INPUT_UPLOAD_SARIF": "true",
+                "INPUT_OUTPUT_FILE": str(explicit),
+                "INPUT_EXTRA_ARGS": "--format json",
+            },
+        )
+        assert explicit.is_file()  # the mismatched content really was written
+        assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
+
+    def test_default_output_file_withholds_report_path_on_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        # The no-explicit-output-file default path, now checked via
+        # report-path directly rather than only via -o's absence from argv.
+        out = _compare_github_output(
+            tmp_path,
+            {
+                "INPUT_FORMAT": "sarif",
+                "INPUT_UPLOAD_SARIF": "true",
+                "INPUT_EXTRA_ARGS": "--format json",
+            },
+        )
+        assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
+
+    def test_matching_sarif_still_publishes_report_path(self, tmp_path: Path) -> None:
+        # Negative control: the ordinary, unoverridden sarif+upload
+        # combination must keep publishing report-path exactly as before.
+        out = _compare_github_output(
+            tmp_path,
+            {"INPUT_FORMAT": "sarif", "INPUT_UPLOAD_SARIF": "true"},
+        )
+        assert "report-path=abicheck-results.sarif" in out, out
+
+    def test_mismatch_without_upload_sarif_still_publishes_report_path(
+        self, tmp_path: Path
+    ) -> None:
+        # The suppression is scoped to the upload-sarif combination
+        # specifically -- report-path for any other purpose is unaffected.
+        explicit = tmp_path / "myreport.sarif"
+        out = _compare_github_output(
+            tmp_path,
+            {
+                "INPUT_FORMAT": "sarif",
+                "INPUT_OUTPUT_FILE": str(explicit),
+                "INPUT_EXTRA_ARGS": "--format json",
+            },
+        )
+        assert f"report-path={explicit}" in out, out
+
+
 def test_both_branches_share_the_same_write_guard() -> None:
     """compare and scan must not drift apart on this.
 

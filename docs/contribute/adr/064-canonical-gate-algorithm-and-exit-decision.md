@@ -815,7 +815,24 @@ lands in two stages rather than one atomic change:
       test_action_run_sh_compare_pr_json_write.py::
       TestSarifDefaultOutputFileUsesEffectiveFormat`, `tests/
       test_action_run_sh_annotate_renderer.py::
-      test_effective_format_override_still_emits_the_diagnostic`). Still
+      test_effective_format_override_still_emits_the_diagnostic`).
+      **A seventh review round (Codex, fresh evidence) found the SARIF fix
+      above was itself incomplete**: it only closed the no-explicit-
+      `output-file` default-path case. An *explicit* `output-file:` +
+      `format: sarif` + `upload-sarif: true` + an `extra-args --format`
+      override still wrote real, non-SARIF content to that explicit path,
+      and `report-path` (the run's own output) was published unconditionally
+      whenever the file existed, regardless of whether its content actually
+      matched the format the upload step assumes. Fixed at the one point
+      that actually gates the danger rather than at the two places content
+      can land: `report-path` — precisely the value `action.yml`'s
+      upload-sarif step's own `if:` condition requires be non-empty — is now
+      withheld whenever `format: sarif` and `upload-sarif: true` were both
+      requested but the effective format isn't sarif, covering the default
+      and explicit-path cases identically and needing no new Action output
+      or `action.yml` change (`tests/
+      test_action_run_sh_compare_pr_json_write.py::
+      TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch`). Still
       open: the release fan-out's `GateOptions` unification, the typed-API half of
       this parity pass, the `--format text` gap named above, and a real
       `--artifact-set` member-level evidence-contract signal for the Action
