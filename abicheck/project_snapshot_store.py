@@ -60,6 +60,7 @@ v2.md`'s "Documentation ownership" section names explicitly.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -284,20 +285,33 @@ class ManifestSummary:
         self.artifact_ids = artifact_ids
 
 
-def _string_id_list(raw: Any, field_name: str) -> tuple[str, ...]:
-    """*raw* as a tuple of ids, refusing anything but a real JSON array of
-    strings.
+def _required_string_id_list(
+    data: Mapping[str, Any], field_name: str, record: str
+) -> tuple[str, ...]:
+    """*data[field_name]* as a tuple of ids, requiring the field to be
+    present as a real JSON array of strings -- never inferred from absence.
+
+    Two distinct malformed-input mistakes, closed together:
 
     `tuple(raw)` alone accepts far more than a well-formed manifest ever
     writes: a bare string iterates into one id per *character*, and a
     mapping iterates into its keys -- either can produce a plausible-looking
     tuple of strings from a document that is not actually a list at all
-    (Codex review). Refusing here, at the one place both id lists parse,
-    matches this module's existing "malformed input fails loudly, never
-    silently reinterpreted" convention.
+    (Codex review). A missing key is a second, separate case: this
+    function's own caller previously read a missing `variant_ids`/
+    `artifact_ids` via `.get(field_name)`, so `None` reached here and was
+    treated the same as an explicitly-written empty list -- silently
+    accepting a truncated manifest as a valid, empty package rather than
+    refusing a document that never stated its membership at all (Codex
+    review, a second round on the same field). Requiring the key present
+    closes both: this module's writer (`write_project_manifest`) always
+    writes both fields, even as `[]` when a package genuinely has no
+    variants/artifacts, so "key absent" is a fact about the *document*, not
+    about a package this module ever produces.
     """
-    if raw is None:
-        return ()
+    if field_name not in data:
+        raise ValueError(f"{record} is missing required field {field_name!r}")
+    raw = data[field_name]
     if not isinstance(raw, list):
         raise ValueError(
             f"{field_name} must be a JSON array of strings, not {type(raw).__name__}"
@@ -334,10 +348,11 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
             f"{root_path / MANIFEST_RELPATH} is not readable by this build: "
             f"{compatibility.reason}"
         )
+    record = str(root_path / MANIFEST_RELPATH)
     return ManifestSummary(
         versions=versions,
-        variant_ids=_string_id_list(data.get("variant_ids"), "variant_ids"),
-        artifact_ids=_string_id_list(data.get("artifact_ids"), "artifact_ids"),
+        variant_ids=_required_string_id_list(data, "variant_ids", record),
+        artifact_ids=_required_string_id_list(data, "artifact_ids", record),
     )
 
 

@@ -269,6 +269,38 @@ class TestReadManifestSummaryValidation:
         with pytest.raises(ValueError, match="artifact_ids"):
             read_manifest_summary(tmp_path)
 
+    def test_a_missing_variant_ids_field_is_refused(self, tmp_path: Path) -> None:
+        """A manifest that never states `variant_ids` at all must be
+        refused, not silently read as an empty membership list -- absence
+        of the field is a truncated document, not a package with zero
+        variants (Codex review, a second round on this same field: an
+        earlier fix validated a *present* malformed list but still let a
+        missing key through as `None` -> `()`)."""
+        self._write_manifest_json(
+            tmp_path,
+            {"versions": _VALID_VERSIONS, "artifact_ids": []},
+        )
+        with pytest.raises(ValueError, match="variant_ids"):
+            read_manifest_summary(tmp_path)
+
+    def test_a_missing_artifact_ids_field_is_refused(self, tmp_path: Path) -> None:
+        self._write_manifest_json(
+            tmp_path,
+            {"versions": _VALID_VERSIONS, "variant_ids": []},
+        )
+        with pytest.raises(ValueError, match="artifact_ids"):
+            read_manifest_summary(tmp_path)
+
+    def test_a_null_variant_ids_field_is_refused(self, tmp_path: Path) -> None:
+        """Explicit JSON `null` must be refused the same way a missing key
+        is -- not quietly re-treated as an empty list either."""
+        self._write_manifest_json(
+            tmp_path,
+            {"versions": _VALID_VERSIONS, "variant_ids": None, "artifact_ids": []},
+        )
+        with pytest.raises(ValueError, match="variant_ids"):
+            read_manifest_summary(tmp_path)
+
     def test_a_newer_package_format_version_is_refused(self, tmp_path: Path) -> None:
         self._write_manifest_json(
             tmp_path,
