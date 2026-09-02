@@ -50,6 +50,8 @@ _MODULES = (
     "abicheck.storage.canonical",
     "abicheck.storage.versioning",
     "abicheck.storage.package",
+    "abicheck.storage.dto",
+    "abicheck.storage.import_v1",
 )
 
 #: Modules the package deliberately does not re-export. They are still

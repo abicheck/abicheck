@@ -73,17 +73,22 @@ def test_not_comparable_report_preserves_declared_contract_coverage(
     [
         ("BUDGET_OVERFLOW", 5, "budget_overflow"),
         ("EVIDENCE_CONTRACT_ERROR", 1, "evidence_contract_error"),
+        ("NOT_COMPARABLE", 6, "not_comparable"),
+        ("BUNDLE_INCOMPLETE", 1, "extraction_error"),
     ],
 )
 def test_scan_abort_verdicts_force_a_blocking_gate(
     tmp_path: Path, verdict: str, report_exit_code: int, category: str
 ) -> None:
-    """`scan`'s own two abort verdicts aren't `Verdict` members, so without
+    """`scan`'s own four abort verdicts aren't `Verdict` members, so without
     dedicated handling `_load_report_file` never reaches `GateInfo.from_
     scan_report` for them (it only calls that after `parse_report_verdict`
     succeeds) -- the abort would read as an unavailable/verdictless report
     a required-target policy could silently tolerate, instead of the real
-    failure it is (Codex review, fresh evidence).
+    failure it is (Codex review, fresh evidence -- `NOT_COMPARABLE`/
+    `BUNDLE_INCOMPLETE` were the two of these four still missing from
+    `_scan_abort_categories`, silently discarding a blocking
+    `run_outcome.operational` for either one).
 
     The gate's own `exit_code` is always `1` (`COVERAGE_INCOMPLETE_EXIT`),
     never *report_exit_code* itself -- `GateInfo.from_scan_report` already
@@ -121,6 +126,447 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
     assert loaded.gate.blocking is True
     assert loaded.gate.exit_code == 1
     assert loaded.gate.blocking_categories == (category,)
+
+
+def test_scan_report_with_a_real_verdict_dispatches_to_the_scan_reader_first(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a native `scan` report carries its own
+    top-level `run_outcome` (ADR-063 Phase 7) but no top-level `severity`
+    block -- a severity-scheme `scan --against` nests its gate at
+    `diff.severity` instead. `_load_report_file` previously tried
+    `GateInfo.from_report_data` FIRST for every report: its own "no
+    `severity` -> read `run_outcome` alone" branch returned straight from
+    the (here, forged) root `run_outcome` without ever reaching
+    `GateInfo.from_scan_report`, the only reader that validates/cross-checks
+    the nested `diff.severity` gate against it. A forged root
+    `run_outcome.gate: "none"` alongside a real nested `diff.severity.
+    exit_code: 4` must fail closed (`_MalformedGate`), not silently read as
+    a nonblocking gate.
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.9",
+                "verdict": "BREAKING",
+                "diff": {
+                    "severity": {
+                        "exit_code": 4,
+                        "blocking": True,
+                        "blocking_categories": ["abi_breaking"],
+                    }
+                },
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "BREAKING",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "none",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
+def test_operational_error_preserves_a_completed_librarys_real_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (second round): a release's top-level
+    `verdict: "ERROR"` names only the OPERATIONALLY failed library -- when a
+    sibling library completed with a real result, `run_outcome.
+    compatibility` already preserves it. Forcing `Verdict.BREAKING`
+    unconditionally discarded that real result; the gate's own exit-4 floor
+    stays unconditional either way (an operational failure blocks
+    regardless of what else completed cleanly)."""
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [
+                    {"name": "a", "verdict": "ERROR"},
+                    {"name": "b", "verdict": "COMPATIBLE_WITH_RISK"},
+                ],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "COMPATIBLE_WITH_RISK",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "extraction_error",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.COMPATIBLE_WITH_RISK
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert loaded.gate.blocking_categories == ("operational_error",)
+
+
+def test_late_budget_overflow_preserves_a_real_completed_compatibility_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (second round): a *late* `BUDGET_
+    OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` abort can also carry a real
+    completed verdict in `run_outcome.compatibility` -- not only
+    `BUNDLE_INCOMPLETE`. Reading it unconditionally (not gated to one
+    sentinel) recovers it here too, with no regression for a report where
+    nothing genuinely completed (that case has no real `compatibility` to
+    read, so `_run_outcome_compatibility_verdict` still returns `None`)."""
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "API_BREAK",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "budget_overflow",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.API_BREAK
+    assert loaded.reason is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking_categories == ("budget_overflow",)
+
+
+def test_not_comparable_refusal_with_run_outcome_blocks_via_operational_axis_only(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `report.not_comparable.
+    not_comparable_document()` always writes a top-level `run_outcome`
+    (`compatibility: null`, `gate: none`, `operational: not_comparable`) for
+    this exact shape -- read it directly rather than fabricating
+    `Verdict.BREAKING`/exit 4 unconditionally. The orthogonal fold floors at
+    exit 1 ("only the operational axis blocks"), consistent with every
+    other operational-failure sentinel in this module. A report with NO
+    `run_outcome` (pre-2.48) still gets the old forced exit-4/BREAKING
+    shape -- see `TestNotComparableReportsBlockAggregation` in
+    `tests/test_aggregate.py`, which is pinned to that exact fallback and
+    must keep passing unchanged."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "not_comparable",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 1
+    assert loaded.gate.blocking_categories == ("not_comparable",)
+    assert loaded.reason is not None and "scope_mismatch" in loaded.reason
+
+
+def test_not_comparable_refusal_with_a_malformed_run_outcome_fails_closed_not_crashing(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `_run_outcome_gate_and_operational`
+    raises `_MalformedGate` (rather than returning `None`) for a PRESENT
+    but schema-invalid `run_outcome` -- every other branch that calls it
+    wraps the call in a `try`/`except _MalformedGate`, but this refusal
+    branch previously called it bare. A corrupt `run_outcome` on a
+    `verdict: null` + `reason.kind` refusal must land the target
+    unavailable with a malformed-gate reason, not raise an exception out of
+    `_load_report_file` and abort the whole aggregation command."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+                "run_outcome": {"gate": "not_a_real_value", "operational": "none"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
+def test_null_verdict_refusal_with_contradicting_run_outcome_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit review, fresh evidence: a schema-valid `run_outcome`
+    whose `operational` contradicts a `verdict: null` + `reason.kind`
+    refusal (here `gate: none`/`operational: none`, as if clean) previously
+    produced a nonblocking `GateInfo` -- trusting a self-inconsistent block
+    would let a real refusal read as safe. Must fail closed instead."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "none",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
+def test_bundle_incomplete_preserves_the_completed_members_compatibility_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `BUNDLE_INCOMPLETE` is the one abort
+    sentinel of the four where a real comparison DID complete -- it fires
+    only after every member scanned cleanly and just the cross-library
+    bundle audit itself never ran. `run_outcome.compatibility` already
+    preserves the worst completed member's real verdict; forcing
+    `verdict=None` the way a true abort does would discard it and wrongly
+    report the target as unavailable/unanalyzed even though it has a real,
+    already-established result.
+    """
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUNDLE_INCOMPLETE",
+                "exit_code": 1,
+                "per_artifact": [
+                    {
+                        "artifact": "a.so",
+                        "verdict": "COMPATIBLE_WITH_RISK",
+                        "exit_code": 0,
+                    }
+                ],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "COMPATIBLE_WITH_RISK",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "extraction_error",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.COMPATIBLE_WITH_RISK
+    assert loaded.reason is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("extraction_error",)
+
+
+def test_bundle_incomplete_with_a_truncated_run_outcome_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a bare
+    `{"run_outcome": {"compatibility": "BREAKING"}}` -- missing `gate`/
+    `operational`/`schema_version`/`lifecycle` -- must not earn the
+    opportunistic verdict-recovery a sibling fix added, NOR be silently
+    discarded as if the block were absent: a present-but-invalid
+    `run_outcome` could carry a real recorded ABI-break `gate` this module
+    would otherwise hide behind a bare coverage-incomplete floor. The
+    scan-abort branch now fails closed on it uniformly with every other
+    structured-`run_outcome` reader here, same as the ERROR/refusal
+    branches."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUNDLE_INCOMPLETE",
+                "exit_code": 1,
+                "run_outcome": {"compatibility": "BREAKING"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
+def test_release_lowercase_not_comparable_is_recognized_as_a_blocking_refusal(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a `compare-release` summary's own
+    lowercase `"not_comparable"` sentinel (ADR-050 D2) is a real string, not
+    JSON `null` -- distinct from `scan`'s uppercase `NOT_COMPARABLE` and from
+    a native `compare`'s `verdict: null` + `reason.kind` shape, so it was
+    caught by neither special-case branch and fell through to the generic
+    "report carried no ABI verdict" unavailable reading, silently discarding
+    a blocking `run_outcome.operational: "not_comparable"`.
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "not_comparable",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "exit": {"code": 16, "not_comparable_contribution": 1},
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "not_comparable",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.reason == "not comparable (release refused comparison)"
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("not_comparable",)
+
+
+def test_pre_2_48_release_refusal_with_no_severity_or_run_outcome_still_blocks(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a genuinely pre-2.48 `compare-release`
+    summary (neither `severity` nor `run_outcome`) still refused the
+    comparison via the legacy `"not_comparable"` sentinel. `GateInfo.
+    from_report_data` legitimately returns `None` for that shape -- that
+    must not read as gate-less/unavailable, letting an optional or
+    tolerated-unexpected target pass."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "not_comparable",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "exit": {"not_comparable_contribution": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("not_comparable",)
+
+
+def test_release_refusal_preserves_findings_from_a_completed_sibling(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: when one library refuses comparison but
+    a sibling library or the global bundle/matrix comparison completed,
+    `run_outcome.compatibility` is non-null and the target is marked
+    analyzed -- `_format_release_json` can still emit real `bundle_
+    findings`/`matrix_findings` in this state, and dropping them (mirroring
+    the `ERROR`/scan-abort branches' own incomplete-findings preservation)
+    would lose them from cross-profile reconciliation."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "not_comparable",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "bundle_findings": [
+                    {
+                        "kind": "func_removed",
+                        "symbol": "sym",
+                        "description": "d",
+                        "affected_libraries": ["a.so"],
+                    }
+                ],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "BREAKING",
+                    "assurance": None,
+                    "gate": "abi_breaking",
+                    "operational": "not_comparable",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.findings is not None
+    assert not loaded.findings.complete
+    assert len(loaded.findings.findings) == 1
 
 
 @pytest.mark.parametrize("prior_contribution", [2, 4])
@@ -605,3 +1051,146 @@ def test_artifact_set_budget_overflow_root_still_names_a_sibling_members_evidenc
     assert loaded.gate.blocking is True
     assert "budget_overflow" in loaded.gate.blocking_categories
     assert "evidence_contract_error" in loaded.gate.blocking_categories
+
+
+def test_operational_error_with_null_compatibility_does_not_fabricate_a_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (third round): a valid, schema-complete
+    `run_outcome` block whose `compatibility` is legitimately JSON `null`
+    (e.g. `build_operational_error_report`'s own extraction-failure report:
+    `compatibility: null`, `gate: none`, `operational: extraction_error`)
+    must NOT be treated the same as a genuinely absent block. Forcing
+    `Verdict.BREAKING` for this shape fabricated an ABI-break verdict and an
+    "analyzed" target count for a comparison that never ran. The gate's own
+    exit-4 floor stays unconditional either way."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "extraction_error",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("operational_error",)
+
+
+def test_legacy_error_release_with_no_run_outcome_still_forces_breaking(
+    tmp_path: Path,
+) -> None:
+    """A genuinely pre-2.48 release ERROR report (no `run_outcome` at all)
+    still forces the original synthetic `Verdict.BREAKING` -- confirms the
+    null-compatibility fix above didn't widen to cover the legacy no-
+    run_outcome case too, which must keep its original forced-blocking
+    shape exactly (pinned by `tests/test_aggregate.py`'s own
+    `TestNotComparableReportsBlockAggregation`-adjacent expectations for
+    this branch)."""
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [{"name": "a", "verdict": "ERROR"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.BREAKING
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+
+
+def test_operational_error_with_a_malformed_run_outcome_fails_closed_not_breaking(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a *present but schema-invalid*
+    `run_outcome` (missing required keys here) is a third case, distinct
+    from both "absent" and "valid" -- `_has_valid_run_outcome_block` reads
+    `False` for it the same as a genuinely absent block, so without an
+    explicit malformed-check this silently fell through to the legacy
+    fabricated-`Verdict.BREAKING` path instead of failing the target
+    unavailable/malformed like every other structured-`run_outcome` reader
+    in this module (the null-verdict/`reason.kind` refusal branch and the
+    release lowercase not_comparable branch both already do this)."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "run_outcome": {"compatibility": "BREAKING"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
+def test_scan_abort_honors_a_structured_gate_the_legacy_blocks_miss(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a `BUDGET_OVERFLOW` report can carry a
+    valid `run_outcome` that preserves a completed ABI-breaking gate even
+    though its legacy `diff.exit`/member contribution blocks are absent --
+    the gate previously computed solely from `_scan_abort_prior_exit`
+    (which found nothing here), loading as exit 1/`budget_overflow` only
+    instead of retaining exit 4 and the `abi_breaking` category the
+    structured gate actually recorded."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.24",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "BREAKING",
+                    "assurance": None,
+                    "gate": "abi_breaking",
+                    "operational": "budget_overflow",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert "abi_breaking" in loaded.gate.blocking_categories

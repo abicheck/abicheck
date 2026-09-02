@@ -511,7 +511,6 @@ def _emit_scan_abort_report(
     `ScanOutcome` to feed `_render_text` (most of its fields were never
     computed at this point) -- inventing prose for that gap is a separate,
     genuinely open design question ADR-064 leaves unresolved.
-
     Shaped as a real (if minimal) ``ScanOutcome.to_dict()``-compatible
     envelope -- top-level ``verdict``/``exit_code``, the exit decision under
     ``diff.exit`` -- rather than `scan_abort_result_fields`'s own ``report``
@@ -533,14 +532,15 @@ def _emit_scan_abort_report(
     """
     if fmt != "json" and secondary_fmt != "json":
         return
+    from .report.not_comparable import run_outcome_dict_for_scan
     from .workflows.scan_abort_result import scan_abort_result_fields
-
     fields = scan_abort_result_fields(axis, prior_decision=prior_decision)
     payload = {
         "scan_schema_version": fields["report"]["scan_schema_version"],
         "verdict": fields["verdict"],
         "exit_code": fields["exit_code"],
         "diff": {"exit": fields["report"]["exit"]},
+        "run_outcome": run_outcome_dict_for_scan(fields["verdict"], fields["exit_code"], report=fields["report"]),
     }
     text = json.dumps(payload, indent=2)
     if fmt == "json":

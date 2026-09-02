@@ -45,7 +45,13 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "23"
+_SNAPSHOT_CACHE_VERSION: str = "24"
+# v24: AbiSnapshot.semantic_ir is now genuinely populated for a real ELF
+# header-AST dump (ADR-063 Phase 6, second slice -- extract/
+# semantic_normalizer.py wired through dumper_manifest.resolve_header_ast_
+# result). A snapshot cached by an older abicheck would silently keep
+# semantic_ir=None/empty forever, even though a fresh dump of the identical
+# inputs now populates it.
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
