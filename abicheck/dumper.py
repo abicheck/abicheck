@@ -1861,6 +1861,11 @@ def _dump_pe(
             "type information will be missing."
         )
         _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
+        # 32-bit x86 is the only PE machine type with __stdcall/__fastcall/
+        # __cdecl export decoration -- see export_symbol_identity.py's own
+        # comment for why every other machine type must NOT strip a
+        # leading underscore.
+        _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
         return AbiSnapshot(
             library=dll_path.name,
             version=version,
@@ -1869,7 +1874,10 @@ def _dump_pe(
             source_mtime_epoch=_dll_mtime_epoch,
             source_size=_safe_size(dll_path),
             # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
-            functions=[_msvc_export_function(sym) for sym in sorted(exported_dynamic)],
+            functions=[
+                _msvc_export_function(sym, is_x86_32=_is_x86_32)
+                for sym in sorted(exported_dynamic)
+            ],
             pe=pe_meta,
             elf_only_mode=True,
             platform="pe",

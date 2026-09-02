@@ -71,13 +71,18 @@ __all__ = [
 # from (and orthogonal to) C++ name mangling: __stdcall appends "@N" (N =
 # argument-list size in bytes) to a leading-underscore-prefixed name,
 # __fastcall does the same but with a leading "@" instead of "_", and plain
-# __cdecl gets only the leading underscore. None of this exists on x64 PE
-# (no decoration at all, any calling convention). A raw export string here
-# is real, observed evidence -- like this module's other builders -- but
-# unlike a mangled name, it is not the identity itself: the header-AST
+# __cdecl gets only the leading underscore. This is *exclusive* to 32-bit
+# x86 (`IMAGE_FILE_MACHINE_I386`) -- x64/ARM/ARM64 PE never decorate a C
+# export at all, so a leading underscore there is part of the real,
+# undecorated source name (Codex review, PR #1015: an x64 `_secret` export
+# is a real, distinct symbol, not a decorated `secret`) and stripping it
+# unconditionally would misclassify it and collide it with an unrelated
+# real `secret` export. A raw export string here is real, observed
+# evidence -- like this module's other builders -- but unlike a mangled
+# name, it is not the identity itself on 32-bit x86: the header-AST
 # producer's own EntityId for the identical declaration carries the
 # undecorated name as its leaf (its own AST read never sees the linker's
-# decoration), so an un-decorated leaf here is required for the two
+# decoration), so an un-decorated leaf is required there for the two
 # evidence modes to agree, not merely cosmetic.
 _PE_FASTCALL_DECORATION_RE = re.compile(r"^@(.+)@\d+$")
 _PE_STDCALL_DECORATION_RE = re.compile(r"^_(.+)@\d+$")
@@ -172,7 +177,7 @@ def itanium_export_variable(name: str) -> Variable:
     )
 
 
-def msvc_export_function(sym: str) -> Function:
+def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
     """The PE/COFF counterpart of :func:`itanium_export_function`.
 
     Handles both PE mangling conventions in use -- see
@@ -182,9 +187,15 @@ def msvc_export_function(sym: str) -> Function:
     __cdecl export decoration before building the identity (see
     :func:`_strip_pe_c_decoration`'s own docstring for why the *identity*,
     not ``Function.name``/``mangled``, is what must be undecorated here).
+
+    *is_x86_32* -- the caller's own ``PeMetadata.machine ==
+    "IMAGE_FILE_MACHINE_I386"`` read -- gates the decoration strip: it is a
+    32-bit-x86-only linker convention, so it must default to *not*
+    stripping (every other PE machine type keeps a leading underscore as
+    real, undecorated source-name evidence).
     """
     is_extern_c = not (sym.startswith("?") or sym.startswith("_Z"))
-    leaf_name = _strip_pe_c_decoration(sym) if is_extern_c else sym
+    leaf_name = _strip_pe_c_decoration(sym) if (is_extern_c and is_x86_32) else sym
     return Function(
         name=sym,
         mangled=sym,

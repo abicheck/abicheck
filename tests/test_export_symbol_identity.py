@@ -71,32 +71,46 @@ class TestExportSymbolIdentityHelpers:
         assert fn.entity_id is not None
         assert fn.entity_id.extra == ("mangled", "_Z3addii")
 
-    def test_msvc_export_function_stdcall_decoration_stripped(self) -> None:
+    def test_msvc_export_function_stdcall_decoration_stripped_on_x86_32(self) -> None:
         # extern "C" __stdcall int f(int) exports as "_f@4" on 32-bit x86 --
         # the identity's leaf must be the undecorated "f" to agree with the
         # header-AST producer's own EntityId for the identical declaration.
-        fn = msvc_export_function("_f@4")
+        # Only meaningful when the caller identifies the binary as x86-32
+        # (see the x64 test below for why this must NOT be the default).
+        fn = msvc_export_function("_f@4", is_x86_32=True)
         assert fn.entity_id is not None
         assert fn.entity_id.extra == ("extern_c",)
         assert fn.entity_id.leaf_name == "f"
         # The raw, decorated evidence is preserved on the Function itself.
         assert fn.name == "_f@4"
 
-    def test_msvc_export_function_fastcall_decoration_stripped(self) -> None:
-        fn = msvc_export_function("@f@4")
+    def test_msvc_export_function_fastcall_decoration_stripped_on_x86_32(self) -> None:
+        fn = msvc_export_function("@f@4", is_x86_32=True)
         assert fn.entity_id is not None
         assert fn.entity_id.leaf_name == "f"
 
-    def test_msvc_export_function_cdecl_underscore_stripped(self) -> None:
+    def test_msvc_export_function_cdecl_underscore_stripped_on_x86_32(self) -> None:
         # extern "C" int f(int) (default __cdecl) exports as "_f" on
         # 32-bit x86 -- leading underscore only, no "@N" suffix.
-        fn = msvc_export_function("_f")
+        fn = msvc_export_function("_f", is_x86_32=True)
         assert fn.entity_id is not None
         assert fn.entity_id.leaf_name == "f"
 
     def test_msvc_export_function_x64_no_decoration_unaffected(self) -> None:
-        # x64 PE has no calling-convention decoration at all.
-        fn = msvc_export_function("f")
+        # x64 PE has no calling-convention decoration at all -- the default
+        # (is_x86_32=False) must NOT strip a leading underscore, since a
+        # real x64 export literally named "_secret" is a distinct symbol
+        # from "secret", not a decorated spelling of it (Codex review,
+        # PR #1015).
+        fn = msvc_export_function("_secret")
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "_secret"
+
+    def test_msvc_export_function_x86_32_plain_undecorated_export(self) -> None:
+        # Even on x86-32, an export with no leading underscore at all (e.g.
+        # __fastcall/__stdcall's own decoration didn't apply, or a plain
+        # already-undecorated name) is left as-is by the fallback branch.
+        fn = msvc_export_function("f", is_x86_32=True)
         assert fn.entity_id is not None
         assert fn.entity_id.leaf_name == "f"
 
@@ -182,3 +196,42 @@ class TestPeExportOnlyEntityId:
         mingw_fn = next(f for f in snap.functions if f.name == "_Z3subii")
         assert mingw_fn.entity_id is not None
         assert mingw_fn.entity_id.extra == ("mangled", "_Z3subii")
+
+    def test_x86_32_stdcall_export_decoration_stripped(self, tmp_path: Path) -> None:
+        import abicheck.pe_metadata as _pe
+        from abicheck import dumper
+        from abicheck.model.pe_facts import PeExport, PeMetadata
+
+        dll = tmp_path / "foo32.dll"
+        dll.write_bytes(b"MZ\x90\x00")
+        meta = PeMetadata(
+            machine="IMAGE_FILE_MACHINE_I386",
+            exports=[PeExport(name="_f@4", ordinal=1)],
+        )
+        with patch.object(_pe, "parse_pe_metadata", return_value=meta):
+            snap = dumper._dump_pe(dll, [], [], "1.0", "c")
+
+        fn = next(f for f in snap.functions if f.name == "_f@4")
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "f"
+
+    def test_x64_underscore_prefixed_export_not_stripped(self, tmp_path: Path) -> None:
+        # x64 PE has no calling-convention decoration -- a real export
+        # literally named "_secret" must keep its leading underscore as
+        # part of its identity (Codex review, PR #1015).
+        import abicheck.pe_metadata as _pe
+        from abicheck import dumper
+        from abicheck.model.pe_facts import PeExport, PeMetadata
+
+        dll = tmp_path / "foo64.dll"
+        dll.write_bytes(b"MZ\x90\x00")
+        meta = PeMetadata(
+            machine="IMAGE_FILE_MACHINE_AMD64",
+            exports=[PeExport(name="_secret", ordinal=1)],
+        )
+        with patch.object(_pe, "parse_pe_metadata", return_value=meta):
+            snap = dumper._dump_pe(dll, [], [], "1.0", "c")
+
+        fn = next(f for f in snap.functions if f.name == "_secret")
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "_secret"
