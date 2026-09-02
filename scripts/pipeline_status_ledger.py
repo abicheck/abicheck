@@ -216,12 +216,18 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
         )
     unknown = set(concepts) - _PIPELINE_REQUIRED_CONCEPTS
     if unknown:
+        # `unknown` may hold non-string YAML keys (e.g. a bare `1:` -- valid
+        # YAML, an int key) alongside real string ones; `sorted()` without a
+        # key raises TypeError comparing an int to a str instead of
+        # reporting a finding. `key=repr` orders any mix of hashable types
+        # deterministically without that crash (a real review finding on
+        # PR #1019; the identical fix applies to `extra` below).
         f.err(
             "pipeline-status-ledger",
             f"{rel}: 'concepts' has entries not in the tracked inventory "
-            f"{sorted(unknown)} -- either a typo, or add the new concept to "
-            f"_PIPELINE_REQUIRED_CONCEPTS in scripts/pipeline_status_ledger.py "
-            f"deliberately",
+            f"{sorted(unknown, key=repr)} -- either a typo, or add the new "
+            f"concept to _PIPELINE_REQUIRED_CONCEPTS in "
+            f"scripts/pipeline_status_ledger.py deliberately",
         )
     for name, entry in concepts.items():
         if not isinstance(entry, dict):
@@ -276,8 +282,11 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
         allowed_extra = set(_PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS.get(name, ()))
         extra = set(entry) - set(_PIPELINE_REQUIRED_CONCEPT_FIELDS) - allowed_extra
         if extra:
+            # See the `unknown` block above: `extra` may hold non-string
+            # YAML keys too, so `sorted()` needs the same `key=repr` guard.
             f.err(
                 "pipeline-status-ledger",
-                f"{rel}: concepts.{name}: unknown field(s) {sorted(extra)} -- "
-                f"either a typo or the schema needs extending deliberately",
+                f"{rel}: concepts.{name}: unknown field(s) "
+                f"{sorted(extra, key=repr)} -- either a typo or the schema "
+                f"needs extending deliberately",
             )

@@ -71,11 +71,12 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Phase 2B (identity-consumer-migration): diff_filtering.py and
-      type_reachability.py's string-suffix/substring identity logic
-      migrated onto EntityId; a StableEntityId/SnapshotLocalIdentity
-      split landed so the entity: alias can be promoted into a real
-      match tier without risking cross-release suppression-id drift.
+      Phase 2B (identity-consumer-migration), not started: diff_filtering.py
+      and type_reachability.py's string-suffix/substring identity logic
+      must still be migrated onto EntityId; a StableEntityId/
+      SnapshotLocalIdentity split must still land so the entity: alias can
+      be promoted into a real match tier without risking cross-release
+      suppression-id drift.
 
   semantic_ir:
     primitive: complete
