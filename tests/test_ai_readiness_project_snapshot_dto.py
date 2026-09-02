@@ -216,6 +216,65 @@ def test_a_multi_hop_alias_chain_is_fully_resolved(car, tmp_path, monkeypatch):
     assert any("asdict" in message for _check, message in f.errors)
 
 
+def test_an_annotated_direct_alias_is_still_detected(car, tmp_path, monkeypatch):
+    """`encode: Callable = dataclasses.asdict` -- an ordinary *annotated*
+    assignment, `ast.AnnAssign` rather than `ast.Assign` -- must not slip
+    past the check either (Codex review, a fourth finding on this same
+    field: every earlier pass only ever walked `ast.Assign`)."""
+    bad_file = tmp_path / "dto.py"
+    bad_file.write_text(
+        "from typing import Callable\n"
+        "import dataclasses\n"
+        "encode: Callable = dataclasses.asdict\n"
+        "def to_dict(self):\n"
+        "    return encode(self)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "_PROJECT_SNAPSHOT_DTO_FILES", ("dto.py",))
+    f = car.Findings()
+    car.check_project_snapshot_dto_no_asdict(f)
+    assert any("asdict" in message for _check, message in f.errors)
+
+
+def test_an_annotated_direct_name_alias_is_still_detected(car, tmp_path, monkeypatch):
+    """The same annotated shape, but reassigning an already-resolved
+    imported name rather than a module attribute:
+    `encode: Callable = asdict`."""
+    bad_file = tmp_path / "dto.py"
+    bad_file.write_text(
+        "from typing import Callable\n"
+        "from dataclasses import asdict\n"
+        "encode: Callable = asdict\n"
+        "def to_dict(self):\n"
+        "    return encode(self)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "_PROJECT_SNAPSHOT_DTO_FILES", ("dto.py",))
+    f = car.Findings()
+    car.check_project_snapshot_dto_no_asdict(f)
+    assert any("asdict" in message for _check, message in f.errors)
+
+
+def test_a_bare_annotation_with_no_value_does_not_crash_the_scan(
+    car, tmp_path, monkeypatch
+):
+    """`encode: Callable` (no `= ...`) is a legal, value-less annotation --
+    `ast.AnnAssign.value` is `None` in this shape, which must be skipped
+    cleanly rather than crash the alias resolver."""
+    good_file = tmp_path / "dto.py"
+    good_file.write_text(
+        "from typing import Callable\nencode: Callable\ndef to_dict(self):\n    return {}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "_PROJECT_SNAPSHOT_DTO_FILES", ("dto.py",))
+    f = car.Findings()
+    car.check_project_snapshot_dto_no_asdict(f)
+    assert f.errors == []
+
+
 def test_an_unrelated_name_reassignment_is_not_flagged(car, tmp_path, monkeypatch):
     """Reassigning an unrelated name must not be swept into the alias set."""
     good_file = tmp_path / "dto.py"

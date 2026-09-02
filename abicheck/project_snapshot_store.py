@@ -83,6 +83,7 @@ from .storage.package import (
     PackageManifest,
     VariantRef,
     _reject_filesystem_collisions,
+    _safe_ref_id,
     artifact_ref_relpath,
     object_relpath,
     variant_ref_relpath,
@@ -315,19 +316,37 @@ class DirectoryObjectStore:
 def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     """Fan *manifest* out across the D6 directory tree rooted at *root*:
     the small `manifest.json` plus one `refs/variants/*.json`/
-    `refs/artifacts/*.json` document per record. Does not touch `objects/` —
-    a caller populates those separately (typically via `DirectoryObjectStore
-    .put`, e.g. through `storage.import_v1.import_legacy_snapshot`) before
-    or after writing the manifest; nothing here depends on `objects/`
-    ordering, since `ObjectStore.put` is idempotent and content-addressed.
+    `refs/artifacts/*.json` document per record. Does not itself *write*
+    `objects/` -- a caller populates those separately (typically via
+    `DirectoryObjectStore.put`, e.g. through `storage.import_v1.
+    import_legacy_snapshot`), and must do so *before* calling this
+    function (see "manifest.json is written last" below for why "after"
+    is unsafe even though `ObjectStore.put` is itself idempotent and
+    content-addressed).
 
     **`manifest.json` is written last, as this function's own commit
-    point.** Every `refs/*.json` document is written first: an interruption
-    partway through would then leave, at worst, ref documents `manifest.json`
-    does not yet name (harmless — nothing reads a ref it wasn't told to load)
-    rather than a durable `manifest.json` naming refs that were never
-    written, which every subsequent reader would treat as a corrupted
-    package (Codex review).
+    point** -- and this function verifies every object it is about to
+    publish a reference to is actually durable on disk *before* writing
+    that commit point, refusing rather than publishing a manifest that
+    names a missing object (Codex review, a second finding on this same
+    ordering: an earlier fix moved `manifest.json` after the `refs/*.json`
+    writes, but the docstring at the time still permitted a caller to
+    populate `objects/` *after* this function returns -- which reopens the
+    identical "manifest names something that doesn't durably exist yet"
+    failure one layer further out, since an interruption between this
+    call's `manifest.json` write and the caller's own later `put()` calls
+    leaves a published package whose artifact refs name permanently
+    missing objects). Every `refs/*.json` document is still written first:
+    an interruption partway through would then leave, at worst, ref
+    documents `manifest.json` does not yet name (harmless -- nothing reads
+    a ref it wasn't told to load) rather than a durable `manifest.json`
+    naming refs that were never written, which every subsequent reader
+    would treat as a corrupted package.
+
+    Raises `ValueError` if any `ArtifactRef.sections` entry names a digest
+    with no corresponding object file (`objects/sha256/<aa>/<digest>.json.zst`
+    or `.bin.zst`) already on disk under *root* -- checked, and this
+    function's own writes abandoned, before `manifest.json` is touched.
 
     **A known, deliberately deferred gap** (flagged in the same review
     round as a distinct, further finding once the ordering above was
@@ -367,6 +386,26 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             canonical_json(artifact.to_dict(), indent=2),
             artifact_path,
             compression=SnapshotCompression.NONE,
+        )
+    # Every object this manifest is about to name must already be durable
+    # on disk -- checked, and the manifest write abandoned, before that
+    # commit point is touched (see this function's own docstring).
+    missing: list[str] = []
+    for artifact in manifest.artifact_refs:
+        for section_kind, ref in artifact.sections.items():
+            json_path = root_path / _object_json_relpath(ref.digest)
+            raw_path = root_path / _object_raw_relpath(ref.digest)
+            if not (json_path.exists() or raw_path.exists()):
+                missing.append(
+                    f"artifact {artifact.artifact_id!r} section "
+                    f"{section_kind!r} -> {ref.digest!r}"
+                )
+    if missing:
+        raise ValueError(
+            "refusing to publish manifest.json referencing object(s) not "
+            f"yet durable in objects/ under {root_path}: {sorted(missing)} "
+            "-- populate objects/ (e.g. via DirectoryObjectStore.put) "
+            "before calling write_project_manifest"
         )
     summary = {
         "versions": manifest.versions.to_dict(),
@@ -447,6 +486,18 @@ def _required_string_id_list(
     otherwise pass this door and fail only later, deep inside whichever ref
     happens to load second (Codex review, a second finding on this same
     field).
+
+    Also refuses an id that isn't a safe, representable ref-path component
+    at all -- via the identical `_safe_ref_id` grammar
+    `VariantRef`/`ArtifactRef` (and so `variant_ref_relpath`/
+    `artifact_ref_relpath`) already enforce on construction. Without this,
+    an id like `"../x"` passed every check above (a real string, not a
+    duplicate, no filesystem collision with another entry) and was handed
+    back from `read_manifest_summary`/`variant_and_artifact_ids` as valid
+    package membership, even though building a `VariantRef`/`ArtifactRef`
+    from it -- the eager `read_project_manifest` path -- already refuses
+    it; the lazy path exposed an id no ref could ever actually be loaded
+    or written under (Codex review, a third finding on this same field).
     """
     if field_name not in data:
         raise ValueError(f"{record} is missing required field {field_name!r}")
@@ -472,6 +523,8 @@ def _required_string_id_list(
             "artifact twice"
         )
     _reject_filesystem_collisions(raw, field_name.removesuffix("s"))
+    for entry in raw:
+        _safe_ref_id(entry, field_name.removesuffix("s"))
     return tuple(raw)
 
 

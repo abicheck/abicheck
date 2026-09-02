@@ -37,6 +37,7 @@ from abicheck.storage.dto import (
     semantic_ir_from_dto,
 )
 from abicheck.storage.import_v1 import import_legacy_snapshot as _import_legacy_snapshot
+from abicheck.storage.package import ArtifactRef, ObjectRef, PackageManifest, VariantRef
 from abicheck.storage.versioning import StorageVersions
 
 
@@ -263,6 +264,57 @@ class TestManifestRoundTrip:
         ir, _conflicts = semantic_ir_from_dto(dto)
         assert ir == snap.semantic_ir
 
+    def test_a_manifest_naming_an_object_never_put_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """`write_project_manifest` must refuse to publish `manifest.json`
+        referencing a section digest that was never `put()` into
+        `objects/` -- an interruption between this call and a caller's own
+        later `put()` calls would otherwise leave a durable, published
+        package whose artifact refs name a permanently missing object
+        (Codex review)."""
+        never_put_digest = "sha256:" + "ab" * 32
+        manifest = PackageManifest(
+            variant_refs=(VariantRef(variant_id="default", artifact_ids=("libfoo",)),),
+            artifact_refs=(
+                ArtifactRef(
+                    artifact_id="libfoo",
+                    variant_id="default",
+                    kind="elf",
+                    sections={
+                        "semantic_ir": ObjectRef(
+                            kind="semantic_ir", digest=never_put_digest
+                        )
+                    },
+                ),
+            ),
+        )
+        with pytest.raises(ValueError, match="not yet durable"):
+            write_project_manifest(tmp_path, manifest)
+        # And it must not have published manifest.json either.
+        assert not (tmp_path / "manifest.json").exists()
+
+    def test_a_manifest_naming_an_object_already_put_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put({"a": 1})
+        manifest = PackageManifest(
+            variant_refs=(VariantRef(variant_id="default", artifact_ids=("libfoo",)),),
+            artifact_refs=(
+                ArtifactRef(
+                    artifact_id="libfoo",
+                    variant_id="default",
+                    kind="elf",
+                    sections={
+                        "semantic_ir": ObjectRef(kind="semantic_ir", digest=digest)
+                    },
+                ),
+            ),
+        )
+        write_project_manifest(tmp_path, manifest)
+        assert (tmp_path / "manifest.json").exists()
+
     def test_manifest_json_is_small_and_does_not_embed_full_records(
         self, tmp_path: Path
     ) -> None:
@@ -472,6 +524,41 @@ class TestReadManifestSummaryValidation:
             },
         )
         with pytest.raises(ValueError, match="collide"):
+            read_manifest_summary(tmp_path)
+
+    @pytest.mark.parametrize("bad_id", ["../x", "a/b", "a\\b", "..", "", "CON"])
+    def test_a_path_unsafe_variant_id_is_refused(
+        self, tmp_path: Path, bad_id: str
+    ) -> None:
+        """An id like `"../x"` is a real, non-duplicate, non-colliding
+        string, so every earlier check passes it -- but `VariantRef`
+        (the eager `read_project_manifest` path) already refuses it via
+        `_safe_ref_id`, since it can never be a `refs/variants/*.json`
+        path component. The lazy path must refuse it too (Codex review)."""
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": [bad_id],
+                "artifact_ids": [],
+            },
+        )
+        with pytest.raises(ValueError):
+            read_manifest_summary(tmp_path)
+
+    @pytest.mark.parametrize("bad_id", ["../x", "a/b", "a\\b", "..", "", "CON"])
+    def test_a_path_unsafe_artifact_id_is_refused(
+        self, tmp_path: Path, bad_id: str
+    ) -> None:
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": [],
+                "artifact_ids": [bad_id],
+            },
+        )
+        with pytest.raises(ValueError):
             read_manifest_summary(tmp_path)
 
     def test_an_ordinary_current_manifest_is_still_readable(

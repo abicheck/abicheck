@@ -2317,12 +2317,24 @@ def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
     module attribute — the previous fix's module-attribute branch only
     matches `<module alias>.asdict`, not a direct `ast.Name` whose `id` is
     already a known alias. Resolved by repeating a pass over every
-    `ast.Assign` whose value is an `ast.Name` already in `aliases`, adding
+    assignment whose value is an `ast.Name` already in `aliases`, adding
     each assigned bare-name target, until a pass adds nothing new — a
     fixed-point loop rather than one hop, so an arbitrarily long alias
     chain (`encode2 = encode`, `encode3 = encode2`, ...) is fully
     resolved regardless of which order `ast.walk` visits the assignments
     in.
+
+    A fourth alias shape closes a gap in the *binding form itself*, not a
+    further hop (Codex review, a fourth finding on this same field):
+    `encode: Callable = dataclasses.asdict` (or `encode: Callable =
+    asdict`) is an ordinary *annotated* assignment (`ast.AnnAssign`), which
+    every pass above ignored entirely — they only ever walked
+    `ast.Assign`, whose `targets`/`value` shape `ast.AnnAssign` does not
+    share (a single `target`, not a `targets` list, and `value` is
+    `None` for a bare annotation with no assignment at all). Resolved by
+    normalizing both node kinds through `_assignment_targets_and_value`
+    below into the one `(targets, value)` shape every pass already
+    consumes, rather than teaching each pass a second node type.
     """
     aliases: set[str] = {"asdict"}
     module_aliases: set[str] = set()
@@ -2335,30 +2347,52 @@ def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
             for alias in node.names:
                 if alias.name == "dataclasses":
                     module_aliases.add(alias.asname or alias.name)
-    assigns = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
-    for node in assigns:
-        value = node.value
+    assigns = [
+        parsed
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and (parsed := _assignment_targets_and_value(node)) is not None
+    ]
+    for targets, value in assigns:
         if (
             isinstance(value, ast.Attribute)
             and value.attr == "asdict"
             and isinstance(value.value, ast.Name)
             and value.value.id in module_aliases
         ):
-            for target in node.targets:
+            for target in targets:
                 if isinstance(target, ast.Name):
                     aliases.add(target.id)
     changed = True
     while changed:
         changed = False
-        for node in assigns:
-            value = node.value
+        for targets, value in assigns:
             if not (isinstance(value, ast.Name) and value.id in aliases):
                 continue
-            for target in node.targets:
+            for target in targets:
                 if isinstance(target, ast.Name) and target.id not in aliases:
                     aliases.add(target.id)
                     changed = True
     return aliases
+
+
+def _assignment_targets_and_value(
+    node: ast.Assign | ast.AnnAssign,
+) -> tuple[list[ast.expr], ast.expr] | None:
+    """*node* normalized to `(targets, value)`, or `None` if it binds
+    nothing (a bare annotation, `x: Callable`, with no `= ...`).
+
+    `ast.Assign.targets` is always a list (`a = b = value` is legal) and
+    always has a `value`; `ast.AnnAssign.target` is a single node and
+    `.value` is `Optional` (`None` for a bare annotation). Normalizing both
+    into the same shape here means every alias-resolution pass above
+    consumes one shape rather than needing a second branch per node kind.
+    """
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if node.value is None:
+        return None
+    return [node.target], node.value
 
 
 def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
