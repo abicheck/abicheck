@@ -62,6 +62,7 @@ against a raw integer or literal -- see
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -602,6 +603,74 @@ def run_outcome_dict_for_scan(
         member_evidence_contract_error=member_evidence_contract_error,
         bundle_incomplete=bundle_incomplete,
         lifecycle=lifecycle,
+    ).to_dict()
+
+
+def run_outcome_dict_for_release(
+    worst_verdict: str, exit_decision: object
+) -> dict[str, Any]:
+    """Build the ``run_outcome`` dict for a directory/package release
+    comparison's own summary JSON (:mod:`abicheck.cli_compare_release_
+    helpers`'s ``_format_release_json``, :mod:`abicheck.cli_compare_
+    release_matrix`'s ``_write_release_summary_file``) -- both claim
+    ``run_outcome`` per the documented "every JSON report" contract
+    (``docs/use/output-formats.md``) but never actually built one (Codex
+    review, fresh evidence).
+
+    *exit_decision* is the release's own already-computed ``exit`` block
+    (``policy.exit_decision_precedence.resolve_release_exit_decision_for_
+    report(...).to_dict()``) -- read, never recomputed, the same
+    read-not-rederive principle every other reader in this module already
+    follows: this is a report-shape convenience *around* that decision, not
+    a second exit-code resolver.
+
+    ``gate`` is derived from ``compatibility_contribution`` -- the pure,
+    real-`Verdict`-based compatibility axis -- with one escalation:
+    ``removed_required_library_contribution`` (``--fail-on-removed-
+    library``'s own exit 8) folds in as :attr:`PolicyGateDecision.
+    ABI_BREAKING`, the same tier ``buildsource.check_report.
+    _escalate_removed_library_severity`` already uses for the equivalent
+    per-library escalation ("a whole library disappearing is unambiguously
+    an ABI break"). ``operational`` reads ``not_comparable_contribution``
+    (preferred) and ``operational_error_contribution`` -- the latter is
+    exactly :attr:`OperationalStatus.EXTRACTION_ERROR`'s own documented
+    grounding ("compare-release's own ``verdict: 'ERROR'`` sentinel -- a
+    library failed to dump/extract/compare"). ``evidence_contract_error_
+    contribution``/``budget_overflow_contribution``/``crosscheck_
+    promotion_contribution`` are always ``0`` for a release decision (see
+    ``ExitDecision``'s own field docstrings) and are not consulted.
+    """
+    exit_block = exit_decision if isinstance(exit_decision, Mapping) else {}
+
+    def _int_contribution(key: str) -> int:
+        raw = exit_block.get(key, 0)
+        return raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+    compat_exit_code = _int_contribution("compatibility_contribution")
+    if _int_contribution("removed_required_library_contribution") != 0:
+        compat_exit_code = policy_gate_decision_exit_code(PolicyGateDecision.ABI_BREAKING)
+    if compat_exit_code not in _GATE_EXIT_CODE.values():
+        compat_exit_code = 0
+    gate = policy_gate_decision_for_exit_code(compat_exit_code)
+
+    operational = OperationalStatus.NONE
+    if _int_contribution("not_comparable_contribution") != 0:
+        operational = OperationalStatus.NOT_COMPARABLE
+    elif _int_contribution("operational_error_contribution") != 0:
+        operational = OperationalStatus.EXTRACTION_ERROR
+
+    compatibility: Verdict | None
+    try:
+        compatibility = Verdict(worst_verdict)
+    except ValueError:
+        compatibility = None
+
+    return RunOutcome(
+        compatibility=compatibility,
+        assurance=None,
+        gate=gate,
+        operational=operational,
+        lifecycle=TargetLifecycle.EXISTING,
     ).to_dict()
 
 

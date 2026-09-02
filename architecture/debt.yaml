@@ -423,12 +423,12 @@
     },
     {
       "path": "abicheck/cli_compare_release_helpers.py",
-      "baseline_lines": 1311,
+      "baseline_lines": 1314,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1311 -> 1314 (ADR-063 Phase 7 follow-up, Codex review): _format_release_json documented (docs/use/output-formats.md) that every JSON report carries run_outcome but never actually built one for the release fan-out's own summary document -- one import (re-exported through report/not_comparable.py, since frontends may not import policy directly), one local reused across both the exit and run_outcome keys instead of calling the exit-decision resolver twice, and one new dict entry.",
       "review_by": "2026-11-30"
     },
     {

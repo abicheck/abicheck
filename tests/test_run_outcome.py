@@ -486,6 +486,68 @@ class TestGateInfoFromScanReportStructuredFirst:
         with pytest.raises(_MalformedGate):
             GateInfo.from_scan_report(report)
 
+    def test_severity_scheme_scan_cross_checks_top_level_run_outcome(self):
+        """Codex review (P2), fresh evidence beyond the compare-report
+        contradiction fix: a severity-scheme scan's diff.severity gate is
+        read via a *nested* from_report_data call that has no run_outcome
+        key of its own (it lives at the outer scan envelope's top level) --
+        without folding/cross-checking it separately, a scan report's own
+        top-level run_outcome was never consulted at all, so a corrupted
+        diff.severity.exit_code: 0 alongside run_outcome.gate: abi_breaking
+        (or even an outright invalid gate value) was silently accepted as
+        nonblocking, unlike the equivalent compare report."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        contradicting = {
+            "scan_schema_version": "1.24",
+            "diff": {
+                "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []}
+            },
+            "run_outcome": RunOutcome(
+                compatibility=None,
+                assurance=None,
+                gate=PolicyGateDecision.ABI_BREAKING,
+                operational=OperationalStatus.NONE,
+            ).to_dict(),
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_scan_report(contradicting)
+
+        invalid_gate = {
+            "scan_schema_version": "1.24",
+            "diff": {
+                "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []}
+            },
+            "run_outcome": {
+                "schema_version": "1.0", "compatibility": None, "assurance": None,
+                "gate": "bogus", "operational": "none",
+            },
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_scan_report(invalid_gate)
+
+        # An agreeing report must still resolve cleanly -- this isn't a
+        # blanket rejection of every severity-scheme scan's run_outcome.
+        agreeing = {
+            "scan_schema_version": "1.24",
+            "diff": {
+                "severity": {
+                    "exit_code": 4, "blocking": True, "blocking_categories": ["abi_breaking"],
+                }
+            },
+            "run_outcome": RunOutcome(
+                compatibility=Verdict("BREAKING"),
+                assurance=None,
+                gate=PolicyGateDecision.ABI_BREAKING,
+                operational=OperationalStatus.NONE,
+            ).to_dict(),
+        }
+        gate = GateInfo.from_scan_report(agreeing)
+        assert gate is not None
+        assert gate.exit_code == 4
+        assert gate.blocking is True
+
 
 # ---------------------------------------------------------------------------
 # The three synthetic report builders
@@ -796,6 +858,67 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = outcome.to_dict()
         assert report["run_outcome"]["gate"] == "none"
         assert report["run_outcome"]["operational"] == "none"
+
+
+# ---------------------------------------------------------------------------
+# Release fan-out (_format_release_json / _write_release_summary_file)
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseJsonRunOutcome:
+    def test_format_release_json_carries_run_outcome(self):
+        """Codex review (P2): docs/use/output-formats.md documents that
+        every JSON report carries run_outcome, including 'the release
+        fan-out' -- _format_release_json never actually built one."""
+        import json
+        from pathlib import Path
+
+        from abicheck.cli_compare_release_helpers import _format_release_json
+
+        out = _format_release_json(
+            "BREAKING", Path("/o"), Path("/n"),
+            [{"library": "libfoo.so", "verdict": "BREAKING"}],
+            [], [], {}, {}, [], None, None,
+        )
+        data = json.loads(out)
+        assert "run_outcome" in data
+        assert data["run_outcome"]["gate"] == "abi_breaking"
+        assert data["run_outcome"]["compatibility"] == "BREAKING"
+
+    def test_format_release_json_run_outcome_surfaces_operational_error(self):
+        """A library that failed to dump/extract/compare (verdict ERROR) is
+        an operational failure, not a compatibility-gate finding --
+        run_outcome must say so via .operational, matching OperationalStatus.
+        EXTRACTION_ERROR's own documented grounding."""
+        import json
+        from pathlib import Path
+
+        from abicheck.cli_compare_release_helpers import _format_release_json
+
+        out = _format_release_json(
+            "ERROR", Path("/o"), Path("/n"),
+            [{"library": "libfoo.so", "verdict": "ERROR"}],
+            [], [], {}, {}, [], None, None,
+        )
+        data = json.loads(out)
+        assert data["run_outcome"]["operational"] == "extraction_error"
+
+    def test_write_release_summary_file_carries_run_outcome(self, tmp_path):
+        """Codex review (P2): the --output-dir sibling of
+        _format_release_json never built a run_outcome either -- the
+        identical gap PR #803 already fixed for effective_config_digest on
+        this same sibling document."""
+        import json
+
+        from abicheck.cli_compare_release import _write_release_summary_file
+
+        _write_release_summary_file(
+            tmp_path, "BREAKING",
+            [{"library": "libfoo.so", "verdict": "BREAKING"}],
+            [], [], {}, {},
+        )
+        data = json.loads((tmp_path / "summary.json").read_text())
+        assert data["run_outcome"]["gate"] == "abi_breaking"
 
 
 # ---------------------------------------------------------------------------

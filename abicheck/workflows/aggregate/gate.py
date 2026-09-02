@@ -95,6 +95,71 @@ class _MalformedGate(ValueError):
     """
 
 
+def _fold_top_level_run_outcome(
+    result: GateInfo,
+    run_outcome: tuple[PolicyGateDecision, OperationalStatus] | None,
+    *,
+    scoped_exempt: bool,
+) -> GateInfo:
+    """Fold a report's top-level ``RunOutcome`` axes into *result*, a
+    ``GateInfo`` already derived from its ``severity`` block alone.
+
+    Shared by :meth:`GateInfo.from_report_data` (a native ``compare``
+    report) and :meth:`GateInfo.from_scan_report` (a severity-scheme scan
+    report, whose own ``diff.severity`` gate is read via a recursive
+    ``from_report_data`` call over the *nested* ``diff`` object -- which has
+    no ``run_outcome`` key of its own, since that lives at the outer scan
+    envelope's top level; without this shared, separate top-level fold, a
+    severity-scheme scan's own top-level ``run_outcome`` was never
+    consulted at all, unlike the equivalent ``compare`` report (Codex
+    review, fresh evidence)).
+
+    ``operational`` always folds in via ``max()`` (the orthogonal-axes
+    shape ADR-049 Phase 7's contract-coverage axis already uses) -- a real
+    operational failure may only ever *raise* what ``severity`` alone
+    already stated, never lower it.
+
+    ``gate`` is cross-checked against *result*'s own ``exit_code``, unless
+    *scoped_exempt*: ``RunOutcome.gate`` is derived from the identical
+    computation ``severity`` itself is (see ``reporter._run_outcome_for_
+    result``), so the two can never disagree on a *fresh, unscoped* report
+    -- a disagreement is corruption and fails closed
+    (:class:`_MalformedGate`), the same principle the surrounding
+    ``severity``-block validation already applies. A **scoped**
+    (``--used-by``/``--required-symbol``) ``compare`` report is
+    deliberately exempt: ``cli_compare_fold._swap_in_scoped_severity``
+    rewrites ``severity.exit_code`` to ``result.scoped_exit_code`` --
+    already folded with the orthogonal contract-coverage/analysis-
+    assurance floors -- while ``_swap_in_scoped_run_outcome`` rewrites
+    ``run_outcome.gate`` from ``result.scoped_compatibility_contribution``,
+    the deliberately *pre*-fold, compatibility-only value D6's own axis
+    separation requires; the two legitimately differ by exactly that fold
+    on a scoped report. ``scan`` reports have no scoped-gate concept, so
+    their own caller always passes ``scoped_exempt=False``.
+    """
+    if run_outcome is None:
+        return result
+    gate, operational = run_outcome
+    if not scoped_exempt:
+        gate_exit = policy_gate_decision_exit_code(gate)
+        if gate_exit != result.exit_code:
+            raise _MalformedGate(
+                f"'run_outcome.gate' ({gate.value}, exit {gate_exit}) "
+                f"contradicts the severity-derived exit_code ({result.exit_code})"
+            )
+    op_exit = operational_status_exit_code(operational)
+    if op_exit > result.exit_code:
+        result = replace(
+            result,
+            exit_code=op_exit,
+            blocking=True,
+            blocking_categories=tuple(
+                sorted({*result.blocking_categories, operational.value})
+            ),
+        )
+    return result
+
+
 @dataclass(frozen=True)
 class GateInfo:
     """One target's own CI gate decision, as it recorded it.
@@ -164,48 +229,15 @@ class GateInfo:
             blocking_categories=tuple(cats),
             from_report=True,
         )
-        # ADR-063 Phase 7: fold in `RunOutcome.operational`, the one axis
-        # the `severity` block above never carried at all. `gate` is not
-        # re-folded here -- the `severity` block is already the precise,
-        # policy-aware compatibility gate (including its granular
-        # `blocking_categories`), and `RunOutcome.gate` is derived from the
-        # identical computation (see `reporter._run_outcome_for_result`), so
-        # the two can never disagree on a *fresh, unscoped* report; only a
-        # real operational failure can raise this result beyond what
-        # `severity` alone already stated.
-        #
-        # A *scoped* (`--used-by`/`--required-symbol`) report is deliberately
-        # exempt from the cross-check below: `cli_compare_fold._swap_in_
-        # scoped_severity` rewrites `severity.exit_code` to `result.scoped_
-        # exit_code` -- already folded with the orthogonal contract-coverage/
-        # analysis-assurance floors -- while `_swap_in_scoped_run_outcome`
-        # rewrites `run_outcome.gate` from `result.scoped_compatibility_
-        # contribution`, the deliberately *pre*-fold, compatibility-only
-        # value D6's own axis separation requires. The two are allowed to
-        # differ by exactly that fold on a scoped report; `full_run_outcome`
-        # is present if and only if that swap ran, so its presence is what
-        # distinguishes an intentional scoped divergence from real
-        # corruption (Codex review).
-        if run_outcome is not None:
-            gate, operational = run_outcome
-            if "full_run_outcome" not in data:
-                gate_exit = policy_gate_decision_exit_code(gate)
-                if gate_exit != result.exit_code:
-                    raise _MalformedGate(
-                        f"'run_outcome.gate' ({gate.value}, exit {gate_exit}) "
-                        f"contradicts 'severity.exit_code' ({result.exit_code})"
-                    )
-            op_exit = operational_status_exit_code(operational)
-            if op_exit > result.exit_code:
-                result = replace(
-                    result,
-                    exit_code=op_exit,
-                    blocking=True,
-                    blocking_categories=tuple(
-                        sorted({*result.blocking_categories, operational.value})
-                    ),
-                )
-        return result
+        # ADR-063 Phase 7: fold `RunOutcome`'s top-level axes into the
+        # severity-derived result -- see `_fold_top_level_run_outcome`'s own
+        # docstring for the full design (including the scoped-report
+        # exemption). `data` (not `sev`) is deliberately what's checked for
+        # `full_run_outcome`/re-read for `run_outcome`: both live at the
+        # report's top level, siblings of `severity`, never nested inside it.
+        return _fold_top_level_run_outcome(
+            result, run_outcome, scoped_exempt="full_run_outcome" in data
+        )
 
     @classmethod
     def from_scan_report(cls, data: Mapping[str, Any]) -> GateInfo | None:
@@ -240,7 +272,18 @@ class GateInfo:
         # the question directly, so it never reaches that argument.
         nested = _scan_severity_gate(data)
         if nested is not None:
-            return nested
+            # The nested `diff.severity` gate above was validated against
+            # itself only -- `_scan_severity_gate` reads it via a recursive
+            # `from_report_data` call over the *nested* `diff` object, which
+            # has no `run_outcome` key of its own. Fold/cross-check the
+            # outer scan envelope's own top-level `run_outcome` here, the
+            # same way `from_report_data` already does for its own
+            # `severity` block (Codex review, fresh evidence: without this,
+            # a severity-scheme scan's top-level run_outcome was never
+            # consulted at all).
+            return _fold_top_level_run_outcome(
+                nested, _run_outcome_gate_and_operational(data), scoped_exempt=False
+            )
         # ADR-063 Phase 7: a fresh scan report's own top-level `run_outcome`
         # (`ScanOutcome.to_dict()`/`ScanResult.to_dict()`/
         # `ScanSetResult.to_dict()`) is preferred over decoding the raw

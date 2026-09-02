@@ -31,6 +31,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   The scoped gate now replaces `run_outcome` the same way it already
   replaces `verdict`/`severity`; the full-library value moves to
   `full_run_outcome`.
+- **A severity-scheme `scan --against` report's own top-level `run_outcome`
+  is now consulted at all.** `GateInfo.from_scan_report`'s severity-scheme
+  branch reads the nested `diff.severity` gate via a recursive call over
+  just that nested object, which never carries the outer report's own
+  `run_outcome` key — so it was silently skipped, unlike the equivalent
+  `compare` report. It's now folded in and cross-checked (fail-closed on
+  contradiction) the same way `compare`'s own `severity` block already is.
+- **`compare-release`'s summary JSON (both the primary `--format json`
+  document and the `--output-dir summary.json` sibling) now carries
+  `run_outcome` too**, closing the gap between what `docs/use/output-
+  formats.md` already documented ("every JSON report... the release
+  fan-out") and what the two writers actually built.
 - **`scan`'s legacy-scheme `run_outcome.gate` no longer counts a
   coverage-only failure as a compatibility break.** ADR-049 Phase 7's
   contract-coverage axis folds a `1` onto an otherwise-compatible `0` via

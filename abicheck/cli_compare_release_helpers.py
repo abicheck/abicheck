@@ -1041,6 +1041,8 @@ def _format_release_json(
         for lib in library_results
         if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
     ]
+    from .report.not_comparable import run_outcome_dict_for_release
+    exit_dict = resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, _release_global_verdict(bundle_result, matrix_result)).to_dict()
     summary: dict[str, object] = {
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
@@ -1050,7 +1052,8 @@ def _format_release_json(
         "unmatched_old": [old_map[k].name for k in removed_keys],
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
-        "exit": resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, _release_global_verdict(bundle_result, matrix_result)).to_dict(),
+        "exit": exit_dict,
+        "run_outcome": run_outcome_dict_for_release(worst_verdict, exit_dict),
     }
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see

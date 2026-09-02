@@ -122,9 +122,19 @@ def _write_release_summary_file(
         _release_global_verdict,
         _release_summary_effective_config_block,
     )
+    from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.gate import resolve_release_exit_decision_for_report
 
     digest, fields = _release_summary_effective_config_block(severity_config)
+    exit_dict = resolve_release_exit_decision_for_report(
+        worst_verdict,
+        fail_on_removed,
+        removed_keys,
+        severity_exit_code,
+        contract_coverage_exit_contribution,
+        library_results,
+        _release_global_verdict(bundle_result, matrix_result),
+    ).to_dict()
     summary_data: dict[str, object] = {
         "verdict": worst_verdict,
         "libraries": library_results,
@@ -132,15 +142,8 @@ def _write_release_summary_file(
         "unmatched_new": [new_map[k].name for k in added_keys],
         "effective_config_digest": digest,
         "effective_config_fields": fields,
-        "exit": resolve_release_exit_decision_for_report(
-            worst_verdict,
-            fail_on_removed,
-            removed_keys,
-            severity_exit_code,
-            contract_coverage_exit_contribution,
-            library_results,
-            _release_global_verdict(bundle_result, matrix_result),
-        ).to_dict(),
+        "exit": exit_dict,
+        "run_outcome": run_outcome_dict_for_release(worst_verdict, exit_dict),
     }
     summary_path = output_dir / "summary.json"
     _safe_write_output(summary_path, json.dumps(summary_data, indent=2))
