@@ -37,7 +37,7 @@ separate.
 ## Non-goals for this change
 
 Per the phased migration below, this change is deliberately **Phase 1 (full)
-plus a small Phase 2 slice** — additive metadata only:
+plus Phase 2's rule/variant classification pass** — additive metadata only:
 
 - No `examples/case*/` directory is moved, renamed, or deleted.
 - No case is removed from `ground_truth.json["verdicts"]` or from any gate
