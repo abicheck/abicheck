@@ -9,8 +9,12 @@ lifecycle: active
 **ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed — roadmap
 ADR, partially implemented. Phase 0's `Fact[T]`/`FactStatus` infrastructure
 and AI-readiness gates have landed, and a narrow Phase 1 slice has too; see
-ADR-063's own Status line for the authoritative, per-slice detail — this
-plan document does not restate it, to avoid the two drifting apart again.
+each phase's own "Landed"/"Still not landed" paragraph below in this plan
+for the authoritative per-slice detail, plus
+`docs/_meta/one-semantic-pipeline-status.yaml` for the concept-level
+authority summary. ADR-063 itself no longer restates this detail — its own
+duplicated status block was removed (PR 0, 2026-09-02) precisely because it
+kept drifting out of sync with this plan.
 **Effort:** XL, multi-quarter, phased — do not attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
 ADR-062, ADR-042, ADR-046/048, ADR-049, ADR-050 (each partially implemented
 already; see "Sequencing against in-flight ADRs" below).
@@ -12590,12 +12594,14 @@ shared machinery came out of the case-(a) half —
 `storage/fact_codec.apply_case_a_fact_backfill` (one navigator + a
 `CaseAFactRule` table, replacing Phase 0's three open-coded legacy-load
 corrections) and `decode_fact_with_legacy_presence` — plus fixes for five
-real merge-path mutation traps the conversions surfaced. Per-batch detail,
-including what this phase deliberately did **not** attempt (no detector
-branches on `FactStatus`; no codegen of the model field, the serialization
-pair, or suppression/report wiring), lives in
-[ADR-063](../adr/063-one-semantic-pipeline.md)'s own Status paragraph —
-not restated here, so the two cannot drift.
+real merge-path mutation traps the conversions surfaced. Per-batch commit
+detail is not separately tracked beyond this summary and the PR history for
+Phase 5's landing commits; what this phase deliberately did **not** attempt
+(no detector branches on `FactStatus`; no codegen of the model field, the
+serialization pair, or suppression/report wiring) is recorded here, in this
+paragraph, rather than in ADR-063 — its own duplicated per-phase status
+block was removed (PR 0, 2026-09-02) to keep this plan the single place
+that detail lives.
 
 **Goal.** A new fact requires declaring the model field plus one registry
 entry, not nine touched files spread across serialization, diff,
@@ -15004,8 +15010,10 @@ this section's own Files subsection specifies, exercised in
 `tests/test_architecture_check.py` against a deliberately-reintroduced
 cyclic-import fixture (one test per denylisted module, plus the
 submodule-import and no-op-when-absent cases) to confirm it fails closed.
-See [ADR-063](../adr/063-one-semantic-pipeline.md)'s own Status paragraph
-for the user-facing summary — not restated here, so the two cannot drift.
+The paragraph above is this phase's own user-facing summary — ADR-063
+itself no longer restates per-phase detail (its duplicated status block was
+removed by PR 0, 2026-09-02); see this plan's own pointer paragraph at the
+top of the document for the current set of status sources.
 
 **Goal.** `suppression.py` and `reclassify.py` share one selector-matching
 primitive instead of two independent grammars kept in sync by hand, and

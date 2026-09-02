@@ -145,6 +145,26 @@ def test_duplicate_mapping_key_is_rejected(
     assert any("duplicate key" in e for e in f.errors)
 
 
+def test_unhashable_mapping_key_is_rejected_not_crashed(tmp_path, monkeypatch) -> None:
+    """A YAML mapping key can itself be a sequence or mapping (`? [a, b]`),
+    which Python cannot hash -- `key in seen`/`mapping[key] = ...` would
+    otherwise raise a raw `TypeError` that neither `_DuplicateKeyError` nor
+    `yaml.YAMLError` catches, crashing the whole docs-contract job instead
+    of producing the promised finding (a real review finding on PR #1019)."""
+    import pipeline_status_ledger as mod
+
+    yaml_text = (
+        "schema_version: 1\nas_of_commit: aa78c37\n"
+        'as_of_date: "2026-09-02"\nconcepts:\n  ? [a, b]\n  : {}\n'
+    )
+    ledger = tmp_path / "ledger.yaml"
+    ledger.write_text(yaml_text, encoding="utf-8")
+    monkeypatch.setattr(mod, "PIPELINE_STATUS_FILE", ledger)
+    f = FakeFindings()
+    assert load_pipeline_status(f) is None  # must not raise
+    assert any("not a scalar" in e for e in f.errors)
+
+
 def test_non_duplicate_yaml_is_unaffected_by_the_strict_loader(
     tmp_path, monkeypatch
 ) -> None:

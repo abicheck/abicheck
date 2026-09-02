@@ -120,18 +120,30 @@ _PIPELINE_DATE_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 _PIPELINE_COMMIT_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
 
 
-class _DuplicateKeyError(Exception):
+class _LedgerYamlError(Exception):
+    """Base for a structural mapping problem this loader's strict
+    constructor detects (a duplicate key, or a key that cannot be a mapping
+    key at all). Distinct from `yaml.YAMLError` in both cases -- the document
+    is syntactically valid YAML -- so either is reported as its own finding
+    rather than folded into the generic "invalid YAML" message below."""
+
+
+class _DuplicateKeyError(_LedgerYamlError):
     """A mapping in the ledger repeats a key (e.g. two `schema_version:`
-    entries, or two `concepts.facts:` entries after a bad merge). Distinct
-    from `yaml.YAMLError` -- the document is syntactically valid YAML, PyYAML
-    just resolves the repeat with silent last-value-wins semantics -- so it
-    is reported as its own finding rather than folded into the "invalid
-    YAML" message below."""
+    entries, or two `concepts.facts:` entries after a bad merge). PyYAML
+    resolves the repeat with silent last-value-wins semantics by default."""
+
+
+class _UnhashableKeyError(_LedgerYamlError):
+    """A mapping key resolved to a YAML sequence or mapping (`? [a, b]`),
+    which Python cannot hash. This ledger's schema never uses one, so a
+    document doing so is malformed structure, not a schema PyYAML itself
+    would reject."""
 
 
 def _load_yaml_strict(text: str) -> object:
-    """Parse *text* as YAML, raising `_DuplicateKeyError` for a duplicate
-    mapping key anywhere in the document.
+    """Parse *text* as YAML, raising `_DuplicateKeyError`/`_UnhashableKeyError`
+    for a duplicate or unhashable mapping key anywhere in the document.
 
     Plain `yaml.safe_load` silently keeps only the last value for a repeated
     key (`{a: 1, a: 2}` -> `{"a": 2}`, no error) -- so a merge or manual edit
@@ -143,6 +155,17 @@ def _load_yaml_strict(text: str) -> object:
     `SafeLoader`-subclass-with-duplicate-checking pattern for the identical
     reason; this is that pattern's `scripts/`-side sibling, not a new
     design, kept independent since `scripts/` does not depend on `abicheck/`.
+
+    The duplicate check alone would crash on an *unhashable* key before ever
+    reaching it: `key in seen`/`seen.add(key)`/`mapping[key] = ...` all
+    require a hashable key, and syntactically valid YAML can supply a
+    sequence or mapping as one (`? [a, b]\\n: value`), which
+    `construct_object` returns as a `list`/`dict` -- neither hashable. An
+    uncaught `TypeError` there would crash the whole docs-contract job
+    instead of producing the promised `pipeline-status-ledger` finding (a
+    real review finding on PR #1019), so hashability is checked explicitly,
+    before either the duplicate check or the `dict` assignment can raise it
+    as a raw `TypeError`.
     """
 
     class _StrictLoader(yaml.SafeLoader):
@@ -155,6 +178,14 @@ def _load_yaml_strict(text: str) -> object:
         mapping: dict[object, object] = {}
         for key_node, value_node in node.value:
             key = loader.construct_object(key_node, deep=True)
+            try:
+                hash(key)
+            except TypeError:
+                raise _UnhashableKeyError(
+                    f"key {key!r} at line {key_node.start_mark.line + 1} is "
+                    f"not a scalar (a YAML sequence/mapping used as a "
+                    f"mapping key) -- only hashable keys are supported"
+                ) from None
             if key in seen:
                 raise _DuplicateKeyError(
                     f"duplicate key {key!r} in the same mapping "
@@ -192,7 +223,7 @@ def load_pipeline_status(f: Findings) -> dict[str, object] | None:
         return None
     try:
         data = _load_yaml_strict(PIPELINE_STATUS_FILE.read_text(encoding="utf-8"))
-    except _DuplicateKeyError as exc:
+    except _LedgerYamlError as exc:
         f.err(
             "pipeline-status-ledger",
             f"{_rel(PIPELINE_STATUS_FILE)}: {exc}",

@@ -5910,9 +5910,11 @@ looked like the obvious fix and wasn't.
   both builders' nodes (real, tested — `service_header_graph_attach.
   _attach_header_graph()`), but the two schemes do not dedup onto a common
   node for a declaration both builders see. Each of these is a real,
-  separate follow-up migration, not silently-abandoned scope — see
-  ADR-063's own Status block, the implementation plan's Phase 3 "Landed"
-  note (`docs/contribute/plans/one-semantic-pipeline.md`), and
+  separate follow-up migration, not silently-abandoned scope — see the
+  implementation plan's Phase 3 "Landed"/D5 "Amendment" notes
+  (`docs/contribute/plans/one-semantic-pipeline.md`; ADR-063 itself no
+  longer carries a duplicated per-phase status block, removed by PR 0,
+  2026-09-02) and
   `compare/surface_graph.py`'s/`policy/public_surface.py`'s own module
   docstrings for the exact reasoning each carries.
 
@@ -5939,8 +5941,9 @@ looked like the obvious fix and wasn't.
   correctly described by the paragraph above, unchanged: `export_surface.py`'s
   own root-seeding logic, `type_reachability.directly_referenced_stdlib_types()`
   staying unmigrated (same `policy -> extract` reason), and the two node-id
-  namespaces not deduping onto one node. See ADR-063's Status block for
-  Phase 3's final accounting.
+  namespaces not deduping onto one node. See the implementation plan's
+  Phase 3 "Landed"/D5 "Amendment" notes for Phase 3's final accounting —
+  ADR-063 itself no longer carries this per-phase detail.
 
 - **ADR-063 Phase 3 (D5)'s traversal migration went through three review
   rounds before landing on a design that reads `AbiSnapshot.surface_graph`
