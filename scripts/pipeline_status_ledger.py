@@ -120,6 +120,60 @@ _PIPELINE_DATE_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 _PIPELINE_COMMIT_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
 
 
+class _DuplicateKeyError(Exception):
+    """A mapping in the ledger repeats a key (e.g. two `schema_version:`
+    entries, or two `concepts.facts:` entries after a bad merge). Distinct
+    from `yaml.YAMLError` -- the document is syntactically valid YAML, PyYAML
+    just resolves the repeat with silent last-value-wins semantics -- so it
+    is reported as its own finding rather than folded into the "invalid
+    YAML" message below."""
+
+
+def _load_yaml_strict(text: str) -> object:
+    """Parse *text* as YAML, raising `_DuplicateKeyError` for a duplicate
+    mapping key anywhere in the document.
+
+    Plain `yaml.safe_load` silently keeps only the last value for a repeated
+    key (`{a: 1, a: 2}` -> `{"a": 2}`, no error) -- so a merge or manual edit
+    that repeats `schema_version` or a `concepts.<name>` entry would let this
+    "structural integrity gate for the authoritative ledger" (this module's
+    own docstring) validate only the surviving copy and silently ignore a
+    conflicting or invalid duplicate (a real review finding on PR #1019).
+    `abicheck/dump_manifest.py`'s `_load_yaml_strict` establishes the same
+    `SafeLoader`-subclass-with-duplicate-checking pattern for the identical
+    reason; this is that pattern's `scripts/`-side sibling, not a new
+    design, kept independent since `scripts/` does not depend on `abicheck/`.
+    """
+
+    class _StrictLoader(yaml.SafeLoader):
+        pass
+
+    def _construct_mapping(
+        loader: yaml.SafeLoader, node: yaml.Node, deep: bool = False
+    ) -> dict[object, object]:
+        seen: set[object] = set()
+        mapping: dict[object, object] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=True)
+            if key in seen:
+                raise _DuplicateKeyError(
+                    f"duplicate key {key!r} in the same mapping "
+                    f"(line {key_node.start_mark.line + 1})"
+                )
+            seen.add(key)
+            mapping[key] = loader.construct_object(value_node, deep=True)
+        return mapping
+
+    _StrictLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
+    )
+    # `_StrictLoader` subclasses `yaml.SafeLoader` and only replaces its
+    # mapping constructor with the duplicate-key check above; bandit's B506
+    # flags every `Loader=` it cannot name-match against
+    # `SafeLoader`/`CSafeLoader`, subclasses included.
+    return yaml.load(text, Loader=_StrictLoader)  # nosec B506
+
+
 def load_pipeline_status(f: Findings) -> dict[str, object] | None:
     """Parse and structurally validate the ledger. Unlike a file predating
     the `_meta/` "required registry" convention (e.g. `terminology.yaml`,
@@ -137,7 +191,13 @@ def load_pipeline_status(f: Findings) -> dict[str, object] | None:
         )
         return None
     try:
-        data = yaml.safe_load(PIPELINE_STATUS_FILE.read_text(encoding="utf-8"))
+        data = _load_yaml_strict(PIPELINE_STATUS_FILE.read_text(encoding="utf-8"))
+    except _DuplicateKeyError as exc:
+        f.err(
+            "pipeline-status-ledger",
+            f"{_rel(PIPELINE_STATUS_FILE)}: {exc}",
+        )
+        return None
     except yaml.YAMLError as exc:
         f.err(
             "pipeline-status-ledger",

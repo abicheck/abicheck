@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -81,6 +82,10 @@ def _valid_ledger() -> dict[str, object]:
     }
 
 
+def _dump_ledger_yaml(data: dict[str, object]) -> str:
+    return yaml.safe_dump(data, sort_keys=False)
+
+
 def test_valid_ledger_produces_no_findings() -> None:
     f = FakeFindings()
     check_pipeline_status_ledger(f, _valid_ledger())
@@ -107,6 +112,53 @@ def test_missing_ledger_file_is_an_error(tmp_path, monkeypatch) -> None:
     f = FakeFindings()
     assert load_pipeline_status(f) is None
     assert any("file not found" in e for e in f.errors)
+
+
+@pytest.mark.parametrize(
+    "yaml_text",
+    [
+        # A repeated top-level key.
+        "schema_version: 1\nschema_version: 2\nas_of_commit: aa78c37\n"
+        'as_of_date: "2026-09-02"\nconcepts: {}\n',
+        # A repeated key nested inside a mapping value.
+        "schema_version: 1\nas_of_commit: aa78c37\n"
+        'as_of_date: "2026-09-02"\n'
+        "concepts:\n  facts:\n    primitive: complete\n    primitive: partial\n",
+    ],
+    ids=["top-level", "nested"],
+)
+def test_duplicate_mapping_key_is_rejected(
+    tmp_path, monkeypatch, yaml_text: str
+) -> None:
+    """Plain `yaml.safe_load` silently keeps only the last value for a
+    repeated key -- a merge or manual edit that duplicates `schema_version`
+    or a `concepts.<name>.<field>` entry must not validate only the
+    surviving copy and silently ignore a conflicting duplicate (a real
+    review finding on PR #1019)."""
+    import pipeline_status_ledger as mod
+
+    ledger = tmp_path / "ledger.yaml"
+    ledger.write_text(yaml_text, encoding="utf-8")
+    monkeypatch.setattr(mod, "PIPELINE_STATUS_FILE", ledger)
+    f = FakeFindings()
+    assert load_pipeline_status(f) is None  # must not raise
+    assert any("duplicate key" in e for e in f.errors)
+
+
+def test_non_duplicate_yaml_is_unaffected_by_the_strict_loader(
+    tmp_path, monkeypatch
+) -> None:
+    """Guard against an overcorrection: the strict loader must parse
+    ordinary, non-duplicated YAML identically to `yaml.safe_load`."""
+    import pipeline_status_ledger as mod
+
+    ledger = tmp_path / "ledger.yaml"
+    ledger.write_text(_dump_ledger_yaml(_valid_ledger()), encoding="utf-8")
+    monkeypatch.setattr(mod, "PIPELINE_STATUS_FILE", ledger)
+    f = FakeFindings()
+    data = load_pipeline_status(f)
+    assert f.errors == []
+    assert data == _valid_ledger()
 
 
 @pytest.mark.parametrize("field", ["as_of_commit", "as_of_date"])

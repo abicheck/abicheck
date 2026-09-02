@@ -13665,11 +13665,15 @@ proves the scope gate for both functions and variables), all in
 `tests/test_dumper_clang_extern_c_identity.py`.
 
 **Still not landed, and therefore this phase is not complete:**
-DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
-`entity_id` yet -- this normalizer canonicalizes evidence a backend already
-resolved identity for, it does not resolve identity itself, so extending it
-to these backends is gated on giving each of them the Phase 2 `EntityId`
-treatment first); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
+DWARF/PDB/BTF/CTF backends produce no `SemanticIR` at all -- this
+normalizer canonicalizes evidence a backend already resolved identity for,
+it does not resolve identity itself, and no `normalize_header_ast`-style
+assembler exists yet for any of these four. DWARF's own Phase 2 prerequisite
+already landed (Phase 2's fourteenth slice, 2026-09-02: `dwarf_snapshot.py`
+populates `entity_id` on `RecordType`/`EnumType`/`Function`/`Variable`/
+typedefs), so DWARF's remaining gap here is specifically the `SemanticIR`
+assembly step, not identity -- PDB/BTF/CTF have neither yet. `service.py`'s
+BTF/CTF dispatch and PDB path (a fourth and
 fifth production assembler this phase's own Files list names) remain
 unwired for the same reason; and the phase's own acceptance criteria (a
 closure-parameterized template fixture, requiring function/template-argument
