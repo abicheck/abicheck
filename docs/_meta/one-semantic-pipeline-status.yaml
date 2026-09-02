@@ -56,7 +56,7 @@ concepts:
     primitive: complete
     producers: complete
     persistence: complete
-    consumers: not_started
+    consumers: partial
     authority: legacy
     removal_gate: >-
       Phase 5B (fact-semantic-consumption): every detector reading an

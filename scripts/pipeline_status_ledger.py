@@ -95,6 +95,11 @@ _PIPELINE_REQUIRED_CONCEPTS = frozenset(
         "l5_source_graph_identity",
     }
 )
+#: The only ledger schema version this validator's field layout implements.
+#: A future schema bump must update both this constant and the validation
+#: logic together (or dispatch per-version), never silently accept a new
+#: version number against the old field rules.
+_PIPELINE_SUPPORTED_SCHEMA_VERSION = 1
 _PIPELINE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PIPELINE_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
@@ -148,10 +153,22 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
     silently read as `None`/absent by a future generator."""
     rel = _rel(PIPELINE_STATUS_FILE)
     schema_version = data.get("schema_version")
-    if not isinstance(schema_version, int):
+    # `bool` is an `int` subclass in Python, so `isinstance(True, int)` is
+    # True -- excluded explicitly, or `schema_version: true` would pass this
+    # check. This validator implements only the version-1 field layout, so
+    # any other integer (a real future schema bump this module hasn't been
+    # updated for) must fail rather than be silently accepted as if it were
+    # version 1 (a real review finding on PR #1019).
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != _PIPELINE_SUPPORTED_SCHEMA_VERSION
+    ):
         f.err(
             "pipeline-status-ledger",
-            f"{rel}: 'schema_version' must be an integer",
+            f"{rel}: 'schema_version' must be exactly "
+            f"{_PIPELINE_SUPPORTED_SCHEMA_VERSION} (the only version this "
+            f"validator implements), got {schema_version!r}",
         )
     as_of_commit = data.get("as_of_commit")
     if not isinstance(as_of_commit, str) or not _PIPELINE_COMMIT_RE.match(as_of_commit):
@@ -241,7 +258,8 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
                 "pipeline-status-ledger",
                 f"{rel}: concepts.{name}.removal_gate: must be a non-empty string",
             )
-        extra = set(entry) - set(_PIPELINE_REQUIRED_CONCEPT_FIELDS) - {"persistence"}
+        allowed_extra = set(_PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS.get(name, ()))
+        extra = set(entry) - set(_PIPELINE_REQUIRED_CONCEPT_FIELDS) - allowed_extra
         if extra:
             f.err(
                 "pipeline-status-ledger",
