@@ -440,9 +440,14 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
         # The warning must reach the log, not the environment file (Codex
         # review, PR #998, fresh evidence: an earlier revision echoed it
-        # *inside* the redirected `{ ... } >> "$GITHUB_OUTPUT"` block).
-        assert "::warning" in log, log
-        assert "::warning" not in out, out
+        # *inside* the redirected `{ ... } >> "$GITHUB_OUTPUT"` block). Checks
+        # the specific `abicheck upload-sarif` title, not any `::warning` --
+        # a bare substring check false-fails wherever run.sh legitimately
+        # emits an unrelated warning too (e.g. its own Python-interpreter
+        # resolution notice on a checkout with no `abicheck` installed;
+        # Codex review, fresh evidence).
+        assert "abicheck upload-sarif" in log, log
+        assert "abicheck upload-sarif" not in out, out
 
     def test_default_output_file_withholds_report_path_on_mismatch(
         self, tmp_path: Path
@@ -458,8 +463,8 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             },
         )
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
-        assert "::warning" in log, log
-        assert "::warning" not in out, out
+        assert "abicheck upload-sarif" in log, log
+        assert "abicheck upload-sarif" not in out, out
 
     def test_matching_sarif_still_publishes_report_path(self, tmp_path: Path) -> None:
         # Negative control: the ordinary, unoverridden sarif+upload
@@ -469,7 +474,10 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             {"INPUT_FORMAT": "sarif", "INPUT_UPLOAD_SARIF": "true"},
         )
         assert "report-path=abicheck-results.sarif" in out, out
-        assert "::warning" not in log, log
+        # Not a bare `::warning` check -- run.sh may legitimately emit an
+        # unrelated warning (e.g. its own Python-interpreter resolution
+        # notice) regardless of this feature (Codex review, fresh evidence).
+        assert "abicheck upload-sarif" not in log, log
 
     def test_mismatch_without_upload_sarif_still_publishes_report_path(
         self, tmp_path: Path
@@ -486,7 +494,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             },
         )
         assert f"report-path={explicit}" in out, out
-        assert "::warning" not in log, log
+        assert "abicheck upload-sarif" not in log, log
 
 
 def test_both_branches_share_the_same_write_guard() -> None:
