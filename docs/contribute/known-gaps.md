@@ -6237,6 +6237,49 @@ looked like the obvious fix and wasn't.
   now picks L0 (fully stripped) vs. L1 (structural facts kept) per
   snapshot, not fixed to one or the other.
 
+  **A third review round (Codex, same PR) found four more real gaps, all
+  now closed:** (1) an explicit out-of-band `--old/new-sources`/
+  `--old/new-build-info` pack directory is resolved *separately* from the
+  snapshot object `project_pair_to_depth` projects — `cli_compare_helpers.
+  run_compare` passed the raw pack paths straight through to
+  `prepare_embedded_build_source`, which reloads and diffs them
+  unconditionally, so a pack-backed `compare --sources ... --depth binary`
+  still leaked full L3-L5 findings even after the first two rounds' fixes.
+  Closed with a new `project_build_source_pack_to_depth` (mirroring
+  `project_snapshot_to_depth`'s own `build_source` capping, factored into a
+  shared `_project_build_source_pack` helper both call) — `run_compare` now
+  resolves each side's pack itself, caps it, attaches the capped pack back
+  onto `old.build_source`/`new.build_source`, and passes `None` for the
+  four path arguments so `prepare_embedded_build_source`'s own
+  `resolve_side_pack` falls back to the now-capped embedded payload instead
+  of reloading the raw one; the same fix also corrected the *reporting*
+  side (`analysis_assurance`/`old_evidence_depth`/`new_evidence_depth`),
+  which previously re-resolved the uncapped pack from the raw paths a
+  second time for these fields even after the findings themselves were
+  capped. (2) `snap.contract` (an ADR-050 `ExtractionContract`) survived a
+  `binary`-depth projection, so `checker.compare()` could still raise a
+  scope/profile mismatch error from two sides' *original* header scopes
+  even though a binary-only comparison never looks at either — now cleared
+  alongside the other L2+ facts. (3) a `Visibility.HIDDEN` (non-exported)
+  function/variable was promoted to `ELF_ONLY` like every other function/
+  variable, manufacturing a false `*_removed_elf_only` finding for a
+  declaration no real binary-only dump would ever have seen as a symbol at
+  all — now dropped from the projected snapshot entirely instead. (4)
+  `types`/`enums` were kept or dropped by the whole-snapshot
+  `dwarf.has_dwarf` flag, the same coarse signal functions/variables still
+  use — but this codebase's model *does* carry real per-record DWARF
+  evidence for these two families (`DwarfMetadata.structs`/`.enums`, keyed
+  by name), so an uninstantiated header-only record sitting alongside
+  unrelated real DWARF content was incorrectly retained; a new
+  `_dwarf_confirmed_names` now filters `types`/`enums` per declaration name
+  instead of by the whole-snapshot flag. `typedefs` stay unconditionally
+  cleared below `headers` regardless — this codebase's model has no
+  per-name DWARF lookup for them at all — and function/variable
+  *signatures* deliberately keep the coarser whole-snapshot gate, since no
+  per-function DWARF-confirmation fact exists anywhere in the model for a
+  projection to read back (a real per-function extension is
+  separately-justified future work, not attempted here).
+
 ### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
 
 A Codex review round on PR #1016 (R1: teaching `action/run.sh`'s verdict

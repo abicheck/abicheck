@@ -26,4 +26,11 @@ it should read in CHANGELOG.md. Delete the other sections.
   DWARF at all (fully stripped to bare symbol identity, matching a real
   headerless, debug-info-less dump). `dump`'s own `--depth` is unaffected
   (it stays floor-only, so a dumped artifact keeps whatever richer evidence
-  extraction produced for a later, deeper comparison).
+  extraction produced for a later, deeper comparison). An explicit
+  out-of-band `--old/new-sources`/`--old/new-build-info` pack is now capped
+  too — it previously bypassed the ceiling entirely — and the ceiling also
+  now clears a stale `ExtractionContract` (which could otherwise raise a
+  spurious scope-mismatch error), drops a non-exported (`HIDDEN`)
+  declaration outright instead of misreporting it as a binary-visible
+  removal, and filters `types`/`enums` by real per-record DWARF confirmation
+  rather than a coarser whole-snapshot flag.

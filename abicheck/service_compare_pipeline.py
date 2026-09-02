@@ -67,7 +67,11 @@ from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
-from .policy.depth_projection import project_pair_to_depth, project_snapshot_to_depth
+from .policy.depth_projection import (
+    project_build_source_pack_to_depth,
+    project_pair_to_depth,
+    project_snapshot_to_depth,
+)
 from .workflows.artifact.execute import (
     enforce_requested_depth,
     resolve_side_snapshot,
@@ -82,6 +86,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ResolvedComparePair",
     "classify_compare_pair",
+    "project_build_source_pack_to_depth",
     "project_pair_to_depth",
     "project_snapshot_to_depth",
     "resolve_compare_request",
