@@ -1027,6 +1027,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_vtable_facts_reliable_value,
         clang_va_list_facts_reliable_value,
         ast_producer_value,
+        from_headers=from_headers,
         variables=variables,
         enums=enums,
         header_cv_facts_reliable_value=header_cv_facts_reliable_value,

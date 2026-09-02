@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..model import AccessLevel, Fact
+from ..model.fact_registry import FACT_REGISTRY
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
@@ -117,11 +118,36 @@ def _owner_pairs(
         raise ValueError(f"no raw-document navigation known for owner {owner!r}")
 
 
+#: The two header-AST producers. A fact whose registered
+#: ``producing_backends`` name only these cannot have been observed by a
+#: run that never parsed a header, however trustworthy its reliability flag
+#: reads -- see :func:`_needs_header_ast`.
+_HEADER_AST_BACKENDS: frozenset[str] = frozenset({"castxml", "clang"})
+
+
+def _needs_header_ast(owner: str, field: str) -> bool:
+    """Whether only a header-AST parse can produce this fact.
+
+    Answered from the fact's own ``FACT_REGISTRY`` entry rather than from a
+    second hand-maintained list -- the registry ADR-063 Phase 5 exists to
+    build is the one place a fact's producers are declared, so a future
+    change to them reaches this decision automatically. An unregistered
+    field answers ``False``: this correction only ever *narrows* a claim,
+    so an unknown fact keeps the pre-existing behaviour rather than being
+    silently downgraded on a guess.
+    """
+    entry = FACT_REGISTRY.get(f"{owner}.{field}")
+    if entry is None:
+        return False
+    return set(entry.producing_backends) <= _HEADER_AST_BACKENDS
+
+
 def apply_case_a_fact_backfill(
     d: dict[str, Any],
     *,
     schema_version: int,
     rules: tuple[CaseAFactRule, ...],
+    from_headers: bool = True,
     **decoded: list[Any],
 ) -> None:
     """Downgrade every case-(a) fact a legacy document cannot vouch for.
@@ -139,17 +165,46 @@ def apply_case_a_fact_backfill(
 
     Only ever *downgrades*, and only for a document that predates the
     field's own conversion: a v(N)+ document's ``<field>_fact`` was decoded
-    explicitly at construction time and is authoritative.
+    explicitly at construction time and is authoritative. ``from_headers``
+    carries the second downgrade reason (see the body): a producer that
+    never parsed a header cannot have observed a header-AST-only fact, which
+    no reliability flag expresses.
     """
     for rule in rules:
-        if schema_version >= rule.min_schema_version or rule.reliable:
+        if schema_version >= rule.min_schema_version:
+            continue
+        # Two independent reasons a pre-conversion document's value is not
+        # evidence, and the second is not covered by the first (Codex
+        # review, PR #993): every ``*_facts_reliable`` flag resolves True
+        # for a snapshot with ``from_headers=False``, since the producer it
+        # describes never ran -- "trusted by irrelevance". That is the right
+        # answer to "is this value a wrong placeholder", and the wrong
+        # answer to "did anyone observe it": a legacy DWARF/PDB/symbols-only
+        # document's `deprecated: null` / `is_restrict: false` /
+        # `access: "public"` would otherwise bridge to PRESENT, claiming a
+        # confirmed fact the fresh equivalent of that same snapshot reports
+        # as NOT_COLLECTED.
+        unreliable = not rule.reliable
+        unproduceable = not from_headers and _needs_header_ast(
+            rule.owner, rule.field
+        )
+        if not (unreliable or unproduceable):
             continue
         fact_key = f"{rule.field}_fact"
         for raw, obj in _owner_pairs(d, rule.owner, decoded):
             if fact_key in raw:
                 continue
-            setattr(obj, rule.field, rule.normalized_default)
-            setattr(obj, fact_key, Fact.not_collected())
+            if unreliable:
+                setattr(obj, rule.field, rule.normalized_default)
+                setattr(obj, fact_key, Fact.not_collected())
+            elif getattr(obj, rule.field) == rule.normalized_default:
+                # Unproduceable-only: downgrade the *claim*, never the
+                # value. A non-header document carrying a non-resting value
+                # for one of these fields got it from somewhere this
+                # registry doesn't model, and discarding it would lose real
+                # data -- unlike the unreliable case, where the value is
+                # known to be a placeholder.
+                setattr(obj, fact_key, Fact.not_collected())
 
 
 def apply_legacy_fact_backfill(
@@ -161,6 +216,7 @@ def apply_legacy_fact_backfill(
     clang_va_list_facts_reliable_value: bool,
     ast_producer_value: str | None,
     *,
+    from_headers: bool = True,
     variables: list[Any] | None = None,
     enums: list[Any] | None = None,
     header_cv_facts_reliable_value: bool = True,
@@ -341,6 +397,7 @@ def apply_legacy_fact_backfill(
                 AccessLevel.PUBLIC,
             ),
         ),
+        from_headers=from_headers,
         types=types,
         functions=funcs,
         variables=variables or [],

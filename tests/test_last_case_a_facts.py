@@ -219,3 +219,152 @@ class TestPhase5ConversionIsComplete:
 
     def test_schema_version_is_40_or_higher(self) -> None:
         assert SCHEMA_VERSION >= _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS == 40
+
+
+#: Below *every* per-field threshold this phase introduced (v38-v40), so
+#: one document exercises all of them: at or above a field's own threshold a
+#: missing `<field>_fact` key means "malformed", not "legacy", and decodes
+#: to NOT_COLLECTED for a different reason than the one under test here.
+_PRE_CASE_A = 30
+
+
+class TestNonHeaderLegacySnapshotsClaimNothing:
+    """A producer that never parsed a header cannot have observed a
+    header-AST-only fact — no reliability flag says so (Codex review, PR
+    #993).
+
+    Every ``*_facts_reliable`` flag resolves ``True`` for a snapshot with
+    ``from_headers=False``, because the producer each flag describes never
+    ran — "trusted by irrelevance". That is the right answer to "is this
+    value a wrong placeholder" and the wrong answer to "did anyone observe
+    it", so a legacy DWARF/PDB/symbols-only document's resting values were
+    bridged to ``PRESENT`` while the *fresh* equivalent of the same
+    snapshot reports ``NOT_COLLECTED``. The invariant is stated across
+    every header-AST-only fact rather than the three that motivated it,
+    and the equivalence to a fresh snapshot is the oracle — not a
+    hard-coded expected status.
+    """
+
+    #: (collection, raw legacy dict at its resting value, field).
+    _RESTING: tuple[tuple[str, dict, str], ...] = (
+        (
+            "functions",
+            {
+                "name": "f",
+                "mangled": "_Z1fv",
+                "return_type": "void",
+                "deprecated": None,
+            },
+            "deprecated",
+        ),
+        (
+            "variables",
+            {"name": "g", "mangled": "g", "type": "int", "deprecated": None},
+            "deprecated",
+        ),
+        (
+            "variables",
+            {"name": "g", "mangled": "g", "type": "int", "access": "public"},
+            "access",
+        ),
+        ("enums", {"name": "E", "deprecated": None}, "deprecated"),
+        (
+            "types",
+            {"name": "W", "kind": "class", "deprecated": None},
+            "deprecated",
+        ),
+    )
+
+    @pytest.mark.parametrize("collection,raw,field", _RESTING)
+    def test_a_resting_value_is_not_collected_not_present(
+        self, collection: str, raw: dict, field: str
+    ) -> None:
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A, from_headers=False, **{collection: [raw]}
+        )
+        obj = getattr(snapshot_from_dict(d), collection)[0]
+        assert getattr(obj, f"{field}_fact").status is FactStatus.NOT_COLLECTED
+
+    def test_param_is_restrict_too(self) -> None:
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A,
+            from_headers=False,
+            functions=[
+                {
+                    "name": "f",
+                    "mangled": "_Z1fPi",
+                    "return_type": "void",
+                    "params": [{"name": "p", "type": "int*", "is_restrict": False}],
+                }
+            ],
+        )
+        param = snapshot_from_dict(d).functions[0].params[0]
+        assert param.is_restrict_fact.status is FactStatus.NOT_COLLECTED
+
+    def test_a_tri_state_false_is_kept_as_evidence_not_downgraded(self) -> None:
+        # `EnumType.is_scoped` is `bool | None`: `None` is its resting
+        # "nobody looked" value and `False` is a real answer ("a plain C
+        # enum"). So an explicit `False` in a non-header legacy document is
+        # kept and stays PRESENT — the same "narrow the claim, never the
+        # value" rule as the non-resting case below. A blanket pre-v19
+        # clang `False` is a different question, answered by the reliability
+        # flag's own branch (see TestEnumIsScopedFact above), not here.
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A,
+            from_headers=False,
+            enums=[{"name": "E", "is_scoped": False}],
+        )
+        got = snapshot_from_dict(d).enums[0]
+        assert got.is_scoped is False
+        assert got.is_scoped_fact.status is FactStatus.PRESENT
+
+    def test_a_real_non_resting_value_is_kept_and_stays_present(self) -> None:
+        # The downgrade narrows the *claim*, never the value: a non-header
+        # document carrying a real value got it from somewhere, and
+        # discarding it would lose data.
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A,
+            from_headers=False,
+            variables=[
+                {"name": "g", "mangled": "g", "type": "int", "access": "private"}
+            ],
+        )
+        got = snapshot_from_dict(d).variables[0]
+        assert got.access is AccessLevel.PRIVATE
+        assert got.access_fact.status is FactStatus.PRESENT
+
+    def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
+        # TypeField.is_const names dwarf among its producers, so a
+        # non-header document's value for it is real evidence — the
+        # producer-capability gate reads the registry, not a hand list.
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A,
+            from_headers=False,
+            types=[
+                {
+                    "name": "W",
+                    "kind": "class",
+                    "fields": [{"name": "m", "type": "int", "is_const": True}],
+                }
+            ],
+        )
+        f = snapshot_from_dict(d).types[0].fields[0]
+        assert f.is_const is True
+        assert f.is_const_fact.status is FactStatus.PRESENT
+
+    def test_a_header_snapshot_is_unaffected(self) -> None:
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A,
+            from_headers=True,
+            ast_producer="castxml",
+            functions=[
+                {
+                    "name": "f",
+                    "mangled": "_Z1fv",
+                    "return_type": "void",
+                    "deprecated": None,
+                }
+            ],
+        )
+        got = snapshot_from_dict(d).functions[0]
+        assert got.deprecated_fact.status is FactStatus.PRESENT

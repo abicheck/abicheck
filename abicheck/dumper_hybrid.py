@@ -548,10 +548,11 @@ def _merge_variable(
     value = backfill_fact(
         v.deprecated, clang_v.deprecated if clang_v else None, key, provenance
     )
-    # replace_with_fact_sync, not replace: `deprecated` carries a Fact[...]
-    # sibling since ADR-063 Phase 5's ninth batch, and a bare replace() lets
-    # the stale sibling win under __post_init__'s "explicit Fact wins" rule,
-    # silently reverting this backfill (model/fact.py's documented trap).
+    # replace_with_fact_sync everywhere this module backfills a Fact[...]-
+    # bridged attr (ADR-063 Phase 5): a bare replace() carries the stale
+    # sibling forward and __post_init__'s "explicit Fact wins" rule then
+    # reverts the backfill (model/fact.py's documented trap; the rule is
+    # enforced for every call site by tests/test_fact_bridged_replace_guard.py).
     return replace_with_fact_sync(v, deprecated=value) if value != v.deprecated else v
 
 
@@ -608,12 +609,7 @@ def _merge_field(
         and clang_f.offset_bits is not None
     ):
         updates["offset_bits"] = clang_f.offset_bits
-    # replace_with_fact_sync, not a bare dataclasses.replace: since ADR-063
-    # Phase 5's eighth batch both backfilled attrs above ("default",
-    # "deprecated") carry a Fact[...] sibling, and a plain replace() would
-    # hand __post_init__ the *stale* sibling alongside the new legacy value
-    # -- which that bridge resolves in favour of the sibling, silently
-    # reverting the merge (model/fact.py's own documented trap).
+    # replace_with_fact_sync: see _merge_variable's comment above.
     return replace_with_fact_sync(f, **updates) if updates else f
 
 
@@ -711,7 +707,10 @@ def _merge_enum_type(
         )
         if value != getattr(e, attr):
             updates[attr] = value
-    return replace(e, **updates) if updates else e
+    # replace_with_fact_sync: see _merge_variable's comment above. The
+    # `**updates` spelling is why a name-based sweep missed this one site
+    # (Codex review, PR #993) -- hence the guard test named there.
+    return replace_with_fact_sync(e, **updates) if updates else e
 
 
 def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSnapshot:

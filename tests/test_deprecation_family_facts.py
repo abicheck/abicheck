@@ -251,6 +251,23 @@ class TestFactSiblingsSurviveMerge:
         assert merged.deprecated == "use h()"
         assert merged.deprecated_fact.value == "use h()"
 
+    def test_hybrid_enum_merge_keeps_both_backfilled_values(self) -> None:
+        # Codex review, PR #993: _merge_enum_type applies its updates with
+        # `replace(e, **updates)`, so no field name appears in the source and
+        # the first sweep of this bug class missed it. Both attrs it merges
+        # (`is_scoped`, `deprecated`) are Fact[...]-bridged since this batch.
+        from abicheck.dumper_hybrid import _merge_enum_type
+
+        merged = _merge_enum_type(
+            EnumType(name="E"),
+            EnumType(name="E", deprecated="use F", is_scoped=True),
+            {},
+        )
+        assert merged.deprecated == "use F"
+        assert merged.deprecated_fact.value == "use F"
+        assert merged.is_scoped is True
+        assert merged.is_scoped_fact.value is True
+
     def test_blank_provenance_blanks_the_fact_sibling_too(self) -> None:
         from abicheck.tu_merge_provenance import _blank_provenance
 
