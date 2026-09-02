@@ -121,7 +121,12 @@ def looks_like_bundle_facts_document(data: Any) -> bool:
             # review, fresh evidence: `int(None)` is exactly the
             # TypeError this reader itself would raise for that value).
             is_legacy_v1 = int(data["schema_version"]) == 1
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: a JSON exponent like 1e999 decodes to float
+            # inf, and int(inf) raises OverflowError rather than
+            # TypeError/ValueError (Codex review, fresh evidence) -- this
+            # pure classifier must answer False for malformed input, not
+            # crash a future operand dispatcher calling it.
             is_legacy_v1 = False
     if not is_legacy_v1:
         return False

@@ -260,3 +260,15 @@ class TestLooksLikeBundleFactsDocument:
         assert not looks_like_bundle_facts_document(
             {"schema_version": "not-a-number", "per_library_snapshots": {}}
         )
+
+    def test_false_for_an_overflowing_schema_version(self) -> None:
+        # Codex review, fresh evidence: a JSON exponent like 1e999 decodes
+        # to float inf (json.loads has no integer overflow limit for
+        # floats), and int(inf) raises OverflowError rather than
+        # TypeError/ValueError -- an exception class the classifier's
+        # except clause didn't originally catch, which would crash a
+        # future operand dispatcher on malformed input instead of routing
+        # it to normal validation.
+        assert not looks_like_bundle_facts_document(
+            {"schema_version": float("inf"), "per_library_snapshots": {}}
+        )
