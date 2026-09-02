@@ -373,7 +373,6 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
     h = html.escape
     compat = d["compat"]
     report_kind = d["report_kind"]
-    verdict = d["verdict"]
     bc_pct = d["bc_pct"]
     affected_pct = d["affected_pct"]
     old_symbol_count = d["old_symbol_count"]
@@ -402,9 +401,10 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
         len(symbol_problems[s]) for s in ("High", "Medium", "Low")
     )
 
-    compat_verdict = (
-        "incompatible" if verdict in ("BREAKING", "API_BREAK") else "compatible"
-    )
+    # Already-resolved by build_html_document -- the 5-way Verdict -> ABICC's
+    # 2-way compatible/incompatible bucketing is a policy interpretation, not
+    # a formatting choice, so the renderer only reads it.
+    compat_verdict = d["compat_verdict"]
     bc_css = (
         "incompatible" if bc_pct < 90 else ("warning" if bc_pct < 100 else "compatible")
     )

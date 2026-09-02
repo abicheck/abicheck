@@ -620,6 +620,16 @@ def build_html_document(
                 **shared,
                 "mode": "compat",
                 "report_kind": report_kind,
+                # The 5-way Verdict -> ABICC's 2-way compatible/incompatible
+                # bucketing is a policy interpretation (which verdicts count
+                # as "incompatible" for ABICC-compatibility purposes), not a
+                # formatting choice, so it belongs here -- not re-derived in
+                # the renderer (Codex review, fresh evidence).
+                "compat_verdict": (
+                    "incompatible"
+                    if verdict in ("BREAKING", "API_BREAK")
+                    else "compatible"
+                ),
                 "compat": _build_compat_problem_data(changed, added, removed),
             }
         )
