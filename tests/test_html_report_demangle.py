@@ -177,8 +177,14 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         can only be exercised by forcing the demangler's return value
         directly (Codecov: this was this PR's one uncovered new line)."""
         import abicheck.html_report as html_report_mod
+        import abicheck.report.render_html as render_html_mod
 
-        monkeypatch.setattr(html_report_mod, "_demangle_symbol", lambda raw, **kw: raw)
+        # Patch the implementation owner (ADR-061 D10): the formatter moved
+        # into `report/render_html.py` with the Phase 2 HTML compute/render
+        # split; `html_report._abbr_symbol_text` is now an alias for it, so
+        # patching the alias's old home would no longer reach the demangler
+        # the function actually calls.
+        monkeypatch.setattr(render_html_mod, "_demangle_symbol", lambda raw, **kw: raw)
         out = html_report_mod._abbr_symbol_text("safe_name")
         assert out == "safe_name"
         assert "<abbr" not in out

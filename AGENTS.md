@@ -493,6 +493,14 @@ Core pipeline (in order of data flow):
    - `sarif.py` — SARIF 2.1.0 output
    - `junit_report.py` — JUnit XML output
    - `report_summary.py`, `report_classifications.py` — report helpers
+   - `report/` — ADR-061 Phase 2's canonical `ReportDocument` and the pure
+     projection every format now goes through (`render_json.py` covers
+     SARIF too; also `render_xml.py`, `render_text.py`, `render_markdown.py`,
+     `render_html.py`). Markdown/HTML split two ways: a `compute_*` half in
+     `reporter_markdown.py`/`html_report.py` returning frozen structs of
+     plain values, a `render_*` half here that formats and decides nothing —
+     **add a report section to that pair, never to a renderer alone**
+     (`abicheck/report/AGENTS.md`)
 7. **Application compatibility** — `appcompat.py`, `appcompat_html.py`
 8. **Utilities**
    - `binary_utils.py` — binary file helpers
