@@ -333,13 +333,56 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         assert got.access is AccessLevel.PRIVATE
         assert got.access_fact.status is FactStatus.PRESENT
 
-    def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
-        # TypeField.is_const names dwarf among its producers, so a
-        # non-header document's value for it is real evidence — the
-        # producer-capability gate reads the registry, not a hand list.
+    @pytest.mark.parametrize(
+        "label,extra,expected",
+        [
+            # A PE/PDB document evidences no CV producer: PDB is not one
+            # (pdb_model states UNSUPPORTED outright), and the `dwarf` in
+            # is_const's registry entry is a producer this document has no
+            # trace of. Codex review, third round — the "could produce it in
+            # principle" reading kept this one PRESENT.
+            ("pe-pdb", {"platform": "pe"}, FactStatus.NOT_COLLECTED),
+            # A DWARF block is real evidence its producer ran.
+            (
+                "elf-dwarf",
+                {"platform": "elf", "dwarf": {"has_debug_info": True}},
+                FactStatus.PRESENT,
+            ),
+            (
+                "elf-dwarf-advanced",
+                {"platform": "elf", "dwarf_advanced": {"cu_count": 1}},
+                FactStatus.PRESENT,
+            ),
+            # ELF alone, no debug block: nothing that produces CV facts ran.
+            ("elf-symbols-only", {"platform": "elf"}, FactStatus.NOT_COLLECTED),
+        ],
+    )
+    def test_cv_facts_follow_the_documents_own_evidenced_producers(
+        self, label: str, extra: dict, expected: FactStatus
+    ) -> None:
         d = _minimal_dict(
             schema_version=_PRE_CASE_A,
             from_headers=False,
+            types=[
+                {
+                    "name": "W",
+                    "kind": "class",
+                    "fields": [{"name": "m", "type": "int", "is_const": False}],
+                }
+            ],
+            **extra,
+        )
+        f = snapshot_from_dict(d).types[0].fields[0]
+        assert f.is_const_fact.status is expected
+
+    def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
+        # TypeField.is_const names dwarf among its producers, and this
+        # document evidences dwarf, so its value is real evidence — the
+        # producer gate reads the registry, not a hand list.
+        d = _minimal_dict(
+            schema_version=_PRE_CASE_A,
+            from_headers=False,
+            dwarf={"has_debug_info": True},
             types=[
                 {
                     "name": "W",

@@ -73,6 +73,7 @@ from .storage.fact_codec import (
     decode_snapshot_facts,
     decode_variable_facts,
     encode_fact_fields,
+    evidenced_producers,
 )
 from .storage.semantic_ir_codec import decode_semantic_ir, encode_semantic_ir
 from .storage.snapshot_load_normalization import (
@@ -1036,11 +1037,16 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_vtable_facts_reliable_value,
         clang_va_list_facts_reliable_value,
         ast_producer_value,
-        # Recorded provenance only -- an inferred `from_headers` is a
-        # guess a legacy DWARF-only dump satisfies too (see
-        # `from_headers_inferred` above), so it must not count as
-        # evidence that a header-AST producer ran.
-        header_provenance_confirmed=from_headers and not from_headers_inferred,
+        # Which producers this document actually evidences -- recorded (never
+        # inferred) header provenance, a real DWARF block, its own platform.
+        # See storage/fact_backfill.evidenced_producers for why "which
+        # backend could produce this fact" is the wrong question here.
+        evidenced=evidenced_producers(
+            d,
+            header_provenance_confirmed=from_headers and not from_headers_inferred,
+            ast_producer=ast_producer_value,
+            platform=d.get("platform"),
+        ),
         variables=variables,
         enums=enums,
         header_cv_facts_reliable_value=header_cv_facts_reliable_value,
