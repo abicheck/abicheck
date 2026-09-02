@@ -344,10 +344,31 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
             # trace of. Codex review, third round — the "could produce it in
             # principle" reading kept this one PRESENT.
             ("pe-pdb", {"platform": "pe"}, FactStatus.NOT_COLLECTED),
+            # A populated debug block on PE is a *PDB*, not DWARF:
+            # parse_pdb_debug_info stores PDB data in DwarfMetadata with
+            # has_dwarf=True, and _dump_pe never calls parse_dwarf. Codex
+            # review, sixth round.
+            (
+                "pe-pdb-with-debug",
+                {"platform": "pe", "dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
             # A DWARF block is real evidence its producer ran.
             (
                 "elf-dwarf",
                 {"platform": "elf", "dwarf": {"has_dwarf": True}},
+                FactStatus.PRESENT,
+            ),
+            (
+                "macho-dwarf",
+                {"platform": "macho", "dwarf_advanced": {"has_dwarf": True}},
+                FactStatus.PRESENT,
+            ),
+            # No platform recorded at all: a document predating the field
+            # is an ELF one, so its debug block still evidences dwarf.
+            (
+                "no-platform-dwarf",
+                {"dwarf": {"has_dwarf": True}},
                 FactStatus.PRESENT,
             ),
             (
@@ -479,3 +500,257 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         )
         got = snapshot_from_dict(d).functions[0]
         assert got.deprecated_fact.status is FactStatus.PRESENT
+
+
+class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
+    """The general contract, over the whole small domain.
+
+    Every test above pins one field against one document shape. This one
+    states the invariant the fix actually restores -- *after a legacy load,
+    a case-(a) fact is PRESENT only if the document evidences at least one
+    of that fact's registered producers* -- and checks it by exhaustively
+    enumerating (every case-(a) field) x (every document shape that varies
+    an evidence axis).
+
+    The oracle is written out here from what each producer's writer does,
+    read off the loaded snapshot's own public attributes. It deliberately
+    does not call ``evidenced_producers`` or consult ``FACT_REGISTRY`` the
+    way the implementation does, so this cannot agree with a wrong
+    implementation the way #699's window-size test agreed with its own
+    wrong formula (AGENTS.md, "A bug fix's regression test targets the bug
+    class").
+    """
+
+    #: (owner, field, collection, raw entry at the field's *resting* value,
+    #: raw entry at a *non-resting* value). The second is the control: the
+    #: downgrade narrows the claim, never the value, so a real answer must
+    #: survive on the very same evidence-free document.
+    _FIELDS: tuple[tuple[str, str, str, dict, dict], ...] = (
+        ("TypeField", "is_const", "types", {"is_const": False}, {"is_const": True}),
+        (
+            "TypeField",
+            "is_volatile",
+            "types",
+            {"is_volatile": False},
+            {"is_volatile": True},
+        ),
+        (
+            "TypeField",
+            "is_mutable",
+            "types",
+            {"is_mutable": False},
+            {"is_mutable": True},
+        ),
+        ("TypeField", "default", "types", {"default": None}, {"default": "0"}),
+        (
+            "TypeField",
+            "deprecated",
+            "types",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "Function",
+            "deprecated",
+            "functions",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "Variable",
+            "deprecated",
+            "variables",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "Variable",
+            "access",
+            "variables",
+            {"access": "public"},
+            {"access": "private"},
+        ),
+        (
+            "RecordType",
+            "deprecated",
+            "types",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        (
+            "EnumType",
+            "deprecated",
+            "enums",
+            {"deprecated": None},
+            {"deprecated": "gone"},
+        ),
+        # `is_scoped` is `bool | None`: `None` is omission, `False` a real
+        # answer ("a plain C enum") — so `False` is its non-resting value.
+        ("EnumType", "is_scoped", "enums", {"is_scoped": None}, {"is_scoped": False}),
+        (
+            "Param",
+            "is_restrict",
+            "functions",
+            {"is_restrict": False},
+            {"is_restrict": True},
+        ),
+    )
+
+    #: Document shapes, one per point in the evidence domain.
+    _SHAPES: tuple[tuple[str, dict], ...] = (
+        ("nothing", {"from_headers": False}),
+        ("elf", {"from_headers": False, "platform": "elf"}),
+        (
+            "elf-placeholder-debug",
+            {"from_headers": False, "platform": "elf", "dwarf": {"has_dwarf": False}},
+        ),
+        (
+            "elf-dwarf",
+            {"from_headers": False, "platform": "elf", "dwarf": {"has_dwarf": True}},
+        ),
+        (
+            "elf-dwarf-advanced",
+            {
+                "from_headers": False,
+                "platform": "elf",
+                "dwarf_advanced": {"has_dwarf": True},
+            },
+        ),
+        (
+            "macho-dwarf",
+            {"from_headers": False, "platform": "macho", "dwarf": {"has_dwarf": True}},
+        ),
+        ("pe", {"from_headers": False, "platform": "pe"}),
+        (
+            "pe-pdb",
+            {"from_headers": False, "platform": "pe", "dwarf": {"has_dwarf": True}},
+        ),
+        ("header-castxml", {"from_headers": True, "ast_producer": "castxml"}),
+        ("header-clang", {"from_headers": True, "ast_producer": "clang"}),
+        ("header-hybrid", {"from_headers": True, "ast_producer": "hybrid"}),
+        ("header-inferred", {}),  # from_headers guessed, not recorded
+    )
+
+    @staticmethod
+    def _expected_evidenced(snap: AbiSnapshot) -> set[str]:
+        """Which producers this snapshot shows ran — the independent oracle.
+
+        Written from what each writer does, not from the implementation:
+        a header-AST backend only under *recorded* provenance; the debug
+        block's producer is DWARF everywhere except PE, whose blocks
+        ``pdb_metadata.parse_pdb_debug_info`` fills from a PDB; and the
+        container format from the platform itself.
+        """
+        evidenced: set[str] = set()
+        if snap.from_headers and not snap.from_headers_inferred:
+            if snap.ast_producer in {"castxml", "clang"}:
+                evidenced.add(snap.ast_producer)
+            else:
+                evidenced |= {"castxml", "clang"}
+        has_debug = any(
+            block is not None and block.has_dwarf
+            for block in (snap.dwarf, snap.dwarf_advanced)
+        )
+        if has_debug:
+            evidenced.add("pdb" if snap.platform == "pe" else "dwarf")
+        if snap.platform in {"elf", "pe", "macho"}:
+            evidenced.add(snap.platform)
+        return evidenced
+
+    @classmethod
+    def _document(cls, owner: str, collection: str, entry: dict, shape: dict) -> dict:
+        """One raw legacy document holding *owner* at *field*'s resting value.
+
+        Dispatches on the owner, not on which keys *entry* happens to
+        carry: ``TypeField.deprecated`` and ``RecordType.deprecated`` are
+        the same key at two different nesting depths.
+        """
+        if owner == "TypeField":
+            raw: dict = {
+                "name": "W",
+                "kind": "class",
+                "fields": [{"name": "m", "type": "int", **entry}],
+            }
+        elif owner == "RecordType":
+            raw = {"name": "W", "kind": "class", **entry}
+        elif owner == "EnumType":
+            raw = {"name": "E", **entry}
+        elif owner == "Param":
+            raw = {
+                "name": "f",
+                "mangled": "_Z1fPi",
+                "return_type": "void",
+                "params": [{"name": "p", "type": "int*", **entry}],
+            }
+        elif owner == "Function":
+            raw = {"name": "f", "mangled": "_Z1fv", "return_type": "void", **entry}
+        else:  # Variable
+            raw = {"name": "g", "mangled": "g", "type": "int", **entry}
+        return _minimal_dict(schema_version=_PRE_CASE_A, **{collection: [raw]}, **shape)
+
+    @staticmethod
+    def _loaded(snap: AbiSnapshot, owner: str, collection: str) -> object:
+        obj = getattr(snap, collection)[0]
+        if owner == "TypeField":
+            return obj.fields[0]
+        if owner == "Param":
+            return obj.params[0]
+        return obj
+
+    @pytest.mark.parametrize(
+        "owner,field,collection,entry",
+        [(o, f, c, e) for o, f, c, e, _n in _FIELDS],
+        ids=[f"{o}.{f}" for o, f, _c, _e, _n in _FIELDS],
+    )
+    @pytest.mark.parametrize("label,shape", _SHAPES, ids=[s[0] for s in _SHAPES])
+    def test_present_implies_an_evidenced_producer(
+        self,
+        label: str,
+        shape: dict,
+        owner: str,
+        field: str,
+        collection: str,
+        entry: dict,
+    ) -> None:
+        d = self._document(owner, collection, entry, shape)
+        snap = snapshot_from_dict(json.loads(json.dumps(d)))
+        obj = self._loaded(snap, owner, collection)
+        status = getattr(obj, f"{field}_fact").status
+        if status is not FactStatus.PRESENT:
+            return
+        entry_def = FACT_REGISTRY.get(f"{owner}.{field}")
+        assert entry_def is not None, f"{owner}.{field} is not registered"
+        producers = set(entry_def.producing_backends)
+        evidenced = self._expected_evidenced(snap)
+        assert producers & evidenced, (
+            f"{owner}.{field} is PRESENT on a {label!r} document, but none of "
+            f"its producers {sorted(producers)} is evidenced by it "
+            f"({sorted(evidenced)})"
+        )
+
+    def test_the_enumeration_is_not_vacuous(self) -> None:
+        """The control for the whole enumeration.
+
+        ``test_present_implies_an_evidenced_producer`` returns early on a
+        non-PRESENT status, so an implementation that downgraded *every*
+        fact would satisfy it trivially. These two assertions are the
+        opposite pressure, stated once per case-(a) field on the most
+        evidence-free document in the domain: its resting value must be
+        downgraded there, and a real, non-resting value must not be — the
+        downgrade narrows the claim, never the value.
+        """
+        nothing = dict(self._SHAPES[0][1])
+        assert self._SHAPES[0][0] == "nothing"
+        for owner, field, collection, resting, non_resting in self._FIELDS:
+            for entry, expected in (
+                (resting, FactStatus.NOT_COLLECTED),
+                (non_resting, FactStatus.PRESENT),
+            ):
+                d = self._document(owner, collection, entry, nothing)
+                snap = snapshot_from_dict(json.loads(json.dumps(d)))
+                obj = self._loaded(snap, owner, collection)
+                got = getattr(obj, f"{field}_fact").status
+                assert got is expected, (
+                    f"{owner}.{field} at {entry} on an evidence-free document: "
+                    f"expected {expected}, got {got}"
+                )
