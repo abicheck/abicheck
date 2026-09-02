@@ -8,18 +8,21 @@
   `resolve_function_identity` already use
   (`canonicalize_function_signature_param_type` per parameter,
   `canonicalize_type_name` for the return/variable type), with
-  `is_const`/`is_volatile` carried via `CanonicalEntity.cv_qualification`. A
-  function whose mangled name is castxml's own synthetic constructor/
-  destructor snapshot key (not a stable cross-backend identity, since a
-  later hybrid-merge step may rewrite it to a real clang-matched one) is
-  excluded; a compiler-generated function with a real mangled name (e.g. a
-  synthesized `operator=`) is normalized like any other. An unresolved
-  type is detected structurally (a substring test, since castxml composes
-  its `"?"` placeholder into the enclosing spelling for a pointer/
-  reference/array/cv-qualified pointee), not by exact-string match, and
-  the same fix applies to the pre-existing typedef-underlying-type check.
-  `dumper.py`'s PE and Mach-O dumps now populate `AbiSnapshot.semantic_ir`
-  too (previously ELF-only), via a new shared choke point,
+  `is_const`/`is_volatile` carried via `CanonicalEntity.cv_qualification`.
+  Every function is normalized, including one whose mangled name is
+  castxml's own synthetic constructor/destructor snapshot key: a later
+  hybrid-merge step may rewrite such a key to a real clang-matched one, and
+  that rewrite is now propagated into `semantic_ir` too
+  (`dumper_hybrid._rewrite_semantic_ir_entity_ids`), so the merged snapshot
+  never ends up with one representation keyed under the retired synthetic
+  identity while another already carries the real one — the same treatment
+  a pre-existing Mach-O mangled-name normalization gap needed and now gets.
+  An unresolved type is detected structurally (a substring test, since
+  castxml composes its `"?"` placeholder into the enclosing spelling for a
+  pointer/reference/array/cv-qualified pointee), not by exact-string match,
+  and the same fix applies to the pre-existing typedef-underlying-type
+  check. `dumper.py`'s PE and Mach-O dumps now populate `AbiSnapshot.
+  semantic_ir` too (previously ELF-only), via a new shared choke point,
   `extract/header_ast_fields.parse_header_ast_fields`. No detector,
   verdict, or exit code changes — `SemanticIR` remains additive and unread
   by the existing pipeline.

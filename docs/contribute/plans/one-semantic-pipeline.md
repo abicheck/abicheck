@@ -12674,43 +12674,48 @@ future slice. A variable's `canonical_spelling` is
 `canonicalize_type_name(variable.type)` with `is_const` carried via
 `cv_qualification`, mirroring the function treatment.
 
-**Not gated on `Function.is_compiler_generated` (Codex review, PR #1012,
-second round, fresh evidence) -- an earlier revision of this slice skipped
-every compiler-generated function, which is both too broad and misses the
-real hazard.** The actual hazard is narrower: a function whose `mangled`
-is castxml's own synthetic ctor/dtor snapshot key (`model.synthetic_key.
-is_synthetic_ctor_key`/`is_synthetic_dtor_key` -- assigned whenever castxml
-"may omit a constructor/destructor's real mangled name even for a public
-user-declared" one, per `extract/headers/castxml/functions.py`'s own
-`function_mangled_name` docstring, so this can hit a genuinely hand-written,
-non-implicit constructor too, not only an implicit one) is NOT a stable
-cross-backend identity. `dumper_hybrid._merge_functions` rewrites such a
-function's merged `mangled`/`entity_id` to a real clang-matched one when
-found via structural matching -- a rewrite this per-backend normalizer
-cannot see (it runs before that hybrid merge step). Including such an
-occurrence would let a hybrid dump's `semantic_ir` end up with a stale,
-unrewritten `entity_id` for a declaration whose flat `functions` entry now
-carries the real one, and/or a genuine duplicate (clang's own `semantic_ir`
-already carries an occurrence for that same real `entity_id`, which
-`merge_semantic_ir`'s bare-`EntityId`-equality matching cannot recognize as
-"the same declaration under castxml's stale synthetic key") -- a strictly
-worse representation-disagreement than the one excluding it avoids. Closing
-this needs `dumper_hybrid.py`'s ctor/dtor rewrite propagated into the
-`semantic_ir` merge too, materially more than this slice's scope --
-named here, not silently narrowed to. A compiler-generated function with a
-REAL mangled name (e.g. a synthesized `operator=`, which castxml gives a
-genuine Itanium mangled name per `Function.is_compiler_generated`'s own
-docstring) has none of this hazard and IS normalized: `AbiSnapshot.
-functions` already includes it, so excluding it from `semantic_ir` too
-would itself be the representation-disagreement this IR exists to avoid,
-for no corresponding safety benefit -- confirmed as a real, not merely
-theoretical, gap by the real castxml/clang end-to-end fixture in
-`tests/test_semantic_ir_end_to_end.py`, which failed against the *first*
-revision of this slice that skipped every compiler-generated function
-regardless of mangled-name shape (`Point`'s implicit
-constructors/destructor, all genuinely synthetic-keyed, surfaced with an
-empty `leaf_name`; its copy/move assignment operators, both genuinely
-real-mangled, were then wrongly excluded too until the second round).
+**No function is excluded from normalization at all -- not gated on
+`Function.is_compiler_generated`, nor on a synthetic ctor/dtor mangled key
+(Codex review, PR #1012, three rounds, fresh evidence each time).** The
+first revision of this slice skipped every compiler-generated function --
+too broad (a compiler-generated function with a real mangled name, e.g. a
+synthesized `operator=`, has no cross-backend hazard at all: `AbiSnapshot.
+functions` already includes it, so excluding it from `semantic_ir` was
+itself the representation-disagreement this IR exists to avoid) and it also
+missed the real hazard. The second revision re-gated on the actual hazard --
+a function whose `mangled` is castxml's own synthetic ctor/dtor snapshot key
+(`model.synthetic_key.is_synthetic_ctor_key`/`is_synthetic_dtor_key` --
+assigned whenever castxml "may omit a constructor/destructor's real mangled
+name even for a public user-declared" one, per `extract/headers/castxml/
+functions.py`'s own `function_mangled_name` docstring, so this can hit a
+genuinely hand-written, non-implicit constructor too, not only an implicit
+one) is NOT a stable cross-backend identity, since `dumper_hybrid.
+_merge_functions` can rewrite it to a real clang-matched one during a hybrid
+merge, a rewrite this per-backend normalizer (which runs before that merge
+step) cannot see -- but that revision still unconditionally excluded such a
+function even from a plain, non-hybrid dump, where no rewrite step exists
+at all and the occurrence is exactly as real as any other function's.
+**The third round closes the hazard at its actual source instead of
+dodging it in the normalizer**: `_merge_functions` now returns (via an
+output-param dict) every `old_entity_id -> new_entity_id` substitution its
+own ctor/dtor structural match makes, and `dumper_hybrid.merge_snapshots()`
+applies the identical substitution to `castxml_snap.semantic_ir` (through
+`_rewrite_semantic_ir_entity_ids`, the same primitive the Mach-O
+mangled-name fix below introduces) *before* reconciling it with clang's --
+so a matched declaration is never left keyed under its retired synthetic
+identity in one representation while `merged_functions` already carries the
+real one. With the hazard closed at the merge step, the normalizer excludes
+nothing: every function is normalized unconditionally, synthetic-keyed and
+compiler-generated ones included. Confirmed as a real, not merely
+theoretical, gap at every round by the real castxml/clang end-to-end
+fixture in `tests/test_semantic_ir_end_to_end.py` (first round: `Point`'s
+implicit constructors/destructor, genuinely synthetic-keyed, surfaced with
+an empty `leaf_name`; its real-mangled copy/move assignment operators were
+then wrongly excluded too until the second round) and by a new unit test in
+`tests/test_dumper_hybrid_semantic_ir.py` pinning the third round's fix
+directly (a matched synthetic ctor's `semantic_ir` occurrence ends up under
+the real, rewritten key, not duplicated or left stale under the synthetic
+one).
 
 **The unresolved-type-sentinel check is a substring test, not exact
 equality (Codex review, PR #1012, second round, fresh evidence).** castxml's

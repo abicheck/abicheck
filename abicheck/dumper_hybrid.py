@@ -107,7 +107,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -138,8 +138,10 @@ from .model import (
     Variable,
     replace_with_fact_sync,
 )
-from .model.identity import with_mangled_name
+from .model.identity import EntityId, EntityKind, with_mangled_name
 from .model.mangled_name import _skip_template_args, itanium_scope_components
+from .model.occurrence import OccurrenceId
+from .model.semantic_ir import CanonicalEntity, SemanticIR
 from .name_classification import canonicalize_type_name
 
 _CTOR_MARKER = "{ctor}"
@@ -211,6 +213,96 @@ def _macho_normalize_mangled(mangled: str) -> str:
     function list (Codex review).
     """
     return mangled[1:] if mangled.startswith("_") else mangled
+
+
+def _rewrite_semantic_ir_entity_ids(
+    ir: SemanticIR | None, rewrites: Mapping[EntityId, EntityId]
+) -> SemanticIR | None:
+    """*ir* with every occurrence whose ``EntityId`` appears as a key in
+    *rewrites* moved to that key's value, leaving every other occurrence
+    untouched (ADR-063 Phase 6 third slice, Codex review, fresh evidence).
+
+    The shared primitive both this module's identity-rewrite sites reduce
+    to: an occurrence built from one backend's own parse can have its
+    identity superseded LATER, by a decision this module itself makes
+    (:func:`_macho_normalize_mangled`'s Darwin-underscore strip;
+    :func:`_merge_functions`'s castxml-synthetic-ctor/dtor-to-real-clang-
+    mangled-name match) -- a rewrite the per-backend `semantic_ir`
+    construction (`extract.semantic_normalizer.normalize_header_ast`, which
+    runs before either of those decisions) cannot see or participate in.
+    Left unrewritten, `merge_semantic_ir`'s bare-`EntityId` matching cannot
+    recognize the pre-rewrite and post-rewrite spellings as "the same
+    declaration," and either retains the affected occurrence twice (once
+    under each identity) or leaves a stale identity in the merged IR that
+    the flat, already-rewritten `functions`/`variables` no longer carry --
+    two different failure shapes, the same root cause.
+
+    ``None`` in, ``None`` out, matching :func:`~abicheck.extract.
+    semantic_ir_merge.merge_semantic_ir`'s own convention for "this backend
+    produced no IR at all". A no-op (returns *ir* unchanged, not a rebuilt-
+    but-equal copy) when *rewrites* is empty or matches nothing, mirroring
+    that same module's "only touch what actually changed" convention.
+    """
+    if ir is None or not rewrites:
+        return ir
+    rewritten: dict[OccurrenceId, CanonicalEntity] = {}
+    changed = False
+    for occ_id, entity in ir.occurrences.items():
+        new_entity_id = rewrites.get(occ_id.entity_id, occ_id.entity_id)
+        new_occ_id = (
+            occ_id
+            if new_entity_id == occ_id.entity_id
+            else OccurrenceId(new_entity_id, occ_id.disambiguator)
+        )
+        # First-observation-wins on a post-rewrite collision, mirroring
+        # `extract.semantic_normalizer._add_occurrence`'s identical
+        # convention -- an exceedingly rare shape rather than a case this
+        # rewrite needs to merge facts for.
+        if new_occ_id != occ_id:
+            changed = True
+        rewritten.setdefault(new_occ_id, entity)
+    if not changed:
+        return ir
+    return SemanticIR(occurrences=rewritten)
+
+
+def _macho_normalize_semantic_ir(ir: SemanticIR | None) -> SemanticIR | None:
+    """*ir* with every ``FUNCTION``/``VARIABLE`` occurrence's ``EntityId``
+    re-spelled through :func:`_macho_normalize_mangled`, mirroring the
+    identical rewrite this module already applies to *clang_functions*/
+    *clang_variables* above (Codex review, ADR-063 Phase 6 third slice,
+    fresh evidence).
+
+    Without this, a Mach-O hybrid dump's ``clang_snap.semantic_ir`` keeps
+    every function/variable occurrence under clang's own Darwin-decorated
+    mangled key (``"__Z..."``) while the flat ``merged_functions``/
+    ``merged_variables`` this same function builds from the ALREADY-
+    normalized *clang_functions*/*clang_variables* carry the prefix-free
+    one (``"_Z..."``) -- so ``merge_semantic_ir``'s bare-``EntityId``
+    matching never recognizes the two as the same declaration, and every
+    affected function/variable is retained TWICE in the merged
+    ``semantic_ir`` (once under each spelling) while the flat snapshot has
+    it once, normalized. Types/enums need no equivalent call: they key on
+    the source-level name, never a mangled linker symbol, so they carry no
+    such platform-specific decoration in the first place (see this
+    module's own comment at the call site below).
+    """
+    if ir is None:
+        return ir
+    rewrites: dict[EntityId, EntityId] = {}
+    for occ_id in ir.occurrences:
+        entity_id = occ_id.entity_id
+        if (
+            entity_id.kind in (EntityKind.FUNCTION, EntityKind.VARIABLE)
+            and len(entity_id.extra) == 2
+            and entity_id.extra[0] == "mangled"
+        ):
+            new_entity_id = with_mangled_name(
+                entity_id, _macho_normalize_mangled(entity_id.extra[1])
+            )
+            if new_entity_id is not None and new_entity_id != entity_id:
+                rewrites[entity_id] = new_entity_id
+    return _rewrite_semantic_ir_entity_ids(ir, rewrites)
 
 
 def _strip_itanium_template_suffix(component: str) -> str:
@@ -464,7 +556,16 @@ def _merge_functions(
     castxml_funcs: list[Function],
     clang_funcs: list[Function],
     provenance: dict[str, str],
+    entity_id_rewrites: dict[EntityId, EntityId] | None = None,
 ) -> list[Function]:
+    """*entity_id_rewrites*, when given, is populated with every
+    ``old_entity_id -> new_entity_id`` substitution made below for a
+    castxml synthetic ctor/dtor key matched to a real clang mangled name --
+    the caller applies the identical rewrite to `castxml_snap.semantic_ir`
+    (:func:`_rewrite_semantic_ir_entity_ids`) so that representation isn't
+    left keyed under the stale synthetic identity this function just
+    retired from the flat `functions` list (Codex review, ADR-063 Phase 6
+    third slice, fresh evidence)."""
     clang_ctor_dtor: dict[tuple[str, str], list[Function]] = {}
     for cf in clang_funcs:
         scope = _ctor_dtor_scope(cf.mangled)
@@ -478,6 +579,12 @@ def _merge_functions(
         if is_synthetic_ctor_key(f.mangled) or is_synthetic_dtor_key(f.mangled):
             match = _match_synthetic_ctor_dtor(f, clang_ctor_dtor)
             if match is not None:
+                if (
+                    entity_id_rewrites is not None
+                    and f.entity_id is not None
+                    and match.entity_id is not None
+                ):
+                    entity_id_rewrites[f.entity_id] = match.entity_id
                 # Adopt match's entity_id too, or it keeps the synthetic key.
                 f = replace(f, mangled=match.mangled, entity_id=match.entity_id)
         merged.append(f)
@@ -752,6 +859,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # entity_id's "mangled" tag is re-spelled too (Codex review).
     clang_functions = clang_snap.functions
     clang_variables = clang_snap.variables
+    clang_semantic_ir = clang_snap.semantic_ir
     if castxml_snap.platform == "macho":
         clang_functions = [
             replace(cf, mangled=nm, entity_id=with_mangled_name(cf.entity_id, nm))
@@ -763,6 +871,13 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
             for cv in clang_variables
             for nm in (_macho_normalize_mangled(cv.mangled),)
         ]
+        # ADR-063 Phase 6 third slice (Codex review, fresh evidence): the
+        # identical rewrite must reach `semantic_ir` too, or its FUNCTION/
+        # VARIABLE occurrences stay keyed under clang's un-normalized
+        # mangled name while the flat lists above (and castxml's own side)
+        # use the normalized one -- see `_macho_normalize_semantic_ir`'s
+        # own docstring for the exact double-counting this produced.
+        clang_semantic_ir = _macho_normalize_semantic_ir(clang_semantic_ir)
 
     # Keyed by type_map_key (namespace-qualified identity), not the bare
     # RecordType.name/EnumType.name: two distinct types sharing only a bare
@@ -775,8 +890,12 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     clang_enums_by_key = {type_map_key(e): e for e in clang_snap.enums}
     clang_vars_by_mangled = {v.mangled: v for v in clang_variables}
 
+    ctor_dtor_entity_id_rewrites: dict[EntityId, EntityId] = {}
     merged_functions = _merge_functions(
-        castxml_snap.functions, clang_functions, provenance
+        castxml_snap.functions,
+        clang_functions,
+        provenance,
+        ctor_dtor_entity_id_rewrites,
     )
 
     merged_types = [
@@ -869,9 +988,14 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # castxml's through unchanged, while `functions`/`types` include
     # clang-only and clang-backfilled data, would leave one freshly built
     # snapshot's two representations disagreeing (extract/semantic_ir_merge.py).
-    merged_ir, ir_conflicts = merge_semantic_ir(
-        castxml_snap.semantic_ir, clang_snap.semantic_ir
+    # `_merge_functions`'s own ctor/dtor identity rewrite (above) must reach
+    # `semantic_ir` too, or a matched castxml declaration stays keyed under
+    # its retired synthetic identity there while `merged_functions` already
+    # carries the real one (Codex review, fresh evidence).
+    castxml_semantic_ir = _rewrite_semantic_ir_entity_ids(
+        castxml_snap.semantic_ir, ctor_dtor_entity_id_rewrites
     )
+    merged_ir, ir_conflicts = merge_semantic_ir(castxml_semantic_ir, clang_semantic_ir)
 
     merged = replace(
         castxml_snap,

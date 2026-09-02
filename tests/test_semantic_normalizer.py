@@ -349,14 +349,19 @@ def test_normalize_header_ast_non_cv_function_has_empty_cv_qualification() -> No
     assert entity.cv_qualification.is_present
 
 
-def test_normalize_header_ast_skips_synthetic_ctor_key_functions() -> None:
+def test_normalize_header_ast_includes_synthetic_ctor_key_functions() -> None:
     """A castxml constructor with no recoverable real mangled name gets a
     synthetic snapshot key (``model.synthetic_key.SYNTHETIC_CTOR_KEY_PREFIX``)
     -- not a stable cross-backend identity, and one `dumper_hybrid.
-    _merge_functions` can later rewrite to a real clang-matched mangled
-    name/entity_id, a rewrite this per-backend normalizer cannot see. See
-    this module's own skip for the full rationale (Codex review, second
-    round, real castxml/clang parity failure)."""
+    _merge_functions` can later rewrite it to a real clang-matched mangled
+    name/entity_id during a hybrid merge. That rewrite is now propagated
+    into `semantic_ir` too (`dumper_hybrid._rewrite_semantic_ir_entity_ids`),
+    so this per-backend normalizer no longer needs to guess and exclude --
+    a single-backend (non-hybrid) dump has no rewrite step at all, and this
+    occurrence is exactly as real as any other function's (Codex review,
+    third round: an earlier revision of this slice excluded every
+    synthetic-keyed function here, unconditionally losing this evidence
+    even for a plain castxml-only dump)."""
     fn = _function(
         "Widget",
         "void",
@@ -371,12 +376,13 @@ def test_normalize_header_ast_skips_synthetic_ctor_key_functions() -> None:
         producer="castxml",
         functions=[fn],
     )
-    assert ir.occurrences == {}
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "void()"
 
 
-def test_normalize_header_ast_skips_synthetic_dtor_key_functions() -> None:
-    """The identical skip applies to a synthetic destructor key (``"~Class"``
-    -- ``model.synthetic_key.is_synthetic_dtor_key``)."""
+def test_normalize_header_ast_includes_synthetic_dtor_key_functions() -> None:
+    """The identical treatment applies to a synthetic destructor key
+    (``"~Class"`` -- ``model.synthetic_key.is_synthetic_dtor_key``)."""
     fn = _function("~Widget", "void", mangled="~Widget", is_compiler_generated=True)
     ir = normalize_header_ast(
         types=[],
@@ -386,7 +392,8 @@ def test_normalize_header_ast_skips_synthetic_dtor_key_functions() -> None:
         producer="castxml",
         functions=[fn],
     )
-    assert ir.occurrences == {}
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "void()"
 
 
 def test_normalize_header_ast_includes_compiler_generated_with_real_mangled_name() -> (

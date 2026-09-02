@@ -141,7 +141,6 @@ from ..model.identity import EntityId
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR, canonical_cv_qualification
 from ..model.signature_normalization import canonicalize_function_signature_param_type
-from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 from ..name_classification import canonicalize_type_name
 
 __all__ = ["normalize_header_ast"]
@@ -327,49 +326,18 @@ def normalize_header_ast(
         )
         _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
     for fn in functions:
-        if is_synthetic_ctor_key(fn.mangled) or is_synthetic_dtor_key(fn.mangled):
-            # NOT gated on `is_compiler_generated` (Codex review, second
-            # round, fresh evidence: an earlier revision of this slice
-            # skipped every compiler-generated function, which is both too
-            # broad and misses the real hazard). The real hazard is
-            # narrower and specific: castxml's own synthetic ctor/dtor
-            # snapshot key (`model.synthetic_key`) is NOT a stable
-            # cross-backend identity -- it exists only because castxml
-            # could not recover a real mangled name for THIS declaration
-            # (a general castxml limitation that can hit a genuinely
-            # hand-written, non-implicit constructor too, per
-            # `extract/headers/castxml/functions.py`'s own
-            # `function_mangled_name` docstring, not only an implicit
-            # one). `dumper_hybrid._merge_functions` REWRITES the merged
-            # snapshot's flat `functions` entry to a real clang-matched
-            # mangled name/entity_id when one is found via structural
-            # matching -- a rewrite this module's own `semantic_ir`
-            # construction (which runs per-backend, before that hybrid
-            # merge step) cannot see or participate in. Including such an
-            # occurrence here would let a hybrid dump's `semantic_ir` end
-            # up with a STALE, unrewritten entity_id for a declaration
-            # whose flat `functions` entry now carries a different (real)
-            # one -- and/or a genuine duplicate, since clang's OWN
-            # `semantic_ir` already carries an occurrence for that same
-            # real entity_id, which `merge_semantic_ir` (keying on bare
-            # `EntityId` equality) cannot recognize as "the same
-            # declaration, just under castxml's stale synthetic key" and
-            # would union in as if it were a second, independent
-            # declaration -- a strictly worse representation-disagreement
-            # than the one this skip avoids. Closing this needs
-            # `dumper_hybrid.py`'s ctor/dtor rewrite propagated into the
-            # `semantic_ir` merge too (or reworked to operate on
-            # `semantic_ir` first), which is materially more than this
-            # slice's scope -- named here, not silently narrowed to. A
-            # compiler-generated function with a REAL mangled name (e.g. a
-            # synthesized `operator=`, which castxml gives a genuine
-            # Itanium mangled name per `Function.is_compiler_generated`'s
-            # own docstring) has none of this hazard and IS normalized
-            # below, same as any other function -- `AbiSnapshot.functions`
-            # already includes it, so excluding it from `semantic_ir` too
-            # would be exactly the representation-disagreement this IR
-            # exists to avoid, for no corresponding safety benefit.
-            continue
+        # Every function is normalized unconditionally, synthetic-ctor/dtor-
+        # keyed ones (`model.synthetic_key`) and compiler-generated ones
+        # included (Codex review, third round, fresh evidence: an earlier
+        # revision of this slice excluded synthetic-keyed functions here to
+        # dodge a real hazard in `dumper_hybrid.merge_snapshots()` -- that
+        # hazard is now closed AT THE SOURCE instead: `_merge_functions`'s
+        # own ctor/dtor identity rewrite is propagated into the `semantic_ir`
+        # merge too, via `_rewrite_semantic_ir_entity_ids`, so this
+        # per-backend normalizer no longer needs to guess which functions a
+        # LATER hybrid step might rewrite. A single-backend (non-hybrid)
+        # dump has no such rewrite step at all, so excluding them there was
+        # always unnecessary lost evidence for no safety benefit).
         _add_occurrence(
             occurrences,
             fn.entity_id,

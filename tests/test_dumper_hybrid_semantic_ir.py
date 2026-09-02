@@ -25,10 +25,11 @@ which is already at its ``architecture/debt.yaml`` no-growth baseline.
 
 from __future__ import annotations
 
+from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.dumper_hybrid import merge_snapshots
-from abicheck.model import AbiSnapshot, Function
+from abicheck.model import AbiSnapshot, Function, Param
 from abicheck.model.fact import Fact
-from abicheck.model.identity import entity_id_for_type
+from abicheck.model.identity import entity_id_for_function, entity_id_for_type
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import (
     CanonicalEntity,
@@ -140,6 +141,114 @@ class TestMergeSnapshotsReconcilesSemanticIr:
             semantic_ir=SemanticIR({OccurrenceId(BAR): _entity("Bar")}),
         )
         assert merge_snapshots(castxml, clang) is castxml
+
+
+class TestMachoNormalizesFunctionAndVariableOccurrences:
+    """ADR-063 Phase 6 third slice (Codex review, fresh evidence): clang's
+    Mach-O ``mangledName`` carries the Darwin linker's leading underscore
+    (``"__Z..."``) that castxml's own spelling never does (``"_Z..."``) --
+    already handled for the flat ``functions``/``variables`` lists via
+    ``_macho_normalize_mangled``, but the identical rewrite was missing for
+    ``semantic_ir`` until this round, so an affected declaration was
+    retained TWICE in the merged IR (once under each spelling) while the
+    flat snapshot had it once, correctly normalized.
+    """
+
+    def test_function_occurrence_is_normalized_and_merges(self) -> None:
+        castxml_eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        clang_eid = entity_id_for_function((), "f", mangled_name="__Z1fv")
+        castxml_occ = OccurrenceId(castxml_eid)
+        clang_occ = OccurrenceId(clang_eid)
+        merged = merge_snapshots(
+            _snap(
+                SemanticIR({castxml_occ: _entity("void()")}),
+                "castxml",
+                platform="macho",
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="_Z1fv",
+                        return_type="void",
+                        entity_id=castxml_eid,
+                    )
+                ],
+            ),
+            _snap(
+                SemanticIR({clang_occ: _entity("void ()", template=("int",))}),
+                "clang",
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="__Z1fv",
+                        return_type="void",
+                        entity_id=clang_eid,
+                    )
+                ],
+            ),
+        )
+        assert merged.semantic_ir is not None
+        # One occurrence, under castxml's prefix-free key -- not two.
+        assert set(merged.semantic_ir.occurrences) == {castxml_occ}
+        # And it actually backfilled from clang's (now correctly matched)
+        # occurrence, not merely survived unmerged.
+        assert merged.semantic_ir.occurrences[castxml_occ].template_arguments.value == (
+            "int",
+        )
+
+
+class TestCtorDtorSyntheticKeyRewritePropagation:
+    """ADR-063 Phase 6 third slice (Codex review, third round, fresh
+    evidence): once ``extract.semantic_normalizer`` stopped excluding
+    castxml's synthetic-ctor/dtor-keyed functions from ``semantic_ir``,
+    ``_merge_functions``'s own identity rewrite (a matched synthetic key ->
+    a real clang mangled name) had to reach ``semantic_ir`` too, or the
+    merged snapshot ends up with the matched declaration keyed under its
+    retired synthetic identity in one representation while
+    ``merged_functions`` already carries the real one.
+    """
+
+    def test_matched_synthetic_ctor_is_rewritten_and_merges(self) -> None:
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+        real_mangled = "_ZN2ns6WidgetC1Ei"
+        castxml_eid = entity_id_for_function((), "Widget", mangled_name=synthetic)
+        clang_eid = entity_id_for_function((), "Widget", mangled_name=real_mangled)
+        castxml_occ = OccurrenceId(castxml_eid)
+        clang_occ = OccurrenceId(clang_eid)
+        castxml_ctor = Function(
+            name="Widget",
+            mangled=synthetic,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            entity_id=castxml_eid,
+        )
+        clang_ctor = Function(
+            name="Widget",
+            mangled=real_mangled,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            entity_id=clang_eid,
+        )
+        merged = merge_snapshots(
+            _snap(
+                SemanticIR({castxml_occ: _entity("void(int)")}),
+                "castxml",
+                functions=[castxml_ctor],
+            ),
+            _snap(
+                SemanticIR({clang_occ: _entity("void (int)", template=("int",))}),
+                "clang",
+                functions=[clang_ctor],
+            ),
+        )
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.semantic_ir is not None
+        # One occurrence, under the real (rewritten) key -- not two, and
+        # not left stale under the retired synthetic one.
+        assert set(merged.semantic_ir.occurrences) == {clang_occ}
+        assert merged.semantic_ir.occurrences[clang_occ].template_arguments.value == (
+            "int",
+        )
 
 
 class TestLegacyFieldsAreUnaffected:
