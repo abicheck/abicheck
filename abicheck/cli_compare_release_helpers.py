@@ -1005,6 +1005,7 @@ def _format_release_summary(
     fail_on_removed: bool = False,
     policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
     suppress: Path | None = None, pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
@@ -1022,6 +1023,7 @@ def _format_release_summary(
             fail_on_removed=fail_on_removed,
             policy=policy, policy_file_path=policy_file_path,
             suppress=suppress, pack_application=pack_application,
+            scope_public_headers=scope_public_headers,
         )
     return _format_release_markdown(
         worst_verdict,
@@ -1101,6 +1103,7 @@ def _format_release_json(
     fail_on_removed: bool = False,
     policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
     suppress: Path | None = None, pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
@@ -1240,6 +1243,7 @@ def _format_release_json(
     digest, fields = _release_summary_effective_config_block(
         severity_config, policy=policy, policy_file_path=policy_file_path,
         suppress=suppress, pack_application=pack_application,
+        scope_public_headers=scope_public_headers,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields

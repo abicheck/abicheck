@@ -115,6 +115,7 @@ def _write_release_summary_file(
     policy_file_path: Path | None = None,
     suppress: Path | None = None,
     pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -124,11 +125,12 @@ def _write_release_summary_file(
     block`` so the two can never independently drift (Codex review, PR
     #803). Also gains the same ``exit`` block that report does, via the
     same resolver (ADR-064 stage 1b, Codex review). *policy*/
-    *policy_file_path*/*suppress*/*pack_application* (P1, CLI-audit) are the
-    release's own resolved policy inputs, forwarded so this sidecar's
-    ``effective_config_fields`` reflects the real policy every library was
-    compared under, same as the primary report (see
-    ``_release_summary_effective_config_block``'s own docstring).
+    *policy_file_path*/*suppress*/*pack_application*/*scope_public_headers*
+    (P1, CLI-audit) are the release's own resolved policy/surface inputs,
+    forwarded so this sidecar's ``effective_config_fields`` reflects the
+    real configuration every library was compared under, same as the
+    primary report (see ``_release_summary_effective_config_block``'s own
+    docstring).
     """
     from .cli_compare_receipt import _release_summary_effective_config_block
     from .cli_compare_release_helpers import (
@@ -144,6 +146,7 @@ def _write_release_summary_file(
         policy_file_path=policy_file_path,
         suppress=suppress,
         pack_application=pack_application,
+        scope_public_headers=scope_public_headers,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
@@ -275,6 +278,7 @@ def _finalize_release_output(
     policy_file_path: Path | None = None,
     suppress: Path | None = None,
     pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -300,6 +304,7 @@ def _finalize_release_output(
         policy_file_path=policy_file_path,
         suppress=suppress,
         pack_application=pack_application,
+        scope_public_headers=scope_public_headers,
     )
     _write_or_echo(output, text)
 
@@ -329,6 +334,7 @@ def _finalize_release_output(
             policy_file_path=policy_file_path,
             suppress=suppress,
             pack_application=pack_application,
+            scope_public_headers=scope_public_headers,
         )
 
     # ADR-049 Phase 7's orthogonal contract-coverage axis, release/package

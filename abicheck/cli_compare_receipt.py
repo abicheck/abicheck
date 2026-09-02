@@ -797,6 +797,7 @@ def _release_summary_effective_config_block(
     policy_file_path: Path | None = None,
     suppress: Path | None = None,
     pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -824,6 +825,21 @@ def _release_summary_effective_config_block(
 
     Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``
     -- lives here since both callers are at their own ``no_growth`` cap.
+
+    *scope_public_headers* (found by a generalized parity test, PR #1016,
+    once the ``policy.base`` fix above showed the class was worth searching
+    for systematically): the same bug shape as ``policy`` above, just for a
+    second field. ``effective_config_fields_from_diff_result`` reads
+    ``result.scope_to_public_surface``/``.scope_to_public_surface_requested``
+    off whatever it's given; a bare ``SimpleNamespace`` that never sets them
+    falls back to that function's own ``getattr(..., default)`` -- ``False``/
+    ``True`` respectively -- regardless of what ``--scope-public-headers``/
+    ``--no-scope-public-headers`` actually resolved to for this run, exactly
+    as ``policy``/``policy_file`` did before P1. The release fan-out has no
+    ``--post-manifest``/forced-public-symbols concept of its own (unlike a
+    single-pair ``compare``, where ``scope_to_public_surface`` can diverge
+    from ``scope_to_public_surface_requested`` when a forced-public-symbols
+    allowlist is active), so both fields are simply the raw CLI value here.
     """
     from types import SimpleNamespace
 
@@ -855,6 +871,8 @@ def _release_summary_effective_config_block(
         suppression_source_sha256=(
             suppression_config.sha256 if suppression_config is not None else None
         ),
+        scope_to_public_surface=scope_public_headers,
+        scope_to_public_surface_requested=scope_public_headers,
     )
     ec_scheme = "severity" if severity_config is not None else "legacy"
     ec_fields = effective_config_fields(

@@ -26,7 +26,12 @@
   from a run with no policy override at all. It also now reports the
   policy document's own `base_policy:` (e.g. `sdk_vendor`) instead of the
   CLI's default profile name, which `--policy <path>` always resolves its
-  own `policy` parameter back to regardless of the document's real base.
+  own `policy` parameter back to regardless of the document's real base. It
+  also now reports the real `--scope-public-headers`/`--no-scope-public-headers`
+  state instead of always reading as the on-by-default value regardless of
+  the flag -- found by generalizing the policy-provenance parity test
+  across every `effective_config_fields` axis rather than just the one
+  reported field.
 - **A directory/package `compare` no longer double-prints every warning
   logged through the shared `"abicheck"` logger** (most visibly a policy
   override's "usually causes binary incompatibility" warning, once per

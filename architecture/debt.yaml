@@ -413,7 +413,7 @@
     },
     {
       "path": "abicheck/cli_compare_receipt.py",
-      "baseline_lines": 930,
+      "baseline_lines": 948,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",

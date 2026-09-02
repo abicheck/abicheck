@@ -819,6 +819,7 @@ def compare_release_cmd(
                     policy_file_path=policy_file_path,
                     suppress=suppress,
                     pack_application=pack_application,
+                    scope_public_headers=scope_public_headers,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -847,6 +848,7 @@ def compare_release_cmd(
                 policy_file_path=policy_file_path,
                 suppress=suppress,
                 pack_application=pack_application,
+                scope_public_headers=scope_public_headers,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
