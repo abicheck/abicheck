@@ -38,9 +38,17 @@
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
 # as of merge commit aa78c37 (PR #1015) plus PR #1019's own status-sync fixes.
 # Update this file in the same PR that changes a concept's landed status.
+#
+# as_of_commit names a commit on the default branch, the same convention
+# adr/index.md's `**Verified:**` receipt uses and for the identical reason:
+# a PR-branch commit stops existing once the branch is squash-merged and
+# deleted, so a receipt anchored to one is unresolvable in a clean checkout
+# of retained history (a real review finding on PR #1019). Point it at the
+# base commit this change built on (or a later reachable main commit, once
+# merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: c7544d4
+as_of_commit: aa78c37
 as_of_date: "2026-09-02"
 
 concepts:

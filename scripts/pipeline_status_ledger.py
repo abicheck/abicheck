@@ -211,14 +211,23 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
             if status_field not in entry:
                 continue
             value = entry[status_field]
-            if value not in _PIPELINE_STATUS_STATES:
+            # A non-hashable value (a YAML list/mapping where a scalar was
+            # expected, e.g. `primitive: [complete]`) must not reach the
+            # `in` membership test below -- `x in frozenset` raises
+            # `TypeError: unhashable type` for one, crashing the whole gate
+            # instead of recording a finding (a real review finding on
+            # PR #1019).
+            if not isinstance(value, str) or value not in _PIPELINE_STATUS_STATES:
                 f.err(
                     "pipeline-status-ledger",
                     f"{rel}: concepts.{name}.{status_field}: {value!r} is not "
                     f"one of {sorted(_PIPELINE_STATUS_STATES)}",
                 )
         authority = entry.get("authority")
-        if "authority" in entry and authority not in _PIPELINE_AUTHORITY_VALUES:
+        if "authority" in entry and (
+            not isinstance(authority, str)
+            or authority not in _PIPELINE_AUTHORITY_VALUES
+        ):
             f.err(
                 "pipeline-status-ledger",
                 f"{rel}: concepts.{name}.authority: {authority!r} is not "

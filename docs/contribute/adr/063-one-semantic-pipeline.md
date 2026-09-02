@@ -495,6 +495,19 @@ already ran.
 
 ### D5 — Public surface as a query over one evidence graph
 
+**Superseded in part by the "Amendment" note near the end of this
+section (2026-09-02, accepted) — read that note first.** The paragraph
+immediately below states this decision's *original* text, kept verbatim
+for the historical record (the package split, the shared-primitive
+reasoning, and the twelve-L5-call-site node-id-collision gap it
+describes all remain accurate and still apply). Its one specific
+sentence that does **not** hold as shipped is "`compute_public_surface()`
+becomes a traversal... through this graph": the Amendment note explains
+why, after three review rounds, that literal mandate was replaced with a
+deterministic `SemanticReferenceIndex` that never reads the graph for
+this decision's motivating case. Treat that sentence as historical intent,
+not current instruction.
+
 Generalize the public-surface computation (`surface.py`,
 `dumper_scoping.py`, `type_reachability.py`, ADR-024/044) into a query over
 one authoritative graph with typed nodes (`Header`, `TranslationUnit`,

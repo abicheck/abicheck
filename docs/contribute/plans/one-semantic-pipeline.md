@@ -125,7 +125,7 @@ removal under 15% done. Concretely, the review found:
   for real execution either; policy, pack, contract, and public-surface
   state are each still (re)resolved independently downstream of it.
 - Phase 3's closure-walk-not-graph-traversal outcome (see ADR-063's own
-  Phase 3 status block and `docs/contribute/known-gaps.md`'s three-review-
+  D5 "Amendment" note and `docs/contribute/known-gaps.md`'s three-review-
   round account) is a correct, reviewed decision given the demonstrated
   hazards of reading a mergeable evidence graph for a value with exactly
   one legitimate source — but it leaves D5's own text unfulfilled, and
@@ -228,8 +228,8 @@ regression from merging.
 
 **Phase 3 (D5) amendment — accepted:** rather than a further attempt to make
 `compute_public_surface()` read the mergeable evidence graph (three review
-rounds already found that unsafe for the reasons ADR-063's own Phase 3
-status block and `docs/contribute/known-gaps.md` record), formally split
+rounds already found that unsafe for the reasons ADR-063's own D5
+"Amendment" note and `docs/contribute/known-gaps.md` record), formally split
 the concept D5 conflated into two: a **`SemanticReferenceIndex`**
 (deterministic, built from `SemanticIR`/snapshot declarations alone,
 authoritative for the public-surface closure walk — what
@@ -240,8 +240,8 @@ analysis, never for a decision with exactly one legitimate source). This
 would formally close D5's own literal "traversal over one authoritative
 graph" text with a decision that matches what already shipped, rather than
 leaving that text describing a design three review rounds rejected.
-Recorded here as accepted; ADR-063's own D5 text and Phase 3 status block
-(this same PR) carry the matching amendment note.
+Recorded here as accepted; ADR-063's own D5 text (this same PR) carries
+the matching amendment note.
 
 **On this plan document's own size and structure:** this document has grown
 past fifteen thousand lines, carrying multi-round PR review history inline
