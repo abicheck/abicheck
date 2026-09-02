@@ -62,6 +62,7 @@ topics:
       - learn/build-source-data.md
       - learn/how-a-break-shows-up.md
       - learn/where-in-the-pipeline.md
+      - learn/triage-a-finding.md
       - skills-src/shared/evidence-and-depth.md
       - learn/assurance-methods.md
 
@@ -256,6 +257,9 @@ topics:
       - abicheck/policy_file.py
       - abicheck/checker_policy.py
       - abicheck/reclassify.py
+    allowed_summaries:
+      - skills-src/shared/policies-and-suppressions.md
+      - learn/rollout-and-governance.md
 
   # ADR-049's effective compatibility configuration: the resolved object, its
   # field-level precedence, and the pack-manifest format. Distinct from
@@ -263,8 +267,6 @@ topics:
   # `policies` (which owns policy files as a user-facing feature): this topic
   # is about how every input across CLI/API/config/pack resolves into one
   # typed configuration and one provenance receipt.
-    allowed_summaries:
-      - skills-src/shared/policies-and-suppressions.md
   compatibility-evaluation-config:
     canonical_page: reference/compatibility-evaluation-config.md
     fact_sources:
@@ -347,6 +349,7 @@ topics:
       - abicheck/suppression_yaml.py
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
+      - learn/rollout-and-governance.md
 
   # GitHub Actions workflow-command annotations (stderr rendering) and,
   # since report schema 2.43, the same classification persisted as a
@@ -421,6 +424,7 @@ topics:
       - integration/scenarios/migration-and-rollout.md
     allowed_summaries:
       - learn/where-in-the-pipeline.md
+      - learn/rollout-and-governance.md
 
   integration-scenario-selection:
     canonical_page: integration/index.md
@@ -528,6 +532,23 @@ topics:
     allowed_summaries:
       - learn/abi-api-handling.md
       - learn/abi-cheat-sheet.md
+
+  compatibility-governance:
+    canonical_page: learn/rollout-and-governance.md
+    fact_sources:
+      - abicheck/suppression.py
+      - abicheck/policy_file.py
+    allowed_summaries:
+      - learn/abi-api-handling.md
+
+  finding-triage:
+    canonical_page: learn/triage-a-finding.md
+    fact_sources:
+      - abicheck/comparability.py
+      - abicheck/elf_symbol_filter.py
+    allowed_summaries:
+      - use/troubleshooting.md
+      - start/first-report.md
 
   class-layout:
     canonical_page: learn/class-layout-abi.md

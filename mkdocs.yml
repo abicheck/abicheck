@@ -221,6 +221,8 @@ nav:
     - Practice:
       - Where in the Pipeline: learn/where-in-the-pipeline.md
       - "Report the Surface, Not Only the Breaks": learn/surface-growth.md
+      - Rollout and Governance: learn/rollout-and-governance.md
+      - Triage a Suspicious Finding: learn/triage-a-finding.md
     - Quick Reference:
       - "Glossary": learn/abi-series/glossary.md
   # The case catalog: every break scenario as a compilable fixture, browsable

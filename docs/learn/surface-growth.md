@@ -112,4 +112,4 @@ claims a tool for that beyond the fields themselves.
 
 ---
 
-**Ladder:** ← [Where in the Pipeline](where-in-the-pipeline.md) · Tier 5 · Practice · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) →
+**Ladder:** ← [Where in the Pipeline](where-in-the-pipeline.md) · Tier 5 · Practice · [Rollout and Governance](rollout-and-governance.md) →

@@ -84,6 +84,8 @@ sequences:
         members:
           - learn/where-in-the-pipeline.md
           - learn/surface-growth.md
+          - learn/rollout-and-governance.md
+          - learn/triage-a-finding.md
         links:
           - use/baseline-management.md              # tool track, case 1
       - id: 6
@@ -179,11 +181,13 @@ paths:
       - learn/abi-series/02-symbol-contracts.md
       - learn/compatibility-direction.md
       - learn/consumer-models.md
+      - learn/rollout-and-governance.md
       - learn/abi-series/07-designing-for-stability.md
     after: start/choose-your-workflow.md
   - role: AI agent / automated reviewer
     pages:
       - learn/how-a-break-shows-up.md
+      - learn/triage-a-finding.md
       - learn/verdicts.md
       - learn/evidence-and-detectability.md
     after: use/output-formats.md

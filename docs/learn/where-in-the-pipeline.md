@@ -107,8 +107,8 @@ off for that PR — and never skip the *check*: a skipped check leaves the
 baseline stale, so the break lands on main unrecorded and every later PR
 fails against it until someone re-baselines by hand.
 [Baseline Management](../use/baseline-management.md#two-kinds-of-baseline-release-contract-vs-accepted-main)
-explains the failure in full; the label recipe is in
-[CI Gating](../use/ci-gating.md).
+explains the failure in full; the rollout order and the label recipe are
+in [Rollout and Governance](rollout-and-governance.md).
 
 ## Nightly
 
