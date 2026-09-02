@@ -148,14 +148,16 @@ def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
     """*path* as a directory-backed ADR-062/ADR-063 storage-v2
     `ProjectSnapshot` package (`project_snapshot_legacy
     .read_legacy_snapshot_document` — manifest.json + refs/ + objects/,
-    written by `dump --project-snapshot-dir`), decoded into an `AbiSnapshot`
-    exactly the way a legacy `.abi.json` file already is
-    (`serialization.snapshot_from_dict`).
+    produced via `project_snapshot_legacy.write_legacy_snapshot_package` --
+    no `dump` CLI flag writes one today, see that module's own docstring for
+    why `dump`'s real output is the single-file sectioned shape instead),
+    decoded into an `AbiSnapshot` exactly the way a legacy `.abi.json` file
+    already is (`serialization.snapshot_from_dict`).
 
-    Single-artifact packages only, matching what `dump --project-snapshot-
-    dir` ever writes (ADR-062 A1.3's "one-artifact project" shape) — a real
-    multi-library `ProjectSnapshot` is real, separately-scoped future work
-    this function does not guess at (see `read_legacy_snapshot_document`'s
+    Single-artifact packages only, matching what `write_legacy_snapshot_
+    package` ever writes (ADR-062 A1.3's "one-artifact project" shape) — a
+    real multi-library `ProjectSnapshot` is real, separately-scoped future
+    work this function does not guess at (see `read_legacy_snapshot_document`'s
     own docstring for the same limit).
 
     Raises `SnapshotError` for anything that goes wrong reading or decoding
@@ -399,8 +401,8 @@ def resolve_input(
     _includes = includes or []
 
     # ADR-062/ADR-063 storage-v2: a directory input is only ever a
-    # `dump --project-snapshot-dir`-written `ProjectSnapshot` package here
-    # -- every other branch below opens `path` as a file and would raise
+    # `ProjectSnapshot` package here -- every other branch below opens
+    # `path` as a file and would raise
     # `IsADirectoryError`, so this must run first, unconditionally (a
     # directory is never ELF/PE/Mach-O/BTF/CTF/symvers/JSON-file regardless
     # of `is_elf`).

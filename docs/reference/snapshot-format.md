@@ -236,6 +236,20 @@ equivalent for writing. See [ADR-059](../contribute/adr/059-compressed-snapshot-
 for the full storage-envelope model (determinism, atomic writes,
 decompression limits, and what's still deferred).
 
+### Sectioned packaging (ADR-062/063 Phase 8)
+
+Orthogonal to compression, and likewise never changing anything below this
+line: the payload every `dump`/`write_snapshot` invocation actually writes
+today is this page's flat structure *packaged* into named, independently
+versioned sections (`binary`/`declarations`/`types`/`layout`/`debug`/
+`build`/`graph`/`provenance` — see
+[Project Snapshot Format](project-snapshot-format.md)), not the bare flat
+object shown below. `snapshot_from_dict`/`load_snapshot` unwrap this
+transparently before any of the fields below are read, and an older flat
+`.abi.json` a prior build wrote is still read exactly as it always was —
+this page's field-level contract is unaffected either way; only the
+outermost envelope differs.
+
 ---
 
 ## Top-level structure

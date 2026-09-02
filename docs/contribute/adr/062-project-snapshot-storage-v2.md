@@ -28,17 +28,23 @@ remains unsplit is each section's own *internal* shape — `elf`/`dwarf`/
 `build_source`/... still carry the existing JSON encoding inside their own
 section, not a further per-field typed decode.
 
-**This is now wired into `dump`/`compare`/`scan`, opt-in.**
-`dump --project-snapshot-dir PATH` additionally writes a real
-`ProjectSnapshot` package at `PATH` (`abicheck/project_snapshot_legacy.py`'s
-`write_legacy_snapshot_package`), alongside — never instead of —
-`-o`/`--output`'s unchanged `.abi.json` write; `compare`/`scan --against`
-accept such a package directory as an input path, resolved by
-`workflows.input_resolution.resolve_input`'s new directory branch into the
-identical `AbiSnapshot` a `.abi.json` file resolves to. Every existing
-invocation that never passes `--project-snapshot-dir` or a package-directory
-operand is completely unaffected — the default snapshot format, and every
-existing snapshot/baseline set/`BundleFacts` document, remain unchanged.
+**This is now wired into `dump`/`compare`/`scan` as the default, single-file
+shape (Phase 8 redesign).** The directory-backed package this ADR
+originally specified (`manifest.json`/`refs/`/`objects/sha256/...`) turned
+out to be pure storage-UX cost for the single-artifact case every `dump`
+performs today — many small files instead of one, awkward to
+`scp`/commit/upload as a CI artifact — for none of its real payoff (content
+dedup, independent per-section objects), which only materializes once a
+project shares content across multiple artifacts. `storage.sectioned_document`
+packages the identical D8 section split as **one JSON document** instead;
+`serialization.snapshot_to_json`/`write_snapshot` write it and
+`snapshot_from_dict`/`load_snapshot` read it by default, with no CLI flag
+required. An older flat `.abi.json` a prior build wrote stays fully
+readable. The directory writer/reader
+(`abicheck/project_snapshot_legacy.py`'s `write_legacy_snapshot_package`/
+`read_legacy_snapshot_document`) remain available as typed-API primitives —
+`compare`/`scan --against` still accept a directory package as an input
+path — but no `dump` CLI flag produces one today.
 Folding baseline sets/`BundleFacts` into sections, multi-artifact packages,
 variant capture, and the `.tar.zst` transport form (A1.4-A1.8) remain not
 implemented. All of Phase 2 is not implemented.

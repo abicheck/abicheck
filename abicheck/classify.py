@@ -168,6 +168,18 @@ class AbiJsonClassifier(FileClassifier):
             # {"type": "library"} which appears in CycloneDX SBOMs.
             re.compile(r'(^|[,{])\s*"library"\s*:', re.MULTILINE),
         ),
+        (
+            # ADR-063 Phase 8: the single-file sectioned document
+            # (storage.sectioned_document) buries "library" inside the
+            # "declarations" section's payload, well past _JSON_PROBE_BYTES
+            # for a real snapshot -- so it needs its own fingerprint.
+            # "section_kind" is each SectionDTO's own wrapper key and
+            # appears within the first few lines of every sectioned
+            # document (top-level "sections" -> first section -> its own
+            # "section_kind"), so it is a reliable early marker.
+            "abicheck/sectioned-v1",
+            re.compile(r'"section_kind"\s*:'),
+        ),
         # Future formats — uncomment or add new entries here:
         # ("libabigail-json-v2", re.compile(r'"abi-corpus"\s*:', re.MULTILINE)),
     ]

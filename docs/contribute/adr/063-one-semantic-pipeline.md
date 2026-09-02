@@ -710,30 +710,31 @@
   `project-snapshot-dto-no-asdict` check now also watches
   `legacy_sections.py`.
 
-  **CLI wiring (this phase's other previously-open gap, now closed as an
-  opt-in addition, never a default-format change):** `dump
-  --project-snapshot-dir PATH` additionally writes a real `ProjectSnapshot`
-  package at `PATH` (`project_snapshot_legacy.write_legacy_snapshot_package`,
-  reached from `cli_buildsource._write_snapshot_output` and
-  `dump_execute.execute_and_write_dump_cli_run`'s shared write path, so both
-  the ELF/PE/Mach-O and the binary-less `--sources`/`--build-info` dump
-  paths cover it) — strictly additive alongside whatever `-o`/`--output`/
-  stdout write the command already performs; every invocation that omits
-  the flag is unaffected. `compare`/`scan --against` accept such a package
-  directory as an input path: `workflows.input_resolution.resolve_input`
-  gained a directory branch (checked first, since every other branch opens
-  its input as a file) that reads the package back via
-  `project_snapshot_legacy.read_legacy_snapshot_document` and decodes it
-  through the unchanged `serialization.snapshot_from_dict`, so every
-  downstream detector/report/exit-code behaves identically to a `.abi.json`
-  input. `cli_resolve.classify_compare_operand` and
-  `cli_scan.scan_cmd`/`frontends/cli/scan_against.py`'s `--against`
-  validation both had to learn to tell a `ProjectSnapshot` package
-  directory apart from (a) a plain directory-of-libraries `compare` operand
-  and (b) a `BuildSourcePack`'s own identically-named `manifest.json` —
-  `project_snapshot_legacy.is_project_snapshot_package_dir` disambiguates
-  by actually reading and validating the manifest (D2's version-
-  compatibility check included), not by filename alone.
+  **CLI wiring (this phase's other previously-open gap, now closed as the
+  real default write/read shape, not a directory package):** the D8
+  section split above is packaged as one JSON document
+  (`storage.sectioned_document.to_sectioned_document`/
+  `from_sectioned_document`) rather than a directory, wired into
+  `serialization.snapshot_to_json`/`write_snapshot` (write) and
+  `snapshot_from_dict`/`load_snapshot` (read, transparently unwrapping
+  either shape) — every `dump`/`compare`/`scan` invocation gets it by
+  default, no flag. A directory-backed `ProjectSnapshot` package remains
+  reachable as a typed-API primitive
+  (`project_snapshot_legacy.write_legacy_snapshot_package`/
+  `read_legacy_snapshot_document`), and `compare`/`scan --against` still
+  accept one as an input path via `workflows.input_resolution.resolve_input`'s
+  directory branch (checked first, since every other branch opens its input
+  as a file), decoded through the same `serialization.snapshot_from_dict`
+  so every downstream detector/report/exit-code behaves identically
+  regardless of which of the three shapes (`.abi.json`, sectioned, or
+  directory package) the input actually is. `cli_resolve
+  .classify_compare_operand` and `cli_scan.scan_cmd`/`frontends/cli
+  /scan_against.py`'s `--against` validation both tell a `ProjectSnapshot`
+  package directory apart from (a) a plain directory-of-libraries `compare`
+  operand and (b) a `BuildSourcePack`'s own identically-named
+  `manifest.json` — `project_snapshot_legacy.is_project_snapshot_package_dir`
+  disambiguates by actually reading and validating the manifest (D2's
+  version-compatibility check included), not by filename alone.
 
   **Still not attempted**: decoding a section's own *internal* shape into a
   typed domain object beyond `semantic_ir` (each legacy section still

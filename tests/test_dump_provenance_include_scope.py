@@ -233,9 +233,9 @@ def test_compiler_option_include_dir_promotes_transitively_reached_header(
         ],
     )
     assert result.exit_code == 0, result.output
-    import json
+    from abicheck.serialization import load_snapshot_document
 
-    snap = json.loads(out.read_text())
+    snap = load_snapshot_document(out)
     by_name = {f["name"]: f for f in snap["functions"]}
     assert by_name["pub"]["origin"] == "public_header"
     assert by_name["dep"]["origin"] == "public_header", (

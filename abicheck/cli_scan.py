@@ -1167,7 +1167,7 @@ def _discover_scan_project_config(
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Previous native library or saved ABI dump to compare ARTIFACT "
-    "against (a single file, or a `--project-snapshot-dir` package dir -- "
+    "against (a single file, or a real ProjectSnapshot package directory -- "
     "not a plain directory or package archive; use `abicheck compare "
     "OLD_PACKAGE NEW_PACKAGE` for those). Without --against, scan runs a "
     "one-build audit/hygiene/source consistency scan only; with it, scan "

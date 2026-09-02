@@ -1304,9 +1304,9 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
             ],
         )
         assert result.exit_code == 0, result.output
-        import json
+        from abicheck.serialization import load_snapshot_document
 
-        return json.loads(out.read_text())
+        return load_snapshot_document(out)
 
     default_snap = _dump()
     explicit_snap = _dump("--lang", "c++")

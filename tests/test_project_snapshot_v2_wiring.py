@@ -241,39 +241,6 @@ class TestRejectUnsupportedAgainstOperand:
         reject_unsupported_against_operand(f)  # must not raise
 
 
-class TestWriteProjectSnapshotPackageEmptyLibrary:
-    """`dump_source_only`'s own `library` field is an empty string for any
-    `--sources`/`--build-info` hint whose `Path.name` is empty (`--sources
-    .`, or any other path ending without a final component) -- `ArtifactRef`
-    rejects an empty `artifact_id` outright, so `_write_project_snapshot_
-    package` must not pass that empty string through unchanged (Codex
-    review, on PR #1014's own `--sources .` case)."""
-
-    def test_an_empty_library_falls_back_to_a_safe_artifact_id(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.cli_buildsource import _write_project_snapshot_package
-
-        doc = snapshot_to_dict(AbiSnapshot(library="", version="1.0.0"))
-        root = tmp_path / "pkg"
-        _write_project_snapshot_package(doc, root, "")  # must not raise
-        assert (root / "refs" / "artifacts" / "source.json").is_file()
-
-    def test_dump_sources_dot_does_not_fail_writing_the_package(
-        self, tmp_path: Path
-    ) -> None:
-        """The exact reported scenario, at the level the fix actually lives:
-        `dump_source_only`'s own `library = hint.name if hint is not None
-        else "source"` yields `""` for `Path(".").name`."""
-        from abicheck.cli_buildsource import _write_project_snapshot_package
-
-        library = Path(".").name
-        assert library == ""
-        doc = snapshot_to_dict(AbiSnapshot(library=library, version="1.0.0"))
-        root = tmp_path / "pkg"
-        _write_project_snapshot_package(doc, root, library)  # must not raise
-
-
 class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
     """`write_project_manifest`'s own docstring names its ref-then-manifest
     publish order as safe for a *first* publication only, not for
@@ -356,60 +323,3 @@ class TestCollectMetadataSkipsDirectories:
         empty = tmp_path / "empty"
         empty.mkdir()
         assert collect_metadata(empty) is None
-
-
-class TestRejectOutputInsideProjectSnapshotDir:
-    """`dump --project-snapshot-dir` writes the package first, then any
-    `-o/--output` write -- an `-o` path landing inside the package root
-    would silently overwrite `manifest.json` afterward, leaving `refs/`/
-    `objects/` behind under an unreadable package (Codex review)."""
-
-    def test_neither_given_is_a_no_op(self) -> None:
-        from abicheck.dry_run import reject_output_inside_project_snapshot_dir
-
-        reject_output_inside_project_snapshot_dir(None, None)  # must not raise
-
-    def test_only_output_given_is_a_no_op(self, tmp_path: Path) -> None:
-        from abicheck.dry_run import reject_output_inside_project_snapshot_dir
-
-        reject_output_inside_project_snapshot_dir(
-            tmp_path / "out.json", None
-        )  # must not raise
-
-    def test_output_matching_the_package_root_is_rejected(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.dry_run import reject_output_inside_project_snapshot_dir
-
-        pkg = tmp_path / "pkg"
-        with pytest.raises(click.UsageError, match="inside --project-snapshot-dir"):
-            reject_output_inside_project_snapshot_dir(pkg, pkg)
-
-    def test_output_nested_inside_the_package_root_is_rejected(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.dry_run import reject_output_inside_project_snapshot_dir
-
-        pkg = tmp_path / "pkg"
-        with pytest.raises(click.UsageError, match="inside --project-snapshot-dir"):
-            reject_output_inside_project_snapshot_dir(pkg / "manifest.json", pkg)
-
-    def test_output_outside_the_package_root_is_accepted(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.dry_run import reject_output_inside_project_snapshot_dir
-
-        pkg = tmp_path / "pkg"
-        out = tmp_path / "out.json"
-        reject_output_inside_project_snapshot_dir(out, pkg)  # must not raise
-
-    def test_a_sibling_directory_sharing_a_name_prefix_is_accepted(
-        self, tmp_path: Path
-    ) -> None:
-        """`pkg-other/` is not inside `pkg/` -- a naive string-prefix check
-        (rather than real path-parent comparison) would wrongly reject it."""
-        from abicheck.dry_run import reject_output_inside_project_snapshot_dir
-
-        pkg = tmp_path / "pkg"
-        out = tmp_path / "pkg-other" / "out.json"
-        reject_output_inside_project_snapshot_dir(out, pkg)  # must not raise

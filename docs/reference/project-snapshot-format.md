@@ -11,20 +11,27 @@ generated: false
 
 # Project Snapshot Format (`ProjectSnapshot`, v2)
 
-> **Experimental, opt-in only.** `dump --project-snapshot-dir PATH`
-> additionally writes a real, directory-backed `ProjectSnapshot` package
-> ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)) — it
-> never replaces `-o`/`--output`'s
-> [`.abi.json` output](snapshot-format.md), which stays the **default**
-> format (and the only one `dump` writes without the flag). `compare`/
-> `scan --against` accept a package directory as an input path (in place of
-> a `.abi.json` file) — so a package this page describes is now genuinely
-> reachable, not just internal, even though `.abi.json` remains what every
-> command writes by default — read back into the same in-memory
-> representation either way. This is the first user-reachable slice of the
-> format, not the whole design — see the ADR's own Status for what is and
-> is not implemented (in particular: single artifact per package only, no
-> `.tar.zst` transport form).
+> **Redesigned as a single file (Phase 8).** `dump`'s real `-o`/`--output`/
+> stdout output is now this format's D8 section split (independently
+> versioned `binary`/`declarations`/`types`/`layout`/`debug`/`build`/
+> `graph`/`provenance` sections, structurally validated on read) packaged as
+> **one JSON document** (`storage.sectioned_document`), not a directory —
+> every `dump` invocation gets this by default, no flag needed.
+> `serialization.snapshot_from_dict` reads either shape transparently, so an
+> older flat `.abi.json` a prior build wrote stays fully readable.
+>
+> The directory-backed package this page otherwise describes
+> ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)'s
+> `manifest.json`/`refs/`/`objects/sha256/...` layout) still exists as a
+> typed-API primitive (`project_snapshot_legacy.write_legacy_snapshot_package`)
+> and `compare`/`scan --against` still accept one as an input path — but no
+> `dump` CLI flag writes one today. The directory shape's real value (content
+> dedup, independent per-section objects) only pays off once a project shares
+> content across multiple artifacts, which nothing produces yet; for the
+> single-artifact case every `dump` performs today, the single-file shape
+> gets the same structural benefits without the directory's storage-UX cost
+> (many small files instead of one, awkward to `scp`/commit/upload as a CI
+> artifact). See the ADR's own Status for the full picture.
 
 `ProjectSnapshot` is ADR-062's replacement for four separate persistence
 shapes (per-library `.abi.json` snapshots, baseline sets, `BundleFacts`, and
@@ -158,31 +165,34 @@ version, and reassembles the original document.
 
 ## CLI wiring
 
-`abicheck/project_snapshot_legacy.py`'s `write_legacy_snapshot_package`/
-`read_legacy_snapshot_document` are the real, directory-backed round trip
-built on the primitives above (`DirectoryObjectStore` + `import_legacy_
-snapshot`/`export_legacy_snapshot` + `write_project_manifest`), reached
-through `abicheck.workflows.storage`'s facade re-export
-(`frontends -> workflows -> storage`, ADR-061's layering):
+`storage.sectioned_document`'s `to_sectioned_document`/
+`from_sectioned_document` package the same D8 split as one JSON document,
+reused by `serialization.snapshot_to_json`/`snapshot_from_dict` (the real
+`-o`/`--output`/stdout write and read path) so every `dump`/`compare`/`scan`
+invocation gets it by default. `abicheck/project_snapshot_legacy.py`'s
+`write_legacy_snapshot_package`/`read_legacy_snapshot_document` remain the
+real, directory-backed round trip built on the primitives above
+(`DirectoryObjectStore` + `import_legacy_snapshot`/`export_legacy_snapshot`
++ `write_project_manifest`), reached through `abicheck.workflows.storage`'s
+facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
 
-- **`dump --project-snapshot-dir PATH`** writes the dump's document as a
-  `ProjectSnapshot` package at `PATH`, in addition to whatever `-o`/
-  `--output`/stdout write it already performs — never instead of it.
-  Single-artifact only, at variant `"default"`, artifact id = the
-  library's own name.
-- **`compare`/`scan --against`** accept a `ProjectSnapshot` package
+- **No `dump` CLI flag writes a directory package today** — every
+  `dump` invocation writes the single-file sectioned shape instead (see
+  above). The directory writer stays available as a typed-API primitive
+  for a caller that wants it directly.
+- **`compare`/`scan --against`** still accept a `ProjectSnapshot` package
   directory as an input path — detected by a real, validated
   `manifest.json` read (`is_project_snapshot_package_dir`, which
   distinguishes it from a `BuildSourcePack`'s own identically-named
   `manifest.json`, and from a plain directory-of-libraries `compare`
   operand, which stays routed to the release/bundle fan-out). Resolved by
   `workflows.input_resolution.resolve_input`'s directory branch into the
-  identical in-memory `AbiSnapshot` a `.abi.json` file resolves to, so
-  every downstream detector, report, and exit code behaves the same either
-  way.
+  identical in-memory `AbiSnapshot` a `.abi.json`/sectioned file resolves
+  to, so every downstream detector, report, and exit code behaves the same
+  regardless of which of the three shapes the input actually is.
 
 ## Related
 
 - [ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md) — the design decision this format implements
 - [Storage format v2 plan](../contribute/plans/storage-format-v2.md) — phasing, acceptance criteria, what remains open
-- [Snapshot Format (`.abi.json`)](snapshot-format.md) — the current, user-facing format this is meant to eventually replace
+- [Snapshot Format (`.abi.json`)](snapshot-format.md) — the flat legacy shape `snapshot_from_dict` still reads unchanged

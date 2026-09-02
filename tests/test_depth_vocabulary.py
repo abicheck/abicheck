@@ -425,7 +425,9 @@ def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[n
         ["dump", "--sources", str(src), "--depth", "build", "-o", str(out)],
     )
     assert res.exit_code == 0, _all_output(res)
-    data = json.loads(out.read_text(encoding="utf-8"))
+    from abicheck.serialization import load_snapshot_document
+
+    data = load_snapshot_document(out)
     assert data["dump_provenance"] == {
         "requested_depth": "build",
         "effective_depth": "build",
@@ -454,7 +456,6 @@ def test_dump_depth_binary_ignores_headers_for_the_scope_contract(tmp_path) -> N
     `ScopeMismatchError` (exit 16) -- at the one depth that is supposed to
     ignore headers entirely (Codex review).
     """
-    import json
 
     from abicheck.cli import main
 
@@ -473,7 +474,9 @@ def test_dump_depth_binary_ignores_headers_for_the_scope_contract(tmp_path) -> N
             args += ["-H", str(h)]
         res = CliRunner().invoke(main, args)
         assert res.exit_code == 0, _all_output(res)
-        outputs.append(json.loads(out.read_text(encoding="utf-8")))
+        from abicheck.serialization import load_snapshot_document
+
+        outputs.append(load_snapshot_document(out))
 
     contracts = [(d.get("contract") or {}) for d in outputs]
     # The headers differ; the scope contract must not.

@@ -13847,12 +13847,14 @@ see.
 
 ### Phase 8 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
 
-**Update (2026-09-02, landed — full D8 section split plus opt-in CLI
-wiring; not the whole phase).** ADR-062 Phase 0's primitives are no longer
-inert: a real `ProjectSnapshot` can be written to and read from a real
-directory, with every legacy document field split across D8's section
-vocabulary, and `dump --project-snapshot-dir`/`compare`/`scan --against`
-can now write and read one. `abicheck/storage/dto.py` is the D8-constrained
+**Update (2026-09-02, landed — full D8 section split plus default CLI
+wiring as a single-file shape; not the whole phase).** ADR-062 Phase 0's
+primitives are no longer inert: every legacy document field is split
+across D8's section vocabulary, and `dump`/`compare`/`scan --against`
+now read/write that split by default — packaged as one JSON document
+(`storage.sectioned_document`), not the directory-backed package this
+phase originally targeted (see the CLI-wiring paragraph below for why).
+`abicheck/storage/dto.py` is the D8-constrained
 `SectionDTO` envelope this phase's Files section asked for, built on
 `storage/semantic_ir_codec.py`'s existing explicit `SemanticIR` encoding
 (extracted into a pure `semantic_ir_to_document`/`semantic_ir_from_document`
@@ -13879,22 +13881,25 @@ itself had only two lines of headroom under the 800-line architecture cap.
 `scripts/check_ai_readiness.py`'s `project-snapshot-dto-no-asdict` check
 now also watches `legacy_sections.py`.
 
-**CLI wiring, opt-in and strictly additive.** `dump --project-snapshot-dir
-PATH` writes a `ProjectSnapshot` package at `PATH` alongside — never instead
-of — whatever `-o`/`--output`/stdout write the command already performs
-(both the ELF/PE/Mach-O and binary-less `--sources`/`--build-info` dump
-paths, via their one shared write chokepoint). `compare`/`scan --against`
-accept such a package directory as an input path: `workflows.
-input_resolution.resolve_input` gained a directory branch (checked before
-every file-opening branch), and `cli_resolve.classify_compare_operand`/
-`scan --against`'s own validation (`frontends/cli/scan_against.py`, split
-out since `cli_scan.py` sits exactly at the 2000-line hard cap) learned to
-tell a real `ProjectSnapshot` package directory apart from a plain
-directory-of-libraries operand and from a `BuildSourcePack`'s identically-
-named `manifest.json`, by actually reading and validating the manifest
-rather than guessing from the filename. Every invocation that never passes
-`--project-snapshot-dir` or a package-directory operand is unaffected — the
-default snapshot format is unchanged. **What this slice does not attempt**:
+**CLI wiring — redesigned (2026-09-02) as the default single-file shape,
+not a directory package.** The directory package's real value (content
+dedup, independent per-section objects) only pays off once a project shares
+content across multiple artifacts, which nothing produces yet; for the
+single-artifact case every `dump` performs today it was pure storage-UX
+cost. `storage.sectioned_document` packages the identical D8 split as one
+JSON document instead, wired into `serialization.snapshot_to_json`/
+`write_snapshot` (write) and `snapshot_from_dict`/`load_snapshot` (read,
+transparently unwrapping either shape) — every `dump`/`compare`/`scan`
+invocation gets it by default, no flag, and an older flat `.abi.json` a
+prior build wrote stays fully readable. The directory writer/reader
+(`project_snapshot_legacy.write_legacy_snapshot_package`/
+`read_legacy_snapshot_document`) remain available as typed-API primitives;
+`compare`/`scan --against` still accept a directory package as an input
+path (`workflows.input_resolution.resolve_input`'s directory branch,
+`cli_resolve.classify_compare_operand`/`frontends/cli/scan_against.py`'s
+validation distinguishing it from a plain directory-of-libraries operand
+and a `BuildSourcePack`'s identically-named `manifest.json`) — but no
+`dump` CLI flag writes one today. **What this slice does not attempt**:
 decoding a section's own *internal* shape into a typed domain object beyond
 `semantic_ir` (each section still carries the pre-existing JSON encoding
 for its fields); multi-artifact packages (a real multi-library

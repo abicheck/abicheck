@@ -185,7 +185,9 @@ class TestResolveInput:
         ``ValueError``/``KeyError``/``UnicodeDecodeError``/``OSError``, not
         the ``TypeError`` this storage-boundary rejection actually raises).
         """
-        d = json.loads(snapshot_to_json(_make_snapshot("1.0")))
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
+        d = from_sectioned_document(json.loads(snapshot_to_json(_make_snapshot("1.0"))))
         d["contract"] = {"profile_fields": "not-a-dict"}
         p = tmp_path / "bad_contract.json"
         p.write_text(json.dumps(d), encoding="utf-8")

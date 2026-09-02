@@ -75,6 +75,11 @@ from .storage.fact_codec import (
     encode_fact_fields,
     evidenced_producers,
 )
+from .storage.sectioned_document import (
+    from_sectioned_document,
+    is_sectioned_document,
+    to_sectioned_document,
+)
 from .storage.semantic_ir_codec import decode_semantic_ir, encode_semantic_ir
 from .storage.snapshot_load_normalization import (
     backfill_missing_elf_binding,
@@ -506,7 +511,20 @@ def _enum_type_from_dict(e: dict[str, Any], schema_version: int) -> EnumType:
 
 
 def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
-    return json.dumps(snapshot_to_dict(snap), indent=indent)
+    # ADR-062/063 Phase 8 (redesign): the file this function's own callers
+    # (`write_snapshot`/`save_snapshot`) actually write to disk is now the
+    # single-file sectioned shape (`storage.sectioned_document`) by
+    # default -- `snapshot_to_dict()` itself keeps returning the flat shape
+    # unchanged for every other caller (tests, `canonical_form` comparisons,
+    # programmatic manipulation); only the JSON-file boundary changes.
+    # `snapshot_from_dict` transparently unwraps either shape, so an older
+    # flat `.abi.json` a prior build wrote stays fully readable.
+    return json.dumps(
+        to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        ),
+        indent=indent,
+    )
 
 
 _T = TypeVar("_T")
@@ -524,6 +542,16 @@ def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
+    # ADR-062/063 Phase 8 (redesign): a document written as the single-file
+    # sectioned shape (`storage.sectioned_document`) is unwrapped into this
+    # function's own long-established flat shape *before* anything below
+    # runs -- every existing reliability-backfill/schema-version rule stays
+    # exactly as it was, now just fed a document `export_legacy_snapshot`
+    # reconstructed rather than one written flat. `is_sectioned_document`
+    # checks for a `"sections"` key, never a real `AbiSnapshot` field, so a
+    # flat document from any schema version cannot collide with it.
+    if is_sectioned_document(d):
+        d = from_sectioned_document(d)
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
@@ -1372,6 +1400,26 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
     from .snapshot_io import read_snapshot_text
 
     return snapshot_from_dict(json.loads(read_snapshot_text(path)))
+
+
+def load_snapshot_document(path: str | Path) -> dict[str, Any]:
+    """*path*'s flat, `snapshot_to_dict()`-shaped document — the raw dict,
+    not a typed `AbiSnapshot` (`load_snapshot`'s own return). For a
+    document-only key `AbiSnapshot` itself does not carry (e.g. a real
+    `dump`'s own `dump_provenance`, folded in by the CLI after
+    `snapshot_to_dict()` already ran) rather than any real snapshot field.
+
+    Transparently unwraps the single-file sectioned shape
+    (`storage.sectioned_document`, Phase 8 redesign) the same way
+    `snapshot_from_dict` does internally, so a caller never needs to know
+    which of the two on-disk shapes *path* actually is.
+    """
+    from .snapshot_io import read_snapshot_text
+
+    d: dict[str, Any] = json.loads(read_snapshot_text(path))
+    if is_sectioned_document(d):
+        return from_sectioned_document(d)
+    return d
 
 
 def save_snapshot(

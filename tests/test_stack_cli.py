@@ -152,7 +152,9 @@ class TestDumpFollowDeps:
         # includes ahead of the JSON (Click 8.2+: `.output` always mixes
         # stdout/stderr) -- `_extract_json` below is the same helper
         # `TestCompareFollowDeps` already uses for this exact reason.
-        data = _extract_json(result.output)
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
+        data = from_sectioned_document(_extract_json(result.output))
         assert "dependency_info" in data
         di = data["dependency_info"]
         assert len(di["nodes"]) >= 1
@@ -160,9 +162,11 @@ class TestDumpFollowDeps:
         assert di["bindings_summary"].get("resolved_ok", 0) > 0
 
     def test_dump_follow_deps_has_libc(self, runner, real_lib):
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
         result = runner.invoke(main, ["dump", str(real_lib), "--follow-deps"])
         assert result.exit_code == 0
-        data = _extract_json(result.output)
+        data = from_sectioned_document(_extract_json(result.output))
         sonames = [n["soname"] for n in data["dependency_info"]["nodes"]]
         assert "libc.so.6" in sonames
 
@@ -178,7 +182,9 @@ class TestDumpFollowDeps:
             "dump", str(real_lib), "--follow-deps", "-o", str(outfile),
         ])
         assert result.exit_code == 0
-        data = json.loads(outfile.read_text())
+        from abicheck.serialization import load_snapshot_document
+
+        data = load_snapshot_document(outfile)
         assert "dependency_info" in data
 
     def test_dump_follow_deps_roundtrip(self, runner, real_lib, tmp_path):

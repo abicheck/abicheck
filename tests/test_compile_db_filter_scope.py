@@ -438,7 +438,9 @@ class TestDumpCliHonorsTheFilterInTheFold:
             so_path, header, compile_db, out, "--compile-db-filter", pick
         )
         assert result.exit_code == 0, result.output
-        snapshot = json.loads(out.read_text(encoding="utf-8"))
+        from abicheck.serialization import load_snapshot_document
+
+        snapshot = load_snapshot_document(out)
         fields = [
             f.get("name")
             for t in snapshot.get("types", [])
@@ -618,9 +620,7 @@ class TestCompareRequestAppliesTheSameScopeGuard:
             build_info=compile_db,
             compile_db_filter="a.cpp",
         )
-        request = CompareRequest(
-            old=side, new=side, frontend="clang", depth="headers"
-        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="headers")
         pair = resolve_compare_request(request)
         assert pair.old is not None and pair.new is not None
 

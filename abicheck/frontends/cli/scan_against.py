@@ -20,9 +20,11 @@ rather than grown inline.
 `--against`'s Click option (`type=click.Path(exists=True, path_type=Path)`,
 no `dir_okay=False`) accepts anything that exists; this module is what
 narrows that back down to the two shapes `resolve_input` actually knows how
-to turn into a single comparison snapshot -- a single file, or a
-`dump --project-snapshot-dir` `ProjectSnapshot` package directory
-(ADR-062/ADR-063 storage-v2) -- and rejects the two it doesn't: a package
+to turn into a single comparison snapshot -- a single file, or a real,
+directory-backed `ProjectSnapshot` package (ADR-062/ADR-063 storage-v2;
+`manifest.json`/`refs/`/`objects/` -- produced via the typed
+`project_snapshot_legacy.write_legacy_snapshot_package` API, not by any
+`dump` CLI flag today) -- and rejects the two it doesn't: a package
 archive, and a plain directory of libraries (both belong to
 `abicheck compare OLD_PACKAGE NEW_PACKAGE`'s fan-out instead).
 """
@@ -60,7 +62,7 @@ def reject_unsupported_against_operand(against: Path | None) -> None:
     if against.is_dir() and not is_project_snapshot_package_dir(against):
         raise click.UsageError(
             f"--against does not accept a plain directory ({against}); only "
-            "a single file or a `--project-snapshot-dir` package dir is "
+            "a single file or a real ProjectSnapshot package directory is "
             "supported here -- use `abicheck compare OLD_PACKAGE "
             "NEW_PACKAGE` for directory-to-directory comparisons."
         )

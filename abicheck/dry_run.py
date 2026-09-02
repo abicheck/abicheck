@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
 
 #: Dry run never returns a compatibility verdict code (2/4); only these three.
 EXIT_OK = 0
@@ -133,34 +132,6 @@ def reject_dry_run_with_output(dry_run: bool, output: object) -> None:
         raise click.UsageError(
             "--dry-run cannot be combined with -o/--output: a dry run performs no "
             "analysis and writes nothing, so there is no output to produce."
-        )
-
-
-def reject_output_inside_project_snapshot_dir(
-    output: object, project_snapshot_dir: object
-) -> None:
-    """``dump``'s two output writes (`-o/--output`'s legacy `.abi.json`,
-    `--project-snapshot-dir`'s package directory) must not collide: the
-    package is written first, so a legacy `-o` path landing inside it (e.g.
-    ``-o pkg/manifest.json --project-snapshot-dir pkg``) would silently
-    overwrite `manifest.json` with the legacy snapshot afterward, leaving
-    `refs/`/`objects/` behind under an unreadable package (Codex review).
-    Reused, shared-helper shape like :func:`reject_dry_run_with_output`
-    above rather than dump-command-local, so a future second writer-pair
-    conflict has one obvious place to join.
-    """
-    if not isinstance(output, Path) or not isinstance(project_snapshot_dir, Path):
-        return
-    package_root = project_snapshot_dir.resolve()
-    output_path = output.resolve()
-    if output_path == package_root or package_root in output_path.parents:
-        import click
-
-        raise click.UsageError(
-            f"-o/--output {output} is inside --project-snapshot-dir "
-            f"{project_snapshot_dir}: the legacy output would silently "
-            "overwrite the package's own manifest.json/refs/objects. Pass "
-            "an -o/--output path outside the package directory."
         )
 
 

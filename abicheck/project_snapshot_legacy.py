@@ -142,9 +142,9 @@ def write_legacy_snapshot_package(
     partway through, can observe a manifest still naming the old artifact
     while a `refs/*.json` document already names the new one). That gap was
     left open because nothing called `write_project_manifest` a second time
-    against a live path; `dump --project-snapshot-dir PATH` run twice
-    against the same `PATH` for two different libraries is exactly that
-    caller now. Rather than reactively building the atomic staged-directory-
+    against a live path; this function called twice against the same
+    *root* for two different libraries is exactly that caller now. Rather
+    than reactively building the atomic staged-directory-
     then-swap publish protocol that gap's own docstring names as the real
     fix (a separately-scoped design decision, not something to improvise
     under review pressure), this refuses the unsafe case outright: every
