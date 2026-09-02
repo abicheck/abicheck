@@ -52,6 +52,16 @@ __all__ = ["backfill_run_outcome", "synthetic_run_outcome"]
 #: outside this set is exactly as untrustworthy as a missing/non-int one.
 _VALID_COMPAT_CONTRIBUTION = frozenset({0, 1, 2, 4})
 
+
+def _is_declared_positive_flag(value: object) -> bool:
+    """Whether *value* is a genuinely-declared ``1`` for one of the ``exit``
+    block's 0/1 orthogonal-axis contribution fields (e.g. ``not_comparable_
+    contribution``/``operational_error_contribution``) -- ``False`` for a
+    missing key, a malformed/non-int value, a `bool`, or a declared ``0``.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value == 1
+
+
 #: `scan`'s own legacy top-level exit scheme (AGENTS.md's exit-code table:
 #: 0 compatible, 2 API break, 4 ABI break, 5 budget overflow, 6 not
 #: comparable) -- the exact `int` domain a pre-severity-scheme scan report's
@@ -325,11 +335,22 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         # precedence, mirroring `run_outcome_dict_for_release`'s own
         # `not_comparable_contribution`-preferred-over-`operational_error_
         # contribution` order.
-        if "not_comparable_contribution" not in exit_decision:
+        # Codex review, fresh evidence, second round: key *presence* alone is
+        # not enough -- a legacy/malformed `exit` block can carry `not_
+        # comparable_contribution: 0` (or any other non-`1` value) even
+        # though a top-level/member verdict genuinely is the sentinel, and
+        # the old `"... not in exit_decision"` check skipped inference
+        # entirely for that shape, letting `run_outcome_dict_for_release`
+        # normalize the refusal to `operational: none`.
+        if not _is_declared_positive_flag(
+            exit_decision.get("not_comparable_contribution")
+        ):
             if "not_comparable" in member_candidates:
                 exit_decision = {**exit_decision, "not_comparable_contribution": 1}
             elif (
-                "operational_error_contribution" not in exit_decision
+                not _is_declared_positive_flag(
+                    exit_decision.get("operational_error_contribution")
+                )
                 and "ERROR" in member_candidates
             ):
                 exit_decision = {**exit_decision, "operational_error_contribution": 1}

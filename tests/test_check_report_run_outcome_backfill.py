@@ -500,6 +500,25 @@ def test_legacy_release_report_infers_operational_from_not_comparable_sentinel()
     assert run_outcome["operational"] == "not_comparable"
 
 
+def test_legacy_release_report_overrides_a_zeroed_not_comparable_contribution() -> None:
+    """Codex review, fresh evidence (second round): key *presence* alone in
+    `exit_decision` isn't enough -- a legacy/malformed `exit` block can
+    already carry `not_comparable_contribution: 0` even though a member's
+    own verdict genuinely is the `not_comparable` sentinel. The old
+    `"... not in exit_decision"` check skipped inference entirely for that
+    shape, letting the refusal normalize to `operational: none`."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "not_comparable"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "not_comparable",
+        "exit": {"compatibility_contribution": 0, "not_comparable_contribution": 0},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["operational"] == "not_comparable"
+
+
 def test_old_standalone_refusal_report_preserves_not_comparable() -> None:
     """Codex review, fresh evidence: report.not_comparable's own pre-2.48
     shape (verdict: null plus a structured reason.kind), before that

@@ -518,6 +518,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   code like `99` discarded a real `BREAKING`/`API_BREAK` verdict's own
   gate contribution, backfilling `run_outcome.gate: "none"` for a
   report whose `verdict` string still said otherwise.
+- **The legacy release backfill's `not_comparable`/`ERROR` operational
+  inference now overrides a declared-but-invalid contribution, not
+  only a missing key** (Codex review, fresh evidence, second round): a
+  legacy/malformed `exit` block can already carry `not_comparable_
+  contribution: 0` (or any non-`1` value) even though a member's own
+  verdict genuinely is the `not_comparable` sentinel — the old
+  key-presence-only check skipped inference entirely for that shape,
+  letting the refusal normalize to `operational: none`.
 
 ### Changed
 
