@@ -336,6 +336,7 @@
         "abicheck/junit_report.py",
         "abicheck/pr_comment.py",
         "abicheck/pr_comment_base.py",
+        "abicheck/pr_comment_render.py",
         "abicheck/pr_comment_scan.py",
         "abicheck/pr_comment_scan_abort.py",
         "abicheck/report_classifications.py",
@@ -814,6 +815,7 @@
     "post_processing_reachability.py",
     "pr_comment.py",
     "pr_comment_base.py",
+    "pr_comment_render.py",
     "pr_comment_scan.py",
     "probe_harness.py",
     "process_resources.py",
@@ -874,6 +876,7 @@
     "type_metadata.py",
     "type_reachability.py",
     "type_reachability_spelling.py",
+    "type_reachability_stdlib_spellings.py",
     "versioned_symbol_scheme.py"
   ]
 }
