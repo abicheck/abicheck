@@ -71,7 +71,6 @@ from .report.render_html import (
     SummaryTableData,
     abbr_symbol_text,
     render_changes_table,
-    render_compat_changes_table,
 )
 from .report.render_html_document import render_html_document
 from .report_classifications import (
@@ -162,11 +161,6 @@ def _changes_table(changes: list[object], demangle: bool = True) -> str:
     imports it, and it has its own direct test coverage -- so the per-change
     fact resolution happens here rather than being pushed onto every caller."""
     return render_changes_table(compute_full_change_rows(changes), demangle)
-
-
-def _compat_changes_table(items: list[object], show_severity: bool = False) -> str:
-    """ABICC-style changes table, same arrangement as `_changes_table` above."""
-    return render_compat_changes_table(compute_full_change_rows(items), show_severity)
 
 
 def _change_bucket(

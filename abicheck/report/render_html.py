@@ -30,9 +30,13 @@ belongs on the render side of the split -- and keeping them here (rather
 than in ``html_report.py``, which needs to call into this module for every
 ``render_*`` function) avoids a same-layer import cycle between the two
 modules. ``html_report.py`` re-exports the ones it still calls directly
-under their original private names (``_abbr_symbol_text``, ``_changes_table``,
-``_compat_changes_table``) so every existing call site and its direct test
-coverage resolves unchanged.
+under their original private names (``_abbr_symbol_text``, ``_changes_table``)
+so every existing call site and its direct test coverage resolves unchanged.
+``render_compat_changes_table`` has no such wrapper: the whole-document
+closure moved its only caller (the ABICC-compatible layout) onto
+``report.render_html_document`` directly, retiring the pre-split
+``_compat_changes_table`` alongside it -- see this module's own test suite
+(``tests/unit/report/test_render_html.py``) for its direct coverage now.
 
 Every per-section ``render_*`` function here is behaviour-preserving by
 construction: each was extracted line-for-line from the pre-split function it

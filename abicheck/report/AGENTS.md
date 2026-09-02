@@ -42,12 +42,11 @@ owns only "assemble the complete page from a finished document"
 since it turns every dataclass into a plain mapping and tuple into a list).
 `html_template.render_document` is unrelated despite the name — page chrome.
 
-`render_xml.py` exists because a `ReportDocument` holds JSON values only —
-so a renderer can never be handed a live object graph to mutate — and an
-`ElementTree` is not one. `element_to_mapping`/`element_from_mapping` are its
-lossless encoding; `render_xml_document` is the projection. Put a report
-*fact* (a tag, an attribute, text) in the document and a *formatting* choice
-(indentation, the XML declaration) in the projection.
+`render_xml.py` exists because a `ReportDocument` holds JSON values only, and
+an `ElementTree` is not one. `element_to_mapping`/`element_from_mapping` are
+its lossless encoding; `render_xml_document` is the projection. Put a report
+*fact* in the document, a *formatting* choice (indentation, XML declaration)
+in the projection.
 
 `finding.py` is the per-`Change` counterpart to `document.py`'s whole-report
 value: `ReportFinding` holds one change's already-resolved `verdict`/
@@ -97,11 +96,12 @@ whole-document closure retired several left with zero resolvers anywhere in
 the repo, tests included, once every caller moved onto
 `ChangeRow`/`build_html_document`: `compute_change_rows`/`ChangeRowFacts`/
 `ChangeRowFactsById` (superseded by `compute_full_change_rows`/`ChangeRow`),
-`_symbol_cell`/`_verdict_icon`, and the six single-section `*_html` wrappers
-`generate_html_report` called directly before `build_html_document` existed.
-`_abbr_symbol_text`/`_changes_table`/`_compat_changes_table` -- the three
-with a real caller (`appcompat_html.py`, plus their own direct tests) -- are
-unaffected.
+`_symbol_cell`/`_verdict_icon`, the six single-section `*_html` wrappers
+`generate_html_report` called directly before `build_html_document` existed,
+and `_compat_changes_table` once its only caller (the ABICC layout) moved
+onto `render_compat_changes_table` directly in `render_html_document.py`.
+`_abbr_symbol_text`/`_changes_table` -- the two with a real caller
+(`appcompat_html.py`, plus their own direct tests) -- are unaffected.
 
 One piece of ADR-061 Phase 2 item 5 stays open: `cli_compare_fold.py`'s
 scoped-gate JSON fold, which needs this package's JSON builders to accept

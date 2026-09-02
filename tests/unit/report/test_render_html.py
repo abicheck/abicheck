@@ -646,3 +646,96 @@ def test_render_html_document_batches_demangling_standalone_on_a_cold_cache() ->
 
     _demangle_mod.demangle.cache_clear()
     _demangle_mod._reset_demangle_batch_cache()
+
+
+def test_html_impact_section_absent_when_no_root_change_qualifies() -> None:
+    """``show_impact=True`` with a root-type-change-kind finding that
+    reaches nothing (no ``affected_symbols``, no ``caused_count``) must
+    render no Impact Summary section at all -- covering the ``None`` path
+    through ``compute_impact`` -> ``_impact_from_mapping`` -> ``render_impact``
+    that a result carrying real impact data (every other test's fixture)
+    never exercises."""
+    change = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED,
+        symbol="Widget",
+        description="size changed",
+        old_value="16",
+        new_value="24",
+    )
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo.so",
+        changes=[change],
+        verdict=Verdict.BREAKING,
+    )
+    html_out = generate_html_report(result, lib_name="libfoo.so", show_impact=True)
+    assert "Impact Summary" not in html_out
+
+
+def test_html_show_only_filter_excluding_everything() -> None:
+    """A ``--show-only`` filter that matches nothing must render the
+    "no changes match the filter" message, not an empty page -- distinct
+    from ``test_html_show_only_filter`` (test_report_filtering.py), which
+    only exercises a *partial* filter (1 of 2 changes shown) and never
+    reaches this all-excluded branch. ``enums`` is a real ``--show-only``
+    element token (``ShowOnlyFilter.parse``); the fixture change is a
+    function, so it matches nothing."""
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo.so",
+        changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="d")],
+        verdict=Verdict.BREAKING,
+    )
+    html_out = generate_html_report(result, lib_name="libfoo.so", show_only="enums")
+    assert "No changes match the current filter" in html_out
+    assert "--show-only enums" in html_out
+    assert "1 change(s) exist but are excluded by the filter" in html_out
+
+
+def test_html_compat_changes_table_empty_and_populated() -> None:
+    """``render_compat_changes_table`` -- the ABICC-style table renderer --
+    has no caller left in ``html_report.py`` after the ReportDocument
+    closure (unlike ``render_changes_table``, still reached via
+    ``_changes_table`` for ``appcompat_html.py``); test it directly at both
+    its ``rows`` boundary cases, same as ``render_changes_table`` gets via
+    the golden HTML suite."""
+    from abicheck.report.render_html import ChangeRow, render_compat_changes_table
+
+    assert render_compat_changes_table(()) == "<p>No changes.</p>"
+
+    row = ChangeRow(
+        kind="func_removed",
+        category="Functions",
+        impact="",
+        severity="High",
+        symbol="foo",
+        description="removed",
+        old_value="",
+        new_value="",
+        source_location=None,
+        affected_symbols=(),
+        caused_count=0,
+        contract_relevance=None,
+        contract_reason_code=None,
+        contract_assurance=None,
+        compatibility_decision=None,
+        contract_evidence_refs=(),
+        correlated_change_kind=None,
+    )
+    out = render_compat_changes_table((row,), show_severity=True)
+    assert "foo" in out
+    assert "High" in out
+
+
+def test_render_changes_table_empty_rows() -> None:
+    """``render_changes_table(())`` -- reachable via ``_changes_table`` when
+    ``appcompat_html.py`` passes an empty bucket -- has no coverage from any
+    higher-level HTML test, since `_build_sections_data` only ever calls it
+    with a non-empty bucket."""
+    from abicheck.report.render_html import render_changes_table
+
+    assert (
+        render_changes_table(()) == "<p class='empty'>No changes in this category.</p>"
+    )
