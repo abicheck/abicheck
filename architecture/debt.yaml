@@ -1073,7 +1073,7 @@
     },
     {
       "path": "abicheck/suppression.py",
-      "baseline_lines": 1993,
+      "baseline_lines": 1355,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "category": "legacy_oversized_module",

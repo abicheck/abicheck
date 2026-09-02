@@ -20,3 +20,9 @@
   `reporter.appcompat_to_json`/`appcompat_to_markdown` still resolve, through
   a lazy module-level `__getattr__` rather than a static re-export, which is
   what keeps the module-level import edge one-way.
+- **Internal (ADR-061 D5): `suppression.py` down from 1993 to 1355 lines.** The
+  namespace-glob matcher — pattern compilation, the non-backtracking segment
+  walk, and the character-level helpers under both — moved to
+  `policy/namespace_glob.py`. It is a general string-matching primitive that
+  knows nothing about suppressions or findings, and `suppression.py` was its
+  only caller. Every name is re-exported unchanged.
