@@ -872,7 +872,7 @@ class TestCompareCommand:
         new_f = _write_snap(tmp_path / "new.json", new)
         result = _invoke("compare", str(old_f), str(new_f), "--profile", "quick")
         assert result.exit_code == 4
-        assert "\n" not in result.output.strip()
+        assert "\n" not in result.stdout.strip()  # stderr carries the scope warning
 
     def test_probe_matrix_one_side_usage_error(self, tmp_path: Path) -> None:
         snap = _snap()
@@ -1919,6 +1919,7 @@ class TestUsedByScoping:
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
             "--profile", "quick",
+            "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
         assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"

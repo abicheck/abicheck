@@ -1089,8 +1089,6 @@ def _report_compare_result(
     show_impact: bool,
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
     secondary_fmt: str | None, secondary_output: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
-    old_sources: Path | None, new_sources: Path | None,
     require_complete_analysis: bool = False,
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
@@ -1135,32 +1133,24 @@ def _report_compare_result(
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
 
     # P0.4 (P1 review): recompute analysis_assurance now that the *real*
-    # evidence pack behind this comparison's findings is known.
-    # checker.compare() (inside compare_snapshots above) only ever saw each
-    # snapshot's own *embedded* BuildSourcePack -- an out-of-band
-    # --old/new-build-info / --old/new-sources pack directory is resolved
-    # separately via _resolve_side_pack and used to produce this run's real
-    # findings/coverage (prepare_embedded_build_source, before
-    # compare_snapshots was even called) without ever being attached back
-    # onto old/new. Without this, analysis_assurance would silently reflect
-    # whatever (possibly absent, possibly stale) payload the bare snapshots
-    # carry instead of the pack that actually backed this run -- defeating
-    # --require-complete-analysis's whole purpose. Re-resolving here is
-    # cheap (pure pack-directory metadata load, no diffing).
-    from .cli_buildsource_helpers import _resolve_side_pack
+    # evidence pack behind this comparison's findings is known. An
+    # out-of-band --old/new-build-info / --old/new-sources pack is now
+    # attached onto old.build_source/new.build_source, already capped to
+    # --depth, by run_compare's resolve-and-cap step above -- so reading it
+    # straight off old/new here (not re-resolving the raw paths, which would
+    # reload the uncapped pack and defeat the ceiling here) is correct at
+    # any --depth (Codex review, PR #1020, second round).
     from .cli_dump_helpers import evidence_depth_label
     from .workflows.gate import compute_analysis_assurance
 
-    old_pack = _resolve_side_pack(old_build_info, old_sources, old)
-    new_pack = _resolve_side_pack(new_build_info, new_sources, new)
+    old_pack = old.build_source
+    new_pack = new.build_source
     result.analysis_assurance = compute_analysis_assurance(
         result, old, new, old_pack=old_pack, new_pack=new_pack,
     )
     # ADR-061 Phase 2 item 5 (post-render mutation): resolved here, before
     # any report is rendered, and attached directly onto `result` -- mirrors
-    # `analysis_assurance` immediately above, which resolves the identical
-    # `old_pack`/`new_pack` for the identical reason (an out-of-band pack
-    # directory is never attached back onto the snapshot object itself).
+    # `analysis_assurance` immediately above.
     # `reporter.to_json`'s JSON builders read these two fields straight off
     # `result` now, instead of `_fold_evidence_depth_into_json` re-parsing
     # this function's own already-rendered JSON text afterwards to splice
@@ -1850,6 +1840,18 @@ def run_compare(
         lang_explicit=lang_explicit,
     )
 
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
+    # #1020): this native CLI path calls `compare_snapshots()` directly, not
+    # `classify_compare_pair`, so it needs the identical capped view applied
+    # here too -- before every subsequent reader of `old`/`new` below
+    # (`fold_l0_hard_removals`, the build-source diff, `compare_snapshots`
+    # itself). Imported from `service_compare_pipeline` (`workflows`), not
+    # `.policy.depth_projection` directly: ADR-061 forbids `frontends ->
+    # policy`, and this CLI module is `frontends`.
+    from .service_compare_pipeline import project_pair_to_depth
+
+    old, new = project_pair_to_depth(old, new, depth)
+
     suppression, pf = _load_suppression_and_policy(
         suppress, policy, policy_file_path,
         strict_suppressions=strict_suppressions,
@@ -1899,13 +1901,29 @@ def run_compare(
     if getattr(old, "from_headers", False) or getattr(new, "from_headers", False):
         extra_changes = fold_l0_hard_removals(old, new, lang, extra_changes)
 
+    # ADR-063 Phase 8 "--depth" ceiling (Codex review, PR #1020, second
+    # round): an out-of-band --old/new-sources/-build-info pack never lives
+    # on old/new until prepare_embedded_build_source diffs it, so
+    # project_pair_to_depth above can't cap it. Resolve + cap it ourselves,
+    # attach onto old/new, then pass None below so resolve_side_pack falls
+    # back to the now-capped embedded payload instead of the raw pack.
+    from .cli_buildsource_helpers import _resolve_side_pack
+    from .service_compare_pipeline import project_build_source_pack_to_depth
+
+    old.build_source = project_build_source_pack_to_depth(
+        _resolve_side_pack(old_build_info, old_sources, old), depth
+    )
+    new.build_source = project_build_source_pack_to_depth(
+        _resolve_side_pack(new_build_info, new_sources, new), depth
+    )
+
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
     from .cli_buildsource import prepare_embedded_build_source
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
             old, new, collect_mode, extra_changes,
-            old_build_info, new_build_info, old_sources, new_sources,
+            None, None, None, None,
             policy_file=pf,
         )
     )
@@ -1964,8 +1982,6 @@ def run_compare(
         demangle=demangle, demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
         secondary_fmt=secondary_fmt, secondary_output=secondary_output,
-        old_build_info=old_build_info, new_build_info=new_build_info,
-        old_sources=old_sources, new_sources=new_sources,
         require_complete_analysis=require_complete_analysis,
         depth=depth,
         use_cases_manifest=use_cases_manifest,

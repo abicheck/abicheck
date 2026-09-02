@@ -768,13 +768,14 @@ def enforce_requested_depth(
     *sides* is ``(label, snapshot)`` pairs so the message names the side that
     fell short: ``compare`` passes both of its own, ``dump`` its single input.
 
-    Known, accepted limitation (Codex review, not fixed here): this is a
-    floor, not a ceiling. An input that is an already-serialized JSON snapshot
-    with richer embedded evidence than ``depth`` requested still carries all of
-    it — ``resolve_input``'s ``fmt == "json"`` branch returns
-    ``load_snapshot(path)`` verbatim, matching the CLI's own long-documented
-    default, which ``--depth`` has never projected down for a pre-built
-    snapshot either.
+    This function is the *floor* half only — it never strips evidence a
+    resolved snapshot carries beyond *depth*. The *ceiling* half is
+    :func:`abicheck.policy.depth_projection.project_snapshot_to_depth`,
+    applied by ``classify_compare_pair`` right after this function confirms
+    the floor — see that function's own docstring and
+    ``docs/contribute/known-gaps.md``'s "``--depth`` is a floor for live
+    extraction, not a ceiling for a pre-built snapshot" entry for the full
+    account, including why ``dump`` deliberately does not apply it.
     """
     if depth is None:
         return

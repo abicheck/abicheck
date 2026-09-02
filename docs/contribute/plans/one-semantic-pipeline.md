@@ -11956,18 +11956,32 @@ doesn't itself trip the `cli-contract` gate — but it's still not through
 `service.run_compare`/`resolve_compare_request`, so it never constructs an
 `AnalysisPlan` either and has no pre-flight check for its own inputs.
 `_resolve_stranded_library()` (the `--bundle-facts-out` path's own
-fallback for a library missing from the normal per-pair comparison) calls
-`cli_resolve._resolve_input()` directly — the same Tier-2 resolution
-`resolve_compare_request` itself calls, but reached independently, bypassing
-the `AnalysisPlan`-producing wrapper around it, with its own bespoke ELF
-fallback (`except Exception: ... AbiSnapshot(...)`) on top. Neither is
-this phase's own Goal to migrate (an `AnalysisPlan` pre-flight check for a
-probe-matrix build-config diff or a deliberately-degrading stranded-library
-fallback is a real, separate design question, not a drive-by widening of
-this phase's Files list) — named here explicitly instead, as a residual
-this phase does **not** close: `cli_compare_release.py`'s release fan-out
-is converged for its main per-pair comparison path only; these two
-narrower branches remain outside the typed `AnalysisPlan` pipeline, a gap
+fallback for a library missing from the normal per-pair comparison) used
+to call `cli_resolve._resolve_input()` directly — the same Tier-2
+resolution `resolve_compare_request` itself calls, but reached
+independently, bypassing the `AnalysisPlan`-producing wrapper around it,
+with its own bespoke ELF fallback (`except Exception: ... AbiSnapshot(...)`)
+on top. Neither was this phase's own Goal to migrate (an `AnalysisPlan`
+pre-flight check for a probe-matrix build-config diff or a
+deliberately-degrading stranded-library fallback is a real, separate
+design question, not a drive-by widening of this phase's Files list) —
+named here explicitly instead, as a residual this phase does **not**
+close.
+
+**`_resolve_stranded_library()` was later migrated (ADR-063 Phase 8
+follow-up, not this phase), narrowing the residual to one branch.** Unlike
+the matrix branch, a stranded library genuinely is one dump-shaped input
+(a path, headers, includes, version, language, an optional depth) once
+looked at correctly, so it now builds a real `DumpRequest` and runs it
+through `resolve_dump_request`/`execute_dump_request` — gaining a real
+`AnalysisPlanner.resolve()` pre-flight check and dropping its hand-rolled
+`depth=binary` header-clearing special-case, while keeping its
+degrade-to-ELF-only-on-failure fallback exactly as before. `_collect_
+matrix_result()` remains unmigrated and is expected to stay that way: it
+has no requested-vs-resolved evidence input for an `AnalysisPlan` to check
+feasibility of at all (two already-empty synthetic snapshots, an
+already-computed `extra_changes` list), so `cli_compare_release.py`'s
+release fan-out is now converged everywhere except that one branch, a gap
 for a future, separately-scoped pass to close rather than a silent
 omission from this plan's own accounting. `bundle.py`'s `compare_bundle()`
 takes already-computed `per_library_results` as an input rather than
