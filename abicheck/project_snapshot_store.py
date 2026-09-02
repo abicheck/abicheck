@@ -326,27 +326,32 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
 
     **`manifest.json` is written last, as this function's own commit
     point** -- and this function verifies every object it is about to
-    publish a reference to is actually durable on disk *before* writing
-    that commit point, refusing rather than publishing a manifest that
-    names a missing object (Codex review, a second finding on this same
-    ordering: an earlier fix moved `manifest.json` after the `refs/*.json`
-    writes, but the docstring at the time still permitted a caller to
-    populate `objects/` *after* this function returns -- which reopens the
-    identical "manifest names something that doesn't durably exist yet"
-    failure one layer further out, since an interruption between this
-    call's `manifest.json` write and the caller's own later `put()` calls
-    leaves a published package whose artifact refs name permanently
-    missing objects). Every `refs/*.json` document is still written first:
-    an interruption partway through would then leave, at worst, ref
-    documents `manifest.json` does not yet name (harmless -- nothing reads
-    a ref it wasn't told to load) rather than a durable `manifest.json`
-    naming refs that were never written, which every subsequent reader
-    would treat as a corrupted package.
+    publish a reference to is actually durable *and valid* on disk
+    *before* writing that commit point, refusing rather than publishing a
+    manifest that names a missing or corrupted object (Codex review, two
+    rounds on this same ordering: the first moved `manifest.json` after
+    the `refs/*.json` writes, but the docstring at the time still
+    permitted a caller to populate `objects/` *after* this function
+    returns -- reopening the identical "manifest names something that
+    doesn't durably exist yet" failure one layer further out, since an
+    interruption between this call's `manifest.json` write and the
+    caller's own later `put()` calls leaves a published package whose
+    artifact refs name permanently missing objects; the second found that
+    a bare path-existence check alone still lets an object *corrupted* or
+    substituted after its own `put()` -- but before this call -- through,
+    since a corrupted file still has the right pathname). Every
+    `refs/*.json` document is still written first: an interruption
+    partway through would then leave, at worst, ref documents
+    `manifest.json` does not yet name (harmless -- nothing reads a ref it
+    wasn't told to load) rather than a durable `manifest.json` naming
+    refs that were never written, which every subsequent reader would
+    treat as a corrupted package.
 
     Raises `ValueError` if any `ArtifactRef.sections` entry names a digest
-    with no corresponding object file (`objects/sha256/<aa>/<digest>.json.zst`
-    or `.bin.zst`) already on disk under *root* -- checked, and this
-    function's own writes abandoned, before `manifest.json` is touched.
+    this function cannot read back via `DirectoryObjectStore.get()` --
+    absent, or present but not matching its own digest -- checked, and
+    this function's own writes abandoned, before `manifest.json` is
+    touched.
 
     **A known, deliberately deferred gap** (flagged in the same review
     round as a distinct, further finding once the ordering above was
@@ -388,24 +393,34 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             compression=SnapshotCompression.NONE,
         )
     # Every object this manifest is about to name must already be durable
-    # on disk -- checked, and the manifest write abandoned, before that
-    # commit point is touched (see this function's own docstring).
-    missing: list[str] = []
+    # *and valid* on disk -- checked, and the manifest write abandoned,
+    # before that commit point is touched (see this function's own
+    # docstring). A bare existence check (does a file sit at the expected
+    # path) is not enough: an object corrupted or substituted after its own
+    # `put()` but before this call still has the right pathname, so an
+    # existence-only check would still publish a manifest referencing it,
+    # with the corruption discovered only later by a reader's `get()`
+    # (Codex review, a second finding on this same check). Reusing
+    # `DirectoryObjectStore.get()` -- the same digest-recompute-and-compare
+    # logic a reader applies -- rather than a second, independent
+    # "is this readable" check that could itself drift from it.
+    store = DirectoryObjectStore(root_path)
+    invalid: list[str] = []
     for artifact in manifest.artifact_refs:
         for section_kind, ref in artifact.sections.items():
-            json_path = root_path / _object_json_relpath(ref.digest)
-            raw_path = root_path / _object_raw_relpath(ref.digest)
-            if not (json_path.exists() or raw_path.exists()):
-                missing.append(
+            try:
+                store.get(ref.digest)
+            except (KeyError, ValueError, SnapshotError) as exc:
+                invalid.append(
                     f"artifact {artifact.artifact_id!r} section "
-                    f"{section_kind!r} -> {ref.digest!r}"
+                    f"{section_kind!r} -> {ref.digest!r} ({exc})"
                 )
-    if missing:
+    if invalid:
         raise ValueError(
             "refusing to publish manifest.json referencing object(s) not "
-            f"yet durable in objects/ under {root_path}: {sorted(missing)} "
-            "-- populate objects/ (e.g. via DirectoryObjectStore.put) "
-            "before calling write_project_manifest"
+            f"yet durable and valid in objects/ under {root_path}: "
+            f"{sorted(invalid)} -- populate objects/ (e.g. via "
+            "DirectoryObjectStore.put) before calling write_project_manifest"
         )
     summary = {
         "versions": manifest.versions.to_dict(),

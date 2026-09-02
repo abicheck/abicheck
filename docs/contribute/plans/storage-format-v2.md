@@ -395,32 +395,28 @@ manifest/ref writer/reader, including a full package round trip through a
 real directory) — the same property-style-plus-example-cases convention as
 Phase 0 (A0.6/A1's "Validation corpus" identity-preservation cases).
 
-### Documentation ownership — deliberately not registered yet
+### Documentation ownership
 
 `docs/AGENTS.md` requires every **new public-facing feature or surface** to
-register a topic in `docs/_meta/topics.yaml` in the same PR, and a reviewer
-asked why storage v2 has none (Codex review). The answer is that neither
-Phase 0 nor this A1.1 slice adds such a surface: no CLI command or flag, no
-report field, no config namespace, no Action input, and nothing in the
-product produces, consumes, or persists a byte through these primitives —
-`SCHEMA_VERSION` is unchanged and every existing document is byte-for-byte
-unchanged. `package.py` itself performs no filesystem or network I/O; its
-`ObjectStore` is a protocol plus one in-memory reference implementation, not
-a place any real package is written to or read from yet. They are also not
-part of the documented Python API: `abicheck/__init__.py` does not re-export
-them, and the `python-api` topic's `fact_sources` name the `service*` modules
-that page actually describes.
+register a topic in `docs/_meta/topics.yaml` in the same PR, and a Phase-0
+reviewer asked why storage v2 had none yet (Codex review). At the time the
+answer was that neither Phase 0 nor A1.1's own first slice added such a
+surface: no CLI command or flag, no report field, no config namespace, no
+Action input, and nothing in the product produced, consumed, or persisted a
+byte through these primitives yet — `package.py` performed no filesystem or
+network I/O, and `ObjectStore` was a protocol plus one in-memory reference
+implementation, not a place any real package was written to or read from.
 
-The registry's `canonical_page` is required to be the one *published*
-narrative page a human reads, and every registered topic points at one under
-`learn/`, `use/`, `reference/` or `integration/` — never at `contribute/`.
-Writing such a page now would mean documenting, to users, an API they cannot
-reach. The ADR and this plan are the contributor-facing owners in the
-meantime, which is what `contribute/` is for.
-
-**The trigger is concrete rather than "later":** the PR that first *persists*
-a `ProjectSnapshot` — Phase 1's package writer — is the one that makes this
-user-facing, and it registers:
+**That Phase-0-era gap is closed.** As stated then, the trigger was
+concrete rather than "later": the PR that first *persists* a
+`ProjectSnapshot` — this file's own "Landed in Phase 1" section above,
+`abicheck/project_snapshot_store.py`'s real, directory-backed
+`DirectoryObjectStore`/`write_project_manifest`/`read_project_manifest` — is
+the one that made this user-facing, and it registered the topic
+`docs/_meta/topics.yaml` already commits to below. The registry's
+`canonical_page` is required to be the one *published* narrative page a
+human reads (never `contribute/`), which is why the trigger names a real
+`reference/` page rather than pointing back at this plan document:
 
 ```yaml
   project-snapshot-storage:
@@ -433,12 +429,24 @@ user-facing, and it registers:
       - abicheck/storage/entity_ids.py
       - abicheck/storage/canonical.py
       - abicheck/storage/versioning.py
+      - abicheck/storage/package.py
+      - abicheck/storage/dto.py
+      - abicheck/storage/import_v1.py
+      - abicheck/project_snapshot_store.py
 ```
 
-alongside the page itself. Recorded here so a future reader finds a decision
-rather than an omission.
+**Still not part of the documented Python API**: `abicheck/__init__.py`
+does not re-export any of these, and the separate `python-api` topic's
+`fact_sources` still name only the `service*` modules that page actually
+describes — registering the `project-snapshot-storage` topic above answers
+"is this documented for a reader who finds `reference/project-snapshot-
+format.md`", not "is this part of the stable Python API", which remains a
+distinct, later question this landing does not answer either way.
 
-**Deliberately not done in Phase 0**, so that no existing behavior changes:
-nothing produces, consumes, or persists these types yet; `AbiSnapshot.index()`
-still resolves first-wins; `SCHEMA_VERSION` is untouched; and no CLI
-surface, report field, or exit code moves.
+**Deliberately not done in Phase 0**, so that no existing behavior changed
+at that point: nothing produced, consumed, or persisted these types yet;
+`AbiSnapshot.index()` still resolved first-wins; `SCHEMA_VERSION` was
+untouched; and no CLI surface, report field, or exit code moved. Phase 1's
+own landing above states plainly that this is still true of everything
+`dump`/`compare`/`scan` read or write today — only a real filesystem
+package outside that pipeline exists now.

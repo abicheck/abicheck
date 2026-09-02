@@ -315,6 +315,45 @@ class TestManifestRoundTrip:
         write_project_manifest(tmp_path, manifest)
         assert (tmp_path / "manifest.json").exists()
 
+    def test_a_manifest_naming_a_corrupted_object_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """A bare path-existence check alone is not enough: an object
+        corrupted or substituted after its own `put()` but before this
+        call still has the right pathname, so a manifest referencing it
+        must still be refused -- `get()` would otherwise reject the
+        package only once a later reader tried to load it (Codex review,
+        a second finding on this same check)."""
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put({"a": 1})
+        other_digest = store.put({"a": 999})
+        _algorithm, _sep, hexdigest = digest.partition(":")
+        path = tmp_path / "objects" / "sha256" / hexdigest[:2] / f"{hexdigest}.json.zst"
+        _other_algorithm, _other_sep, other_hex = other_digest.partition(":")
+        other_path = (
+            tmp_path / "objects" / "sha256" / other_hex[:2] / f"{other_hex}.json.zst"
+        )
+        # Substitute the first object's file with the second's real,
+        # validly-compressed bytes -- the path still exists, but no longer
+        # matches its own digest.
+        path.write_bytes(other_path.read_bytes())
+        manifest = PackageManifest(
+            variant_refs=(VariantRef(variant_id="default", artifact_ids=("libfoo",)),),
+            artifact_refs=(
+                ArtifactRef(
+                    artifact_id="libfoo",
+                    variant_id="default",
+                    kind="elf",
+                    sections={
+                        "semantic_ir": ObjectRef(kind="semantic_ir", digest=digest)
+                    },
+                ),
+            ),
+        )
+        with pytest.raises(ValueError, match="not yet durable"):
+            write_project_manifest(tmp_path, manifest)
+        assert not (tmp_path / "manifest.json").exists()
+
     def test_manifest_json_is_small_and_does_not_embed_full_records(
         self, tmp_path: Path
     ) -> None:
