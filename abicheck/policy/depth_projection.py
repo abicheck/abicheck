@@ -42,42 +42,51 @@ ladder (``binary``/``headers``/``build``/``source``, ``BINARY`` covering both
 L0 and L1: "no L2 AST", not "no debug info"); this module maps onto the
 coarser public ladder a caller actually requests through ``--depth``,
 picking L0 or L1 **per snapshot** (not fixed to L1) based on whether *that*
-snapshot actually carries DWARF debug info — see
-:func:`_snapshot_has_native_debug_info` — so a headers-only snapshot with no
-DWARF strips down to L0 (no structural facts survive at all) exactly the way
-the reference implementation's own L0 branch does, while a DWARF-informed
-one keeps layout/signatures at ``binary`` the way a real DWARF-informed
-binary dump would (Codex review, PR #1020: an earlier version of this
-module fixed every ``binary``-rung projection to the reference
-implementation's L1 branch unconditionally, so a purely header-derived
-snapshot with no DWARF at all still carried full ``types``/``enums``/
-function-signature data through a ``binary``-depth projection and could
-still emit e.g. ``type_field_type_changed``).
+snapshot's structural facts are genuinely DWARF/symbol-sourced — see
+:func:`_structural_facts_are_dwarf_confirmed` — so a headers-derived
+snapshot strips down to L0 (no structural facts survive at all) exactly the
+way the reference implementation's own L0 branch does, while a genuinely
+DWARF/symbols-only one keeps layout/signatures at ``binary`` the way a real
+DWARF-informed binary dump would (Codex review, PR #1020: an earlier
+version of this module fixed every ``binary``-rung projection to the
+reference implementation's L1 branch unconditionally, so a purely
+header-derived snapshot with no DWARF at all still carried full
+``types``/``enums``/function-signature data through a ``binary``-depth
+projection and could still emit e.g. ``type_field_type_changed``; a later
+version kept a *header-derived* ``RecordType`` wholesale whenever DWARF
+merely confirmed a struct by *name*, still letting an uncorroborated
+header-only field-type change through — see
+:func:`_structural_facts_are_dwarf_confirmed`'s own docstring for why
+``from_headers`` is now part of the gate, not just ``dwarf.has_dwarf``).
 
 **Deliberately in scope** (the same fields the tier-accuracy gate's
 validated ``project()`` degrades, plus the ``BuildSourcePack`` L3-L5 split
-that synthetic corpus never populates, plus three fields a second review
-round found this module itself needed to close — see below):
+that synthetic corpus never populates, plus several fields later review
+rounds found this module itself needed to close — see below):
 ``functions``/``variables`` visibility+origin (a ``Visibility.HIDDEN``
-— non-exported — declaration is dropped entirely, not promoted to
+— non-exported — declaration is dropped entirely, and a declaration with
+no confirmed export-table entry is dropped too, not promoted to
 ``ELF_ONLY``: see :func:`_strip_header_and_above_evidence`'s own
-docstring), ``types``/``enums`` (kept only when DWARF specifically
-observed that declaration by name — :func:`_dwarf_confirmed_names`, real
-per-record evidence, not a whole-snapshot guess), ``typedefs`` (always
-cleared — this codebase's model has no per-name DWARF lookup for them at
-all), ``constants``, ``python_api``, ``from_headers``, ``semantic_ir`` and
-``surface_graph`` (both L2+ header-AST/header-graph facts, gated the same
-as ``from_headers`` — ``_attach_header_graph``'s own docstring: "the
-header-only (L2) semantic graph", not an L4/L5 fact despite a first
-version of this module gating it to ``source`` on that wrong assumption),
-``contract`` (an ADR-050 ``ExtractionContract`` computed from the same
-header-scope/compile-context inputs this module discards — left alone, it
-can still make ``checker.compare()`` raise a scope/profile mismatch error
-from two sides' *original* header scopes even though a binary-only
-comparison was never going to look at either), ``build_mode``, and
-``build_source`` (nulled below ``build``; degraded to its L3-only
-``build_evidence`` — ``source_abi``/``source_graph`` cleared — between
-``build`` and ``source``). Callers that resolve build-info/source packs
+docstring), ``types``/``enums``/``typedefs`` (kept wholesale only when
+:func:`_structural_facts_are_dwarf_confirmed`, else fully cleared —
+genuine DWARF-visible struct/enum layout changes on a header-derived
+snapshot are still caught independently through the untouched
+``snap.dwarf`` fields, never through these), ``constants``, ``python_api``,
+``from_headers``, ``semantic_ir`` and ``surface_graph`` (both L2+
+header-AST/header-graph facts, gated the same as ``from_headers`` —
+``_attach_header_graph``'s own docstring: "the header-only (L2) semantic
+graph", not an L4/L5 fact despite a first version of this module gating it
+to ``source`` on that wrong assumption), ``contract`` (an ADR-050
+``ExtractionContract`` computed from the same header-scope/compile-context
+inputs this module discards — left alone, it can still make
+``checker.compare()`` raise a scope/profile mismatch error from two sides'
+*original* header scopes even though a binary-only comparison was never
+going to look at either), ``build_mode``, and ``build_source`` (nulled
+below ``build``; degraded to its L3-only ``build_evidence`` —
+``source_abi``/``source_graph`` cleared, and their own
+``BuildSourceManifest.coverage`` rows demoted to ``NOT_COLLECTED`` so a
+report can't still claim that evidence backed this run — between ``build``
+and ``source``). Callers that resolve build-info/source packs
 *out-of-band* (a real, pre-built pack directory, not embedded inline) must
 project or withhold those packs themselves before diffing them — this
 module only ever sees what already lives on the snapshot object it was
@@ -87,20 +96,14 @@ handed; see ``cli_compare_helpers.run_compare``'s own comment on its
 **Deliberately out of scope, not silently assumed handled**: platform
 container facts (``elf``/``pe``/``macho``/``dwarf``/``dwarf_advanced``
 themselves are never cleared — only what they *justify keeping* in
-``functions``/``types``/... changes), ``kabi``/``sycl``/``python_ext``/
-``numpy_capi``, ``dependency_info``, ``fact_provenance``/``ast_*``/
-entity-id maps, and ``elf_only_mode`` (left exactly as resolved except
-where the no-DWARF branch sets it ``True`` itself, matching the reference
-implementation's identical choice at its own L0). Function/variable
-*signatures* (return type, params, value) stay gated on whole-snapshot
-DWARF presence, not per-declaration — see
-:func:`_snapshot_has_native_debug_info`'s own docstring for exactly why:
-this codebase's model has no per-function DWARF-confirmation fact for a
-projection to read back, so getting this fully precise is real,
-separately-justified future work (it needs a new fact the dumper doesn't
-record yet), not a residual of this module's own scope. A future extension
-of this module's scope generally is the same: real, separately-justified
-work, not a residual of this docstring's own account.
+``functions``/``types``/... changes, and what :func:`_exported_symbol_names`
+reads back out of them), ``kabi``/``sycl``/``python_ext``/``numpy_capi``,
+``dependency_info``, ``fact_provenance``/``ast_*``/entity-id maps, and
+``elf_only_mode`` (left exactly as resolved except where the no-DWARF
+branch sets it ``True`` itself, matching the reference implementation's
+identical choice at its own L0). A future extension of this module's scope
+is real, separately-justified work, not a residual of this docstring's own
+account.
 """
 
 from __future__ import annotations
@@ -108,6 +111,7 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING
 
+from ..buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
 
@@ -122,94 +126,150 @@ __all__ = [
 ]
 
 
-def _snapshot_has_native_debug_info(snap: AbiSnapshot) -> bool:
-    """Whether *snap* carries DWARF debug info independent of any header AST.
+def _structural_facts_are_dwarf_confirmed(snap: AbiSnapshot) -> bool:
+    """Whether *snap*'s ``types``/``enums``/``typedefs``/function-variable
+    signatures are genuinely DWARF/symbol-sourced, not header-parsed.
 
-    The same signal ``confidence.py``/``analysis_assurance.py`` already use
-    for "does this snapshot have debug info" (``dwarf is not None and
-    dwarf.has_dwarf``) — not restated, reused, so this module cannot silently
-    disagree with those about what counts. Deliberately does not also probe
-    PE/Mach-O-specific debug carriers (PDB, ...): matching that same existing
-    precedent exactly rather than inventing a wider, unvalidated heuristic —
-    a real PDB-aware extension is separately-justified future work, not a
-    residual of this function's own scope.
+    Requires both ``snap.dwarf.has_dwarf`` (the same signal
+    ``confidence.py``/``analysis_assurance.py`` already use for "does this
+    snapshot have debug info" — not restated, reused) **and**
+    ``not snap.from_headers``. ``AbiSnapshot.from_headers``'s own field
+    comment states the reason precisely: "DWARF-derived declarations
+    populate the SAME functions/types lists [as header-derived ones] but
+    must NOT be mistaken for header-level evidence." A header-derived
+    ``RecordType``'s numeric *layout* (size/offset) may be backfilled from
+    DWARF when the header backend can't compute it itself
+    (``dumper_layout_backfill.py``), but its field-level *type spelling*
+    stays whatever the header AST parsed — DWARF confirming a struct's
+    *name* says nothing about whether that struct's *fields* agree with the
+    header's own spelling (Codex review, PR #1020, fourth round — a third
+    cut of this module kept a header-derived ``RecordType`` wholesale
+    whenever DWARF merely confirmed the struct by name, which still let an
+    uncorroborated header-only field-type change through; a per-record
+    ``DwarfMetadata.structs``/``.enums`` name check was one level too
+    narrow, not a fix). The same reasoning applies to function/variable
+    signatures: this codebase's dumper merge process has no per-declaration
+    "was this signature confirmed by its own DWARF DIE, or only by
+    headers" fact either.
 
-    **Whole-snapshot, not per-declaration** — deliberately, and only for the
-    two fact families this codebase's model has no per-name DWARF lookup
-    for at all: function/variable signatures. ``types``/``enums`` *do* have
-    one (``DwarfMetadata.structs``/``.enums``, keyed by name) and are
-    filtered per-record instead — see :func:`_dwarf_confirmed_names`. For
-    functions/variables, this whole-snapshot gate matches the one
-    already-validated reference implementation of this idea,
-    ``scripts/check_tier_accuracy.py``'s ``project()``, exactly: its own L1
-    branch keeps every function's signature uniformly once *any* DWARF is
-    present, with no per-function check either — this codebase's dumper
-    merge process does not track "was this specific function's signature
-    confirmed by its own DWARF subprogram DIE, or only by headers" anywhere
-    a projection could read it back. A real per-function extension is
-    separately-justified future work (it would need a new fact the dumper
-    doesn't currently record), not a residual of this function's own scope
-    (Codex review, PR #1020, third round).
+    A genuinely DWARF/symbols-only dump (``from_headers`` is ``False``) has
+    no such ambiguity: ``dwarf_snapshot.py``'s own DWARF-only extraction
+    path populates ``types``/``enums``/``typedefs``/function-variable
+    signatures directly from DWARF DIEs, so every one of those fields is
+    real DWARF evidence there, safely kept wholesale. On a header-derived
+    snapshot, a real binary-visible struct/enum layout change is still
+    caught independently: ``diff_platform._diff_dwarf`` reads
+    ``snap.dwarf.structs``/``.enums`` directly, which this module never
+    clears, and degrades gracefully with no header model at all ("If the
+    header model is absent... fall back to comparing all DWARF types",
+    that function's own comment) — function/variable signature changes have
+    no such independent DWARF-native detector, a real, separately-justified
+    gap (it would need a new per-declaration confirmation fact the dumper
+    does not currently record), not a residual of this function's own
+    scope. Deliberately does not also probe PE/Mach-O-specific debug
+    carriers (PDB, ...) — matching the existing ``confidence.py``/
+    ``analysis_assurance.py`` precedent exactly rather than inventing a
+    wider, unvalidated heuristic; a real PDB-aware extension is
+    separately-justified future work too.
     """
-    return snap.dwarf is not None and snap.dwarf.has_dwarf
+    return snap.dwarf is not None and snap.dwarf.has_dwarf and not snap.from_headers
 
 
-def _dwarf_confirmed_names(snap: AbiSnapshot) -> tuple[frozenset[str], frozenset[str]]:
-    """Struct and enum names DWARF specifically observed, respectively.
+def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
+    """*snap*'s raw platform export-table names, or ``None`` with no table at all.
 
-    ``DwarfMetadata.structs``/``.enums`` are real per-name facts — unlike
-    the whole-snapshot ``has_dwarf`` flag, they answer "was *this*
-    declaration confirmed by DWARF" precisely, so an uninstantiated
-    header-only record sitting alongside unrelated real DWARF content is
-    correctly excluded rather than swept in by the coarser flag (Codex
-    review, PR #1020, third round — a first cut of this module used
-    ``_snapshot_has_native_debug_info`` for these two families too, which
-    over-retains exactly this case). Empty when *snap* has no ``dwarf`` at
-    all, which is what makes the no-DWARF-whatsoever case (this function's
-    old, coarser job) fall out of the same per-record filter for free.
+    A small, local copy of the same "raw export table" read every other
+    consumer of this idea already keeps its own independent copy of
+    (``buildsource.crosscheck_base._exported_symbol_names``,
+    ``buildsource.snapshot_exports.exported_symbols_from_snapshot``,
+    ``post_manifest._exported_symbol_names``,
+    ``diff_unnamed_types._exported_symbol_names`` — see
+    ``buildsource/CLAUDE.md``'s own note that unifying these is a
+    deliberately separate slice, not folded in here): each has a slightly
+    different normalization/fallback need, and a ``policy``-layer caller
+    may import ``model``/``compare`` but not ``extract`` (ADR-061), where
+    most of those live. Matches ``crosscheck_base``'s own normalization
+    exactly (only default-versioned ELF exports; Mach-O's single leading
+    underscore stripped) since that is what must line up against
+    ``Function.mangled``/``Variable.mangled``'s own spelling.
+
+    ``None`` (never an empty ``frozenset``) when *snap* carries no platform
+    export table at all — a caller must treat "cannot confirm" differently
+    from "parsed and confirmed empty" (a real hidden-only library genuinely
+    exports nothing and that must still read as confirmed-empty, not as
+    "no evidence"), so :func:`_strip_header_and_above_evidence` skips this
+    check entirely rather than misreading an absent platform block as zero
+    exports.
     """
-    dwarf = snap.dwarf
-    if dwarf is None:
-        return frozenset(), frozenset()
-    return frozenset(dwarf.structs), frozenset(dwarf.enums)
+    elf = snap.elf
+    if elf is not None:
+        return frozenset(s.name for s in elf.symbols if s.name and s.is_default)
+    pe = snap.pe
+    if pe is not None:
+        return frozenset(e.name for e in pe.exports if e.name)
+    macho = snap.macho
+    if macho is not None:
+        return frozenset(
+            e.name[1:] if e.name.startswith("_") else e.name
+            for e in macho.exports
+            if e.name
+        )
+    return None
 
 
 def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
     """Blank every L2+ (header-AST) fact on *snap*, in place.
 
-    ``types``/``enums`` keep only the entries DWARF itself specifically
-    observed (:func:`_dwarf_confirmed_names`) — real per-record evidence,
-    not a whole-snapshot guess. ``typedefs`` are always cleared: this
-    codebase's model has no per-name DWARF lookup for them at all (no
-    ``DwarfMetadata.typedefs``), so there is no evidence-backed way to keep
-    any of them below `headers`. Function/variable *signatures*
-    (return type, params, value) stay gated on whole-snapshot DWARF
-    presence — see :func:`_snapshot_has_native_debug_info`'s own docstring
-    for exactly why that one stays coarser. A function/variable with
-    ``Visibility.HIDDEN`` (a real, non-exported header-only declaration,
-    never a fact a binary-only view could see at all) is dropped from the
-    snapshot entirely rather than promoted to ``ELF_ONLY`` — promoting it
-    would misrepresent an unexported symbol as binary-visible and could
-    manufacture a false ``*_removed_elf_only`` finding for a declaration no
-    real binary-only dump would ever have seen as a symbol in the first
-    place (Codex review, PR #1020, third round).
+    ``types``/``enums``/``typedefs`` and function/variable *signatures*
+    (return type, params, value) survive wholesale only when
+    :func:`_structural_facts_are_dwarf_confirmed` — see that function's own
+    docstring for exactly why ``dwarf.has_dwarf`` alone is not enough.
+    Otherwise every one of those is fully cleared, not merely re-scoped.
+
+    A function/variable with ``Visibility.HIDDEN`` (a real, non-exported
+    header-only declaration, never a fact a binary-only view could see at
+    all) is dropped from the snapshot entirely rather than promoted to
+    ``ELF_ONLY`` (Codex review, PR #1020, third round). A surviving
+    function/variable is *additionally* required to appear in *snap*'s own
+    raw export table (:func:`_exported_symbol_names`, when one exists)
+    before promotion to ``ELF_ONLY`` — a header parser's own "declared
+    public, without contrary evidence" fallback (e.g. ``dumper_castxml.
+    _variable_visibility``'s un-emitted customization-point-object case)
+    can mark a declaration ``PUBLIC`` even though the compiler never
+    actually emitted a symbol for it, and promoting that declaration to
+    ``ELF_ONLY`` would manufacture a false ``*_removed_elf_only``/
+    ``*_removed`` finding for a symbol no real binary-only dump would ever
+    have seen (Codex review, PR #1020, fourth round). Skipped — no
+    filtering beyond the ``HIDDEN`` drop above — when *snap* carries no
+    platform export table at all, so a synthetic/incomplete snapshot with
+    no platform block populated keeps its prior, looser behavior rather
+    than being stripped to nothing.
     """
+    dwarf_sourced = _structural_facts_are_dwarf_confirmed(snap)
+
     snap.functions = [f for f in snap.functions if f.visibility != Visibility.HIDDEN]
     snap.variables = [v for v in snap.variables if v.visibility != Visibility.HIDDEN]
+    exported = _exported_symbol_names(snap)
+    if exported is not None:
+        snap.functions = [f for f in snap.functions if f.mangled in exported]
+        snap.variables = [v for v in snap.variables if v.mangled in exported]
     for f in snap.functions:
         f.visibility = Visibility.ELF_ONLY
         f.origin = ScopeOrigin.UNKNOWN
     for v in snap.variables:
         v.visibility = Visibility.ELF_ONLY
         v.origin = ScopeOrigin.UNKNOWN
-    confirmed_structs, confirmed_enums = _dwarf_confirmed_names(snap)
-    snap.types = [t for t in snap.types if t.name in confirmed_structs]
-    snap.enums = [e for e in snap.enums if e.name in confirmed_enums]
-    for t in snap.types:
-        t.origin = ScopeOrigin.UNKNOWN
-    for e in snap.enums:
-        e.origin = ScopeOrigin.UNKNOWN
-    snap.typedefs = {}
+
+    if dwarf_sourced:
+        for t in snap.types:
+            t.origin = ScopeOrigin.UNKNOWN
+        for e in snap.enums:
+            e.origin = ScopeOrigin.UNKNOWN
+    else:
+        snap.types = []
+        snap.enums = []
+        snap.typedefs = {}
+
     snap.constants = {}
     snap.from_headers = False
     snap.python_api = None
@@ -227,7 +287,7 @@ def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
     # look at either scope (Codex review, PR #1020, third round).
     snap.contract = None
 
-    if not _snapshot_has_native_debug_info(snap):
+    if not dwarf_sourced:
         for f in snap.functions:
             f.return_type = "?"
             f.params = []
@@ -236,6 +296,43 @@ def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
             v.is_const = False
             v.value = None
         snap.elf_only_mode = True
+
+
+#: Layer values :func:`_project_build_source_pack` clears between ``build``
+#: and ``source`` — shared so the payload fields and their manifest coverage
+#: rows can never independently drift.
+_L4_L5_LAYER_VALUES = frozenset(
+    {DataLayer.L4_SOURCE_ABI.value, DataLayer.L5_SOURCE_GRAPH.value}
+)
+
+
+def _mark_layers_not_collected(
+    pack: BuildSourcePack, layer_values: frozenset[str]
+) -> None:
+    """Rewrite *pack*'s own ``manifest.coverage`` rows for *layer_values*, in place.
+
+    Clearing ``pack.source_abi``/``.source_graph`` alone leaves
+    ``pack.manifest.coverage``'s own ``LayerCoverage`` rows still claiming
+    ``PRESENT``/``PARTIAL`` for a layer this projection just removed —
+    ``evidence_report.optional_coverage()`` returns those rows directly, so
+    human output, JSON ``layer_coverage``, and the D9 evidence metrics could
+    still claim source-ABI/source-graph evidence backed this comparison even
+    though the depth ceiling excluded it from actually being diffed (Codex
+    review, PR #1020, fourth round). Demoting to ``NOT_COLLECTED`` (dropping
+    every other field — ``detail``/``confidence``/counts) matches the exact
+    "nothing collected" row shape every existing producer already
+    constructs for a layer it never ran (e.g. ``inline.py``'s own
+    ``else: LayerCoverage(layer=..., status=CoverageStatus.NOT_COLLECTED)``
+    branches), so a reader can't distinguish "genuinely never collected"
+    from "collected, then projected away below the requested depth" — which
+    is exactly the honest claim at this depth.
+    """
+    pack.manifest.coverage = [
+        LayerCoverage(layer=row.layer, status=CoverageStatus.NOT_COLLECTED)
+        if row.layer in layer_values
+        else row
+        for row in pack.manifest.coverage
+    ]
 
 
 def _project_build_source_pack(
@@ -248,16 +345,20 @@ def _project_build_source_pack(
     pack resolved out-of-band from an explicit ``--build-info``/``--sources``
     path) so the L3-L5 capping rule is stated once rather than duplicated
     between the two callers. Below ``build``, the whole pack carries no
-    evidence an explicit ``--depth`` asked for and is dropped entirely;
-    between ``build`` and ``source``, the L3 ``build_evidence`` payload
-    survives but the L4 source-ABI replay and L5 source-graph payloads are
-    cleared; at or above ``source``, *pack* is returned unchanged.
+    evidence an explicit ``--depth`` asked for and is dropped entirely — its
+    ``manifest.coverage`` goes with it, so no separate row-demotion is
+    needed there. Between ``build`` and ``source``, the L3 ``build_evidence``
+    payload survives but the L4 source-ABI replay and L5 source-graph
+    payloads are cleared, and their own coverage rows demoted alongside them
+    (:func:`_mark_layers_not_collected`); at or above ``source``, *pack* is
+    returned unchanged.
     """
     if rank < build_rank:
         return None
     if rank < source_rank:
         pack.source_abi = None
         pack.source_graph = None
+        _mark_layers_not_collected(pack, _L4_L5_LAYER_VALUES)
     return pack
 
 

@@ -49,7 +49,30 @@ Six real, review-caught gaps are pinned by name here so they don't recur:
 6. ``types``/``enums`` were kept or dropped by the whole-snapshot
    ``dwarf.has_dwarf`` flag rather than per-record evidence, so an
    uninstantiated header-only record sitting alongside unrelated real DWARF
-   content was incorrectly retained.
+   content was incorrectly retained. **Superseded by gap 7** (see below) --
+   a per-record ``DwarfMetadata.structs``/``.enums`` name check was the
+   fix attempted for this gap, but it was itself one level too narrow.
+7. A header-derived ``RecordType``/``EnumType`` was kept *wholesale*
+   whenever DWARF merely confirmed the same-named struct/enum *existed* --
+   DWARF confirming a struct's name says nothing about whether its
+   *fields* agree with the header's own spelling (DWARF only ever
+   backfills numeric layout onto a header-derived record, never its
+   field-level type text). Only a genuinely DWARF/symbols-only snapshot
+   (``from_headers is False``) may keep these wholesale; on a
+   header-derived snapshot they are now always fully cleared, relying on
+   the separate, untouched ``snap.dwarf`` fields (``diff_platform.
+   _diff_dwarf``) to still catch a real DWARF-visible layout change.
+8. A function/variable promoted from a header parser's own "declared
+   public, without contrary evidence" fallback (e.g. an un-emitted inline
+   constexpr customization-point object) was promoted to ``ELF_ONLY``
+   the same as a genuinely exported one, manufacturing a false
+   ``*_removed``/``*_removed_elf_only`` finding for a declaration no real
+   binary-only dump would ever have seen as a symbol at all.
+9. Nulling a ``BuildSourcePack``'s ``source_abi``/``source_graph`` between
+   ``build`` and ``source`` left their own ``LayerCoverage`` rows in
+   ``pack.manifest.coverage`` still claiming ``PRESENT``/``PARTIAL``, so a
+   report could still claim source-ABI/source-graph evidence backed a
+   comparison the depth ceiling actually excluded it from.
 """
 
 from __future__ import annotations
@@ -60,6 +83,9 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck import checker
+from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_abi import SourceAbiSurface
 from abicheck.cli import main
 from abicheck.model import (
     AbiSnapshot,
@@ -72,10 +98,14 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
-from abicheck.model.dwarf_facts import DwarfMetadata, EnumInfo, StructLayout
+from abicheck.model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
+from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
-from abicheck.policy.depth_projection import project_snapshot_to_depth
+from abicheck.policy.depth_projection import (
+    project_build_source_pack_to_depth,
+    project_snapshot_to_depth,
+)
 from abicheck.serialization import save_snapshot
 
 
@@ -197,15 +227,21 @@ class TestBinaryDepthNoDwarf:
         assert var.visibility is Visibility.ELF_ONLY
 
 
-class TestBinaryDepthWithDwarf:
-    """DWARF-informed structural facts are an L0/L1 fact, kept at ``binary``."""
+class TestStructuralFactsRequireDwarfSourcing:
+    """Pinned gap 7: DWARF confirming a struct/enum by *name* does not
+    corroborate a header-derived RecordType/EnumType's own field-level
+    spelling -- only a genuinely DWARF/symbols-only snapshot
+    (``from_headers is False``) may keep ``types``/``enums``/... wholesale
+    at ``binary`` depth."""
 
-    def test_dwarf_visible_structural_break_still_detected(self) -> None:
-        # `structs={"S": ...}` -- DWARF specifically observed *this* record by
-        # name (`_dwarf_confirmed_names`'s real per-record evidence), not
-        # merely `has_dwarf=True` on the whole snapshot; a struct that isn't
-        # in this dict is a header-only fact even when its snapshot carries
-        # unrelated real DWARF content elsewhere (Codex review, third round).
+    def test_header_derived_field_diff_is_suppressed_even_with_dwarf(self) -> None:
+        # DWARF confirms a struct named "S" exists (`structs={"S": ...}`),
+        # but its own StructLayout carries no fields at all -- the field
+        # type difference below exists only in the header-parsed
+        # RecordType, so it must not survive a from_headers=True
+        # binary-depth projection (the review-caught bug: retaining a
+        # RecordType wholesale merely because DWARF confirmed the struct's
+        # *name*, not its field-level content).
         dwarf_meta = DwarfMetadata(
             has_dwarf=True,
             structs={"S": StructLayout(name="S", byte_size=8, fields=[])},
@@ -243,17 +279,113 @@ class TestBinaryDepthWithDwarf:
         old_b = project_snapshot_to_depth(old, "binary")
         new_b = project_snapshot_to_depth(new, "binary")
         result = checker.compare(old_b, new_b)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_genuine_dwarf_struct_break_is_still_caught_via_snap_dwarf(self) -> None:
+        # The identical field-type break, but expressed as a real
+        # difference between each side's own DWARF StructLayout (not
+        # merely the header-parsed RecordType) -- caught by the separate,
+        # DWARF-native `diff_platform._diff_dwarf` detector, which reads
+        # `snap.dwarf` directly and is never touched by this module.
+        old_layout = StructLayout(
+            name="S",
+            byte_size=8,
+            fields=[FieldInfo(name="x", type_name="int", byte_offset=0, byte_size=4)],
+        )
+        new_layout = StructLayout(
+            name="S",
+            byte_size=8,
+            fields=[
+                FieldInfo(name="x", type_name="double", byte_offset=0, byte_size=8)
+            ],
+        )
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[TypeField(name="x", type="int")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            from_headers=True,
+            dwarf=DwarfMetadata(has_dwarf=True, structs={"S": old_layout}),
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[TypeField(name="x", type="int")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            from_headers=True,
+            dwarf=DwarfMetadata(has_dwarf=True, structs={"S": new_layout}),
+        )
+        old_b = project_snapshot_to_depth(old, "binary")
+        new_b = project_snapshot_to_depth(new, "binary")
+        result = checker.compare(old_b, new_b)
+        assert result.verdict != checker.Verdict.NO_CHANGE
+        assert {c.kind.value for c in result.changes} == {"struct_field_type_changed"}
+
+    def test_dwarf_only_snapshot_keeps_types_wholesale(self) -> None:
+        # from_headers=False -- a genuinely DWARF/symbols-only dump, where
+        # `types` itself was populated FROM DWARF directly
+        # (dwarf_snapshot.py), so no header-vs-DWARF ambiguity exists.
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[TypeField(name="x", type="int")],
+                    origin=ScopeOrigin.UNKNOWN,
+                )
+            ],
+            from_headers=False,
+            dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[TypeField(name="x", type="double")],
+                    origin=ScopeOrigin.UNKNOWN,
+                )
+            ],
+            from_headers=False,
+            dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        old_b = project_snapshot_to_depth(old, "binary")
+        new_b = project_snapshot_to_depth(new, "binary")
+        result = checker.compare(old_b, new_b)
         assert result.verdict == checker.Verdict.BREAKING
         assert {c.kind.value for c in result.changes} == {"type_field_type_changed"}
 
-    def test_header_only_fact_still_cleared(self) -> None:
+    def test_header_only_constant_still_cleared_with_dwarf_present(self) -> None:
         old, new = _headers_only_pair(dwarf=True)
         old_b = project_snapshot_to_depth(old, "binary")
         new_b = project_snapshot_to_depth(new, "binary")
         result = checker.compare(old_b, new_b)
-        # The pair differs only in `constants` (a header-only fact) -- with
-        # DWARF present, structural facts survive but the constant value
-        # must still be cleared, exactly the same as the no-DWARF case.
+        # The pair differs only in `constants` (a header-only fact, always
+        # cleared) -- `types`/`enums`/`typedefs` are identical between
+        # old/new here, so this doesn't exercise the from_headers gate
+        # above; it only pins that a from_headers=True snapshot's constants
+        # are still cleared with DWARF present.
         assert result.verdict == checker.Verdict.NO_CHANGE
 
 
@@ -425,92 +557,124 @@ class TestHiddenVisibilityDropped:
         assert result.changes == []
 
 
-class TestPerRecordDwarfConfirmation:
-    """Pinned gap 6: DWARF confirmation is per-record, not whole-snapshot."""
+class TestExportTableGatesVisibilityPromotion:
+    """Pinned gap 8: a header-declared-``PUBLIC``-without-evidence
+    declaration must not be promoted to ``ELF_ONLY`` unless the platform's
+    own export table actually confirms it."""
 
-    def _snap(self, *, field_type: str, member_value: int) -> AbiSnapshot:
-        # `dwarf.has_dwarf=True` alone (the old, coarser gate) would keep both
-        # `Confirmed` and `Unconfirmed` below; only `Confirmed`/`ConfirmedE`
-        # are in `structs`/`enums`, so only they should survive.
-        dwarf_meta = DwarfMetadata(
-            has_dwarf=True,
-            structs={
-                "Confirmed": StructLayout(name="Confirmed", byte_size=8, fields=[])
-            },
-            enums={
-                "ConfirmedE": EnumInfo(
-                    name="ConfirmedE", underlying_byte_size=4, members={}
+    def _snap(self, version: str, *, include_unconfirmed: bool) -> AbiSnapshot:
+        variables = [
+            Variable(
+                name="pub_v",
+                mangled="pub_v",
+                type="int",
+                visibility=Visibility.PUBLIC,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+        ]
+        if include_unconfirmed:
+            # A header parser's own "declared public, without contrary
+            # evidence" fallback (dumper_castxml._variable_visibility's
+            # un-emitted-CPO case) -- PUBLIC, but the compiler never
+            # actually emitted a symbol for it, so it's absent below.
+            variables.append(
+                Variable(
+                    name="cpo",
+                    mangled="cpo",
+                    type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
                 )
-            },
-        )
+            )
+        elf = ElfMetadata(symbols=[ElfSymbol(name="pub_v", is_default=True)])
         return AbiSnapshot(
             library="lib",
-            version="1",
+            version=version,
             from_headers=True,
-            dwarf=dwarf_meta,
-            types=[
-                RecordType(
-                    name="Confirmed",
-                    kind="struct",
-                    size_bits=64,
-                    fields=[TypeField(name="x", type=field_type)],
-                    origin=ScopeOrigin.PUBLIC_HEADER,
-                ),
-                RecordType(
-                    name="Unconfirmed",
-                    kind="struct",
-                    size_bits=64,
-                    fields=[TypeField(name="x", type=field_type)],
-                    origin=ScopeOrigin.PUBLIC_HEADER,
-                ),
-            ],
-            enums=[
-                EnumType(
-                    name="ConfirmedE",
-                    members=[EnumMember(name="A", value=member_value)],
-                    origin=ScopeOrigin.PUBLIC_HEADER,
-                ),
-                EnumType(
-                    name="UnconfirmedE",
-                    members=[EnumMember(name="A", value=member_value)],
-                    origin=ScopeOrigin.PUBLIC_HEADER,
-                ),
-            ],
+            variables=variables,
+            elf=elf,
         )
 
-    def test_only_dwarf_confirmed_records_survive(self) -> None:
+    def test_unconfirmed_declaration_is_dropped(self) -> None:
         projected = project_snapshot_to_depth(
-            self._snap(field_type="int", member_value=0), "binary"
+            self._snap("1", include_unconfirmed=True), "binary"
         )
-        assert [t.name for t in projected.types] == ["Confirmed"]
-        assert [e.name for e in projected.enums] == ["ConfirmedE"]
+        assert [v.name for v in projected.variables] == ["pub_v"]
 
-    def test_unconfirmed_record_break_is_not_reported(self) -> None:
-        old = self._snap(field_type="int", member_value=0)
-        new = self._snap(field_type="double", member_value=1)
-        # Only the *unconfirmed* declarations differ between old/new.
-        old.types = [t for t in old.types if t.name == "Unconfirmed"]
-        new.types = [t for t in new.types if t.name == "Unconfirmed"]
-        old.enums = [e for e in old.enums if e.name == "UnconfirmedE"]
-        new.enums = [e for e in new.enums if e.name == "UnconfirmedE"]
+    def test_confirmed_declaration_still_promoted(self) -> None:
+        projected = project_snapshot_to_depth(
+            self._snap("1", include_unconfirmed=True), "binary"
+        )
+        assert projected.variables[0].visibility is Visibility.ELF_ONLY
+
+    def test_removing_an_unconfirmed_declaration_is_not_reported(self) -> None:
+        old = self._snap("1", include_unconfirmed=True)
+        new = self._snap("2", include_unconfirmed=False)
         old_b = project_snapshot_to_depth(old, "binary")
         new_b = project_snapshot_to_depth(new, "binary")
         result = checker.compare(old_b, new_b)
         assert result.verdict == checker.Verdict.NO_CHANGE
+        assert result.changes == []
 
-    def test_confirmed_record_break_is_still_reported(self) -> None:
-        old = self._snap(field_type="int", member_value=0)
-        new = self._snap(field_type="double", member_value=0)
-        # Only the *confirmed* struct's field type differs.
-        old.types = [t for t in old.types if t.name == "Confirmed"]
-        new.types = [t for t in new.types if t.name == "Confirmed"]
-        old.enums = []
-        new.enums = []
-        old_b = project_snapshot_to_depth(old, "binary")
-        new_b = project_snapshot_to_depth(new, "binary")
-        result = checker.compare(old_b, new_b)
-        assert result.verdict == checker.Verdict.BREAKING
-        assert {c.kind.value for c in result.changes} == {"type_field_type_changed"}
+    def test_no_platform_table_falls_back_to_looser_behavior(self) -> None:
+        # A synthetic/incomplete snapshot with no elf/pe/macho block at all
+        # keeps the pre-existing (looser) behavior rather than being
+        # stripped to nothing -- `_exported_symbol_names` returns `None`,
+        # not an empty set, precisely to make this distinction.
+        snap = AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            variables=[
+                Variable(
+                    name="cpo",
+                    mangled="cpo",
+                    type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        projected = project_snapshot_to_depth(snap, "binary")
+        assert [v.name for v in projected.variables] == ["cpo"]
+        assert projected.variables[0].visibility is Visibility.ELF_ONLY
+
+
+class TestBuildSourcePackCoverageProjection:
+    """Pinned gap 9: a projected-away L4/L5 payload's own coverage row must
+    not still claim ``PRESENT``/``PARTIAL``."""
+
+    def _pack(self) -> BuildSourcePack:
+        pack = BuildSourcePack(root=Path("/tmp/pack"))
+        pack.source_abi = SourceAbiSurface()
+        pack.source_graph = SourceGraphSummary()
+        pack.manifest.coverage = [
+            LayerCoverage(
+                layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT
+            ),
+            LayerCoverage(
+                layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT
+            ),
+            LayerCoverage(
+                layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT
+            ),
+        ]
+        return pack
+
+    def test_l4_l5_coverage_demoted_at_build_depth(self) -> None:
+        capped = project_build_source_pack_to_depth(self._pack(), "build")
+        assert capped is not None
+        rows = {row.layer: row.status for row in capped.manifest.coverage}
+        assert rows[DataLayer.L3_BUILD.value] == CoverageStatus.PRESENT
+        assert rows[DataLayer.L4_SOURCE_ABI.value] == CoverageStatus.NOT_COLLECTED
+        assert rows[DataLayer.L5_SOURCE_GRAPH.value] == CoverageStatus.NOT_COLLECTED
+
+    def test_coverage_untouched_at_source_depth(self) -> None:
+        capped = project_build_source_pack_to_depth(self._pack(), "source")
+        assert capped is not None
+        rows = {row.layer: row.status for row in capped.manifest.coverage}
+        assert rows[DataLayer.L4_SOURCE_ABI.value] == CoverageStatus.PRESENT
+        assert rows[DataLayer.L5_SOURCE_GRAPH.value] == CoverageStatus.PRESENT
 
 
 class TestOutOfBandPackCapping:

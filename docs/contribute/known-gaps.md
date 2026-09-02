@@ -6271,14 +6271,66 @@ looked like the obvious fix and wasn't.
   evidence for these two families (`DwarfMetadata.structs`/`.enums`, keyed
   by name), so an uninstantiated header-only record sitting alongside
   unrelated real DWARF content was incorrectly retained; a new
-  `_dwarf_confirmed_names` now filters `types`/`enums` per declaration name
-  instead of by the whole-snapshot flag. `typedefs` stay unconditionally
-  cleared below `headers` regardless — this codebase's model has no
-  per-name DWARF lookup for them at all — and function/variable
-  *signatures* deliberately keep the coarser whole-snapshot gate, since no
-  per-function DWARF-confirmation fact exists anywhere in the model for a
-  projection to read back (a real per-function extension is
-  separately-justified future work, not attempted here).
+  `_dwarf_confirmed_names` filtered `types`/`enums` per declaration name
+  instead of by the whole-snapshot flag. **Superseded by the fourth review
+  round below** — the per-record name check turned out to be one level too
+  narrow.
+
+  **A fourth review round (Codex, same PR) found three more real gaps, all
+  now closed:** (1) the third round's per-record `_dwarf_confirmed_names`
+  fix retained a *header-derived* `RecordType`/`EnumType` wholesale
+  whenever DWARF merely confirmed the same-named struct/enum *existed* —
+  DWARF confirming a struct's name says nothing about whether its *fields*
+  agree with the header's own spelling (DWARF only ever backfills numeric
+  *layout* onto a header-derived record — `dumper_layout_backfill.py`'s
+  own scope — never its field-level type text), so a header-only field-type
+  change could still leak through a `binary`-depth projection whenever an
+  unrelated real DWARF struct happened to share the changed struct's name.
+  Fixed by replacing the per-record name check with a whole-snapshot
+  `not snap.from_headers` requirement (`_structural_facts_are_dwarf_
+  confirmed`, replacing `_dwarf_confirmed_names`/`_snapshot_has_native_
+  debug_info`): `AbiSnapshot.from_headers`'s own field comment states the
+  real distinction precisely — "DWARF-derived declarations populate the
+  SAME functions/types lists [as header-derived ones] but must NOT be
+  mistaken for header-level evidence." Only a genuinely DWARF/symbols-only
+  dump (`from_headers` is `False`, where `dwarf_snapshot.py`'s own
+  DWARF-only extraction path populates `types`/`enums`/`typedefs`/
+  function-variable signatures directly from DWARF DIEs) may now keep
+  those fields wholesale; a header-derived snapshot always clears them at
+  `binary` depth, same as the no-DWARF-at-all case. A real DWARF-visible
+  struct/enum layout change on a header-derived snapshot is still caught
+  independently, through the untouched `snap.dwarf.structs`/`.enums`
+  fields via `diff_platform._diff_dwarf` (which this module never clears,
+  and degrades gracefully with no header model at all — "If the header
+  model is absent... fall back to comparing all DWARF types", that
+  function's own comment) — function/variable signature changes have no
+  equivalent independent DWARF-native detector, a real, separately-
+  justified gap (it would need a new per-declaration confirmation fact the
+  dumper does not currently record), not attempted here. (2) a function/
+  variable promoted from a header parser's own "declared public, without
+  contrary evidence" fallback (e.g. `dumper_castxml._variable_visibility`'s
+  un-emitted customization-point-object case) was promoted to `ELF_ONLY`
+  the same as a genuinely exported one, manufacturing a false
+  `*_removed`/`*_removed_elf_only` finding for a declaration no real
+  binary-only dump would ever have seen as a symbol at all. Fixed with a
+  new `_exported_symbol_names` (a small, local copy of the same "raw
+  export table" read this codebase's `crosscheck_base.py`/
+  `snapshot_exports.py`/`post_manifest.py`/`diff_unnamed_types.py` each
+  already keep their own independent copy of, since a `policy`-layer
+  caller may import `model`/`compare` but not `extract`, ADR-061, where
+  most of those live): a surviving function/variable must now also appear
+  in the snapshot's own raw ELF/PE/Mach-O export table before promotion to
+  `ELF_ONLY`; skipped (falls back to the prior, looser behavior) when no
+  platform table was parsed at all, so a synthetic/incomplete snapshot
+  isn't stripped to nothing. (3) nulling a `BuildSourcePack`'s
+  `source_abi`/`source_graph` between `build` and `source` left their own
+  `LayerCoverage` rows in `pack.manifest.coverage` still claiming
+  `PRESENT`/`PARTIAL` — `evidence_report.optional_coverage()` returns
+  those rows directly, so a report could still claim source-ABI/
+  source-graph evidence backed a comparison the depth ceiling actually
+  excluded it from. Fixed with `_mark_layers_not_collected`, demoting the
+  L4/L5 coverage rows to `NOT_COLLECTED` in the same place the payload
+  fields themselves are cleared.
 
 ### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
 
