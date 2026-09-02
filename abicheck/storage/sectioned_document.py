@@ -148,13 +148,16 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
     carried (`missing_required_section_fields`, via `export_legacy_snapshot`)
     -- the same corruption checks a directory package's
     `read_legacy_snapshot_document` already applies, since both ultimately
-    share `export_legacy_snapshot` -- or a section entirely absent from
-    `sections` that `SECTION_SCHEMA_VERSIONS_KEY` records this document was
-    actually written with (Codex review: `export_legacy_snapshot` only
-    iterates the sections it is handed, so a whole section dropped from
-    `sections` -- as opposed to a field dropped from within one -- is
-    otherwise invisible to it, and reads back as empty/confirmed-absent
-    rather than failing loudly).
+    share `export_legacy_snapshot` -- or `sections` and
+    `SECTION_SCHEMA_VERSIONS_KEY` naming different section sets in EITHER
+    direction (Codex/CodeRabbit review, fresh evidence on both sides:
+    `export_legacy_snapshot` only iterates the sections it is handed, so a
+    whole section dropped from `sections` is invisible to it and reads back
+    as empty/confirmed-absent; a section added to `sections` without a
+    matching version-inventory entry is exported anyway, silently merging
+    unaccounted-for content -- mirroring the identical missing/extra pair
+    `read_legacy_snapshot_document` already checks for the directory
+    format).
     """
     sections_raw = document.get(SECTIONS_KEY)
     if not isinstance(sections_raw, Mapping):
@@ -180,6 +183,21 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
             f"that its own {SECTION_SCHEMA_VERSIONS_KEY!r} advertises -- the "
             "document is truncated or was hand-edited; refusing to silently "
             "synthesize empty defaults for lost evidence"
+        )
+    # The inverse contradiction (Codex/CodeRabbit review, fresh evidence): a
+    # section present in `sections` but never listed in
+    # SECTION_SCHEMA_VERSIONS_KEY is unaccounted-for content -- e.g. a
+    # semantic_ir object injected by a hand edit -- that export_legacy_
+    # snapshot would otherwise still merge in. Reject that too, mirroring
+    # read_legacy_snapshot_document's identical missing/extra pair for the
+    # directory-backed format.
+    extra_sections = set(sections_raw) - set(stated_sections)
+    if extra_sections:
+        raise ValueError(
+            f"sectioned document has section(s) {sorted(extra_sections)} that "
+            f"its own {SECTION_SCHEMA_VERSIONS_KEY!r} does not advertise -- "
+            "the document is truncated or was hand-edited; refusing to merge "
+            "unaccounted-for section content"
         )
     store = InMemoryObjectStore()
     sections: dict[str, ObjectRef] = {}

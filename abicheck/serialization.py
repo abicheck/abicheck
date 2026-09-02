@@ -1416,10 +1416,22 @@ def load_snapshot_document(path: str | Path) -> dict[str, Any]:
     """
     from .snapshot_io import read_snapshot_text
 
-    d: dict[str, Any] = json.loads(read_snapshot_text(path))
-    if is_sectioned_document(d):
-        return from_sectioned_document(d)
-    return d
+    parsed: Any = json.loads(read_snapshot_text(path))
+    # json.loads() can return a list/str/number/bool/None for arbitrary
+    # JSON text -- this function's own dict[str, Any] contract (and
+    # is_sectioned_document's "sections" key lookup below) both assume a
+    # JSON object, so a non-dict root must fail loudly here rather than
+    # surface as a confusing downstream AttributeError/KeyError, or (for a
+    # list/str, where `in` is still syntactically valid but semantically
+    # wrong) silently misclassify as flat/sectioned (Codex review).
+    if not isinstance(parsed, dict):
+        raise SnapshotError(
+            f"{path}: expected a JSON object at the document root, got "
+            f"{type(parsed).__name__}"
+        )
+    if is_sectioned_document(parsed):
+        return from_sectioned_document(parsed)
+    return parsed
 
 
 def save_snapshot(

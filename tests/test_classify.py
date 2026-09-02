@@ -143,6 +143,35 @@ class TestAbiJsonClassifier:
         p.write_text("<root/>")
         assert self.clf.accepts(p) is None
 
+    def test_incidental_section_kind_property_rejected(self, tmp_path: Path) -> None:
+        """Codex/CodeRabbit review, fresh evidence: an ordinary JSON file
+        that happens to carry a "section_kind" property for an unrelated
+        reason (not a real abicheck sectioned document -- no top-level
+        "sections" object) must not be misclassified as an ABI snapshot.
+        An earlier version of this fingerprint matched the too-generic
+        nested "section_kind" key alone."""
+        p = tmp_path / "release-notes.json"
+        p.write_text('{"section_kind": "changelog", "entries": []}')
+        assert self.clf.accepts(p) is False
+
+    def test_real_sectioned_snapshot_accepted(self, tmp_path: Path) -> None:
+        """ADR-063 Phase 8: a real sectioned document (the "sections" key
+        genuinely at the top level, `to_sectioned_document`'s own shape)
+        must still be recognized as an ABI snapshot."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json
+
+        p = tmp_path / "libfoo.json"
+        p.write_text(json.dumps(sectioned, indent=2))
+        assert self.clf.accepts(p) is True
+
     def test_fingerprint_registry_extensible(self) -> None:
         """Ensure FINGERPRINTS is extensible and restored after mutation."""
         original_len = len(AbiJsonClassifier.FINGERPRINTS)

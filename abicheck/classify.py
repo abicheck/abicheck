@@ -173,12 +173,19 @@ class AbiJsonClassifier(FileClassifier):
             # (storage.sectioned_document) buries "library" inside the
             # "declarations" section's payload, well past _JSON_PROBE_BYTES
             # for a real snapshot -- so it needs its own fingerprint.
-            # "section_kind" is each SectionDTO's own wrapper key and
-            # appears within the first few lines of every sectioned
-            # document (top-level "sections" -> first section -> its own
-            # "section_kind"), so it is a reliable early marker.
+            # Matches the document's own top-level "sections" key the same
+            # way the entry above matches top-level "library" (preceded by
+            # start-of-string/comma/brace, so a "sections" key nested deep
+            # inside an unrelated document doesn't match this position) --
+            # not the nested per-SectionDTO "section_kind" key an earlier
+            # version of this fingerprint matched, which is common and
+            # generic enough to false-positive on an ordinary JSON file
+            # carrying that property for an unrelated reason (Codex/
+            # CodeRabbit review, fresh evidence). "sections" is always
+            # within the first few lines: `to_sectioned_document()` writes
+            # it as the second top-level key, right after `schema_version`.
             "abicheck/sectioned-v1",
-            re.compile(r'"section_kind"\s*:'),
+            re.compile(r'(^|[,{])\s*"sections"\s*:\s*\{', re.MULTILINE),
         ),
         # Future formats — uncomment or add new entries here:
         # ("libabigail-json-v2", re.compile(r'"abi-corpus"\s*:', re.MULTILINE)),

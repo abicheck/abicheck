@@ -123,6 +123,27 @@ class TestFromSectionedDocumentRejectsMalformedInput:
         with pytest.raises(ValueError, match="declarations"):
             from_sectioned_document(sectioned)
 
+    def test_an_unadvertised_extra_section_is_refused(self) -> None:
+        """The inverse of the missing-section case: a section present in
+        `sections` but absent from `SECTION_SCHEMA_VERSIONS_KEY` -- e.g.
+        injected by a hand edit -- must be refused too, mirroring the
+        directory-backed package's identical missing/extra pair (Codex/
+        CodeRabbit review, fresh evidence). Self-consistent (its own
+        `section_kind` field matches its key) so this exercises the new
+        manifest cross-check itself, not export_legacy_snapshot's unrelated
+        pre-existing per-DTO kind-consistency check."""
+        from abicheck.storage.dto import SEMANTIC_IR_SECTION_KIND, SectionDTO
+
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        sectioned = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        assert SEMANTIC_IR_SECTION_KIND not in sectioned[SECTIONS_KEY]
+        bogus_dto = SectionDTO(
+            section_kind=SEMANTIC_IR_SECTION_KIND, section_schema_version=1, payload={}
+        )
+        sectioned[SECTIONS_KEY][SEMANTIC_IR_SECTION_KIND] = bogus_dto.to_dict()
+        with pytest.raises(ValueError, match=SEMANTIC_IR_SECTION_KIND):
+            from_sectioned_document(sectioned)
+
     def test_a_missing_section_schema_versions_key_is_refused(self) -> None:
         doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
         sectioned = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)

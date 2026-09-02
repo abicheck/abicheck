@@ -171,9 +171,11 @@ class TestDumpFollowDeps:
         assert "libc.so.6" in sonames
 
     def test_dump_without_follow_deps_no_dep_info(self, runner, real_lib):
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
         result = runner.invoke(main, ["dump", str(real_lib)])
         assert result.exit_code == 0
-        data = _extract_json(result.output)
+        data = from_sectioned_document(_extract_json(result.output))
         assert data.get("dependency_info") is None
 
     def test_dump_follow_deps_to_file(self, runner, real_lib, tmp_path):
