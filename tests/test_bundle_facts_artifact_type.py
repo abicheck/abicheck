@@ -31,6 +31,7 @@ import pytest
 
 from abicheck.bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
+    BundleFacts,
     capture_bundle_facts,
 )
 from abicheck.bundle_facts_serialization import looks_like_bundle_facts_document
@@ -77,6 +78,16 @@ class TestBundleFactsArtifactTypeDiscriminator:
         d = bundle_facts_to_dict(facts)
         assert d["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
         assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
+    def test_artifact_type_is_not_a_constructor_parameter(self) -> None:
+        # Codex review, fresh evidence: init=False makes the marker an
+        # invariant a caller cannot break by construction -- a hand-built
+        # BundleFacts(artifact_type="other") would otherwise write a
+        # document bundle_facts_from_dict rejects (or, worse, one the
+        # archive writer silently overwrites with the real marker, so the
+        # two writers would disagree about what they just wrote).
+        with pytest.raises(TypeError):
+            BundleFacts(artifact_type="something-else")  # type: ignore[call-arg]
 
     def test_missing_artifact_type_defaults_to_current_on_a_true_v1_document(
         self,

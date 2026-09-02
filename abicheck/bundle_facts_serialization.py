@@ -204,11 +204,18 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     # malformed, not legacy -- silently defaulting it would let the
     # discriminator schema_version 2 exists to enforce be bypassed by the
     # exact documents it's meant to catch.
+    # `artifact_type` is never passed into the `BundleFacts(...)` call below:
+    # the field is `init=False` (always `BUNDLE_FACTS_ARTIFACT_TYPE`), and
+    # every path that doesn't raise here has already proven the document's
+    # own value equals that constant -- there is nothing left to carry
+    # through (Codex review, fresh evidence: passing a caller-suppliable
+    # value into an `init=False` field isn't even possible, so this also
+    # keeps the constructor call honest about that).
     if "artifact_type" in d:
-        artifact_type = d["artifact_type"]
-        if artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
+        given_artifact_type = d["artifact_type"]
+        if given_artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
             raise ValueError(
-                f"bundle facts: unexpected artifact_type {artifact_type!r} "
+                f"bundle facts: unexpected artifact_type {given_artifact_type!r} "
                 f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
             )
     else:
@@ -227,7 +234,6 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
                 f"bundle facts: schema_version {schema_version} requires an "
                 "'artifact_type' key (added in schema_version 2); none was given"
             )
-        artifact_type = BUNDLE_FACTS_ARTIFACT_TYPE
     # "per_library_snapshots" is mandatory, not merely defaulted: a
     # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
     # must not silently load as a valid, current-schema *empty* bundle --
@@ -249,7 +255,6 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         )
     raw_manifest = d.get("manifest")
     return BundleFacts(
-        artifact_type=artifact_type,
         schema_version=schema_version,
         variant_fingerprint=str(
             d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)

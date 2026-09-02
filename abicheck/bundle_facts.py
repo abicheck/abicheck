@@ -141,7 +141,11 @@ class BundleFacts:
     ``DT_SONAME``, else it silently goes unreported for a stored-baseline
     comparison a live one would have caught (Codex review). Empty for a
     caller that didn't pass real paths, same as ``filesystem_aliases``.
-    ``artifact_type`` is always :data:`BUNDLE_FACTS_ARTIFACT_TYPE` here."""
+    ``artifact_type`` is always :data:`BUNDLE_FACTS_ARTIFACT_TYPE` here --
+    ``init=False`` makes that an invariant a caller cannot break by
+    construction (``BundleFacts(artifact_type="other")`` is a ``TypeError``,
+    not a document that later writers and readers would disagree about --
+    Codex review, fresh evidence)."""
 
     schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT
@@ -149,7 +153,7 @@ class BundleFacts:
     manifest: InstantiationManifest | None = None
     filesystem_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
     library_filenames: dict[str, str] = field(default_factory=dict)
-    artifact_type: str = BUNDLE_FACTS_ARTIFACT_TYPE
+    artifact_type: str = field(default=BUNDLE_FACTS_ARTIFACT_TYPE, init=False)
 
 
 def capture_bundle_facts(
