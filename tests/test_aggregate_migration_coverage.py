@@ -177,6 +177,98 @@ def test_scan_report_with_a_real_verdict_dispatches_to_the_scan_reader_first(
     assert loaded.reason is not None and "malformed" in loaded.reason
 
 
+def test_bundle_incomplete_preserves_the_completed_members_compatibility_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `BUNDLE_INCOMPLETE` is the one abort
+    sentinel of the four where a real comparison DID complete -- it fires
+    only after every member scanned cleanly and just the cross-library
+    bundle audit itself never ran. `run_outcome.compatibility` already
+    preserves the worst completed member's real verdict; forcing
+    `verdict=None` the way a true abort does would discard it and wrongly
+    report the target as unavailable/unanalyzed even though it has a real,
+    already-established result.
+    """
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUNDLE_INCOMPLETE",
+                "exit_code": 1,
+                "per_artifact": [
+                    {
+                        "artifact": "a.so",
+                        "verdict": "COMPATIBLE_WITH_RISK",
+                        "exit_code": 0,
+                    }
+                ],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "COMPATIBLE_WITH_RISK",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "extraction_error",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.COMPATIBLE_WITH_RISK
+    assert loaded.reason is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("extraction_error",)
+
+
+def test_release_lowercase_not_comparable_is_recognized_as_a_blocking_refusal(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a `compare-release` summary's own
+    lowercase `"not_comparable"` sentinel (ADR-050 D2) is a real string, not
+    JSON `null` -- distinct from `scan`'s uppercase `NOT_COMPARABLE` and from
+    a native `compare`'s `verdict: null` + `reason.kind` shape, so it was
+    caught by neither special-case branch and fell through to the generic
+    "report carried no ABI verdict" unavailable reading, silently discarding
+    a blocking `run_outcome.operational: "not_comparable"`.
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "not_comparable",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "exit": {"code": 16, "not_comparable_contribution": 1},
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "not_comparable",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.reason == "not comparable (release refused comparison)"
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("not_comparable",)
+
+
 @pytest.mark.parametrize("prior_contribution", [2, 4])
 def test_late_budget_overflow_preserves_a_real_prior_break_in_the_gate_exit_code(
     tmp_path: Path, prior_contribution: int

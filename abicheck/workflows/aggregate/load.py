@@ -153,6 +153,31 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _run_outcome_compatibility_verdict(data: Mapping[str, Any]) -> Verdict | None:
+    """The report's own top-level ``run_outcome.compatibility``, parsed as a
+    real :class:`Verdict`, or ``None``.
+
+    Distinct from :func:`parse_report_verdict`, which reads the sibling
+    top-level ``verdict`` key: for a report whose own root ``verdict`` is
+    itself a non-``Verdict`` sentinel string (a `scan --artifact-set`'s
+    ``BUNDLE_INCOMPLETE``, a `compare-release` summary's lowercase
+    ``"not_comparable"``), ``run_outcome.compatibility`` may still carry a
+    real, already-established completed-comparison result the sentinel
+    string itself discards (Codex review, fresh evidence -- see the two call
+    sites below).
+    """
+    run_outcome = data.get("run_outcome")
+    if not isinstance(run_outcome, Mapping):
+        return None
+    raw = run_outcome.get("compatibility")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return Verdict(raw)
+    except ValueError:
+        return None
+
+
 #: The four synthetic ``verdict`` strings a native `scan` abort report (single
 #: binary or set-level) can carry at its own root, mapped to the aggregate
 #: gate's blocking-category label -- shared between the root-level check
@@ -466,9 +491,27 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         blocking_categories = frozenset(
             {scan_abort_category}
         ) | _member_abort_categories(data)
+        # `BUNDLE_INCOMPLETE` is the one sentinel of the four where a real
+        # comparison DID complete (Codex review, fresh evidence): unlike a
+        # true abort (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`/
+        # `NOT_COMPARABLE`, where nothing was ever compared), it fires only
+        # after every member scanned cleanly and just the cross-library
+        # bundle audit itself never ran -- `run_outcome_dict_for_scan`
+        # already preserves the worst completed member's real compatibility
+        # verdict at `run_outcome.compatibility` (`service_scan.run_scan_
+        # set`'s own `member_verdicts=` wiring). Forcing `verdict=None` here
+        # the same way the other three sentinels do would discard that real,
+        # already-established result and wrongly report the target as
+        # unavailable/unanalyzed even though the operational `extraction_
+        # error` axis alone already accounts for the skipped audit.
+        compat_verdict = (
+            _run_outcome_compatibility_verdict(data)
+            if raw_scan_verdict == _SCAN_BUNDLE_INCOMPLETE_VERDICT
+            else None
+        )
         return _LoadedReport(
             target_id=target_id,
-            verdict=None,
+            verdict=compat_verdict,
             gate=GateInfo(
                 exit_code=max(COVERAGE_INCOMPLETE_EXIT, _scan_abort_prior_exit(data)),
                 blocking=True,
@@ -477,7 +520,11 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             ),
             library=data.get("library"),
             head_sha=head_sha,
-            reason=f"scan aborted before completing a comparison ({scan_abort_category})",
+            reason=(
+                None
+                if compat_verdict is not None
+                else f"scan aborted before completing a comparison ({scan_abort_category})"
+            ),
             path=path,
             contract_coverage_exit=max(_contract_coverage_exit(data), contract_axis),
             contract_coverage_incomplete=(
@@ -487,12 +534,67 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 _contract_coverage_declared(data) or contract_declared
             ),
             analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
-            # No comparison ran at all -- unlike the operational-error branch
-            # above, there is no partial finding set to preserve, and (unlike
-            # that branch) this target is not "analyzed" for the finding
-            # matrix either.
-            findings=None,
-            effective_config_digest=None,
+            # No comparison ran at all for a true abort -- there is no
+            # partial finding set to preserve, and this target is not
+            # "analyzed" for the finding matrix either. `BUNDLE_INCOMPLETE`
+            # (compat_verdict resolved above) is the one exception: its
+            # members did complete, so their findings are real, just not
+            # exhaustive (the bundle audit itself never ran).
+            findings=(
+                _incomplete_findings(data) if compat_verdict is not None else None
+            ),
+            effective_config_digest=(
+                effective_config_digest if compat_verdict is not None else None
+            ),
+        )
+    # ADR-050 D2 (Codex review, fresh evidence): a `compare-release` summary's
+    # own lowercase `"not_comparable"` sentinel is a REAL string (not JSON
+    # `null`) -- distinct from `scan`'s uppercase `NOT_COMPARABLE` handled
+    # above, and from a native `compare`'s `verdict: null` + `reason.kind`
+    # shape handled below -- so it is neither a `Verdict` member nor caught
+    # by either of those two branches. It previously fell through to the
+    # generic "report carried no ABI verdict" unavailable reading further
+    # below, silently discarding `run_outcome.operational: "not_comparable"`
+    # and letting a warn/optional/tolerated-unexpected target policy pass a
+    # refused release comparison. `_format_release_json`/`resolve_release_
+    # exit_decision_for_report` already compute a correct top-level
+    # `run_outcome` for this sentinel, and this shape carries no root
+    # `severity` key unless a severity scheme was active -- either way
+    # `GateInfo.from_report_data` already reads both correctly, so it is
+    # reused here rather than hand-rolling a second run_outcome reader.
+    if data.get("verdict") == "not_comparable":
+        try:
+            release_gate = GateInfo.from_report_data(data)
+        except _MalformedGate as exc:
+            return _LoadedReport(
+                target_id=target_id,
+                verdict=None,
+                gate=None,
+                library=data.get("library"),
+                head_sha=head_sha,
+                reason=f"report gate decision is malformed: {exc}",
+                path=path,
+            )
+        compat_verdict = _run_outcome_compatibility_verdict(data)
+        return _LoadedReport(
+            target_id=target_id,
+            verdict=compat_verdict,
+            gate=release_gate,
+            library=data.get("library"),
+            head_sha=head_sha,
+            reason=(
+                None
+                if compat_verdict is not None
+                else "not comparable (release refused comparison)"
+            ),
+            path=path,
+            contract_coverage_exit=_contract_coverage_exit(data),
+            contract_coverage_incomplete=_contract_coverage_incomplete(data),
+            contract_coverage_declared=_contract_coverage_declared(data),
+            analysis_assurance_exit=_analysis_assurance_exit(data),
+            effective_config_digest=(
+                effective_config_digest if compat_verdict is not None else None
+            ),
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a

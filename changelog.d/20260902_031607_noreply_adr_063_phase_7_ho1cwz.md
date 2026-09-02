@@ -437,6 +437,26 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   nested `diff.severity` gate against it. A nested severity exit 4 paired
   with a root `run_outcome.gate: "none"` was accepted as a nonblocking
   gate instead of failing closed (Codex review, fresh evidence).
+- **A `compare-release` summary's own lowercase `"not_comparable"`
+  sentinel (ADR-050 D2 — a real string, distinct from `scan`'s uppercase
+  `NOT_COMPARABLE` and from a native `compare`'s `verdict: null` +
+  `reason.kind` shape) is now recognized as a blocking refusal too.**
+  Previously caught by neither special-case branch, it fell through to
+  the generic "report carried no ABI verdict" unavailable reading,
+  silently discarding `run_outcome.operational: "not_comparable"` and
+  letting a warn/optional/tolerated-unexpected target policy pass a
+  refused release comparison. Reuses `GateInfo.from_report_data` (Codex
+  review, fresh evidence).
+- **`BUNDLE_INCOMPLETE` now preserves the worst completed member's real
+  compatibility verdict instead of forcing `verdict: None` the way a
+  true scan abort does.** Unlike `BUDGET_OVERFLOW`/
+  `EVIDENCE_CONTRACT_ERROR`/`NOT_COMPARABLE` (where nothing was ever
+  compared), `BUNDLE_INCOMPLETE` fires only after every member scanned
+  cleanly and just the cross-library bundle audit itself never ran —
+  `run_outcome.compatibility` already carries that real result, and
+  discarding it wrongly reported the target as unavailable/unanalyzed
+  even though it had a real, already-established outcome (Codex review,
+  fresh evidence).
 
 ### Changed
 
