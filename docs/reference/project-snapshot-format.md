@@ -15,13 +15,16 @@ generated: false
 > additionally writes a real, directory-backed `ProjectSnapshot` package
 > ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)) — it
 > never replaces `-o`/`--output`'s
-> [`.abi.json` output](snapshot-format.md), which stays the default and
-> only user-facing format. `compare`/`scan --against` accept a package
-> directory as an input path (in place of a `.abi.json` file), read back
-> into the same in-memory representation either way. This is the first
-> user-reachable slice of the format, not the whole design — see the ADR's
-> own Status for what is and is not implemented (in particular: single
-> artifact per package only, no `.tar.zst` transport form).
+> [`.abi.json` output](snapshot-format.md), which stays the **default**
+> format (and the only one `dump` writes without the flag). `compare`/
+> `scan --against` accept a package directory as an input path (in place of
+> a `.abi.json` file) — so a package this page describes is now genuinely
+> reachable, not just internal, even though `.abi.json` remains what every
+> command writes by default — read back into the same in-memory
+> representation either way. This is the first user-reachable slice of the
+> format, not the whole design — see the ADR's own Status for what is and
+> is not implemented (in particular: single artifact per package only, no
+> `.tar.zst` transport form).
 
 `ProjectSnapshot` is ADR-062's replacement for four separate persistence
 shapes (per-library `.abi.json` snapshots, baseline sets, `BundleFacts`, and

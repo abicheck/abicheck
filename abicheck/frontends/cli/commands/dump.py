@@ -300,7 +300,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
 
     reject_dry_run_with_output(dry_run, output)
-    reject_dry_run_with_output(dry_run, project_snapshot_dir)
+    if dry_run and project_snapshot_dir is not None:
+        raise click.UsageError(
+            "--dry-run cannot be combined with --project-snapshot-dir: a dry "
+            "run performs no analysis and writes no package directory."
+        )
     if output is None and snapshot_compression not in ("auto", "none"):
         raise click.UsageError(
             f"--compression {snapshot_compression} requires -o/--output -- "

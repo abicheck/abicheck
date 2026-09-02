@@ -345,7 +345,20 @@ def legacy_section_from_dto(dto: SectionDTO) -> dict[str, Any]:
     section's current version first, then returns a fresh, mutable, fully
     unfrozen `dict` of its payload (`to_dict()["payload"]`, never the DTO's
     own frozen `MappingProxyType`/`tuple` storage — a shallow `dict(...)`
-    copy would leave every nested container still frozen)."""
+    copy would leave every nested container still frozen).
+
+    Rejects a `semantic_ir`-kind `dto`, symmetrically with
+    `legacy_section_to_dto`'s own refusal to *encode* one -- that kind has
+    its own decoder (`semantic_ir_from_dto`), and returning its raw payload
+    here would silently bypass it rather than raising the identical error
+    `legacy_section_to_dto` already gives a caller that gets this backwards
+    (CodeRabbit review).
+    """
+    if dto.section_kind not in LEGACY_SECTION_KINDS:
+        raise ValueError(
+            f"{dto.section_kind!r} is not a legacy section kind -- expected "
+            f"one of {LEGACY_SECTION_KINDS}"
+        )
     current = migrate_section_dto(dto)
     payload = current.to_dict()["payload"]
     assert isinstance(payload, dict)

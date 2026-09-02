@@ -122,10 +122,12 @@ open. See "Landed in Phase 1" below.
   **Implemented except the `.tar.zst` transport form**, which remains open.
 - **A1.2** A v1-v25 import adapter maps every existing snapshot into the v2
   in-memory model, preserving source schema and producer generation. No
-  existing baseline is rewritten in place. **Implemented for the
-  `semantic_ir`/`semantic_ir_conflicts` fields onto a typed, D8-constrained
-  representation; every other field travels as one opaque, unmigrated
-  document object** — see "Landed in Phase 1" below.
+  existing baseline is rewritten in place. **Implemented, and now for every
+  document field, not just `semantic_ir`/`semantic_ir_conflicts`**:
+  `storage/legacy_sections.py`'s explicit per-section field split puts the
+  rest onto D8's named sections too (each still carrying its own
+  pre-existing JSON encoding internally, not a further per-field typed
+  decode) — see "Landed in Phase 1" below.
 - **A1.3** A single-library snapshot is representable as a one-artifact
   project, and round-trips through the store unchanged at the semantic-digest
   level. **Implemented** — see `tests/test_project_snapshot_store.py`'s full
