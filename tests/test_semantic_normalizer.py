@@ -908,3 +908,99 @@ def test_normalize_header_ast_dwarf_records_enums_typedefs_unaffected() -> None:
     )
     for entity in ir.occurrences.values():
         assert entity.producer == "dwarf"
+
+
+# ---------------------------------------------------------------------------
+# CanonicalEntity.template_arguments (ADR-063 Phase 6, sixth slice) -- the
+# pure splitter's own edge cases live in
+# tests/test_semantic_normalizer_template_args.py; these test the wiring
+# into normalize_header_ast itself, backend-agnostic (any producer string
+# behaves identically here -- see extract/semantic_normalizer_template_
+# args.py's own module docstring for why).
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_header_ast_non_template_record_has_confirmed_empty_template_arguments() -> (
+    None
+):
+    scope = (Namespace("ns"),)
+    rt = _record("Widget", "ns::Widget", scope, "Widget")
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.template_arguments.value == ()
+    assert entity.template_arguments.is_present
+
+
+def test_normalize_header_ast_template_record_decomposes_arguments() -> None:
+    scope = (Namespace("ns"),)
+    rt = _record("Box<int, 3>", "ns::Box<int, 3>", scope, "Box<int, 3>")
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.template_arguments.value == ("int", "3")
+
+
+def test_normalize_header_ast_uninstantiated_pattern_is_not_a_template_instantiation() -> (
+    None
+):
+    """clang's ``parse_types()`` never surfaces a concrete specialization,
+    only the bare, unparameterized pattern -- ``Fact.present(())`` here is
+    the CORRECT, confirmed answer for it (it genuinely is not an
+    instantiation), not a gap (see this module's own docstring, "Scope of
+    the sixth slice")."""
+    scope: tuple = ()
+    rt = _record("Box", None, scope, "Box")
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.template_arguments.value == ()
+
+
+def test_normalize_header_ast_enums_functions_variables_typedefs_leave_template_arguments_uncollected() -> (
+    None
+):
+    """None of these can themselves be a template instantiation in this
+    codebase's model -- ``Fact.not_collected()`` (the dataclass default) is
+    unchanged by this slice for all four."""
+    scope = (Namespace("ns"),)
+    et = EnumType(
+        name="Color",
+        qualified_name="ns::Color",
+        entity_id=entity_id_for_enum(scope, "Color"),
+    )
+    fn = _function("f", "void")
+    var = Variable(
+        name="g",
+        mangled="g",
+        type="int",
+        entity_id=entity_id_for_variable((), "g", mangled_name="g"),
+    )
+    typedef_eid = entity_id_for_typedef(scope, "Handle")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[et],
+        typedefs_qualified={"ns::Handle": "int"},
+        typedef_entity_ids={"ns::Handle": typedef_eid},
+        producer="castxml",
+        functions=[fn],
+        variables=[var],
+    )
+    for entity_id in (et.entity_id, fn.entity_id, var.entity_id, typedef_eid):
+        entity = ir.occurrences[OccurrenceId(entity_id)]
+        assert entity.template_arguments.status is FactStatus.NOT_COLLECTED

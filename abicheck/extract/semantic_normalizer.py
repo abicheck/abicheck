@@ -16,7 +16,7 @@
 """``normalize_header_ast`` — projects already-parsed header-AST (and, since
 the fifth slice, DWARF) facts into a real
 :class:`~abicheck.model.semantic_ir.SemanticIR` (ADR-063 Phase 6, second
-through fifth slices).
+through sixth slices).
 
 **Second slice, not the phase's full scope.** The plan
 (``docs/contribute/plans/one-semantic-pipeline.md``, "Phase 6") originally
@@ -116,6 +116,14 @@ two header-AST backends do -- see ``extract/semantic_normalizer_dwarf.py``'s
 own module docstring for the full account, including the real-compiled-
 fixture verification behind each carve-out.
 
+**Scope of the sixth slice.** ``CanonicalEntity.template_arguments``, for
+records only -- a pure, backend-agnostic decomposition of a record's own
+already-canonical compound ``Name<Arg1, Arg2>`` spelling (whatever backend
+produced it), needing no new identity work and no producer-specific branch;
+see ``extract/semantic_normalizer_template_args.py``'s own module docstring
+for the full account, including exactly why functions/typedefs/variables/
+enums stay untouched and what remains unmet for clang.
+
 A typedef whose underlying type neither backend could resolve is stamped
 ``Fact.failed(...)``, not ``Fact.present("?")`` (Codex review, PR #1001):
 both backends spell an unresolved chain with the identical ``"?"``
@@ -189,6 +197,7 @@ from .semantic_normalizer_artifacts import (
     has_unresolved_component,
     is_castxml_opaque_function_type,
 )
+from .semantic_normalizer_template_args import split_template_arguments
 
 __all__ = ["normalize_header_ast"]
 
@@ -535,6 +544,7 @@ def _add_occurrence(
     *,
     producer: str,
     cv_qualification: Fact[tuple[str, ...]] | None = None,
+    template_arguments: Fact[tuple[str, ...]] | None = None,
 ) -> None:
     """Record one occurrence, first-observation-wins on a key collision.
 
@@ -571,6 +581,11 @@ def _add_occurrence(
         **(
             {"cv_qualification": cv_qualification}
             if cv_qualification is not None
+            else {}
+        ),
+        **(
+            {"template_arguments": template_arguments}
+            if template_arguments is not None
             else {}
         ),
     )
@@ -623,11 +638,13 @@ def normalize_header_ast(
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for rt in types:
+        rt_name = rt.qualified_name or rt.name
         _add_occurrence(
             occurrences,
             rt.entity_id,
-            Fact.present(rt.qualified_name or rt.name),
+            Fact.present(rt_name),
             producer=producer,
+            template_arguments=Fact.present(split_template_arguments(rt_name) or ()),
         )
     for et in enums:
         _add_occurrence(

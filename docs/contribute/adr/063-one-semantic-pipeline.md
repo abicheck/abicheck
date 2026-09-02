@@ -571,14 +571,17 @@
   separately-justified extension beyond the availability-bearing subset
   this phase (and D7's initial realization) actually covers.
 - **Phase 6** (one canonical `SemanticIR` between the backends and the
-  checker) has landed five slices — the IR itself and its persistence, the
+  checker) has landed six slices — the IR itself and its persistence, the
   header-AST normalizer for records/enums/typedefs, functions and
   variables, and constants across every header-AST-backed platform
-  (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included), and now
-  DWARF, the first non-header-AST producer; it is
+  (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included), DWARF
+  (the first non-header-AST producer), and now `CanonicalEntity.
+  template_arguments` for records; it is
   **not yet complete**: the PDB/BTF/CTF backends still produce no IR at all,
-  `CanonicalEntity.template_arguments` is never populated by any backend, and
-  a `--dump-manifest` multi-TU dump loses occurrence detail. See this
+  clang produces no occurrence at all for a concrete template
+  specialization (so `template_arguments` cross-backend agreement remains
+  unexercised there), a function template's own argument list is unattempted,
+  and a `--dump-manifest` multi-TU dump loses occurrence detail. See this
   bullet's own "Still not landed" paragraph below for the exact account.
   **First slice — the IR itself, its persistence,
   and the hybrid merge's reconciliation of it — and no parser narrowing.**
@@ -707,24 +710,82 @@
   (`int* const`) and a pointer to const data (`const int*`) with the
   *identical* text, so only the structural field can tell them apart here.
   `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (26→27).
+  **Sixth slice landed: `CanonicalEntity.template_arguments`, for records.**
+  Backend-agnostic and extraction-free, unlike every prior slice's own
+  per-producer work: a concrete class-template specialization's
+  `RecordType.qualified_name`/`name` already embeds its full
+  `Name<Arg1, Arg2>` compound spelling on every backend that surfaces one
+  at all (confirmed with real castxml AND DWARF output — a compiler's own
+  `DW_AT_name` for an emitted instantiation is the identical compound
+  spelling castxml's `<Struct name="Box&lt;int, 3&gt;">` already carries),
+  so decomposing it is a pure function of text this normalizer already
+  reads for `canonical_spelling`, not new identity work:
+  `extract/semantic_normalizer_template_args.py`'s
+  `split_template_arguments` (a bracket/paren/angle-aware text splitter,
+  reused unmodified for whatever backend produced the name) finds the
+  record's own leaf segment's top-level `<...>` and splits its contents on
+  top-level commas, verbatim — deliberately never running each argument
+  through `canonicalize_type_name`, since a plain text split cannot tell a
+  type argument from a non-type one (a literal value, an enumerator) apart
+  from its own text alone, and no concrete cross-backend value-spelling
+  divergence is observed to justify guessing (mirrors the fourth slice's
+  identical reasoning for constants). A closure-typed argument's own raw
+  `"(lambda at <path>:<line>:<col>)"` marker is stored unrenumbered — since
+  `template_arguments` was never added to `qualified_name_segments.
+  _PAYLOAD_FIELD_EXCLUSIONS`, the pre-existing `renumber_anonymous_closure_
+  identities` walk (already reaching every string in `AbiSnapshot.
+  semantic_ir`) canonicalizes it post-hoc to the identical stable ordinal
+  it already gives the SAME marker embedded in the record's own
+  `canonical_spelling`/`EntityId` — confirmed end to end against a real
+  compiled fixture (`test_semantic_ir_end_to_end.py`'s new closure-
+  parameterized-template test): the decomposed argument and the record's
+  own identity key end up carrying byte-identical renumbered text.
+  **clang is a confirmed, named exception, and it is a missing OCCURRENCE,
+  not a wrong FACT**: `dumper_clang.py`'s categorizing walk never treats a
+  `ClassTemplateSpecializationDecl` as record-producing (only the
+  uninstantiated PATTERN, e.g. bare `"Box"`, ever becomes a `RecordType`
+  there), so every clang-produced record this normalizer sees is
+  confirmedly NOT an instantiation — `Fact.present(())` is the CORRECT
+  answer for all of them, not a gap, but clang produces no comparable
+  occurrence at all for a concrete specialization, so the acceptance
+  criteria's own closure-parameterized-template fixture cannot show
+  cross-backend agreement for that entity on clang, only exercise castxml's
+  real decomposition (confirmed with the same new end-to-end test, which
+  asserts this asymmetry directly rather than assuming parity — squarely
+  within this phase's own stated acceptance bar, which explicitly allows a
+  fact/entity only one backend can produce). Functions/typedefs/variables/
+  enums are deliberately untouched: none of them can themselves be a
+  template instantiation the way a record can in this codebase's model (a
+  function template's own instantiation is real, e.g. `identity<int>`, but
+  neither backend's `Function.name` embeds the argument spelling the way a
+  record's compound name does — confirmed with real castxml output: only
+  the Itanium-MANGLED name carries it, needing a real demangler to decode
+  back into argument spellings, a materially larger, separately-scoped
+  project this slice does not attempt).
   **Still not landed, and therefore this phase is not yet complete**: the
   PDB/BTF/CTF backends still produce no `entity_id` at all, so
   extending the normalizer to them is gated on giving each the Phase 2
   `EntityId` treatment first (the same scale of work Phase 2 did for
   ELF/PE/Mach-O, the header-AST backends, and now DWARF, redone per debug
-  format);
-  `CanonicalEntity.template_arguments` is still never populated by any
-  backend — every real writer only ever constructs `canonical_spelling`/
-  `cv_qualification`, so the acceptance-criteria fixture (a
-  closure-parameterized template) remains unmet; and a `--dump-manifest`
-  multi-TU dump loses occurrence detail, because `tu_merge.merge_fragments()`
-  collapses same-identity declarations across TUs into one *before*
-  `normalize_header_ast` ever runs, so a real ODR-duplicate/
-  incomplete-declaration pair spread across two TUs never reaches
-  `SemanticIR.occurrences` as two occurrences the way one spread across two
-  header-AST parses of a single TU already does. See the plan's own "Still
-  not landed, and therefore this phase is not complete" list for the full,
-  current account.
+  format); clang producing no occurrence at all for a concrete template
+  specialization (above) still leaves the acceptance criteria's own
+  cross-backend-agreement bar unmet for that entity, closable only by
+  extending `dumper_clang.py`'s categorizing walk to also recognize
+  `ClassTemplateSpecializationDecl` as record-producing (reusing
+  `extract.headers.clang.templates._specialization_spelling`, already built
+  for the identical qualified-name reconstruction one caller over for
+  scope/base-lookup purposes) — a real, separately-scoped extraction-side
+  project given its own blast radius across `dumper_clang.py`'s entire
+  existing test suite, not a normalizer-only change; a function template's
+  own argument list (above) is a further, separate, unattempted gap; and a
+  `--dump-manifest` multi-TU dump loses occurrence detail, because
+  `tu_merge.merge_fragments()` collapses same-identity declarations across
+  TUs into one *before* `normalize_header_ast` ever runs, so a real
+  ODR-duplicate/incomplete-declaration pair spread across two TUs never
+  reaches `SemanticIR.occurrences` as two occurrences the way one spread
+  across two header-AST parses of a single TU already does. See the plan's
+  own "Still not landed, and therefore this phase is not complete" list for
+  the full, current account.
 - **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
   is **implemented**: `abicheck/policy/outcome.py` (new) defines
   `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`
