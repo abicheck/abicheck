@@ -22,7 +22,18 @@ Phase 2 is establishing across every output format. Its projections are
 needs no serializer of its own), `render_text.py` (the one-line `--stat`
 summary, `render_stat_document`), `render_xml.py` (JUnit),
 `render_markdown.py` (Markdown prose), and `render_html.py` (the HTML
-report). Every output format now crosses this boundary.
+report).
+
+The two prose projections are **not** yet `ReportDocument` consumers, and
+that distinction matters when you reach for one as a model: JSON, SARIF,
+JUnit and `--stat` construct a `ReportDocument` and project it, while
+`render_markdown.py`/`render_html.py` project their own per-section frozen
+structs. Both have the fact-vs-formatting split; neither crosses the single
+canonical document boundary yet (ADR-061 Phase 2 item 1's literal
+acceptance). Converging them is tracked in
+`docs/contribute/plans/duplication-and-convergence-assessment.md`'s Phase 4.
+Note `html_template.render_document` is unrelated despite the name — it
+wraps an assembled body in page chrome.
 
 `render_xml.py` exists because a `ReportDocument` holds JSON values only —
 so a renderer can never be handed a live object graph to mutate — and an

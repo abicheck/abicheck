@@ -4,7 +4,9 @@
   `abicheck/report/render_html.py` is the HTML counterpart to the existing
   `render_json.py`/`render_xml.py`/`render_markdown.py` projections, closing the
   last format that still interleaved formatting decisions with the logic
-  deciding *what* a section contains. Each of `html_report.py`'s section
+  deciding *what* a section contains. (Like Markdown, HTML projects its own
+  per-section structs rather than a `ReportDocument`; converging both prose
+  formats onto that document remains open.) Each of `html_report.py`'s section
   builders split into a `compute_*` function returning a small frozen struct of
   plain values and a `render_*` function that turns that struct into markup and
   makes no decision of its own. Every previous spelling
