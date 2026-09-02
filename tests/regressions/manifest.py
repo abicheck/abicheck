@@ -426,6 +426,8 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_action_compile_context_parity.py",
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
+            "tests/test_explicit_source_extractor_propagation.py",
+            "tests/test_dump_scan_l3_comparability.py",
         ),
         known_gaps=(
             KnownGap(
@@ -440,9 +442,24 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "per-entry-point concern beyond this one profile field, "
                     "include roots, evidence-pack/target attribution, "
                     "safety budgets, suppression/filtering, per-library "
-                    "override, output/report options) — none has yet had "
-                    "this same five-state/full-chain/mutation-check "
-                    "treatment; consumer_compile was chosen as the first "
+                    "override, output/report options) — of these only the "
+                    "frontend concern has since had any of this treatment, "
+                    "and only for one chain: `--ast-frontend` -> the L4 "
+                    "source-ABI replay backend, where `scan` accepted the "
+                    "value and then ignored it "
+                    "(tests/test_explicit_source_extractor_propagation.py, "
+                    "exhaustive over the frontend x env domain, grounded in "
+                    "_make_source_extractor, with the end-to-end half in "
+                    "tests/test_dump_scan_l3_comparability.py). The same "
+                    "concern's *other* consumers (the L2 header parse, the "
+                    "preprocessor/pattern pre-scans) are untouched, and one "
+                    "frontend divergence is deliberately still open rather "
+                    "than closed: an UNFLAGGED `auto` resolves to clang for "
+                    "`scan` and castxml for `dump`/`compare`, which is a "
+                    "real default change to make deliberately (the CLI "
+                    "cleanup phase-two plan's PR 3A item 2), not a "
+                    "propagation bug to patch. consumer_compile was chosen "
+                    "as the first "
                     "worked example specifically because #860/#883's own "
                     "history and this class's pre-existing seed tests "
                     "already pointed at it, not because it's necessarily "

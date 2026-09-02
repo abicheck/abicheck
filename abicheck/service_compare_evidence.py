@@ -61,7 +61,9 @@ __all__ = [
     "SideEvidence",
     "collect_mode_for",
     "dump_collect_mode_for",
+    "L4_SOURCE_EXTRACTORS",
     "effective_frontend",
+    "explicit_source_extractor",
     "normalized_debug_format",
     "reject_compile_db_filter_scope_mismatch",
     "reject_debug_format_for_binaries",
@@ -93,6 +95,95 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
         else header_backend
     )
     return _resolve_header_backend(requested)
+
+
+#: The backends an ``--ast-frontend`` request can actually select for L4
+#: source-ABI replay: the overlap between ``dumper.HEADER_BACKENDS`` (what the
+#: flag accepts) and what ``buildsource.inline._make_source_extractor``
+#: implements. Deliberately *not* every value :func:`effective_frontend` can
+#: return -- ``hybrid`` is an L2-only, dual-backend header-AST mode with no L4
+#: counterpart at all, which is why ``_make_source_extractor`` answers it with
+#: a ``skipped`` ExtractorRecord rather than an extractor. (The ``android``
+#: adapter in ``buildsource.source_extractors.resolver`` is a third L4 backend,
+#: but it needs a pre-captured dump and is unreachable from ``--ast-frontend``,
+#: so no frontend request can ever resolve to it here.)
+L4_SOURCE_EXTRACTORS: frozenset[str] = frozenset({"castxml", "clang"})
+
+
+def explicit_source_extractor(
+    compile: CompileContext | None,
+) -> str | None:
+    """The L4 replay backend explicitly *named*, or ``None`` for anything else.
+
+    Exists so a caller that must not change its own ``auto`` behaviour can
+    still honor a *named* backend the same way every other resolver does.
+    ``scan``'s candidate resolution is that caller: it has always let its L4
+    replay take ``_make_source_extractor``'s own clang reading of ``"auto"``
+    (see ``scan_engine``'s call site), so adopting :func:`effective_frontend`
+    wholesale would newly *require* castxml for a plain ``scan --depth
+    source`` that works with clang today. Answering only the named case keeps
+    that behaviour untouched while closing the real defect underneath it --
+    ``scan --ast-frontend castxml`` silently replaying L4 through clang, which
+    is what made a ``scan --against`` candidate non-comparable with a ``dump``
+    baseline taken with the identical flag.
+
+    **"Named" means ``castxml``/``clang``, never ``auto`` -- including an
+    ``auto`` the user typed out** (Codex review, PR #990). That is a real
+    remaining divergence, not an oversight: ``scan`` resolves ``auto`` to
+    clang and ``dump``/``compare`` resolve it to castxml, so
+    ``--ast-frontend auto`` on both sides still reproduces the spurious
+    ``source_fact_coverage_incomplete`` verdict on unchanged source
+    (reproduced directly while reviewing this). It is deliberately left to
+    the plan's PR 3A item 2, because the only coherent fix is to make the
+    *word* mean one thing across commands -- i.e. the default change this
+    function exists to avoid. Honoring a typed ``auto`` while an omitted one
+    kept clang would be strictly worse: the same word would select different
+    backends depending on whether it was typed, and ``CompileContext.frontend``
+    is the same string either way (the CLI's own typed-vs-default signal
+    exists only to rank an explicit value above a config one, not to change
+    what the value resolves to).
+
+    Deliberately delegates to :func:`effective_frontend` rather than
+    re-deriving the resolution, so an explicit request cannot resolve to one
+    backend here and a different one there: the two agree *by construction*,
+    not by two copies of the same rule staying in sync. ``header_backend`` is
+    passed as ``"auto"`` because it is only consulted when ``compile``
+    states nothing explicit -- the branch this function has already returned
+    ``None`` for.
+
+    **Total over its input domain, and deliberately not a validator.** It
+    answers only "is there an explicit L4 backend request here?", returning
+    ``None`` -- "the caller's own default stands" -- for everything else: a
+    missing context, an ``auto``/unstated frontend, ``hybrid`` and
+    ``android`` (neither is an L4 request this path could honor -- see
+    :data:`L4_SOURCE_EXTRACTORS`), and any value that is not a frontend at
+    all. It never raises.
+
+    That the membership test comes *before* the delegation is the point, not
+    an optimization (CodeRabbit review, PR #990). ``effective_frontend``
+    resolves through ``dumper._resolve_header_backend``, which raises
+    ``ValidationError`` on anything outside the four *header-AST* backends --
+    a strictly narrower set than ``api_types.SUPPORTED_FRONTENDS``, which
+    also admits ``android``. Delegating first would therefore turn a value
+    the typed API calls valid into a crash on ``scan``, which previously
+    could not fail here at all. Today three upstream validators (the CLI's
+    own ``AST_FRONTENDS`` choice, the ``.abicheck.yml`` ``compile.frontend``
+    check, and ``frontend_value_errors``) each reject ``android`` before it
+    could reach a ``scan`` compile context, so this is latent rather than
+    live -- but a resolver that is correct only while two independently
+    maintained vocabularies stay in sync is precisely the failure this whole
+    change set exists to remove. Validating frontends stays those
+    validators' job; this function's job is to answer a question.
+    """
+    if compile is None:
+        return None
+    if compile.frontend.lower() not in L4_SOURCE_EXTRACTORS:
+        return None
+    # Still routed through `effective_frontend` rather than returned
+    # directly, so the "agrees with dump/compare by construction" property
+    # above survives any future normalization it grows.
+    resolved = effective_frontend(compile, "auto")
+    return resolved if resolved in L4_SOURCE_EXTRACTORS else None
 
 
 @dataclasses.dataclass(frozen=True)

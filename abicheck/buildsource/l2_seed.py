@@ -435,7 +435,7 @@ def derive_l2_compile_context(
 
     Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
     resolution precedence (explicit ``--build-info``/``--sources`` pack ->
-    trusted ``--config``/``--build-query`` -> ``build.compile_db`` ->
+    trusted ``--config`` (or a programmatic ``build_query``) -> ``build.compile_db`` ->
     auto-discovered ``compile_commands.json`` -> the inferred build-system
     query) via the same :func:`abicheck.buildsource.inline.collect_inline_pack`
     call — kept as an independent call (rather than folded into

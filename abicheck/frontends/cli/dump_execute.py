@@ -83,8 +83,6 @@ def execute_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
-    build_query: str | None,
-    build_compile_db: str | None,
     allow_build_query: bool,
     legacy_compile_db_tokens: tuple[str, ...],
     legacy_compile_db_matched: bool,
@@ -158,16 +156,16 @@ def execute_dump_cli_run(
     backward compatibility"), never a real trust signal for this call.
     Forwarding it verbatim into ``_gated_build_query_inputs`` -- a Tier-2
     gate written for a programmatic API caller who must opt in -- nulled an
-    explicit ``--config``/``--build-query`` for this execution step alone,
-    contradicting both flags' own documented CLI contract (``--build-query``:
-    "runs automatically as trusted operator input"; ``--config``: "build.
-    query runs only from an explicit --config") and regressing
-    ``perform_elf_dump``, which forwarded both unchanged with no such gate.
-    ``dump``'s CLI is itself the trust boundary an explicit ``--config``/
-    ``--build-query`` already crossed by being typed here at all -- unlike
-    ``scan``'s config-file-sourced ``build.query``, which needs its own
-    ``resolve_effective_allow_query`` "level-implies-query" decision
-    (ADR-037 D4) precisely because it is not operator-typed.
+    explicit ``--config`` for this execution step alone, contradicting that
+    flag's own documented CLI contract ("build.query runs only from an
+    explicit --config") and regressing ``perform_elf_dump``, which forwarded
+    it unchanged with no such gate. ``dump``'s CLI is itself the trust
+    boundary an explicit ``--config`` already crossed by being typed here at
+    all -- unlike ``scan``'s config-file-sourced ``build.query``, which needs
+    its own ``resolve_effective_allow_query`` "level-implies-query" decision
+    (ADR-037 D4) precisely because it is not operator-typed. (Before PR 3C
+    this paragraph also named ``--build-query``, the second authorizer; that
+    flag is removed, so an explicit ``--config`` is the only one left.)
 
     Raises:
         click.UsageError: If *exec_resolved* (or the input it resolves) is
@@ -190,8 +188,6 @@ def execute_dump_cli_run(
             exec_resolved,
             notify=notify,
             build_config=build_config,
-            build_query=build_query,
-            build_compile_db=build_compile_db,
             allow_build_query=allow_build_query,
             legacy_compile_db_tokens=legacy_compile_db_tokens,
             legacy_compile_db_matched=legacy_compile_db_matched,
@@ -213,8 +209,6 @@ def execute_and_write_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
-    build_query: str | None,
-    build_compile_db: str | None,
     legacy_compile_db_tokens: tuple[str, ...],
     legacy_compile_db_matched: bool,
     seed_collect_mode: str | None,
@@ -269,8 +263,6 @@ def execute_and_write_dump_cli_run(
         exec_resolved,
         notify=notify,
         build_config=build_config,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
         allow_build_query=True,
         legacy_compile_db_tokens=legacy_compile_db_tokens,
         legacy_compile_db_matched=legacy_compile_db_matched,
@@ -287,8 +279,6 @@ def execute_and_write_dump_cli_run(
         build_config,
         allow_build_query,
         collect_mode,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
         build_targets=build_targets,
         extractor=header_backend,
         depth=requested_depth,

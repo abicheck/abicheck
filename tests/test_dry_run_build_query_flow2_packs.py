@@ -176,8 +176,6 @@ def test_flow2_sources_pack_with_compile_units_takes_precedence(
             str(src_pack),
             "-H",
             str(header),
-            "--build-query",
-            "cmake -S . -B build",
             "--dry-run",
         ],
     )

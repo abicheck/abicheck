@@ -2148,6 +2148,62 @@ pipelines a fourth time.
   `scan --against` candidate needs one interpreter, not two, before the flags
   that configure it are removed.
 
+  > **LANDED (2026-09-02): `dump --build-query` and `dump --build-compile-db`
+  > are removed.** Both are now a hard usage error (`No such option`, exit
+  > 64) with no hidden alias; `--build-info`, `--build-target` and
+  > `--compile-db-filter` are untouched, being genuine per-run inputs rather
+  > than project build settings. The replacement is the config form this
+  > section already specified (`build.query` / `build.compile_db` in a file
+  > passed with `--config`), which worked before the removal and is unchanged
+  > by it.
+  >
+  > **The removal simplified the trust model rather than merely relocating
+  > it.** The real gate was `cfg_trusted_for_query = build_config is not None
+  > or build_query is not None` -- a bare `--build-query` on the command line
+  > was a second, independent authorizer for executing an arbitrary command.
+  > With the flag gone the gate has exactly one term, so prerequisites 1 and
+  > 2 ("only an explicitly-passed `--config` may authorize executing
+  > `build.query`"; "an auto-discovered `.abicheck.yml` never executes a
+  > query") are now structural rather than conventional: there is no
+  > command-line-only route to execution at all.
+  > `cli_dump_dry_run_build_query.py` lost its own CLI-override parameters
+  > for the same reason, so the mirrored decision cannot drift from the real
+  > one by a term the real one no longer has.
+  >
+  > Scope note: the *engine/typed-API* `build_query`/`build_compile_db`
+  > parameters (`service_dump_pipeline.run_dump_request`,
+  > `buildsource.embed_build_source`, `l2_seed`) are deliberately kept. They
+  > remain meaningful for a Python API caller -- who is the operator, exactly
+  > as an explicit `--config` is -- and removing them is a public-API change
+  > with its own compatibility question, not part of this CLI removal. What
+  > was removed is the whole CLI-layer thread: the two Click options, the
+  > `dump_cmd` parameters, and their forwarding through
+  > `frontends/cli/dump_execute.py`.
+  >
+  > Tests: `tests/test_dump_build_query_flags_removed.py` (new -- both
+  > spellings exit 64, and no surviving build-evidence flag re-opens the
+  > authorization, asserted over the whole surviving flag surface rather than
+  > one representative, with a `touch pwned` query proving non-execution).
+  > `tests/test_dry_run_build_query_contract.py` migrated: the two tests whose
+  > *subject* was the removed CLI override are deleted (the capability is
+  > gone, so they cannot be rewritten), and every other use of the flag was
+  > scaffolding that either drops out or moves to an explicit `--config` via a
+  > new `_explicit_config` helper. Verified end to end against a real
+  > g++-compiled library: an auto-discovered config reports "will NOT run ...
+  > pass --config to authorize it", an explicit `--config` reports the exact
+  > argv, cwd and resulting compile-DB path, and neither executes anything.
+  >
+  > **One ordering caveat, stated rather than glossed:** this entry's own
+  > "all three resolvers converge" rule is satisfied for item 1 (closed by PR
+  > C, ELF and PE/Mach-O alike) but only *partly* for item 2 -- a **named**
+  > L4 backend now resolves identically everywhere (PR #990), while `auto`
+  > still resolves to clang on `scan` and castxml on `dump`/`compare`. That
+  > residue is a frontend-selection divergence, not a `build.query`/
+  > `build.compile_db` interpretation one: the two flags removed here are
+  > interpreted by a single path either way, so the removal does not widen
+  > it. It is recorded here so a future reader does not infer from "3C
+  > landed" that item 2 closed.
+
   > **Status (2026-08-21): still blocked — but on a materially shorter list
   > than this note carried earlier the same day.** Blocker 5's three
   > sub-issues and blocker 6 are now closed (see the second 2026-08-21 note
@@ -2204,7 +2260,55 @@ pipelines a fourth time.
   >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
   >    around a resolve-time embed.
   > 2. **The L4 extractor default still diverges, in more than one pairing.**
-  >    `scan`'s candidate resolution hardcodes `source_extractor="auto"`
+  >    **Update (2026-09-02): the *named-backend* half is closed; the
+  >    `auto` half below remains.** `scan`'s candidate resolution no longer
+  >    ignores a `--ast-frontend`/`compile.frontend` that names a concrete
+  >    backend: `scan_engine`'s call site now passes
+  >    `service_compare_evidence.explicit_source_extractor(
+  >    compile_context) or "auto"`, and that helper *delegates to*
+  >    `effective_frontend` rather than re-deriving a second resolution, so
+  >    an explicit request cannot resolve to one backend on `scan` and a
+  >    different one on `dump`/`compare` — they agree by construction, not by
+  >    two copies of a rule staying in sync. It answers `None` (leaving
+  >    `scan`'s own `"auto"` in place) for a missing context, an unstated
+  >    `auto`, and `hybrid` — the last because `hybrid` is an L2-only
+  >    dual-backend header-AST mode with no L4 extractor at all, so there is
+  >    nothing to honor; forwarding it would reach `_make_source_extractor`'s
+  >    `skipped` branch, which is `dump`'s behaviour but *not* `scan`'s
+  >    today, and `scan` does not call `reject_hybrid_source_frontend`, so
+  >    that would have been a new divergence rather than a closed one.
+  >    Verified against real castxml + clang + g++: the two long-standing
+  >    xfails in `tests/test_dump_scan_l3_comparability.py`
+  >    (`..._is_comparable_on_unchanged_source[castxml]` and
+  >    `..._matches_reported_cli_invocation[castxml]`) now pass outright,
+  >    `_SCAN_KNOWN_DIVERGENT_FRONTENDS` and its whole xfail-signature
+  >    apparatus are gone, and the exhaustive bucket set that apparatus
+  >    inspected was kept — repurposed into positive `_assert_scan_*_is_clean`
+  >    assertions, which are strictly stronger than the `Verdict: NO_CHANGE`
+  >    check they sit next to. Contract tests for the new primitive:
+  >    `tests/test_explicit_source_extractor_propagation.py` (exhaustive over
+  >    the accepted-spelling x `ABICHECK_AST_FRONTEND` domain against a
+  >    hand-written oracle table, grounded in `_make_source_extractor`, plus a
+  >    fast-lane pin on the `scan_engine` call site itself); registered under
+  >    the `config.propagation_completeness` bug class, whose own known gap
+  >    already named "frontend/compiler as a general per-entry-point concern"
+  >    as untreated.
+  >
+  >    **What is deliberately still open**, and is what the rest of this item
+  >    describes: `auto` itself -- **including an `auto` the user typed out**,
+  >    not just an omitted flag (Codex review, PR #990, reproduced directly:
+  >    `--ast-frontend auto` given to both `dump` and `scan --against` over
+  >    unchanged source still yields `COMPATIBLE_WITH_RISK` /
+  >    `source_fact_coverage_incomplete`, because `dump` resolves `auto` to
+  >    castxml and `scan` to clang). Honoring a *typed* `auto` while an
+  >    omitted one kept clang was considered and rejected as strictly worse:
+  >    the same word would select different backends depending on whether it
+  >    was typed, and `CompileContext.frontend` carries the identical string
+  >    either way (the CLI's typed-vs-default signal exists to rank an
+  >    explicit value above a config one, not to change what the value
+  >    resolves to). The only coherent fix is to make the word mean one thing
+  >    across commands, which is the default change below. `scan`'s candidate
+  >    resolution hardcodes `source_extractor="auto"`
   >    (`embed_build_source`, ignoring whatever `--ast-frontend` scan itself
   >    received), which resolves to clang; `compare`'s implicit-dump operand
   >    and the typed `execute_dump_request` pipeline reach
@@ -4608,14 +4712,15 @@ PR E  Action machine-report           = PR 1b — uncapped persisted release
       └─ DELETE --annotate, --annotate-additions — DONE, verified against
          current abicheck/cli.py and action.yml
 PR F  trusted build config            = PR 3C — build.query executes only
-      (blocked on PE/Mach-O, below)     from an explicit --config (a data
+      (DONE)                            from an explicit --config (a data
                                        path like build.compile_db carries no
                                        such restriction), trust receipt in
-                                       --dry-run, fail closed. Blocked on
-                                       PR C's remaining half: handle_non_elf_
-                                       dump (PE/Mach-O) still resolves
-                                       independently of the shared pipeline
-      └─ then DELETE dump --build-query, dump --build-compile-db
+                                       --dry-run, fail closed. Both flags are
+                                       gone; an explicit --config is now the
+                                       only authorizer, so the trust gate has
+                                       one term instead of two
+      └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
+         now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
       (ADR-064 accepted; stage 1a done,   schema / report / Action parity
        stage 1b partially wired)
