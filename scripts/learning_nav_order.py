@@ -20,12 +20,15 @@ For each nav group under the two learning tabs in `mkdocs.yml` (the
 "ABI/API Compatibility" tab's groups and the "Concepts" tab itself) the
 pages' front-matter `level:` values must be non-decreasing in nav order,
 skipping only the series hub. This is the learning-series plan's Goal
-criterion "each nav group is non-decreasing in level", made executable
-without touching the recorded by-question grouping — a *within-group*
-reorder is the fix, never a regrouping.
+criterion "each nav group is non-decreasing in level", made executable.
 
-Branch pages (the ladder's "go deeper" side reads) are included: the ladder
-exempts them from the spine's monotonicity, not from the sidebar's.
+Since the sidebar became the ladder itself (one nav group per step of
+`docs/_meta/learning-ladder.yaml`, enforced by `learning_ladder.py`'s
+sidebar rule), a regression here means the ladder's own order regressed or
+a "go deeper" branch was placed ahead of a lower-level member; the fix is
+in the ladder file and `mkdocs.yml` together. Branch pages are included:
+the ladder exempts them from the spine's monotonicity, not from the
+sidebar's. `nav_groups` is also the nav reader that sidebar rule builds on.
 
 Split out of `check_ai_readiness.py` the same way `adr_status_sync.py` was
 (that script is past the 2000-line hard cap). Pure stdlib — it reads the
@@ -78,22 +81,31 @@ def _strip_comment(line: str) -> str:
     return "".join(out).rstrip()
 
 
-def nav_groups(
-    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
-) -> dict[str, list[str]]:
-    """Map `"<tab> / <group>"` to the ordered page paths under it.
+def _unquote(value: str) -> str:
+    """A nav item's value with one layer of matching YAML quotes removed:
+    `"learn/x.md"` and `'learn/x.md'` name the same page as `learn/x.md`."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
 
-    Only groups under `tabs` are returned. A tab whose direct children are
-    pages (the Concepts tab) is one group named after the tab itself; a tab
-    whose children are groups yields one entry per group. Deeper nesting
-    folds into the nearest enclosing group.
-    """
+
+def _nav_events(
+    mkdocs_text: str, tabs: tuple[str, ...]
+) -> list[tuple[str, str, str | None]]:
+    """The nav block as ordered events: `("tab", tab, None)` when one of
+    `tabs` opens, `("group", key, None)` when a group under it opens,
+    `("subgroup", key, title)` when a group nested inside that group opens,
+    `("subpage", key, path)` for a page inside such a nested group and
+    `("page", key, path)` for a page directly in the group, where `key` is
+    `"<tab> / <group>"` (`"<tab> / <tab>"` for a page directly under the
+    tab). Nesting below a subgroup folds into that subgroup."""
     lines = mkdocs_text.split("\n")
     in_nav = False
-    groups: dict[str, list[str]] = {}
+    events: list[tuple[str, str, str | None]] = []
     tab_indent: int | None = None
     current_tab: str | None = None
     current_group: str | None = None
+    sub_indent: int | None = None  # indent of the open nested group's title
     for raw in lines:
         line = _strip_comment(raw)
         if not line.strip():
@@ -109,31 +121,116 @@ def nav_groups(
             continue
         indent = len(m.group(1))
         title = (m.group(2) or m.group(3) or m.group(4) or "").strip()
-        value = (m.group(5) or "").strip()
+        value = _unquote((m.group(5) or "").strip())
         if tab_indent is None:
             tab_indent = indent
         if indent == tab_indent:
             current_tab = title if title in tabs and not value else None
             current_group = None
-            if current_tab and not value:
-                pass
+            sub_indent = None
+            if current_tab is not None:
+                events.append(("tab", current_tab, None))
             continue
         if current_tab is None:
             continue
         if indent == tab_indent + 2:
+            sub_indent = None
             if value:
                 # a page directly under the tab: the tab is the group
-                key = f"{current_tab} / {current_tab}"
-                groups.setdefault(key, []).append(value)
+                events.append(("page", f"{current_tab} / {current_tab}", value))
                 current_group = None
             else:
                 current_group = f"{current_tab} / {title}"
-                groups.setdefault(current_group, [])
+                events.append(("group", current_group, None))
             continue
+        key = current_group or f"{current_tab} / {current_tab}"
+        if sub_indent is not None and indent <= sub_indent:
+            sub_indent = None  # back out of the nested group
         if value:
-            key = current_group or f"{current_tab} / {current_tab}"
-            groups.setdefault(key, []).append(value)
+            events.append(("subpage" if sub_indent is not None else "page", key, value))
+        elif sub_indent is None:
+            sub_indent = indent
+            events.append(("subgroup", key, title))
+        else:
+            # a group nested inside the nested group: recorded as another
+            # subgroup opening (the rule rejects more than one), its pages
+            # folding into the enclosing nested group
+            events.append(("subgroup", key, title))
+    return events
+
+
+def nav_groups(
+    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
+) -> dict[str, list[str]]:
+    """Map `"<tab> / <group>"` to the ordered page paths under it.
+
+    Only groups under `tabs` are returned. A tab whose direct children are
+    pages (the Concepts tab) is one group named after the tab itself; a tab
+    whose children are groups yields one entry per group. Deeper nesting
+    folds into the nearest enclosing group. Two groups with the same title
+    fold into one key too — `duplicate_nav_groups` names them.
+    """
+    groups: dict[str, list[str]] = {}
+    for kind, key, value in _nav_events(mkdocs_text, tabs):
+        if kind == "tab":
+            continue
+        pages = groups.setdefault(key, [])
+        if kind in ("page", "subpage") and value is not None:
+            pages.append(value)
     return groups
+
+
+def nav_subgroups(
+    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
+) -> dict[str, list[tuple[str, list[str]]]]:
+    """Per group key, the nested groups opened inside it as `(title, pages)`
+    in nav order — the structure `nav_groups` folds away. A page inside a
+    nested group is listed under the most recently opened nested group."""
+    subs: dict[str, list[tuple[str, list[str]]]] = {}
+    for kind, key, value in _nav_events(mkdocs_text, tabs):
+        if kind == "subgroup" and value is not None:
+            subs.setdefault(key, []).append((value, []))
+        elif kind == "subpage" and value is not None and subs.get(key):
+            subs[key][-1][1].append(value)
+    return subs
+
+
+def duplicate_nav_groups(
+    mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
+) -> list[str]:
+    """Group keys that open more than once under one of `tabs`, and tabs
+    that themselves open more than once (reported by their bare name), in
+    order of first appearance — `nav_groups` would silently merge their
+    pages either way."""
+    seen: list[str] = []
+    dupes: list[str] = []
+    for kind, key, _ in _nav_events(mkdocs_text, tabs):
+        if kind not in ("tab", "group"):
+            continue
+        if key in seen and key not in dupes:
+            dupes.append(key)
+        seen.append(key)
+    return dupes
+
+
+def nav_page_count(mkdocs_text: str, page: str) -> int:
+    """How many times `page` is listed anywhere in the nav block — every tab,
+    not only the learning ones the other readers are scoped to."""
+    count = 0
+    in_nav = False
+    for raw in mkdocs_text.split("\n"):
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+        if not in_nav:
+            in_nav = line.startswith("nav:")
+            continue
+        if not line.startswith(" ") and not line.startswith("-"):
+            break
+        m = _NAV_ITEM_RE.match(line)
+        if m and _unquote((m.group(5) or "").strip()) == page:
+            count += 1
+    return count
 
 
 def page_level(docs: Path, page: str) -> str | None:

@@ -18,8 +18,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > **5. Linker & ELF** ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -328,4 +327,4 @@ dependency the library doesn't even define.
 
 ---
 
-**Ladder:** ← [Part 4 — C++ ABI Specifics](04-cpp-abi.md) · Tier 2 · Mechanics · [Part 6 — Subtle & Transitive Breaks](06-transitive-breaks.md) →
+**Ladder:** ← [Part 4 — C++ ABI Specifics](04-cpp-abi.md) · Step 3 · How Breaks Happen · [Part 6 — Subtle & Transitive Breaks](06-transitive-breaks.md) →

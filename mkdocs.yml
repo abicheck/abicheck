@@ -165,73 +165,78 @@ nav:
     - Python API Reference: reference/python-api-reference.md
     - Machine-Readable Metadata: reference/machine-readable-metadata.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
-  # from first principles to expert-level design guidance. Nav-only regroup
-  # (docs/AGENTS.md: nav position and file location are independent, no
-  # redirects needed) -- collapses the old flat 15-entry "Deep Dives" list
-  # and the separately-numbered "Learning Series" into one taxonomy, so a
-  # framing page (Consumer Models), a numbered Part (C++ ABI), and a
-  # split-out deep dive (Class Layout ABI & API) that cover the same kind of
-  # question sit in the same nav group instead of two parallel structures. A
-  # Part's own numbered "Series navigation" breadcrumb (top of each page)
-  # still carries the sequential 0-7 reading order this reshuffle doesn't
-  # remove; the sidebar now groups by *question asked* instead.
+  # from first principles to a multi-binary product in CI. The sidebar IS the
+  # reading order: one numbered group per step of docs/_meta/learning-
+  # ladder.yaml, in step order, holding that step's pages in ladder order
+  # (docs/AGENTS.md "Layout"; scripts/learning_ladder.py's sidebar rule
+  # fails the docs contract when the two drift). An earlier by-question
+  # regroup let the sidebar, the hub's ladder, and the page footers each
+  # tell a different order -- Step 5 pages ahead of Step 3, Part 7 three
+  # groups away from Part 6 -- which is exactly what this layout retires.
+  # Nav position and file location stay independent (no redirects needed).
+  # Parts 0-7 are the numbered spine and read straight through Steps 2-4;
+  # each Part's own "Series navigation" breadcrumb carries that sub-order.
   - ABI/API Compatibility:
-    - Start:
-      - Overview: learn/abi-api-handling.md
-      - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md
+    - Overview: learn/abi-api-handling.md
+    - "1. Start Here":
+      - ABI in Five Minutes: learn/abi-series/abi-in-5-minutes.md
       - How a Break Shows Up: learn/how-a-break-shows-up.md
       - ABI Cheat Sheet: learn/abi-cheat-sheet.md
-    - Define Your Contract:
-      - "Compatibility as a Product Contract": learn/abi-series/00-product-contract.md
+      - Glossary: learn/abi-series/glossary.md
+    - "2. Foundations":
+      - "Part 0: Compatibility as a Product Contract": learn/abi-series/00-product-contract.md
+      - "Part 1: From Source Code to a Running Process": learn/abi-series/01-foundations.md
+      - Your ABI Surface: learn/abi-surface.md
+    - "3. How Breaks Happen":
+      - "Part 2: Symbol Contracts": learn/abi-series/02-symbol-contracts.md
+      - "Part 3: Type Layout": learn/abi-series/03-type-layout.md
+      - "Part 4: C++ ABI": learn/abi-series/04-cpp-abi.md
+      - "Part 5: Linker & ELF": learn/abi-series/05-linker-elf.md
+      - "Part 6: Transitive Breaks": learn/abi-series/06-transitive-breaks.md
+      # The ladder's "go deeper" branches of Parts 4 and 5: optional,
+      # advanced side reads, grouped at the end of the step so the Parts
+      # read in one run and the group stays non-decreasing in level.
+      - Go Deeper (optional):
+        - Class Layout ABI & API: learn/class-layout-abi.md
+        - Exception Unwinding: learn/exception-unwinding-abi.md
+        - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
+        - The MSVC/PE ABI Model: learn/msvc-pe-abi-model.md
+    - "4. Designing for Stability":
+      - "Part 7: Designing for Stability": learn/abi-series/07-designing-for-stability.md
+    - "5. Define Your Contract":
       - Compatibility Direction: learn/compatibility-direction.md
       - Consumer Models: learn/consumer-models.md
       - Build Profile Comparability: learn/build-profile-comparability.md
-      - Your ABI Surface: learn/abi-surface.md
-    - ABI Mechanics:
-      - Foundations: learn/abi-series/01-foundations.md
-      - Symbol Contracts: learn/abi-series/02-symbol-contracts.md
-      - Type Layout: learn/abi-series/03-type-layout.md
-      - C++ ABI: learn/abi-series/04-cpp-abi.md
-      - Linker & ELF: learn/abi-series/05-linker-elf.md
-      - Transitive Breaks: learn/abi-series/06-transitive-breaks.md
-      - Class Layout ABI & API: learn/class-layout-abi.md
-    - Beyond ABI:
       - Static & Header-Only Contracts: learn/static-and-header-only.md
-      - Behavioral & Semantic Compatibility: learn/behavioral-compatibility.md
-      - Data, Wire & Storage Compatibility: learn/data-wire-compatibility.md
-      - Ownership & Lifetime Contracts: learn/ownership-and-lifetime.md
-      - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
-    - Platforms & Toolchains:
-      - Exception Unwinding: learn/exception-unwinding-abi.md
-      - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
-      - Dependency & Runtime Floors: learn/dependency-floors.md
-      - Environment & Toolchain Drift: learn/environment-drift.md
-      - The MSVC/PE ABI Model: learn/msvc-pe-abi-model.md
-    - Designing Stable Interfaces:
-      - Designing for Stability: learn/abi-series/07-designing-for-stability.md
-    # Verification & Assurance is deliberately its own group, not one more
-    # mechanism topic: Define Your Contract/ABI Mechanics/Beyond ABI/
-    # Platforms & Toolchains teach mechanisms (what a change does), this
-    # asks the categorically different "how do you catch it" question.
-    - Verification & Assurance:
-      - "Detecting Breaks": learn/abi-series/08-detection.md
-      - "Assurance Beyond Static Checking": learn/assurance-methods.md
-    # Practice: the moments a check runs and what a report must show — the
-    # "now do it on a real project" question, one owner per practice topic.
-    - Practice:
+    # Steps 1-5 teach the problem and the reader's own promise; from here
+    # on the subject is catching breaks -- the categorically different
+    # "how do you catch it" question, where checking tools enter.
+    - "6. Detect Breaks":
+      - Detecting Breaks: learn/abi-series/08-detection.md
+      - Assurance Beyond Static Checking: learn/assurance-methods.md
+    # The moments a check runs and what a report must show -- the "now do
+    # it on a real project" question, one owner per practice topic.
+    - "7. In Practice":
       - Where in the Pipeline: learn/where-in-the-pipeline.md
       - "Report the Surface, Not Only the Breaks": learn/surface-growth.md
       - Rollout and Governance: learn/rollout-and-governance.md
       - Triage a Suspicious Finding: learn/triage-a-finding.md
-    # At Scale: a release of several binaries, and the libraries whose contract
-    # is an instantiation matrix rather than an export table.
-    - At Scale:
+    # A release of several binaries, the libraries whose contract is an
+    # instantiation matrix rather than an export table, and the floors a
+    # deployment sits on.
+    - "8. At Scale":
       - "Products, Not Libraries": learn/products-not-libraries.md
       - Template- and Header-Heavy Libraries: learn/template-heavy-libraries.md
       - How System Libraries Stay Compatible: learn/system-library-discipline.md
+      - Dependency & Runtime Floors: learn/dependency-floors.md
+      - Environment & Toolchain Drift: learn/environment-drift.md
       - Packages and Consumers: learn/packages-and-consumers.md
-    - Quick Reference:
-      - "Glossary": learn/abi-series/glossary.md
+    # What no static comparison can decide.
+    - "9. Beyond Static ABI":
+      - Behavioral & Semantic Compatibility: learn/behavioral-compatibility.md
+      - Data, Wire & Storage Compatibility: learn/data-wire-compatibility.md
+      - Ownership & Lifetime Contracts: learn/ownership-and-lifetime.md
+      - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
   # The case catalog: every break scenario as a compilable fixture, browsable
   # by verdict (what abicheck reports) or by category (what kind of change).
   - Examples:
