@@ -123,6 +123,12 @@ def _owner_pairs(
 #: provenance is *recorded* (see :func:`evidenced_producers`).
 _HEADER_AST_BACKENDS: frozenset[str] = frozenset({"castxml", "clang"})
 
+#: Every ``ast_producer`` spelling this build understands. ``serialization``'s
+#: own reliability computations record that the field has always held exactly
+#: these three, verified against every write site -- so a *fourth* string is
+#: not a producer this build can reason about (see :func:`evidenced_producers`).
+_KNOWN_AST_PRODUCERS: frozenset[str] = _HEADER_AST_BACKENDS | {"hybrid"}
+
 
 def evidenced_producers(
     *,
@@ -145,8 +151,20 @@ def evidenced_producers(
     - ``castxml``/``clang`` only when header provenance is **recorded**
       (an inferred ``from_headers`` is a guess a legacy DWARF-only dump
       satisfies too); a recorded ``ast_producer`` narrows to that one
-      backend, ``"hybrid"`` (or an unrecorded producer on a confirmed
-      header snapshot) admits both.
+      backend, and ``"hybrid"`` admits both.
+
+      An **absent** ``ast_producer`` also admits both, but an
+      *unrecognized* one admits neither (Codex review, PR #995): those are
+      different states, not one. ``None`` means the document format did not
+      carry the field yet, and its recorded ``from_headers`` still says a
+      header-AST backend ran -- only which one is unknown, and each field's
+      own ``*_facts_reliable`` computation in ``serialization.py`` is what
+      answers that conservatively. A fourth *spelling* means the document
+      names a producer this build cannot identify (``ast_producer`` has held
+      exactly ``castxml``/``clang``/``hybrid`` at every write site), so this
+      build cannot say what it produces, and the falsy ``""`` is the same
+      malformed case. Crediting both there let a header-only fact stay
+      ``PRESENT`` on a document naming neither backend.
     - ``elf``/``pe``/``macho`` from the document's own ``platform``.
 
     **No debug-info producer is ever credited from a debug block.** The
@@ -207,7 +225,7 @@ def evidenced_producers(
     if header_provenance_confirmed:
         if ast_producer in _HEADER_AST_BACKENDS:
             evidenced.add(ast_producer)
-        else:
+        elif ast_producer is None or ast_producer == "hybrid":
             evidenced |= _HEADER_AST_BACKENDS
     if platform in {"elf", "pe", "macho"}:
         evidenced.add(platform)
