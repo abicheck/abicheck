@@ -177,6 +177,132 @@ def test_scan_report_with_a_real_verdict_dispatches_to_the_scan_reader_first(
     assert loaded.reason is not None and "malformed" in loaded.reason
 
 
+def test_operational_error_preserves_a_completed_librarys_real_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (second round): a release's top-level
+    `verdict: "ERROR"` names only the OPERATIONALLY failed library -- when a
+    sibling library completed with a real result, `run_outcome.
+    compatibility` already preserves it. Forcing `Verdict.BREAKING`
+    unconditionally discarded that real result; the gate's own exit-4 floor
+    stays unconditional either way (an operational failure blocks
+    regardless of what else completed cleanly)."""
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [
+                    {"name": "a", "verdict": "ERROR"},
+                    {"name": "b", "verdict": "COMPATIBLE_WITH_RISK"},
+                ],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "COMPATIBLE_WITH_RISK",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "extraction_error",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.COMPATIBLE_WITH_RISK
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert loaded.gate.blocking_categories == ("operational_error",)
+
+
+def test_late_budget_overflow_preserves_a_real_completed_compatibility_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (second round): a *late* `BUDGET_
+    OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` abort can also carry a real
+    completed verdict in `run_outcome.compatibility` -- not only
+    `BUNDLE_INCOMPLETE`. Reading it unconditionally (not gated to one
+    sentinel) recovers it here too, with no regression for a report where
+    nothing genuinely completed (that case has no real `compatibility` to
+    read, so `_run_outcome_compatibility_verdict` still returns `None`)."""
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "API_BREAK",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "budget_overflow",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.API_BREAK
+    assert loaded.reason is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking_categories == ("budget_overflow",)
+
+
+def test_not_comparable_refusal_with_run_outcome_blocks_via_operational_axis_only(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `report.not_comparable.
+    not_comparable_document()` always writes a top-level `run_outcome`
+    (`compatibility: null`, `gate: none`, `operational: not_comparable`) for
+    this exact shape -- read it directly rather than fabricating
+    `Verdict.BREAKING`/exit 4 unconditionally. The orthogonal fold floors at
+    exit 1 ("only the operational axis blocks"), consistent with every
+    other operational-failure sentinel in this module. A report with NO
+    `run_outcome` (pre-2.48) still gets the old forced exit-4/BREAKING
+    shape -- see `TestNotComparableReportsBlockAggregation` in
+    `tests/test_aggregate.py`, which is pinned to that exact fallback and
+    must keep passing unchanged."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "not_comparable",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 1
+    assert loaded.gate.blocking_categories == ("not_comparable",)
+    assert loaded.reason is not None and "scope_mismatch" in loaded.reason
+
+
 def test_bundle_incomplete_preserves_the_completed_members_compatibility_verdict(
     tmp_path: Path,
 ) -> None:

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from abicheck.change_registry_types import Verdict
+from abicheck.policy.outcome import fold_gate_and_operational
 
 from .contracts import (
     _BOOTSTRAP_VERDICT,
@@ -47,6 +48,8 @@ from .gate import (
     _contract_coverage_incomplete,
     _is_valid_contribution,
     _MalformedGate,
+    _run_outcome_blocking_categories,
+    _run_outcome_gate_and_operational,
     contract_coverage_blocks,
 )
 from .reconcile import ReportFindings, parse_report_findings
@@ -416,9 +419,24 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     # optional / unexpected policy could let pass, silently downgrading a hard
     # operational failure to a coverage gap.
     if data.get("verdict") == _OPERATIONAL_ERROR_VERDICT:
+        # Codex review, fresh evidence: a release's `run_outcome.compatibility`
+        # may already carry another library's real, completed verdict (the
+        # `ERROR` string names only the OPERATIONALLY failed one) -- read it
+        # rather than always fabricating `Verdict.BREAKING`. Falls back to the
+        # synthetic `Verdict.BREAKING` when no structured `run_outcome` is
+        # present (a pre-2.48 report, or a run_outcome-less writer), preserving
+        # this branch's original forced-blocking behavior exactly. The gate's
+        # own `exit_code`/`blocking_categories` stay unconditional either way
+        # -- an operational failure floors at 4 regardless of what else
+        # completed cleanly.
+        error_compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
-            verdict=Verdict.BREAKING,
+            verdict=(
+                error_compat_verdict
+                if error_compat_verdict is not None
+                else Verdict.BREAKING
+            ),
             gate=GateInfo(
                 exit_code=4,
                 blocking=True,
@@ -492,23 +510,26 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             {scan_abort_category}
         ) | _member_abort_categories(data)
         # `BUNDLE_INCOMPLETE` is the one sentinel of the four where a real
-        # comparison DID complete (Codex review, fresh evidence): unlike a
-        # true abort (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`/
-        # `NOT_COMPARABLE`, where nothing was ever compared), it fires only
-        # after every member scanned cleanly and just the cross-library
-        # bundle audit itself never ran -- `run_outcome_dict_for_scan`
-        # already preserves the worst completed member's real compatibility
-        # verdict at `run_outcome.compatibility` (`service_scan.run_scan_
-        # set`'s own `member_verdicts=` wiring). Forcing `verdict=None` here
-        # the same way the other three sentinels do would discard that real,
-        # already-established result and wrongly report the target as
-        # unavailable/unanalyzed even though the operational `extraction_
-        # error` axis alone already accounts for the skipped audit.
-        compat_verdict = (
-            _run_outcome_compatibility_verdict(data)
-            if raw_scan_verdict == _SCAN_BUNDLE_INCOMPLETE_VERDICT
-            else None
-        )
+        # comparison typically DID complete: unlike a true abort (nothing
+        # ever compared), it fires only after every member scanned cleanly
+        # and just the cross-library bundle audit itself never ran --
+        # `run_outcome_dict_for_scan` already preserves the worst completed
+        # member's real compatibility verdict at `run_outcome.compatibility`
+        # (`service_scan.run_scan_set`'s own `member_verdicts=` wiring).
+        # Codex review, fresh evidence (second round): a *late* `BUDGET_
+        # OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` abort can carry a real
+        # completed verdict there too -- the writer reconstructs it from
+        # whatever completed before the abort fired -- so this reads
+        # `run_outcome.compatibility` unconditionally for all four sentinels
+        # rather than only `BUNDLE_INCOMPLETE`. `_run_outcome_compatibility_
+        # verdict` already returns `None` for an old/run_outcome-less report
+        # or one where nothing genuinely completed, so this is a pure
+        # widening with no regression for those cases. Forcing `verdict=
+        # None` when a real one is available would discard it and wrongly
+        # report the target as unavailable/unanalyzed even though the
+        # operational axis alone already accounts for the abort/skipped
+        # audit itself.
+        compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
             verdict=compat_verdict,
@@ -607,25 +628,53 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     # --on-missing-required warn / discovered-only mode, while a genuine
     # not_comparable result is exactly the "we don't actually know if this
     # is safe" case this whole ADR exists to never treat as silently OK.
-    # Mapped to the same forced-blocking shape the operational-error branch
-    # above already uses -- a synthetic BREAKING verdict with a gate that
-    # bypasses the legacy/report gate lookup entirely -- so it is folded
-    # into exit_code() unconditionally, coverage settings notwithstanding.
+    # Historically mapped to the same forced-blocking shape the operational-
+    # error branch above uses -- a synthetic BREAKING verdict with a gate
+    # bypassing the legacy/report gate lookup entirely, kept below as the
+    # fallback for a report predating `run_outcome` (schema < 2.48). Codex
+    # review, fresh evidence: `report.not_comparable.not_comparable_
+    # document()` now always writes a top-level `run_outcome` for this exact
+    # shape (`compatibility: null`, `gate: none`, `operational: not_
+    # comparable`) -- read it directly when present, the same way the
+    # release's own lowercase `"not_comparable"` branch above already does,
+    # rather than fabricating `Verdict.BREAKING`/exit 4 unconditionally. The
+    # orthogonal fold (`fold_gate_and_operational(NONE, NOT_COMPARABLE)`)
+    # floors at exit 1 -- "only the operational axis blocks" -- consistent
+    # with every other operational-failure sentinel in this module rather
+    # than a fabricated compatibility-axis 4.
     if "verdict" in data and data.get("verdict") is None:
         reason_obj = data.get("reason")
         if isinstance(reason_obj, dict) and isinstance(reason_obj.get("kind"), str):
             kind = reason_obj["kind"]
             message = reason_obj.get("message")
             detail = f": {message}" if isinstance(message, str) and message else ""
-            return _LoadedReport(
-                target_id=target_id,
-                verdict=Verdict.BREAKING,
-                gate=GateInfo(
+            run_outcome = _run_outcome_gate_and_operational(data)
+            if run_outcome is not None:
+                refusal_gate_dec, refusal_operational = run_outcome
+                refusal_exit_code = fold_gate_and_operational(
+                    refusal_gate_dec, refusal_operational
+                )
+                refusal_gate = GateInfo(
+                    exit_code=refusal_exit_code,
+                    blocking=refusal_exit_code != 0,
+                    blocking_categories=_run_outcome_blocking_categories(
+                        refusal_gate_dec, refusal_operational
+                    ),
+                    from_report=True,
+                )
+                refusal_verdict = _run_outcome_compatibility_verdict(data)
+            else:
+                refusal_gate = GateInfo(
                     exit_code=4,
                     blocking=True,
                     blocking_categories=("not_comparable",),
                     from_report=True,
-                ),
+                )
+                refusal_verdict = Verdict.BREAKING
+            return _LoadedReport(
+                target_id=target_id,
+                verdict=refusal_verdict,
+                gate=refusal_gate,
                 library=data.get("library"),
                 head_sha=head_sha,
                 reason=f"not comparable ({kind}){detail}",

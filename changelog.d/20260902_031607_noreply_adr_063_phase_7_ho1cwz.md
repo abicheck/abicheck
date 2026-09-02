@@ -457,6 +457,29 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   discarding it wrongly reported the target as unavailable/unanalyzed
   even though it had a real, already-established outcome (Codex review,
   fresh evidence).
+- **Three more forced-blocking `_load_report_file` branches now read a
+  report's real completed compatibility axis from `run_outcome`
+  wherever available, instead of always fabricating a synthetic
+  verdict/exit code** (Codex review, fresh evidence, second round):
+  - The operational `"ERROR"` branch (a release library that failed to
+    dump/extract/compare) previously always forced `Verdict.BREAKING`,
+    discarding a *sibling* library's real completed result (e.g.
+    `COMPATIBLE_WITH_RISK`) that `run_outcome.compatibility` already
+    carries. The gate's own exit-4 floor stays unconditional either way.
+  - `run_outcome.compatibility` is now read unconditionally for all four
+    scan abort sentinels, not only `BUNDLE_INCOMPLETE` — a *late*
+    `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` can carry a real
+    completed verdict too, reconstructed by the writer from whatever
+    finished before the abort fired. Pure widening: a report where
+    nothing genuinely completed still reads `None`, unchanged.
+  - A native `compare`'s own `verdict: null` + `reason.kind` refusal
+    (`report.not_comparable.not_comparable_document()`) now reads its
+    own top-level `run_outcome` when present, rather than always forcing
+    `Verdict.BREAKING`/exit 4 — the orthogonal fold floors at exit 1
+    ("only the operational axis blocks"), matching every other
+    operational-failure sentinel in this module. A report predating
+    `run_outcome` (schema < 2.48) still gets the original forced
+    exit-4/BREAKING fallback, unchanged.
 
 ### Changed
 
