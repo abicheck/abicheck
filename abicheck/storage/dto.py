@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..model.semantic_ir import SemanticIR
+from .canonical import canonical_form
 from .guards import (
     identity_text as _identity_text,
     mapping as _mapping,
@@ -144,6 +145,18 @@ class SectionDTO:
                 f"got {self.section_schema_version!r}"
             )
         _mapping(self.payload, "payload")
+        # A fresh, normalized structure -- never the caller's own mapping.
+        # `payload` is a frozen dataclass field, but `Mapping`/`dict` are
+        # themselves mutable, so holding the caller's object let a later
+        # mutation of that same object (or of `dto.payload` directly, since
+        # nothing prevents reaching into a plain dict) silently change this
+        # DTO's content -- including the bytes `to_dict()` later returns --
+        # after construction already validated it (Codex review).
+        # `canonical_form` both copies (every nested mapping/sequence is
+        # rebuilt) and normalizes, so two payloads that are the same content
+        # in a different key/insertion order also compare and serialize
+        # identically from here on.
+        object.__setattr__(self, "payload", canonical_form(self.payload))
 
     def to_dict(self) -> dict[str, Any]:
         return {

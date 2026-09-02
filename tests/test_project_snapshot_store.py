@@ -7,6 +7,7 @@ and D6 manifest/ref writer/reader (ADR-062 A1.1's other half).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ from abicheck.storage.dto import (
     semantic_ir_from_dto,
 )
 from abicheck.storage.import_v1 import import_legacy_snapshot
+from abicheck.storage.versioning import StorageVersions
 
 
 def _snapshot_with_ir() -> AbiSnapshot:
@@ -98,6 +100,43 @@ class TestDirectoryObjectStore:
         )
         assert expected.exists()
 
+    def test_a_corrupted_json_object_is_refused_rather_than_silently_returned(
+        self, tmp_path: Path
+    ) -> None:
+        """A file substituted, corrupted, or hand-edited under a digest's own
+        path must never come back as if it were the addressed content."""
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put({"a": 1})
+        other_digest = store.put({"a": 2})
+        _algorithm, _sep, hexdigest = digest.partition(":")
+        path = tmp_path / "objects" / "sha256" / hexdigest[:2] / f"{hexdigest}.json.zst"
+        # Overwrite the first object's file with the *second* object's real,
+        # validly-compressed bytes -- a corruption a naive read/parse would
+        # not notice, since the substituted content is itself well-formed.
+        _other_algorithm, _other_sep, other_hex = other_digest.partition(":")
+        other_path = (
+            tmp_path / "objects" / "sha256" / other_hex[:2] / f"{other_hex}.json.zst"
+        )
+        path.write_bytes(other_path.read_bytes())
+        with pytest.raises(ValueError, match="does not match its requested digest"):
+            store.get(digest)
+
+    def test_a_corrupted_raw_object_is_refused_rather_than_silently_returned(
+        self, tmp_path: Path
+    ) -> None:
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put(b"real content")
+        other_digest = store.put(b"a different payload entirely")
+        _algorithm, _sep, hexdigest = digest.partition(":")
+        _other_algorithm, _other_sep, other_hex = other_digest.partition(":")
+        path = tmp_path / "objects" / "sha256" / hexdigest[:2] / f"{hexdigest}.bin.zst"
+        other_path = (
+            tmp_path / "objects" / "sha256" / other_hex[:2] / f"{other_hex}.bin.zst"
+        )
+        path.write_bytes(other_path.read_bytes())
+        with pytest.raises(ValueError, match="does not match its requested digest"):
+            store.get(digest)
+
 
 class TestManifestRoundTrip:
     def test_full_package_round_trips_through_a_real_directory(
@@ -161,3 +200,95 @@ class TestManifestRoundTrip:
         assert (tmp_path / "refs" / "variants" / "default.json").is_file()
         assert (tmp_path / "refs" / "artifacts" / "libfoo.json").is_file()
         assert any((tmp_path / "objects").rglob("*.json.zst"))
+
+
+#: A minimal, currently-readable `versions` block -- used by the malformed-
+#: id-list tests below so they exercise the id-list guard specifically,
+#: rather than tripping the (also real, separately tested) reader-
+#: compatibility guard on an absent/unstated version axis first. Derived
+#: from `StorageVersions`' own defaults rather than hand-typed numbers, so
+#: it can't silently drift from what a real writer emits.
+_VALID_VERSIONS = StorageVersions().to_dict()
+
+
+class TestReadManifestSummaryValidation:
+    """`manifest.json` is untrusted input the moment it's hand-edited or
+    corrupted — these state the guards `read_manifest_summary` applies
+    before a caller can go on to load anything else from the package."""
+
+    def _write_manifest_json(self, root: Path, content: object) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "manifest.json").write_text(json.dumps(content), encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        "variant_ids",
+        [
+            "ab",  # a bare string iterates into one id per character
+            {"default": "x"},  # a mapping iterates into its keys
+            [1, 2],  # entries must be strings
+        ],
+    )
+    def test_a_malformed_variant_id_list_is_refused(
+        self, tmp_path: Path, variant_ids: object
+    ) -> None:
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": variant_ids,
+                "artifact_ids": [],
+            },
+        )
+        with pytest.raises(ValueError, match="variant_ids"):
+            read_manifest_summary(tmp_path)
+
+    @pytest.mark.parametrize(
+        "artifact_ids",
+        ["ab", {"libfoo": "x"}, [1, 2]],
+    )
+    def test_a_malformed_artifact_id_list_is_refused(
+        self, tmp_path: Path, artifact_ids: object
+    ) -> None:
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": [],
+                "artifact_ids": artifact_ids,
+            },
+        )
+        with pytest.raises(ValueError, match="artifact_ids"):
+            read_manifest_summary(tmp_path)
+
+    def test_a_newer_package_format_version_is_refused(self, tmp_path: Path) -> None:
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": {"package_format_version": 999_999},
+                "variant_ids": [],
+                "artifact_ids": [],
+            },
+        )
+        with pytest.raises(ValueError, match="not readable by this build"):
+            read_manifest_summary(tmp_path)
+
+    def test_an_unstated_comparison_contract_version_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        # `versions: {}` -- entirely absent, which `StorageVersions.from_dict`
+        # reads as UNSTATED for both fail-closed axes, per D2.
+        self._write_manifest_json(tmp_path, {"variant_ids": [], "artifact_ids": []})
+        with pytest.raises(ValueError, match="not readable by this build"):
+            read_manifest_summary(tmp_path)
+
+    def test_an_ordinary_current_manifest_is_still_readable(
+        self, tmp_path: Path
+    ) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        store = DirectoryObjectStore(tmp_path)
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        write_project_manifest(tmp_path, manifest)
+        # No exception, and the summary loads with the real membership --
+        # a normally-written manifest passes the same check.
+        summary = read_manifest_summary(tmp_path)
+        assert summary.artifact_ids == ("libfoo",)

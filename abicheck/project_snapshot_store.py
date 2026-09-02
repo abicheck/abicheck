@@ -85,7 +85,7 @@ from .storage.package import (
     object_relpath,
     variant_ref_relpath,
 )
-from .storage.versioning import StorageVersions
+from .storage.versioning import StorageVersions, check_reader_compatibility
 
 __all__ = [
     "DirectoryObjectStore",
@@ -184,12 +184,33 @@ class DirectoryObjectStore:
     def get(self, digest: str) -> Any:
         if not isinstance(digest, str):
             raise TypeError(f"digest must be a string, not {type(digest).__name__}")
+        # The digest names the *algorithm* too (`object_relpath` already
+        # requires this to parse), so a corrupted or hand-edited object file
+        # is verified against exactly the algorithm the caller asked for --
+        # not merely "some hash of whatever bytes happen to be on disk".
+        algorithm, _separator, _hexdigest = digest.partition(":")
         json_path = self._json_path(digest)
         if json_path.exists():
-            return canonical_form(json.loads(read_snapshot_bytes(json_path)))
+            content = canonical_form(json.loads(read_snapshot_bytes(json_path)))
+            actual = semantic_digest(content, algorithm=algorithm)
+            if actual != digest:
+                raise ValueError(
+                    f"{json_path} does not match its requested digest {digest!r} "
+                    f"(recomputed {actual!r}) -- the object may be corrupted or "
+                    "was hand-edited"
+                )
+            return content
         raw_path = self._raw_path(digest)
         if raw_path.exists():
-            return read_snapshot_bytes(raw_path)
+            payload = read_snapshot_bytes(raw_path)
+            actual = raw_digest(payload, algorithm=algorithm)
+            if actual != digest:
+                raise ValueError(
+                    f"{raw_path} does not match its requested digest {digest!r} "
+                    f"(recomputed {actual!r}) -- the object may be corrupted or "
+                    "was hand-edited"
+                )
+            return payload
         raise KeyError(f"no object stored under digest {digest!r} in {self._root}")
 
     def has(self, digest: str) -> bool:
@@ -255,17 +276,60 @@ class ManifestSummary:
         self.artifact_ids = artifact_ids
 
 
+def _string_id_list(raw: Any, field_name: str) -> tuple[str, ...]:
+    """*raw* as a tuple of ids, refusing anything but a real JSON array of
+    strings.
+
+    `tuple(raw)` alone accepts far more than a well-formed manifest ever
+    writes: a bare string iterates into one id per *character*, and a
+    mapping iterates into its keys -- either can produce a plausible-looking
+    tuple of strings from a document that is not actually a list at all
+    (Codex review). Refusing here, at the one place both id lists parse,
+    matches this module's existing "malformed input fails loudly, never
+    silently reinterpreted" convention.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{field_name} must be a JSON array of strings, not {type(raw).__name__}"
+        )
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, str):
+            raise ValueError(
+                f"{field_name}[{index}] must be a string, got "
+                f"{type(entry).__name__} ({entry!r})"
+            )
+    return tuple(raw)
+
+
 def read_manifest_summary(root: str | Path) -> ManifestSummary:
     """Load only `manifest.json` — the one document D8 requires be small
-    enough to load unconditionally."""
+    enough to load unconditionally.
+
+    Refuses a package this build cannot safely read *before* returning
+    anything a caller might go on to load `refs/*.json` from: D2's two
+    fail-closed version axes (`package_format_version`/
+    `comparison_contract_version`) exist precisely so an unrecognized
+    container layout or comparison contract is refused rather than silently
+    parsed as if it were this build's own (Codex review — no other
+    production call site performed this check yet).
+    """
     root_path = Path(root)
     data = json.loads(read_snapshot_bytes(root_path / MANIFEST_RELPATH))
     if not isinstance(data, dict):
         raise ValueError(f"{root_path / MANIFEST_RELPATH} is not a JSON object")
+    versions = StorageVersions.from_dict(data.get("versions", {}))
+    compatibility = check_reader_compatibility(versions)
+    if not compatibility.readable:
+        raise ValueError(
+            f"{root_path / MANIFEST_RELPATH} is not readable by this build: "
+            f"{compatibility.reason}"
+        )
     return ManifestSummary(
-        versions=StorageVersions.from_dict(data.get("versions", {})),
-        variant_ids=tuple(data.get("variant_ids", ())),
-        artifact_ids=tuple(data.get("artifact_ids", ())),
+        versions=versions,
+        variant_ids=_string_id_list(data.get("variant_ids"), "variant_ids"),
+        artifact_ids=_string_id_list(data.get("artifact_ids"), "artifact_ids"),
     )
 
 

@@ -34,6 +34,42 @@ class TestSectionDTO:
         )
         assert SectionDTO.from_dict(dto.to_dict()) == dto
 
+    def test_mutating_the_caller_s_own_mapping_after_construction_is_inert(
+        self,
+    ) -> None:
+        """`SectionDTO` must hold its own, independent copy of `payload` —
+        mutating the mapping the caller passed in must never change what the
+        DTO reports or serializes."""
+        caller_payload = {"a": 1, "nested": {"x": [1, 2, 3]}}
+        dto = SectionDTO(
+            section_kind="graph", section_schema_version=1, payload=caller_payload
+        )
+        before = dto.to_dict()
+
+        caller_payload["a"] = 999
+        caller_payload["nested"]["x"].append(4)
+        caller_payload["new_key"] = "surprise"
+
+        assert dto.to_dict() == before
+        assert dto.payload["a"] == 1
+        assert dto.payload["nested"]["x"] == [1, 2, 3]
+        assert "new_key" not in dto.payload
+
+    def test_mutating_dto_payload_directly_is_inert_for_a_fresh_dto(self) -> None:
+        """`dto.payload` is itself a fresh object built by `__post_init__`,
+        not an alias to anything else the caller can still reach -- mutating
+        it does not retroactively change a *second*, independently-built
+        `SectionDTO` over equal content."""
+        payload = {"a": 1}
+        dto = SectionDTO(
+            section_kind="graph", section_schema_version=1, payload=payload
+        )
+        reference = SectionDTO(
+            section_kind="graph", section_schema_version=1, payload={"a": 1}
+        )
+        dto.payload["a"] = 999  # type: ignore[index]
+        assert reference.to_dict()["payload"] == {"a": 1}
+
     def test_empty_section_kind_is_refused(self) -> None:
         with pytest.raises(ValueError):
             SectionDTO(section_kind="", section_schema_version=1, payload={})
