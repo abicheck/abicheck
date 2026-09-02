@@ -117,6 +117,30 @@ class TestProjectSnapshotLegacyRoundTrip:
         with pytest.raises(ValueError):
             read_legacy_snapshot_document(root)
 
+    def test_read_legacy_snapshot_document_rejects_a_missing_section(
+        self, tmp_path: Path
+    ) -> None:
+        """A stale/corrupted artifact ref that has dropped a section
+        `manifest.json`'s own `section_schema_versions` still advertises
+        must be refused -- `export_legacy_snapshot` only iterates the
+        sections actually present in `artifact.sections`, so silently
+        proceeding would let `join_legacy_document` backfill the missing
+        section's declarations/types with empty defaults, turning lost
+        evidence into confirmed absence (Codex review)."""
+        from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
+        from abicheck.storage.package import artifact_ref_relpath
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        root = _write_package(tmp_path, snap)
+        art_path = root / artifact_ref_relpath("libfoo.so.1")
+        art = json.loads(art_path.read_text(encoding="utf-8"))
+        assert art["sections"], "fixture snapshot must publish at least one section"
+        dropped_kind = next(iter(art["sections"]))
+        del art["sections"][dropped_kind]
+        art_path.write_text(json.dumps(art), encoding="utf-8")
+        with pytest.raises(SnapshotError, match=dropped_kind):
+            read_legacy_snapshot_document(root)
+
 
 class TestIsProjectSnapshotPackageDir:
     def test_true_for_a_real_package(self, tmp_path: Path) -> None:

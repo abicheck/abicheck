@@ -225,6 +225,31 @@ def read_legacy_snapshot_document(
     _variant, artifact = read_variant_artifact_pair(
         root, artifact.variant_id, artifact_id
     )
+    # `export_legacy_snapshot` only ever looks at the sections *present* in
+    # `artifact.sections` -- a section a stale/corrupted artifact ref has
+    # dropped simply isn't iterated, and `join_legacy_document` then fills
+    # its declarations/types with empty defaults, turning lost evidence into
+    # confirmed absence (a real false addition/removal downstream, not a
+    # loud failure). `manifest.json`'s own `section_schema_versions` is the
+    # ground truth for which sections this package's (sole, today) artifact
+    # was actually written with, at import time -- cross-check against it
+    # before export, not after (Codex review). Gated on a genuinely
+    # single-artifact package: with more than one artifact, the manifest-
+    # level map is the union across all of them, so a per-artifact subset
+    # is expected and not itself a corruption signal -- multi-artifact
+    # packages are documented above as out of this function's scope anyway.
+    if len(summary.artifact_ids) == 1:
+        missing_sections = set(summary.versions.section_schema_versions) - set(
+            artifact.sections
+        )
+        if missing_sections:
+            raise SnapshotError(
+                f"{root} artifact {artifact_id!r} is missing section(s) "
+                f"{sorted(missing_sections)} that manifest.json's "
+                "section_schema_versions advertises -- the artifact ref is "
+                "stale or corrupted; refusing to silently synthesize empty "
+                "defaults for lost evidence"
+            )
     store = DirectoryObjectStore(root)
     return export_legacy_snapshot(
         artifact,
