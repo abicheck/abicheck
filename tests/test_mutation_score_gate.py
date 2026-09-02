@@ -75,8 +75,8 @@ def test_mutmut_subprocess_timeout_matches_the_workflow_ceiling() -> None:
         / "workflows"
         / "mutation.yml"
     ).read_text(encoding="utf-8")
-    assert "timeout-minutes: 240" in workflow
-    assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 240 * 60
+    assert "timeout-minutes: 355" in workflow
+    assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 355 * 60
 
 
 def test_stats_without_a_survivor_count_are_not_a_completion_witness(
