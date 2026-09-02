@@ -66,7 +66,7 @@ from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecy
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
-from .check_report_run_outcome import synthetic_run_outcome
+from .check_report_run_outcome import backfill_run_outcome, synthetic_run_outcome
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
@@ -586,6 +586,7 @@ def augment_report(
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
     backfill_exit_block_fields(out)
+    backfill_run_outcome(out)
     _stamp_schema_version(out, report)
     out["check_id"] = check_id
     out["target_id"] = check_id

@@ -607,7 +607,7 @@ def run_outcome_dict_for_scan(
 
 
 def run_outcome_dict_for_release(
-    worst_verdict: str, exit_decision: object
+    compatibility_verdict: str, exit_decision: object
 ) -> dict[str, Any]:
     """Build the ``run_outcome`` dict for a directory/package release
     comparison's own summary JSON (:mod:`abicheck.cli_compare_release_
@@ -616,6 +616,22 @@ def run_outcome_dict_for_release(
     ``run_outcome`` per the documented "every JSON report" contract
     (``docs/use/output-formats.md``) but never actually built one (Codex
     review, fresh evidence).
+
+    *compatibility_verdict* is deliberately **not** the release's own
+    reported ``worst_verdict`` -- that string can legitimately be the
+    ``"ERROR"``/``"not_comparable"`` operational sentinels
+    ``_RELEASE_VERDICT_ORDER`` ranks above every real compatibility
+    verdict, which is the right behavior for the release's *reported*
+    verdict but would silently erase a real, already-completed
+    compatibility result from this genuinely separate axis (Codex review,
+    fresh evidence: one ``BREAKING`` library plus a second, unrelated
+    library's ``ERROR`` must still read ``compatibility: "BREAKING"``
+    here). Callers pass ``cli_compare_release_helpers.
+    _release_completed_compatibility_verdict(...)`` instead -- the worst
+    *real* ``Verdict`` among the release's library/global results, with
+    the two sentinels excluded -- so this function only ever has to try
+    parsing a value that is either a real ``Verdict`` or the honest
+    ``"NO_CHANGE"`` default.
 
     *exit_decision* is the release's own already-computed ``exit`` block
     (``policy.exit_decision_precedence.resolve_release_exit_decision_for_
@@ -661,7 +677,7 @@ def run_outcome_dict_for_release(
 
     compatibility: Verdict | None
     try:
-        compatibility = Verdict(worst_verdict)
+        compatibility = Verdict(compatibility_verdict)
     except ValueError:
         compatibility = None
 

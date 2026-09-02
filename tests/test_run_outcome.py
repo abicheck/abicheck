@@ -938,6 +938,32 @@ class TestReleaseJsonRunOutcome:
         assert gate.exit_code == 4
         assert gate.blocking is True
 
+    def test_operational_sentinel_library_does_not_mask_a_real_break(self):
+        """Codex review (P2), fresh evidence: one BREAKING library alongside
+        one ERROR library previously produced run_outcome.compatibility=None
+        (the raw worst_verdict, "ERROR", isn't a real Verdict at all) --
+        masking the genuine breaking library entirely. _release_completed_
+        compatibility_verdict must exclude the ERROR/not_comparable
+        sentinels and report the worst REAL verdict underneath them, while
+        the top-level `verdict`/`operational` axis is unaffected."""
+        import json
+        from pathlib import Path
+
+        from abicheck.cli_compare_release_helpers import _format_release_json
+
+        out = _format_release_json(
+            "ERROR", Path("/o"), Path("/n"),
+            [
+                {"library": "libfoo.so", "verdict": "BREAKING"},
+                {"library": "libbar.so", "verdict": "ERROR"},
+            ],
+            [], [], {}, {}, [], None, None,
+        )
+        data = json.loads(out)
+        assert data["verdict"] == "ERROR"
+        assert data["run_outcome"]["compatibility"] == "BREAKING"
+        assert data["run_outcome"]["operational"] == "extraction_error"
+
     def test_write_release_summary_file_carries_run_outcome(self, tmp_path):
         """Codex review (P2): the --output-dir sibling of
         _format_release_json never built a run_outcome either -- the

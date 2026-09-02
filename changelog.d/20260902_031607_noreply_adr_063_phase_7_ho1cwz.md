@@ -114,6 +114,29 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   unavailable target for `aggregate`. `severity.exit_code` now escalates to
   `4` in the same case, mirroring `buildsource/check_report.py`'s
   `_escalate_removed_library_severity`'s identical per-library escalation.
+- **A legacy report re-stamped to the current schema now gets a backfilled
+  `run_outcome` too.** `augment_report()` already upgraded an older report's
+  `exit` block(s) before claiming the current schema version
+  (`check_report_exit_backfill.backfill_exit_block_fields`); it never did
+  the equivalent for `run_outcome`, so a pre-existing report re-checked
+  through `check` silently claimed a schema version whose promised block it
+  didn't carry. The new `backfill_run_outcome` (mirrors the exit-block
+  sibling's shape) synthesizes it from whichever fields the old report
+  shape actually has — reusing `run_outcome_dict_for_scan`/`_for_release`
+  for a scan/release-shaped report, and the legacy verdict/severity-exit-code
+  mapping otherwise — and is a no-op for a report that already carries one.
+- **The release fan-out's `run_outcome.compatibility` no longer goes `null`
+  when one library in the set errored.** `_format_release_json`/
+  `_write_release_summary_file` fed the raw top-level `worst_verdict` (which
+  can be the operational sentinel `"ERROR"`/`"not_comparable"`, not a real
+  `Verdict`) straight into `run_outcome_dict_for_release`, so one library
+  failing to dump/extract could mask a genuine `BREAKING` verdict on a
+  *different* library in the same release. The new
+  `_release_completed_compatibility_verdict` recomputes the worst REAL
+  verdict across the library results (and the release-global verdict),
+  excluding those two sentinels, and only that goes into
+  `run_outcome.compatibility` — `verdict`/`run_outcome.operational` are
+  unaffected.
 
 ### Changed
 

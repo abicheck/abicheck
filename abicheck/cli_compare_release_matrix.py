@@ -119,6 +119,7 @@ def _write_release_summary_file(
     same resolver (ADR-064 stage 1b, Codex review).
     """
     from .cli_compare_release_helpers import (
+        _release_completed_compatibility_verdict,
         _release_global_verdict,
         _release_summary_effective_config_block,
     )
@@ -126,6 +127,7 @@ def _write_release_summary_file(
     from .workflows.gate import resolve_release_exit_decision_for_report
 
     digest, fields = _release_summary_effective_config_block(severity_config)
+    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict,
         fail_on_removed,
@@ -133,7 +135,7 @@ def _write_release_summary_file(
         severity_exit_code,
         contract_coverage_exit_contribution,
         library_results,
-        _release_global_verdict(bundle_result, matrix_result),
+        release_global_verdict,
     ).to_dict()
     summary_data: dict[str, object] = {
         "verdict": worst_verdict,
@@ -143,7 +145,12 @@ def _write_release_summary_file(
         "effective_config_digest": digest,
         "effective_config_fields": fields,
         "exit": exit_dict,
-        "run_outcome": run_outcome_dict_for_release(worst_verdict, exit_dict),
+        "run_outcome": run_outcome_dict_for_release(
+            _release_completed_compatibility_verdict(
+                library_results, release_global_verdict
+            ),
+            exit_dict,
+        ),
     }
     summary_path = output_dir / "summary.json"
     _safe_write_output(summary_path, json.dumps(summary_data, indent=2))

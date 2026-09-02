@@ -103,12 +103,12 @@
     },
     {
       "path": "abicheck/buildsource/check_report.py",
-      "baseline_lines": 812,
+      "baseline_lines": 813,
       "target": "workflows",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "New entry, ADR-063 Phase 7: augment_report()'s two mutators (_neutralize_gate/_escalate_removed_library_severity) and the three synthetic report builders (build_operational_error_report/build_bootstrap_report/build_new_target_report) each gained the identical structured `run_outcome` treatment their legacy `severity`/`verdict` fields already had, across five call sites this module owns and no other module can substitute for -- the run_outcome-building helper itself was split out to the new sibling check_report_run_outcome.py to keep the added footprint to the minimum per-site glue (one import, one conditional 2-line write, or one dict-literal line). No smaller diff was found that still lands the required behavior at every one of the five sites this phase's plan names.",
+      "rationale": "New entry, ADR-063 Phase 7: augment_report()'s two mutators (_neutralize_gate/_escalate_removed_library_severity) and the three synthetic report builders (build_operational_error_report/build_bootstrap_report/build_new_target_report) each gained the identical structured `run_outcome` treatment their legacy `severity`/`verdict` fields already had, across five call sites this module owns and no other module can substitute for -- the run_outcome-building helper itself was split out to the new sibling check_report_run_outcome.py to keep the added footprint to the minimum per-site glue (one import, one conditional 2-line write, or one dict-literal line). No smaller diff was found that still lands the required behavior at every one of the five sites this phase's plan names. Raised 812 -> 813 (same phase, Codex review, fresh evidence): a pre-existing report re-stamped to the current schema never carried `run_outcome` at all -- `augment_report` now calls the new `backfill_run_outcome` (in check_report_run_outcome.py, the same sibling module) alongside the pre-existing `backfill_exit_block_fields` call it already mirrors, one import name and one function call.",
       "review_by": "2026-11-30"
     },
     {
@@ -423,12 +423,12 @@
     },
     {
       "path": "abicheck/cli_compare_release_helpers.py",
-      "baseline_lines": 1330,
+      "baseline_lines": 1375,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1311 -> 1314 (ADR-063 Phase 7 follow-up, Codex review): _format_release_json documented (docs/use/output-formats.md) that every JSON report carries run_outcome but never actually built one for the release fan-out's own summary document -- one import (re-exported through report/not_comparable.py, since frontends may not import policy directly), one local reused across both the exit and run_outcome keys instead of calling the exit-decision resolver twice, and one new dict entry. Raised again 1314 -> 1330 (same follow-up, second Codex round, fresh evidence): the severity block built a few lines below the previous bump escalates run_outcome.gate to abi_breaking for --fail-on-removed-library but never escalated its own severity.exit_code to match, so a severity-scheme release whose ordinary findings contribute 0 emitted a severity/run_outcome pair GateInfo.from_report_data's own contradiction check (this same PR) rejects as corrupt -- mirroring buildsource/check_report.py's _escalate_removed_library_severity's identical escalation for the per-library severity JSON.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1311 -> 1314 (ADR-063 Phase 7 follow-up, Codex review): _format_release_json documented (docs/use/output-formats.md) that every JSON report carries run_outcome but never actually built one for the release fan-out's own summary document -- one import (re-exported through report/not_comparable.py, since frontends may not import policy directly), one local reused across both the exit and run_outcome keys instead of calling the exit-decision resolver twice, and one new dict entry. Raised again 1314 -> 1330 (same follow-up, second Codex round, fresh evidence): the severity block built a few lines below the previous bump escalates run_outcome.gate to abi_breaking for --fail-on-removed-library but never escalated its own severity.exit_code to match, so a severity-scheme release whose ordinary findings contribute 0 emitted a severity/run_outcome pair GateInfo.from_report_data's own contradiction check (this same PR) rejects as corrupt -- mirroring buildsource/check_report.py's _escalate_removed_library_severity's identical escalation for the per-library severity JSON. Raised again 1330 -> 1375 (same follow-up, third Codex round, fresh evidence): the raw top-level `worst_verdict` this module passed into run_outcome_dict_for_release could be an operational sentinel ('ERROR'/'not_comparable') that masks a real per-library BREAKING/API_BREAK verdict underneath it (`Verdict.__call__` falls back to `compatibility=None` for a non-Verdict string) -- the new `_release_completed_compatibility_verdict` helper (plus the `_RELEASE_OPERATIONAL_SENTINELS` set it reads) recomputes the worst REAL verdict across library_results/release_global_verdict excluding those two sentinels, so `run_outcome.compatibility` reports the genuine break even when the top-level `verdict` stays an operational sentinel.",
       "review_by": "2026-11-30"
     },
     {

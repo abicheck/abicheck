@@ -73,6 +73,47 @@ def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_resul
     return worst
 
 
+#: The two release-level sentinels that are not real `Verdict` values and
+#: must never mask a *different*, already-completed compatibility result
+#: on `RunOutcome.compatibility`'s own independent axis (Codex review, fresh
+#: evidence): `worst_verdict`'s own `_RELEASE_VERDICT_ORDER` rollup ranks
+#: both above every real verdict by design (an operational failure/refusal
+#: dominates the release's own reported "verdict"), which is exactly the
+#: right behavior for the *reported* release verdict but the wrong one for
+#: `run_outcome.compatibility`, a genuinely separate axis.
+_RELEASE_OPERATIONAL_SENTINELS = frozenset({"ERROR", "not_comparable"})
+
+
+def _release_completed_compatibility_verdict(
+    library_results: list[dict[str, object]], release_global_verdict: str
+) -> str:
+    """The worst real `Verdict` among *library_results* + *release_global_
+    verdict*, with the two operational sentinels excluded -- for
+    ``run_outcome.compatibility``, never for the release's own reported
+    ``verdict`` (``worst_verdict`` stays exactly what it always was).
+
+    One `BREAKING` library plus a second, unrelated library's `ERROR` still
+    surfaces `compatibility: "BREAKING"` here, even though `worst_verdict`
+    itself (correctly) reports `"ERROR"` -- the real compatibility result
+    is not lost just because a different library's operational failure
+    dominates the release-level rollup.
+    """
+    worst = "NO_CHANGE"
+    for entry in library_results:
+        v = str(entry.get("verdict", "NO_CHANGE"))
+        if v in _RELEASE_OPERATIONAL_SENTINELS:
+            continue
+        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+            worst = v
+    if (
+        release_global_verdict not in _RELEASE_OPERATIONAL_SENTINELS
+        and _RELEASE_VERDICT_ORDER.get(release_global_verdict, 0)
+        > _RELEASE_VERDICT_ORDER.get(worst, 0)
+    ):
+        worst = release_global_verdict
+    return worst
+
+
 def _resolve_release_headers(
     headers: tuple[Path, ...],
     old_headers_only: tuple[Path, ...],
@@ -1042,7 +1083,8 @@ def _format_release_json(
         if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
     ]
     from .report.not_comparable import run_outcome_dict_for_release
-    exit_dict = resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, _release_global_verdict(bundle_result, matrix_result)).to_dict()
+    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    exit_dict = resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, release_global_verdict).to_dict()
     summary: dict[str, object] = {
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
@@ -1053,7 +1095,10 @@ def _format_release_json(
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
         "exit": exit_dict,
-        "run_outcome": run_outcome_dict_for_release(worst_verdict, exit_dict),
+        "run_outcome": run_outcome_dict_for_release(
+            _release_completed_compatibility_verdict(library_results, release_global_verdict),
+            exit_dict,
+        ),
     }
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
