@@ -134,11 +134,12 @@ which is the difference between "public in principle" and "your customer
 calls it". `recommended_action` is the checker's own suggestion
 ([§ Recommended action per finding](../use/output-formats.md#recommended-action-per-finding-recommended_action)).
 
-What to do about a real break is the next tier: [Part 7 — Designing for
+What to do about a real break: [Part 7 — Designing for
 Stability](abi-series/07-designing-for-stability.md) holds the patterns,
 and [Rollout and Governance](rollout-and-governance.md) says how to ship an
-intentional one without hiding it.
+intentional one without hiding it. The next step of the series, *At Scale*,
+asks the same questions of a release of several binaries.
 
 ---
 
-**Ladder:** ← [Rollout and Governance](rollout-and-governance.md) · Tier 5 · Practice · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) →
+**Ladder:** ← [Rollout and Governance](rollout-and-governance.md) · Step 7 · In Practice · [Products, Not Libraries](products-not-libraries.md) →

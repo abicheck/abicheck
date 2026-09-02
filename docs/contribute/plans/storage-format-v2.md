@@ -108,19 +108,28 @@ and `BundleFacts` document is bit-for-bit unchanged.
 
 ### Phase 1 — unified project and multibuild storage
 
-**Status: A1.1 partially implemented** (this change) — the object model
-(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`) is
-landed; the directory-backed store that actually reads and writes it is not.
-See "Landed in Phase 1 (partial)" below.
+**Status: A1.1/A1.2/A1.3 implemented** (this change) — the object model
+(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`), a
+real directory-backed store (`abicheck/project_snapshot_store.py`'s
+`DirectoryObjectStore` plus its manifest/ref writer/reader — everything but
+the `.tar.zst` transport form), the v1-v25 import adapter
+(`storage/import_v1.py`), and a single-library snapshot round-tripping
+through the store as a one-artifact project are all landed. A1.4-A1.8 remain
+open. See "Landed in Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
   directory abstraction, with a deterministic `.tar.zst` transport form.
+  **Implemented except the `.tar.zst` transport form**, which remains open.
 - **A1.2** A v1-v25 import adapter maps every existing snapshot into the v2
   in-memory model, preserving source schema and producer generation. No
-  existing baseline is rewritten in place.
+  existing baseline is rewritten in place. **Implemented for the
+  `semantic_ir`/`semantic_ir_conflicts` fields onto a typed, D8-constrained
+  representation; every other field travels as one opaque, unmigrated
+  document object** — see "Landed in Phase 1" below.
 - **A1.3** A single-library snapshot is representable as a one-artifact
   project, and round-trips through the store unchanged at the semantic-digest
-  level.
+  level. **Implemented** — see `tests/test_project_snapshot_store.py`'s full
+  package round trip.
 - **A1.4** Baseline sets and `BundleFacts` are expressed as sections of one
   package rather than parallel top-level formats.
 - **A1.5** `BuildSourcePack`, project source graphs, and toolchain profiles
@@ -265,14 +274,21 @@ there, so the table is checked rather than maintained by hand.
 Tests live in `tests/unit/storage/`, stating each primitive's contract as
 invariants alongside the example cases (A0.6).
 
-## Landed in Phase 1 (partial): A1.1's object model
+## Landed in Phase 1: A1.1's object model, directory store, import adapter, and one-artifact projects
 
-The first Phase 1 slice — the object model half of "1. `storage/package.py`
-— manifest, refs, and the object-store abstraction" — is implemented.
+The object model (A1.1's first half), the directory-backed store (A1.1's
+second half), the v1-v25 import adapter (A1.2), and expressing a
+single-library dump as a one-artifact project (A1.3) are implemented —
+jointly with ADR-063 Phase 8, whose own D8 constraint (every DTO a
+distinct, versioned, explicitly-encoded class, never `asdict`) this landing
+satisfies for the one domain type it actually sections today
+(`SemanticIR`).
 
 | Module | Contract |
 |---|---|
 | `abicheck/storage/package.py` | `MANIFEST_RELPATH`, `SECTION_KINDS`, `ObjectRef`, `VariantRef`, `ArtifactRef`, `PackageManifest`, `ObjectStore`, `InMemoryObjectStore`, `object_relpath`, `variant_ref_relpath`, `artifact_ref_relpath` (A1.1) |
+| `abicheck/storage/dto.py` | `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `SectionDTO`, `migrate_section_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint) |
+| `abicheck/storage/import_v1.py` | `LEGACY_DOCUMENT_SECTION_KIND`, `import_legacy_snapshot` (A1.2) |
 
 `ObjectRef`/`VariantRef`/`ArtifactRef`/`PackageManifest` are the in-memory
 document model of D6's `manifest.json` plus the ref documents it names.
@@ -281,64 +297,126 @@ document model of D6's `manifest.json` plus the ref documents it names.
 only `model` (`storage/AGENTS.md`'s "Permitted imports"), so it cannot itself
 wrap ADR-059's `snapshot_io.py` envelope — a concrete, `.tar.zst`-transportable
 store is a separate implementation, outside this package, built over both
-this module and `snapshot_io`. `InMemoryObjectStore` is the one reference
-implementation this module ships, exercised by its own tests and usable
-on its own for a one-process comparison that never needs to persist a
-package.
+this module and `snapshot_io`. `InMemoryObjectStore` is the one
+process-local reference implementation `package.py` itself ships.
 
-**Not yet implemented, and still open**: an actual directory-backed
-`ObjectStore`/`ProjectSnapshotStore` (A1.1's other half — "reads and writes
-the D6 layout over a directory abstraction, with a deterministic `.tar.zst`
-transport form"), the v1-v25 import adapter (A1.2), expressing a single-library
-dump as a one-artifact project (A1.3), and everything after it in the Phase 1
-list above. `PackageManifest.variant_refs`/`.artifact_refs` embed full
-records rather than pointers to on-disk `refs/*.json` files, because there is
-no writer yet to make that split meaningful — see the module's own docstring.
+**`abicheck/project_snapshot_store.py`** (flat-root, deliberately outside
+`storage/` for the identical import-layering reason `ObjectStore`'s own
+docstring already gives) is A1.1's real, directory-backed store:
+`DirectoryObjectStore` implements `ObjectStore` over ADR-059's
+`snapshot_io.py` envelope — every object written zstd-compressed at
+`objects/sha256/<aa>/<digest>.json.zst` (or `.bin.zst` for a raw binary
+payload), content-addressed and deduplicated exactly as D7 describes.
+`write_project_manifest`/`read_project_manifest` (plus the lazy
+`read_manifest_summary`/`read_variant_ref`/`read_artifact_ref` primitives
+the eager reader is built from) fan a `PackageManifest` out across the rest
+of D6's directory tree: `manifest.json` carries only `versions` and the two
+id lists — not the full embedded records `PackageManifest.to_dict()` itself
+still returns for the in-memory convenience — with each variant/artifact's
+full record at its own `refs/variants/<id>.json`/`refs/artifacts/<id>.json`.
+**The deterministic `.tar.zst` transport form D6 also describes is not
+implemented** — everything above operates on a real directory only.
+
+**`abicheck/storage/import_v1.py`**'s `import_legacy_snapshot` takes one
+already-serialized legacy document (`serialization.snapshot_to_dict()`'s
+shape — `storage/` cannot import `serialization.py` itself, so a caller
+outside the package builds the document) and an `ObjectStore`, and returns a
+one-artifact, one-variant `PackageManifest` with the object content already
+written into the store — A1.2 and A1.3 together. `StorageVersions.
+source_schema_version` is carried through from the document's own
+`schema_version` key unchanged, so a migration or audit can always answer
+"what producer epoch actually emitted this" (D2). **What is actually
+migrated onto a typed, D8-constrained representation today is
+`semantic_ir`/`semantic_ir_conflicts` alone** (`storage/dto.py`'s
+`semantic_ir_to_dto`/`semantic_ir_from_dto`, built on
+`storage/semantic_ir_codec.py`'s `semantic_ir_to_document`/
+`semantic_ir_from_document` — extracted from that module's existing
+snapshot-dict-mutating `encode_semantic_ir`/`decode_semantic_ir` into a pure
+object-in/document-out pair this DTO layer builds on rather than
+duplicates). Everything else the legacy document carries — symbols, types,
+layout, every DWARF/PE/Mach-O fact, the whole of what D8 eventually splits
+into `binary`/`declarations`/`types`/`layout`/`debug`/... sections — travels
+as one opaque `"legacy_document"` object (`import_v1.
+LEGACY_DOCUMENT_SECTION_KIND`): the exact remaining document content, not a
+placeholder. Splitting that remainder into real D8 sections is A1.4's own
+explicitly scheduled future work, not attempted here.
+
+**Not yet implemented, and still open**: folding baseline sets and
+`BundleFacts` into sections (A1.4/A1.5), storing `BuildSourcePack`/project
+source graphs/toolchain profiles once per project and referencing them by
+digest, `bundle_variants:` CLI/config wiring (A1.6/A1.7), non-ELF artifact
+membership specifics (A1.8), and the `.tar.zst` transport form. Splitting
+D8's remaining section kinds out of `import_v1.py`'s one `"legacy_document"`
+object, and giving `ArtifactRef.sections` a per-section `FactAvailability`
+(the "known, deliberately deferred gap" below), are both real future work
+this landing does not attempt.
 
 **A known, deliberately deferred gap** (flagged in review, Codex): `ArtifactRef.sections`
 has no accompanying D3 `FactAvailability`/`AvailabilityLedger` per section, so an
 absent section key cannot yet distinguish "not collected" from "unsupported"
 from "failed" the way a real producer will eventually need to report. Not
-closed here because no producer populates a section yet and D8's per-section
-content schemas don't exist yet either — wiring D3's vocabulary in now would
-mean guessing at a shape (per-artifact? per-section-kind?) with nothing real
-to validate the guess against, exactly the premature-design risk this file's
-own "Known gaps over risky reactive patches" convention warns about. Revisit
-once A1.4/A1.5 (folding sections/`BundleFacts`) or the first real section
-producer gives this a real caller to design against.
+closed here because D8's per-section content schemas still don't exist for
+most section kinds — wiring D3's vocabulary in now would mean guessing at a
+shape (per-artifact? per-section-kind?) with nothing real to validate the
+guess against, exactly the premature-design risk this file's own "Known
+gaps over risky reactive patches" convention warns about. Revisit once
+A1.4/A1.5 (folding sections/`BundleFacts`) gives this a real, multi-section
+producer to design against.
 
-Tests live in `tests/unit/storage/test_project_package.py`, following the same
-property-style-plus-example-cases convention as Phase 0 (A0.6/A1's
-"Validation corpus" identity-preservation cases, applied at the level this
-module actually operates at: a manifest's own `to_dict`/`from_dict` round
-trip, digest stability, and the D6 path-layout functions).
+**A second, deliberately deferred gap**: `import_legacy_snapshot` writes an
+empty `ArtifactRef.native_identity` — a legacy document's `build_id` field
+means an opaque CI identifier and is explicitly not reused for D6's native
+binary identity (content SHA-256, ELF build ID, Mach-O UUID, PE/PDB
+identity); populating it needs the artifact's own binary, which an adapter
+operating on an already-serialized document does not have. Real, separately-
+scoped future work for whichever caller has the binary in hand at import
+time.
 
-### Documentation ownership — deliberately not registered yet
+**A third, deliberately deferred gap**: `write_project_manifest` writes
+`refs/*.json` before `manifest.json` (the previous gap's own fix), which
+makes *first publication* of a set of ids safe but not *republishing
+changed content under ids that are already live* — a second call against
+a package another reader might concurrently be loading can overwrite a
+ref file the currently-published manifest still names. Closing it needs
+either a staged-directory-then-atomic-root-swap publish protocol or
+content-addressed (never-overwritten) ref paths, and no caller in this
+landing republishes an existing package (every current caller creates a
+fresh one), so there is no real update caller yet to design the fix
+against — see the function's own docstring. Revisit once A1.6/A1.7
+(variant capture, stored/live comparison) gives this a real caller.
+
+Tests live in `tests/unit/storage/test_project_package.py` (the object
+model), `tests/unit/storage/test_dto.py` (the DTO envelope, including a
+property test that payload key insertion order never changes the persisted
+bytes — the general form of ADR-063 Phase 8's own D8 test requirement),
+`tests/unit/storage/test_import_v1.py` (the import adapter), and
+`tests/test_project_snapshot_store.py` (the directory-backed store and
+manifest/ref writer/reader, including a full package round trip through a
+real directory) — the same property-style-plus-example-cases convention as
+Phase 0 (A0.6/A1's "Validation corpus" identity-preservation cases).
+
+### Documentation ownership
 
 `docs/AGENTS.md` requires every **new public-facing feature or surface** to
-register a topic in `docs/_meta/topics.yaml` in the same PR, and a reviewer
-asked why storage v2 has none (Codex review). The answer is that neither
-Phase 0 nor this A1.1 slice adds such a surface: no CLI command or flag, no
-report field, no config namespace, no Action input, and nothing in the
-product produces, consumes, or persists a byte through these primitives —
-`SCHEMA_VERSION` is unchanged and every existing document is byte-for-byte
-unchanged. `package.py` itself performs no filesystem or network I/O; its
-`ObjectStore` is a protocol plus one in-memory reference implementation, not
-a place any real package is written to or read from yet. They are also not
-part of the documented Python API: `abicheck/__init__.py` does not re-export
-them, and the `python-api` topic's `fact_sources` name the `service*` modules
-that page actually describes.
+register a topic in `docs/_meta/topics.yaml` in the same PR, and a Phase-0
+reviewer asked why storage v2 had none yet (Codex review). At the time the
+answer was that neither Phase 0 nor A1.1's own first slice added such a
+surface: no CLI command or flag, no report field, no config namespace, no
+Action input, and nothing in the product produced, consumed, or persisted a
+byte through these primitives yet — `package.py` performed no filesystem or
+network I/O, and `ObjectStore` was a protocol plus one in-memory reference
+implementation, not a place any real package was written to or read from.
 
-The registry's `canonical_page` is required to be the one *published*
-narrative page a human reads, and every registered topic points at one under
-`learn/`, `use/`, `reference/` or `integration/` — never at `contribute/`.
-Writing such a page now would mean documenting, to users, an API they cannot
-reach. The ADR and this plan are the contributor-facing owners in the
-meantime, which is what `contribute/` is for.
-
-**The trigger is concrete rather than "later":** the PR that first *persists*
-a `ProjectSnapshot` — Phase 1's package writer — is the one that makes this
-user-facing, and it registers:
+**That Phase-0-era gap is closed.** As stated then, the trigger was
+concrete rather than "later": the PR that first *persists* a
+`ProjectSnapshot` — this file's own "Landed in Phase 1" section above,
+`abicheck/project_snapshot_store.py`'s real, directory-backed
+`DirectoryObjectStore`/`write_project_manifest`/`read_project_manifest` — is
+the one that made this user-facing, and it registered the topic
+`docs/_meta/topics.yaml` already commits to below. The registry's
+`canonical_page` is required to be the one *published* narrative page a
+human reads (never `contribute/`), which is why the trigger names a real
+`reference/` page rather than pointing back at this plan document:
 
 ```yaml
   project-snapshot-storage:
@@ -351,12 +429,24 @@ user-facing, and it registers:
       - abicheck/storage/entity_ids.py
       - abicheck/storage/canonical.py
       - abicheck/storage/versioning.py
+      - abicheck/storage/package.py
+      - abicheck/storage/dto.py
+      - abicheck/storage/import_v1.py
+      - abicheck/project_snapshot_store.py
 ```
 
-alongside the page itself. Recorded here so a future reader finds a decision
-rather than an omission.
+**Still not part of the documented Python API**: `abicheck/__init__.py`
+does not re-export any of these, and the separate `python-api` topic's
+`fact_sources` still name only the `service*` modules that page actually
+describes — registering the `project-snapshot-storage` topic above answers
+"is this documented for a reader who finds `reference/project-snapshot-
+format.md`", not "is this part of the stable Python API", which remains a
+distinct, later question this landing does not answer either way.
 
-**Deliberately not done in Phase 0**, so that no existing behavior changes:
-nothing produces, consumes, or persists these types yet; `AbiSnapshot.index()`
-still resolves first-wins; `SCHEMA_VERSION` is untouched; and no CLI
-surface, report field, or exit code moves.
+**Deliberately not done in Phase 0**, so that no existing behavior changed
+at that point: nothing produced, consumed, or persisted these types yet;
+`AbiSnapshot.index()` still resolved first-wins; `SCHEMA_VERSION` was
+untouched; and no CLI surface, report field, or exit code moved. Phase 1's
+own landing above states plainly that this is still true of everything
+`dump`/`compare`/`scan` read or write today — only a real filesystem
+package outside that pipeline exists now.

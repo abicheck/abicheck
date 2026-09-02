@@ -198,6 +198,8 @@ class ScanOutcome:
             d["effective_depth"] = self.effective_depth
         if self.baseline_channel is not None:
             d["baseline_channel"] = self.baseline_channel
+        from .policy.outcome import run_outcome_dict_for_scan_outcome
+        d["run_outcome"] = run_outcome_dict_for_scan_outcome(self.verdict, self.exit_code, self.diff_summary)
         return d
 
 

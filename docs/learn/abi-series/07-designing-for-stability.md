@@ -19,8 +19,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> **7. Designing for Stability** ·
-> [Detecting Breaks](08-detection.md)
+> **7. Designing for Stability**
 
 **What you'll learn on this page**
 
@@ -426,9 +425,9 @@ You now have the full picture: how a library becomes a running process
 ([Part 6](06-transitive-breaks.md)), and the patterns that make a library
 evolvable (this page).
 
-The ladder continues below with a release of several binaries; the
-[ABI Cheat Sheet](../abi-cheat-sheet.md) is the two-minute card of
-everything above.
+The [ABI Cheat Sheet](../abi-cheat-sheet.md) is the two-minute card of
+everything above. From here the series turns from mechanism to your own
+library: which promise you are making, to whom, and how to check it.
 
 ---
 
@@ -456,9 +455,10 @@ real release decision, these are where to verify it:
   of its checklist and additionally covers enums, unions, bitfields, alignment,
   TLS, and transitive/dependency leaks.
 
-*Next on the ladder: [Dependency & Runtime Floors](../dependency-floors.md) opens
-the at-scale tier — or go back to the [series overview](../abi-api-handling.md).*
+*Next on the ladder: [Compatibility Direction](../compatibility-direction.md)
+opens Step 5, Define Your Contract — or go back to the
+[series overview](../abi-api-handling.md).*
 
 ---
 
-**Ladder:** ← [Triage a Suspicious Finding](../triage-a-finding.md) · Tier 6 · Design · [Products, Not Libraries](../products-not-libraries.md) →
+**Ladder:** ← [Part 6 — Subtle & Transitive Breaks](06-transitive-breaks.md) · Step 4 · Designing for Stability · [Compatibility Direction](../compatibility-direction.md) →

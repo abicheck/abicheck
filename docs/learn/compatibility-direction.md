@@ -152,4 +152,4 @@ against a specific real consumer.
 
 ---
 
-**Ladder:** ← [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) · Tier 3 · Define the contract · [Consumer Models](consumer-models.md) →
+**Ladder:** ← [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) · Step 5 · Define Your Contract · [Consumer Models](consumer-models.md) →

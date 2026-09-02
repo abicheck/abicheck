@@ -113,6 +113,18 @@ finishes in ~45 seconds.
   `StepResult.output_lines` exposes the raw records, so an *injected extra*
   `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
   `test_reusable_workflow_execution.py`.
+- `verify_merge_checks_harness.mjs` — the Node counterpart to
+  `_workflow_exec.py`, for an `actions/github-script` step rather than a
+  `run:` one: mocks `context`/`core`/`github` (including a scripted,
+  per-poll-attempt `checks.listForRef` response) and a fake, script-
+  advanced clock, then executes the *real* script text extracted from
+  `.github/workflows/verify-merge-checks.yml` — never a hand-copied
+  reimplementation, which could silently drift from what actually ships.
+  Exists because that workflow's poll/select/decide logic went through six
+  Codex review rounds, each finding a real race-condition bug that no
+  purely textual test could see and each checked only with a throwaway,
+  uncommitted smoke script until this landed. See
+  `test_verify_merge_checks_race_logic.py`.
 
 ## What NOT to do
 

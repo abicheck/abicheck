@@ -2,6 +2,14 @@
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
+**Related rule:** same `enum-member-value-changed` rule as
+[case08_enum_value_change](../case08_enum_value_change/README.md) (the
+canonical case for this rule); this case is the variant exercising
+public-surface scoping — `ErrorCode` isn't reachable from any exported
+function/variable signature, so detection depends on
+`--no-scope-public-headers` (see "Minimum evidence" below). See
+`examples/CLAUDE.md`'s "Taxonomy" section.
+
 ## Verdict and consumer impact
 
 Changing the numeric value bound to a released enumerator is a semantic ABI

@@ -139,4 +139,4 @@ version scripts, `-fvisibility=hidden` + explicit exports — are the subject of
 
 ---
 
-**Ladder:** ← [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) · Tier 1 · Foundations · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) →
+**Ladder:** ← [Part 1 — Foundations](abi-series/01-foundations.md) · Step 2 · Foundations · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) →

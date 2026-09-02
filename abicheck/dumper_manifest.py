@@ -69,8 +69,10 @@ from .dumper_toolchain import (
     _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind,
 )
+from .extract.semantic_normalizer import normalize_header_ast
 from .model import EnumType, Function, RecordType, Variable
 from .model.identity import EntityId
+from .model.semantic_ir import SemanticIR
 from .tu_fragment import (
     MergedTuFragments as MergedTuFragments,
     TuFragment as TuFragment,
@@ -615,6 +617,14 @@ class ElfHeaderAstResult:
     is_clang: bool
     provenance_headers: tuple[Path, ...]
     frontend_context_kind: str | None = None
+    # ADR-063 Phase 6 (second slice): the canonical SemanticIR projection of
+    # this same merged result -- computed once, here, so both the legacy
+    # single-TU dump (`_dump_elf`) and a real manifest dump share one
+    # normalizer call instead of each format handler recomputing it from
+    # `types`/`enums`/`typedefs_qualified`/`typedef_entity_ids` above. See
+    # `extract/semantic_normalizer.py`'s own docstring for this slice's
+    # scope (records/enums/typedefs only).
+    semantic_ir: SemanticIR | None = None
 
 
 def resolve_header_ast_result(
@@ -750,4 +760,11 @@ def resolve_header_ast_result(
         frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
+        semantic_ir=normalize_header_ast(
+            types=merged.types,
+            enums=merged.enums,
+            typedefs_qualified=merged.typedefs_qualified,
+            typedef_entity_ids=merged.typedef_entity_ids,
+            producer=merged.ast_producer,
+        ),
     )

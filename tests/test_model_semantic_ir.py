@@ -37,6 +37,7 @@ from abicheck.model.semantic_ir import (
     CanonicalEntity,
     SemanticIR,
     canonical_cv_qualification,
+    renumber_conflict_keys,
     semantic_ir_conflict_key,
 )
 
@@ -304,3 +305,242 @@ class TestConflictKey:
             occ, fact_b
         )
         assert keys_equal == (fact_a == fact_b)
+
+
+class TestRenumberConflictKeys:
+    """``renumber_conflict_keys`` (ADR-063 Phase 6 second slice, Codex
+    review, PR #1001): re-keying ``semantic_ir_conflicts`` after its
+    matching occurrence identity changed, without the length-prefix
+    corruption a naive in-place text rewrite of the packed key would cause.
+    """
+
+    def test_stale_key_replaced_with_a_freshly_computed_one(self) -> None:
+        old_eid = entity_id_for_type((Namespace("ns"),), "OldName")
+        new_eid = entity_id_for_type((Namespace("ns"),), "NewName")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        conflicts = {old_key: "discarded"}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("ns::NewName"))
+            }
+        )
+
+        renumber_conflict_keys(conflicts, [old_occ], new_ir)
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: "discarded"}
+
+    def test_rewrite_value_is_applied_to_the_moved_conflict_value(self) -> None:
+        """The discarded backend's own spelling (Codex review, PR #1001,
+        third round) can embed the identical closure/anonymous marker the
+        retained spelling does -- unlike the key, a value is plain text
+        with no packed-length encoding to corrupt, so it's rewritten the
+        ordinary way rather than left stale."""
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        conflicts = {old_key: "'(lambda:x.h:20:4)'"}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("New"))
+            }
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [old_occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace(":20:4)", "#1)"),
+        )
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: "'(lambda:x.h#1)'"}
+
+    def test_value_is_rewritten_even_when_the_key_stays_unchanged(self) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, fourth
+        round): an occurrence whose own EntityId carries no marker (its own
+        key is therefore unchanged) can still record a conflict whose VALUE
+        names a *different*, marker-bearing type -- a typedef aliasing a
+        closure-parameterized template, say. Gating the value rewrite on
+        "the key changed" (an earlier revision of this function) skipped
+        exactly this case."""
+        eid = entity_id_for_type((), "Alias")  # no marker -> key is stable
+        occ = OccurrenceId(eid)
+        key = semantic_ir_conflict_key(occ, "canonical_spelling")
+        conflicts = {key: "'(lambda:x.h:20:4)'"}
+        new_ir = SemanticIR(
+            occurrences={occ: CanonicalEntity(canonical_spelling=Fact.present("Alias"))}
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace(":20:4)", "#1)"),
+        )
+
+        assert conflicts == {key: "'(lambda:x.h#1)'"}
+
+    def test_value_containing_an_apostrophe_is_still_renumbered(self) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, fifth
+        round): a discarded spelling containing an apostrophe (a string NTTP
+        argument, a header basename) makes Python's own ``repr()`` switch to
+        DOUBLE-quoting. Passing that repr() text straight to *rewrite_value*
+        would make the marker-detection machinery (which deliberately
+        ignores text inside a double-quoted literal, so a real C++ NTTP
+        string spelled like a marker is never corrupted) treat the whole
+        value as quoted content and skip it -- confirmed to fail against a
+        version of ``renumber_conflict_keys`` that passed the raw repr()
+        text to *rewrite_value* unchanged."""
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        real_value = "clang's Wrapper<(lambda:x.h:20:4)>"
+        conflicts = {old_key: repr(real_value)}
+        assert conflicts[old_key].startswith('"')  # repr() really does quote with "
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("New"))
+            }
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [old_occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace(":20:4)", "#1)"),
+        )
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: repr("clang's Wrapper<(lambda:x.h#1)>")}
+
+    def test_unrecognized_value_shape_is_left_untouched(self) -> None:
+        """A conflict VALUE that doesn't literal-eval to a str or a
+        tuple[str, ...] means this function's own assumption about its
+        writer (``extract/semantic_ir_merge.py``) no longer holds --
+        guessing at a rewrite would risk corrupting a value it doesn't
+        understand, so it is left alone (still moved to the fresh key)."""
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        conflicts = {old_key: "not a python literal at all ("}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("New"))
+            }
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [old_occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace("x", "y"),
+        )
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: "not a python literal at all ("}
+
+    def test_tuple_valued_conflict_rewrites_each_element(self) -> None:
+        """``template_arguments``/``cv_qualification`` conflicts repr() a
+        tuple[str, ...], not a bare str -- each element is rewritten
+        independently, not the tuple's own repr() text as one blob."""
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "template_arguments")
+        conflicts = {old_key: repr(("(lambda:x.h:20:4)", "int"))}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(
+                    canonical_spelling=Fact.present("New"),
+                    template_arguments=Fact.present(("int",)),
+                )
+            }
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [old_occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace(":20:4)", "#1)"),
+        )
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "template_arguments")
+        assert conflicts == {fresh_key: repr(("(lambda:x.h#1)", "int"))}
+
+    def test_default_rewrite_value_is_a_no_op(self) -> None:
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        conflicts = {old_key: "unchanged value"}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("New"))
+            }
+        )
+
+        renumber_conflict_keys(conflicts, [old_occ], new_ir)
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: "unchanged value"}
+
+    def test_unchanged_occurrence_is_left_untouched(self) -> None:
+        eid = entity_id_for_type((), "Same")
+        occ = OccurrenceId(eid)
+        key = semantic_ir_conflict_key(occ, "canonical_spelling")
+        conflicts = {key: "value"}
+        new_ir = SemanticIR(
+            occurrences={occ: CanonicalEntity(canonical_spelling=Fact.present("Same"))}
+        )
+
+        renumber_conflict_keys(conflicts, [occ], new_ir)
+
+        assert conflicts == {key: "value"}
+
+    def test_mismatched_id_count_is_a_no_op(self) -> None:
+        """A rare post-renumber key collision (two old ids -> one new id):
+        bail rather than guess a wrong correspondence."""
+        eid_a = entity_id_for_type((), "A")
+        eid_b = entity_id_for_type((), "B")
+        occ_a, occ_b = OccurrenceId(eid_a), OccurrenceId(eid_b)
+        key_a = semantic_ir_conflict_key(occ_a, "canonical_spelling")
+        key_b = semantic_ir_conflict_key(occ_b, "canonical_spelling")
+        conflicts = {key_a: "a", key_b: "b"}
+        # Collapsed onto ONE occurrence -- length mismatch against the two
+        # old ids passed in.
+        new_ir = SemanticIR(
+            occurrences={occ_a: CanonicalEntity(canonical_spelling=Fact.present("A"))}
+        )
+
+        renumber_conflict_keys(conflicts, [occ_a, occ_b], new_ir)
+
+        assert conflicts == {key_a: "a", key_b: "b"}
+
+    def test_multiple_fact_names_on_one_occurrence_all_move(self) -> None:
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        conflicts = {
+            semantic_ir_conflict_key(old_occ, "canonical_spelling"): "spelling",
+            semantic_ir_conflict_key(old_occ, "cv_qualification"): "cv",
+        }
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(
+                    canonical_spelling=Fact.present("New"),
+                    cv_qualification=Fact.present(("const",)),
+                )
+            }
+        )
+
+        renumber_conflict_keys(conflicts, [old_occ], new_ir)
+
+        assert conflicts == {
+            semantic_ir_conflict_key(new_occ, "canonical_spelling"): "spelling",
+            semantic_ir_conflict_key(new_occ, "cv_qualification"): "cv",
+        }

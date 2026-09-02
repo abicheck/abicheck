@@ -120,4 +120,4 @@ model of what static comparison can and cannot prove.
 
 ---
 
-**Ladder:** ← [Packages and Consumers](packages-and-consumers.md) · Tier 8 · Beyond static ABI · [Data, Wire & Storage Compatibility](data-wire-compatibility.md) →
+**Ladder:** ← [Packages and Consumers](packages-and-consumers.md) · Step 9 · Beyond Static ABI · [Data, Wire & Storage Compatibility](data-wire-compatibility.md) →

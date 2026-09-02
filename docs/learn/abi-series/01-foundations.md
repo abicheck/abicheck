@@ -17,8 +17,7 @@ generated: false
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -473,4 +472,4 @@ keep*. That is the subject of the next page; the break families follow it.
 
 ---
 
-**Ladder:** ← [Part 0 — Compatibility as a Product Contract](00-product-contract.md) · Tier 1 · Foundations · [What Is Part of Your ABI Surface?](../abi-surface.md) →
+**Ladder:** ← [Part 0 — Compatibility as a Product Contract](00-product-contract.md) · Step 2 · Foundations · [What Is Part of Your ABI Surface?](../abi-surface.md) →

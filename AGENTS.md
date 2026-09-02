@@ -188,9 +188,23 @@ Core pipeline (in order of data flow):
    pair is never collapsed; `CanonicalEntity` holds only the non-identity
    payload). Persisted as `AbiSnapshot.semantic_ir` (schema v38,
    `storage/semantic_ir_codec.py`) and reconciled across the two header-AST
-   backends by `extract/semantic_ir_merge.py` — but **no backend produces one
-   yet**: the parser narrowing and `extract/semantic_normalizer.py` are the
-   remainder of that phase.
+   backends by `extract/semantic_ir_merge.py`. **Second slice landed:**
+   `extract/semantic_normalizer.py`'s `normalize_header_ast` projects each
+   header-AST backend's already-parsed `RecordType`/`EnumType`/typedef
+   output (both `dumper_castxml.py` and `dumper_clang.py` already carry a
+   real `entity_id` on each, per Phase 2's option (a)) into a real
+   `SemanticIR`, wired through `dumper_manifest.resolve_header_ast_result`
+   so both the legacy single-TU ELF dump and a real manifest dump populate
+   it — a real `dump()`/`compare()` now carries a non-empty `semantic_ir`,
+   including through `--ast-frontend hybrid`'s reconciliation. Functions,
+   variables, and constants are not normalized yet (a function's/variable's
+   canonical *signature* spelling is exactly the still-open cross-backend
+   canonicalization problem, not a mechanical projection — see that
+   module's own docstring), and the PE/Mach-O header-AST assembly sites in
+   `dumper.py` are not yet wired (that file sits at its `architecture/
+   debt.yaml` no-growth baseline — see the ELF site's own comment there).
+   BTF/CTF/PDB remain fully unmigrated: those backends do not populate
+   `entity_id` at all yet.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info
@@ -787,6 +801,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `adr-index-nav-sync` | ERROR | Every `docs/contribute/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
 | `adr-status-sync` | ERROR on contradiction / bad receipt, WARN on staleness | An ADR's own `**Status:**` line and its row in `adr/index.md` may not *contradict* each other — one claiming nothing is implemented while the other claims something is (how ADR-056's row went stale), or disagreeing on the decision word. Paraphrase is explicitly allowed: the index cell is an abridgement, and a stricter prototype flagged 15 of 56 ADRs, nearly all false positives. Separately validates the optional `**Verified:** <ref>@<sha> on <YYYY-MM-DD>` receipt (see `adr/index.md`'s convention section): exactly one per ADR, well-formed, a real non-future date, and naming a commit reachable from the default branch — a receipt anchored to the branch that adds it vanishes on merge and then fails this required job on `main` permanently. It then WARNs when commits after that sha touched a first-party file the Status paragraph names, which is the only mechanism here that catches *document-vs-code* drift (ADR-049's status claimed its evaluator was unwired for five merged PRs after it wasn't). **A file is watched only when the Status names it by full repo-relative path** (any `FIRST_PARTY_PY_ROOTS` tree, not just `abicheck/`); a bare `x.py` is accepted only when it resolves to `abicheck/x.py`, and family shorthand (`_resolver.py`) is deliberately not guessed at — see `adr/index.md` for why. Lives in `scripts/adr_status_sync.py`, a sibling leaf module, since `check_ai_readiness.py` is already past the 2000-line hard cap |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
+| `project-snapshot-dto-no-asdict` | ERROR | No `dataclasses.asdict()`/`asdict()` call in a `ProjectSnapshot` DTO file (`abicheck/storage/dto.py`, `abicheck/storage/import_v1.py`, `abicheck/project_snapshot_store.py`, `abicheck/storage/semantic_ir_codec.py`) — ADR-063 Phase 8's D8 constraint, made mechanical |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 | `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |
 

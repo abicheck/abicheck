@@ -45,6 +45,17 @@ added it; the plan's §7 rule applies.
 
 ### A1. `docs/_meta/learning-ladder.yaml`
 
+> **2026-09-02 amendment.** As implemented, the file's `tiers:` are
+> presented to readers as numbered **steps** (`Step 1` … `Step 9`, ids
+> `1`-`9`; "tier" is the evidence-level word elsewhere in the docs), Part 7
+> sits in Step 4 directly after Parts 2-6, and `mkdocs.yml`'s "ABI/API
+> Compatibility" tab must carry one nav group per step in step order —
+> `scripts/learning_ladder.py`'s sidebar rule, so the nav can no longer
+> tell a different order from the ladder. The footer (A3) reads
+> `· Step N · <title> ·` and links pages by their `short_title`. See the
+> [curriculum plan's §5 amendment](learning-series-curriculum.md#5-proposed-target-shape)
+> for why.
+
 The one machine-readable owner of tier membership and reading order (plan
 §5). It sits next to `topics.yaml` and `terminology.yaml`, and like them
 it describes *ownership and order*, never content. The listing below is

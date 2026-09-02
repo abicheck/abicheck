@@ -54,10 +54,9 @@ Callers wanting a real `BundleFacts` in one of these archives go through
 `serialization.py`'s `save_bundle_facts`/`load_bundle_facts`
 (`format="archive"`), which delegates the glue to `bundle_facts.py`.
 
-### ADR-062 Phase 0 primitives, plus Phase 1's object model
+### ADR-062 Phase 0 primitives, plus Phase 1's object model, DTO layer, and import adapter
 
-Five primitives (four Phase 0, one Phase 1), each consumed directly by its
-own module — no service locator; `__init__.py` is a re-export surface only.
+Seven primitives (four Phase 0, three Phase 1), plus the internal `guards.py`; each is consumed directly by its own module — no service locator; `__init__.py` is a re-export surface only.
 
 | Module | Owns |
 |---|---|
@@ -65,8 +64,10 @@ own module — no service locator; `__init__.py` is a re-export surface only.
 | `identity.py` | `EntityId`/`OccurrenceId`/`OccurrenceSet`/`IdentityConflict` — logical vs. observed identity, multiplicity preserved (D4) |
 | `canonical.py` | `canonical_form`/`canonical_json`/`semantic_digest` — the one canonical logical encoding (D5) |
 | `versioning.py` | `StorageVersions`/`ProducerIdentity`/`check_reader_compatibility` — the separated version axes (D2) |
-| `package.py` | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`/`InMemoryObjectStore` — D6/D7's package object model and path layout (plan A1.1; no directory-backed store yet) |
-| `guards.py` | the value guards all five apply at their doors — internal, not re-exported (invariant 6) |
+| `package.py` | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`/`InMemoryObjectStore` — D6/D7's package object model and path layout (plan A1.1). The directory-backed `ObjectStore` implementation lives outside this package — `abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` — since this package may import only `model` |
+| `dto.py` | `SectionDTO`/`migrate_section_dto`/`semantic_ir_to_dto`/`semantic_ir_from_dto` — A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint (a distinct, versioned, explicitly-encoded class per section, never `asdict`; `scripts/check_ai_readiness.py`'s `project-snapshot-dto-no-asdict` check enforces it mechanically) |
+| `import_v1.py` | `import_legacy_snapshot` — the v1-v25 import adapter (A1.2/A1.3): one already-serialized legacy document, reshaped into a one-artifact `PackageManifest` |
+| `guards.py` | the value guards all seven apply at their doors — internal, not re-exported (invariant 6) |
 
 ## Invariants this package must not break
 
@@ -91,7 +92,6 @@ own module — no service locator; `__init__.py` is a re-export surface only.
    meaning is an array, never a map relying on insertion order.
 5. **Never add a fifth meaning to one version integer.** A new kind of
    compatibility question gets its own axis in `StorageVersions`.
-
 6. **Never coerce a value a decision reads.** `str()` on a field that
    identifies something is silently lossy in the one way that matters: `1`
    and `"1"` become the same value, so two things a package distinguished

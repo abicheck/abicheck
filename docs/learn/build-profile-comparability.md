@@ -292,4 +292,4 @@ _See also: [Part 0 — Compatibility as a Product Contract](abi-series/00-produc
 
 ---
 
-**Ladder:** ← [Consumer Models](consumer-models.md) · Tier 3 · Define the contract · [Static & Header-Only Contracts](static-and-header-only.md) →
+**Ladder:** ← [Consumer Models](consumer-models.md) · Step 5 · Define Your Contract · [Static & Header-Only Contracts](static-and-header-only.md) →

@@ -682,3 +682,65 @@ class TestCompareOldBundleFacts:
             "precondition failure -- a partial artifact was left behind "
             "despite the overall command failing"
         )
+
+
+class TestRenderJsonCarriesRunOutcome:
+    """Codex review, fresh evidence: `_render_json`'s summary previously
+    omitted `run_outcome` entirely, an exception to this repo's own "every
+    compare/release JSON report carries run_outcome" contract
+    (`docs/use/output-formats.md`). Unlike the live directory/package
+    release fan-out, `BundleDiffResult.verdict` is always a real `Verdict`
+    -- never the "ERROR"/"not_comparable" operational sentinels -- so this
+    exercises `_render_json` directly against a hand-built result rather
+    than compiling real binaries (no `gcc` dependency needed)."""
+
+    def _result(self, verdict) -> object:
+        from abicheck.bundle_models import BundleDiffResult
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change, DiffResult
+
+        changes = (
+            [Change(kind=ChangeKind.FUNC_REMOVED, symbol="s", description="d")]
+            if verdict != Verdict.NO_CHANGE
+            else []
+        )
+        diff = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libfoo.so",
+            changes=changes,
+            verdict=verdict,
+        )
+        return BundleDiffResult(
+            old_root=Path("/old"), new_root=Path("/new"), per_library=[diff]
+        )
+
+    def test_breaking_verdict_gets_a_real_gate(self, tmp_path: Path) -> None:
+        from abicheck.change_registry_types import Verdict
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+
+        out = _render_json(
+            self._result(Verdict.BREAKING),
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
+        payload = json.loads(out)
+        run_outcome = payload["run_outcome"]
+        assert run_outcome["compatibility"] == "BREAKING"
+        assert run_outcome["gate"] == "abi_breaking"
+        assert run_outcome["operational"] == "none"
+
+    def test_no_change_verdict_gets_a_clean_gate(self, tmp_path: Path) -> None:
+        from abicheck.change_registry_types import Verdict
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+
+        out = _render_json(
+            self._result(Verdict.NO_CHANGE),
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
+        payload = json.loads(out)
+        run_outcome = payload["run_outcome"]
+        assert run_outcome["compatibility"] == "NO_CHANGE"
+        assert run_outcome["gate"] == "none"

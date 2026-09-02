@@ -393,6 +393,18 @@ topics:
       - abicheck/effective_config_digest.py
       - abicheck/confidence.py
       - abicheck/junit_coverage_warnings.py
+      # ADR-063 Phase 7: the run_outcome report block (Codex review, fresh
+      # evidence -- this topic already owns the page run_outcome is
+      # documented on; these are the fact sources that own the block itself
+      # and its legacy-report backfill).
+      - abicheck/policy/outcome.py
+      - abicheck/report/run_outcome.py
+      - abicheck/report/not_comparable.py
+      - abicheck/buildsource/check_report_run_outcome.py
+      - abicheck/workflows/aggregate/gate.py
+      - abicheck/cli_compare_release_helpers.py
+      - abicheck/cli_compare_release_matrix.py
+      - abicheck/schemas/compare_report.schema.json
     allowed_summaries:
       - start/first-report.md
       - start/choose-your-workflow.md
@@ -694,3 +706,22 @@ topics:
     task_pages:
       - reference/python-api-reference.md
       - reference/github-action-inputs.md
+
+  # ADR-062 Phase 1 / ADR-063 Phase 8: the PR that first *persists* a
+  # ProjectSnapshot registers this topic, per storage-format-v2.md's
+  # "Documentation ownership" section, which names this exact entry ahead
+  # of time as the trigger's own commitment.
+  project-snapshot-storage:
+    canonical_page: reference/project-snapshot-format.md
+    fact_sources:
+      - abicheck/storage/availability.py
+      - abicheck/storage/fact_availability.py
+      - abicheck/storage/availability_status.py
+      - abicheck/storage/identity.py
+      - abicheck/storage/entity_ids.py
+      - abicheck/storage/canonical.py
+      - abicheck/storage/versioning.py
+      - abicheck/storage/package.py
+      - abicheck/storage/dto.py
+      - abicheck/storage/import_v1.py
+      - abicheck/project_snapshot_store.py

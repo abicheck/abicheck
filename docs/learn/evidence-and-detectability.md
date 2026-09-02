@@ -35,8 +35,8 @@ This page is the conceptual companion to the practical
 [Limitations](limitations.md) and [Tool Comparison](../reference/tool-comparison.md)
 pages; for the teaching-track version — which break families need which evidence,
 with worked example cases — see
-[Detecting Breaks](abi-series/08-detection.md) (the series' Verification &
-Assurance capstone). It answers the
+[Detecting Breaks](abi-series/08-detection.md) (Step 6 of the series). It
+answers the
 question users ask most often:
 
 > "Why did tool A catch this and tool B didn't?"
@@ -674,4 +674,4 @@ _See also: [Part 0 — Compatibility as a Product Contract](abi-series/00-produc
 
 ---
 
-**Ladder:** ← [Contract-Aware Compatibility](contract-aware-compatibility.md) · Concepts c2 · The evidence model · [What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md) →
+**Ladder:** ← [Contract-Aware Compatibility](contract-aware-compatibility.md) · Concepts c2 · The evidence model · [What Each Level Sees](what-each-level-sees.md) →

@@ -238,6 +238,7 @@ class _ScopedFold:
         if self.required_symbols is not None:
             payload["required_symbol_contract"] = self.required_symbols
         self._swap_in_scoped_severity(payload)
+        self._swap_in_scoped_run_outcome(payload)
         # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED, synthesized fresh
         # per app/host by scope_diff_to_app/scope_diff_to_required_symbols)
         # and uncovered missing-contract labels are relevant to the scoped
@@ -450,6 +451,44 @@ class _ScopedFold:
             "blocking_categories": list(
                 getattr(self.result, "scoped_blocking_categories", ()) or ()
             ),
+        }
+
+    def _swap_in_scoped_run_outcome(self, payload: dict[str, Any]) -> None:
+        """Move the full-library ``run_outcome`` block aside for the scoped one.
+
+        ``run_outcome`` (ADR-063 Phase 7) is built by ``report.run_outcome.
+        run_outcome_dict_for_diff_result`` before any ``--used-by``/
+        ``--required-symbol`` scoping is applied, so it describes the
+        full-library compatibility gate by construction -- the identical
+        problem `_swap_in_scoped_severity` above already exists to fix for
+        the legacy ``severity`` block, on the newer structured axis (Codex
+        review): without this, a scoped-compatible run that exits 0 could
+        still carry a blocking ``run_outcome.gate`` describing an unrelated
+        full-library break, and since `GateInfo.from_report_data` prefers
+        the structured `run_outcome` over `severity`/`exit_code`, an
+        aggregate reading this report would fail on a target whose actual,
+        scoped process exit passed. Uses
+        ``result.scoped_compatibility_contribution`` -- the *pre*-coverage/
+        analysis-assurance-floor scoped exit code
+        ``cli_compare_helpers.run_compare`` stamps before folding those
+        orthogonal axes into ``result.scoped_exit_code`` -- so this stays
+        the pure compatibility-gate value ``run_outcome.gate`` represents,
+        under both the legacy and severity exit-code schemes alike (unlike
+        `_swap_in_scoped_severity` above, which only fires under the
+        severity scheme, since only that scheme has a `severity` block to
+        swap in the first place).
+        """
+        run_outcome = payload.get("run_outcome")
+        scoped_compat = getattr(self.result, "scoped_compatibility_contribution", None)
+        if not isinstance(run_outcome, dict) or scoped_compat is None:
+            return
+        from .report.not_comparable import policy_gate_decision_for_exit_code
+
+        payload["full_run_outcome"] = run_outcome
+        payload["run_outcome"] = {
+            **run_outcome,
+            "compatibility": self.scoped_verdict_value,
+            "gate": policy_gate_decision_for_exit_code(scoped_compat).value,
         }
 
     def _fold_findings_into_changes(

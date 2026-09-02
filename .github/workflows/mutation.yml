@@ -180,10 +180,25 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # The full baseline has taken just over two hours on GitHub-hosted runners.
-    # Keep a hard ceiling, but leave enough headroom for the measurement to
-    # finish and produce a receipt rather than being cancelled at 120 minutes.
-    timeout-minutes: 240
+    # The full baseline took just over two hours when this was first set to
+    # 240 minutes (2x headroom over that). `only_mutate` has grown since
+    # (identity, suppression and serialization joined diff_*/checker_policy),
+    # and the weekly `schedule` run (job 99506019384, 2026-08-31) ran the
+    # full 240 minutes and was cancelled by this exact timeout before
+    # producing a receipt -- confirmed via its own "Run mutation testing
+    # (baseline drift)" step, which the job log shows starting and then
+    # nothing until being killed at the wall-clock limit. 360 minutes is
+    # GitHub-hosted runners' own hard per-job ceiling (not configurable
+    # higher), so this raises the budget to platform maximum minus a few
+    # minutes of buffer for the surrounding checkout/install/save/upload
+    # steps in the same job -- not a guarantee this now always fits (the
+    # weekly run genuinely may still need more than a single job's
+    # ceiling allows, in which case scoping `only_mutate` down or splitting
+    # the run across multiple scheduled invocations is the real fix, not a
+    # bigger number). The "Flag a cancelled or incomplete run" step below
+    # already turns a repeat of this into a loud, greppable step-summary
+    # warning rather than a silent gap.
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v6
         with:
