@@ -756,9 +756,41 @@ lands in two stages rather than one atomic change:
       TestCompareDoesNotInjectALosingWrite::
       test_extra_args_overriding_json_away_still_injects_a_write`,
       `tests/test_action_run_sh_scan_pr_json_write.py`, a new module mirroring
-      the compare-mode one). Still open: the release
-      fan-out's `GateOptions` unification, the typed-API half of this
-      parity pass, the `--format text` gap named above, and a real
+      the compare-mode one). **A fifth review round (Codex, fresh evidence)
+      found the fix had stopped one layer short: report *detection* was
+      covered, report *rendering* was not.** The step-summary "Format" row
+      and its "Full report" markdown-vs-code-fence decision (whether the raw
+      output embeds as rendered Markdown or inside a ` ``` ` fence) still
+      read the nominal `$FORMAT`, so a `format: json` step overridden to
+      `--format markdown` mislabeled the summary row and embedded real
+      Markdown output inside a code fence, and the reverse override embedded
+      raw JSON as if it were Markdown. Fixed by gating both on
+      `${_EFFECTIVE_FORMAT:-${FORMAT:-markdown}}` too (`tests/
+      test_action_run_sh_summary.py::
+      TestStepSummaryFullReportFencingUsesEffectiveFormat`). **Also
+      identified, and deliberately deferred rather than fixed in this PR**
+      (recorded in `docs/contribute/known-gaps.md`): (1) CodeRabbit review,
+      fresh evidence — none of `_effective_format`'s three siblings
+      (`_extra_args_has_write_flag`, `_extra_args_write_json_path`) or the
+      real `CMD` assembly (`CMD+=($INPUT_EXTRA_ARGS)`) disable pathname
+      expansion when splitting `INPUT_EXTRA_ARGS`, so a crafted `extra-args:
+      '*'` in a workspace containing a flag-shaped filename could inject an
+      unintended argument — real, but `_effective_format` deliberately
+      matches its siblings' and the real command's own (equally unsafe)
+      splitting on purpose, so hardening only the newest of the four sites
+      would introduce a detection/execution divergence rather than close
+      one; the fix needs all four sites (plus a hostile-glob test corpus)
+      changed together. (2) Codex review, fresh evidence — extra-args
+      supplying its own `-o`/`--output` (a different flag than `--format`,
+      with no existing "effective value" helper the way `--write` has
+      `_extra_args_write_json_path`) can point the real primary report at a
+      path this script's `$OUTPUT_FILE` tracking never learns about,
+      leaving `_json_report_src` with nothing to find; closing this
+      properly needs a new `_effective_output_file` helper with the same
+      freshness/fingerprint discipline `_json_report_src` already applies
+      to `$OUTPUT_FILE`, not a narrow patch to one call site. Still open:
+      the release fan-out's `GateOptions` unification, the typed-API half of
+      this parity pass, the `--format text` gap named above, and a real
       `--artifact-set` member-level evidence-contract signal for the Action
       to consume.
 

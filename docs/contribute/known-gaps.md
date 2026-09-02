@@ -6034,3 +6034,27 @@ looked like the obvious fix and wasn't.
   `add_sided_flag` -- a scoped, standalone follow-up, not a drive-by change
   bundled into a PR whose actual objective was the effective-format fix
   itself.
+
+- **`action/run.sh` has no "effective output path" counterpart to
+  `_effective_format` — investigated, deliberately not fixed (Codex review,
+  PR #998, fresh evidence).** `extra-args` supplying its own `-o`/`--output`
+  (`abicheck/cli_options.py`'s `-o/--output`) is a different flag than
+  `--format`, and Click's last-flag-wins rule applies to it exactly the same
+  way: an `extra-args: -o report.json` on top of an Action run with no
+  `output-file:` input configured really does write the primary report to
+  `report.json` on disk instead of stdout — but `$OUTPUT_FILE` (this
+  script's own tracking variable, sourced only from `INPUT_OUTPUT_FILE`)
+  never learns about it, so `_json_report_src` finds nothing: not
+  `$OUTPUT_FILE` (empty), not `$_STDOUT_JSON_FILE` (nothing on stdout, since
+  `-o` redirected it), not `$PR_JSON` (only populated when this script's own
+  injection fires). A scan or compare that exits non-zero this way (e.g.
+  `EVIDENCE_CONTRACT_ERROR`) publishes the generic `ERROR` instead of the
+  real, more specific verdict its own report on disk could have named.
+  **Not fixed here**, for the same "coordinated primitive, not a narrow
+  patch" reason as the pathname-expansion gap above: `--write` already has
+  its own effective-value recovery (`_extra_args_write_json_path`), but
+  `-o`/`--output` has none, and building one properly means giving it the
+  same freshness/fingerprint discipline `_json_report_src` already applies
+  to `$OUTPUT_FILE` (a pre-existing file at the extra-args path must not be
+  trusted as this run's own output) — a new `_effective_output_file` helper
+  and its own test suite, not a one-line change to a single call site.

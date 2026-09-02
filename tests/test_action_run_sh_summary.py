@@ -67,11 +67,15 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run(fmt: str, output: str) -> str:
+def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
     """Run the extracted snippet with FORMAT/ABICHECK_OUTPUT set, return stdout.
 
     Values are passed via the subprocess environment (not embedded in the
     script text) so no shell-quoting of arbitrary content is needed.
+    *effective_fmt*, when given, sets ``$_EFFECTIVE_FORMAT`` too (an
+    ``extra-args --format`` override — see ``_effective_format``'s own
+    docstring); omitted, the isolated snippet behaves exactly as it did
+    before that value existed.
     """
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
@@ -79,6 +83,10 @@ def _run(fmt: str, output: str) -> str:
         f.write(_summary_fence_region())
         script_path = f.name
     env = dict(os.environ, FORMAT=fmt, ABICHECK_OUTPUT=output)
+    if effective_fmt is not None:
+        env["_EFFECTIVE_FORMAT"] = effective_fmt
+    else:
+        env.pop("_EFFECTIVE_FORMAT", None)
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
@@ -119,3 +127,40 @@ class TestStepSummaryFullReportFencing:
     def test_text_format_still_fenced(self) -> None:
         out = _run("text", "Verdict: COMPATIBLE")
         assert "```" in out
+
+
+class TestStepSummaryFullReportFencingUsesEffectiveFormat:
+    """Codex review, PR #998, fresh evidence: a `format: json` step whose own
+    `extra-args` overrides to `--format markdown` (or the reverse) rendered
+    the real output under the *wrong* fencing rule when this block still
+    checked the nominal `$FORMAT` -- the identical effective-format-override
+    class this PR already fixed for report *detection*, now closed here too
+    for report *rendering*.
+    """
+
+    def test_json_overridden_to_markdown_is_not_fenced(self) -> None:
+        out = _run(
+            "json",
+            "# Report\n\nSome **bold** text.",
+            effective_fmt="markdown",
+        )
+        assert "```" not in out
+        assert "# Report" in out
+
+    def test_markdown_overridden_to_json_is_fenced(self) -> None:
+        out = _run(
+            "markdown",
+            '{"verdict": "COMPATIBLE"}',
+            effective_fmt="json",
+        )
+        assert "```" in out
+        assert '{"verdict": "COMPATIBLE"}' in out
+
+    def test_falls_back_to_nominal_format_when_effective_format_unset(
+        self,
+    ) -> None:
+        # Isolated callers that never assign `$_EFFECTIVE_FORMAT` (matching
+        # every test above this class) must keep behaving exactly as before
+        # this fix.
+        out = _run("markdown", "# Report\n\nDefault behaviour.")
+        assert "```" not in out

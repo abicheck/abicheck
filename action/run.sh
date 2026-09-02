@@ -3080,7 +3080,12 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
     fi
     echo "| Mode | $MODE |"
-    echo "| Format | ${FORMAT:-markdown} |"
+    # The *effective* format (see `_effective_format`'s own docstring): an
+    # `extra-args --format` override changes what the run actually produced,
+    # and showing the nominal `format:` input here would mislabel the very
+    # report rendered a few lines below (Codex review, PR #998, fresh
+    # evidence).
+    echo "| Format | ${_EFFECTIVE_FORMAT:-${FORMAT:-markdown}} |"
     if [[ -n "${OUTPUT_FILE:-}" ]]; then
       echo "| Report | \`${OUTPUT_FILE}\` |"
     fi
@@ -3092,11 +3097,16 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     # code fence (which would make it display as literal ``` text). Every
     # other format (json/sarif/text/review/etc.) is genuinely verbatim
     # output, so it keeps the fence.
+    #
+    # Gated on the effective format too, for the same reason as the "Format"
+    # row above: a `format: json` step overridden to `--format markdown` (or
+    # the reverse) would otherwise embed the real output under the wrong
+    # rendering rule.
     if [[ -n "$ABICHECK_OUTPUT" ]]; then
       echo "<details>"
       echo "<summary>Full report</summary>"
       echo ""
-      if [[ "${FORMAT:-markdown}" == "markdown" ]]; then
+      if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-markdown}}" == "markdown" ]]; then
         echo "$ABICHECK_OUTPUT"
       else
         echo '```'
