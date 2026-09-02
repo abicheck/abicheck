@@ -195,3 +195,55 @@ $ abicheck project validate-build abicheck-build/ --format json
 Exit codes: `0` valid (warnings may still be present), `1` one or more
 validation errors, `64` usage error (`DIRECTORY` is not a readable
 `build-output.json`).
+
+---
+
+## The L3 compile-action record
+
+The build/source pack's L3 layer stores one record per compile action; this
+is the option record the L3 diff actually reads (moved here from
+[Source & Build Data](../learn/build-source-data.md), which keeps the
+narrative).
+
+Each translation unit the build compiled becomes one `CompileUnit` record.
+`abi_relevant_flags` is carried for provenance/localization, but it is **not**
+what `build_diff.py` compares:
+
+```json
+{
+  "id": "cu://src/money.cpp#cfg:9f3a2e",
+  "source": "src/money.cpp",
+  "compiler": "toolchain://gcc-14-cxx",
+  "language": "CXX",
+  "standard": "c++20",
+  "defines": {"_GLIBCXX_USE_CXX11_ABI": "1", "NDEBUG": "1"},
+  "include_paths": ["include/", "build/generated/"],
+  "target_triple": "x86_64-linux-gnu",
+  "abi_relevant_flags": ["-fvisibility=hidden", "-D_GLIBCXX_USE_CXX11_ABI=1"]
+}
+```
+
+The actual L3 diff input is `BuildEvidence.build_options[]` — a separate,
+flatter `BuildOption` record per canonical option key, which the adapters
+*project* from `compile_units[].abi_relevant_flags` (and other sources):
+
+```json
+{
+  "key": "define:_GLIBCXX_USE_CXX11_ABI",
+  "value": "1",
+  "abi_relevant": true,
+  "scope": "global"
+}
+```
+
+Comparing this record between old and new is exactly the "L3 build-flag delta"
+table you see in a report: change `value` from `"1"` to `"0"` here and
+`_diff_options()` emits `abi_relevant_build_flag_changed` — nothing about the
+source itself needs to change for that finding to fire. **This is the record a
+third-party/build-emitted producer must populate** (see
+[Build-emitted facts](../learn/build-source-data.md#build-emitted-facts-the-abicheck_inputs-protocol-flow-2)
+below): shipping only `compile_units[].abi_relevant_flags` without the
+corresponding `build_options[]` entries silently drops L3 flag-drift detection,
+because only the built-in adapters (CMake/Ninja/Bazel/Make) perform that
+projection automatically.
+

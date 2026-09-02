@@ -138,7 +138,7 @@ flags applied) that can correctly overrule a lower layer's naive reading —
 but for the one fact a lower artifact layer directly observed (a symbol is
 present, a struct is this many bytes), a higher layer's absence of evidence
 is never grounds to override it. That asymmetry is the
-[*authority rule*](build-source-data.md) below in full, and it is why the
+[*authority rule*](#how-they-combine) below in full, and it is why the
 next section's own false-positive/false-negative table is not monotonic on
 both axes at every step (L1 alone *adds* false positives L0 was too blind to
 raise) even though the false-negative axis is. Read "staircase" as *more
@@ -156,10 +156,7 @@ snapshot"](../reference/tool-comparison.md#current-scan-quality-snapshot)
 (the "Scan-depth matrix" row) is that owner; see that page for the run
 status and target count. Do not re-add a specific eval-target count,
 run-freshness claim, or per-depth percentage table to *this* page — a second
-copy is exactly how this page and that one disagreed before (this page
-previously claimed measured `100.0%` correct-verdict coverage at `source`
-depth after the catalog it was measured against had already grown past the
-pinned target count).
+copy is exactly how this page and that one disagreed before.
 
 Qualitatively — and this part doesn't drift, because it follows from what
 each layer can and cannot observe, not from a specific run's numbers — the
@@ -179,8 +176,8 @@ description makes on its own.) An earlier `full` rung —
 whole-library replay, as opposed to `source`'s changed-TU replay — scored
 identically to `source` on the comparable-target set the matrix was last
 measured against, which is why the two were collapsed into one public
-`source` rung; see the appendix
-below.
+`source` rung; see
+[Removed scan axes](../use/companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max).
 
 Across the full staircase, adding evidence drives **both** error axes down — it
 is not a trade-off where you must choose between missing breaks and crying wolf.
@@ -254,13 +251,14 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > **how far down** these layers to collect. The [`--depth` dial section
 > below](#the-depth-dial-how-much-evidence-to-collect) explains the mapping
 > (and the removed `s0`–`s6`/`--mode`/`--source-method` axes it replaced —
-> see the [appendix](#appendix-removed-scan-axes-s0s6-mode-source-method-max)).
+> see the [appendix](../use/companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max)).
 
 ### How they combine
 
 The layers are **independent and additive**, not a fallback chain — abicheck
 overlays every source you give it and lets the strongest evidence win, under
-one rule (the *authority rule*, see [Build & Source Packs](build-source-data.md)):
+one rule, the **authority rule** — this is its definition, and every other
+page links here rather than restating it:
 
 > **Artifact-backed evidence (L0/L1/L2) is authoritative for the shipped-ABI
 > verdict.** Build/source evidence (L3/L4) *explains, localizes, scopes, or
@@ -345,7 +343,7 @@ There is no fifth `full` rung. The old `full` depth (whole-library L4 replay,
 as opposed to `source`'s changed-TU replay) has been **collapsed into
 `source`** — the two rungs only ever differed in replay *scope*, never in
 which evidence layer they reached, so keeping both as separate public options
-was pure surface area. See the [appendix](#appendix-removed-scan-axes-s0s6-mode-source-method-max)
+was pure surface area. See the [appendix](../use/companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max)
 for the full removal list and migration mapping.
 
 **Scope rule — which translation units `--depth source` actually replays:**
@@ -433,7 +431,7 @@ the L0 export table against L2 declarations in both directions.
 
 Migrating an old command line? The removed `s0…s6`/`--mode`/`--source-method`/
 `--max` axes map onto `--depth` in the
-[appendix at the end of this page](#appendix-removed-scan-axes-s0s6-mode-source-method-max).
+[Removed scan axes](../use/companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max).
 
 ---
 
@@ -508,42 +506,15 @@ scoping (an application-scoped view folded into `compare`, not a separate
 command). See [§4](#4-app-mode-consumer-scoped-vs-library-compare-contract-scoped)
 for its exact scope.
 
-### b. libabigail (`abidiff`)
+### b. libabigail, ABICC, and abicheck, by evidence
 
-Primarily **DWARF-based**: `abidw` extracts ABI XML, `abidiff` compares it. Falls
-back to CTF/BTF or ELF symbol names; with no debug info it degrades toward
-ELF-only.
-
-- **Good for:** emitted binary ABI from debug builds (struct/class layout, type
-  changes, symbols); no headers required in the common DWARF workflow; a mature
-  ABI diff model.
-- **Limits:** stripped binaries degrade to symbol-only; a header directory is
-  mostly a *public-symbol filter*, not a full source-AST analysis, so source-only
-  changes (default args, access changes, `noexcept`) stay hard; not
-  product/bundle/app-policy oriented by default.
-
-### c. ABI Compliance Checker (ABICC)
-
-Two workflows:
-
-- **`abi-dumper` workflow** — DWARF-based dump from a debug `.so`, optional
-  public-header filter. Lacks a full AST, so it misses many source-only API
-  breaks.
-- **XML / header workflow** — GCC-compiled AST from headers. GCC-only, with
-  known slowness/reliability issues, path sensitivity, and timeouts on complex
-  C++. Lacks ELF binary metadata, so it's weaker on exported-symbol/platform
-  linker facts.
-
-Coarser verdict vocabulary than abicheck `compare` (no `API_BREAK` modeling).
-abicheck's [`compat` mode](../reference/tool-comparison.md) is a drop-in
-replacement for ABICC-style flags; new integrations should prefer `compare`.
-
-### d. abicheck
-
-The combined-evidence model above (§1). Strongest with library + headers + debug
-info + build context. See [Tool Comparison](../reference/tool-comparison.md) for
-the benchmark showing why combining ELF + CastXML + DWARF beats single-source
-tools.
+`abidiff` is DWARF-first (falls back toward symbol-only on a stripped
+release, and a header directory is a public-symbol filter there, not an
+AST), ABICC's two workflows are DWARF-based or GCC-header-based (each
+missing the other's facts), and abicheck overlays every source it is given.
+The per-tool capability and per-case results are owned by
+[Tool Comparison](../reference/tool-comparison.md); abicheck's own ABICC
+drop-in `compat` mode is described in [Tool Modes](../use/tool-modes.md).
 
 ### e. Methods beyond ABI diff tools
 
@@ -676,44 +647,23 @@ your tests and your specification. See
 tests, ASan/TSan lifecycle and concurrency tests — and what each one actually
 proves.
 
+Four compatibility dimensions live entirely on the far side of this
+boundary, and each has its own page that starts from here rather than
+re-arguing it: [behavioral and semantic compatibility](behavioral-compatibility.md)
+(same signature, different meaning), [data, wire and storage
+compatibility](data-wire-compatibility.md) (a layout that outlives both
+binaries), [ownership and lifetime contracts](ownership-and-lifetime.md)
+(who frees what, for how long), and [concurrency and initialization
+contracts](concurrency-and-initialization.md) (thread-safety and init order).
+
 ---
 
-## Appendix — removed scan axes (`s0…s6`, `--mode`, `--source-method`, `--max`)
+## Removed scan axes
 
-Earlier releases let you pick evidence in two other ways. As of the ADR-043
-pre-1.0 CLI reset, both are **removed outright, not deprecated** — `scan`
-no longer accepts `--mode`/`--source-method`/`--max` at all; passing any of
-them is a plain "no such option" usage error (exit 64), same as any other
-unrecognized flag. There is no warn-and-map compatibility shim: this table is
-here only for anyone migrating an old command line, not as a live alias list.
-The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
-(`buildsource/scan_levels.py`) — the internal Python service API
-(`ScanRequest`, used by other programmatic callers) still accepts it —
-but it must never leak into the public CLI, `--help`, reports, the config
-schema, or GitHub Action inputs. Prefer `--depth`.
-
-**`--source-method s0…s6`** (the old "how it gathers evidence" axis):
-
-| Removed | Was | Use instead |
-|------------|-----|-------------|
-| `s0` / `s3` | diff classifier / lexical pattern scan (compiler-free) | `--depth binary` (or `headers` for +L2) |
-| `s1` | compile-DB / build-flag scan (L3) | `--depth build` |
-| `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
-| `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung**: the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
-| `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
-| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source` (ADR-043 D6); they only ever differed in replay *scope*, and `scan --depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
-
-**`--mode`** presets:
-
-| Removed | Was | Use instead |
-|------------|-----|-------------|
-| `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` (or just `auto` with a seed) |
-| `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
-| `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target, ADR-043 D7) |
-| `audit` | intra-version hygiene lint, no baseline | omit `--against` — the always-on hygiene/cross-source checks run on every scan regardless, and omitting `--against` is already a one-build audit (the old standalone `--audit` flag was itself removed as redundant, ADR-043 D5) |
-
-`--source-method auto` (risk-driven escalation) is now simply the default when
-you **omit** `--depth`.
+Earlier releases selected evidence with `--source-method s0…s6`, `--mode`
+and `--max`; all three are gone (ADR-043). The migration table lives with
+the other retired-surface maps, in
+[Migrating to the Current CLI § Removed scan axes](../use/companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max).
 
 ---
 
@@ -721,3 +671,7 @@ _See also: [Part 0 — Compatibility as a Product Contract](abi-series/00-produc
 [Limitations](limitations.md) · [Tool Comparison](../reference/tool-comparison.md) ·
 [Application Compatibility](../use/appcompat.md) ·
 [Multi-Binary Releases](../use/multi-binary.md)._
+
+---
+
+**Ladder:** ← [Contract-Aware Compatibility](contract-aware-compatibility.md) · Concepts c2 · The evidence model · [What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md) →

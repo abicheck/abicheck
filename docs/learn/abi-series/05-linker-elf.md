@@ -1,3 +1,14 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/diff_versioning.py
+  - abicheck/diff_platform.py
+lifecycle: active
+generated: false
+---
 # Part 5 — ELF & Linker-Level Concerns
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -292,20 +303,13 @@ the [Platform Support reference](../../reference/platforms.md).
 
 ## How to govern the linker-level contract
 
-!!! tip "Design patterns for Part 5"
-    - **Version scripts as the source of truth.** A `.map` file enumerating
-      every intentional export is the canonical place to negotiate API surface
-      — and it doubles as your `-fvisibility=hidden` allowlist.
-    - **`ABI_EXPORT` macro discipline.** Build with `-fvisibility=hidden` and
-      annotate public functions with a project-specific macro expanding to
-      `__attribute__((visibility("default")))` (ELF) /
-      `__declspec(dllexport)` (PE).
-    - **CI gate on every PR.** Dump the previous release, compare the
-      candidate, fail on any 🔴 BREAKING not paired with a SONAME bump.
-    - **Never link with absolute `--rpath`.** Use `$ORIGIN` or install-time
-      rewriting; absolute build paths are non-portable and a security hazard.
-    - **Declare TLS access models explicitly.** If a TLS variable is ever
-      reached via `dlopen`, pin `-ftls-model=global-dynamic`.
+A version script as the one source of truth for exports, hidden visibility
+with an export macro, `$ORIGIN`-relative rather than absolute `RPATH`, and
+an explicit TLS model for anything reached through `dlopen` — the design
+rules that keep the linker-level contract governable are
+[Part 7's](07-designing-for-stability.md) Pattern 4; how glibc and
+libstdc++ apply them over decades is the subject of
+[How System Libraries Stay Compatible](../system-library-discipline.md).
 
 ---
 
@@ -321,3 +325,7 @@ dependency the library doesn't even define.
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [Platforms reference](../../reference/platforms.md) ·
 [Quality examples](../../reference/examples/by-category/quality.md)
+
+---
+
+**Ladder:** ← [Part 4 — C++ ABI Specifics](04-cpp-abi.md) · Tier 2 · Mechanics · [Part 6 — Subtle & Transitive Breaks](06-transitive-breaks.md) →

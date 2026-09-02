@@ -62,15 +62,17 @@ path, not the nav position.
     **ABI/API Compatibility** tab, grouped by the question a page answers
     rather than by page *kind* (a numbered Learning-Series Part, a
     framing page, and a split-out deep-dive page covering the same question
-    sit in the same group): **Start** (the hub, five-minute overview, cheat
-    sheet) → **Define Your Contract** (Part 0, direction, consumer models,
+    sit in the same group): **Start** (the hub, five-minute overview, how a break
+    shows up, cheat sheet) → **Define Your Contract** (Part 0, direction, consumer models,
     build-profile comparability, public surface) → **ABI Mechanics** (Parts
     1-2-3-4-5-6, plus `class-layout-abi.md`) → **Beyond ABI** (behavioral,
     data/wire, ownership, static/header-only, concurrency) → **Platforms &
     Toolchains** (exception unwinding, modern-toolchain hazards, runtime
-    floors, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
+    floors, environment drift, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
     7) → **Verification & Assurance** (`abi-series/08-detection.md` +
-    `assurance-methods.md`) → **Quick Reference** (glossary). This is a
+    `assurance-methods.md`) → **Practice** (where in the pipeline, surface
+    growth, rollout and governance, triage) → **At Scale** (products, template-heavy
+    libraries, system-library discipline, packages and consumers) → **Quick Reference** (glossary). This is a
     nav-only regroup of what was once a flat "Deep Dives" list plus a
     separately-numbered "Learning Series" — a Part's own numbered "Series
     navigation" breadcrumb (top of each `abi-series/0N-*.md` page) still
@@ -78,7 +80,7 @@ path, not the nav position.
   - The **tool track** — how abicheck itself models and reports compatibility
     — is navigated under the **Concepts** tab: verdicts,
     `evidence-and-detectability.md`, `architecture.md`, build/source data,
-    graph coverage, impact assessment, environment drift,
+    graph coverage, impact assessment,
     `elf-symbol-filtering.md` (a specific abicheck scan-mode behavior, not
     general ABI knowledge — kept out of the educational tab even though its
     file lives in the same directory), and `limitations.md`.
@@ -361,6 +363,7 @@ python scripts/gen_cli_reference.py       # docs/reference/cli-reference.md
 python scripts/gen_python_api_reference.py  # docs/reference/python-api-reference.md
 python scripts/gen_config_reference.py    # docs/reference/config-keys-reference.md
 python scripts/gen_platform_matrix.py     # docs/reference/platforms.md's "Quick Reference" section
+python scripts/gen_learning_ladder.py     # docs/learn/abi-api-handling.md's ladder and role-path tables (from docs/_meta/learning-ladder.yaml)
 python scripts/gen_backend_capability_matrix.py  # docs/reference/header-backend-capabilities.md's fact matrix
 python scripts/gen_fact_capability_matrix.py      # docs/reference/fact-registry.md
 python scripts/gen_agent_skills.py        # .agents/skills/, .claude/skills/, .gemini/skills/ (from skills-src/)

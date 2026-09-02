@@ -250,10 +250,6 @@ SONAME bump — but they should fail CI when you promise source compatibility.
     - **Stable DTOs at the API boundary.** Define plain structs with explicit
       layout for every value that crosses the ABI, and treat those DTOs as a
       versioned schema separate from your internal types.
-    - **Build-time abicheck in CI.** Run `abicheck compare` against the last
-      released `.so` on every PR; flag anything above `COMPATIBLE_WITH_RISK` as
-      a release blocker — and ship the build with debug info so transitive
-      layout shifts are *visible* to the tool.
     - **Zero reserved fields before public release**, or commit in
       documentation to never activating them. Reserved padding that is never
       used is free; reserved padding whose safety you can't audit is a future
@@ -267,12 +263,16 @@ SONAME bump — but they should fail CI when you promise source compatibility.
 
 ## Next
 
-You've now seen every family of break. The final page turns the scattered "how
-to fix" boxes into a single, coherent design playbook — the patterns that make a
-library *evolvable*, plus the CI gate that enforces them.
+You've now seen every family of break. Before the design playbook that keeps
+them out ([Part 7](07-designing-for-stability.md)), the ladder turns to the
+contract itself: which side of the boundary promises what, and to whom.
 
-➡️ **[Part 7 — Designing for Stability](07-designing-for-stability.md)**
+➡️ **[Compatibility Direction](../compatibility-direction.md)**
 
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [BREAKING examples](../../reference/examples/by-verdict/breaking.md) ·
 [Limitations](../limitations.md)
+
+---
+
+**Ladder:** ← [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) · Tier 2 · Mechanics · [Compatibility Direction](../compatibility-direction.md) →

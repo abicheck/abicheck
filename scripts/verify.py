@@ -379,6 +379,15 @@ STEPS: tuple[Step, ...] = (
         description="Use-case registry vs. human docs drift gate",
     ),
     Step(
+        # The learning-series hub's ladder and role-path tables are rendered
+        # from docs/_meta/learning-ladder.yaml; this is the drift half only
+        # (the ladder's rules run inside docs-contract).
+        "learning-ladder",
+        _pyscript("scripts/gen_learning_ladder.py", "--check"),
+        frozenset({PR, FULL}),
+        description="Learning-series hub ladder/paths blocks in sync with docs/_meta/learning-ladder.yaml",
+    ),
+    Step(
         "docs-contract",
         _pyscript("scripts/check_docs_contract.py"),
         frozenset({PR, FULL}),

@@ -113,7 +113,7 @@ jobs:
       # --profile pr` run locally (CLAUDE.md "M0-3"), so this job can't
       # silently diverge from the local PR-profile definition of done.
       - name: Scoping / tier-accuracy / doc-sync / docs-contract / agent-skills / repo-facts gates
-        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,agent-skills-generated,repo-facts
+        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,repo-facts
       # G37 Phase 0. Deliberately in this job and not a new one: both steps are
       # deterministic re-derivations over content this job already has on
       # disk (committed repo content, plus the freshly-generated agent-skill

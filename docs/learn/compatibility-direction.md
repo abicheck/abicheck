@@ -138,9 +138,18 @@ asks you to make explicit before reasoning about breaks at all. Naming which
 directions your project actually needs (usually: backward always, forward
 if rollback is supported, both host directions if you ship plugins) is the
 first step; running `compare` once per direction that matters is the
-mechanical follow-through.
+mechanical follow-through:
+
+```bash
+abicheck compare old.so new.so -H include/   # backward: old consumers on the new library
+abicheck compare new.so old.so -H include/   # forward: the rollback path
+```
 
 See also: [Product Contract §5](abi-series/00-product-contract.md#5-name-your-contract-shape) for
 naming your contract shape, and [Plugin Systems](../use/plugin-systems.md)
 for the consumer-scoped mechanics that make a specific direction checkable
 against a specific real consumer.
+
+---
+
+**Ladder:** ← [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) · Tier 3 · Define the contract · [Consumer Models](consumer-models.md) →
