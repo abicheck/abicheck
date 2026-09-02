@@ -179,7 +179,7 @@ def _named_violations() -> list[tuple[str, int, str, list[str]]]:
             )
             if not unsynced:
                 continue
-            rel = str(path.relative_to(_PKG.parent))
+            rel = path.relative_to(_PKG.parent).as_posix()
             func = _enclosing_function(tree, node)
             unreviewed = [
                 name
@@ -203,7 +203,7 @@ def _starred_calls() -> list[tuple[str, int, str]]:
             if not _is_replace_call(node):
                 continue
             if any(kw.arg is None for kw in node.keywords):
-                rel = str(path.relative_to(_PKG.parent))
+                rel = path.relative_to(_PKG.parent).as_posix()
                 found.append((rel, node.lineno, _enclosing_function(tree, node)))
     return found
 
@@ -240,7 +240,7 @@ class TestNoUnsyncedReplace:
         live: set[tuple[str, str, str]] = set()
         for path in _module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            rel = str(path.relative_to(_PKG.parent))
+            rel = path.relative_to(_PKG.parent).as_posix()
             for node in ast.walk(tree):
                 if not _is_replace_call(node):
                     continue
@@ -253,6 +253,41 @@ class TestNoUnsyncedReplace:
         assert not stale, (
             "allowlisted call sites that no longer exist (or that now sync "
             f"their sibling) — shrink the list: {stale}"
+        )
+
+    def test_relative_paths_are_computed_platform_independently(self) -> None:
+        """`rel` must be built via `.as_posix()`, never bare `str(Path)`.
+
+        `Path.relative_to(...)` renders with the *host's native* separator
+        — `str()` of a relative path is `abicheck\\dwarf_snapshot.py` on
+        Windows — while every allowlist key above is spelled with forward
+        slashes. `str(rel)` on Windows therefore never equals any allowlist
+        key, so `_named_violations`/`_starred_calls` never find their own
+        allowlisted entries and every one of the three tests above failed
+        on the `windows-latest` CI lane: real, allowlisted, already-safe
+        call sites read as unreviewed violations, and every genuinely-live
+        allowlist entry read as stale, for every PR run on that lane.
+
+        Proven with `PureWindowsPath` so the difference is real even when
+        this test itself runs on POSIX, and pinned as a source-level
+        invariant (never the bare `str()` spelling anywhere in this
+        file) so a future edit re-adding the platform-dependent spelling at
+        a fourth call site fails immediately rather than silently reaching
+        the same Windows-only gap the first three did.
+        """
+        from pathlib import PureWindowsPath
+
+        windows_relative = PureWindowsPath("abicheck") / "dwarf_snapshot.py"
+        assert str(windows_relative) != windows_relative.as_posix()
+        assert windows_relative.as_posix() == "abicheck/dwarf_snapshot.py"
+
+        source = Path(__file__).read_text(encoding="utf-8")
+        banned = "str" + "(path.relative_to("
+        assert banned not in source, (
+            "rel must be computed via path.relative_to(...).as_posix(), "
+            "never the bare str(...) form -- see this test's own "
+            "docstring for why the latter silently breaks every allowlist "
+            "match on Windows"
         )
 
 
