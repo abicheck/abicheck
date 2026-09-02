@@ -336,6 +336,73 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(TypeError, match="semantic_ir_conflicts"):
             snapshot_from_dict(document)
 
+    def _document_with_fact(self, fact_name: str, patch: dict) -> dict:
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.present("Foo"),
+                    template_arguments=Fact.present(("int",)),
+                    cv_qualification=Fact.present(("const",)),
+                )
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        document["semantic_ir"]["occurrences"][0]["entity"][fact_name].update(patch)
+        return document
+
+    @pytest.mark.parametrize("fact_name", ["canonical_spelling", "cv_qualification"])
+    def test_a_truncated_fact_missing_its_value_is_rejected(
+        self, fact_name: str
+    ) -> None:
+        """`{"status": "present"}` with no `value` would construct
+        `Fact(PRESENT, None)` — usable evidence, by `resolved_fact_count`, for
+        a spelling the document no longer carries."""
+        document = self._document_with_fact(fact_name, {})
+        del document["semantic_ir"]["occurrences"][0]["entity"][fact_name]["value"]
+        with pytest.raises(ValueError, match="missing required field"):
+            snapshot_from_dict(document)
+
+    def test_a_fact_missing_its_status_is_rejected(self) -> None:
+        document = self._document_with_fact("canonical_spelling", {})
+        del document["semantic_ir"]["occurrences"][0]["entity"]["canonical_spelling"][
+            "status"
+        ]
+        with pytest.raises(ValueError, match="missing required field"):
+            snapshot_from_dict(document)
+
+    @pytest.mark.parametrize("bad", ["", "const", 1, {"a": "b"}, ["const", 2], [None]])
+    def test_a_malformed_tuple_fact_value_is_rejected(self, bad: object) -> None:
+        """A scalar where a list belongs is the defect that mattered:
+        `cv_qualification.value = ""` passed straight through
+        `canonical_cv_qualification` as the *empty* qualification."""
+        document = self._document_with_fact("cv_qualification", {"value": bad})
+        with pytest.raises(TypeError):
+            snapshot_from_dict(document)
+
+    @pytest.mark.parametrize("bad", [1, ["Foo"], {"a": "b"}, True])
+    def test_a_malformed_scalar_fact_value_is_rejected(self, bad: object) -> None:
+        document = self._document_with_fact("canonical_spelling", {"value": bad})
+        with pytest.raises(TypeError):
+            snapshot_from_dict(document)
+
+    def test_a_null_value_stays_legitimate_for_every_status(self) -> None:
+        """`Fact.present(None)` is a confirmed absence, and the value-less
+        statuses carry `None` too — the validation must not refuse those."""
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.present(None),  # type: ignore[arg-type]
+                    template_arguments=Fact.not_collected(),
+                    cv_qualification=Fact.unsupported("no evidence"),
+                )
+            }
+        )
+        reloaded = _round_trip(_snapshot(ir))
+        assert reloaded.semantic_ir is not None
+        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+
     def test_a_non_string_conflict_entry_is_rejected(self) -> None:
         document = snapshot_to_dict(_snapshot(None, semantic_ir_conflicts={"k": "v"}))
         document["semantic_ir_conflicts"] = {"k": 3}

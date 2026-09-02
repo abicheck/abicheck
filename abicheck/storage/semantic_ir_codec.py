@@ -94,14 +94,45 @@ def _fact_to_dict(fact: Fact[Any]) -> dict[str, Any]:
     }
 
 
-def _fact_from_dict(raw: Any, *, as_tuple: bool) -> Fact[Any]:
+def _fact_value(raw: Any, field_name: str, *, as_tuple: bool) -> Any:
+    """One semantic fact's value, checked against the shape its field
+    declares rather than admitted as whatever the document holds.
+
+    ``None`` is legitimate for every status (a confirmed-absent
+    ``Fact.present(None)``, and the value-less statuses). Anything else must
+    match the field's declared type: a `str` spelling, or a list of `str`
+    for a tuple-valued field. Without this, `"cv_qualification": {"value":
+    ""}` entered the IR as a present-but-scalar qualification and
+    `canonical_cv_qualification` read it as the *empty* one -- malformed
+    persisted state reaching reduction and hybrid merging as if a backend
+    had established it (Codex review).
+    """
+    if raw is None:
+        return None
+    if not as_tuple:
+        return identity_text(raw, f"semantic_ir {field_name} value")
+    entries = row_sequence(raw, f"semantic_ir {field_name} value")
+    return tuple(
+        identity_text(entry, f"semantic_ir {field_name} value[{index}]")
+        for index, entry in enumerate(entries)
+    )
+
+
+def _fact_from_dict(raw: Any, *, as_tuple: bool, field_name: str) -> Fact[Any]:
     data = _mapping(raw, "semantic_ir fact")
-    value = data.get("value")
-    if as_tuple and isinstance(value, list):
-        value = tuple(value)
     return Fact(
-        status=FactStatus(data["status"]),
-        value=value,
+        # required_field, not `data[...]`/`data.get(...)`: a truncated fact
+        # keeping `"status": "present"` while losing `value` would otherwise
+        # construct `Fact(PRESENT, None)`, which `resolved_fact_count` reads
+        # as usable evidence for a spelling the document no longer carries;
+        # and a bare subscript raises `KeyError`, which is neither of the two
+        # exceptions this package documents as "the document is malformed".
+        status=FactStatus(required_field(data, "status", "semantic_ir fact")),
+        value=_fact_value(
+            required_field(data, "value", "semantic_ir fact"),
+            field_name,
+            as_tuple=as_tuple,
+        ),
         # diagnostics_from, never bare tuple(): a string is a Sequence, so
         # ``"diagnostics": "parse error"`` would decode to eleven
         # single-character diagnostics and be written back that way, and a
@@ -149,7 +180,9 @@ def _entity_to_dict(entity: CanonicalEntity) -> dict[str, Any]:
 def _entity_from_dict(raw: Any) -> CanonicalEntity:
     data = _mapping(raw, "semantic_ir entity")
     facts = {
-        name: _fact_from_dict(value, as_tuple=name in _TUPLE_VALUED_FACTS)
+        name: _fact_from_dict(
+            value, as_tuple=name in _TUPLE_VALUED_FACTS, field_name=name
+        )
         for name, value in data.items()
         if name != "producer"
     }
