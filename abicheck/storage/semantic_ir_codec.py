@@ -69,7 +69,12 @@ from .guards import (
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["decode_semantic_ir", "encode_semantic_ir"]
+__all__ = [
+    "decode_semantic_ir",
+    "encode_semantic_ir",
+    "semantic_ir_from_document",
+    "semantic_ir_to_document",
+]
 
 #: Every ``Fact``-typed field on ``CanonicalEntity``, derived from the
 #: dataclass itself so a new field cannot be added to the model and silently
@@ -192,23 +197,22 @@ def _entity_from_dict(raw: Any) -> CanonicalEntity:
     )
 
 
-def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
-    """In-place: write ``snap.semantic_ir``'s list-of-entries encoding into
-    ``d["semantic_ir"]``, or drop the key when the snapshot carries none.
+def semantic_ir_to_document(
+    ir: SemanticIR | None, conflicts: Mapping[str, str]
+) -> dict[str, Any]:
+    """The pure, object-in/document-out half of the encoding.
 
-    Dropping (rather than writing ``null``) matches every other sparse,
-    only-present-when-meaningful field this package's wire format already
-    uses, so a snapshot from a backend not yet narrowed onto the normalizer
-    serializes exactly as it did before this field existed.
+    Returns a document with `"semantic_ir"`/`"semantic_ir_conflicts"` keys
+    present only when there is something to say — the same sparse,
+    only-present-when-meaningful convention `encode_semantic_ir` applies to
+    a whole snapshot dict, extracted so a caller that has a typed
+    :class:`SemanticIR` (ADR-063 Phase 8's DTO layer, in particular) can
+    reach this encoding without needing a whole `AbiSnapshot` to hang it
+    off of. ``encode_semantic_ir`` below is now a thin wrapper over this
+    function; nothing about the wire format changes.
     """
-    # Same sparse convention for the conflict map: written only when a merge
-    # actually recorded one, so a snapshot with nothing to say carries no key
-    # rather than an empty object. Without this, every v38 document would
-    # differ from the v37 one it would otherwise have been -- for a field
-    # only the hybrid path can ever populate.
-    if not snap.semantic_ir_conflicts:
-        d.pop("semantic_ir_conflicts", None)
-    else:
+    out: dict[str, Any] = {}
+    if conflicts:
         # Validated on the way OUT as strictly as on the way in, and for a
         # reason specific to writing: a non-string key survives in memory
         # but `json.dumps` renders it as a string, so `{1: "first", "1":
@@ -219,68 +223,70 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
         # preserves a mapping's insertion order, so two runs that recorded
         # the same conflicts in a different order would otherwise write
         # different documents for identical state.
-        d["semantic_ir_conflicts"] = {
+        out["semantic_ir_conflicts"] = {
             identity_text(key, "semantic_ir_conflicts key"): identity_text(
                 value, "semantic_ir_conflicts value"
             )
             for key, value in sorted(
-                _mapping(snap.semantic_ir_conflicts, "semantic_ir_conflicts").items(),
+                _mapping(conflicts, "semantic_ir_conflicts").items(),
                 key=lambda item: identity_text(item[0], "semantic_ir_conflicts key"),
             )
         }
-    ir = snap.semantic_ir
-    if ir is None:
-        d.pop("semantic_ir", None)
-        return
-    d["semantic_ir"] = {
-        "occurrences": [
-            {
-                "occurrence": {
-                    "entity_id": domain_entity_id_to_dto(occ_id.entity_id),
-                    "disambiguator": occ_id.disambiguator,
-                },
-                "entity": _entity_to_dict(entity),
-            }
-            # Sorted, never the mapping's incidental insertion order: two
-            # equal ``SemanticIR`` values built in opposite orders must
-            # serialize identically, or a content hash over the document
-            # reports a difference the stored state does not have
-            # (``storage/AGENTS.md`` invariant 4).
-            for occ_id, entity in sorted(
-                ir.occurrences.items(), key=lambda item: canonical_key(item[0])
-            )
-        ]
-    }
+    if ir is not None:
+        out["semantic_ir"] = {
+            "occurrences": [
+                {
+                    "occurrence": {
+                        "entity_id": domain_entity_id_to_dto(occ_id.entity_id),
+                        "disambiguator": occ_id.disambiguator,
+                    },
+                    "entity": _entity_to_dict(entity),
+                }
+                # Sorted, never the mapping's incidental insertion order: two
+                # equal ``SemanticIR`` values built in opposite orders must
+                # serialize identically, or a content hash over the document
+                # reports a difference the stored state does not have
+                # (``storage/AGENTS.md`` invariant 4).
+                for occ_id, entity in sorted(
+                    ir.occurrences.items(), key=lambda item: canonical_key(item[0])
+                )
+            ]
+        }
+    return out
 
 
-def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
-    """In-place: rebuild ``snap.semantic_ir`` and ``snap.semantic_ir_conflicts``
-    from *d*, leaving the IR ``None`` for a document that carries no
-    ``semantic_ir`` key (every snapshot written before schema v38, and every
-    one written since by a backend with no IR to record).
+def semantic_ir_from_document(
+    document: Mapping[str, Any],
+) -> tuple[SemanticIR | None, dict[str, str]]:
+    """The pure, document-in/object-out half of the decoding.
 
-    The conflict map is decoded independently of the IR: a merged snapshot
-    can legitimately record conflicts while a *reader* of that document has
-    no IR key to attach them to only if the writer dropped one, so tying the
-    two together would silently discard evidence in the one case the pairing
-    is not guaranteed.
+    Returns ``(ir, conflicts)``, mirroring `semantic_ir_to_document`'s
+    output shape exactly: `ir` is ``None`` for a document that carries no
+    `"semantic_ir"` key (every snapshot written before schema v38, and every
+    one written since by a backend with no IR to record); `conflicts` is
+    `{}` when the document carries no `"semantic_ir_conflicts"` key. The
+    conflict map is decoded independently of the IR — a merged snapshot can
+    legitimately record conflicts while a document carries no IR key to
+    attach them to, so tying the two together would silently discard
+    evidence in the one case the pairing is not guaranteed.
     """
-    if "semantic_ir_conflicts" in d:
-        snap.semantic_ir_conflicts = {
+    conflicts: dict[str, str] = {}
+    if "semantic_ir_conflicts" in document:
+        conflicts = {
             identity_text(key, "semantic_ir_conflicts key"): identity_text(
                 value, "semantic_ir_conflicts value"
             )
             for key, value in _mapping(
-                d["semantic_ir_conflicts"], "semantic_ir_conflicts"
+                document["semantic_ir_conflicts"], "semantic_ir_conflicts"
             ).items()
         }
-    if "semantic_ir" not in d:
+    if "semantic_ir" not in document:
         # Key absent: this snapshot predates v38, or its backend produced no
         # IR. A key that is PRESENT but malformed (`[]`, `""`, `0`) is a
         # different document and is rejected below rather than read as
         # "no backend produced one".
-        return
-    document = _mapping(d["semantic_ir"], "semantic_ir")
+        return None, conflicts
+    ir_document = _mapping(document["semantic_ir"], "semantic_ir")
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     # `required_field`, not a default: this codec always writes the key (an
     # IR that observed nothing is `{"occurrences": []}`), so a present
@@ -289,7 +295,7 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     # a backend ran and established there are none -- the "absence is not
     # evidence" reading this package exists to refuse (Codex review).
     for entry_raw in row_sequence(
-        required_field(document, "occurrences", "semantic_ir"),
+        required_field(ir_document, "occurrences", "semantic_ir"),
         "semantic_ir occurrences",
     ):
         entry = _mapping(entry_raw, "semantic_ir occurrence entry")
@@ -324,4 +330,42 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
                 "be discarded on load"
             )
         occurrences[occ_id] = _entity_from_dict(entry.get("entity"))
-    snap.semantic_ir = SemanticIR(occurrences=occurrences)
+    return SemanticIR(occurrences=occurrences), conflicts
+
+
+def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
+    """In-place: write ``snap.semantic_ir``'s list-of-entries encoding into
+    ``d["semantic_ir"]``/``d["semantic_ir_conflicts"]``, dropping either key
+    the snapshot has nothing to say for.
+
+    A thin wrapper over `semantic_ir_to_document` — see that function for
+    the actual encoding. Dropping (rather than writing ``null``) matches
+    every other sparse, only-present-when-meaningful field this package's
+    wire format already uses, so a snapshot from a backend not yet narrowed
+    onto the normalizer serializes exactly as it did before this field
+    existed.
+    """
+    encoded = semantic_ir_to_document(
+        snap.semantic_ir, snap.semantic_ir_conflicts or {}
+    )
+    for key in ("semantic_ir", "semantic_ir_conflicts"):
+        if key in encoded:
+            d[key] = encoded[key]
+        else:
+            d.pop(key, None)
+
+
+def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
+    """In-place: rebuild ``snap.semantic_ir`` and ``snap.semantic_ir_conflicts``
+    from *d*, leaving the IR ``None`` for a document that carries no
+    ``semantic_ir`` key (every snapshot written before schema v38, and every
+    one written since by a backend with no IR to record).
+
+    A thin wrapper over `semantic_ir_from_document` — see that function for
+    the actual decoding.
+    """
+    ir, conflicts = semantic_ir_from_document(d)
+    if "semantic_ir_conflicts" in d:
+        snap.semantic_ir_conflicts = conflicts
+    if ir is not None:
+        snap.semantic_ir = ir

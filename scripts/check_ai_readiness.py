@@ -2260,6 +2260,67 @@ def check_banned_imports(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: no asdict/mirror-deserializer for ProjectSnapshot DTOs (ADR-062
+# Phase 1 / ADR-063 Phase 8's D8 constraint)
+# ---------------------------------------------------------------------------
+
+#: The files ADR-063 Phase 8 landed as the `ProjectSnapshot` package's DTO
+#: layer — D8 requires each to build its wire form via an explicit,
+#: hand-written encoding (`SectionDTO.to_dict()`,
+#: `semantic_ir_codec.semantic_ir_to_document()`, ...), never
+#: `dataclasses.asdict()`. Unlike `serialization.py`'s legacy `AbiSnapshot`
+#: encoding — which deliberately keeps its own `asdict()` call, per D1's
+#: "Keep the physical envelope... No new binary codec" and ADR-062's own
+#: "no existing baseline is rewritten" promise — a new file added to this
+#: list starts under the identical constraint the day it lands, not as a
+#: later cleanup.
+_PROJECT_SNAPSHOT_DTO_FILES = (
+    "abicheck/storage/dto.py",
+    "abicheck/storage/import_v1.py",
+    "abicheck/project_snapshot_store.py",
+)
+
+
+def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
+    """ADR-063 Phase 8's D8 constraint, made mechanical: zero
+    `dataclasses.asdict`/`asdict` call sites in any `ProjectSnapshot`-DTO
+    file (see `_PROJECT_SNAPSHOT_DTO_FILES`). A first draft of one of these
+    files reaching for `asdict()` as a shortcut is exactly the "second,
+    unreviewed mirror deserializer" this phase's own text names as the
+    defect the whole DTO layer exists to avoid — this check exists so that
+    mistake fails CI instead of surviving review.
+    """
+    for rel in _PROJECT_SNAPSHOT_DTO_FILES:
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called_name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if called_name == "asdict":
+                f.err(
+                    "project-snapshot-dto-no-asdict",
+                    f"{rel}:{node.lineno}: `asdict(...)` is not allowed in a "
+                    "ProjectSnapshot DTO file — ADR-063 Phase 8's D8 "
+                    "constraint requires an explicit, hand-written "
+                    "to_dict()/from_dict() per DTO, never a generic "
+                    "dataclass mirror",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Check: CLI interface contract (ADR-037 D10.1)
 # ---------------------------------------------------------------------------
 
@@ -3126,6 +3187,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
     "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
+    "project-snapshot-dto-no-asdict": check_project_snapshot_dto_no_asdict,
     "cli-contract": check_cli_contract,
     "engine-cli-boundary": check_engine_cli_boundary,
     "fact-detector-misuse": check_fact_detector_misuse,

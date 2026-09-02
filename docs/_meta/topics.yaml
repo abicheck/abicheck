@@ -694,3 +694,22 @@ topics:
     task_pages:
       - reference/python-api-reference.md
       - reference/github-action-inputs.md
+
+  # ADR-062 Phase 1 / ADR-063 Phase 8: the PR that first *persists* a
+  # ProjectSnapshot registers this topic, per storage-format-v2.md's
+  # "Documentation ownership" section, which names this exact entry ahead
+  # of time as the trigger's own commitment.
+  project-snapshot-storage:
+    canonical_page: reference/project-snapshot-format.md
+    fact_sources:
+      - abicheck/storage/availability.py
+      - abicheck/storage/fact_availability.py
+      - abicheck/storage/availability_status.py
+      - abicheck/storage/identity.py
+      - abicheck/storage/entity_ids.py
+      - abicheck/storage/canonical.py
+      - abicheck/storage/versioning.py
+      - abicheck/storage/package.py
+      - abicheck/storage/dto.py
+      - abicheck/storage/import_v1.py
+      - abicheck/project_snapshot_store.py

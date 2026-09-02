@@ -143,6 +143,7 @@ nav:
     - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
     - Snapshot Format: reference/snapshot-format.md
+    - Project Snapshot Format (v2, in development): reference/project-snapshot-format.md
     - Source Graph Schema: reference/source-graph-schema.md
     - Build Output Schema: reference/build-output-schema.md
     - Project Targets Schema: reference/project-targets-schema.md

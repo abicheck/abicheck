@@ -13712,6 +13712,37 @@ see.
 
 ### Phase 8 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
 
+**Update (2026-09-02, landed — a bounded first slice, not the whole
+phase).** ADR-062 Phase 0's primitives are no longer inert: a real
+`ProjectSnapshot` can now be written to and read from a real directory.
+`abicheck/storage/dto.py` (new) is the D8-constrained `SectionDTO` envelope
+this phase's Files section asked for, built on `storage/semantic_ir_codec.py`'s
+existing explicit `SemanticIR` encoding (extracted into a pure
+`semantic_ir_to_document`/`semantic_ir_from_document` pair this DTO layer
+calls, rather than duplicating it) — `semantic_ir_to_dto`/`semantic_ir_from_dto`
+are the one concrete domain type actually promoted onto a typed,
+D8-constrained representation. `abicheck/storage/import_v1.py` (new) is the
+v1-v25 import adapter, and `abicheck/project_snapshot_store.py` (new,
+flat-root — this phase's directory-backed writer, kept outside `storage/`
+for the same import-layering reason `package.py`'s own docstring already
+gives) is a real `DirectoryObjectStore` plus a manifest/ref writer and
+reader implementing D6's directory layout (everything except the `.tar.zst`
+transport form). `scripts/check_ai_readiness.py`'s new
+`project-snapshot-dto-no-asdict` check is this phase's own promised
+AI-readiness-style gate: zero `asdict()` call sites in any `ProjectSnapshot`
+DTO file. **What this slice does not attempt**: every legacy document field
+beyond `semantic_ir`/`semantic_ir_conflicts` still travels as one opaque,
+unmigrated `"legacy_document"` object rather than D8's full
+`binary`/`declarations`/`types`/`layout`/`debug`/... section split (real,
+separately-scoped future work — ADR-062's own A1.4/A1.5), and the `.tar.zst`
+transport form, `bundle_variants:`/CLI wiring (A1.6/A1.7), and non-ELF
+membership specifics (A1.8) remain open. See `docs/contribute/plans/
+storage-format-v2.md`'s "Landed in Phase 1" section and
+`docs/contribute/adr/062-project-snapshot-storage-v2.md`'s Status for the
+authoritative, jointly-maintained account — this note exists so a reader of
+this plan doesn't have to cross-reference the ADR to learn Phase 8 is no
+longer purely a proposal.
+
 **Goal.** ADR-062 Phase 0's primitives stop being inert. A real
 `ProjectSnapshot` can be written and read, using `Fact[T]`/`EntityId` from
 Phases 0/2 as its domain representation rather than a second identity/

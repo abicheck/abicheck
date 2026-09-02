@@ -599,7 +599,36 @@
   version is deliberately *not* bumped (no dumping-pipeline output
   changed). The parser narrowing, the normalizer, and the per-call-site
   parity tests are the remainder of this phase.
-- **Phases 7–10** are still unimplemented design text.
+- **Phase 7** is still unimplemented design text.
+- **Phase 8** (wiring ADR-062 Phase 1's storage-v2 writer/reader to the
+  domain layer, jointly with D8's constraint) has landed **a bounded first
+  slice**, not the whole phase. `abicheck/storage/dto.py` (new) is the
+  D8-constrained `SectionDTO` envelope this phase's Files section asked
+  for — built on `storage/semantic_ir_codec.py`'s existing `SemanticIR`
+  encoding (extracted into a pure `semantic_ir_to_document`/
+  `semantic_ir_from_document` pair the DTO layer calls, not duplicates),
+  so `SemanticIR` is the one domain type actually promoted onto a typed,
+  versioned section so far. `abicheck/storage/import_v1.py` (new) is the
+  v1-v25 import adapter (ADR-062 A1.2), and `abicheck/project_snapshot_store.py`
+  (new, flat-root — kept outside `storage/` for the same import-layering
+  reason `storage/package.py`'s own docstring already gives) is a real
+  `DirectoryObjectStore` plus a manifest/ref writer and reader implementing
+  ADR-062 D6's directory layout (everything except the `.tar.zst` transport
+  form). A single-library legacy snapshot now round-trips through a real
+  directory as a one-artifact `ProjectSnapshot` package at the
+  semantic-digest level (ADR-062 A1.3). `scripts/check_ai_readiness.py`'s
+  new `project-snapshot-dto-no-asdict` check is this phase's own promised
+  AI-readiness-style gate. **Deliberately not attempted in this slice**:
+  every legacy document field beyond `semantic_ir`/`semantic_ir_conflicts`
+  still travels as one opaque, unmigrated `"legacy_document"` object rather
+  than D8's full section split (ADR-062's own A1.4/A1.5, scheduled
+  separately), and nothing here is wired into `dump`/`compare`/`scan`, so
+  every existing snapshot, baseline set, and `BundleFacts` document a user
+  reaches remains unchanged. See
+  `docs/contribute/plans/storage-format-v2.md`'s "Landed in Phase 1"
+  section and `docs/contribute/adr/062-project-snapshot-storage-v2.md`'s
+  own Status for the jointly-maintained, authoritative account.
+- **Phases 9–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this
