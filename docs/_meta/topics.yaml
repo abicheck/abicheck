@@ -61,6 +61,7 @@ topics:
       - learn/abi-series/08-detection.md
       - learn/build-source-data.md
       - learn/how-a-break-shows-up.md
+      - learn/where-in-the-pipeline.md
       - skills-src/shared/evidence-and-depth.md
       - learn/assurance-methods.md
 
@@ -83,6 +84,7 @@ topics:
       - skills-src/shared/compatibility-contracts.md
       - learn/abi-cheat-sheet.md
       - learn/abi-series/07-designing-for-stability.md
+      - learn/surface-growth.md
 
   baseline-lifecycle:
     canonical_page: use/baseline-management.md
@@ -109,6 +111,7 @@ topics:
       - use/baseline-storage.md
     reference_page: reference/resolve-baseline.md
     allowed_summaries:
+      - learn/where-in-the-pipeline.md
       - start/getting-started.md
       - skills-src/shared/baseline-and-comparability.md
 
@@ -395,6 +398,7 @@ topics:
       - use/github-action-source-scans.md
       - use/annotations.md
     allowed_summaries:
+      - learn/where-in-the-pipeline.md
       - skills-src/shared/ci-wiring.md
 
   project-integration:
@@ -415,6 +419,8 @@ topics:
       - integration/scenarios/dependency-and-container-checks.md
       - integration/scenarios/monorepo.md
       - integration/scenarios/migration-and-rollout.md
+    allowed_summaries:
+      - learn/where-in-the-pipeline.md
 
   integration-scenario-selection:
     canonical_page: integration/index.md
@@ -498,6 +504,30 @@ topics:
     allowed_summaries:
       - learn/abi-api-handling.md
       - start/first-report.md
+
+  compatibility-pipeline:
+    canonical_page: learn/where-in-the-pipeline.md
+    fact_sources:
+      - action/
+      - .github/workflows/publish-baseline.yml
+      - .github/workflows/update-main-baseline.yml
+    allowed_summaries:
+      - learn/abi-api-handling.md
+      - use/ci-gating.md
+
+  surface-growth:
+    canonical_page: learn/surface-growth.md
+    fact_sources:
+      - abicheck/diff_surface_metrics.py
+      - abicheck/surface_graph.py
+      - abicheck/policy/severity.py
+      - abicheck/semver.py
+    task_pages:
+      - use/api-surface-intelligence.md
+      - use/annotations.md
+    allowed_summaries:
+      - learn/abi-api-handling.md
+      - learn/abi-cheat-sheet.md
 
   class-layout:
     canonical_page: learn/class-layout-abi.md

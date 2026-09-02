@@ -216,6 +216,11 @@ nav:
     - Verification & Assurance:
       - "Detecting Breaks": learn/abi-series/08-detection.md
       - "Assurance Beyond Static Checking": learn/assurance-methods.md
+    # Practice: the moments a check runs and what a report must show — the
+    # "now do it on a real project" question, one owner per practice topic.
+    - Practice:
+      - Where in the Pipeline: learn/where-in-the-pipeline.md
+      - "Report the Surface, Not Only the Breaks": learn/surface-growth.md
     - Quick Reference:
       - "Glossary": learn/abi-series/glossary.md
   # The case catalog: every break scenario as a compilable fixture, browsable

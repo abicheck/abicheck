@@ -81,7 +81,9 @@ sequences:
       - id: 5
         title: Practice
         floor: intermediate
-        members: []                # the practice pages land one PR at a time
+        members:
+          - learn/where-in-the-pipeline.md
+          - learn/surface-growth.md
         links:
           - use/baseline-management.md              # tool track, case 1
       - id: 6
@@ -157,6 +159,8 @@ paths:
       - learn/how-a-break-shows-up.md
       - learn/compatibility-direction.md
       - learn/abi-series/08-detection.md
+      - learn/where-in-the-pipeline.md
+      - learn/surface-growth.md
       - learn/verdicts.md                      # concepts, after the educational tiers
     after: start/choose-your-workflow.md
   - role: Distribution / package maintainer
@@ -168,6 +172,7 @@ paths:
     pages:
       - learn/abi-series/00-product-contract.md
       - learn/consumer-models.md
+      - learn/where-in-the-pipeline.md
     after: start/choose-your-workflow.md
   - role: Plugin / SDK author
     pages:

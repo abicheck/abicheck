@@ -70,7 +70,8 @@ path, not the nav position.
     Toolchains** (exception unwinding, modern-toolchain hazards, runtime
     floors, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
     7) → **Verification & Assurance** (`abi-series/08-detection.md` +
-    `assurance-methods.md`) → **Quick Reference** (glossary). This is a
+    `assurance-methods.md`) → **Practice** (where in the pipeline, surface
+    growth) → **Quick Reference** (glossary). This is a
     nav-only regroup of what was once a flat "Deep Dives" list plus a
     separately-numbered "Learning Series" — a Part's own numbered "Series
     navigation" breadcrumb (top of each `abi-series/0N-*.md` page) still

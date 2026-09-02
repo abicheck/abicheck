@@ -113,4 +113,4 @@ different":
 
 ---
 
-**Ladder:** ← [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) · Tier 4 · Evidence and detection · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) →
+**Ladder:** ← [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) · Tier 4 · Evidence and detection · [Where in the Pipeline](where-in-the-pipeline.md) →

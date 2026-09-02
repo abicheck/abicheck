@@ -457,4 +457,4 @@ the at-scale tier — or go back to the [series overview](../abi-api-handling.md
 
 ---
 
-**Ladder:** ← [Assurance Beyond Static Checking: What Each Verification Method Actually Proves](../assurance-methods.md) · Tier 6 · Design · [Dependency & Runtime Floors](../dependency-floors.md) →
+**Ladder:** ← [Report the Surface, Not Only the Breaks](../surface-growth.md) · Tier 6 · Design · [Dependency & Runtime Floors](../dependency-floors.md) →
