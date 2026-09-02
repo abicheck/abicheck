@@ -12632,14 +12632,20 @@ serving `semantic_ir=None` forever for identical cache-key inputs, per that
 constant's own documented purpose ("bumped whenever a change to the
 dumping/provenance pipeline could alter a snapshot's content without
 changing any of the caller-supplied cache-key inputs").
-`qualified_name_segments._LAMBDA_IDENTITY_FIELDS` is **not** extended to
-walk `semantic_ir` in this slice -- the first slice's own note already
-flagged this as an open question once occurrences are real; it stays open,
-named here again rather than silently resolved, since this slice's fixture
-scope (records/enums/typedefs, no lambda/closure-parameterized case) never
-exercises it. A future slice that populates functions (the entity kind
-`_LAMBDA_IDENTITY_FIELDS` actually renumbers today) must resolve this before
-that data can be trusted.
+`qualified_name_segments._LAMBDA_IDENTITY_FIELDS` **is** extended to walk
+`semantic_ir` (Codex review, PR #1001) -- the first slice's own note had
+flagged this as an open question once occurrences are real, and this slice
+closes it: `SemanticIR.occurrences`' dict KEYS (an `OccurrenceId` wrapping
+an `EntityId`, a reach path the generic walk's dict-handling previously
+only rewrote for a plain string key) and values are both renumbered in
+step with the flat `types`/`enums`/`typedefs` spelling they describe.
+`semantic_ir_conflicts` -- packed-key text a naive in-place rewrite would
+corrupt -- gets its own dedicated re-key/re-value function
+(`model.semantic_ir.renumber_conflict_keys`), including a marker present
+*only* in a conflict's discarded value (never among the retained
+declarations), assigned an ordinal as a pure continuation that never
+disturbs an already-assigned real ordinal. See
+`tests/test_lambda_identity_semantic_ir.py`.
 
 **Still not landed, and therefore this phase is not complete:** functions,
 variables, and constants are not normalized (above); DWARF/PDB/BTF/CTF
