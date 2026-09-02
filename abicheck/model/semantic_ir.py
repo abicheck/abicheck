@@ -271,17 +271,23 @@ def renumber_conflict_keys(
     :func:`semantic_ir_conflict_key` is ever called with; see
     ``extract/semantic_ir_merge.py``, this dict's only writer).
 
-    *rewrite_value* is applied to each moved conflict's own **value** — the
-    ``repr()`` of the *discarded* backend's own spelling
+    *rewrite_value* is applied to every matched conflict's own **value** —
+    the ``repr()`` of the *discarded* backend's own spelling
     (``extract/semantic_ir_merge.py``'s only writer of this dict) can embed
     the identical closure/anonymous marker the *retained* spelling does
     (Codex review, PR #1001, second round): unlike the key, a value is
     plain free text with no packed-length encoding to corrupt, so it is
     safe to rewrite the ordinary way (the caller's own
     ``apply_anonymous_type_ordinals``-backed callable, matching how every
-    other reachable string in the snapshot is rewritten). Defaults to a
-    no-op so a caller with nothing to rewrite (or that intentionally wants
-    only the keys moved) need not pass one.
+    other reachable string in the snapshot is rewritten). Applied whether or
+    not the *key* itself changed — a third review round caught exactly the
+    gap an earlier revision left: an occurrence whose own ``EntityId`` has
+    no marker (so its key is unchanged) can still carry a conflicting
+    ``canonical_spelling`` that names a *different*, marker-bearing type
+    (e.g. a typedef aliasing a closure-parameterized template), so gating
+    the value rewrite on "the key changed" skipped exactly the case that
+    needed it. Defaults to a no-op so a caller with nothing to rewrite (or
+    that intentionally wants only the keys moved) need not pass one.
 
     *old_occurrence_ids* must be ``new_semantic_ir.occurrences``'s own keys
     *before* they were rewritten, in the identical order (both built by
@@ -290,25 +296,31 @@ def renumber_conflict_keys(
     post-renumber key collision onto one entity: bail rather than guess a
     wrong correspondence, the same fail-closed posture this module's
     matching logic already takes elsewhere). Mutates *conflicts* in place;
-    an occurrence pair that didn't actually change contributes nothing
-    (checked by equality, not identity, so this is safe to call whether or
-    not the caller already knows which pairs changed).
+    an entry whose key and rewritten value both come out unchanged
+    contributes nothing (checked by equality, not identity, so this is safe
+    to call whether or not the caller already knows which pairs changed).
     """
     old_ids = list(old_occurrence_ids)
     new_ids = list(new_semantic_ir.occurrences)
     if not conflicts or len(old_ids) != len(new_ids):
         return
     rewritten: dict[str, str] = {}
+    stale_keys: list[str] = []
     for old_occ_id, new_occ_id in zip(old_ids, new_ids):
-        if old_occ_id == new_occ_id:
-            continue
         entity = new_semantic_ir.occurrences.get(new_occ_id)
         if entity is None:
             continue
         for fact_name, _fact in entity.fact_items():
             old_key = semantic_ir_conflict_key(old_occ_id, fact_name)
-            if old_key in conflicts:
-                rewritten[semantic_ir_conflict_key(new_occ_id, fact_name)] = (
-                    rewrite_value(conflicts.pop(old_key))
-                )
+            old_value = conflicts.get(old_key)
+            if old_value is None:
+                continue
+            new_key = semantic_ir_conflict_key(new_occ_id, fact_name)
+            new_value = rewrite_value(old_value)
+            if new_key == old_key and new_value == old_value:
+                continue
+            stale_keys.append(old_key)
+            rewritten[new_key] = new_value
+    for key in stale_keys:
+        del conflicts[key]
     conflicts.update(rewritten)

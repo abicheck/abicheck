@@ -200,6 +200,45 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
             "clang::Wrapper<(lambda:task_group.h#1)>"
         )
 
+    def test_semantic_ir_conflict_value_is_renumbered_even_with_a_stable_key(
+        self,
+    ) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, fourth
+        round): an occurrence whose own ``EntityId`` carries no marker (its
+        own conflict key is therefore unchanged) can still record a
+        conflict whose VALUE names a *different*, marker-bearing type --
+        gating the value rewrite on "the key changed" skipped exactly this
+        case."""
+        eid = entity_id_for_type((), "Alias")  # no marker -> key is stable
+        occ_id = OccurrenceId(eid)
+        key = semantic_ir_conflict_key(occ_id, "canonical_spelling")
+        semantic_ir = SemanticIR(
+            occurrences={
+                occ_id: CanonicalEntity(canonical_spelling=Fact.present("Alias"))
+            }
+        )
+        marker = _closure("task_group.h", 20, 4)
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            # A real marker somewhere else is what makes the walk run at
+            # all (the cheap "anything to renumber?" gate).
+            types=[_record("Other", qualified=f"Wrapper<{marker}>")],
+            semantic_ir=semantic_ir,
+            semantic_ir_conflicts={key: repr(f"clang::Wrapper<{marker}>")},
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        assert snap.semantic_ir is not None
+        (unchanged_occ_id,) = snap.semantic_ir.occurrences.keys()
+        assert unchanged_occ_id == occ_id  # the key really didn't move
+
+        assert key in snap.semantic_ir_conflicts
+        assert ":20:4" not in snap.semantic_ir_conflicts[key]
+        assert snap.semantic_ir_conflicts[key] == repr(
+            "clang::Wrapper<(lambda:task_group.h#1)>"
+        )
+
     def test_semantic_ir_conflicts_untouched_when_nothing_needs_renumbering(
         self,
     ) -> None:

@@ -358,6 +358,31 @@ class TestRenumberConflictKeys:
         fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
         assert conflicts == {fresh_key: "'(lambda:x.h#1)'"}
 
+    def test_value_is_rewritten_even_when_the_key_stays_unchanged(self) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, fourth
+        round): an occurrence whose own EntityId carries no marker (its own
+        key is therefore unchanged) can still record a conflict whose VALUE
+        names a *different*, marker-bearing type -- a typedef aliasing a
+        closure-parameterized template, say. Gating the value rewrite on
+        "the key changed" (an earlier revision of this function) skipped
+        exactly this case."""
+        eid = entity_id_for_type((), "Alias")  # no marker -> key is stable
+        occ = OccurrenceId(eid)
+        key = semantic_ir_conflict_key(occ, "canonical_spelling")
+        conflicts = {key: "'(lambda:x.h:20:4)'"}
+        new_ir = SemanticIR(
+            occurrences={occ: CanonicalEntity(canonical_spelling=Fact.present("Alias"))}
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace(":20:4)'", "#1)'"),
+        )
+
+        assert conflicts == {key: "'(lambda:x.h#1)'"}
+
     def test_default_rewrite_value_is_a_no_op(self) -> None:
         old_eid = entity_id_for_type((), "Old")
         new_eid = entity_id_for_type((), "New")
