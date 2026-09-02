@@ -235,3 +235,16 @@
   (bare `FunctionType`, or the whole `_Atomic(...)` group) — closing
   this and any other single-level wrapping-position combination at
   once, rather than one more special case.
+  Two more findings narrowed the Darwin-gated extern-"C" de-prefix
+  fallback: `is_darwin_target` now also checks the triple's OS component
+  (`darwin`/`macos`/`ios`/`tvos`/`watchos`, tolerating a trailing version
+  suffix), not only an `"apple"` vendor substring — a valid
+  `"x86_64-unknown-darwin"` triple clang genuinely mangles as Mach-O was
+  previously missed. And the fallback now also requires `not entry.scope`
+  — a real, explicit `asm("_foo")` label is just as possible on Darwin as
+  off it, and this fallback's justification ("a genuinely plain-C
+  compilation unit has no `LinkageSpecDecl`") only holds for a
+  declaration with no enclosing scope at all; a namespaced Darwin C++
+  declaration is never plain C regardless of platform, and retagging one
+  `("extern_c",)` would have silently discarded both its genuine
+  asm-label identity and its namespace.

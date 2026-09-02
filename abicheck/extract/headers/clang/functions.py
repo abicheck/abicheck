@@ -579,11 +579,31 @@ def parse_functions(
         # export-table membership, where trying the de-prefixed form is
         # always safe); the identity decision built on top of it is what
         # needs the platform gate.
+        #
+        # The Darwin gate ALONE is still not enough (nineteenth round,
+        # fresh evidence): a real, explicit `asm("_foo")` label is just
+        # as possible ON Darwin as off it, and this fallback's whole
+        # justification -- "a genuinely plain-C compilation unit has no
+        # `LinkageSpecDecl`" -- only holds for a declaration with NO
+        # enclosing scope at all; C has no namespaces, so a plain-C
+        # function is always global-scope. A NAMESPACED Darwin C++
+        # declaration (`namespace n { void foo() asm("_foo"); }`) is
+        # never plain C regardless of platform, so `entry.scope` gates
+        # the fallback the same way `entry.extern_c`/`raw_mangled ==
+        # name` already implicitly are for a real extern-"C" block (a
+        # `LinkageSpecDecl` always resets `entry.scope` too, since it
+        # is not itself a scope-introducing node). Requiring `not entry.
+        # scope` also preserves both the genuine asm-label identity AND
+        # the namespace `dumper_hybrid.py`'s Mach-O rewrite would
+        # otherwise have silently dropped by retagging the declaration
+        # `("extern_c",)` (whose own `entity_id_for_function` contract
+        # always resolves `scope=()`, discarding it outright).
         is_extern_c = (
             entry.extern_c
             or raw_mangled == name
             or (
                 raw_mangled is not None
+                and not entry.scope
                 and _is_darwin_target(target_triple)
                 and name in _symbol_candidates(raw_mangled)
             )

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """The clang header-AST backend's ``extern "C"`` recognition on Mach-O
-(ADR-063 Phase 6, Codex review, fifteenth and sixteenth rounds, fresh
+(ADR-063 Phase 6, Codex review, fifteenth through nineteenth rounds, fresh
 evidence each time).
 
 A new, dedicated file rather than added to ``test_dumper_clang.py`` --
@@ -57,6 +57,36 @@ linker-decoration artifact at all -- it is exactly what a real, explicit
 castxml's own resolver also keeps tagged ``("mangled", "_foo")``. An
 ungated version of the fifteenth round's fix misread that as C linkage
 too, discarding the real mangled identity clang correctly observed.
+
+**Nineteenth round, fresh evidence, two independent findings on the SAME
+commit** further narrowed the gate (the seventeenth/eighteenth rounds in
+between were about a different artifact --
+``extract.semantic_normalizer_artifacts``'s opaque-``FunctionType``
+regex, documented in ``test_semantic_normalizer_artifacts.py`` instead):
+
+  1. ``is_darwin_target`` checked only for an ``"apple"`` VENDOR
+     substring, missing a valid triple like ``"x86_64-unknown-darwin"``
+     (real Mach-O target behavior determined by the OS component, not
+     the vendor). Fixed by splitting the triple on ``"-"`` and checking
+     each component against known Darwin OS names
+     (``darwin``/``macos``/``ios``/``tvos``/``watchos``) via
+     ``startswith`` (to tolerate a trailing version suffix like
+     ``"darwin20.6.0"``), in addition to the ``"apple"`` vendor check.
+
+  2. The Darwin gate ALONE was not enough: a real, explicit
+     ``asm("_foo")`` label is just as possible ON Darwin as off it, and
+     the whole justification for this fallback -- "a genuinely plain-C
+     compilation unit has no ``LinkageSpecDecl``" -- only holds for a
+     declaration with NO enclosing scope at all (C has no namespaces, so
+     a plain-C declaration is always global-scope). A NAMESPACED Darwin
+     C++ declaration (``namespace n { void foo() asm("_foo"); }``) is
+     never plain C regardless of platform, so both ``parse_functions``
+     and ``parse_variables`` now also require ``not entry.scope`` --
+     preserving both the genuine asm-label mangled identity AND the
+     namespace a retag to ``("extern_c",)`` would otherwise have
+     silently discarded (``entity_id_for_function``/
+     ``entity_id_for_variable``'s ``is_extern_c`` branch always resolves
+     ``scope=()``).
 """
 
 from __future__ import annotations
@@ -76,6 +106,13 @@ _LINUX_TRIPLE = "x86_64-unknown-linux-gnu"
         ("arm64-apple-darwin", True),
         ("x86_64-apple-darwin20", True),
         ("arm64-apple-macosx13.0.0", True),
+        ("arm64-apple-ios15.0", True),
+        ("armv7-apple-tvos", True),
+        ("armv7k-apple-watchos", True),
+        # Not an "apple" vendor at all, but the OS component is real
+        # Mach-O/Darwin behavior clang genuinely accepts and mangles for
+        # (Codex review, nineteenth round, fresh evidence).
+        ("x86_64-unknown-darwin", True),
         ("x86_64-unknown-linux-gnu", False),
         ("aarch64-linux-android", False),
         ("x86_64-pc-windows-msvc", False),
@@ -193,3 +230,62 @@ def test_parse_functions_leading_underscore_not_extern_c_without_target() -> Non
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_c_api")
+
+
+def test_parse_functions_leading_underscore_not_extern_c_when_namespaced() -> None:
+    """The Darwin gate ALONE is not enough (nineteenth round, fresh
+    evidence): a real, explicit ``asm("_foo")`` label is just as possible
+    ON Darwin as off it. ``namespace n { void foo() asm("_foo"); }`` is
+    never plain C regardless of platform (C has no namespaces), so this
+    NAMESPACED Darwin declaration must stay tagged ``("mangled",
+    "_foo")`` -- retagging it ``("extern_c",)`` would silently discard
+    both the real asm-label mangled identity AND the namespace
+    (``entity_id_for_function``'s ``is_extern_c`` branch always resolves
+    ``scope=()``)."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "foo",
+                    "loc": {"line": 2},
+                    "mangledName": "_foo",  # a real asm("_foo") label
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.is_extern_c is False
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "_foo")
+
+
+def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> None:
+    """The variable-level sibling of the namespaced-Darwin case above."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "g_count",
+                    "loc": {"line": 2},
+                    "type": {"qualType": "int"},
+                    "mangledName": "_g_count",  # a real asm("_g_count") label
+                },
+            ],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "_g_count")

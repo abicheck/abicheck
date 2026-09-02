@@ -272,6 +272,16 @@ def symbol_candidates(mangled: str) -> tuple[str, ...]:
     return (mangled,)
 
 
+#: OS-component names (lowercased) that mark a Darwin/Apple target --
+#: checked against each ``-``-separated triple COMPONENT, not the raw
+#: string, and via ``startswith`` rather than exact equality, since the OS
+#: component routinely carries a trailing version suffix (``"macosx13.0"``,
+#: ``"ios15.0"``, ``"darwin20.6.0"``). Deliberately independent of the
+#: VENDOR component ("apple") -- see :func:`is_darwin_target`'s own
+#: docstring for the confirmed, real triple this distinction matters for.
+_DARWIN_OS_NAMES = ("darwin", "macos", "ios", "tvos", "watchos")
+
+
 def is_darwin_target(target_triple: str | None) -> bool:
     """Whether *target_triple* names a Darwin (macOS/iOS/...) target.
 
@@ -290,10 +300,27 @@ def is_darwin_target(target_triple: str | None) -> bool:
     Darwin's linker actually prepends this underscore as pure platform
     decoration with no identity content of its own, so only there is
     stripping it safe.
+
+    **Checks the triple's OS component, not merely an ``"apple"`` vendor
+    (Codex review, nineteenth round, fresh evidence).** A target such as
+    ``"x86_64-unknown-darwin"`` is a valid triple clang accepts and mangles
+    exactly like a real Mach-O target (Darwin's OS-level linker behavior,
+    not anything vendor-specific), but its vendor component is
+    ``"unknown"``, not ``"apple"`` -- an ``"apple" in triple`` substring
+    test missed it, so the de-prefix fallback was wrongly skipped and this
+    normalizer fell back to a real, non-Darwin mangled identity for a
+    genuinely plain-C declaration castxml still recognized as extern "C".
+    Splitting on ``"-"`` and checking each COMPONENT (rather than a bare
+    substring test over the whole triple) also avoids a false match from
+    an unrelated component that merely happens to CONTAIN one of these
+    tokens.
     """
     if not target_triple:
         return False
-    return "apple" in target_triple.lower()
+    components = target_triple.lower().split("-")
+    return "apple" in components or any(
+        component.startswith(_DARWIN_OS_NAMES) for component in components
+    )
 
 
 def visibility(

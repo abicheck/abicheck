@@ -13245,6 +13245,51 @@ inside the parens is the same one used outside them, just not applied
 recursively. Pinned by a parametrized regression test covering all three
 newly-reported shapes.
 
+**Nineteenth round, fresh evidence, two independent findings on the SAME
+commit -- both narrowing the Darwin-gated extern-"C" de-prefix fallback
+further.**
+
+First: `is_darwin_target` checked only for an `"apple"` VENDOR substring
+in the whole triple, missing a valid triple like
+`"x86_64-unknown-darwin"` -- clang genuinely accepts this triple and
+mangles for it exactly like a real Mach-O target, since the Darwin
+underscore-decoration behavior this whole gate exists to recognize is an
+OS-level linker behavior, not anything vendor-specific. Fixed by
+splitting the triple on `"-"` and checking each COMPONENT against a set
+of known Darwin OS names (`darwin`/`macos`/`ios`/`tvos`/`watchos`) via
+`startswith` (tolerating a trailing version suffix like
+`"darwin20.6.0"`), in addition to the pre-existing `"apple"` vendor
+check -- rather than a bare substring test over the whole string, which
+would also risk a false match from an unrelated component that merely
+CONTAINS one of these tokens.
+
+Second, a materially different and more subtle gap: the Darwin gate
+ALONE is not sufficient, because a real, explicit `asm("_foo")` label is
+just as possible ON Darwin as off it -- the sixteenth round's own fix
+already established this for the non-Darwin case, and this round is the
+identical failure mode surfacing on Darwin itself. This fallback's whole
+justification is "a genuinely plain-C compilation unit has no
+`LinkageSpecDecl`", and that justification only holds for a declaration
+with NO enclosing scope at all: C has no namespaces, so a plain-C
+declaration is always global-scope. A NAMESPACED Darwin C++ declaration
+(`namespace n { void foo() asm("_foo"); }`) is never plain C regardless
+of platform, so the fallback needs `entry.scope` as a THIRD, independent
+gate alongside the target check -- mirroring how `entry.extern_c` itself
+is only ever set by walking into a real `LinkageSpecDecl`, which (per
+this same normalizer's own commentary elsewhere) always resets scope
+too. Both `extract.headers.clang.functions.parse_functions` and
+`dumper_clang._ClangAstParser.parse_variables` now also require `not
+entry.scope`. Retagging such a declaration `("extern_c",)` would have
+been a double loss, not merely a wrong tag: `entity_id_for_function`/
+`entity_id_for_variable`'s `is_extern_c` branch always resolves
+`scope=()`, so the fix also protects the namespace itself from being
+silently discarded, not only the genuine asm-label mangled identity.
+Pinned by two new regression tests (`is_darwin_target`'s own parametrize
+list gains the `"x86_64-unknown-darwin"` case, plus `ios`/`tvos`/
+`watchos` OS-component cases; a new namespaced-Darwin-declaration test
+proves the scope gate for both functions and variables), all in
+`tests/test_dumper_clang_extern_c_identity.py`.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already
