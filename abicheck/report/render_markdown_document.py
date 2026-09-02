@@ -13,13 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Markdown's whole-document ``ReportDocument`` construction and projection.
+"""Markdown's whole-document ``ReportDocument`` construction and projection:
+review digest and the full-mode (``to_markdown``'s default view) report.
 
-ADR-061 Phase 2 item 1: Markdown is the prose format whose renderer does not
-yet fully consume one canonical, JSON-shaped ``ReportDocument`` -- unlike
-JSON, SARIF, JUnit, ``--stat``, and now HTML (``html_report.
-build_html_document`` + ``report/render_html_document.py``). This module is
-Markdown's counterpart to that HTML split. Two slices have landed:
+ADR-061 Phase 2 item 1: Markdown is the prose format whose renderer did not
+used to fully consume one canonical, JSON-shaped ``ReportDocument`` -- unlike
+JSON, SARIF, JUnit, ``--stat`` (``reporter_markdown.to_stat`` already builds
+one via ``report/render_text.py``'s ``render_stat_document``), and HTML
+(``html_report.build_html_document`` + ``report/render_html_document.py``).
+This module (plus its sibling, ``render_markdown_alternate.py``, which owns
+``--report-mode leaf``/``root-cause`` -- split out once the combined module
+passed the architecture check's new-file 800-line ceiling, the same reason
+``render_html.py``/``render_html_document.py`` are two files) is Markdown's
+counterpart to that HTML split. Two views land here:
 
 - ``--format review``'s digest (``build_review_digest_document``/
   ``render_review_digest_document``) -- already had the cleanest compute/
@@ -28,10 +34,7 @@ Markdown's counterpart to that HTML split. Two slices have landed:
   every field is already JSON-safe, so the document wrap is a direct fold.
 - The full-mode report (``build_markdown_document``/
   ``render_markdown_document``, ``report_mode == "full"``) -- ``to_markdown``'s
-  default view. ``--report-mode leaf``/``root-cause`` and ``--stat`` are not
-  converted yet (they still run through ``reporter_markdown.py``'s own
-  pre-existing, unconverted code) -- see this module's own "Known gaps" note
-  below.
+  default view.
 
 Both ``build_*`` functions fold a dataclass (or several) into a JSON-shaped
 mapping and wrap it as a ``ReportDocument``; the matching ``render_*``
@@ -40,15 +43,22 @@ round trip turns every dataclass into a plain mapping and tuple into a list,
 same as HTML's ``_*_from_mapping`` helpers) and calls the existing,
 unmodified ``render_markdown.py`` render functions -- no rendering logic
 duplicated here, with one exception: the full-mode report's per-``Change``
-sections (severity-grouped changes, "Not Evaluated") need a JSON-safe
-row shape ``Change`` itself isn't (mirroring HTML's ``ChangeRow``, which
-solved the identical problem for HTML's own per-row table data) --
-``_change_row``/``_render_change_row``/``_render_change_row_oneline`` below
-are that row type's compute/render halves, kept local to this module rather
-than added to ``render_markdown.py`` (which has ~25 lines of headroom left
-under its own 800-line cap) since `_format_change_md`/`_format_change_md_
-oneline` there keep serving their other existing callers (leaf/root-cause
-mode, the scoped-gate text append) unconverted and unchanged.
+sections (severity-grouped changes, "Not Evaluated") need a JSON-safe row
+shape ``Change`` itself isn't (mirroring HTML's ``ChangeRow``, which solved
+the identical problem for HTML's own per-row table data) --
+``_change_row``/``_row_contract_tag``/``_render_change_row``/
+``_render_change_row_oneline`` below are that row type's compute/render
+halves, kept local to this module rather than added to ``render_markdown.py``
+(which has essentially no headroom left under its own 800-line cap) since
+``_format_change_md``/``_format_change_md_oneline``/``_format_leaf_type_change``
+there keep serving their other existing caller (the scoped-gate text append
+in ``cli_compare_fold.py``) unconverted and unchanged. ``_not_evaluated_
+mapping``/``_render_not_evaluated_lines`` are the identical split for the
+"## Not Evaluated (Contract)" section every view (this module's full mode
+and ``render_markdown_alternate.py``'s leaf/root-cause modes alike) shares
+verbatim -- ``render_markdown_alternate.py`` imports these row/section
+helpers from here rather than duplicating them (a same-package,
+one-directional dependency, not a cycle).
 
 Lives in this package, not the near-full flat ``reporter_markdown.py``
 (``architecture/debt.yaml``'s ``no_growth`` baseline there had ~18 lines of
@@ -60,18 +70,16 @@ five-line call to this module, freeing most of it back) or a new flat
 ``layers.report.legacy_paths`` member, same layer as this file) via
 ``importlib`` rather than a static import, mirroring ``report/
 scoped_gate.py``'s own ``_reporter()`` helper: ``reporter_markdown.py``
-imports this module's entry points statically (``to_markdown``/
-``to_review_digest`` call the ``build_*``/``render_*`` pairs above), so a
-static import back here would close a real cycle
-``check_ai_readiness.py``'s ``import-cycle-growth`` gate flags.
+imports this module's entry points via function-local (not module-level)
+imports (``to_markdown``/``render_review_digest`` call the matching
+``build_*``/``render_*`` pair above), so a static, module-level import back
+here would close a real cycle ``check_ai_readiness.py``'s
+``import-cycle-growth`` gate flags.
 
-**Known gap**: leaf/root-cause modes and ``--stat``'s markdown-adjacent
-paths are not yet converted -- they still build their own frozen structs
-from ``reporter_markdown.py``'s pre-existing ``compute_*``/``_build_*``/
-``_append_*`` helpers, none of which this module touches or removes. A
-follow-up slice can convert them the same way once it's worth collapsing
-the now-duplicated per-change formatting between here and
-``render_markdown.py``'s ``_format_change_md`` family.
+Every view's byte-for-byte output is unchanged by this split --
+``tests/test_golden_output.py``/``tests/test_golden_review_digest.py`` pin
+the exact text every ``build_*``/``render_*`` pair here must keep
+reproducing.
 """
 
 from __future__ import annotations
@@ -160,9 +168,7 @@ def build_review_digest_document(
         "out_of_surface_count": digest.out_of_surface_count,
         "bump_value": digest.bump_value,
         "soname_value": digest.soname_value,
-        "impacted": [
-            {"symbol": s.symbol, "kind": s.kind} for s in digest.impacted
-        ],
+        "impacted": [{"symbol": s.symbol, "kind": s.kind} for s in digest.impacted],
     }
     return ReportDocument.from_mapping(d)
 
@@ -203,10 +209,13 @@ def render_review_digest_document(doc: ReportDocument) -> str:
 
 def _change_row(c: Any) -> dict[str, Any]:
     """A JSON-safe row for one ``Change``, carrying every field
-    ``_render_change_row``/``_render_change_row_oneline`` need -- including
-    ``impact_for(kind)``, resolved here (compute side) rather than by the
-    renderer, mirroring HTML's ``ChangeRow``/``compute_full_change_rows``
-    fix for the identical "registry lookup on the render side" issue.
+    ``_render_change_row``/``_render_change_row_oneline``/
+    ``_render_leaf_type_change_row`` need -- including ``impact_for(kind)``,
+    resolved here (compute side) rather than by the renderer, mirroring
+    HTML's ``ChangeRow``/``compute_full_change_rows`` fix for the identical
+    "registry lookup on the render side" issue. ``symbol`` is only read by
+    the leaf-mode row renderer (``_format_leaf_type_change``'s ``###
+    {symbol} — {desc}`` heading); every other caller ignores it.
     """
     from ..checker_policy import impact_for
 
@@ -216,6 +225,7 @@ def _change_row(c: Any) -> dict[str, Any]:
     affected = getattr(c, "affected_symbols", None)
     return {
         "kind": kind.value if kind else "",
+        "symbol": getattr(c, "symbol", None),
         "description": getattr(c, "description", "") or "",
         "old_value": getattr(c, "old_value", None),
         "new_value": getattr(c, "new_value", None),
@@ -228,6 +238,22 @@ def _change_row(c: Any) -> dict[str, Any]:
         "contract_assurance": getattr(assurance, "value", None),
         "correlated_change_kind": getattr(c, "correlated_change_kind", None),
     }
+
+
+def _row_contract_tag(row: Mapping[str, Any]) -> str | None:
+    """The ``<relevance> (<reason_code>), assurance: <level>`` tag for one
+    already-JSON-safe ``_change_row``, or ``None`` when the row was never
+    contract-stamped. Shared by every row-based renderer below that shows a
+    contract decision (mirrors ``render_markdown._contract_decision_text``,
+    the ``Change``-based equivalent)."""
+    if row.get("contract_relevance") is None:
+        return None
+    tag = str(row["contract_relevance"])
+    if row.get("contract_reason_code"):
+        tag += f" ({row['contract_reason_code']})"
+    if row.get("contract_assurance") is not None:
+        tag += f", assurance: {row['contract_assurance']}"
+    return tag
 
 
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
@@ -262,17 +288,54 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
         names = ", ".join(f"`{s}`" for s in affected[:5])
         suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
-    if row.get("contract_relevance") is not None:
-        tag = str(row["contract_relevance"])
-        if row.get("contract_reason_code"):
-            tag += f" ({row['contract_reason_code']})"
-        if row.get("contract_assurance") is not None:
-            tag += f", assurance: {row['contract_assurance']}"
+    tag = _row_contract_tag(row)
+    if tag is not None:
         line += f"\n  > Contract: {tag}"
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
     return line
+
+
+def _not_evaluated_mapping(section: Any) -> dict[str, Any] | None:
+    """JSON-safe fold of a ``NotEvaluatedSection`` (or ``None``), shared by
+    every view that discloses ADR-049 D1's unscored findings (full, leaf,
+    root-cause)."""
+    if section is None:
+        return None
+    return {
+        "entries": [
+            {"row": _change_row(e.change), "label": e.label, "suffix": e.suffix}
+            for e in section.entries
+        ]
+    }
+
+
+def _render_not_evaluated_lines(d: Mapping[str, Any] | None) -> list[str]:
+    """Render a ``_not_evaluated_mapping()`` result -- the "## Not Evaluated
+    (Contract)" section every view shares verbatim
+    (``render_markdown.render_not_evaluated_section``'s own heading/preamble
+    text, kept identical here since that function takes a real
+    ``NotEvaluatedSection`` of ``Change`` objects rather than JSON-safe rows).
+    """
+    if d is None:
+        return []
+    lines: list[str] = [
+        "## 🔍 Not Evaluated (Contract)",
+        "",
+        "> These findings were detected but **not scored** by compatibility",
+        "> policy: each is either proven outside the declared contract or",
+        "> unresolved for want of evidence (ADR-049). They contribute nothing",
+        "> to the verdict or the gate. Incomplete evidence is reported",
+        "> separately on the contract-coverage axis, which has its own exit",
+        "> code — uncertainty is never silently treated as compatible.",
+        "",
+    ]
+    for entry in d["entries"]:
+        lines.append(_render_change_row_oneline(entry["row"]))
+        lines.append(f"  > Contract: {entry['label']}{entry['suffix']}")
+    lines.append("")
+    return lines
 
 
 def build_markdown_document(
@@ -369,20 +432,7 @@ def build_markdown_document(
             }
             for g in severity_data.groups
         ],
-        "not_evaluated": (
-            None
-            if not_evaluated is None
-            else {
-                "entries": [
-                    {
-                        "row": _change_row(e.change),
-                        "label": e.label,
-                        "suffix": e.suffix,
-                    }
-                    for e in not_evaluated.entries
-                ]
-            }
-        ),
+        "not_evaluated": _not_evaluated_mapping(not_evaluated),
         "environment_drift": _opt_asdict(rm.compute_environment_drift(changes)),
         "empty_message": (
             None
@@ -406,7 +456,9 @@ def build_markdown_document(
     return ReportDocument.from_mapping(d)
 
 
-def _suppression_note_from_mapping(d: Mapping[str, Any] | None) -> SuppressionNote | None:
+def _suppression_note_from_mapping(
+    d: Mapping[str, Any] | None,
+) -> SuppressionNote | None:
     if d is None:
         return None
     return SuppressionNote(
@@ -462,9 +514,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         )
         lines.append("")
     if d["library_files"] is not None:
-        lines += render_library_files_section(
-            LibraryFilesSection(**d["library_files"])
-        )
+        lines += render_library_files_section(LibraryFilesSection(**d["library_files"]))
     for group in d["severity_groups"]:
         lines += [group["heading"], ""]
         if group["note_lines"]:
@@ -474,22 +524,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         for row in group["rows"]:
             lines.append(fmt(row))
         lines.append("")
-    if d["not_evaluated"] is not None:
-        lines += [
-            "## 🔍 Not Evaluated (Contract)",
-            "",
-            "> These findings were detected but **not scored** by compatibility",
-            "> policy: each is either proven outside the declared contract or",
-            "> unresolved for want of evidence (ADR-049). They contribute nothing",
-            "> to the verdict or the gate. Incomplete evidence is reported",
-            "> separately on the contract-coverage axis, which has its own exit",
-            "> code — uncertainty is never silently treated as compatible.",
-            "",
-        ]
-        for entry in d["not_evaluated"]["entries"]:
-            lines.append(_render_change_row_oneline(entry["row"]))
-            lines.append(f"  > Contract: {entry['label']}{entry['suffix']}")
-        lines.append("")
+    lines += _render_not_evaluated_lines(d["not_evaluated"])
     lines += render_environment_drift_section(
         _environment_drift_from_mapping(d["environment_drift"])
     )
@@ -498,7 +533,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
     lines += render_redundancy_note(
         None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
     )
-    lines += render_suppression_note(_suppression_note_from_mapping(d["suppression_note"]))
+    lines += render_suppression_note(
+        _suppression_note_from_mapping(d["suppression_note"])
+    )
     lines += render_out_of_surface_note(
         None
         if d["out_of_surface_note"] is None
