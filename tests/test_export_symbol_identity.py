@@ -64,6 +64,13 @@ class TestExportSymbolIdentityHelpers:
         assert fn.entity_id is not None
         assert fn.entity_id.extra == ("extern_c",)
 
+    def test_msvc_export_function_itanium_mangled_mingw(self) -> None:
+        # A MinGW/GCC-built PE DLL's C++ exports are Itanium-mangled, not
+        # MSVC-mangled -- a real, supported PE lane distinct from MSVC's own.
+        fn = msvc_export_function("_Z3addii")
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra == ("mangled", "_Z3addii")
+
     def test_two_distinct_exports_never_collide(self) -> None:
         ids = {
             itanium_export_function(n).entity_id
@@ -126,6 +133,9 @@ class TestPeExportOnlyEntityId:
             exports=[
                 PeExport(name="?add@@YAHHH@Z", ordinal=1),
                 PeExport(name="PlainExport", ordinal=2),
+                # A MinGW/GCC-built PE DLL's own C++ export mangling --
+                # Itanium, not MSVC -- a real, distinct supported PE lane.
+                PeExport(name="_Z3subii", ordinal=3),
             ]
         )
         with patch.object(_pe, "parse_pe_metadata", return_value=meta):
@@ -139,3 +149,7 @@ class TestPeExportOnlyEntityId:
         plain_fn = next(f for f in snap.functions if f.name == "PlainExport")
         assert plain_fn.entity_id is not None
         assert plain_fn.entity_id.extra == ("extern_c",)
+
+        mingw_fn = next(f for f in snap.functions if f.name == "_Z3subii")
+        assert mingw_fn.entity_id is not None
+        assert mingw_fn.entity_id.extra == ("mangled", "_Z3subii")

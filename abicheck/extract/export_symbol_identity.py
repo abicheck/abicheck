@@ -78,9 +78,21 @@ def itanium_export_mangled_name(sym: str) -> str | None:
 
 
 def msvc_export_mangled_name(sym: str) -> str | None:
-    """The PE/COFF counterpart of :func:`itanium_export_mangled_name`,
-    keyed on the MSVC ``?`` mangling prefix instead of Itanium ``_Z``."""
-    return sym if sym.startswith("?") else None
+    """The PE/COFF counterpart of :func:`itanium_export_mangled_name`.
+
+    A PE/COFF export's mangling convention depends on which toolchain
+    produced the DLL, not just the container format: MSVC uses its own
+    ``?``-prefixed scheme, but a MinGW/GCC-built DLL's C++ exports are
+    Itanium-mangled (``_Z...``), same as ELF/Mach-O -- both are real,
+    observed PE export tables this codebase supports (see the MinGW PE
+    lane referenced by ``AGENTS.md``). Recognize either prefix so a
+    MinGW DLL's headerless dump agrees with its header-backed dump's own
+    mangled-branch ``EntityId`` instead of silently falling back to the
+    extern-"C" branch for every MinGW C++ export.
+    """
+    if sym.startswith("?") or sym.startswith("_Z"):
+        return sym
+    return None
 
 
 def itanium_export_function(name: str) -> Function:
@@ -126,8 +138,13 @@ def itanium_export_variable(name: str) -> Variable:
 
 
 def msvc_export_function(sym: str) -> Function:
-    """The PE/COFF counterpart of :func:`itanium_export_function`."""
-    is_extern_c = not sym.startswith("?")
+    """The PE/COFF counterpart of :func:`itanium_export_function`.
+
+    Handles both PE mangling conventions in use -- see
+    :func:`msvc_export_mangled_name` for why a bare ``?``-prefix check
+    alone misses MinGW/GCC's Itanium-mangled C++ exports.
+    """
+    is_extern_c = not (sym.startswith("?") or sym.startswith("_Z"))
     return Function(
         name=sym,
         mangled=sym,

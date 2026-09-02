@@ -10154,15 +10154,31 @@ reads) — inert in practice, since they only feed `entity_id_for_function`'s
 real `DW_AT_linkage_name` at all; every ordinarily-mangled C++ overload
 takes the mangled branch instead and never touches them.
 
-**Still open after this slice**, narrower than before: PE/Mach-O producers
-carry no `EntityId` at all (item (1)'s remaining extraction-side gap); the
-flat detector modules named above (`diff_platform.py`'s DWARF-tier
-functions, `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
-`diff_platform_elf_symbols.py`, `diff_versioning.py`, `diff_sycl.py`) still
-key on their own string-based matching rather than reading the now-real
-`entity_id` this slice populates — wiring them is the diff-site pass item
-(1)'s own text already distinguished from the extraction-side work this
-slice closes. `diff_filtering.py`/`type_reachability.py`'s bespoke
+**Update (2026-09-02, landed): PE/Mach-O extraction-side `entity_id`.**
+`dumper.py`'s own header-less `_dump_macho`/`_dump_pe` export-table-only
+branches now populate `entity_id` too, via a new shared leaf module,
+`abicheck/extract/export_symbol_identity.py`, that also absorbs
+`dumper_elf_fallback.py`'s own construction (one shared builder for all
+three export-table-only producers instead of three drifting copies). The
+with-headers path for both formats already ran through the same
+header-AST parser ELF uses and so already carried `entity_id` before this
+slice — undocumented until now, not new. `export_symbol_identity.py`'s PE
+helper recognizes both the MSVC `?` and Itanium `_Z` mangling prefixes (a
+MinGW/GCC-built PE DLL's C++ exports are Itanium-mangled, a real, distinct
+supported PE lane from MSVC's own), so a MinGW DLL's headerless and
+header-backed dumps agree on the mangled branch instead of the headerless
+path silently falling back to extern-"C" for every MinGW C++ export. This
+closes item (1)'s remaining extraction-side gap in full: every
+DWARF/PE/Mach-O/ELF-symbol-table-only producer now populates `entity_id`.
+
+**Still open after this slice**: the flat detector modules named above
+(`diff_platform.py`'s DWARF-tier functions, `diff_elf_layout.py`,
+`diff_platform_elf_dynamic.py`, `diff_platform_elf_symbols.py`,
+`diff_versioning.py`, `diff_sycl.py`) still key on their own string-based
+matching rather than reading the now-real `entity_id` this slice
+populates — wiring them is the diff-site pass item (1)'s own text already
+distinguished from the extraction-side work this slice closes.
+`diff_filtering.py`/`type_reachability.py`'s bespoke
 string-suffix ambiguity trackers remain unmigrated, unattempted this slice
 given that module's own extensive, multiply-reviewed fragility (see its own
 module docstring) — a real rewrite risk this slice judged not worth taking
