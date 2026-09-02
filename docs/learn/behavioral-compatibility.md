@@ -13,12 +13,12 @@ generated: false
 
 # Behavioral & Semantic Compatibility
 
+A static comparison cannot decide this dimension;
+[§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+says why. This page is the fuller treatment the dimension
 [Compatibility as a Product Contract §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
-names eight compatibility dimensions and is explicit that a static ABI/API
-checker is strongest on two of them — source and binary compatibility — and
-weakest on this one. This page is the fuller treatment that dimension needs:
-what behavioral compatibility actually means, why static comparison
-structurally cannot decide it, and what to do instead.
+names: what behavioral compatibility means, and what verifies it.
+
 
 ## The question this dimension answers
 
@@ -50,25 +50,10 @@ observe.
 
 ## Why this is structurally outside what a static comparer can decide
 
-[Evidence & Detectability](evidence-and-detectability.md) explains the L0–L5
-evidence model: every layer, up through source replay (L4) and the
-reachability graph (L5), answers *what changed structurally* — a symbol, a
-type, a macro value, a call edge. None of them execute the code. Proving two
-function bodies compute the same result for all inputs is, in the general
-case, undecidable (it reduces to program equivalence) — no static analysis
-tool, abicheck included, can close this gap by adding another evidence
-layer. This is a difference in *kind*, not degree, from every other
-dimension on this page's companion table: source/binary/build-profile
-compatibility are static properties of declarations and artifacts;
-behavioral compatibility is a property of *execution*.
-
-A source-level diff can sometimes give a hint — a changed literal inside a
-function body, a changed conditional, a rewritten loop — and abicheck's L4
-source replay does surface some of these as informational findings when
-sources are supplied. But a hint is not a proof: the same textual change can
-be behavior-preserving (a refactor) or behavior-changing (a real fix or
-regression), and telling those apart requires understanding what the code
-*means*, not just what it *says*.
+A behavioral change leaves every declaration, symbol and layout byte-identical;
+there is nothing in either artifact for a comparison to read. The general
+argument is [§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove);
+what follows is specific to behaviour.
 
 ## What actually verifies behavioral compatibility
 

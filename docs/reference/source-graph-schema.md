@@ -582,3 +582,228 @@ re-collection.
 every graph-producing module, or provide an on-disk v2 pack format keyed by
 canonical identity — see [ADR-046](../contribute/adr/046-source-graph-identity-v2-and-evidence-merge.md)'s
 "D4 implementation" section for the full scoping rationale.
+
+---
+
+## L4 and L5 records in the build/source pack
+
+The L4 source-declaration and L5 graph-edge records the pack stores, with
+the practical reading of each (moved here from
+[Source & Build Data](../learn/build-source-data.md), which keeps the
+narrative).
+
+### L4 — one source declaration (`SourceAbiTu.macros[] / .functions[] / …`)
+
+Per-TU source replay produces one `SourceEntity` per declaration, grouped by
+kind (`declarations`, `types`, `functions`, `variables`, `macros`, `templates`,
+`inline_bodies`, `constexpr_values`). The fields that matter for diffing are
+`signature_hash` (stable across a *value*-only edit), `body_hash` (inline/
+template bodies), and `value` (the normalized macro/`constexpr`/default-arg
+string):
+
+```json
+{
+  "id": "src://cart.h#CART_MAX_ITEMS",
+  "kind": "macro",
+  "qualified_name": "CART_MAX_ITEMS",
+  "value": "64",
+  "visibility": "public_header",
+  "api_relevant": true,
+  "confidence": "high"
+}
+```
+
+A later TU dump with `"value": "128"` on the same `qualified_name` is exactly
+what `diff_source_abi()` turns into `public_macro_value_changed` — the macro
+never becomes a symbol, so this record is the *only* place that fact exists.
+The same shape carries a function's default-argument value (`value`) separately
+from its `signature_hash`, which is what lets abicheck tell "the default
+changed" (`API_BREAK`) apart from "the parameter type changed" (a different
+symbol, an add+remove).
+
+### L5 — one graph edge (`SourceGraphSummary.edges[]`)
+
+The graph is nodes (`GraphNode`: `id`, `kind` — `target`/`source`/`header`/
+`source_decl`/`binary_symbol`/…) linked by typed, directed `GraphEdge`s. This is
+the record `graph explain` walks to answer "what does this declaration reach":
+
+```json
+{
+  "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+  "src": "decl://_ZNK4cart4Cart5totalEb",
+  "dst": "binary_symbol://_ZNK4cart4Cart5totalEb",
+  "provenance": "source_abi_link",
+  "confidence": "high"
+}
+```
+
+A `decl://` node id is `SourceEntity.identity()` — the **mangled** name when
+one exists, not the qualified source name — precisely so overloads
+(`total(bool)` vs. a hypothetical `total()`) get distinct source-decl nodes
+instead of colliding on one `Cart::total`. For a C++ method this makes the
+`decl://` and `binary_symbol://` ids look identical modulo prefix; that's
+expected — the edge still records *two separate nodes* (a source declaration
+and an exported binary symbol) so a rename on one side without the other shows
+up as the edge moving to a different `dst`.
+
+`diff_source_graph_findings()` compares the *edge set*, not individual nodes:
+if this exact `(src, dst, kind)` triple disappears and a *different* `dst`
+appears for the same `src`, that is `source_to_binary_mapping_changed` — the
+declaration now compiles down to a different exported symbol, a fact neither
+the binary diff nor the source diff alone would name.
+
+### Why this matters in practice
+
+None of L3/L4/L5's records are byte offsets or machine code — they are
+normalized *facts about intent* (a flag, a macro value, a reachability edge),
+which is exactly why the [authority rule](../learn/evidence-and-detectability.md#how-they-combine)
+caps them at `API_BREAK`/`risk`: they describe what the source or build says
+should happen, not what the compiler actually emitted. Only L0/L1 — the
+`AbiSnapshot` derived straight from the binary and its DWARF/PDB — records what
+*did* happen, which is why it alone can prove `BREAKING`.
+
+---
+
+## `reachability_state`
+
+Every finding in a full JSON or SARIF report now carries `reachability_state`
+(`sarif`: `reachabilityState`), one of:
+
+- `reachable` — the finding's subject was proven public-reachable (the same
+  signal that sets `public_reachable: true`).
+- `unreachable` — the reachability walk positively found this finding's
+  subject **not** part of the effective public ABI.
+- `unknown` — no walk reached a verdict at all, or the only evidence
+  available (typically the optional [L5 source graph](../learn/build-source-data.md))
+  is itself flagged narrowed or degraded for the relevant edge family. See
+  [Graph Coverage & Negative Evidence](../learn/graph-coverage.md) for why `unknown`
+  is not the same claim as `unreachable`.
+
+Before this, a JSON/SARIF consumer could only see the boolean
+`public_reachable`, which is `false` for **both** `unreachable` and
+`unknown` — there was no way to tell "we checked and it's safe to suppress"
+apart from "we never checked, don't assume it's safe." `reachability_state`
+closes that gap; it is always present (never an absent key), since
+`unknown` is itself a meaningful, honest answer.
+
+## `impact_assessment`
+
+`impact_assessment` bundles the finding's reachability/impact fields into
+one object, so a consumer doesn't need to stitch together several
+independently-nullable keys:
+
+```json
+{
+  "reachability_state": "reachable",
+  "public_reachable": true,
+  "reachability_kind": "value_embedding",
+  "confidence": "high",
+  "proof_path": {
+    "target": "ns::internal::Helper",
+    "root": "pub",
+    "is_direct": false,
+    "prose": "fn:pub → base:detail::Helper"
+  },
+  "decision": {
+    "state": "kept"
+  }
+}
+```
+
+- `reachability_state`/`public_reachable`/`reachability_kind` mirror the
+  finding's own top-level fields of the same name.
+- `proof_path` mirrors `affected_public_roots`/`impact_proof_path`/
+  `impact_is_direct`/`reachability_proof_path`, when the finding has any of
+  them — `root` and `steps` come from the structured L5 graph walk
+  ([ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md)),
+  `prose` is the human-readable rendering. `steps` is empty when only the
+  prose rendering is available. When a producer had more than one candidate
+  path and picked this one via the
+  [ADR-046 D6 preference order](source-graph-schema.md#proof-path-preference-order-adr-046-d6),
+  the runner-ups appear as `alternative_paths` (each its own nested
+  `proof_path`-shaped object) and `discarded_path_count` counts any further
+  candidates beyond the kept cap — both absent for the common single-candidate
+  case. `occurrence_id` is a stable, `description`-independent hash over this
+  path's underlying graph occurrences
+  ([ADR-046 D1](source-graph-schema.md#relation_key-and-occurrence_id)) —
+  absent today for nearly every finding, since no current producer populates
+  the per-call-site attrs it's derived from.
+- `decision` records whether the finding was kept or suppressed, and (when a
+  [pattern-aware modulation](../use/api-surface-intelligence.md) or
+  other classification override fired) the reason code and
+  `verdict_override` — the overridden verdict, which can be a downgrade
+  *or* an escalation (e.g. a `std::`-embedding proof promoting
+  `STDLIB_IMPLEMENTATION_CHANGED` to `BREAKING`), not always a demotion.
+  `suppression_rule` names the suppression rule that actually suppressed a
+  finding (its `label`, falling back to its `reason`) — present only on a
+  `suppression.suppressed_changes[]` entry, and only when the matching rule
+  set either field.
+- `evidence_category`/`correlated_change_kind` mirror the finding's own
+  top-level fields when set.
+- `root_cause_id`/`root_cause_display`/`impact_group_id` (G29 Phase 3
+  follow-up) are this finding's root-cause grouping key/display root — the
+  same computation [root-cause grouping](../learn/impact-analysis.md#root-cause-grouping) below uses,
+  surfaced per-finding independent of `report_mode`. Present only when the
+  finding has a real correlation signal (a `caused_by_type`, or its own
+  symbol is referenced by another finding's `caused_by_type`); absent for
+  an uncorrelated singleton finding, so a plain finding's
+  `impact_assessment` doesn't balloon with a root cause naming nothing but
+  itself. `impact_group_id` is currently always identical to
+  `root_cause_id` — a placeholder alias until a future revision gives it
+  independent meaning.
+- `root_cause_evidence` (G29 Phase 6) is this finding's own entry from the
+  `RootCauseCorrelator` (`abicheck.impact.correlation.correlate_root_causes`)
+  — present only when this finding is a member of one of that composer's
+  multi-piece groups: the four load-failure kinds (a symbol vanishing from
+  the export table, an internal dependency of a public entry point, a real
+  consumer's own unresolved import, and that consumer actually failing to
+  load), correlated by shared symbol identity and ranked by evidence
+  strength (`artifact_proven` → `call_graph_overapprox` → `call_graph_proven`
+  → `consumer_proven` → `runtime_proven`). `evidence_level` is this
+  finding's own rank; `strongest_evidence_level`/`evidence_levels` describe
+  the whole correlated group, so a consumer can tell "this piece alone is
+  only artifact-proven, but the group as a whole also has consumer proof"
+  without re-running the correlator itself. Unconditional on `report_mode`,
+  same as `root_cause_id`/`impact_group_id`.
+
+`impact_assessment` intentionally duplicates data already published at the
+top level — it exists so a consumer can query one object instead of several
+separately-named keys, not to replace the existing fields (which stay for
+backward compatibility). To keep large reports from filling up with mostly
+empty objects, `impact_assessment` is **only emitted when it carries
+information beyond the all-defaults case** — a plain finding with no
+reachability/impact evidence at all won't have this key, only
+`reachability_state: "unknown"`.
+
+Both fields appear everywhere a finding is serialized: the full `changes[]`
+list, `--report-mode leaf`'s `leaf_changes[]`/`changes[]` union (root type
+changes route through a separate builder that mirrors the same fields), and
+each entry in `suppression.suppressed_changes[]` — a suppressed finding's
+`decision.state` is always `"suppressed"` there, so its `impact_assessment`
+is always present. SARIF carries the same two fields as `properties.reachabilityState`/
+`properties.impactAssessment`. JUnit does not carry the full object (a
+structured node/edge object is a poor fit for JUnit's `<properties>`
+text-value model) — but `--report-mode root-cause --format junit` does add
+additive `rootCauseId`/`rootCause` attributes to each `<failure>` element,
+without restructuring JUnit's per-symbol `<testcase>` tree; see
+[Root-cause grouping](../learn/impact-analysis.md#root-cause-grouping) below.
+
+---
+
+## Coverage pass states
+
+`SourceGraphSummary` records, per extractor pass, how complete its own
+coverage was; [Graph Coverage & Negative Evidence](../learn/graph-coverage.md)
+explains why the distinction decides whether an *absent* edge means anything.
+
+- `extractor_passes` — the pass ran over the **full** project scope with no
+  errors. An edge family with a `extractor_passes` entry is trustworthy for
+  both "this edge exists" and "this edge does not exist".
+- `narrowed_passes` — the pass ran, but only over a **restricted** scope
+  (e.g. a `--changed-paths`-scoped run). An edge found there is still real;
+  an edge *not* found there proves nothing about the parts of the project
+  the pass never looked at.
+- `degraded_passes` — the pass hit collection errors (a translation unit
+  failed to parse, a tool crashed) but still folded in whatever edges it
+  managed to extract before failing. The edges it *did* find are real; the
+  ones it didn't are an unknown, untracked gap — not evidence of absence.

@@ -13,11 +13,13 @@ generated: false
 
 # Data, Wire & Storage Compatibility
 
-[Compatibility as a Product Contract §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
+A static comparison cannot decide this dimension;
+[§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+says why. [Compatibility as a Product Contract §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
 lists this as its own dimension because it is easy to conflate with binary
-ABI compatibility — both are about layout and values — while actually
-answering a different question with a different, often much longer-lived,
-audience.
+ABI compatibility — both are about layout and values — while answering a
+different question for a different, often much longer-lived, audience.
+
 
 ## The question this dimension answers
 

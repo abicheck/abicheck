@@ -1167,3 +1167,97 @@ stage('ABI Check') {
     testResultsFiles: 'abi-results.xml'
     testResultsFormat: 'JUnit'
 ```
+
+---
+
+## Evidence coverage and metrics (build/source pack)
+
+A compare or scan that carries build/source evidence reports what each
+layer covered, alongside the findings (moved here from
+[Source & Build Data](../learn/build-source-data.md), which keeps the
+narrative).
+
+Every compare run that involves a pack prints an **evidence-coverage table** so
+you can tell which findings are artifact-proven vs. build-context-only:
+
+```text
+Evidence coverage:
+  L0 binary metadata         present, high confidence
+  L1 debug info              present, high confidence: DWARF
+  L2 public header AST       present, high confidence: header-scoped
+  L3 build context           present, high confidence: cmake+ninja, 142 compile units, 1 target
+  L4 source ABI replay       present, high confidence: clang extractor, scope=target, parsed 142/142 TUs
+  L5 source graph summary    not_collected
+```
+
+The same rows are emitted as a structured `layer_coverage` array in the
+`--format json` report (schema `report_schema_version` 2.0+; the key was
+`evidence_coverage` in 1.x), so machine consumers can key off layer status
+and confidence.
+
+### Evidence metrics (timing & finding split)
+
+Alongside the coverage table, a pack-aware compare prints an **evidence-metrics
+summary** (ADR-033 D6/D9) so CI can tune which evidence mode to run by cost and
+signal:
+
+```text
+Evidence metrics:
+  collection time            0.0142s
+  findings                   artifact-backed=3, source-only=0, build-context-drift=1
+```
+
+The same numbers are emitted as a structured `evidence_metrics` object in the
+`--format json` report (schema `report_schema_version` 2.1+), keyed by the D9
+metric names:
+
+```json
+"evidence_metrics": {
+  "extractor.duration_seconds": 0.0142,
+  "coverage.build_context.present": true,
+  "coverage.source_abi.mode": "not_collected",
+  "coverage.graph.mode": "not_collected",
+  "findings.artifact_backed.count": 3,
+  "findings.source_only.count": 0,
+  "findings.build_context_drift.count": 1,
+  "findings.evidence_required_missing.count": 0,
+  "findings.demoted_by_surface.count": 0,
+  "findings.suppressed_with_reason.count": 0
+}
+```
+
+`artifact-backed` findings are proven by the binary/debug/header tiers (L0–L2);
+`source-only` and `build-context-drift` come from the optional L3–L5 layers and
+never override an artifact-backed verdict. Both blocks are additive and present
+only when build-info/source facts were involved in the compare.
+
+### What is being checked — and what is not, and why
+
+Right below the coverage table, every pack-aware compare prints a **capability
+report** that translates the available evidence into the concrete *check
+categories* it enables — and, for each disabled category, the precise reason.
+This makes the cumulative picture explicit as you add inputs (binary → +debug
+info → +headers → +build data → +sources):
+
+```text
+Checks enabled for this scan (and why others are not):
+  [on]  Symbol presence & linkage (added/removed/SONAME) — from the binary's dynamic symbol table
+  [on]  Type layout, members, vtables, signatures — from DWARF/PDB debug info
+  [on]  API decls absent from the symbol table; public-surface scoping — from the public header AST
+  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) — from build-system data
+  [off] Macros, default args, inline/template/constexpr bodies — no sources/clang: source-only API changes are not detected
+  [off] Impact / call / reachability graph — no graph evidence: cross-symbol impact is not analyzed
+```
+
+Each category is gated on exactly one evidence layer, so a `[off]` line tells you
+exactly which input (or tool) to add to enable it — e.g. installing clang and
+passing `--sources` (L4 source-ABI replay) turns on the macro / default-argument / inline-body /
+template-body / constexpr checks.
+
+### Header parse context
+
+`header_parse_context_drift` fires when the new side carries a public-header AST
+that was **not** parsed with the build's ABI-relevant flags. To avoid this,
+dump the snapshot with the build's compile database — `abicheck dump … -p build/`
+records `parsed_with_build_context` on the snapshot, and a later `compare`
+honors it and suppresses the drift finding.

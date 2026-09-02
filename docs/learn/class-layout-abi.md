@@ -3,6 +3,8 @@ doc_type: explanation
 audience:
   - library-maintainer
 level: advanced
+canonical_for:
+  - class-layout
 depends_on:
   - abicheck/diff_types.py
   - abicheck/diff_platform.py

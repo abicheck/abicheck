@@ -13,14 +13,13 @@ generated: false
 
 # Concurrency & Initialization Contracts
 
-A library's threading model and initialization/destruction order are part
-of its contract with every consumer, exactly as much as its symbols and
-types are — but, like
-[behavioral compatibility](behavioral-compatibility.md) and
-[ownership/lifetime contracts](ownership-and-lifetime.md), almost none of it
-is expressible in a signature a static comparer can read. This page names
-the specific sub-questions so they aren't silently dropped from a release
-review just because no tool flags them.
+A static comparison cannot decide this dimension;
+[§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+says why. A library's threading model and initialization/destruction order are
+part of its contract with every consumer, exactly as much as its symbols
+and types are. This page names the specific sub-questions so they are not
+silently dropped from a release review just because no tool flags them.
+
 
 ## The sub-questions
 
@@ -74,20 +73,6 @@ review just because no tool flags them.
   cancelled, and what state it leaves things in if so, is a contract
   question orthogonal to whatever cancellation API surface (a function, a
   flag, a token type) exists to request it.
-
-## Why this belongs on its own page rather than folded into "behavioral"
-
-Every item above is, in the sense
-[Behavioral & Semantic Compatibility](behavioral-compatibility.md) defines
-it, a behavioral contract — none of it is provable by static comparison for
-the same underlying reason (it's a property of execution, not of
-declarations). This page exists separately because concurrency and
-initialization bugs have a distinct enough failure signature — nondeterministic,
-timing-dependent, often only reproducing under load or on specific
-hardware/toolchain combinations — that they deserve their own checklist
-rather than being buried as one example among many under a general
-"behavior" heading. A reviewer scanning a changelog for behavioral risk
-should be able to check specifically: did anything on *this* list change?
 
 ## What actually verifies these contracts
 

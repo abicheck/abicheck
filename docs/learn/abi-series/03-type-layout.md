@@ -3,6 +3,8 @@ doc_type: tutorial
 audience:
   - library-maintainer
 level: intermediate
+summarizes:
+  - class-layout
 depends_on:
   - abicheck/diff_types.py
 lifecycle: active
@@ -219,6 +221,16 @@ bytes into what v2 treats as an 8-byte cell.
     "both sides return a pointer" comparison would miss these.
 
 ---
+
+## C++ classes: the same rules, plus bases and vptrs
+
+Everything above applies to a C++ class as a plain aggregate. What C++ adds
+— base-class sub-objects at fixed offsets, the hidden vptr, the empty-base
+and tail-padding optimizations, `[[no_unique_address]]`, standard-layout
+and trivially-copyable status — is a second family of layout facts the
+compiler bakes into callers the same way, and each has its own change
+kind and evidence tier. That family is owned by one page:
+[Class Layout ABI & API](../class-layout-abi.md).
 
 ## How to defend type layout
 

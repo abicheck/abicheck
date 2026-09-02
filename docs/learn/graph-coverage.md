@@ -23,18 +23,13 @@ that honestly instead of guessing.
 
 `SourceGraphSummary` (the in-memory L5 graph abicheck's snapshot carries)
 records, per extractor pass, whether its own coverage was complete:
-
-- `extractor_passes` — the pass ran over the **full** project scope with no
-  errors. An edge family with a `extractor_passes` entry is trustworthy for
-  both "this edge exists" and "this edge does not exist".
-- `narrowed_passes` — the pass ran, but only over a **restricted** scope
-  (e.g. a `--changed-paths`-scoped run). An edge found there is still real;
-  an edge *not* found there proves nothing about the parts of the project
-  the pass never looked at.
-- `degraded_passes` — the pass hit collection errors (a translation unit
-  failed to parse, a tool crashed) but still folded in whatever edges it
-  managed to extract before failing. The edges it *did* find are real; the
-  ones it didn't are an unknown, untracked gap — not evidence of absence.
+the pass either ran over the **full** project scope with no errors (an
+edge family it covers is trustworthy for presence *and* absence), ran over
+a **narrowed** scope (a found edge is real; a missing one proves nothing
+about what it never looked at), or **degraded** on collection errors (the
+edges it found are real; the ones it did not are an untracked gap). The
+three pass states and the fields that carry them are documented in
+[Source Graph Schema § Coverage pass states](../reference/source-graph-schema.md#coverage-pass-states).
 
 Two collection strategies commonly produce exactly this shape:
 
@@ -99,14 +94,14 @@ for a transition window before removal.
 
 This doesn't change how you should reason about completeness: whether the
 graph saw everything it needed to is still reported through the coverage
-fields described above (`extractor_passes`/`degraded_passes`/
-`narrowed_passes` and the tri-state `reachability` status), never through
+fields described above (the full, narrowed and degraded pass states and the tri-state
+`reachability` status), never through
 whether a flag was passed. A header-only collection degrades the same way
 it always did (declarations and signatures only, no function bodies) — it
 is just no longer possible to accidentally run *without* it when depth
 `headers` or deeper evidence is available.
 
-## Canonical entity identity and rename/move reconciliation (G31 Phase B)
+## Canonical entity identity and rename/move reconciliation
 
 The header-only graph and a build-integrated graph can identify the same
 declaration differently depending on which pass saw it first. Without any
@@ -132,7 +127,7 @@ an exact (bidirectionally-unambiguous) alias match, or — as a last resort —
 a match on unique structural position when even the qualified name changed.
 **Ambiguous evidence never resolves to a guess**: if two candidates share
 the same alias or structural position, neither is reconciled — both stay a
-plain add/remove, exactly as before Phase B. A match produces a
+plain add/remove, exactly as before reconciliation existed. A match produces a
 `declaration_renamed`, `declaration_moved`, or
 `declaration_identity_reconciled` finding — pure enrichment, RISK-tier,
 never overriding or suppressing an artifact-proven finding elsewhere in the

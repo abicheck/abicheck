@@ -250,10 +250,6 @@ SONAME bump — but they should fail CI when you promise source compatibility.
     - **Stable DTOs at the API boundary.** Define plain structs with explicit
       layout for every value that crosses the ABI, and treat those DTOs as a
       versioned schema separate from your internal types.
-    - **Build-time abicheck in CI.** Run `abicheck compare` against the last
-      released `.so` on every PR; flag anything above `COMPATIBLE_WITH_RISK` as
-      a release blocker — and ship the build with debug info so transitive
-      layout shifts are *visible* to the tool.
     - **Zero reserved fields before public release**, or commit in
       documentation to never activating them. Reserved padding that is never
       used is free; reserved padding whose safety you can't audit is a future

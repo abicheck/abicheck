@@ -347,3 +347,21 @@ contract and its stability policy, see
 - [Baseline Management](../use/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
 - [Output Formats](../use/output-formats.md) — the comparison-report JSON and `report_schema_version`.
 - [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md) — the compressed storage envelope (plain/gzip/zstd).
+
+---
+
+## The build/source pack envelope
+
+- The pack is **content-addressed** and **versioned independently**
+  (`evidence_pack_version`) from the ABI snapshot schema, so it never bloats an
+  ordinary dump. The snapshot stores only a lightweight `evidence_pack`
+  reference (content hash + coverage summary); old readers ignore it.
+- Every extractor writes both a **raw** artifact (under `raw/`, for
+  provenance/debugging) and an abicheck-owned **normalized** fact model (e.g.
+  `build/build_evidence.json`). Only normalized facts feed comparison and the
+  content hash.
+- Command lines and paths are **redacted** (home prefixes, secret-looking
+  `-D` macros) before they are persisted.
+
+See ADR-028 (umbrella) and ADR-029 (build context) under
+[Development → ADRs](../contribute/adr/index.md) for the full design.

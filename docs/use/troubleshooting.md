@@ -120,6 +120,44 @@ result.
 
 ---
 
+### castxml: `__has_cpp_attribute` not defined on macOS (Xcode 16.4+)
+
+**Status:** Open — upstream castxml issue to be filed.
+
+**Affected platforms:** macOS with Xcode 16.4+ (Apple Clang headers).
+
+**Symptom:** When castxml processes a C header that includes `<stddef.h>`, the
+macOS SDK resolves this through the libc++ `__config` header, which uses the
+`__has_cpp_attribute` preprocessor macro. castxml does not define this macro,
+causing parse failures:
+
+```text
+.../MacOSX.sdk/usr/include/c++/v1/__config:1009:7: error:
+  function-like macro '__has_cpp_attribute' is not defined
+```
+
+Multiple lines in `__config` trigger the same error wherever
+`__has_cpp_attribute(...)` appears in `#if` / `#elif` directives.
+
+**Root cause:** Per the C++ standard, `__has_cpp_attribute` should be a built-in
+macro that evaluates to 0 for unknown attributes. castxml's internal
+preprocessor does not predefine it, so the preprocessor treats the bare
+identifier as an error rather than defaulting to 0.
+
+**Workaround:** In castxml-specific shim headers (not general project headers),
+replace `#include <stddef.h>` with `typedef __SIZE_TYPE__ size_t;` to avoid the
+libc++ header chain entirely. `__SIZE_TYPE__` is a GCC/Clang built-in that
+castxml supports.
+
+> **Caution:** This typedef only supplies `size_t` — other `<stddef.h>`
+> definitions (`NULL`, `ptrdiff_t`, `offsetof`, `max_align_t`) are not
+> available. Do not use this substitution in normal build headers as it will
+> break compilation that depends on those definitions. Safer alternatives:
+> create an isolated shim header used only by castxml invocations, or provide
+> a minimal custom header that supplies all needed type definitions.
+
+---
+
 ## 1) "Why did I get API_BREAK/BREAKING unexpectedly?"
 
 ### Check header/binary mismatch first

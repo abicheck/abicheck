@@ -100,7 +100,7 @@ for `auto` (risk-driven, best paired with `since:`):
     (omitting `against`/`abi-baseline` for an audit-only run); `full` collapsed into `source`, since the two only
     ever differed in replay *scope*, and an unseeded `depth: source` already
     resolves to the whole target. The mapping from the old axes is in the
-    [Removed scan axes appendix](../learn/evidence-and-detectability.md#appendix-removed-scan-axes-s0s6-mode-source-method-max).
+    [Removed scan axes appendix](companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max).
 
 ### Single-release audit (no baseline)
 

@@ -3,6 +3,9 @@ doc_type: explanation
 audience:
   - library-maintainer
 level: intermediate
+summarizes:
+  - evidence-model
+  - ast-frontend-resolution
 depends_on:
   - scripts/evidence_tiers.py
 lifecycle: active
@@ -20,14 +23,8 @@ generated: false
 > [7. Designing for Stability](07-designing-for-stability.md) ·
 > **Detecting Breaks**
 
-> **This page is the Verification & Assurance capstone, not "Part 8."** Parts
-> 0–7 are a sequential mechanism education — each one teaches what a class of
-> change actually does to a binary or a consumer, building on the previous
-> part. This page asks a categorically different question: given everything
-> Parts 0–7 taught you to look for, **how do you actually catch it before you
-> ship?** That shift — from "what breaks" to "how do I verify nothing broke"
-> — is why it's grouped on its own in the navigation instead of sitting as
-> one more numbered step in the Learning Series list.
+> This page is the Verification & Assurance capstone: Parts 0–7 teach what
+> breaks; this page asks how you catch it before you ship.
 
 Parts 0–7 explained the *mechanisms*: what the compiler bakes into a binary, and
 which changes corrupt that contract. This page turns the telescope around and asks
@@ -121,97 +118,66 @@ must come from a compile DB, the config `compile:` block, or explicit flags, or
 L2 (and the public/internal scoping that depends on it) is only as good as the
 context it was handed.
 
+**What a header AST dump is.** `abicheck dump -H include/` produces one: the
+frontend parses the public headers under the compile context above and
+records every declaration it finds — functions with their parameter types,
+records with their fields and bases, enums, typedefs — as the L2 half of the
+snapshot. The compile context decides its contents; the frontend decides
+how much of each declaration is captured.
+
+**castxml and clang capture different facts.** The two L2 frontends expose
+the same parser interface but do not populate every model field alike —
+castxml records template instantiations only, while the clang backend also
+records the uninstantiated pattern, and a handful of C++20 facts are
+clang-only. The per-field matrix is generated from the parsers' own source
+in [Header Backend Capabilities](../../reference/header-backend-capabilities.md);
+consult it before attributing a missing finding to the library.
+
+**The same idea, applied per translation unit.** L4 source replay runs the
+identical declaration-level parse over each compiled translation unit under
+its own recorded flags. That is what recovers the facts no header AST can
+carry: a change to an *uninstantiated* template's signature is L4-only
+([case122](../../reference/examples/case122_template_signature_uninstantiated.md)),
+two providers corroborating one declaration is what the cross-source pass
+reads ([case151](../../reference/examples/case151_xcheck_provider_matrix.md)),
+and a declaration's *source file* changing while its symbol stays put is a
+fact only the L5 graph derived from those TUs can see
+([case162](../../reference/examples/case162_symbol_source_owner_changed.md)).
+
 ---
 
 ## 2. What it takes to find each break family
 
-The table below extends the
-[break-families table](../abi-cheat-sheet.md#break-families-and-where-each-is-explained) with the
-detection dimension: the **minimum evidence** that makes the family visible
-(`L0` binary · `L1` +debug info · `L2` +headers · `L3` +build data · `L4`
-+sources), and whether a symbol-level or debug-info-level checker can see it at
-all. Per-case minimums are machine-readable in
+Every family in the
+[break-families index](../abi-cheat-sheet.md#break-families-and-where-each-is-explained)
+has a *minimum evidence* level — `L0` binary, `L1` +debug info, `L2`
++headers, `L3` +build data, `L4` +sources — below which no tool can see it,
+and the per-case minimums are machine-readable in
 [`examples/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/examples/ground_truth.json)
-(`min_evidence` field) and measured in
-[Benchmarking by evidence tier](../../reference/tool-comparison.md#benchmarking-by-evidence-tier).
-
-| Break family | Min evidence | Symbol-only (L0) sees it? | DWARF tools (L1) see it? | Why — and representative cases |
-|---|:---:|:---:|:---:|---|
-| Symbol/function/variable removal | **L0** | ✅ | ✅ | The symbol vanishes from `.dynsym` — every tool's home turf ([case01](../../reference/examples/case01_symbol_removal.md), [case12](../../reference/examples/case12_function_removed.md)) |
-| C++ signature/qualifier changes | **L1** | ⚠️ partial | ✅ | Itanium mangling encodes parameters, `const`, `static` — so even a stripped binary shows *a symbol vanished and a new one appeared*. But classifying it as a qualifier change on the *same* method (rather than an unrelated removal + addition) takes debug info or headers ([case21](../../reference/examples/case21_method_became_static.md), [case22](../../reference/examples/case22_method_const_changed.md) are measured at L1) |
-| **C** signature changes | **L1/L2** | ❌ | ✅ | C symbols are just the function name — `foo(int)` → `foo(long)` keeps the identical symbol. Needs DWARF or headers ([case02](../../reference/examples/case02_param_type_change.md), [case10](../../reference/examples/case10_return_type.md)) |
-| Struct/class layout, packing, alignment | **L1/L2** | ❌ | ✅ | No symbol changes when a field moves; layout lives in debug info and headers ([case07](../../reference/examples/case07_struct_layout.md), [case40](../../reference/examples/case40_field_layout.md), [case56](../../reference/examples/case56_struct_packing_changed.md)) |
-| Enum value reassignment | **L1/L2** | ❌ | ✅ | Constants are compiled into *callers*; the library's symbols are untouched ([case08](../../reference/examples/case08_enum_value_change.md), [case20](../../reference/examples/case20_enum_member_value_changed.md)) |
-| Vtable reordering | **L1/L2** | ❌ | ✅ | Every symbol still exists — only the *slot indexes* moved ([case09](../../reference/examples/case09_cpp_vtable.md)) |
-| Source-only API breaks: access narrowed, `explicit` added, default argument removed, hidden friends | **L2** | ❌ | mostly ❌ | DWARF doesn't reliably model these; they live in the declared AST ([case34](../../reference/examples/case34_access_level.md), [case106](../../reference/examples/case106_ctor_became_explicit.md), [case123](../../reference/examples/case123_default_argument_removed.md), [case96](../../reference/examples/case96_hidden_friend_removed.md)) |
-| ELF/linker metadata: SONAME, visibility, symbol versions, RPATH | **L0** | ✅ | ✅ | Binary-only facts — which means *header-only* checkers (ABICC's XML mode) are the blind ones here ([case05](../../reference/examples/case05_soname.md), [case65](../../reference/examples/case65_symbol_version_removed.md)) |
-| Toolchain/build-flag drift: `-std` floor, ABI version, flag changes | **L1/L3** | ❌ | partly | Compilers record their flags in `DW_AT_producer`, so a `-g` build exposes some drift; the rest needs the compile DB ([case103](../../reference/examples/case103_toolchain_flag_drift.md)). The libstdc++ dual-ABI flip is the notable exception: it *renames mangled symbols* (`std::__cxx11::`), so even a stripped binary betrays it at L0 ([case104](../../reference/examples/case104_glibcxx_dual_abi_flip.md)) |
-| Header **`const`/`constexpr`** constant values | **L2** | ❌ | ❌ | The value lives in the declared AST, not the binary — header comparison sees it ([case124](../../reference/examples/case124_header_constant_value_changed.md)). Plain `#define` macros are *not* part of the AST — see the next row |
-| Plain `#define` macro values, inline/template **bodies**, uninstantiated templates | **L4** | ❌ | ❌ | These never reach the shipped binary or the header AST — only source/preprocessor evidence sees them. [case122](../../reference/examples/case122_template_signature_uninstantiated.md) is deliberately a *no-change* case: it marks the boundary of what even source analysis can prove about templates that were never instantiated |
-| Multi-library release skew (bundle SONAME/dependency drift) | release model | ❌ | ❌ | Not a property of any *single* binary diff — needs a bundle-level comparison ([multi-binary guide](../../use/multi-binary.md), bundle cases 84/90–93 in `examples/`) |
-| Internal-only changes (**should be NO_CHANGE**) | **L2** | FP ⚠️ | FP ⚠️ | The inverse problem: without header scoping, tools *flag* private `detail::` churn as breaking. Evidence here removes false positives ([case118](../../reference/examples/case118_internal_struct_field_added_scoped.md)–[120](../../reference/examples/case120_internal_struct_reordered_scoped.md)) |
-
-Two lessons hide in this table:
-
-- **Evidence runs in both directions.** More input doesn't just find more breaks —
-  it *dismisses* false alarms. Header scoping is what lets a checker say
-  "that struct changed, but it was never part of the public surface."
-- **The staircase is real and measurable.** Over the example catalog,
-  correct-verdict coverage improves substantially from a stripped binary up to
-  full source evidence, and the false-negative count falls with it. The climb is
-  **non-decreasing, not strictly rising at every rung** — in the current
-  measurement `headers` and `build` score identically, because that step adds
-  context a verdict does not always need. This page deliberately
-  quotes **no percentages**: there is exactly one measured table, it carries its
-  own freshness caveat and denominator definition, and a second hand-copied set
-  of numbers here would go stale silently. Read it at
-  [Evidence & Detectability § What each layer buys](../evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives),
-  with the per-source breakdown in the
-  [evidence-tier table](../../reference/tool-comparison.md#which-source-discovers-what).
+(`min_evidence`). The family-by-family table lives with the level-by-level
+walk-through, in
+[What Each Level Sees § Reference: which input proves which family](../what-each-level-sees.md#reference-which-input-proves-which-family);
+the two lessons it carries — evidence runs in both directions (more input
+also *dismisses* false alarms, because header scoping is what lets a checker
+say "that struct was never public"), and the staircase is measurable but
+not strictly rising at every rung — are measured in
+[Evidence & Detectability § What each layer buys](../evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives).
 
 ---
 
 ## 3. Why an abidiff- or ABICC-class checker is not sufficient
 
-This is a structural argument, not tool-bashing — both tools are good at what
-their evidence lets them see (details and per-case results in the
-[Tool Comparison](../../reference/tool-comparison.md)):
-
-1. **Each is capped at one rung of the staircase.**
-   `abidiff` is DWARF-first (L0+L1): hand it the stripped release binary you
-   actually ship and it degrades toward symbol-only; the source-only API family —
-   access changes, default arguments, `explicit`, `noexcept` semantics — stays
-   invisible even with debug info, because a header directory acts as a symbol
-   *filter* there, not a full AST. ABICC leans the other way: its header/XML
-   workflow sees the declared contract but not the binary truth (exports,
-   SONAME, symbol versions), and its `abi-dumper` workflow inherits the DWARF
-   ceiling. Neither overlays *all* the layers, so each one misses families the
-   other catches — and both miss the L3/L4 tail (flag drift, inline bodies,
-   uninstantiated templates).
-
-2. **No public-surface scoping.** Without resolving what is *public*, every
-   internal `detail::` struct edit shows up as a break. In practice that
-   noise — not missed breaks — is what makes teams turn checkers off. The
-   scoped-internal cases ([118](../../reference/examples/case118_internal_struct_field_added_scoped.md)–[120](../../reference/examples/case120_internal_struct_reordered_scoped.md))
-   exist precisely to test that a checker can stay *silent* correctly.
-
-3. **A binary verdict is not a release decision.** "Compatible / incompatible"
-   collapses distinctions that [Part 0](00-product-contract.md) showed are
-   policy-relevant: a source-level `API_BREAK` ships fine for prebuilt binaries
-   but breaks rebuilders; a `COMPATIBLE_WITH_RISK` `noexcept` change is fine
-   unless a consumer relied on it. The 5-tier verdict and policy profiles exist
-   because real release gates need that resolution — as do bundle-level
-   comparison, application-scoped checks, and suppression workflows.
-
-**And where everything stops:** no static tool — abicheck included — can prove
-*behaviour*. A function that keeps its signature and layout but starts returning
-different values is invisible to every approach in §1 except runtime testing.
-The honest boundary is documented in
-[Limitations](../limitations.md) and
-[What ABI tools cannot prove](../evidence-and-detectability.md#5-what-abi-tools-cannot-prove);
-treat static ABI checking as the part of release safety you can automate
-*exhaustively*, not as all of it. [Assurance Beyond Static Checking](../assurance-methods.md)
-names, method by method, what to run for the rest.
+Each classic checker is capped at one rung of the staircase (`abidiff` is
+DWARF-first and degrades to symbol-only on a stripped release; ABICC's
+header workflow sees the declared contract but not the binary truth) and
+neither scopes findings to the public surface, so each misses families the
+other catches and both drown teams in internal-churn noise — the structural
+comparison, per case, is [Tool Comparison](../../reference/tool-comparison.md).
+And where everything stops: no static tool, abicheck included, can prove
+*behaviour* — the honest boundary is
+[What ABI tools cannot prove](../evidence-and-detectability.md#5-what-abi-tools-cannot-prove),
+and [Assurance Beyond Static Checking](../assurance-methods.md) names what to
+run for the rest.
 
 ---
 
