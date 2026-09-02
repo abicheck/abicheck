@@ -149,6 +149,23 @@ class TestDeterministicEncoding:
             backward, sort_keys=True
         )
 
+    @given(keys=st.lists(_tags, min_size=2, max_size=5, unique=True))
+    def test_conflict_map_order_does_not_change_the_document(
+        self, keys: list[str]
+    ) -> None:
+        """`json.dumps` preserves a mapping's insertion order, so the
+        conflict map needs the same canonical ordering the occurrence list
+        has — two runs recording the same conflicts in a different order
+        describe identical state."""
+        conflicts = {key: f"discarded::{key}" for key in keys}
+        forward = snapshot_to_dict(_snapshot(None, semantic_ir_conflicts=conflicts))
+        backward = snapshot_to_dict(
+            _snapshot(
+                None, semantic_ir_conflicts=dict(reversed(list(conflicts.items())))
+            )
+        )
+        assert json.dumps(forward) == json.dumps(backward)
+
     def test_entries_are_sorted_by_canonical_key(self) -> None:
         eid = entity_id_for_type((), "Foo")
         ir = SemanticIR(
@@ -270,9 +287,7 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(ValueError, match="same occurrence twice"):
             snapshot_from_dict(document)
 
-    @pytest.mark.parametrize(
-        "bad", ["parse error", [1], [None], ["ok", 2], {"a": "b"}]
-    )
+    @pytest.mark.parametrize("bad", ["parse error", [1], [None], ["ok", 2], {"a": "b"}])
     def test_malformed_fact_diagnostics_are_rejected(self, bad: object) -> None:
         """A bare `tuple()` would split a string into one diagnostic per
         character and coerce a non-string member into a manufactured one —

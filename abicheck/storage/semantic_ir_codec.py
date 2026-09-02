@@ -77,9 +77,7 @@ __all__ = ["decode_semantic_ir", "encode_semantic_ir"]
 #: one is truncated: letting the dataclass default fill it in would turn
 #: missing persisted evidence into a valid `NOT_COLLECTED` availability claim.
 _FACT_FIELDS = tuple(
-    f.name
-    for f in fields(CanonicalEntity)
-    if f.name not in ("producer",)
+    f.name for f in fields(CanonicalEntity) if f.name not in ("producer",)
 )
 
 #: The ``CanonicalEntity`` fields carrying a tuple-valued ``Fact``. JSON has
@@ -98,6 +96,7 @@ def _mapping(raw: Any, field_name: str) -> Mapping[str, Any]:
 
 
 def _fact_to_dict(fact: Fact[Any]) -> dict[str, Any]:
+    """One ``Fact``'s wire form: status value, JSON-native value, diagnostics."""
     value = fact.value
     return {
         "status": fact.status.value,
@@ -161,6 +160,9 @@ def _fact_from_dict(raw: Any, *, as_tuple: bool, field_name: str) -> Fact[Any]:
 
 
 def _entity_to_dict(entity: CanonicalEntity) -> dict[str, Any]:
+    """One ``CanonicalEntity``'s wire form: every ``Fact`` field, plus
+    ``producer`` when the entity names one (sparse, like every other
+    only-present-when-meaningful key in this format)."""
     document: dict[str, Any] = {
         name: _fact_to_dict(fact) for name, fact in entity.fact_items()
     }
@@ -170,6 +172,8 @@ def _entity_to_dict(entity: CanonicalEntity) -> dict[str, Any]:
 
 
 def _entity_from_dict(raw: Any) -> CanonicalEntity:
+    """Rebuild a ``CanonicalEntity``, requiring every fact field the writer
+    emits — see :data:`_FACT_FIELDS`."""
     data = _mapping(raw, "semantic_ir entity")
     facts = {
         name: _fact_from_dict(
@@ -204,6 +208,12 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     # only the hybrid path can ever populate.
     if not snap.semantic_ir_conflicts:
         d.pop("semantic_ir_conflicts", None)
+    else:
+        # Sorted for the same reason the occurrence list is: `json.dumps`
+        # preserves a mapping's insertion order, so two runs that recorded
+        # the same conflicts in a different order would otherwise write
+        # different documents for identical state.
+        d["semantic_ir_conflicts"] = dict(sorted(snap.semantic_ir_conflicts.items()))
     ir = snap.semantic_ir
     if ir is None:
         d.pop("semantic_ir", None)
@@ -284,9 +294,7 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
             # the assignment below would drop one of the two occurrences
             # (`storage/AGENTS.md` invariant 6).
             disambiguator=identity_text(
-                required_field(
-                    occurrence, "disambiguator", "semantic_ir occurrence"
-                ),
+                required_field(occurrence, "disambiguator", "semantic_ir occurrence"),
                 "semantic_ir occurrence disambiguator",
             ),
         )
