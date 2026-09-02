@@ -133,6 +133,21 @@ class TestExportSymbolIdentityHelpers:
         assert fn.entity_id is not None
         assert fn.entity_id.extra == ("extern_c",)
 
+    def test_msvc_export_function_vectorcall_x64(self) -> None:
+        # __vectorcall's own "name@@N" decoration applies on x64 too, unlike
+        # __stdcall/__fastcall/__cdecl -- so this must strip even without
+        # is_x86_32.
+        fn = msvc_export_function("f@@8")
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra == ("extern_c",)
+        assert fn.entity_id.leaf_name == "f"
+        assert fn.name == "f@@8"  # raw evidence preserved
+
+    def test_msvc_export_function_vectorcall_x86_32_with_underscore(self) -> None:
+        fn = msvc_export_function("_f@@8", is_x86_32=True)
+        assert fn.entity_id is not None
+        assert fn.entity_id.leaf_name == "f"
+
     def test_two_distinct_exports_never_collide(self) -> None:
         ids = {
             itanium_export_function(n).entity_id

@@ -87,6 +87,28 @@ __all__ = [
 _PE_FASTCALL_DECORATION_RE = re.compile(r"^@(.+)@\d+$")
 _PE_STDCALL_DECORATION_RE = re.compile(r"^_(.+)@\d+$")
 
+# __vectorcall's own decoration ("name@@N") is a distinct case: unlike
+# __stdcall/__fastcall/__cdecl above, it applies on *every* PE machine type
+# (x64/ARM64 included, not just 32-bit x86) -- MSVC's argument-passing
+# convention decorates a __vectorcall export with a trailing "@@N" on any
+# architecture, with the leading underscore itself still x86-32-only
+# (Codex review, PR #1015). The optional leading "_" here covers both
+# shapes with one pattern rather than depending on getting that underscore
+# rule exactly right for a decoration this codebase does not otherwise
+# need to fully model.
+_PE_VECTORCALL_DECORATION_RE = re.compile(r"^_?(.+)@@\d+$")
+
+
+def _strip_pe_vectorcall_decoration(sym: str) -> str | None:
+    """Undo __vectorcall's ``name@@N``/``_name@@N`` export decoration.
+    Unlike :func:`_strip_pe_c_decoration`, this applies on every PE machine
+    type. Returns ``None`` (not the unchanged string) when *sym* doesn't
+    match, so a caller can tell "no vectorcall decoration here" apart from
+    "stripped to the same spelling".
+    """
+    match = _PE_VECTORCALL_DECORATION_RE.match(sym)
+    return match.group(1) if match else None
+
 
 def _strip_pe_c_decoration(sym: str) -> str:
     """Undo 32-bit x86 PE/COFF's __stdcall/__fastcall/__cdecl export
@@ -199,11 +221,22 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
     ``_Z...`` -- undone before mangling-prefix detection so the identity
     agrees with the header-AST producer's own ``_Z...`` spelling (Codex
     review, PR #1015; confirmed against real GNU binutils/LLVM documentation
-    of i686 MinGW's leading-underscore convention).
+    of i686 MinGW's leading-underscore convention). __vectorcall's own
+    decoration is checked independently of *is_x86_32* -- see
+    :func:`_strip_pe_vectorcall_decoration`'s own docstring for why.
     """
     normalized = sym[1:] if (is_x86_32 and sym.startswith("__Z")) else sym
     is_extern_c = not (normalized.startswith("?") or normalized.startswith("_Z"))
-    leaf_name = _strip_pe_c_decoration(sym) if (is_extern_c and is_x86_32) else normalized
+    if is_extern_c:
+        vectorcall_leaf = _strip_pe_vectorcall_decoration(normalized)
+        if vectorcall_leaf is not None:
+            leaf_name = vectorcall_leaf
+        elif is_x86_32:
+            leaf_name = _strip_pe_c_decoration(sym)
+        else:
+            leaf_name = normalized
+    else:
+        leaf_name = normalized
     return Function(
         name=sym,
         mangled=sym,
