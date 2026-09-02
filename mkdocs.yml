@@ -130,13 +130,12 @@ nav:
     - Contract-Aware Compatibility: learn/contract-aware-compatibility.md
     - Evidence & Detectability: learn/evidence-and-detectability.md
     - What Each Level Sees: learn/what-each-level-sees.md
+    - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
+    - Limitations: learn/limitations.md
     - Architecture: learn/architecture.md
     - Build Info & Sources (build-source data): learn/build-source-data.md
     - Graph Coverage & Negative Evidence: learn/graph-coverage.md
     - Unified Impact Assessment: learn/impact-analysis.md
-    - Environment & Toolchain Drift: learn/environment-drift.md
-    - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
-    - Limitations: learn/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:
     - CLI Reference: reference/cli-reference.md
@@ -180,6 +179,7 @@ nav:
     - Start:
       - Overview: learn/abi-api-handling.md
       - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md
+      - How a Break Shows Up: learn/how-a-break-shows-up.md
       - ABI Cheat Sheet: learn/abi-cheat-sheet.md
     - Define Your Contract:
       - "Compatibility as a Product Contract": learn/abi-series/00-product-contract.md
@@ -192,19 +192,20 @@ nav:
       - Symbol Contracts: learn/abi-series/02-symbol-contracts.md
       - Type Layout: learn/abi-series/03-type-layout.md
       - C++ ABI: learn/abi-series/04-cpp-abi.md
-      - Class Layout ABI & API: learn/class-layout-abi.md
       - Linker & ELF: learn/abi-series/05-linker-elf.md
       - Transitive Breaks: learn/abi-series/06-transitive-breaks.md
+      - Class Layout ABI & API: learn/class-layout-abi.md
     - Beyond ABI:
+      - Static & Header-Only Contracts: learn/static-and-header-only.md
       - Behavioral & Semantic Compatibility: learn/behavioral-compatibility.md
       - Data, Wire & Storage Compatibility: learn/data-wire-compatibility.md
       - Ownership & Lifetime Contracts: learn/ownership-and-lifetime.md
-      - Static & Header-Only Contracts: learn/static-and-header-only.md
       - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
     - Platforms & Toolchains:
       - Exception Unwinding: learn/exception-unwinding-abi.md
       - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
       - Dependency & Runtime Floors: learn/dependency-floors.md
+      - Environment & Toolchain Drift: learn/environment-drift.md
       - The MSVC/PE ABI Model: learn/msvc-pe-abi-model.md
     - Designing Stable Interfaces:
       - Designing for Stability: learn/abi-series/07-designing-for-stability.md
@@ -215,6 +216,20 @@ nav:
     - Verification & Assurance:
       - "Detecting Breaks": learn/abi-series/08-detection.md
       - "Assurance Beyond Static Checking": learn/assurance-methods.md
+    # Practice: the moments a check runs and what a report must show — the
+    # "now do it on a real project" question, one owner per practice topic.
+    - Practice:
+      - Where in the Pipeline: learn/where-in-the-pipeline.md
+      - "Report the Surface, Not Only the Breaks": learn/surface-growth.md
+      - Rollout and Governance: learn/rollout-and-governance.md
+      - Triage a Suspicious Finding: learn/triage-a-finding.md
+    # At Scale: a release of several binaries, and the libraries whose contract
+    # is an instantiation matrix rather than an export table.
+    - At Scale:
+      - "Products, Not Libraries": learn/products-not-libraries.md
+      - Template- and Header-Heavy Libraries: learn/template-heavy-libraries.md
+      - How System Libraries Stay Compatible: learn/system-library-discipline.md
+      - Packages and Consumers: learn/packages-and-consumers.md
     - Quick Reference:
       - "Glossary": learn/abi-series/glossary.md
   # The case catalog: every break scenario as a compilable fixture, browsable
@@ -265,6 +280,12 @@ nav:
 exclude_docs: |
   CLAUDE.md
   AGENTS.md
+
+# A link to a heading that no longer exists is reported (and fails under
+# --strict). The learning-series plan moves hub sections whose anchors other
+# pages link; this is what catches a stale fragment.
+validation:
+  anchors: warn
 
 plugins:
   - search

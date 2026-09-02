@@ -3,7 +3,7 @@ doc_type: explanation
 audience:
   - library-maintainer
   - contributor
-level: intermediate
+level: advanced
 summarizes:
   - platform-support-matrix
   - evidence-model
@@ -90,171 +90,20 @@ the full model (all six layers, the `--depth` dial, and worked examples).
 
 ## Artifact layers in detail
 
-### Layer L0: Binary metadata
+Each layer is read by a format-specific parser and contributes one kind of
+evidence; the exact per-platform reach of each is owned by the reference
+pages linked in the table, not restated here.
 
-Reads native binary metadata using format-specific parsers:
+| Layer | What it reads | Where it is documented in full |
+|---|---|---|
+| L0 binary metadata | The export table, SONAME or install name, dependencies, symbol binding and versioning — ELF, PE/COFF and Mach-O each through their own parser | [Platform Support](../reference/platforms.md) |
+| L1 debug information | Struct/class layout, member offsets, vtable slots and calling conventions from DWARF (with BTF and CTF as fallbacks on ELF) or PDB; separate debug files are found through a resolver chain (`--debug-root`, `--debuginfod`) | [Platform Support](../reference/platforms.md), [Dump & Compare Flags](../use/dump-compare-flags.md) |
+| L2 header AST | Declarations, signatures, enums, typedefs, access and `noexcept` from the public headers through castxml or clang (`--ast-frontend`); castxml emulates the external compiler's defines and include paths, and the clang backend is syntactic, so DWARF stays the layout authority on a clang-only host | [Header Backend Capabilities](../reference/header-backend-capabilities.md), [Platform Support § Windows toolchains](../reference/platforms.md#windows-toolchain-support-matrix) |
+| L3 build context, L4 source replay | Post-build, opt-in, never authoritative on their own: the ABI-relevant flags and toolchain from the build graph, and the macros, default arguments, `constexpr` values and uninstantiated templates only the sources carry — collected into a content-addressed build/source pack | [Build & Source Packs](build-source-data.md) |
 
-**ELF** (Linux, via `pyelftools`):
-- Exported symbols (functions, variables) from `.dynsym`
-- SONAME, symbol binding (GLOBAL, WEAK, LOCAL), symbol versioning
-- NEEDED dependencies, visibility attributes
-
-**PE/COFF** (Windows, via `pefile`):
-- Exported functions and ordinals from the export table
-- Imported DLLs and functions from the import table
-- Machine type, characteristics, DLL characteristics
-- File and product version from VS_FIXEDFILEINFO resource
-
-**Mach-O** (macOS, via `macholib`):
-- Exported symbols from the symbol table (including weak definitions)
-- Install name (LC_ID_DYLIB — equivalent of ELF SONAME)
-- Dependent libraries (LC_LOAD_DYLIB — equivalent of ELF DT_NEEDED)
-- Re-exported libraries (LC_REEXPORT_DYLIB)
-- Current and compatibility versions, minimum OS version
-- Fat/universal binary support (automatic architecture selection)
-
-### Layer L2: Header AST (castxml / Clang) — all platforms
-
-Parses C/C++ headers through a selectable frontend — `--ast-frontend
-auto|castxml|clang|hybrid` (or `ABICHECK_AST_FRONTEND`). `auto` always
-resolves to castxml first and **never** silently switches producer — not
-even on a host with no castxml at all — unless `--allow-ast-frontend-fallback`
-(or `ABICHECK_ALLOW_AST_FALLBACK=1`) is also given; with that opt-in, a
-recognized castxml toolchain-version mismatch or direct-include-guard
-failure falls back to clang `-ast-dump=json` (ADR-003, G16). Without the
-opt-in, and on a clang-only host, run explicitly with `--ast-frontend clang`
-instead of relying on `auto`. `hybrid` (G28 Phase 3) runs both and merges
-them. The rest of this section describes the castxml backend. The clang
-backend exposes the same
-declaration surface (signatures, classes/bases, enums, typedefs, access,
-`noexcept`, templates) but is a **syntactic** AST: it does **not** compute record
-layout, so `size_bits`/`offset_bits`/vtable slots stay unset and the layout
-detectors skip an unknown-vs-unknown comparison — **DWARF (L1) remains the layout
-authority** on a clang-only host. With that caveat, the header AST extracts:
-
-- Function signatures (parameters, return types)
-- Class/struct definitions; layout when backed by castxml or DWARF evidence
-- Virtual method tables (vtable slot ordering) when backed by castxml or DWARF
-  evidence
-- Enum values and member names
-- Typedefs and template instantiations
-- `noexcept` specifications
-- Access levels (public, protected, private)
-
-castxml is a cross-platform tool maintained by Kitware (available via conda-forge,
-system packages, or direct download for Linux, Windows, and macOS). It is the primary
-source for type-level analysis, catching changes invisible to debug-info-only tools:
-`noexcept`, `static` qualifier, const qualifier, access level changes.
-
-**Compiler support:** castxml uses an **internal Clang compiler** for parsing but
-**emulates** the preprocessor defines, include paths, and target platform of an external
-compiler via `--castxml-cc-<id> <compiler-binary>`. At invocation castxml calls the
-external compiler to discover its built-in defines (e.g. `__GNUC__`, `__GNUC_MINOR__`,
-`_MSC_VER`) and default include search paths, then injects those into its internal Clang
-so the resulting AST matches what the external compiler would produce.
-
-| Compiler ID | Compiler | Typical platforms |
-|-------------|----------|-------------------|
-| `gnu` | GCC / g++ | Linux, macOS, Windows (MinGW) |
-| `gnu-c` | GCC / gcc (C mode) | Linux, macOS, Windows (MinGW) |
-| `msvc` | Microsoft Visual C++ (cl) | Windows |
-| `msvc-c` | Microsoft Visual C (cl, C mode) | Windows |
-
-**Auto-detection logic** (see `dumper.py:_castxml_dump()`): abicheck extracts the
-*filename* from the compiler binary path (via `Path(cc_bin).name`), lower-cases it, and
-checks whether it is `cl` or `cl.exe`. If so, it passes `--castxml-cc-msvc`; otherwise it
-passes `--castxml-cc-gnu`. The comparison is case-insensitive so `CL.EXE`, `Cl.exe`, etc.
-are all correctly detected on Windows.
-
-**Compiler resolution priority** (highest to lowest):
-
-1. `--compiler /path/to/compiler` — explicit path override, used as-is
-2. `--compiler-prefix <prefix>` — cross-toolchain prefix; abicheck appends `g++` (C++ mode)
-   or `gcc` (C mode) automatically
-3. Default mapping — logical name (`c++` → `g++`, `cc` → `gcc`, `clang++` → `clang++`)
-
-**Scanning with a specific compiler version:** use `--compiler` to point at the exact
-binary. castxml queries that binary for its version-specific predefined macros and include
-paths, so the parse reflects exactly what that compiler version defines:
-
-```bash
-abicheck dump libfoo.so -H foo.h --compiler /usr/bin/g++-9   # GCC 9
-abicheck dump libfoo.so -H foo.h --compiler /usr/bin/g++-12  # GCC 12
-```
-
-**Limitations — non-C/C++ languages and compiler extensions:**
-
-castxml can only parse **C and C++** because its internal engine is Clang. It cannot parse
-Fortran, Rust, Ada, or other languages — there is no `--castxml-cc-fortran` equivalent.
-For compilers that add language extensions beyond standard C/C++ (e.g. Intel DPC++/SYCL
-`__attribute__((sycl_kernel))`, CUDA `__global__`, OpenACC pragmas), castxml can query
-the external compiler's preprocessor state but its internal Clang will reject
-extension-specific syntax during parsing. To scan such headers you would need either a
-CastXML build linked against the matching Clang fork (e.g. Intel's DPC++ Clang for SYCL)
-or a different AST extraction tool that uses that compiler's libclang directly.
-
-### Layer L1: Debug info cross-check (optional)
-
-When debug info is available in the binary:
-
-**DWARF** (Linux `.so` only — via `pyelftools`):
-- Cross-validates struct/class sizes against header-computed sizes
-- Verifies member offsets (catches `#pragma pack` or `-march`-specific alignment differences)
-- Checks vtable slot offsets
-- Detects calling convention and frame register changes
-
-`abicheck/dumper_debug.py` doesn't stop at DWARF for ELF: it falls back to
-**BTF** and then **CTF** when DWARF isn't present (`DWARF > BTF > CTF` for
-userspace binaries; kernel binaries prefer BTF over their own embedded
-DWARF), converting either into the same metadata shape the checker
-consumes — so a headerless, DWARF-less ELF binary carrying BTF or CTF
-still gets L1 evidence, not just L0.
-
-abicheck has no Mach-O debug-map/DWARF reader today — a headerless macOS
-`.dylib`'s own binary/debug-info evidence is always L0 (exports +
-load-command metadata) only, even when the binary carries debug info; this
-is about the L0/L1 binary-evidence layers specifically, not the whole scan
-— `--sources`/`--build-info` can still attach L3–L5 build/source evidence
-independently of the platform. See [Platform Support](../reference/platforms.md)
-for the full per-platform breakdown.
-
-**PDB** (Windows `.dll` — via built-in PDB parser):
-- Extracts struct/class/union sizes and field layouts from TPI stream
-- Extracts enum underlying types and member values
-- Detects calling convention changes (`__cdecl`, `__stdcall`, `__fastcall`,
-  `__thiscall`, `__vectorcall`) from `LF_PROCEDURE` / `LF_MFUNCTION` records
-- Extracts MSVC toolchain info (version, machine type, ABI flags) from DBI stream
-- Auto-discovers PDB files from PE debug directory; use `--pdb-path` to override
-
-**Debug artifact resolution** (via `debug_resolver` module):
-
-When debug info is not embedded, abicheck searches a configurable resolver
-chain: split DWARF (.dwo/.dwp), build-id trees, path mirrors, dSYM bundles,
-PDB files, and optionally debuginfod servers. Use `--debug-root` to point at
-separate debug file directories, or `--debuginfod` for network-based resolution.
-
-### Layers L3 / L4: Build & source evidence (optional)
-
-The build (L3) and source (L4) layers are **post-build, opt-in, and never
-authoritative on their own** — abicheck reads existing build outputs and
-build-system query interfaces; it does not rebuild your project. They are
-collected into a content-addressed **build/source pack** and attached to a snapshot:
-
-- **L3 — build context** (`build_context.py`, ADR-029): parses a
-  `compile_commands.json` (`-p build/`) or a CMake/Ninja/Bazel/Make graph to
-  recover the exact ABI-relevant flags and toolchain the library was built with.
-  Diffs emit context/risk kinds like `abi_relevant_build_flag_changed`,
-  `toolchain_version_changed`, and `link_export_policy_changed`.
-- **L4 — source ABI replay** (ADR-030): parses selected TUs and public headers
-  under their real per-TU build context and links the result against the
-  exported surface, catching `public_macro_value_changed`,
-  `default_argument_changed`, `constexpr_value_changed`, and the uninstantiated
-  templates that no artifact carries.
-
-Both are described in full in [Build & Source Packs](build-source-data.md). Per the
-authority rule, every L3/L4 finding defaults to `API_BREAK` or risk and carries
-an explicit evidence-tier boundary so it is never read as a proven shipped-ABI
-break.
+Per the authority rule, every L3/L4 finding defaults to `API_BREAK` or risk
+and carries an explicit evidence-tier boundary so it is never read as a
+proven shipped-ABI break.
 
 ---
 
@@ -288,16 +137,17 @@ Source of truth: `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `R
 
 ## Verdict system
 
-| Verdict | Exit code | Meaning |
-|---------|-----------|---------|
-| `NO_CHANGE` | 0 | Identical snapshots |
-| `COMPATIBLE` | 0 | Safe changes (new symbols, weak binding) |
-| `COMPATIBLE_WITH_RISK` | 0 | Binary-compatible but deployment risk present |
-| `API_BREAK` | 2 | Source-level break, binary-safe (rename, access change) |
-| `BREAKING` | 4 | Binary ABI break — old binaries will fail |
+The checker's five verdicts (`NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`,
+`API_BREAK`, `BREAKING`) and the exit code each maps to are owned by
+[Verdicts](verdicts.md) and [Exit Codes](../reference/exit-codes.md); this
+page does not restate the table.
 
 ---
 
 ## Error model
 
 Public exceptions are defined in `abicheck/errors.py`. Tool errors produce exit code `1`.
+
+---
+
+**Ladder:** ← [Limitations & Known Boundaries](limitations.md) · Concepts c3 · Internals · [Source & Build Data](build-source-data.md) →

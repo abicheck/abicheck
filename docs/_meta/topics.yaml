@@ -58,6 +58,12 @@ topics:
       - start/choose-your-workflow.md
       - use/tool-modes.md
       - learn/architecture.md
+      - learn/abi-series/08-detection.md
+      - learn/build-source-data.md
+      - learn/how-a-break-shows-up.md
+      - learn/where-in-the-pipeline.md
+      - learn/triage-a-finding.md
+      - learn/template-heavy-libraries.md
       - skills-src/shared/evidence-and-depth.md
       - learn/assurance-methods.md
 
@@ -78,6 +84,9 @@ topics:
     allowed_summaries:
       - start/first-report.md
       - skills-src/shared/compatibility-contracts.md
+      - learn/abi-cheat-sheet.md
+      - learn/abi-series/07-designing-for-stability.md
+      - learn/surface-growth.md
 
   baseline-lifecycle:
     canonical_page: use/baseline-management.md
@@ -104,6 +113,7 @@ topics:
       - use/baseline-storage.md
     reference_page: reference/resolve-baseline.md
     allowed_summaries:
+      - learn/where-in-the-pipeline.md
       - start/getting-started.md
       - skills-src/shared/baseline-and-comparability.md
 
@@ -176,7 +186,7 @@ topics:
       - reference/protect-committed-baseline.md
 
   bundle-analysis:
-    canonical_page: use/multi-binary.md
+    canonical_page: learn/products-not-libraries.md
     fact_sources:
       - abicheck/bundle.py
       - abicheck/bundle_models.py
@@ -189,6 +199,12 @@ topics:
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
       - abicheck/frontends/cli/options/bundle_facts.py
     reference_page: reference/cli-reference.md
+    task_pages:
+      - use/multi-binary.md
+      - integration/scenarios/release-bundle.md
+      - integration/scenarios/multi-dso-project.md
+    allowed_summaries:
+      - learn/template-heavy-libraries.md
 
   cli-surface:
     canonical_page: use/cli-usage.md
@@ -248,6 +264,9 @@ topics:
       - abicheck/policy_file.py
       - abicheck/checker_policy.py
       - abicheck/reclassify.py
+    allowed_summaries:
+      - skills-src/shared/policies-and-suppressions.md
+      - learn/rollout-and-governance.md
 
   # ADR-049's effective compatibility configuration: the resolved object, its
   # field-level precedence, and the pack-manifest format. Distinct from
@@ -255,8 +274,6 @@ topics:
   # `policies` (which owns policy files as a user-facing feature): this topic
   # is about how every input across CLI/API/config/pack resolves into one
   # typed configuration and one provenance receipt.
-    allowed_summaries:
-      - skills-src/shared/policies-and-suppressions.md
   compatibility-evaluation-config:
     canonical_page: reference/compatibility-evaluation-config.md
     fact_sources:
@@ -339,6 +356,7 @@ topics:
       - abicheck/suppression_yaml.py
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
+      - learn/rollout-and-governance.md
 
   # GitHub Actions workflow-command annotations (stderr rendering) and,
   # since report schema 2.43, the same classification persisted as a
@@ -390,6 +408,7 @@ topics:
       - use/github-action-source-scans.md
       - use/annotations.md
     allowed_summaries:
+      - learn/where-in-the-pipeline.md
       - skills-src/shared/ci-wiring.md
 
   project-integration:
@@ -410,6 +429,11 @@ topics:
       - integration/scenarios/dependency-and-container-checks.md
       - integration/scenarios/monorepo.md
       - integration/scenarios/migration-and-rollout.md
+    allowed_summaries:
+      - learn/where-in-the-pipeline.md
+      - learn/rollout-and-governance.md
+      - learn/products-not-libraries.md
+      - learn/packages-and-consumers.md
 
   integration-scenario-selection:
     canonical_page: integration/index.md
@@ -432,6 +456,7 @@ topics:
       - use/github-action.md
       - use/dump-compare-flags.md
       - use/tool-modes.md
+      - learn/abi-series/08-detection.md
 
   # Compatibility dimensions beyond source/binary ABI that a static checker
   # cannot decide directly -- named explicitly in Compatibility as a Product
@@ -485,6 +510,96 @@ topics:
   # page had grown to answer more than one primary question). Part 4 keeps
   # the core, first-read-through mechanisms and links out to these for the
   # deep-dive material.
+  break-symptoms:
+    canonical_page: learn/how-a-break-shows-up.md
+    fact_sources:
+      - scripts/evidence_tiers.py
+    allowed_summaries:
+      - learn/abi-api-handling.md
+      - start/first-report.md
+
+  compatibility-pipeline:
+    canonical_page: learn/where-in-the-pipeline.md
+    fact_sources:
+      - action/
+      - .github/workflows/publish-baseline.yml
+      - .github/workflows/update-main-baseline.yml
+    allowed_summaries:
+      - learn/abi-api-handling.md
+      - use/ci-gating.md
+
+  surface-growth:
+    canonical_page: learn/surface-growth.md
+    fact_sources:
+      - abicheck/diff_surface_metrics.py
+      - abicheck/surface_graph.py
+      - abicheck/policy/severity.py
+      - abicheck/semver.py
+    task_pages:
+      - use/api-surface-intelligence.md
+      - use/annotations.md
+    allowed_summaries:
+      - learn/abi-api-handling.md
+      - learn/abi-cheat-sheet.md
+
+  compatibility-governance:
+    canonical_page: learn/rollout-and-governance.md
+    fact_sources:
+      - abicheck/suppression.py
+      - abicheck/policy_file.py
+    allowed_summaries:
+      - learn/abi-api-handling.md
+
+  finding-triage:
+    canonical_page: learn/triage-a-finding.md
+    fact_sources:
+      - abicheck/comparability.py
+      - abicheck/elf_symbol_filter.py
+    allowed_summaries:
+      - use/troubleshooting.md
+      - start/first-report.md
+
+  template-library-contract:
+    canonical_page: learn/template-heavy-libraries.md
+    fact_sources:
+      - abicheck/bundle_manifest.py
+      - abicheck/buildsource/source_abi.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/limitations.md
+
+  system-library-discipline:
+    canonical_page: learn/system-library-discipline.md
+    fact_sources:
+      - abicheck/policies/glibc_symbol_versioned.yaml
+      - abicheck/diff_versioning.py
+    allowed_summaries:
+      - learn/abi-series/05-linker-elf.md
+      - learn/abi-series/07-designing-for-stability.md
+      - learn/rollout-and-governance.md
+
+  packages-and-consumers:
+    canonical_page: learn/packages-and-consumers.md
+    fact_sources:
+      - abicheck/package.py
+      - abicheck/debian_symbols.py
+    task_pages:
+      - use/python-extensions.md
+      - use/debian-symbols.md
+      - start/scanning-conda-packages.md
+      - integration/scenarios/packages-and-sdks.md
+    allowed_summaries:
+      - learn/abi-series/01-foundations.md
+
+  class-layout:
+    canonical_page: learn/class-layout-abi.md
+    fact_sources:
+      - abicheck/diff_types.py
+      - abicheck/diff_elf_layout.py
+    allowed_summaries:
+      - learn/abi-series/03-type-layout.md
+      - learn/abi-series/04-cpp-abi.md
+
   exception-unwinding-abi:
     canonical_page: learn/exception-unwinding-abi.md
     fact_sources:

@@ -1,3 +1,11 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+lifecycle: active
+generated: false
+---
 # ABI in Five Minutes
 
 > **New to the series?** This is the gentlest door. When you're ready for the
@@ -92,3 +100,7 @@ library's promises into the caller and never re-checks them.**
   the mechanics first.
 - **[ABI Cheat Sheet](../abi-cheat-sheet.md)** — the one-screen summary of
   verdicts and common changes, to keep open while you read.
+
+---
+
+**Ladder:** ← [Series overview](../abi-api-handling.md) · Tier 0 · Orientation · [How a Break Shows Up](../how-a-break-shows-up.md) →

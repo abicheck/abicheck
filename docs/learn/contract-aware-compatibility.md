@@ -277,3 +277,7 @@ for that last one).
 - [CI Gating](../use/ci-gating.md) — where this stage sits in the overall pipeline
 - [Exit Codes → Contract-coverage contribution](../reference/exit-codes.md#contract-coverage-contribution-adr-049)
 - [Verdicts → Contract evaluation and the verdict](verdicts.md#contract-evaluation-and-the-verdict)
+
+---
+
+**Ladder:** ← [Verdicts](verdicts.md) · Concepts c1 · Reading a result · [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) →

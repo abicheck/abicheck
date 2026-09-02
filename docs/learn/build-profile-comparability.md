@@ -248,6 +248,20 @@ not just a differing or superficially-growing flag.
   (GCC-old vs. MSVC-new) unless that cross-profile question is genuinely
   what you're asking. Each profile is its own comparability lineage.
 
+### Comparing one library across build configurations
+
+When the question really is "does this one library behave the same across
+its supported build configurations," the answer is not to defeat the gate
+but to give both sides a *probe matrix*: a snapshot of the configuration
+each side was built under, so the build-configuration findings are
+reported as such rather than mistaken for library changes:
+
+```bash
+abicheck compare old.so new.so --probe-matrix old=probes-old.yaml --probe-matrix new=probes-new.yaml
+```
+
+Producing the matrix is owned by the [Probe Harness](../use/probe-harness.md).
+
 ## Rule of thumb
 
 > Before reading a single finding, ask: **did OLD and NEW come from the same
@@ -275,3 +289,7 @@ exit codes, the `--diagnostic-comparison` flag, and the JSON `reason` shape
 _See also: [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) ·
 [Evidence & Detectability](evidence-and-detectability.md) ·
 [Environment & Toolchain Drift](environment-drift.md)._
+
+---
+
+**Ladder:** ← [Consumer Models](consumer-models.md) · Tier 3 · Define the contract · [Static & Header-Only Contracts](static-and-header-only.md) →

@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+depends_on:
+  - abicheck/semver.py
+lifecycle: active
+generated: false
+---
 # Part 0 — Compatibility as a Product Contract
 
 > **Series navigation:** **0. Product Contract** ·
@@ -150,6 +160,32 @@ not-comparable, a hard failure) mean.
 
 ---
 
+## 2a. Which level of promise are you making?
+
+The dimensions above are the columns; the *ladder* below is the spine. Each
+rung is a stronger promise than the one before it, and each names the
+verdict that gates it, the exit code a plain `compare` returns when the
+promise is broken, the version action that follows, and — where one
+applies — the [`--contract` domain](../contract-aware-compatibility.md)
+that tells the checker which surface the promise is about.
+
+| Rung | The promise | What the consumer may do | Verdict that gates it | Exit code | SemVer action | `--contract` domain |
+|---|---|---|---|---|---|---|
+| 1 | **No promise** — `detail::`, `impl::`, experimental namespaces ([§3](#3-define-the-public-surface-before-you-check), [Your ABI Surface](../abi-surface.md)) | nothing, safely | none: scoped out under public-header scoping | 0 | none | out of every domain |
+| 2 | **Source compatibility** — recompile and it builds ([Part 6 § source-only breaks](06-transitive-breaks.md#source-only-api-breaks-binary-identical)) | rebuild against the new headers | `API_BREAK` | 2 | major, if source compatibility is promised | `public` |
+| 3 | **Binary backward compatibility** — old consumers load the new library ([Parts 2–5](02-symbol-contracts.md)); the default `compare` | keep an already-built binary | `BREAKING` | 4 | major; SONAME or install-name bump | `exports` (or `public`) |
+| 4 | **Binary forward compatibility** — new consumers on the old library; the plugin/host and rollback case ([Compatibility Direction](../compatibility-direction.md)) | build against the new SDK and run on the old library | `BREAKING`, in the reversed comparison | 4 | major, from the host's side | `exports`, arguments reversed |
+| 5 | **Deployment compatibility** — the same binary loads on the same OS matrix ([Dependency & Runtime Floors](../dependency-floors.md)) | deploy on the oldest supported runtime | `COMPATIBLE_WITH_RISK`; `BREAKING` once a floor is declared with `--env-matrix` | 0, or 4 with a declared floor | release note, or block | — |
+| 6 | **Wire/data compatibility** — a stored file or a message outlives both versions ([Data, Wire & Storage](../data-wire-compatibility.md)) | read old data with the new version, and the reverse | not decidable from two artifacts | — | major on an incompatible format change | — |
+
+Exit codes are the legacy `compare` scheme; a severity preset changes them
+([Verdicts](../verdicts.md)). Pick the highest rung you actually promise:
+every rung below it is included, and every rung above it is a promise
+nobody made, which is why [§4](#4-semantic-versioning-turning-the-promise-into-a-number)
+can only ever constrain the version number, never choose it.
+
+---
+
 ## 3. Define the public surface *before* you check
 
 Before checking ABI/API stability, write down what is actually promised. The
@@ -207,6 +243,10 @@ classification means for your version number and release, *and only after* the
 public API is declared (§3).
 
 ### abicheck verdict → SemVer action
+
+The ladder in [§2a](#2a-which-level-of-promise-are-you-making) reads this
+mapping from the promise side; the table below reads it from the verdict
+side. They are one mapping.
 
 | abicheck verdict / class | Product meaning | Typical SemVer action |
 |--------------------------|-----------------|-----------------------|
@@ -318,3 +358,7 @@ any other tool) needs to even see a given change, read
 _See also: [Verdicts](../verdicts.md) · [Policy Profiles](../../use/policies.md) ·
 [Evidence & Detectability](../evidence-and-detectability.md) ·
 [Examples Encyclopedia](../../reference/examples/index.md)._
+
+---
+
+**Ladder:** ← [Glossary](glossary.md) · Tier 1 · Foundations · [Part 1 — Foundations: From Source Code to a Running Process](01-foundations.md) →

@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+depends_on:
+  - abicheck/elf_metadata.py
+lifecycle: active
+generated: false
+---
 # Part 1 — Foundations: From Source Code to a Running Process
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -428,41 +438,15 @@ ABI-breaking before you ship belongs in your CI pipeline.
 ## 7. Where abicheck fits
 
 `abicheck` operationalizes everything above. It does not need your source at
-review time; it reads the *compiled* artifacts (plus debug info / headers when
-available) and reasons about the binary contract directly.
-
-```mermaid
-flowchart LR
-    old["libfoo.so.1<br/>(old release)"] -->|dump| s1["snapshot v1"]
-    new["libfoo.so.2-candidate"] -->|dump| s2["snapshot v2"]
-    s1 --> diff{{"diff + classify"}}
-    s2 --> diff
-    diff --> verdict["verdict:<br/>NO_CHANGE / COMPATIBLE /<br/>COMPATIBLE_WITH_RISK /<br/>API_BREAK / BREAKING"]
-```
-
-1. **Snapshot.** It extracts an `AbiSnapshot` from each binary — the exported
-   symbols, type layouts, vtables, calling conventions, ELF metadata, and so on.
-2. **Diff.** It compares the two snapshots structurally (walking pointer chains,
-   struct members, vtable slots — not just symbol names).
-3. **Classify.** Each detected difference is one of many change kinds (see the
-   [Change Kind Reference](../../reference/change-kinds.md) for the exact,
-   up-to-date count), and each change kind is partitioned into exactly one
-   verdict tier.
-
-The five verdicts, from safest to most severe, are:
-
-| Verdict | Meaning | Typical CI action |
-|---|---|---|
-| ✅ `NO_CHANGE` | Identical ABI/API | pass |
-| 🟢 `COMPATIBLE` | Backward-compatible (additions / quality signals) | pass |
-| 🟡 `COMPATIBLE_WITH_RISK` | Links fine, but a deployment/behavioral hazard | review |
-| 🟠 `API_BREAK` | Source won't recompile; binaries still link | review / bump minor |
-| 🔴 `BREAKING` | Existing binaries crash or corrupt at runtime | block / bump SONAME |
-
-Each verdict maps to a CI exit code so a release gate can distinguish a harmless
-symbol addition from a silent memory-corruption hazard. The full semantics and
-exit codes are in [Verdicts](../verdicts.md); a one-screen summary is the
-[ABI Cheat Sheet](../abi-cheat-sheet.md).
+review time: it reads the *compiled* artifacts (plus debug info and headers
+when available), extracts a snapshot of each — exported symbols, type
+layouts, vtables, calling conventions, ELF metadata — diffs the two
+snapshots structurally, and classifies every difference into one of five
+verdicts, each mapped to a CI exit code so a release gate can tell a
+harmless addition from a silent memory-corruption hazard. The pipeline
+itself is described in [Architecture](../architecture.md); the verdicts
+and their exit codes are owned by [Verdicts](../verdicts.md), with a
+one-screen summary on the [ABI Cheat Sheet](../abi-cheat-sheet.md).
 
 Throughout the rest of the series, look for callouts like this:
 
@@ -474,32 +458,19 @@ Throughout the rest of the series, look for callouts like this:
 
 ---
 
-## 8. Glossary
-
-| Term | One-line definition |
-|------|---------------------|
-| **Symbol** | A name (function or global) the linker/loader resolves to an address. |
-| **Defined / Undefined symbol** | A name this object *provides* vs *needs* (`T` vs `U` in `nm`). |
-| **`.dynsym`** | A shared object's table of dynamically-visible symbols, searched at load time. |
-| **Relocation** | A "patch this address once the symbol's location is known" note in a binary. |
-| **Dynamic loader** | `ld.so` / `dyld` / PE loader — resolves symbols and maps libraries at startup. |
-| **Mangling** | Encoding of C++ name + signature into a flat symbol string. |
-| **SONAME** | A shared object's *declared identity* (`libfoo.so.1`); the major number is the ABI epoch. |
-| **Calling convention** | The register/stack contract for passing arguments and returning values. |
-| **Vtable** | A per-class array of function pointers backing C++ virtual dispatch. |
-| **API** | Source-level contract (headers). Breaks at compile time. |
-| **ABI** | Binary-level contract (compiled artifacts). Breaks at run time, often silently. |
-
----
-
 ## Next
 
-Now that you know what a symbol is and how it's resolved, the most direct way to
-break a library is to make a symbol the loader needs *disappear* or *change
-meaning*. That is the subject of the next page.
+Now that you know what a symbol is and how it's resolved, one question decides
+what counts as a break at all: which of those symbols and types are *yours to
+keep*. That is the subject of the next page; the break families follow it.
 
-➡️ **[Part 2 — Symbol Contract Breaks](02-symbol-contracts.md)**
+➡️ **[What Is Part of Your ABI Surface?](../abi-surface.md)** — then
+[Part 2 — Symbol Contract Breaks](02-symbol-contracts.md).
 
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [Verdicts](../verdicts.md) ·
 [Examples Encyclopedia](../../reference/examples/index.md)
+
+---
+
+**Ladder:** ← [Part 0 — Compatibility as a Product Contract](00-product-contract.md) · Tier 1 · Foundations · [What Is Part of Your ABI Surface?](../abi-surface.md) →

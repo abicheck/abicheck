@@ -91,6 +91,15 @@ terms:
     aliases:
       - Policy
 
+  Authority rule:
+    canonical_page: learn/evidence-and-detectability.md
+    short_definition: >-
+      Artifact evidence (L0–L2) decides any BREAKING verdict; build and
+      source evidence (L3–L5) can add, explain, scope or localise findings
+      but never delete an artifact-proven break.
+    aliases:
+      - the authority rule
+
   Evidence Tier:
     canonical_page: learn/evidence-and-detectability.md
     short_definition: >-
