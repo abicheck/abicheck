@@ -350,6 +350,28 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
     `` const`` sits there, correctly attributed) -- never from the text
     after the parameter list closes.
 
+    **A ``"<"``/``">"`` used as a real comparison operator inside a
+    parenthesized non-type template argument does not throw off the sigil
+    search either (Codex review, twelfth round, fresh evidence) -- the
+    identical bracket-KIND-aware discipline :func:`~abicheck.extract.
+    semantic_normalizer_artifacts.has_unresolved_component` already applies,
+    reused here for the same reason.** For clang's own spelling of
+    ``S<(N < 0)> * const gp`` (``"S<(N < 0)> *const"``), a flat depth
+    counter treats the comparison ``<`` as another template opener, so
+    after the real ``)``/``>`` closers the running depth never returns to
+    zero -- the sigil search then never finds the real top-level ``*`` at
+    all (everything after the false-elevated depth looks "still nested"),
+    silently reporting no qualification for a genuinely const pointer. A
+    ``"<"`` only legitimately opens when what follows is NOT immediately
+    inside an unmatched ``(``/``[`` (the same "is this really a template
+    bracket or a real operator" question ``>``'s own popping rule already
+    answers, applied symmetrically to ``<``'s own PUSH): a bracket kind
+    stack records each opaque ``(``/``[``/``<`` as it opens, and a ``">"``
+    only pops when the innermost still-open entry is itself a ``"<"`` --
+    a real ``<``/``>`` comparison/shift pair sitting inside an already-open
+    ``(``/``[`` neither pushes nor pops that stack, so the running depth is
+    never falsely elevated by them in the first place.
+
     **Known, accepted limitation: a top-level qualifier hidden behind a
     typedef is not detected (Codex review, eighth round, fresh evidence).**
     For ``typedef int * const ConstPtr; extern ConstPtr p;``, both backends
@@ -376,7 +398,13 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
     function's own `restrict` non-recognition already makes for a closely
     related reason (see `_CV_KEYWORD_RE`'s own comment).
     """
-    depth = 0
+    # Bracket-KIND-aware stack, not a flat depth counter (Codex review,
+    # twelfth round, fresh evidence) -- mirrors `semantic_normalizer_
+    # artifacts.has_unresolved_component`'s identical discipline (see this
+    # function's own docstring, the paragraph just above, for the full
+    # reasoning). Contains only "(" (opaque, non-declarator-group parens),
+    # "[", and "<" -- "at depth 0" is exactly `not stack`.
+    stack: list[str] = []
     last_sigil = -1
     # True for a paren currently open on this stack that groups a
     # declarator's own sigil -- popped, not depth-counted, so a sigil (or a
@@ -392,20 +420,33 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
             transparent = _is_declarator_group(type_str, i + 1)
             transparent_parens.append(transparent)
             if not transparent:
-                depth += 1
+                stack.append(ch)
             i += 1
             continue
         if ch == ")":
             was_transparent = transparent_parens.pop() if transparent_parens else False
-            if not was_transparent:
-                depth = max(0, depth - 1)
+            if not was_transparent and stack:
+                stack.pop()
             i += 1
             continue
-        if ch in "[<":
-            depth += 1
-        elif ch in "]>":
-            depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
+        if ch == "[":
+            stack.append(ch)
+        elif ch == "]":
+            if stack:
+                stack.pop()
+        elif ch == "<":
+            if not stack or stack[-1] not in "([":
+                stack.append(ch)
+            # else: a real comparison operator character sitting inside a
+            # paren/bracket expression context, not a template opener --
+            # leave the stack untouched (symmetric with the ">" rule below).
+        elif ch == ">":
+            if stack and stack[-1] == "<":
+                stack.pop()
+            # else: a real comparison/shift-operator character sitting
+            # inside a paren/bracket expression context, not a template
+            # closer -- leave the stack untouched.
+        elif ch in "*&" and not stack:
             last_sigil = i
         i += 1
     raw_suffix = type_str[last_sigil + 1 :] if last_sigil != -1 else type_str

@@ -13008,6 +13008,27 @@ gate's 800-line cap for a new file -- mirroring `model.declarator_
 qualifiers.py`'s own split from `model.signature_normalization.py` for the
 identical reason.
 
+**The sigil-finding scan in `_variable_top_level_cv_qualification` gets
+the identical bracket-KIND-aware stack fix (Codex review, twelfth round,
+fresh evidence), for the same underlying primitive bug found in a
+different function.** For clang's own spelling of `template<int N> extern
+S<(N < 0)> * const gp` (`"S<(N < 0)> *const"`), a flat depth counter
+treats the comparison `<` as another template opener; after the real
+`)`/`>` closers the running depth never returns to zero, so the sigil
+search never finds the real top-level `*` at all, silently reporting no
+qualification for a genuinely const pointer. Fixed symmetrically with the
+existing `">"` rule: a `"<"` only pushes a new bracket level when the
+innermost still-open entry is NOT itself a `"("`/`"["` -- a real
+comparison `<` sitting inside an already-open paren/bracket expression is
+left untouched the same way its own closing `>` already is, so the two
+never spuriously push a level a later real `)` would then incorrectly pop
+instead of the paren it actually closes. Applied proactively to
+`has_unresolved_component` too (same file split, `extract/semantic_
+normalizer_artifacts.py`), since it carries the identical latent bug for
+the identical shape even though no concrete failure was reported there --
+"fix the cause, not the instance" applied to a shared primitive weakness
+rather than only the one call site that happened to be caught.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

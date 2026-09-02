@@ -462,6 +462,30 @@ def test_normalize_header_ast_shift_operator_in_template_argument_is_not_unresol
     assert entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_comparison_operator_in_template_argument_function() -> (
+    None
+):
+    """The identical fix, proactively applied to ``has_unresolved_
+    component`` too (Codex review, twelfth round found this shape in the
+    sibling variable-cv-qualification scan; this is the same underlying
+    primitive bug and would misbehave identically here without the
+    matching fix): a real comparison ``<`` inside a parenthesized non-type
+    template argument must not push a spurious bracket level that a later
+    real ``)`` would then incorrectly pop instead of the paren it actually
+    closes, corrupting the running depth for anything after it."""
+    fn = _function("f", "void", ("S<(N < 0)>",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_nested_template_closers_still_pop_correctly() -> None:
     """A genuine ``">>"`` closing TWO nested template levels
     (``"vector<vector<int>>"``) still pops both, unlike the shift-operator
@@ -847,6 +871,36 @@ def test_normalize_header_ast_member_function_pointer_variable_keeps_own_qualifi
         mangled="g_pmf",
         type="void (C::* const)(int)",
         entity_id=entity_id_for_variable((), "g_pmf", mangled_name="g_pmf"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_comparison_operator_in_template_argument_variable() -> (
+    None
+):
+    """A real comparison ``<``/``>`` pair inside a parenthesized non-type
+    template argument does not throw off the sigil search (Codex review,
+    twelfth round, fresh evidence: confirmed against clang's real
+    ``qualType`` spelling for ``template<int N> extern S<(N < 0)> * const
+    gp``, ``"S<(N < 0)> *const"``). A flat depth counter treats the
+    comparison ``<`` as another template opener, so after the real
+    ``)``/``>`` closers the running depth never returns to zero and the
+    sigil search never finds the real top-level ``*`` at all, silently
+    reporting no qualification for a genuinely const pointer."""
+    var = Variable(
+        name="gp",
+        mangled="gp",
+        type="S<(N < 0)> *const",
+        entity_id=entity_id_for_variable((), "gp", mangled_name="gp"),
     )
     ir = normalize_header_ast(
         types=[],

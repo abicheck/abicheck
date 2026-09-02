@@ -141,3 +141,13 @@
   `extract/semantic_normalizer_artifacts.py`, once their accumulated
   docstrings pushed `semantic_normalizer.py` past the AI-readiness gate's
   800-line cap for a new file.
+  `_variable_top_level_cv_qualification`'s own sigil-finding scan gets the
+  identical bracket-KIND-aware stack fix as `has_unresolved_component`: a
+  real comparison `<` inside a parenthesized non-type template argument
+  (e.g. clang's own `"S<(N < 0)> *const"`) no longer pushes a spurious
+  bracket level that a later real `)` would then incorrectly pop instead
+  of the paren it actually closes — previously this corrupted the running
+  depth enough that the real top-level `*`/`const` were never found at
+  all, silently reporting no qualification for a genuinely const pointer.
+  `has_unresolved_component` gets the identical symmetric fix proactively,
+  since it carries the same latent primitive weakness for the same shape.

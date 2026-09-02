@@ -219,12 +219,19 @@ def has_unresolved_component(raw_type: str) -> bool:
     ``")"``/``"]"`` still pops unconditionally (matching this function's
     existing "never raise, degrade gracefully on malformed/adversarial
     input" discipline for every other close), and every genuinely
-    ambiguous ``"<"`` (a real less-than operator, not a template open) is
-    an accepted, PRE-EXISTING residual this fix does not attempt to
-    solve -- doing so needs real expression parsing, and no concrete
-    evidence of that specific shape has been found the way this ``">>"``
-    shape was (Codex review, with a real ``clang++ -Xclang
-    -ast-dump=json`` repro).
+    ambiguous ``"<"``/``">"`` pair (a real less-than/greater-than
+    comparison, not a template open/close) is an accepted, PRE-EXISTING
+    residual this fix does not attempt to solve when it occurs OUTSIDE any
+    ``(...)``/``[...]`` grouping -- doing so needs real expression parsing.
+    **A ``"<"`` occurring INSIDE an already-open ``(...)``/``[...]`` IS
+    handled, symmetrically with the ``">"`` rule above:** it only pushes a
+    new bracket level when the innermost still-open entry is NOT itself a
+    ``"("``/``"["`` -- i.e. only when genuinely at top level or already
+    inside a real ``<...>``. A real comparison ``<`` sitting inside an
+    already-open paren/bracket expression (``"S<(N < 0)>"``'s inner ``<``)
+    is left untouched the same way its own closing ``>`` would be, so the
+    two do not spuriously push a bracket level that a later, real ``)``
+    would then incorrectly pop instead of the paren it actually closes.
     """
     stack: list[str] = []
     i = 0
@@ -240,7 +247,11 @@ def has_unresolved_component(raw_type: str) -> bool:
             if stack:
                 stack.pop()
         elif ch == "<":
-            stack.append(ch)
+            if not stack or stack[-1] not in "([":
+                stack.append(ch)
+            # else: a real comparison operator character sitting inside a
+            # paren/bracket expression context, not a template opener --
+            # leave the stack untouched (symmetric with the ">" rule below).
         elif ch == ">":
             if stack and stack[-1] == "<":
                 stack.pop()
