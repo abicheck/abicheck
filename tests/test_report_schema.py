@@ -861,6 +861,33 @@ class TestReportIdentityEnvelope:
         with pytest.raises(ValueError, match="check_id"):
             reporter.to_json(result)
 
+    def test_schema_pattern_itself_rejects_a_trailing_newline_check_id(self):
+        """Codex review, fresh evidence: the previous test only proves
+        checker_types.validate_check_id() (the Python-side eager check
+        to_json() runs) rejects a trailing newline -- it never reaches the
+        packaged/published JSON Schema's own ``check_id`` ``pattern``,
+        which independently anchored with a trailing ``$``. Python's
+        ``jsonschema`` library validates a ``pattern`` with ``re.search()``,
+        which has the identical Python-``re``-specific quirk this whole bug
+        class is about (``$`` matches immediately before a single trailing
+        ``\\n``, unlike real ECMA-262 ``$`` semantics) -- so an external
+        producer that only validates against the schema, bypassing this
+        package's own ``to_json()``, could still emit a schema-valid report
+        carrying a corrupting trailing newline. Builds the payload dict
+        directly (not through ``reporter.to_json()``) so the Python-side
+        eager check can't mask a schema regression."""
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        payload = json.loads(reporter.to_json(result))
+        schema = load_compare_report_schema()
+
+        payload["check_id"] = "libfoo@profile#channel@source"
+        jsonschema.validate(instance=payload, schema=schema)
+
+        payload["check_id"] = "libfoo@profile#channel@source\n"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=schema)
+
     def test_explicit_id_qualified_check_id_round_trips_and_validates(self):
         """G42 'Explicit check identifiers': the full construct
         (build_check_id) -> validate-against-schema -> parse
