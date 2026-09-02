@@ -1001,7 +1001,6 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
         )
 
-
     if "castxml_var_access_facts_reliable" in d:
         # Same explicit-marker-wins reasoning as the flags above.
         castxml_var_access_facts_reliable_value = bool(
@@ -1038,11 +1037,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_va_list_facts_reliable_value,
         ast_producer_value,
         # Which producers this document actually evidences -- recorded (never
-        # inferred) header provenance, a real DWARF block, its own platform.
-        # See storage/fact_backfill.evidenced_producers for why "which
-        # backend could produce this fact" is the wrong question here.
+        # inferred) header provenance, plus its own platform. A debug block
+        # names no producer (BTF/CTF/PDB all write into the DWARF blocks), so
+        # none is credited from one. See
+        # storage/fact_backfill.evidenced_producers for why "which backend
+        # could produce this fact" is the wrong question here.
         evidenced=evidenced_producers(
-            d,
             header_provenance_confirmed=from_headers and not from_headers_inferred,
             ast_producer=ast_producer_value,
             platform=d.get("platform"),

@@ -125,7 +125,6 @@ _HEADER_AST_BACKENDS: frozenset[str] = frozenset({"castxml", "clang"})
 
 
 def evidenced_producers(
-    d: dict[str, Any],
     *,
     header_provenance_confirmed: bool,
     ast_producer: str | None,
@@ -148,37 +147,43 @@ def evidenced_producers(
       satisfies too); a recorded ``ast_producer`` narrows to that one
       backend, ``"hybrid"`` (or an unrecorded producer on a confirmed
       header snapshot) admits both.
-    - the *debug-info* producer only when a debug block reports
-      ``has_dwarf`` -- **not** merely when the block exists (Codex review,
-      PR #995): a symbols-only ELF dump persists a fully-populated
-      placeholder ``DwarfMetadata()``/``AdvancedDwarfMetadata()`` with
-      ``has_dwarf: false``
-      (``dumper_elf_fallback._build_symbol_only_snapshot``), whose
-      serialized form is a non-empty mapping and so passes a truthiness
-      test. See :func:`_has_debug_evidence`.
     - ``elf``/``pe``/``macho`` from the document's own ``platform``.
 
-    **Which** debug producer that block evidences follows the platform,
-    because the two blocks are a storage shape rather than a format claim
-    (Codex review, PR #995, sixth round): ``pdb_metadata.
-    parse_pdb_debug_info`` stores a successfully-parsed PDB *in*
-    ``DwarfMetadata``/``AdvancedDwarfMetadata`` with ``has_dwarf=True``,
-    and ``service_dump_native_pe._dump_pe`` -- the only writer of a
-    ``platform: "pe"`` debug block -- never calls ``parse_dwarf`` at all.
-    So a PE document's ``has_dwarf`` evidences ``pdb``; every other
-    platform's evidences ``dwarf``. Reading it as ``dwarf`` on PE was the
-    original defect one level down: it kept legacy PDB
-    ``TypeField.is_const``/``is_volatile`` at ``PRESENT`` even though the
-    fresh PDB model (``pdb_model._record_from_layout``) states
-    ``UNSUPPORTED`` for both.
+    **No debug-info producer is ever credited from a debug block.** The
+    ``dwarf``/``dwarf_advanced`` blocks are this codebase's debug *storage*,
+    not a format claim, and every non-DWARF producer writes into them with
+    ``has_dwarf=True``: ``btf_metadata.BtfMetadata.to_dwarf_metadata`` and its
+    CTF sibling (via ``dumper_debug._resolve_debug_metadata``) and
+    ``pdb_metadata.parse_pdb_debug_info``. Nothing inside a legacy document
+    says which of them ran -- ``dwarf_advanced.has_dwarf`` is not the
+    discriminator it looks like either, since
+    ``dwarf_presence._section_presence_metadata`` sets it for BTF and CTF on
+    the ``--debug-presence-only`` path. Two review rounds were spent
+    narrowing this inference (Codex, PR #995: first the placeholder block's
+    truthiness, then PE); the third finding is that the inference itself is
+    the bug, because the storage layer cannot answer a question the payload
+    does not record. So a populated debug block evidences *nothing*, and a
+    fact resting on a debug producer alone downgrades. Only ``is_const`` and
+    ``is_volatile`` name ``dwarf`` at all, both alongside the two header-AST
+    backends, so this reaches exactly those two on a legacy *non-header*
+    document still holding their resting default -- and it narrows the
+    claim, never the value.
 
-    Deliberately **never** inferred: ``btf`` and ``ctf``. No document field
-    distinguishes them today, and guessing one from the platform is exactly
-    the "could produce" reasoning this function replaces. No fact in the
-    registry names them as its only producer, so nothing currently depends
-    on the gap -- but a future one would fail closed (downgraded to
-    ``NOT_COLLECTED``) rather than silently claiming a fact, which is the
-    safe direction here: the downgrade narrows the claim, never the value.
+    A **fresh** snapshot is unaffected in every case: it persists each
+    ``<field>_fact`` directly and :func:`apply_case_a_fact_backfill` skips
+    any entry that already carries one. Recording the resolved format
+    (``dumper.resolved_debug_format``) in the snapshot would not change that
+    -- it would name the producer only for documents that never needed this
+    correction.
+
+    So the evidenced set is exactly the two bullets above: ``dwarf``,
+    ``pdb``, ``btf`` and ``ctf`` are never inferred. No fact in the registry
+    names any of them as its *only* producer, so nothing is left with no
+    reachable producer at all -- and a future one would fail closed
+    (downgraded to ``NOT_COLLECTED``) rather than silently claim itself.
+
+    Takes no raw document by design: needing one back would mean this layer
+    is reading the payload to decide what it means again.
     """
     evidenced: set[str] = set()
     if header_provenance_confirmed:
@@ -186,43 +191,9 @@ def evidenced_producers(
             evidenced.add(ast_producer)
         else:
             evidenced |= _HEADER_AST_BACKENDS
-    if _has_debug_evidence(d):
-        evidenced.add(_debug_producer_for(platform))
     if platform in {"elf", "pe", "macho"}:
         evidenced.add(platform)
     return frozenset(evidenced)
-
-
-def _debug_producer_for(platform: str | None) -> str:
-    """The producer a populated debug block evidences on *platform*.
-
-    ``DwarfMetadata``/``AdvancedDwarfMetadata`` are this codebase's debug
-    *storage*, not a format claim -- the PE path fills them from a PDB (see
-    :func:`evidenced_producers`) -- so the platform is what says which
-    producer actually ran. Unknown or absent platforms answer ``dwarf``:
-    that is the format for every non-PE target abicheck reads, and a legacy
-    document predating the ``platform`` field is an ELF one.
-    """
-    return "pdb" if platform == "pe" else "dwarf"
-
-
-def _has_debug_evidence(d: dict[str, Any]) -> bool:
-    """Whether a debug block in *d* reports real debug info.
-
-    Both blocks carry an explicit ``has_dwarf`` (``model/dwarf_facts.py``),
-    which is the only honest signal: a binary with no debug info still gets
-    a placeholder block written for it, so "the key is present" and even
-    "the mapping is non-empty" are both true for a snapshot that has no
-    debug info at all. A non-mapping value (a truncated or hand-authored
-    document) is no evidence either.
-
-    Answers only *whether* a producer ran; :func:`_debug_producer_for`
-    answers which one.
-    """
-    return any(
-        isinstance(block, dict) and bool(block.get("has_dwarf"))
-        for block in (d.get("dwarf"), d.get("dwarf_advanced"))
-    )
 
 
 def _unproduceable(owner: str, field: str, evidenced: frozenset[str]) -> bool:

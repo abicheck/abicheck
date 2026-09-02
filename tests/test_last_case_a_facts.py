@@ -344,71 +344,86 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
             # trace of. Codex review, third round — the "could produce it in
             # principle" reading kept this one PRESENT.
             ("pe-pdb", {"platform": "pe"}, FactStatus.NOT_COLLECTED),
-            # A populated debug block on PE is a *PDB*, not DWARF:
-            # parse_pdb_debug_info stores PDB data in DwarfMetadata with
-            # has_dwarf=True, and _dump_pe never calls parse_dwarf. Codex
-            # review, sixth round.
+            # Nor does a *populated* debug block, on any platform. The
+            # dwarf/dwarf_advanced blocks are debug storage, not a format
+            # claim: BtfMetadata.to_dwarf_metadata and its CTF sibling and
+            # parse_pdb_debug_info all write into them with has_dwarf=True,
+            # so a legacy document cannot say which producer ran. Codex
+            # review, fifth and sixth rounds narrowed this inference twice
+            # before the seventh established the inference itself is the bug.
             (
-                "pe-pdb-with-debug",
+                "pe-with-debug",
                 {"platform": "pe", "dwarf": {"has_dwarf": True}},
                 FactStatus.NOT_COLLECTED,
             ),
-            # A DWARF block is real evidence its producer ran.
             (
-                "elf-dwarf",
+                "elf-debug-block",
                 {"platform": "elf", "dwarf": {"has_dwarf": True}},
-                FactStatus.PRESENT,
+                FactStatus.NOT_COLLECTED,
             ),
             (
-                "macho-dwarf",
-                {"platform": "macho", "dwarf_advanced": {"has_dwarf": True}},
-                FactStatus.PRESENT,
-            ),
-            # No platform recorded at all: a document predating the field
-            # is an ELF one, so its debug block still evidences dwarf.
-            (
-                "no-platform-dwarf",
-                {"dwarf": {"has_dwarf": True}},
-                FactStatus.PRESENT,
-            ),
-            (
-                "elf-dwarf-advanced",
+                "elf-debug-advanced-block",
                 {"platform": "elf", "dwarf_advanced": {"has_dwarf": True}},
-                FactStatus.PRESENT,
+                FactStatus.NOT_COLLECTED,
+            ),
+            (
+                "macho-debug-block",
+                {"platform": "macho", "dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
+            ),
+            (
+                "no-platform-debug-block",
+                {"dwarf": {"has_dwarf": True}},
+                FactStatus.NOT_COLLECTED,
             ),
             # ELF alone, no debug block: nothing that produces CV facts ran.
             ("elf-symbols-only", {"platform": "elf"}, FactStatus.NOT_COLLECTED),
+            # The one shape that *does* keep the fact: recorded header
+            # provenance, which names its producer explicitly.
+            (
+                "header-castxml",
+                {"from_headers": True, "ast_producer": "castxml"},
+                FactStatus.PRESENT,
+            ),
         ],
     )
     def test_cv_facts_follow_the_documents_own_evidenced_producers(
         self, label: str, extra: dict, expected: FactStatus
     ) -> None:
-        d = _minimal_dict(
-            schema_version=_PRE_CASE_A,
-            from_headers=False,
-            types=[
+        base: dict = {
+            "from_headers": False,
+            "types": [
                 {
                     "name": "W",
                     "kind": "class",
                     "fields": [{"name": "m", "type": "int", "is_const": False}],
                 }
             ],
-            **extra,
-        )
+        }
+        d = _minimal_dict(schema_version=_PRE_CASE_A, **{**base, **extra})
         f = snapshot_from_dict(d).types[0].fields[0]
         assert f.is_const_fact.status is expected
 
-    def test_a_placeholder_dwarf_block_is_not_dwarf_evidence(self) -> None:
-        """A symbols-only ELF dump still persists DWARF blocks.
+    def test_no_debug_block_is_producer_evidence(self) -> None:
+        """Neither a placeholder debug block nor a populated one.
 
-        Codex review, PR #995: ``_build_symbol_only_snapshot`` writes a
-        fully-populated ``DwarfMetadata()``/``AdvancedDwarfMetadata()`` with
-        ``has_dwarf: false`` for a binary that has no debug info at all, and
-        their serialized form is a **non-empty mapping** -- so "the block is
-        truthy" reads as DWARF evidence when there is none. Built here by
-        serializing a real snapshot rather than hand-writing the dict,
-        because the placeholder's real shape is exactly what a hand-written
-        fixture would get wrong.
+        Codex review, PR #995, across three rounds. First: a symbols-only ELF
+        dump still persists a fully-populated ``DwarfMetadata()``/
+        ``AdvancedDwarfMetadata()`` with ``has_dwarf: false``
+        (``dumper_elf_fallback._build_symbol_only_snapshot``), whose
+        serialized form is a **non-empty mapping** -- so "the block is truthy"
+        read as evidence when there was none. Then: a PE document's block is
+        filled by ``pdb_metadata.parse_pdb_debug_info`` with
+        ``has_dwarf=True``. Then: so is a BTF or CTF one, via
+        ``BtfMetadata.to_dwarf_metadata`` -- and
+        ``dwarf_presence._section_presence_metadata`` sets
+        ``dwarf_advanced.has_dwarf`` for those too, so neither block nor flag
+        names a producer. The contract is therefore the simple one: a legacy
+        document's debug block evidences nothing at all.
+
+        Built by serializing a real snapshot rather than hand-writing the
+        blocks, because the placeholder's real shape is exactly what a
+        hand-written fixture would get wrong.
         """
         from abicheck.model.dwarf_facts import (
             AdvancedDwarfMetadata,
@@ -438,18 +453,28 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
 
         assert d["dwarf"], "the placeholder block must stay non-empty"
         assert d["dwarf"]["has_dwarf"] is False
-        got = snapshot_from_dict(json.loads(json.dumps(d)))
-        assert got.types[0].fields[0].is_const_fact.status is FactStatus.NOT_COLLECTED
 
-        # ... and the same document with real debug info keeps its fact.
-        d["dwarf"]["has_dwarf"] = True
-        got = snapshot_from_dict(json.loads(json.dumps(d)))
-        assert got.types[0].fields[0].is_const_fact.status is FactStatus.PRESENT
+        # Every flag combination a real writer can emit — the placeholder,
+        # a DWARF dump, a BTF/CTF conversion, a PDB parse — is the same
+        # answer, because none of them is distinguishable from the others.
+        for basic, advanced in (
+            (False, False),
+            (True, True),
+            (True, False),
+            (False, True),
+        ):
+            d["dwarf"]["has_dwarf"] = basic
+            d["dwarf_advanced"]["has_dwarf"] = advanced
+            got = snapshot_from_dict(json.loads(json.dumps(d)))
+            assert (
+                got.types[0].fields[0].is_const_fact.status is FactStatus.NOT_COLLECTED
+            ), f"has_dwarf={basic}/{advanced} was treated as producer evidence"
 
     def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
-        # TypeField.is_const names dwarf among its producers, and this
-        # document evidences dwarf, so its value is real evidence — the
-        # producer gate reads the registry, not a hand list.
+        # A *non-resting* value survives on any document: the downgrade
+        # narrows the claim, never the value. `is_const: true` was set by
+        # something, and discarding it would lose data — so this stays
+        # PRESENT even though the debug block evidences no producer.
         d = _minimal_dict(
             schema_version=_PRE_CASE_A,
             from_headers=False,
@@ -605,11 +630,22 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
             {"from_headers": False, "platform": "elf", "dwarf": {"has_dwarf": False}},
         ),
         (
-            "elf-dwarf",
+            "elf-debug-block",
             {"from_headers": False, "platform": "elf", "dwarf": {"has_dwarf": True}},
         ),
         (
-            "elf-dwarf-advanced",
+            # What BtfMetadata.to_dwarf_metadata emits: the basic block set,
+            # the advanced one left at its default.
+            "elf-btf-shaped",
+            {
+                "from_headers": False,
+                "platform": "elf",
+                "dwarf": {"has_dwarf": True},
+                "dwarf_advanced": {"has_dwarf": False},
+            },
+        ),
+        (
+            "elf-debug-advanced-block",
             {
                 "from_headers": False,
                 "platform": "elf",
@@ -617,12 +653,12 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
             },
         ),
         (
-            "macho-dwarf",
+            "macho-debug-block",
             {"from_headers": False, "platform": "macho", "dwarf": {"has_dwarf": True}},
         ),
         ("pe", {"from_headers": False, "platform": "pe"}),
         (
-            "pe-pdb",
+            "pe-debug-block",
             {"from_headers": False, "platform": "pe", "dwarf": {"has_dwarf": True}},
         ),
         ("header-castxml", {"from_headers": True, "ast_producer": "castxml"}),
@@ -636,10 +672,9 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
         """Which producers this snapshot shows ran — the independent oracle.
 
         Written from what each writer does, not from the implementation:
-        a header-AST backend only under *recorded* provenance; the debug
-        block's producer is DWARF everywhere except PE, whose blocks
-        ``pdb_metadata.parse_pdb_debug_info`` fills from a PDB; and the
-        container format from the platform itself.
+        a header-AST backend only under *recorded* provenance, and the
+        container format from the platform itself. A debug block names no
+        producer, so none is credited from one.
         """
         evidenced: set[str] = set()
         if snap.from_headers and not snap.from_headers_inferred:
@@ -647,12 +682,10 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
                 evidenced.add(snap.ast_producer)
             else:
                 evidenced |= {"castxml", "clang"}
-        has_debug = any(
-            block is not None and block.has_dwarf
-            for block in (snap.dwarf, snap.dwarf_advanced)
-        )
-        if has_debug:
-            evidenced.add("pdb" if snap.platform == "pe" else "dwarf")
+        # No debug producer, on any platform or flag combination: the
+        # dwarf/dwarf_advanced blocks are debug *storage* that BTF, CTF and
+        # PDB all write into with has_dwarf=True, so a legacy document names
+        # no producer at all (see evidenced_producers' own docstring).
         if snap.platform in {"elf", "pe", "macho"}:
             evidenced.add(snap.platform)
         return evidenced
