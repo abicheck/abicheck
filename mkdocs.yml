@@ -223,6 +223,11 @@ nav:
       - "Report the Surface, Not Only the Breaks": learn/surface-growth.md
       - Rollout and Governance: learn/rollout-and-governance.md
       - Triage a Suspicious Finding: learn/triage-a-finding.md
+    # At Scale: a release of several binaries, and the libraries whose contract
+    # is an instantiation matrix rather than an export table.
+    - At Scale:
+      - "Products, Not Libraries": learn/products-not-libraries.md
+      - Template- and Header-Heavy Libraries: learn/template-heavy-libraries.md
     - Quick Reference:
       - "Glossary": learn/abi-series/glossary.md
   # The case catalog: every break scenario as a compilable fixture, browsable

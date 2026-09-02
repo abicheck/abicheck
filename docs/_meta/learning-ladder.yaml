@@ -97,6 +97,8 @@ sequences:
         title: At scale
         floor: advanced
         members:
+          - learn/products-not-libraries.md
+          - learn/template-heavy-libraries.md
           - learn/dependency-floors.md
           - learn/environment-drift.md
       - id: 8
@@ -155,6 +157,7 @@ paths:
       - learn/class-layout-abi.md              # branch of Part 4
       - learn/abi-series/06-transitive-breaks.md
       - learn/abi-series/07-designing-for-stability.md
+      - learn/template-heavy-libraries.md
     after: start/choose-your-workflow.md
   - role: CI / release engineer
     pages:
@@ -168,6 +171,7 @@ paths:
   - role: Distribution / package maintainer
     pages:
       - learn/abi-series/05-linker-elf.md
+      - learn/products-not-libraries.md
       - learn/dependency-floors.md
     after: start/choose-your-workflow.md
   - role: Product / SDK owner (several binaries)
@@ -175,6 +179,8 @@ paths:
       - learn/abi-series/00-product-contract.md
       - learn/consumer-models.md
       - learn/where-in-the-pipeline.md
+      - learn/products-not-libraries.md
+      - learn/template-heavy-libraries.md
     after: start/choose-your-workflow.md
   - role: Plugin / SDK author
     pages:

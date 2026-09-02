@@ -160,7 +160,8 @@ the declarative topology in `.abicheck.yml` is the
 [independent-targets](../integration/scenarios/multi-dso-project.md) and
 [monorepo](../integration/scenarios/monorepo.md) scenarios as the two
 shapes it takes. Which shape a *release* of several binaries is, and what
-one contract across them means, is the subject of the at-scale tier.
+one contract across them means, is the subject of
+[Products, Not Libraries](products-not-libraries.md).
 
 ## Now run it
 

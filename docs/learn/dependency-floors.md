@@ -220,4 +220,4 @@ established fixes keep both audiences:
 
 ---
 
-**Ladder:** ← [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) · Tier 7 · At scale · [Environment & Toolchain Drift](environment-drift.md) →
+**Ladder:** ← [Template- and Header-Heavy Libraries](template-heavy-libraries.md) · Tier 7 · At scale · [Environment & Toolchain Drift](environment-drift.md) →

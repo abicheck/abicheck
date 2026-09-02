@@ -63,6 +63,7 @@ topics:
       - learn/how-a-break-shows-up.md
       - learn/where-in-the-pipeline.md
       - learn/triage-a-finding.md
+      - learn/template-heavy-libraries.md
       - skills-src/shared/evidence-and-depth.md
       - learn/assurance-methods.md
 
@@ -185,7 +186,7 @@ topics:
       - reference/protect-committed-baseline.md
 
   bundle-analysis:
-    canonical_page: use/multi-binary.md
+    canonical_page: learn/products-not-libraries.md
     fact_sources:
       - abicheck/bundle.py
       - abicheck/bundle_models.py
@@ -198,6 +199,12 @@ topics:
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
       - abicheck/frontends/cli/options/bundle_facts.py
     reference_page: reference/cli-reference.md
+    task_pages:
+      - use/multi-binary.md
+      - integration/scenarios/release-bundle.md
+      - integration/scenarios/multi-dso-project.md
+    allowed_summaries:
+      - learn/template-heavy-libraries.md
 
   cli-surface:
     canonical_page: use/cli-usage.md
@@ -425,6 +432,7 @@ topics:
     allowed_summaries:
       - learn/where-in-the-pipeline.md
       - learn/rollout-and-governance.md
+      - learn/products-not-libraries.md
 
   integration-scenario-selection:
     canonical_page: integration/index.md
@@ -549,6 +557,15 @@ topics:
     allowed_summaries:
       - use/troubleshooting.md
       - start/first-report.md
+
+  template-library-contract:
+    canonical_page: learn/template-heavy-libraries.md
+    fact_sources:
+      - abicheck/bundle_manifest.py
+      - abicheck/buildsource/source_abi.py
+    allowed_summaries:
+      - learn/abi-series/04-cpp-abi.md
+      - learn/limitations.md
 
   class-layout:
     canonical_page: learn/class-layout-abi.md

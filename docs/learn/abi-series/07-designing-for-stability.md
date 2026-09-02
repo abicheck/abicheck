@@ -457,4 +457,4 @@ the at-scale tier — or go back to the [series overview](../abi-api-handling.md
 
 ---
 
-**Ladder:** ← [Triage a Suspicious Finding](../triage-a-finding.md) · Tier 6 · Design · [Dependency & Runtime Floors](../dependency-floors.md) →
+**Ladder:** ← [Triage a Suspicious Finding](../triage-a-finding.md) · Tier 6 · Design · [Products, Not Libraries](../products-not-libraries.md) →

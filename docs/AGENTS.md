@@ -71,7 +71,8 @@ path, not the nav position.
     floors, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
     7) → **Verification & Assurance** (`abi-series/08-detection.md` +
     `assurance-methods.md`) → **Practice** (where in the pipeline, surface
-    growth, rollout and governance, triage) → **Quick Reference** (glossary). This is a
+    growth, rollout and governance, triage) → **At Scale** (products, template-heavy
+    libraries) → **Quick Reference** (glossary). This is a
     nav-only regroup of what was once a flat "Deep Dives" list plus a
     separately-numbered "Learning Series" — a Part's own numbered "Series
     navigation" breadcrumb (top of each `abi-series/0N-*.md` page) still
