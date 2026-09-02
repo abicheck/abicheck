@@ -551,6 +551,30 @@ nav:
     assert any("learn/c-branch.md sits before learn/c.md" in m for m in msgs)
 
 
+def test_sibling_branches_out_of_ladder_order_is_an_error(tmp_path: Path) -> None:
+    """All branches are advanced, so the level gate cannot tell two of them
+    apart; the sidebar must still list them in the ladder's own order."""
+    ladder_text = BASE_LADDER.replace(
+        "              - learn/c-branch.md\n",
+        "              - learn/c-branch.md\n              - learn/c-branch2.md\n",
+    )
+    levels = {**LEVELS, "learn/c-branch2.md": "advanced"}
+    docs, ladder = _build(tmp_path, ladder_text=ladder_text, levels=levels)
+    nav_ok = NAV_OK.replace(
+        "        - CB: learn/c-branch.md\n",
+        "        - CB: learn/c-branch.md\n        - CB2: learn/c-branch2.md\n",
+    )
+    (docs.parent / "mkdocs.yml").write_text(nav_ok, encoding="utf-8")
+    assert _run(docs, ladder) == []
+    swapped = NAV_OK.replace(
+        "        - CB: learn/c-branch.md\n",
+        "        - CB2: learn/c-branch2.md\n        - CB: learn/c-branch.md\n",
+    )
+    (docs.parent / "mkdocs.yml").write_text(swapped, encoding="utf-8")
+    msgs = _run(docs, ladder)
+    assert any("go-deeper pages are not in ladder order" in m for m in msgs)
+
+
 def test_branch_right_after_its_parent_is_also_accepted(tmp_path: Path) -> None:
     """The branch may follow its parent directly instead of closing the step."""
     nav = NAV_OK.replace(

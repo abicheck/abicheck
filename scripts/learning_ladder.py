@@ -46,9 +46,10 @@ Rules the file encodes (each is an ERROR):
   `**Ladder:**` footer line whose two links are its ladder neighbours.
 - **The sidebar is the ladder.** In `mkdocs.yml`, a sequence's tab either
   carries one nav group per step — titled `<id>. <title>`, in step order,
-  holding exactly that step's members in ladder order with each branch
-  somewhere after its parent — or lists the whole sequence flat in the
-  same order (the Concepts tab). The hub may sit directly under its tab.
+  holding exactly that step's members in ladder order, each branch
+  somewhere after its parent and branches in ladder order among
+  themselves — or lists the whole sequence flat in the same order (the
+  Concepts tab). The hub may sit directly under its tab.
   This is what keeps the sidebar, the hub's step list, and every page's
   footer telling one reading order instead of three.
 
@@ -422,6 +423,16 @@ def _order_findings(
                 out.append(
                     f"{label}: {branch} sits before {parent}, the page it hangs from"
                 )
+    # Branches keep the ladder's own order among themselves too (parents in
+    # member order, siblings in YAML order): they are all "advanced", so the
+    # level gate would let two of them swap while the sidebar stopped
+    # matching the hub's "go deeper" lists.
+    placed_branches = [b for b in all_branches if b in position]
+    if [p for p in pages if p in placed_branches] != placed_branches:
+        out.append(
+            f"{label}: go-deeper pages are not in ladder order (expected "
+            f"{' → '.join(placed_branches)})"
+        )
     return out
 
 
