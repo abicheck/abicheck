@@ -20,7 +20,20 @@ mapping or text. `document.py` is the shared immutable `ReportDocument`
 Phase 2 is establishing across every output format. Its projections are
 `render_json.py` (JSON, and therefore SARIF — SARIF is a JSON format and
 needs no serializer of its own), `render_text.py` (the one-line `--stat`
-summary, `render_stat_document`), and `render_xml.py` (JUnit).
+summary, `render_stat_document`), `render_xml.py` (JUnit),
+`render_markdown.py` (Markdown prose), and `render_html.py` (the HTML
+report).
+
+The two prose projections are **not** yet `ReportDocument` consumers, and
+that distinction matters when you reach for one as a model: JSON, SARIF,
+JUnit and `--stat` construct a `ReportDocument` and project it, while
+`render_markdown.py`/`render_html.py` project their own per-section frozen
+structs. Both have the fact-vs-formatting split; neither crosses the single
+canonical document boundary yet (ADR-061 Phase 2 item 1's literal
+acceptance). Converging them is tracked in
+`docs/contribute/plans/duplication-and-convergence-assessment.md`'s Phase 4.
+Note `html_template.render_document` is unrelated despite the name — it
+wraps an assembled body in page chrome.
 
 `render_xml.py` exists because a `ReportDocument` holds JSON values only —
 so a renderer can never be handed a live object graph to mutate — and an
@@ -41,15 +54,37 @@ result with a mutation in between (Codex review). `findings_by_change_id`
 indexes a set of findings by `id(change)` for O(1) lookup within one render
 (never persisted past it — `Change` has no `__hash__`).
 
-Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML remain
-the one open follow-up slice: they emit prose straight from a `DiffResult`
-rather than building a structured value first, so each needs its own rewrite
-against its golden output. See ADR-061's Phase 2 status note for the
-now-closed halves of items 4 and 5 (per-finding verdict; the fold-ins'
-demangle scope) — one piece of item 5 stays open, `cli_compare_fold.py`'s
+`render_markdown.py` and `render_html.py` are the two prose/markup
+projections, and they follow one shape you should copy for any new format:
+the *source* module (`reporter_markdown.py`, `html_report.py`) keeps a
+`compute_*` function per section that reads the `DiffResult`/`Change`
+sequence and returns a small frozen struct of plain values — never a
+pre-built string or markup fragment — and this package holds the matching
+`render_*` that formats it and decides nothing. A section that does not
+exist is a `None` from `compute_*`, which is not the same as an empty one.
+
+"Decides nothing" includes *registry lookups*, which is the part that is
+easy to get wrong because the rendered output is identical either way: a
+per-change `category()`/`severity()`/`impact_for()`/`kind_str()` call is a
+decision the compute half owes the renderer, not a formatting choice, and
+`html_report.py`'s `compute_change_rows` -> `ChangeRowFacts` is the shape to
+copy for it. `tests/unit/report/test_render_html.py`'s
+`test_render_html_imports_no_decision_making_module` is the structural
+guard: `render_html.py` must not import `report_classifications`,
+`checker_policy`, `severity`, `reclassify` or friends at all. An assertion
+on rendered strings cannot catch this class — the import list is what
+changes.
+Filtering that *looks* like formatting stays compute-side whenever it is
+really a report decision (which summary rows are non-empty; which reclassify
+rules are still active). Both modules keep every pre-split name as a thin
+wrapper or re-export, so no caller or existing test changed.
+
+One piece of ADR-061 Phase 2 item 5 stays open: `cli_compare_fold.py`'s
 scoped-gate JSON fold, which needs this package's JSON builders to accept
 scoped-gate awareness natively rather than re-deriving already-built
-sections post-render.
+sections post-render. See ADR-061's Phase 2 status note for the closed
+halves of items 4 and 5 (per-finding verdict; the fold-ins' demangle
+scope).
 
 ## Tests
 
