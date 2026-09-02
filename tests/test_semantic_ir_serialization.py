@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.model.fact import Fact
 from abicheck.model.identity import Namespace, Record, entity_id_for_type
-from abicheck.model.occurrence import OccurrenceId
+from abicheck.model.occurrence import OccurrenceId, canonical_key
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
@@ -119,6 +120,111 @@ class TestRoundTrip:
     def test_conflicts_round_trip(self) -> None:
         snap = _snapshot(None, semantic_ir_conflicts={"key": "'clang::Foo'"})
         assert _round_trip(snap).semantic_ir_conflicts == {"key": "'clang::Foo'"}
+
+
+class TestDeterministicEncoding:
+    """`storage/AGENTS.md` invariant 4: a semantic digest must never depend on
+    incidental order. Two equal `SemanticIR` values built in opposite
+    insertion orders describe identical state, so they must encode to an
+    identical document — otherwise a content hash over the snapshot reports a
+    difference that does not exist."""
+
+    @given(tags=st.lists(_tags, min_size=2, max_size=5, unique=True))
+    def test_insertion_order_does_not_change_the_document(
+        self, tags: list[str]
+    ) -> None:
+        eid = entity_id_for_type((), "Foo")
+        entries = [
+            (
+                OccurrenceId(eid, disambiguator=tag),
+                CanonicalEntity(canonical_spelling=Fact.present(f"Foo<{tag}>")),
+            )
+            for tag in tags
+        ]
+        forward = snapshot_to_dict(_snapshot(SemanticIR(occurrences=dict(entries))))
+        backward = snapshot_to_dict(
+            _snapshot(SemanticIR(occurrences=dict(reversed(entries))))
+        )
+        assert json.dumps(forward, sort_keys=True) == json.dumps(
+            backward, sort_keys=True
+        )
+
+    def test_entries_are_sorted_by_canonical_key(self) -> None:
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid, disambiguator=tag): CanonicalEntity(
+                    canonical_spelling=Fact.present("Foo")
+                )
+                for tag in ("zzz", "aaa", "mmm")
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        written = [
+            entry["occurrence"]["disambiguator"]
+            for entry in document["semantic_ir"]["occurrences"]
+        ]
+        assert written == sorted(
+            written,
+            key=lambda tag: canonical_key(OccurrenceId(eid, disambiguator=tag)),
+        )
+
+
+class TestMalformedDocumentsAreRefused:
+    """`storage/AGENTS.md` invariant 6: never coerce a value a decision reads.
+    A coerced disambiguator would make a JSON `1` and `"1"` one `OccurrenceId`
+    and silently drop one of the two occurrences on load."""
+
+    def _document_with_disambiguators(self, first: object, second: object) -> dict:
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid, disambiguator="1"): CanonicalEntity(
+                    canonical_spelling=Fact.present("first")
+                ),
+                OccurrenceId(eid, disambiguator="2"): CanonicalEntity(
+                    canonical_spelling=Fact.present("second")
+                ),
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        entries = document["semantic_ir"]["occurrences"]
+        entries[0]["occurrence"]["disambiguator"] = first
+        entries[1]["occurrence"]["disambiguator"] = second
+        return document
+
+    @pytest.mark.parametrize("bad", [1, 1.0, True, ["1"], {"v": "1"}])
+    def test_a_non_string_disambiguator_is_rejected(self, bad: object) -> None:
+        document = self._document_with_disambiguators(bad, "2")
+        with pytest.raises(TypeError, match="disambiguator"):
+            snapshot_from_dict(document)
+
+    def test_coercion_would_have_lost_an_occurrence(self) -> None:
+        # The failure the rejection above prevents, stated directly: a
+        # coercing decoder maps JSON 1 and "1" onto one key.
+        document = self._document_with_disambiguators(1, "1")
+        with pytest.raises(TypeError):
+            snapshot_from_dict(document)
+
+    def test_a_non_string_producer_is_rejected(self) -> None:
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.present("Foo"), producer="castxml"
+                )
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        document["semantic_ir"]["occurrences"][0]["entity"]["producer"] = 7
+        with pytest.raises(TypeError, match="producer"):
+            snapshot_from_dict(document)
+
+    def test_a_non_string_conflict_entry_is_rejected(self) -> None:
+        document = snapshot_to_dict(_snapshot(None, semantic_ir_conflicts={"k": "v"}))
+        document["semantic_ir_conflicts"] = {"k": 3}
+        with pytest.raises(TypeError, match="semantic_ir_conflicts"):
+            snapshot_from_dict(document)
 
 
 class TestAbsence:

@@ -201,14 +201,28 @@ def merge_semantic_ir(
             continue
         pairs = _pair_group(base_ids, overlay_ids)
         if pairs is None:
-            # No unique matching: union both sides verbatim, base first, so
-            # an occurrence both sides key identically keeps the base's
-            # entity (the same precedence every matched pair uses).
+            # No unique matching: union both sides, base first. An occurrence
+            # both sides key *identically* is not a guessed pairing at all --
+            # one `OccurrenceId` names one occurrence, by that type's own
+            # definition -- so it is merged here under the ordinary
+            # base-plus-backfill rule rather than dropped. "Union verbatim"
+            # has no meaning for a key collision: `setdefault` would silently
+            # discard the overlay's entity, losing exactly the facts (and
+            # conflict records) this function exists to preserve, which is a
+            # strictly worse outcome than either merging or keeping both --
+            # and keeping both is not representable (Codex review). What
+            # stays fail-closed is what the ambiguity is actually about:
+            # no occurrence is paired with a *differently* keyed one.
             for occ in base_ids:
                 merged[occ] = base.occurrences[occ]
             for occ in overlay_ids:
-                merged.setdefault(occ, overlay.occurrences[occ])
                 consumed_overlay.add(occ)
+                if occ in merged:
+                    merged[occ] = _merge_entity(
+                        merged[occ], overlay.occurrences[occ], occ, conflicts
+                    )
+                else:
+                    merged[occ] = overlay.occurrences[occ]
             continue
         for base_occ, overlay_occ in pairs:
             base_entity = base.occurrences[base_occ]

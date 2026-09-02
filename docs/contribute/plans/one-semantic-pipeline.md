@@ -12490,7 +12490,7 @@ chokepoints; `abicheck/extract/semantic_ir_merge.py` wired into
 (`test_model_semantic_ir.py`, `test_semantic_ir_merge.py`,
 `test_semantic_ir_serialization.py`, `test_dumper_hybrid_semantic_ir.py`).
 
-Two deliberate deviations from this section's letter, both in service of
+Three deliberate deviations from this section's letter, each in service of
 its own stated reasoning:
 
 1. **`encode_semantic_ir`/`decode_semantic_ir` live in `storage/`, not in
@@ -12501,7 +12501,16 @@ its own stated reasoning:
    (`entity_id_codec.py`, `surface_graph_codec.py`), and keeps
    `serialization.py` — already at its `architecture/debt.yaml` no-growth
    baseline — to the call-site plumbing.
-2. **The "two occurrences on one side sharing a non-empty disambiguator"
+2. **An ambiguous group is not "unioned verbatim" for an occurrence both
+   sides key identically** — that phrasing has no meaning for a key
+   collision, and taking it literally means `setdefault` silently discarding
+   the overlay's entity, losing exactly the facts and conflict records this
+   step exists to preserve (Codex review, PR #991). One `OccurrenceId` names
+   one occurrence by that type's own definition, so an exact key match is
+   not a guessed pairing: it merges under the ordinary base-plus-backfill
+   rule. What stays fail-closed is what the ambiguity is actually about —
+   no occurrence is ever paired with a *differently* keyed one.
+3. **The "two occurrences on one side sharing a non-empty disambiguator"
    ambiguity is unreachable from a real `SemanticIR`**, because that pair
    *is* one `OccurrenceId` and therefore one dict key. The guard stays (the
    matcher takes plain lists, and the invariant belongs to the caller's key

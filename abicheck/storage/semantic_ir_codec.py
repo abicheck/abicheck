@@ -53,10 +53,10 @@ from typing import TYPE_CHECKING, Any
 
 from ..model.availability import FactStatus
 from ..model.fact import Fact
-from ..model.occurrence import OccurrenceId
+from ..model.occurrence import OccurrenceId, canonical_key
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
-from .guards import mapping as _require_mapping
+from .guards import identity_text, mapping as _require_mapping, provenance_text
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -99,6 +99,14 @@ def _fact_from_dict(raw: Any, *, as_tuple: bool) -> Fact[Any]:
     )
 
 
+def _disambiguator(raw: Any) -> str:
+    """An occurrence's disambiguator: absent/``null`` is the ordinary empty
+    case, anything else must genuinely be a string."""
+    if raw is None or raw == "":
+        return ""
+    return identity_text(raw, "semantic_ir occurrence disambiguator")
+
+
 def _entity_to_dict(entity: CanonicalEntity) -> dict[str, Any]:
     document: dict[str, Any] = {
         name: _fact_to_dict(fact) for name, fact in entity.fact_items()
@@ -115,7 +123,13 @@ def _entity_from_dict(raw: Any) -> CanonicalEntity:
         for name, value in data.items()
         if name != "producer"
     }
-    return CanonicalEntity(producer=str(data.get("producer", "")), **facts)
+    producer = data.get("producer", "")
+    return CanonicalEntity(
+        producer=provenance_text(producer, "semantic_ir entity producer")
+        if producer != ""
+        else "",
+        **facts,
+    )
 
 
 def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
@@ -140,7 +154,14 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
                 },
                 "entity": _entity_to_dict(entity),
             }
-            for occ_id, entity in ir.occurrences.items()
+            # Sorted, never the mapping's incidental insertion order: two
+            # equal ``SemanticIR`` values built in opposite orders must
+            # serialize identically, or a content hash over the document
+            # reports a difference the stored state does not have
+            # (``storage/AGENTS.md`` invariant 4).
+            for occ_id, entity in sorted(
+                ir.occurrences.items(), key=lambda item: canonical_key(item[0])
+            )
         ]
     }
 
@@ -160,7 +181,9 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     conflicts = d.get("semantic_ir_conflicts")
     if conflicts:
         snap.semantic_ir_conflicts = {
-            str(key): str(value)
+            identity_text(key, "semantic_ir_conflicts key"): identity_text(
+                value, "semantic_ir_conflicts value"
+            )
             for key, value in _mapping(conflicts, "semantic_ir_conflicts").items()
         }
     raw = d.get("semantic_ir")
@@ -175,7 +198,11 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
             entity_id=domain_entity_id_from_dto(
                 _mapping(occurrence.get("entity_id"), "semantic_ir entity_id")
             ),
-            disambiguator=str(occurrence.get("disambiguator") or ""),
+            # identity_text, never str(): a JSON ``1`` and ``"1"`` would
+            # otherwise become one ``OccurrenceId``, and the assignment
+            # below would silently drop one of the two occurrences
+            # (``storage/AGENTS.md`` invariant 6).
+            disambiguator=_disambiguator(occurrence.get("disambiguator")),
         )
         occurrences[occ_id] = _entity_from_dict(entry.get("entity"))
     snap.semantic_ir = SemanticIR(occurrences=occurrences)

@@ -531,8 +531,11 @@
   disagreement keeping castxml's value and recording the discarded one
   per *occurrence* (`fact_provenance`'s declaration-only key cannot
   separate two matched pairs sharing one `EntityId`), and a fail-closed
-  matcher that leaves a group with no unique complete matching entirely
-  unmerged. Each of the plan's four review-falsified matching rules is
+  matcher that never pairs an occurrence with a differently-keyed one — a
+  group with no unique complete matching keeps every occurrence from both
+  sides, while an occurrence the two sides key *identically* still merges,
+  since one `OccurrenceId` names one occurrence and discarding the
+  overlay's copy would lose the evidence this step exists to preserve. Each of the plan's four review-falsified matching rules is
   pinned as a property test (`tests/test_semantic_ir_merge.py`); one of
   them — two occurrences on one side sharing a non-empty disambiguator —
   turns out to be structurally unreachable from a real `SemanticIR` (that

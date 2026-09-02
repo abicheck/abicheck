@@ -262,6 +262,111 @@ class TestMultiOccurrenceMatching:
         assert conflicts == {}
 
 
+class TestAmbiguousGroupsStillKeepEvidence:
+    """A group with no unique matching is not paired by guess — but an
+    occurrence both sides key *identically* is not a guess at all, and
+    dropping the overlay's copy of it (the only thing a verbatim union can do
+    with a key collision) loses exactly the facts and conflict records this
+    function exists to preserve."""
+
+    def test_an_exact_key_match_inside_an_ambiguous_group_still_backfills(
+        self,
+    ) -> None:
+        shared = OccurrenceId(FOO, disambiguator="usr1")
+        base_extra = OccurrenceId(FOO, disambiguator="usr2")
+        base_empty = OccurrenceId(FOO)
+        overlay_extra_a = OccurrenceId(FOO, disambiguator="usr3")
+        overlay_extra_b = OccurrenceId(FOO, disambiguator="usr4")
+        # usr1 pairs in the first pass; two unmatched leftovers remain on each
+        # side, so the group as a whole has no unique matching.
+        merged, conflicts = merge_semantic_ir(
+            _ir(
+                (shared, _entity("base::Shared")),
+                (base_extra, _entity()),
+                (base_empty, _entity()),
+            ),
+            _ir(
+                (
+                    shared,
+                    _entity("clang::Shared", template=("int",), producer="clang"),
+                ),
+                (overlay_extra_a, _entity("Other", producer="clang")),
+                (overlay_extra_b, _entity("Other", producer="clang")),
+            ),
+        )
+        assert merged is not None
+        # Every occurrence from both sides survives...
+        assert set(merged.occurrences) == {
+            shared,
+            base_extra,
+            base_empty,
+            overlay_extra_a,
+            overlay_extra_b,
+        }
+        # ...and the identically-keyed pair kept base precedence, took the
+        # overlay's unresolved-fact backfill, and recorded the disagreement,
+        # rather than the overlay entity being silently discarded.
+        assert merged.occurrences[shared].canonical_spelling.value == "base::Shared"
+        assert merged.occurrences[shared].template_arguments.value == ("int",)
+        assert conflicts == {
+            semantic_ir_conflict_key(shared, "canonical_spelling"): repr(
+                "clang::Shared"
+            )
+        }
+
+    @given(tags=st.lists(_tags, min_size=3, max_size=5, unique=True))
+    def test_no_overlay_fact_is_ever_silently_dropped(self, tags: list[str]) -> None:
+        """Generalized: for any group shape, every overlay occurrence's facts
+        end up somewhere — merged into the base entity it paired with, or
+        carried on its own entry. What may legitimately not survive is the
+        overlay's *key* (base precedence renames a matched pair to the base
+        occurrence's key); what may never not survive is its evidence.
+
+        Each overlay entity carries a distinct template-argument value, so
+        "its facts are present" is checkable without asking the
+        implementation which pairing it chose.
+        """
+        base_entries = [
+            (OccurrenceId(FOO, disambiguator=t), _entity(f"base::{t}")) for t in tags
+        ]
+        overlay_entries = [
+            (
+                OccurrenceId(FOO, disambiguator=t),
+                _entity(f"clang::{t}", template=(f"arg-{t}",), producer="clang"),
+            )
+            for t in tags[:-1]
+        ] + [
+            (
+                OccurrenceId(FOO),
+                _entity("clang::extra", template=("arg-extra",), producer="clang"),
+            )
+        ]
+        merged, _ = merge_semantic_ir(_ir(*base_entries), _ir(*overlay_entries))
+        assert merged is not None
+        surviving = {
+            entity.template_arguments.value for entity in merged.occurrences.values()
+        }
+        for _, overlay_entity in overlay_entries:
+            assert overlay_entity.template_arguments.value in surviving
+
+    @given(tags=st.lists(_tags, min_size=1, max_size=4, unique=True))
+    def test_every_base_occurrence_keeps_its_key(self, tags: list[str]) -> None:
+        """The other half: base precedence means a base occurrence's key is
+        never replaced by an overlay one."""
+        base_entries = [
+            (OccurrenceId(FOO, disambiguator=t), _entity(f"base::{t}")) for t in tags
+        ]
+        merged, _ = merge_semantic_ir(
+            _ir(*base_entries),
+            _ir(
+                (OccurrenceId(FOO), _entity("clang::x", producer="clang")),
+                (OccurrenceId(BAR), _entity("clang::y", producer="clang")),
+            ),
+        )
+        assert merged is not None
+        assert {occ for occ, _ in base_entries} <= set(merged.occurrences)
+
+
 class TestUnionRules:
     def test_overlay_only_entity_is_unioned_verbatim(self) -> None:
         base_occ = OccurrenceId(FOO)
