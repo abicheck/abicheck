@@ -6149,7 +6149,11 @@ looked like the obvious fix and wasn't.
 
 - **`--depth` is a floor for live extraction, not a ceiling for a pre-built
   snapshot — real, cross-cutting, and previously undocumented outside one
-  function's own docstring.** `enforce_requested_depth`
+  function's own docstring. Fixed (ADR-063 Phase 8 follow-up): the
+  comparison-time projection this entry's own "real fix" paragraph called
+  for is now `abicheck.policy.depth_projection.project_snapshot_to_depth`,
+  applied by `classify_compare_pair` right after `enforce_requested_depth`
+  confirms the floor.** `enforce_requested_depth`
   (`workflows/artifact/execute.py`) already fails a run when the *resolved*
   evidence falls short of an explicit `--depth`, and its own docstring has
   long carried this note: "this is a floor, not a ceiling. An input that is
@@ -6173,26 +6177,48 @@ looked like the obvious fix and wasn't.
   entry so the directory/package path states the same acknowledged
   limitation explicitly rather than silently inheriting an undocumented
   one.
-  **Not fixed here, and the two obvious-looking fixes are each wrong for a
-  reason worth recording so they aren't re-attempted as the "obvious"
-  patch:** stripping a resolved snapshot's higher-level facts down to the
-  requested depth *before* comparing would work for this one call site, but
-  would also discard evidence a caller legitimately wants to keep on a
-  snapshot that gets reused for a *later* comparison at a higher depth —
-  `--depth` is meant to gate what a comparison *uses*, not to mutate a
+  **The two obvious-looking fixes below were, and remain, correctly
+  rejected — the eventual fix is neither of them, kept here so both stay
+  un-reattempted:** stripping a resolved snapshot's higher-level facts down
+  to the requested depth *before* comparing would work for this one call
+  site, but would also discard evidence a caller legitimately wants to keep
+  on a snapshot that gets reused for a *later* comparison at a higher depth
+  — `--depth` is meant to gate what a comparison *uses*, not to mutate a
   snapshot's own persisted content. Rejecting `--depth binary` outright for
   any operand backed by a pre-built snapshot (matching the pre-#1016
   directory/package behavior) would reintroduce exactly the asymmetry D1
-  closed, since the single-pair path already accepts and silently
-  under-enforces the same combination. The real fix needs a
-  comparison-time projection — resolve the snapshot as today, then filter
-  what `checker.compare()` is allowed to see down to the requested rung,
-  keeping the resolved `AbiSnapshot` itself untouched — which is a real,
-  separate design question (which facts a given depth "sees" needs the
-  same explicit mapping `evidence_depth.py`'s own rank table already gives
-  requested-vs-resolved comparison, just applied the other direction), not
-  a one-line patch to either `resolve_input` or the two call sites that
-  triggered this entry.
+  closed, since the single-pair path already accepted and silently
+  under-enforced the same combination.
+
+  **The fix actually shipped is exactly the comparison-time projection this
+  entry called for**: resolve the snapshot as before, then filter what
+  `checker.compare()` is allowed to see down to the requested rung, keeping
+  the resolved `AbiSnapshot` itself untouched.
+  `abicheck.policy.depth_projection.project_snapshot_to_depth` is that
+  filter — pure (returns a deep copy), mapped onto the public
+  `binary`/`headers`/`build`/`source` ladder via the exact same rank table
+  (`evidence_depth.DEPTH_RANK`) this entry's own "applied the other
+  direction" phrase named, and validated against the one prior
+  already-trusted reference implementation of this idea:
+  `scripts/check_tier_accuracy.py`'s `project()`, which the per-tier
+  accuracy gate runs against a real (if synthetic) labelled corpus.
+  `classify_compare_pair` (`service_compare_pipeline.py`) applies it to a
+  local `old`/`new` view, gated on `request.depth is not None` — the same
+  "no explicit depth, no effect" contract `enforce_requested_depth` already
+  has — right after that function confirms the floor; `pair.old`/`pair.new`
+  themselves are never mutated, so a caller reading the unprojected
+  snapshot elsewhere is unaffected. `dump` deliberately does **not** apply
+  this at write time, for the exact reason given above (it would discard
+  evidence a later, deeper comparison might want) — `--depth` on `dump`
+  stays floor-only, unchanged. See `project_snapshot_to_depth`'s own
+  docstring for the precise field-by-field scope (deliberately mirrors what
+  the validated reference implementation degrades — visibility/origin
+  scoping, macro/constexpr constants, the Python-API stub surface, the
+  header-AST `SemanticIR`, `build_mode`, the `BuildSourcePack` L3/L4/L5
+  split, `surface_graph` — and just as deliberately leaves untouched what
+  that reference implementation never validated: platform container facts,
+  `kabi`/`sycl`/`python_ext`/`numpy_capi`, `typedefs`, dependency/contract/
+  provenance metadata).
 
 ### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
 

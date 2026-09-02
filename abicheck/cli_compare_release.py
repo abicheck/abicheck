@@ -627,8 +627,42 @@ def compare_release_cmd(
 
             if bundle_facts_out is not None and not no_bundle_analysis:
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
+                #
+                # ADR-063 D1's second named exception: this used to call
+                # `cli_resolve._resolve_input()` directly -- the same Tier-2
+                # resolution `resolve_dump_request`/`execute_dump_request`
+                # wrap, but reached independently, with its own hand-rolled
+                # `depth=binary` header-clearing special-case (duplicating
+                # what `service_compare_evidence`'s shared evidence
+                # resolution already does for every matched pair) and no
+                # `AnalysisPlan` pre-flight check at all. Migrated onto the
+                # same `DumpRequest -> resolve_dump_request ->
+                # execute_dump_request` pipeline `dump`/`scan` already
+                # converge on: this stranded library is exactly one dump-
+                # shaped input, so building a real `DumpRequest` for it and
+                # running the shared pipeline both gets it the
+                # `AnalysisPlanner.resolve()` pre-flight check ADR-063 Phase 4
+                # already provides and drops the manual `is_binary_depth`
+                # special-case -- `DumpRequest.depth` feeds the identical
+                # evidence-resolution machinery a matched pair's own
+                # `CompareRequest` side does, so headers are cleared
+                # consistently by the one shared mechanism instead of a
+                # second, hand-copied rule that could drift from it.
+                #
+                # The "deliberately-degrading stranded-library fallback"
+                # ADR-063's own text names as the reason this isn't "the same
+                # shape of check" as an ordinary comparison is preserved
+                # exactly: a `PlanningError`/`ValidationError`/`SnapshotError`
+                # from either resolve or execute step still degrades to an
+                # ELF-only entry with a warning, not a hard failure -- the
+                # migration changes *how* the input resolves, not this
+                # function's own degrade-rather-than-abort contract.
                 def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
-                    from .cli_resolve import _resolve_input
+                    from .api_types import DumpRequest, InputSpec
+                    from .service_dump_pipeline import (
+                        execute_dump_request,
+                        resolve_dump_request,
+                    )
                     from .workflows import extraction
 
                     old_dbg = (
@@ -636,35 +670,22 @@ def compare_release_cmd(
                         if old_debug_dir
                         else None
                     )
-                    # `depth=binary` clears header inputs for every matched
-                    # pair (`_split_public_header_inputs_for_request`'s own
-                    # docstring); a stranded (removed-in-new) library must
-                    # get the same headerless resolution, else its BundleFacts
-                    # entry carries L2 header evidence a matched pair's
-                    # snapshot never would, silently reintroducing header/API
-                    # findings `--depth binary` was asked to exclude (Codex
-                    # review, P2).
-                    is_binary_depth = depth is not None and depth.lower() == "binary"
-                    stranded_h = [] if is_binary_depth else old_h
-                    stranded_inc = [] if is_binary_depth else old_inc
-                    # old_h doubles as the public-header set, matching the
-                    # normal compare path (else origin=UNKNOWN; Codex review).
-                    pub_headers, pub_dirs = extraction.split_public_header_inputs(
-                        stranded_h
-                    )
                     try:
-                        return _resolve_input(
-                            old_path,
-                            stranded_h,
-                            stranded_inc,
-                            old_version,
-                            lang,
-                            pdb_path=old_dbg,
-                            compile=compile_context,
-                            include_dependencies=include_dependencies,
-                            public_headers=pub_headers,
-                            public_header_dirs=pub_dirs,
+                        dump_request = DumpRequest(
+                            input=InputSpec.of(
+                                old_path,
+                                headers=old_h,
+                                includes=old_inc,
+                                version=old_version,
+                                pdb=old_dbg,
+                                compile=compile_context,
+                                include_dependencies=include_dependencies,
+                            ),
+                            lang=lang,
+                            depth=depth,
                         )
+                        resolved = resolve_dump_request(dump_request)
+                        return execute_dump_request(resolved).snapshot
                     except Exception as exc:
                         # Degrade rather than abort, but warn: lossy entry (Codex review).
                         click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)

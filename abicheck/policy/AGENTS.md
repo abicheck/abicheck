@@ -119,6 +119,20 @@ or a CLI flag directly is in the wrong layer.
   compilation machinery, split out purely to keep `selectors.py` itself
   under the 800-line cap below (mechanical extraction, same pattern as
   `public_surface.py`/`public_surface_closure.py` above).
+- `depth_projection.py` — ADR-063 Phase 8 follow-up: the `--depth`
+  *ceiling* half `docs/contribute/known-gaps.md`'s "floor for live
+  extraction, not a ceiling for a pre-built snapshot" entry named but did
+  not attempt. `project_snapshot_to_depth()` is a pure gating decision
+  ("which facts may a comparison at this depth see"), mirrored from the
+  one prior validated reference implementation of the same idea —
+  `scripts/check_tier_accuracy.py`'s `project()` — generalized from that
+  script's synthetic corpus onto a real `AbiSnapshot` and its own public
+  `binary`/`headers`/`build`/`source` ladder (`evidence_depth.DEPTH_RANK`,
+  a `model`-layer leaf, not `compare`). `service_compare_pipeline.
+  classify_compare_pair` applies it as a view over what gets classified,
+  right after `workflows.artifact.execute.enforce_requested_depth`
+  confirms the floor — the two functions are deliberately kept separate
+  (floor vs. ceiling), not merged into one.
 
 ## Conventions
 

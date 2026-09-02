@@ -1071,27 +1071,45 @@ snapshot — not a gap this decision claims to close.
 
 **A second, narrower exception, found the same way (checked against real
 code, not assumed covered by "bundle/release fan-out" above): two branches
-inside `cli_compare_release.py` bypass the pipeline and are not migrated by
-this plan either.** `_collect_matrix_result()` (the `--probe-matrix-*`
-release-global build-configuration feature) calls `service.
-compare_snapshots()` directly over a pair of empty snapshots with
+inside `cli_compare_release.py` bypassed the pipeline.** `_collect_matrix_result()`
+(the `--probe-matrix-*` release-global build-configuration feature) calls
+`service.compare_snapshots()` directly over a pair of empty snapshots with
 `extra_changes` — the sanctioned Tier-2 chokepoint, not the disallowed
 Tier-1 `checker.compare()` core, so this does not itself trip the
 `cli-contract` gate — but it still never constructs a request or a plan,
-which is what this decision's own convergence is about. `_resolve_stranded_library()` (the
-`--bundle-facts-out` path's fallback for a library missing from the normal
-per-pair comparison) calls `cli_resolve._resolve_input()` directly — the
-same Tier-2 resolution `resolve_compare_request` itself calls, but reached
-independently, with its own bespoke fallback on top. The release fan-out's
-*main* per-pair path (`_run_compare_pair`) does route through `service.
-run_compare`, so "bundle/release fan-out" above is not uniformly
-unconverged — only these two narrower branches are. Migrating either is a
-real, separate design question (an `AnalysisPlan` pre-flight check for a
-probe-matrix build-config diff, or for a deliberately-degrading
-stranded-library fallback, is not the same shape of check this decision
-specifies for an ordinary comparison) and is named here, explicitly, as
-staying outside this decision's convergence rather than left to be
-discovered as a silent gap in an implementation phase's own accounting.
+which is what this decision's own convergence is about. This one remains
+unmigrated, and deliberately so: an `AnalysisPlan` pre-flight check has
+nothing to check here — there is no requested-vs-resolved evidence input to
+validate feasibility for, only two already-empty synthetic snapshots and an
+already-computed `extra_changes` list — so forcing this branch through
+`AnalysisPlanner.resolve()` would mean inventing a vacuous plan for a
+request shape the checker was never designed to answer, not closing a real
+gap.
+
+`_resolve_stranded_library()` (the `--bundle-facts-out` path's fallback for
+a library missing from the normal per-pair comparison) **is migrated**
+(ADR-063 Phase 8 follow-up): it used to call `cli_resolve._resolve_input()`
+directly — the same Tier-2 resolution `resolve_compare_request` itself
+calls, but reached independently, with its own hand-rolled `depth=binary`
+header-clearing special-case and no `AnalysisPlan` pre-flight check at all.
+Unlike the matrix branch above, this one genuinely is "the same shape of
+check" once looked at correctly: a stranded library is exactly one
+dump-shaped input (a path, headers, includes, version, language, an
+optional depth), so it now builds a real `DumpRequest` and runs it through
+`resolve_dump_request`/`execute_dump_request` — the identical pipeline
+`dump`/`scan` already converge on — gaining a real `AnalysisPlanner.
+resolve()` pre-flight check and dropping the hand-copied depth-clearing
+rule (the shared evidence-resolution machinery a matched pair's own
+`CompareRequest` side already uses does the identical clearing
+consistently). Its "deliberately-degrading stranded-library fallback"
+nature — the reason this was originally judged not-the-same-shape-of-check
+as an ordinary comparison — is preserved exactly, not designed away: a
+`PlanningError`/`ValidationError`/`SnapshotError` from either the resolve
+or execute step still degrades to an ELF-only entry with a warning rather
+than aborting the release. The release fan-out's *main* per-pair path
+(`_run_compare_pair`) already routed through `service.run_compare`, so
+"bundle/release fan-out" above is now unconverged in exactly one narrower
+branch (`_collect_matrix_result()`), not two.
 
 ### D2 — `Fact[T]`: one representation of "do we know this, and how"
 
