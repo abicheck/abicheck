@@ -103,12 +103,12 @@
     },
     {
       "path": "abicheck/buildsource/check_report.py",
-      "baseline_lines": 813,
+      "baseline_lines": 814,
       "target": "workflows",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "New entry, ADR-063 Phase 7: augment_report()'s two mutators (_neutralize_gate/_escalate_removed_library_severity) and the three synthetic report builders (build_operational_error_report/build_bootstrap_report/build_new_target_report) each gained the identical structured `run_outcome` treatment their legacy `severity`/`verdict` fields already had, across five call sites this module owns and no other module can substitute for -- the run_outcome-building helper itself was split out to the new sibling check_report_run_outcome.py to keep the added footprint to the minimum per-site glue (one import, one conditional 2-line write, or one dict-literal line). No smaller diff was found that still lands the required behavior at every one of the five sites this phase's plan names. Raised 812 -> 813 (same phase, Codex review, fresh evidence): a pre-existing report re-stamped to the current schema never carried `run_outcome` at all -- `augment_report` now calls the new `backfill_run_outcome` (in check_report_run_outcome.py, the same sibling module) alongside the pre-existing `backfill_exit_block_fields` call it already mirrors, one import name and one function call.",
+      "rationale": "New entry, ADR-063 Phase 7: augment_report()'s two mutators (_neutralize_gate/_escalate_removed_library_severity) and the three synthetic report builders (build_operational_error_report/build_bootstrap_report/build_new_target_report) each gained the identical structured `run_outcome` treatment their legacy `severity`/`verdict` fields already had, across five call sites this module owns and no other module can substitute for -- the run_outcome-building helper itself was split out to the new sibling check_report_run_outcome.py to keep the added footprint to the minimum per-site glue (one import, one conditional 2-line write, or one dict-literal line). No smaller diff was found that still lands the required behavior at every one of the five sites this phase's plan names. Raised 812 -> 813 (same phase, Codex review, fresh evidence): a pre-existing report re-stamped to the current schema never carried `run_outcome` at all -- `augment_report` now calls the new `backfill_run_outcome` (in check_report_run_outcome.py, the same sibling module) alongside the pre-existing `backfill_exit_block_fields` call it already mirrors, one import name and one function call. Raised 813 -> 814 merging G42 phase 1 (PR #1008, `explicit_id`/`environment_id` params on `build_check_id()` and the four report builders) onto this already-landed ADR-063 baseline -- both branches touch this module independently and neither can substitute for the other's lines; the merge itself adds no new behavior beyond what each PR already carried on its own.",
       "review_by": "2026-11-30"
     },
     {
@@ -233,22 +233,22 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1698,
+      "baseline_lines": 1812,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (CheckSpec.id/CheckSpec.analysis_*, the checks[].id/checks[].analysis: parsing this module is the canonical owner of per its own docstring) -- reviewed growth, not a routine edit; no other module owns this project-schema surface to move it to. Raised a second time (1810 -> 1812) for a Codex-review fix: _IDENTIFIER_RE anchored with a trailing $, which (without re.MULTILINE) also matches just before a trailing newline -- a YAML block-scalar checks[].id/analysis.* value could carry one through and corrupt a downstream GITHUB_OUTPUT write; documented and fixed as \\Z.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/buildsource/run_plan.py",
-      "baseline_lines": 1118,
+      "baseline_lines": 1130,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (RunPlanCheck.explicit_id/analysis_* projection and the duplicate-check_id guard's analysis-aware error path) -- reviewed growth, not a routine edit; RunPlanCheck's own module is this data's canonical owner.",
       "review_by": "2026-11-30"
     },
     {
@@ -373,12 +373,12 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 803,
+      "baseline_lines": 815,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit. Raised 810 -> 815 (same phase, Codex review, fresh evidence): fixed the environment_id group's charset to require an initial alphanumeric character (matching build_check_id's own validate_identifier(), which already enforced it -- the public CHECK_ID_PATTERN validator had drifted more permissive than the canonical constructor), and expanded the header comment explaining why this module's pattern is no longer byte-identical to the published JSON Schema's own ECMAScript-compatible pattern (Python-only \\\\Z vs. portable $(?!\\\\n)).",
       "review_by": "2026-11-30"
     },
     {
@@ -1033,12 +1033,12 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1111,
+      "baseline_lines": 1117,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1111 -> 1116 merging G42 phase 1 (PR #1008) onto ADR-063 Phase 7's already-landed REPORT_SCHEMA_VERSION bump to 2.48 (run_outcome): both PRs independently bumped REPORT_SCHEMA_VERSION on the same base version, a genuine same-line collision the file's own documented \"renumber, don't reuse\" convention (see the 2.32/2.36/2.38 history entries) resolves by renumbering G42's bump to 2.49 and adding its own five-line history entry rather than discarding either PR's change. Raised 1116 -> 1117 (same phase, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.24 -> 1.25 in lockstep with REPORT_SCHEMA_VERSION's 2.49 bump -- a scan-shaped check-target report shares build_check_id() with a compare-shaped one, so the widened check_id lexical contract reaches it too and needs its own feature-detectable version marker.",
       "review_by": "2026-11-30"
     },
     {
@@ -2033,12 +2033,12 @@
     },
     {
       "path": "tests/test_reusable_workflows.py",
-      "baseline_lines": 1942,
+      "baseline_lines": 1943,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised by one line for G42 phase 1: TestPreCheckOperationalErrorReport's end-to-end test extracts and directly executes the real check-project.yml precheck script (set -euo pipefail), which now references MATRIX_EXPLICIT_ID -- the existing test's hand-built env needed that one added key to keep passing, not new test coverage (new G42 coverage for this script lives in the new sibling tests/test_reusable_workflows_explicit_id.py instead).",
       "review_by": "2026-11-30"
     },
     {

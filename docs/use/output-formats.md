@@ -691,7 +691,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.48",
+  "report_schema_version": "2.49",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

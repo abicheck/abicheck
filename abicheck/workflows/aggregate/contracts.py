@@ -141,28 +141,51 @@ AGGREGATE_SCHEMA_VERSION = "1.7"
 #: known-shaped tail segments is safe even if ``target`` itself were ever to
 #: contain a stray ``@``/``#`` (bundle/target ids are also identifiers today,
 #: but this regex does not need to assume that to parse correctly).
+#:
+#: G42 adds two further optional, composable tail segments, in this fixed
+#: order: ``!<environment_id>`` (a named-environment qualifier — reserved
+#: here, not yet produced by any generator; see the G42 plan's "Named
+#: environments" phase) and ``~<explicit_id>`` (a project-author-supplied
+#: ``checks[].id``, G42's "Explicit check identifiers" phase). Both are
+#: independently omittable and neither collides with the base charset —
+#: ``!``/``~`` never appear inside a component (``_IDENTIFIER_RE`` above).
+#: Absent both, the generated string and its parse are bit-for-bit
+#: unchanged from the pre-G42 shape (``environment_id=None``,
+#: ``explicit_id=None``) — this is the backward-compatibility guarantee.
 _CHECK_ID_RE = re.compile(
     r"^(?P<target>.+)@(?P<profile>[A-Za-z0-9][A-Za-z0-9._-]*)"
     r"#(?P<channel>[A-Za-z0-9][A-Za-z0-9._-]*)"
-    r"@(?P<depth>binary|headers|build|source)$"
+    r"@(?P<depth>binary|headers|build|source)"
+    r"(?:!(?P<environment_id>[A-Za-z0-9][A-Za-z0-9._-]*))?"
+    # \Z, not a trailing $ -- $ also matches just before a trailing \n
+    # (Codex review; see checker_types.CHECK_ID_PATTERN's identical fix,
+    # kept in lockstep with this pattern per this module's own docstring).
+    r"(?:~(?P<explicit_id>[A-Za-z0-9][A-Za-z0-9._-]*))?\Z"
 )
 
 
 @dataclass(frozen=True)
 class CheckIdParts:
-    """A parsed ``check_id``-shaped ``target_id`` (ADR-047 §7)."""
+    """A parsed ``check_id``-shaped ``target_id`` (ADR-047 §7, extended by G42).
+
+    :attr:`environment_id`/:attr:`explicit_id` are ``None`` for a
+    pre-G42-shaped id (no ``!``/``~`` tail) — the common case today.
+    """
 
     target: str
     profile: str
     baseline_channel: str
     requested_depth: str
+    environment_id: str | None = None
+    explicit_id: str | None = None
 
 
 def parse_check_id(target_id: str) -> CheckIdParts | None:
     """Split *target_id* into its ``check_id`` components, or ``None``.
 
     ``None`` means *target_id* does not follow the
-    ``target@profile#baseline_channel@requested_depth`` shape
+    ``target@profile#baseline_channel@requested_depth`` shape (optionally
+    followed by a ``!environment_id`` and/or ``~explicit_id`` tail, G42)
     ``buildsource.check_report.build_check_id`` produces — e.g. a bare
     filename-derived id (:func:`target_id_from_path`) from a report that
     never went through the run-plan/``check-target`` pipeline. This is the
@@ -178,6 +201,8 @@ def parse_check_id(target_id: str) -> CheckIdParts | None:
         profile=m.group("profile"),
         baseline_channel=m.group("channel"),
         requested_depth=m.group("depth"),
+        environment_id=m.group("environment_id"),
+        explicit_id=m.group("explicit_id"),
     )
 
 

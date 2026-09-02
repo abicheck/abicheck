@@ -102,8 +102,12 @@ from .scan_levels import USER_DEPTHS, EvidenceDepth
 #: — matches the per-component pattern the report-identity envelope (ADR-047
 #: §7, ``compare_report.schema.json``'s ``check_id``) already enforces for
 #: ``target@profile#baseline_channel@depth``, so a name valid here can never
-#: produce an ambiguous/unparseable check_id downstream.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: produce an ambiguous/unparseable check_id downstream. ``\Z``, not a
+#: trailing ``$`` -- without ``re.MULTILINE``, ``$`` also matches just
+#: before a trailing ``\n`` (a common PyYAML block-scalar artifact), which
+#: would let an embedded newline through into a generated ``check_id`` and
+#: silently break ``GITHUB_OUTPUT`` downstream (Codex review).
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 #: ADR-047 §3 ``targets:`` ``kind`` discriminator.
 TARGET_KIND_LIBRARY = "library"
@@ -222,6 +226,43 @@ def _require_mapping(data: object, block: str) -> dict[str, Any]:
     return data
 
 
+def _parse_analysis_block(raw: object, *, where: str) -> tuple[str, str, str]:
+    """Parse an optional ``checks[].analysis:`` mapping (G42 "Explicit check
+    identifiers"): ``{evidence, policy, assurance}``, each an optional
+    non-empty string. Returns ``("", "", "")`` when *raw* is absent -- the
+    field is entirely optional, and every existing ``checks[]`` entry that
+    predates this block parses unchanged.
+
+    Only structural validity (mapping shape, known keys, non-empty string
+    values) is checked here -- same "parsing alone isn't validation" split
+    this module's own docstring documents elsewhere; the identifier-charset
+    check is deferred to :func:`_check_issues`, alongside every other
+    checks[]-level cross-reference/charset rule.
+    """
+    if raw is None:
+        return "", "", ""
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{where}.analysis must be a mapping, got {type(raw).__name__}: {raw!r}"
+        )
+    unknown = _unknown_keys(raw, {"evidence", "policy", "assurance"})
+    if unknown:
+        raise ValueError(f"{where}.analysis: unknown key(s) {unknown}")
+    values: dict[str, str] = {}
+    for key in ("evidence", "policy", "assurance"):
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{where}.analysis.{key} must be a non-empty string")
+        values[key] = value
+    return (
+        values.get("evidence", ""),
+        values.get("policy", ""),
+        values.get("assurance", ""),
+    )
+
+
 @dataclass
 class CheckSpec:
     """One ``{channel, depth, required, gate_mode, profiles}`` tuple (ADR-047 §3).
@@ -254,6 +295,32 @@ class CheckSpec:
     #: coexisted, so "this member is new" has no well-defined old side (see
     #: ``abicheck.buildsource.baseline_set.resolve_bundle``'s docstring).
     allow_new_target: bool = False
+    #: G42 "Explicit check identifiers": an optional project-owned logical
+    #: id, appended to the generated ``check_id`` as a ``~<id>`` tail
+    #: (``abicheck.buildsource.check_report.build_check_id``). Lets two
+    #: checks that would otherwise generate the identical ``target@profile
+    #: #channel@depth`` string (e.g. two ``checks[]`` entries differing only
+    #: in ``analysis:``) each carry a distinct, non-colliding identity.
+    #: Empty (the default) means "no explicit id" -- the generated string is
+    #: unchanged from the pre-G42 shape.
+    id: str = ""
+    #: G42 "Explicit check identifiers": which extraction/comparison
+    #: *method* produced the facts this check consumes (e.g. "replay" vs.
+    #: "clang-plugin") -- see G39's per-finding evidence-provider
+    #: vocabulary. Purely a distinguishing/reporting label at this phase;
+    #: nothing downstream yet selects a different extraction pipeline based
+    #: on this value. Empty means "not declared".
+    analysis_evidence: str = ""
+    #: G42 "Explicit check identifiers": which policy profile this check's
+    #: analysis is evaluated under. References the same policy-profile
+    #: mechanism ``--policy``/``profiles.<id>`` already select -- this field
+    #: is the identity slot it's selected through, not a second mechanism.
+    #: Empty means "not declared".
+    analysis_policy: str = ""
+    #: G42 "Explicit check identifiers": which assurance requirement this
+    #: check's analysis must meet (G41 Phase 3's assurance mechanism).
+    #: Empty means "not declared".
+    analysis_assurance: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -266,6 +333,17 @@ class CheckSpec:
             d["profiles"] = list(self.profiles)
         if self.allow_new_target:
             d["allow_new_target"] = True
+        if self.id:
+            d["id"] = self.id
+        analysis: dict[str, Any] = {}
+        if self.analysis_evidence:
+            analysis["evidence"] = self.analysis_evidence
+        if self.analysis_policy:
+            analysis["policy"] = self.analysis_policy
+        if self.analysis_assurance:
+            analysis["assurance"] = self.analysis_assurance
+        if analysis:
+            d["analysis"] = analysis
         return d
 
     @classmethod
@@ -277,6 +355,8 @@ class CheckSpec:
             "gate_mode",
             "profiles",
             "allow_new_target",
+            "id",
+            "analysis",
         }
         unknown = _unknown_keys(d, known)
         if unknown:
@@ -329,6 +409,18 @@ class CheckSpec:
                 f"{where}.allow_new_target must be a boolean, got "
                 f"{type(allow_new_target).__name__}: {allow_new_target!r}"
             )
+        check_id = ""
+        if "id" in d:
+            # Structural validity only -- the identifier-charset check is
+            # deferred to _check_issues, same split _parse_analysis_block's
+            # own docstring documents.
+            raw_id = d["id"]
+            if not isinstance(raw_id, str) or not raw_id:
+                raise ValueError(f"{where}.id must be a non-empty string")
+            check_id = raw_id
+        analysis_evidence, analysis_policy, analysis_assurance = _parse_analysis_block(
+            d.get("analysis"), where=where
+        )
         return cls(
             channel=channel,
             depth=depth,
@@ -336,6 +428,10 @@ class CheckSpec:
             gate_mode=gate_mode,
             profiles=profiles,
             allow_new_target=allow_new_target,
+            id=check_id,
+            analysis_evidence=analysis_evidence,
+            analysis_policy=analysis_policy,
+            analysis_assurance=analysis_assurance,
         )
 
 
@@ -1526,6 +1622,24 @@ def _check_issues(
         issues.append(
             f"{where}: gate_mode must be one of {sorted(GATE_MODES)}, got {check.gate_mode!r}."
         )
+    # G42 "Explicit check identifiers": id/analysis.* charset validation,
+    # deferred here (not in CheckSpec.from_dict) same as every other
+    # identifier this module validates -- see _identifier_issues.
+    if check.id and not _IDENTIFIER_RE.match(check.id):
+        issues.append(
+            f"{where}: id {check.id!r} is not a valid identifier -- must match "
+            f"{_IDENTIFIER_RE.pattern!r}."
+        )
+    for field_name, value in (
+        ("analysis.evidence", check.analysis_evidence),
+        ("analysis.policy", check.analysis_policy),
+        ("analysis.assurance", check.analysis_assurance),
+    ):
+        if value and not _IDENTIFIER_RE.match(value):
+            issues.append(
+                f"{where}: {field_name} {value!r} is not a valid identifier -- "
+                f"must match {_IDENTIFIER_RE.pattern!r}."
+            )
     for profile_id in check.profiles:
         profile = config.profiles.get(profile_id)
         if profile is None:

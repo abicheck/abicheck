@@ -16,6 +16,10 @@ NAME="${INPUT_NAME:?}"
 PROFILE="${INPUT_PROFILE:?}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:?}"
 REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:?}"
+# G42 "Explicit check identifiers": this check's checks[].id, if the
+# project declared one -- folded into check_id's "~<explicit_id>" tail.
+# Empty (the default) is the pre-G42, unqualified check_id shape.
+EXPLICIT_ID="${INPUT_EXPLICIT_ID:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
 PROJECT="${INPUT_PROJECT:-}"
 HEAD_SHA="${INPUT_HEAD_SHA:-}"
@@ -83,7 +87,7 @@ _slug() {
 # tradeoff git's own short-hash prefixes and Docker's short image IDs make
 # (CodeRabbit review).
 _IDENTITY_DIGEST="$(
-  printf '%s\x1f%s\x1f%s\x1f%s' "$NAME" "$PROFILE" "$BASELINE_CHANNEL" "$REQUESTED_DEPTH" \
+  printf '%s\x1f%s\x1f%s\x1f%s\x1f%s' "$NAME" "$PROFILE" "$BASELINE_CHANNEL" "$REQUESTED_DEPTH" "$EXPLICIT_ID" \
     | python3 -c 'import hashlib, sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
 )"
 # A valid but long identity component (e.g. a long target/bundle id --
@@ -145,6 +149,7 @@ ENVELOPE_ARGS=(
   --profile-id "$PROFILE"
   --baseline-channel "$BASELINE_CHANNEL"
   --requested-depth "$REQUESTED_DEPTH"
+  --explicit-id "$EXPLICIT_ID"
   --gate-mode "$GATE_MODE"
   --project "$PROJECT"
   --head-sha "$HEAD_SHA"
