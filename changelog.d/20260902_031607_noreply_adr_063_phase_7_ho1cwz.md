@@ -70,3 +70,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   block itself already had. A corrupt, policy-blocked report could
   previously read as a clean legacy verdict once the structured-first
   reader landed.
+- **`scan --format json`'s own budget-overflow/evidence-contract-error
+  abort envelope (`cli_scan._emit_scan_abort_report`) now carries
+  `run_outcome` too.** This is a fourth, independent scan-report writer —
+  distinct from `ScanOutcome`/`ScanResult`/`ScanSetResult` — that claimed
+  `scan_schema_version` 1.24 while never emitting the new structured block
+  at all, forcing a consumer back onto legacy exit-code/sentinel decoding
+  for exactly the operational failures this axis exists to represent.

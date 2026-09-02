@@ -16,6 +16,7 @@ from ..policy.outcome import (
     PolicyGateDecision,
     RunOutcome,
     policy_gate_decision_for_exit_code as policy_gate_decision_for_exit_code,  # re-exported, same reason
+    run_outcome_dict_for_scan as run_outcome_dict_for_scan,  # re-exported, same reason (cli_scan.py)
 )
 from .document import ReportDocument
 from .render_json import render_json

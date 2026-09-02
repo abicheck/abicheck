@@ -688,6 +688,24 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         assert report["run_outcome"]["gate"] == "none"
         assert report["run_outcome"]["operational"] == "extraction_error"
 
+    def test_native_cli_scan_abort_json_carries_run_outcome(self):
+        """Codex review (P2): cli_scan._emit_scan_abort_report is a fourth,
+        independent scan writer -- a hand-built --format json envelope for
+        a budget-overflow/evidence-contract-error abort, distinct from
+        ScanOutcome/ScanResult/ScanSetResult -- that claimed scan_schema_
+        version 1.24 while never emitting run_outcome at all."""
+        import contextlib
+        import io
+
+        from abicheck.cli_scan import _emit_scan_abort_report
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _emit_scan_abort_report("budget_overflow", "json", None)
+        report = json.loads(buf.getvalue())
+        assert report["run_outcome"]["operational"] == "budget_overflow"
+        self._assert_structured_path_taken(report)
+
     def test_scan_outcome_coverage_only_exit_1_reads_gate_none_end_to_end(self):
         """Codex review (P1), end-to-end through the real writer: a legacy-
         scheme scan whose own compatibility is clean but whose contract
