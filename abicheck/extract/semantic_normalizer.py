@@ -641,13 +641,49 @@ def normalize_header_ast(
         # own docstring, "Scope of the fourth slice"), so there is no "?"
         # placeholder to guard against. No `cv_qualification` either: there
         # is no captured type for it to describe.
-        spelling_fact = (
-            Fact.unsupported(
+        #
+        # `dumper_clang_expr._initializer_value` normalizes even a LONE
+        # literal, not only a compound expression (Codex review, fourteenth
+        # round, fresh evidence): a boolean literal's clang AST JSON `value`
+        # deserializes to a Python `bool`, and `str(True)`/`str(False)`
+        # capitalizes it -- never the lowercase `"true"`/`"false"` C++
+        # keyword spelling castxml's verbatim `init` text carries. This
+        # exact capitalization is a safe, structural signal (no real C++
+        # source spells a bool literal this way, the same "producer-
+        # specific artifact recognized by its own shape" treatment already
+        # applied to the compound fingerprint and the opaque `FunctionType`
+        # tag) -- marked `Fact.unsupported()` rather than `Fact.present`,
+        # the identical class of "state genuinely incomparable evidence
+        # honestly" fix.
+        #
+        # **Known, accepted residual, NOT fixed here:** clang's numeric/
+        # character literal normalization (a hex/octal/binary/suffixed
+        # integer, a character literal, or a non-decimal float source
+        # spelling all evaluate to a plain decimal digit string) has no
+        # equivalent safe structural signal -- a bare `"65"`, unlike
+        # `"True"`, could genuinely be either a real decimal literal (which
+        # castxml would ALSO spell `"65"`, a real cross-backend match) or
+        # clang's normalized form of `'A'`/`0x41`/... , and this module has
+        # no way to tell the two apart from the value text alone. Closing
+        # that fully needs either a real castxml-side literal-grammar
+        # parser (hex/octal/char-escape/float-exponent parsing, to
+        # canonicalize BOTH sides to one comparable form) or threading each
+        # constant's own literal AST-node kind through to this normalizer --
+        # materially more than this slice's "recognize a known artifact"
+        # scope, the same "model-shape decision for a future slice, not a
+        # normalizer-only change" conclusion already reached for `restrict`/
+        # the typedef-hidden-qualifier case.
+        if CLANG_EXPR_FINGERPRINT_RE.match(value):
+            spelling_fact = Fact.unsupported(
                 "clang's compound-initializer fingerprint is not a "
                 "cross-backend-comparable value spelling"
             )
-            if CLANG_EXPR_FINGERPRINT_RE.match(value)
-            else Fact.present(value)
-        )
+        elif value in ("True", "False"):
+            spelling_fact = Fact.unsupported(
+                "clang's Python-bool-derived literal spelling is not a "
+                "cross-backend-comparable value spelling"
+            )
+        else:
+            spelling_fact = Fact.present(value)
         _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
     return SemanticIR(occurrences=occurrences)

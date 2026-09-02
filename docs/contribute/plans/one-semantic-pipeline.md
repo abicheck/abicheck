@@ -13043,6 +13043,51 @@ unchanged const callback. The regex now allows a cv-keyword run after
 EVERY sigil, since castxml's recursive wrapping can in principle nest more
 than one (`"FunctionType** const volatile"`).
 
+**A clang Python-`bool`-derived literal constant is also `Fact.unsupported()`,
+not `Fact.present(...)` (Codex review, fourteenth round, fresh evidence).**
+clang's compound-initializer-expression parser stringifies a captured
+Python `bool` constant value with plain `str(...)`, which spells `True`/
+`False` with a capital first letter -- not the C/C++ source spelling
+(`true`/`false`) either backend's *own* literal text would show, and not a
+spelling castxml ever produces for the same declaration. Left as
+`Fact.present("True")`, an unchanged boolean constant read identically by
+both backends' real evidence still reported a spurious hybrid conflict the
+moment clang's own producer-specific stringification diverged from
+castxml's genuine source-text capture -- the identical class of bug the
+`expr:` fingerprint and opaque-`FunctionType` fixes above already closed
+for their own producer-specific artifacts, just for a third one this
+normalizer had not yet recognized. The fix checks for the exact two-value
+set `{"True", "False"}` rather than a case-insensitive comparison or a
+substring test, since a real declared string/identifier constant that
+happens to spell exactly `True` or `False` as its own source text is
+legitimate, comparable evidence, not an artifact to discard. The
+decimal-integer/character/float-literal residual this normalizer still
+cannot distinguish from a genuinely spelled literal (e.g. castxml
+composing `0x10` and clang composing `16` for an unchanged constant) is
+a known, accepted, documented limitation, not attempted here: unlike the
+boolean case, there is no structural signal in the value text alone that
+marks a normalized-but-equivalent numeric spelling as producer-specific
+rather than a real value difference worth reporting, and closing it
+correctly needs either a shared literal-grammar normalizer both backends
+route through or a new structural fact recording each backend's original,
+un-normalized token -- a model-shape decision for a future slice, the
+same conclusion already reached for `restrict` and the typedef-hidden
+top-level qualifier above. Pinned by a dedicated regression test (a
+decimal integer constant continues to report `Fact.present(...)`
+unchanged) so a future fix has something that starts failing once it
+lands.
+
+**`tests/test_semantic_normalizer.py` split a second time, mirroring the
+production-code split (Codex review round, same principle as the
+eleventh-round production split above).** Adding the two regression tests
+for the boolean-literal fix pushed the test file to 1217 lines, past the
+AI-readiness gate's 1200-line cap for a new test file. The 21 tests
+exercising `semantic_normalizer_artifacts.py`'s own primitives (the
+unresolved-type sentinel, the opaque `FunctionType` tag, the clang
+expression fingerprint, and the two boolean-literal tests just added) moved
+to a new sibling file, `tests/test_semantic_normalizer_artifacts.py`,
+leaving the general projection/canonicalization tests in the original file.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

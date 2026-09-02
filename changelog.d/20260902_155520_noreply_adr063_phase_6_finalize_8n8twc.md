@@ -157,3 +157,21 @@
   (`"FunctionType* const"`), which an earlier revision of the anchored
   regex missed, wrongly publishing it as present and conflicting with
   clang's real spelling for an unchanged const callback.
+  A clang-produced boolean constant is also `Fact.unsupported()` rather
+  than `Fact.present(...)`: clang's compound-initializer parser stringifies
+  a captured Python `bool` with plain `str(...)`, spelling `"True"`/
+  `"False"` instead of either backend's own real `true`/`false` source
+  text, which made an unchanged boolean constant report a spurious hybrid
+  conflict the moment clang's stringification diverged from castxml's
+  genuine source-text capture. The decimal-integer/character/float-literal
+  residual (e.g. `0x10` vs. `16` for an unchanged constant) remains a
+  documented, accepted limitation, pinned by a regression test, since no
+  structural signal in the value text alone distinguishes a normalized
+  spelling from a real value difference — a correct fix needs a shared
+  literal-grammar normalizer or a new per-backend original-token fact, a
+  model-shape decision for a future slice.
+  `tests/test_semantic_normalizer.py` split a second time, mirroring the
+  production-code split above, once these two new tests pushed it past the
+  AI-readiness gate's 1200-line cap for a new test file: the artifact-
+  recognition-primitive tests now live in a new sibling file,
+  `tests/test_semantic_normalizer_artifacts.py`.
