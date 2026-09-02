@@ -670,6 +670,7 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_EXPLICIT_ID: ${{ inputs.explicit-id }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
         INPUT_PROJECT: ${{ inputs.project }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}

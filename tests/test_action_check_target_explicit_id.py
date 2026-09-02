@@ -40,8 +40,10 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from test_action_check_target import (
     _BASE_IDENTITY,
+    ACTION_DIR,
     PROFILE,
     RUN_SH,
     _run_finalize,
@@ -153,3 +155,37 @@ class TestExplicitIdThreadsIntoTheRealReportEnvelope:
         )
         assert outputs_a["report-path"] != outputs_b["report-path"]
         assert outputs_a["check-id"] != outputs_b["check-id"]
+
+
+class TestExplicitIdInputIsForwardedToFinalizeEnv:
+    """Real bug (Codex review, second round): declaring the ``explicit-id``
+    *input* on ``action.yml`` and reading ``INPUT_EXPLICIT_ID`` in
+    ``run.sh`` is not enough by itself -- the composite action's "Write
+    report envelope and finalize" step maps every input it needs onto its
+    own ``env:`` block explicitly (this is how a composite Action's steps
+    see `inputs.*` at all), and an input declared but left off that
+    specific step's mapping reaches `run.sh` as an unset/empty variable
+    regardless of what the caller passed in. Same class of gap the tests
+    above (which drive `run.sh` directly, bypassing `action.yml`'s own
+    env mapping) cannot catch -- this test parses the real `action.yml`
+    and asserts the mapping itself exists, mirroring this file's own
+    `TestExpectedProjectRefForwardedToResolveBaseline`/
+    `TestAllowNewTargetForwardedToResolveBaseline` precedent."""
+
+    def test_action_yml_declares_the_input(self) -> None:
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        assert "explicit-id" in data["inputs"]
+        assert data["inputs"]["explicit-id"]["required"] is False
+        assert data["inputs"]["explicit-id"]["default"] == ""
+
+    def test_finalize_step_maps_it_to_input_explicit_id(self) -> None:
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        finalize_step = next(
+            s for s in steps if s.get("name") == "Write report envelope and finalize"
+        )
+        assert finalize_step["env"]["INPUT_EXPLICIT_ID"] == (
+            "${{ inputs.explicit-id }}"
+        )
