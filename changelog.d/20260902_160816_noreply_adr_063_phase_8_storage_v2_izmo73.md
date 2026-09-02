@@ -23,4 +23,12 @@
   build now cleanly refuses a sectioned snapshot instead of silently
   reading it as an empty one. `actions/baseline/build_manifest.py` (the
   baseline-set publishing Action) also unwraps the sectioned shape before
-  reading a snapshot's metadata and hashing its stable content.
+  reading a snapshot's metadata and hashing its stable content, and
+  `buildsource/baseline_set.py`'s resolver does the same before verifying
+  a resolved snapshot's digest — translating a malformed/unrecognized
+  sectioned envelope into the documented `AMBIGUOUS`/`STALE_SCHEMA`
+  resolve outcomes rather than letting the unwrap's own exception escape.
+  The sectioned-shape classifier fingerprint (`abicheck/classify.py`) now
+  recognizes a valid document regardless of its top-level key order (e.g.
+  `json.dumps(..., sort_keys=True)`), rather than requiring the exact
+  adjacency `to_sectioned_document()` happens to write.

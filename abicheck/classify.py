@@ -178,14 +178,33 @@ class AbiJsonClassifier(FileClassifier):
             # (OpenAPI, a docs config, ...) can carry its own top-level
             # "sections" object (Codex/CodeRabbit review, fresh evidence,
             # second round; the round before that found the same problem
-            # with the nested per-SectionDTO "section_kind" key). Match the
-            # exact adjacency `to_sectioned_document()` always writes
-            # instead: "schema_version" is the envelope's first key and
-            # "sections" its second, with nothing else between them --
-            # requiring both together, in that order, is far more specific
-            # than either key alone.
+            # with the nested per-SectionDTO "section_kind" key). A THIRD
+            # round then found that requiring the exact adjacency
+            # `to_sectioned_document()` happens to write ("schema_version"
+            # immediately followed by "sections") breaks the moment a
+            # document is reserialized with reordered keys -- e.g.
+            # `json.dumps(..., sort_keys=True)`, or any JSON formatter --
+            # even though `from_sectioned_document()` itself accepts the
+            # document regardless of key order; `compare-release` directory
+            # discovery would then silently skip that (still perfectly
+            # valid) snapshot.
+            #
+            # The fix is to require "schema_version" and "sections" each
+            # independently, via lookaheads, rather than as one adjacent
+            # sequence -- co-occurrence of BOTH keys (one specific to any
+            # abicheck snapshot, the other specific to this envelope shape)
+            # is what stays rare in an unrelated document, without caring
+            # where either sits relative to the other. Deliberately does
+            # NOT also require "section_schema_versions": unlike the other
+            # two keys, `to_sectioned_document()` writes it dict-order
+            # *after* the (size-variable) "sections" payload, so on a real,
+            # content-heavy snapshot it can itself fall past the probe
+            # window -- requiring it would reintroduce the same kind of
+            # false negative this fix exists to close.
             "abicheck/sectioned-v1",
-            re.compile(r'"schema_version"\s*:\s*\d+\s*,\s*"sections"\s*:\s*\{'),
+            re.compile(
+                r'(?=[\s\S]*"schema_version"\s*:\s*\d+)(?=[\s\S]*"sections"\s*:\s*\{)'
+            ),
         ),
         # Future formats — uncomment or add new entries here:
         # ("libabigail-json-v2", re.compile(r'"abi-corpus"\s*:', re.MULTILINE)),

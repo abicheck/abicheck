@@ -251,10 +251,8 @@ class BaselineArtifact:
     """One ``manifest.json`` ``artifacts[]`` entry (``build_manifest.py``).
 
     Only the fields this module's resolution logic actually reads — not a
-    full mirror of every key ``build_manifest.py`` writes (``git_commit``,
-    ``created_at``, ``build_id``, ``dump_provenance``, ...), which stay
-    whatever the manifest happens to carry and are never round-tripped
-    through this dataclass.
+    full mirror of every key ``build_manifest.py`` writes, which stay
+    whatever the manifest carries and are never round-tripped here.
     """
 
     library: str = ""
@@ -303,17 +301,13 @@ class BaselineManifest:
     snapshot_schema: int | None = None
     fact_set: dict[str, Any] | None = None
     #: Caller-assigned scanner-compatibility generation
-    #: (``actions/baseline/build_manifest.py``'s ``--baseline-generation``) --
-    #: ``None`` when the producing baseline-set run never declared one (an
-    #: older manifest, or a caller not tracking generations), which is never
-    #: compared against an expectation (see :func:`_schema_and_profile_check`).
+    #: (``build_manifest.py``'s ``--baseline-generation``) -- ``None`` when
+    #: the producing run never declared one, which is never compared
+    #: against an expectation (see :func:`_schema_and_profile_check`).
     baseline_generation: int | None = None
-    #: Generator provenance (``actions/baseline/build_manifest.py``'s
-    #: ``{"tool", "version", "git_sha"?, "action_ref"?}`` block) -- purely
-    #: informational (reproducibility/debugging), never consulted by any
-    #: resolve/freshness check: unlike ``baseline_generation``, a differing
-    #: ``version`` between two manifests is not itself evidence of a stale
-    #: baseline. ``None`` for an older manifest that predates this field.
+    #: Generator provenance (``{"tool", "version", "git_sha"?,
+    #: "action_ref"?}``) -- purely informational, never consulted by any
+    #: resolve/freshness check. ``None`` for a manifest that predates it.
     generator: dict[str, Any] | None = None
     artifacts: list[BaselineArtifact] = field(default_factory=list)
 
@@ -489,17 +483,15 @@ def _load_manifest_or_result(
       an empty/partial ``actions/cache`` restore, or a stripped artifact
       download) becomes :data:`ResolveOutcome.AMBIGUOUS`, not
       ``not_found`` -- a directory a caller went to the trouble of staging
-      is a different, more concerning failure than "no baseline exists
-      yet" and must not silently bootstrap a `required: false` caller to a
-      green run with zero comparison performed (Codex review).
+      is a different, more concerning failure and must not silently
+      bootstrap a `required: false` caller to a green run with zero
+      comparison performed (Codex review).
     - a manifest that exists but is corrupt/malformed (not valid JSON, or
-      not a JSON object) -- a different failure than either of the above --
-      becomes :data:`ResolveOutcome.STALE_SCHEMA`, since this resolver
-      cannot understand the shape it's looking at. Without this, a corrupt
-      ``manifest.json`` (a truncated download, a hand edit) would raise an
-      unhandled ``ValueError`` all the way out of ``resolve_baseline.py``,
-      breaking the Action's typed-outcome contract for exactly the kind of
-      real baseline-resolution failure ADR-047 §6 exists to name.
+      not a JSON object) becomes :data:`ResolveOutcome.STALE_SCHEMA`, since
+      this resolver cannot understand the shape it's looking at -- without
+      this, a corrupt ``manifest.json`` would raise an unhandled
+      ``ValueError`` out of ``resolve_baseline.py``, breaking the Action's
+      typed-outcome contract.
     """
     if not baseline_dir.is_dir():
         return None, _not_found_result(
@@ -586,21 +578,17 @@ def _evidence_incompatibility(
     Deliberately does **not** also compare ``evidence_producer.version``
     against ``fact_set.producer_version`` — re-raised in later review as a
     "scanner/recipe version desync" gap; re-verified against **both** real
-    producers before staying with this decision, not just the one checked
-    originally. ADR-047 §2's own example styles ``evidence_producer.version``
-    as a package release version (``"0.x.y"``), but ``fact_set
-    .producer_version`` is an independent internal producer-build version in
-    both cases that exist: ``CLANG_EXTRACTOR_VERSION`` (``"0.7"`` today, per
-    ``source_extractors/clang.py``) for the Python clang extractor, and
-    ``kPluginVersion`` (``contrib/abicheck-clang-plugin/
-    AbicheckFactsPlugin.cpp``) for the C++ plugin — neither corresponds to a
-    package release number. Comparing the two directly would reject nearly
-    every real resolution on a coincidental mismatch between two
-    incommensurable version schemes, which is worse than not checking at all
-    — a real version-compatibility check needs a producer-side fix
-    (recording the same identity in both places, e.g. build-output.json's
-    emitter stamping the real producer-build version instead of the package
-    version), not a resolver-side guess at a mapping that doesn't exist
+    producers before staying with this decision. ADR-047 §2's own example
+    styles ``evidence_producer.version`` as a package release version
+    (``"0.x.y"``), but ``fact_set.producer_version`` is an independent
+    internal producer-build version in both cases that exist:
+    ``CLANG_EXTRACTOR_VERSION`` (``"0.7"`` today) for the Python clang
+    extractor, and ``kPluginVersion`` for the C++ plugin — neither
+    corresponds to a package release number. Comparing the two directly
+    would reject nearly every real resolution on a coincidental mismatch
+    between incommensurable version schemes — a real version-compatibility
+    check needs a producer-side fix (recording the same identity in both
+    places), not a resolver-side guess at a mapping that doesn't exist
     anywhere in the codebase today.
     """
     if not candidate_evidence_producer:
@@ -640,25 +628,21 @@ def _schema_and_profile_check(
 
     ``expected_project_ref``, when non-empty, is compared *exactly* against
     the manifest's own ``project_ref`` -- an empty string (the default)
-    means the caller either has no expectation (``release-contract``,
-    resolved by tag/asset selection rather than a Git ref) or resolved the
-    physical baseline-path by some means already scoped to the right ref, so
-    this check is opt-in, not implicitly derived from anything else here.
+    means the caller either has no expectation or resolved the physical
+    baseline-path by some means already scoped to the right ref, so this
+    check is opt-in.
 
     ``expected_baseline_generation``, when not ``None``, is compared
     *exactly* against the manifest's own ``baseline_generation`` -- ``None``
     (the default) means the caller isn't tracking scanner-compatibility
-    generations for this check, so it is opt-in the same way
-    ``expected_project_ref`` is.
+    generations for this check, opt-in the same way.
 
     Raises ``ValueError`` if ``expected_baseline_generation`` is neither
-    ``None`` nor a genuine non-negative ``int`` -- ``resolve_baseline.py``'s
-    own CLI wrapper already rejects a malformed ``--expected-baseline-
-    generation`` before ever reaching this function, but
-    :func:`resolve_target`/:func:`resolve_bundle` are themselves the real,
-    directly-callable Python resolution boundary, and `bool` is an `int`
-    subclass in Python -- a caller passing `True` would otherwise silently
-    compare equal to a real generation `1` (Codex review).
+    ``None`` nor a genuine non-negative ``int`` -- :func:`resolve_target`/
+    :func:`resolve_bundle` are the real, directly-callable Python
+    resolution boundary, and `bool` is an `int` subclass in Python -- a
+    caller passing `True` would otherwise silently compare equal to a real
+    generation `1` (Codex review).
     """
     if expected_baseline_generation is not None and (
         type(expected_baseline_generation) is not int
@@ -769,13 +753,12 @@ def _snapshot_digest_issue(
     The schema-version check also always runs, reading the *snapshot's
     own* ``schema_version`` -- distinct from ``_schema_and_profile_check``,
     which only looks at the manifest's aggregate ``snapshot_schema`` field
-    (absent on an older/hand-authored manifest). Returns the
-    ``stale_schema`` outcome for that case; every other issue here returns
-    ``ambiguous`` (Codex review).
-
-    Reads through :func:`~abicheck.snapshot_io.read_snapshot_bytes` (ADR-059)
-    so a gzip/zstd-compressed baseline snapshot verifies exactly the same
-    way a plain one does, by magic-byte detection.
+    (absent on an older/hand-authored manifest). Returns ``stale_schema``
+    for that case; every other issue here returns ``ambiguous`` (Codex
+    review). Reads through
+    :func:`~abicheck.snapshot_io.read_snapshot_bytes` (ADR-059) so a
+    gzip/zstd-compressed baseline snapshot verifies the same way a plain
+    one does, by magic-byte detection.
     """
     from ..errors import SnapshotError
     from ..snapshot_io import read_snapshot_bytes
@@ -807,8 +790,37 @@ def _snapshot_digest_issue(
     # ADR-062/063 Phase 8 (Codex review): unwrap the sectioned envelope the
     # same way build_manifest.py's _read_snapshot_meta() does before
     # hashing, or the digest below would mismatch every new baseline.
+    #
+    # Second round (fresh evidence): the unwrap can itself raise --
+    # `ValueError` for a malformed sections map, or a raw `TypeError` out of
+    # `export_legacy_snapshot`'s migration for a structurally-wrong payload
+    # (e.g. a section whose value is `[]`). Check the envelope's own
+    # `schema_version` for staleness BEFORE attempting the unwrap: a
+    # genuinely newer envelope is expected to carry section shapes this
+    # build cannot decode, and that must read back as `STALE_SCHEMA`
+    # ("upgrade"), never `AMBIGUOUS` ("corrupt") -- regardless of what the
+    # decode failure itself happens to raise.
     if is_sectioned_document(raw):
-        raw = from_sectioned_document(raw)
+        stated_schema_version = raw.get("schema_version")
+        if (
+            isinstance(stated_schema_version, int)
+            and stated_schema_version > serialization.SCHEMA_VERSION
+        ):
+            return ResolveOutcome.STALE_SCHEMA, (
+                f"target {target!r}'s snapshot {snapshot_path.name!r} has "
+                f"schema_version {stated_schema_version!r}, newer than "
+                "this resolver understands (up to schema_version "
+                f"{serialization.SCHEMA_VERSION}) -- upgrade abicheck "
+                "before resolving against this baseline-set."
+            )
+        try:
+            raw = from_sectioned_document(raw)
+        except (TypeError, ValueError) as exc:
+            return ResolveOutcome.AMBIGUOUS, (
+                f"target {target!r}'s snapshot {snapshot_path.name!r} "
+                f"could not be unwrapped from its sectioned envelope: "
+                f"{exc} -- the baseline-set is corrupt or was hand-edited."
+            )
     schema_version = raw.get("schema_version")
     if (
         isinstance(schema_version, int)
@@ -848,14 +860,12 @@ def _binary_digest_issue(
     ``snapshot`` and a ``binary`` field at once, so the two need separate
     recorded digests -- reusing one field for both would compare a JSON
     snapshot's content hash against an ELF binary's raw-byte hash and
-    (mis)report every bundle member as corrupt, since the two will never
-    coincidentally match (Codex review). ``actions/baseline/build_manifest.py``
-    populates ``binary_sha256`` for every ``stage_binary: true`` entry (G30
-    P1.6) with a plain whole-file digest -- no volatile-field stripping
-    needed, since dumper.py's timestamp-stamping doesn't apply to an
-    unmodified ELF file. Without this, a truncated/tampered staged binary
-    would still resolve purely because a file with the right name exists
-    under binaries/.
+    (mis)report every bundle member as corrupt (Codex review).
+    ``build_manifest.py`` populates ``binary_sha256`` for every
+    ``stage_binary: true`` entry with a plain whole-file digest -- no
+    volatile-field stripping needed, since an unmodified ELF file isn't
+    timestamp-stamped. Without this, a truncated/tampered staged binary
+    would still resolve purely because a file with the right name exists.
     """
     if not expected_sha256:
         return None
@@ -891,16 +901,14 @@ def _not_elf_issue(member: str, binary_path: Path) -> str | None:
 
     ``build_bundle_snapshot()`` (``abicheck/bundle.py``) silently skips any
     staged input that isn't a real, parseable ELF file rather than erroring,
-    so a non-ELF file staged under ``binaries/`` (e.g. a JSON snapshot
-    placed at the wrong path) -- or a truncated/corrupted one that still
-    happens to start with the ELF magic and match its recorded digest --
-    would otherwise resolve as ``resolved`` here and then silently vanish
-    from the bundle-scoped comparison downstream, reporting success on a
-    comparison that never actually consulted this member. A bare magic-byte
-    sniff alone doesn't catch the truncated case, so this mirrors
-    ``build_bundle_snapshot()``'s own skip criteria exactly (magic check,
-    then a real parse, then the same "essentially empty" emptiness check)
-    so a ``resolved`` outcome here actually predicts survival there (Codex
+    so a non-ELF file staged under ``binaries/`` -- or a truncated/corrupted
+    one that still happens to start with the ELF magic and match its
+    recorded digest -- would otherwise resolve as ``resolved`` here and
+    then silently vanish from the bundle-scoped comparison downstream. A
+    bare magic-byte sniff alone doesn't catch the truncated case, so this
+    mirrors ``build_bundle_snapshot()``'s own skip criteria exactly (magic
+    check, then a real parse, then the same emptiness check) so a
+    ``resolved`` outcome here actually predicts survival there (Codex
     review, two rounds).
     """
     try:
@@ -917,8 +925,7 @@ def _not_elf_issue(member: str, binary_path: Path) -> str | None:
             f"bundle member {member!r}'s staged binary {binary_path.name!r} "
             "is not an ELF file (missing the \\x7fELF magic) -- "
             "build_bundle_snapshot() silently skips non-ELF inputs, so this "
-            "member would otherwise vanish from the bundle comparison "
-            "despite resolve-baseline reporting success."
+            "member would otherwise vanish from the bundle comparison."
         )
     try:
         meta = parse_elf_metadata(binary_path)
@@ -949,16 +956,14 @@ def _resolve_under_baseline_dir(baseline_dir: Path, rel: str) -> Path | None:
     escape (e.g. ``"../../etc/passwd"``) -- ``None`` if refused.
 
     A ``manifest.json``'s ``snapshot``/``binary`` fields are untrusted
-    content from a restored archive/cache entry (a hand-edited or corrupt
-    manifest, or a compromised baseline artifact); ``Path``'s own ``/``
+    content from a restored archive/cache entry; ``Path``'s own ``/``
     operator silently *discards the left operand entirely* when the right
     side is an absolute path (a well-known pathlib gotcha), so an absolute
-    or ``..``-escaping value must be checked explicitly rather than trusted
-    -- otherwise a corrupt manifest could point a "resolved" snapshot/binary
-    path at an arbitrary file outside the baseline-set, which a downstream
-    ``compare`` would then silently read as the old side (Codex review).
-    Mirrors :func:`~.build_output._resolve_under_root`'s identical guard for
-    ``build-output.json``.
+    or ``..``-escaping value must be checked explicitly -- otherwise a
+    corrupt manifest could point a "resolved" path at a file outside the
+    baseline-set, which a downstream ``compare`` would silently read as the
+    old side (Codex review). Mirrors
+    :func:`~.build_output._resolve_under_root`'s identical guard.
     """
     if Path(rel).is_absolute():
         return None
@@ -997,12 +1002,10 @@ def resolve_target(
     project_ref/generation-compatible baseline-set simply not carrying an
     ``artifacts[]`` entry for ``target`` into :data:`ResolveOutcome.NEW_TARGET`
     instead of :data:`ResolveOutcome.AMBIGUOUS` -- a caller opts into this
-    only for a check it has explicitly designed to tolerate a target's first
-    appearance (e.g. a new library's first release), never by default: an
-    absent target in an otherwise-healthy baseline-set is far more often a
-    staging/configuration mistake (wrong channel, wrong baseline-path, a
-    typo'd target id) than a genuine new-library lifecycle event, so
-    ``ambiguous`` stays the default failure mode.
+    only for a check designed to tolerate a target's first appearance,
+    never by default: an absent target is far more often a staging
+    mistake than a genuine new-library event, so ``ambiguous`` stays the
+    default failure mode.
     """
     baseline_dir = Path(baseline_dir)
     manifest, failure = _load_manifest_or_result(baseline_dir, required)
@@ -1051,7 +1054,7 @@ def resolve_target(
                 "this baseline-set's manifest -- ambiguous which one is "
                 "authoritative; a real actions/baseline-produced manifest "
                 "never has duplicate library entries, so this manifest is "
-                "hand-edited or corrupted."
+                "hand-edited or corrupted"
             ),
             manifest_path=manifest_path,
         )

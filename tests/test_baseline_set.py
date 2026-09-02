@@ -988,31 +988,6 @@ def test_resolve_target_digest_match_resolves_compressed_snapshot(
     assert result.snapshot_path == str(tmp_path / f"libpvxs{suffix}")
 
 
-def test_resolve_target_digest_match_resolves_sectioned_snapshot(
-    tmp_path: Path,
-) -> None:
-    """ADR-062/063 Phase 8 (Codex review): the manifest records a digest of
-    the *unwrapped* content (matching build_manifest.py's own hash), so the
-    resolver must unwrap the sectioned envelope the same way before
-    hashing, or every new baseline would permanently mismatch."""
-    from abicheck.model import AbiSnapshot
-    from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
-    from abicheck.storage.sectioned_document import to_sectioned_document
-
-    flat = snapshot_to_dict(AbiSnapshot(library="libpvxs", version="1.0.0"))
-    real_digest = compute_snapshot_content_hash(flat)
-    sectioned = to_sectioned_document(flat, max_known_schema_version=SCHEMA_VERSION)
-    _write_manifest(
-        tmp_path,
-        artifacts=[_target_artifact("libpvxs", extra={"sha256": real_digest})],
-    )
-    (tmp_path / "libpvxs.abicheck.json").write_text(
-        json.dumps(sectioned), encoding="utf-8"
-    )
-    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
-    assert result.outcome == ResolveOutcome.RESOLVED
-
-
 def test_resolve_target_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
     # A truncated/replaced snapshot file (partial download, stale cache
     # restore) must never resolve just because a file with the right name

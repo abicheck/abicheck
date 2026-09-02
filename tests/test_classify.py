@@ -182,6 +182,38 @@ class TestAbiJsonClassifier:
         p.write_text(json.dumps(sectioned, indent=2))
         assert self.clf.accepts(p) is True
 
+    def test_reordered_sectioned_snapshot_still_accepted(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence (third round): a valid sectioned
+        document reserialized with sorted (or otherwise reordered) keys --
+        e.g. `json.dumps(..., sort_keys=True)`, or any JSON formatter --
+        must still be recognized, since `from_sectioned_document()` itself
+        accepts it regardless of key order. An earlier version of this
+        fingerprint required "schema_version" immediately adjacent to and
+        before "sections", which this reordering breaks.
+
+        The probe window is shrunk to isolate the sectioned-v1 fingerprint
+        under test: a real document this small still carries "library"
+        (matching the pre-existing abicc-v1 fingerprint too) well inside
+        the default 4096-byte window, which would mask a regression here
+        -- a real, large snapshot buries "library" past that window
+        entirely (see the sectioned-v1 fingerprint's own comment)."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json
+
+        text = json.dumps(sectioned, indent=2, sort_keys=True)
+        assert '"library"' not in text[:250]  # stays out of the shrunk probe window
+        p = tmp_path / "libfoo-sorted.json"
+        p.write_text(text)
+        self.clf._JSON_PROBE_BYTES = 250
+        assert self.clf.accepts(p) is True
+
     def test_fingerprint_registry_extensible(self) -> None:
         """Ensure FINGERPRINTS is extensible and restored after mutation."""
         original_len = len(AbiJsonClassifier.FINGERPRINTS)
