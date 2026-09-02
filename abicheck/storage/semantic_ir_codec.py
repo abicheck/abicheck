@@ -61,6 +61,7 @@ from .guards import (
     identity_text,
     mapping as _require_mapping,
     provenance_text,
+    required_field,
     row_sequence,
 )
 
@@ -231,8 +232,15 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
         return
     document = _mapping(d["semantic_ir"], "semantic_ir")
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    # `required_field`, not a default: this codec always writes the key (an
+    # IR that observed nothing is `{"occurrences": []}`), so a present
+    # `semantic_ir` without it is a truncated document. Substituting `()`
+    # would turn "the occurrence evidence is missing" into the *claim* that
+    # a backend ran and established there are none -- the "absence is not
+    # evidence" reading this package exists to refuse (Codex review).
     for entry_raw in row_sequence(
-        _present_or(document, "occurrences", ()), "semantic_ir occurrences"
+        required_field(document, "occurrences", "semantic_ir"),
+        "semantic_ir occurrences",
     ):
         entry = _mapping(entry_raw, "semantic_ir occurrence entry")
         occurrence = _mapping(entry.get("occurrence"), "semantic_ir occurrence")

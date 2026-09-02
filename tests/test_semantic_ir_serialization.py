@@ -320,6 +320,15 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(TypeError):
             snapshot_from_dict(document)
 
+    def test_a_missing_occurrences_collection_is_rejected(self) -> None:
+        """`{"semantic_ir": {}}` is a truncated document, not the claim that
+        a backend ran and found nothing — this codec always writes the key,
+        and an IR that observed nothing is `{"occurrences": []}`."""
+        document = snapshot_to_dict(_snapshot(SemanticIR()))
+        document["semantic_ir"] = {}
+        with pytest.raises(ValueError, match="missing required field"):
+            snapshot_from_dict(document)
+
     @pytest.mark.parametrize("bad", [[], "", 0, False])
     def test_a_falsey_malformed_conflict_map_is_rejected(self, bad: object) -> None:
         document = snapshot_to_dict(_snapshot(None))
