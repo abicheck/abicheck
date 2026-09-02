@@ -6001,3 +6001,33 @@ looked like the obvious fix and wasn't.
   history for the multi-round record: three review rounds on one commit
   chain, each fix closing the previous round's hazard while (in round 2's
   case) introducing this one.
+
+- **`BundleFacts` (and its G40 archive container) has no published JSON
+  Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`** —
+  investigated, not fixed (Codex review, CLI cleanup phase two's PR I
+  "artifact_type discriminator" prerequisite). That PR's own plan text
+  states the ordinary "Merge criteria" machine-contract obligations
+  (packaged *and* documented schema copies, JSON Schema validation) apply
+  when a manifest changes, and `BUNDLE_FACTS_SCHEMA_VERSION`'s 1→2 bump
+  for the new `artifact_type`/`BUNDLE_ARCHIVE_ARTIFACT_TYPE` markers is
+  exactly that kind of change — but a repo-wide search confirms neither
+  container has ever had a schema file: `abicheck/schemas/` covers
+  `compare_report`, `aggregate_report`, `build_evidence`, and
+  `build_source_pack` only, and `docs/reference/schemas/v1/` mirrors that
+  same set. This is a pre-existing gap predating this PR (the container
+  has existed since G38 Phase 2 with no schema at any version), not one
+  this PR's own diff introduced or made worse. Not fixed here because
+  authoring a first JSON Schema for a format with no existing schema
+  infrastructure (`scripts/publish_schemas.py`'s packaged/documented-copy
+  machinery, plus real validation tests) is a substantial, separate
+  deliverable — not a narrow addition to a field-and-classifier PR — and
+  because `BundleFacts`' own shape is still scheduled to change again
+  shortly: PR I's own `BundleCompareRequest` unification (blocked on PR
+  G2's `GateOptions`, which doesn't exist yet) may still touch this
+  container's fields before the format truly stabilizes, and authoring a
+  schema now only to revise it again for that landing would be wasted
+  work on the exact same axis. Tracked here rather than deferred silently;
+  the schema-authoring work belongs with (or immediately after) whichever
+  PR actually stabilizes `BundleFacts`' final v2-era shape -- the
+  `BundleCompareRequest` PR itself, or a dedicated follow-up if that PR's
+  own scope doesn't naturally include it.

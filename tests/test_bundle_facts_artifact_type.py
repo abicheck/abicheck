@@ -90,13 +90,28 @@ class TestBundleFactsArtifactTypeDiscriminator:
         d["schema_version"] = 1
         assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
 
+    def test_missing_artifact_type_accepts_a_string_encoded_v1_version(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: the old reader normalized
+        # schema_version via int(...) before comparing, so a v1 document
+        # spelling it as the string "1" (still exactly what int("1") == 1
+        # accepts) must keep loading, not be rejected by a raw,
+        # unnormalized comparison against the missing marker.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        del d["artifact_type"]
+        d["schema_version"] = "1"
+        assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
     def test_missing_artifact_type_defaults_when_schema_version_is_absent_too(
         self,
     ) -> None:
         # No schema_version key at all is the same "predates the marker"
         # case as an explicit 1 -- bundle_facts_from_dict already defaults
         # a missing schema_version to the current one for other purposes,
-        # but that must not by itself make a missing marker look legacy.
+        # but that must not by itself make a missing marker look legacy
+        # any less than an explicit "1" does.
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
         d = bundle_facts_to_dict(facts)
         del d["artifact_type"]
@@ -128,9 +143,10 @@ class TestBundleFactsArtifactTypeDiscriminator:
 class TestLooksLikeBundleFactsDocument:
     """Two-tier classification: an explicit ``artifact_type`` key is trusted
     outright (in both the match and mismatch directions) -- shape-based
-    fallback applies only to a true v1 document (``schema_version`` absent
-    or explicitly ``1``); a document declaring ``schema_version`` 2+ with no
-    marker gets neither tier (Codex review, fresh evidence)."""
+    fallback applies only to a true v1 document (``schema_version`` absent,
+    or normalizing -- via the same ``int(...)`` coercion the reader applies
+    -- to exactly ``1``); a document *explicitly* declaring ``schema_version``
+    2+ with no marker gets neither tier (Codex review, fresh evidence)."""
 
     def test_true_for_a_document_with_the_correct_marker(self) -> None:
         assert looks_like_bundle_facts_document(
@@ -152,6 +168,14 @@ class TestLooksLikeBundleFactsDocument:
     def test_true_for_a_legacy_v1_document_with_no_marker_key(self) -> None:
         assert looks_like_bundle_facts_document(
             {"schema_version": 1, "per_library_snapshots": {}}
+        )
+
+    def test_true_for_a_string_encoded_v1_version(self) -> None:
+        # Codex review, fresh evidence: must classify identically to the
+        # bare-int-1 case above, matching bundle_facts_from_dict's own
+        # int(...) normalization.
+        assert looks_like_bundle_facts_document(
+            {"schema_version": "1", "per_library_snapshots": {}}
         )
 
     def test_true_when_schema_version_is_absent_too(self) -> None:

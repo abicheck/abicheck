@@ -77,21 +77,25 @@ def looks_like_bundle_facts_document(data: Any) -> bool:
        `per_library_snapshots`-shaped key; the explicit marker is the whole
        point of having one.
     2. **Shape fallback** (true v1 documents only): `artifact_type` is
-       absent *and* `schema_version` is absent or explicitly `1` -- the
-       only signal available before the marker existed (schema_version 2)
-       is `per_library_snapshots` being present and mapping-shaped,
-       mirroring `bundle_facts_from_dict`'s own mandatory-key check. This
-       is a real, accepted false-positive surface (an unrelated document
-       that happens to define that one key) inherited from the v1 format
+       absent *and* `schema_version` is absent, or *normalizes* (the same
+       `int(...)` coercion :func:`bundle_facts_from_dict` applies, so
+       `"1"`/`True` keep classifying exactly as they did before this
+       marker existed -- Codex review, fresh evidence: an earlier,
+       unnormalized comparison rejected a legitimate `"schema_version":
+       "1"` baseline) to exactly `1` -- the only signal available before
+       the marker existed (schema_version 2) is `per_library_snapshots`
+       being present and mapping-shaped, mirroring
+       `bundle_facts_from_dict`'s own mandatory-key check. This is a real,
+       accepted false-positive surface (an unrelated document that
+       happens to define that one key) inherited from the v1 format
        itself, not introduced here -- closing it further would mean
        rejecting genuine v1 baselines already persisted in users' CI,
        which `BUNDLE_FACTS_SCHEMA_VERSION`'s own docstring rules out. A
-       document declaring `schema_version: 2` (or newer) but omitting the
-       marker gets neither tier -- schema_version 2 is exactly where the
-       marker became mandatory, so a document at or past that version
-       with no marker is malformed, not legacy, and must not silently pass
-       through the fallback meant for documents that predate the marker's
-       existence (Codex review, fresh evidence).
+       document *explicitly* declaring `schema_version` 2+ but omitting
+       the marker gets neither tier -- schema_version 2 is exactly where
+       the marker became mandatory, so an explicit 2+ with no marker is
+       malformed, not legacy, and must not silently pass through the
+       fallback meant for documents that predate the marker's existence.
 
     Does not itself decode JSON, open a file, or validate the document
     beyond this one question -- a caller wanting the parsed
@@ -103,8 +107,15 @@ def looks_like_bundle_facts_document(data: Any) -> bool:
         return False
     if "artifact_type" in data:
         return data.get("artifact_type") == BUNDLE_FACTS_ARTIFACT_TYPE
-    schema_version = data.get("schema_version", 1)
-    if isinstance(schema_version, bool) or schema_version != 1:
+    raw_schema_version = data.get("schema_version")
+    try:
+        # Same coercion bundle_facts_from_dict applies, so a legacy
+        # document spelling schema_version as "1" or 1.0 classifies
+        # identically to one spelling it as the bare int 1 (Codex review).
+        is_legacy_v1 = raw_schema_version is None or int(raw_schema_version) == 1
+    except (TypeError, ValueError):
+        is_legacy_v1 = False
+    if not is_legacy_v1:
         return False
     return isinstance(data.get("per_library_snapshots"), dict)
 
@@ -174,22 +185,25 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
             "bundle facts file."
         )
-    # A true v1 document (schema_version absent or explicitly 1, predating
-    # this marker) carries no `artifact_type` key at all -- defaults to the
-    # current value, same back-compat treatment as the missing-
-    # `schema_version` case just above. A document that *does* carry the
-    # key but names a different artifact type is rejected outright rather
-    # than silently accepted: whoever built it declared it as something
-    # else, and reading it as bundle facts anyway would score a comparison
-    # against a document nobody asked to be read this way (CLI cleanup
-    # phase two, PR I prerequisite -- the whole point of the explicit
-    # marker is that it is trusted, not advisory). A document declaring
-    # schema_version 2+ but omitting the key gets neither default nor
-    # fallback: schema_version 2 is exactly where the marker became
-    # mandatory, so a missing marker there is malformed, not legacy --
-    # silently defaulting it would let the discriminator schema_version 2
-    # exists to enforce be bypassed by the exact documents it's meant to
-    # catch (Codex review, fresh evidence).
+    # A true v1 document -- schema_version absent entirely, or *normalizing*
+    # (the same `int(...)` coercion just above, so a pre-marker document
+    # spelling it "1" or `True` keeps loading exactly as it did before this
+    # marker existed -- Codex review, fresh evidence: a raw, unnormalized
+    # comparison rejected a legitimate `"schema_version": "1"` baseline the
+    # old `int(...)`-based reader accepted) to exactly `1` -- carries no
+    # `artifact_type` key at all: defaults to the current value. A document
+    # that *does* carry the key but names a different artifact type is
+    # rejected outright rather than silently accepted: whoever built it
+    # declared it as something else, and reading it as bundle facts anyway
+    # would score a comparison against a document nobody asked to be read
+    # this way (CLI cleanup phase two, PR I prerequisite -- the whole point
+    # of the explicit marker is that it is trusted, not advisory). A
+    # document explicitly declaring schema_version 2+ but omitting the key
+    # gets neither default nor fallback: schema_version 2 is exactly where
+    # the marker became mandatory, so an explicit 2+ with no marker is
+    # malformed, not legacy -- silently defaulting it would let the
+    # discriminator schema_version 2 exists to enforce be bypassed by the
+    # exact documents it's meant to catch.
     if "artifact_type" in d:
         artifact_type = d["artifact_type"]
         if artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
@@ -198,10 +212,11 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
                 f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
             )
     else:
-        raw_schema_version = d.get("schema_version", 1)
-        is_legacy_v1 = (
-            not isinstance(raw_schema_version, bool) and raw_schema_version == 1
-        )
+        raw_schema_version = d.get("schema_version")
+        try:
+            is_legacy_v1 = raw_schema_version is None or int(raw_schema_version) == 1
+        except (TypeError, ValueError):
+            is_legacy_v1 = False
         if not is_legacy_v1:
             raise ValueError(
                 f"bundle facts: schema_version {schema_version} requires an "
