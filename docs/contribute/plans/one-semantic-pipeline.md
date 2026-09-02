@@ -13197,6 +13197,25 @@ reference/cv-suffix branches above already apply, just for a bracket
 shape not yet covered. Fixed by widening `\[\]` to `\[\d*\]` in the regex.
 Pinned by a new regression test using a sized-array `Variable`.
 
+**A third wrapper shape, seventeenth round, fresh evidence: `_Atomic(...)`
+can enclose the whole opaque spelling too.** castxml's resolver composes
+`_Atomic(void (*)(int)) callback` into `"_Atomic(FunctionType*)"` -- the
+identical "outer wrapping node, not glued onto the tag" shape the
+pointer/cv/array branches above already accept, just realized as a real
+paren pair instead of a sigil or keyword (mirroring
+`has_unresolved_component`'s own pre-existing `_ATOMIC_WRAPPER_PREFIX`
+transparent-wrapper treatment for the identical `_Atomic(...)`
+composition on the unresolved-sentinel side). An earlier revision of
+`_CASTXML_OPAQUE_FUNCTION_TYPE_RE` had no `_Atomic(...)` branch at all,
+so this shape fell through as a real, present spelling, conflicting in a
+hybrid dump against clang's complete `_Atomic(void (*)(int))` spelling
+while keeping the opaque, useless base value. Fixed by splitting the
+regex into a reusable inner pattern
+(`_CASTXML_OPAQUE_FUNCTION_TYPE_INNER`) and matching it either bare or
+wrapped in `_Atomic(...)`, rather than trying to fold the wrapper into
+one already-dense pattern. Pinned by a new regression test using an
+`_Atomic`-wrapped `Variable`.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

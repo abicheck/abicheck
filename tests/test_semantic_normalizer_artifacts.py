@@ -264,6 +264,33 @@ def test_normalize_header_ast_castxml_sized_array_opaque_function_type() -> None
     assert entity.canonical_spelling.status.value == "unsupported"
 
 
+def test_normalize_header_ast_castxml_atomic_wrapped_opaque_function_type() -> None:
+    """castxml's resolver composes ``_Atomic(void (*)(int)) callback`` into
+    ``"_Atomic(FunctionType*)"`` -- an ``_Atomic(...)`` wrapper enclosing
+    the whole opaque spelling, not only a pointer/cv/array wrapper (Codex
+    review, seventeenth round, fresh evidence): an earlier revision had no
+    ``_Atomic(...)`` branch, so this shape fell through as a real, present
+    spelling, conflicting with clang's complete ``_Atomic(void
+    (*)(int))`` spelling in a hybrid dump of an unchanged declaration."""
+    var = Variable(
+        name="callback",
+        mangled="callback",
+        type="_Atomic(FunctionType*)",
+        entity_id=entity_id_for_variable((), "callback", mangled_name="callback"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"
+
+
 def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     """A real, fully-resolved type spelling can legally contain a literal
     ``"?"`` -- clang emits one verbatim for a dependent ternary expression

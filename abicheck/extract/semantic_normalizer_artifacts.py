@@ -155,9 +155,29 @@ CLANG_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
 #: bound), so a sized array publishes the opaque tag as ``Fact.present``
 #: instead of ``Fact.unsupported()``, conflicting in a hybrid dump against
 #: clang's real, complete declarator for an unchanged callback array.
+#:
+#: **An ``_Atomic(...)`` wrapper can enclose the whole opaque spelling too
+#: (Codex review, seventeenth round, fresh evidence).** castxml's
+#: resolver composes `_Atomic(void (*)(int)) callback` into
+#: ``"_Atomic(FunctionType*)"`` -- the identical "outer wrapping node,
+#: not glued onto the tag" shape the pointer/cv/array branches above
+#: already accept, just realized as a real paren pair instead of a sigil
+#: or keyword (mirroring `has_unresolved_component`'s own pre-existing
+#: `_ATOMIC_WRAPPER_PREFIX` transparent-wrapper treatment for the
+#: identical `_Atomic(...)` composition on the unresolved-sentinel side).
+#: An earlier revision of this regex had no `_Atomic(...)` branch at all,
+#: so this shape fell through as a real, present spelling, conflicting in
+#: a hybrid dump against clang's complete `_Atomic(void (*)(int))`
+#: spelling while keeping the opaque, useless base value.
+_CASTXML_OPAQUE_FUNCTION_TYPE_INNER = (
+    r"(?:(?:const|volatile)\s+)*FunctionType"
+    r"(?:\s*(?:[*&]|\[\d*\])(?:\s+(?:const|volatile))*)*"
+)
 _CASTXML_OPAQUE_FUNCTION_TYPE_RE = re.compile(
-    r"^(?:(?:const|volatile)\s+)*FunctionType"
-    r"(?:\s*(?:[*&]|\[\d*\])(?:\s+(?:const|volatile))*)*$"
+    r"^(?:"
+    rf"_Atomic\({_CASTXML_OPAQUE_FUNCTION_TYPE_INNER}\)"
+    rf"|{_CASTXML_OPAQUE_FUNCTION_TYPE_INNER}"
+    r")$"
 )
 
 

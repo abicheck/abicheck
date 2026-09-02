@@ -217,3 +217,10 @@
   array's own opaque-tag fallback was wrongly published as
   `Fact.present(...)`, conflicting against clang's real, complete
   declarator for an unchanged callback array in a hybrid dump.
+  It also now accepts an `_Atomic(...)` wrapper enclosing the whole
+  opaque spelling (`"_Atomic(FunctionType*)"` for
+  `_Atomic(void (*)(int)) callback`) — mirroring
+  `has_unresolved_component`'s own pre-existing transparent-wrapper
+  treatment of `_Atomic(...)` on the unresolved-sentinel side — since an
+  earlier revision had no `_Atomic(...)` branch at all and fell through
+  to publishing the opaque base value as present.
