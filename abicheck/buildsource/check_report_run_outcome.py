@@ -74,7 +74,13 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     version``) reuses :func:`~abicheck.policy.outcome.run_outcome_dict_for_
     scan` exactly the way ``GateInfo.from_scan_report`` would read it back;
     a release/bundle report (``libraries``+``old_dir``) reuses
-    :func:`~abicheck.policy.outcome.run_outcome_dict_for_release`. Neither
+    :func:`~abicheck.policy.outcome.run_outcome_dict_for_release`, with its
+    own ``compatibility_contribution`` fallback to ``severity.exit_code``
+    or the legacy verdict mapping when the original ``exit`` block never
+    carried that key (this function must run *before* ``check_report.
+    augment_report``'s own call to ``backfill_exit_block_fields``, which
+    would otherwise default it to 0 -- indistinguishable from a real
+    confirmed-clean report -- before this function ever sees it). Neither
     call site can reach ``cli_compare_release_helpers._release_completed_
     compatibility_verdict``'s own ERROR/not_comparable-excluding precision
     (that helper lives in a `frontends`-classified module this leaf may not
@@ -114,12 +120,6 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             report=report,
         )
         return
-    if "libraries" in out and "old_dir" in out:
-        out["run_outcome"] = run_outcome_dict_for_release(
-            str(raw_verdict) if raw_verdict is not None else "NO_CHANGE",
-            out.get("exit", {}),
-        )
-        return
     from ..change_registry_types import Verdict
     from ..policy.severity import legacy_exit_code
 
@@ -128,6 +128,39 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         compatibility = Verdict(raw_verdict) if isinstance(raw_verdict, str) else None
     except ValueError:
         compatibility = None
+
+    if "libraries" in out and "old_dir" in out:
+        # `exit`, when present, is only trusted for `compatibility_
+        # contribution` if that specific key survived -- this runs before
+        # `backfill_exit_block_fields` (Codex review, fresh evidence: that
+        # backfill unconditionally defaults every missing `*_contribution`
+        # key, including this one, to 0, indistinguishable from a real
+        # confirmed-clean report; calling this first sees the true original
+        # shape). Falls back to `severity.exit_code`, then the legacy
+        # verdict mapping -- never the backfilled 0 -- so a legacy BREAKING
+        # release report with no exit/severity block still gets gate:
+        # abi_breaking instead of silently passing aggregation as clean.
+        exit_decision = out.get("exit")
+        if (
+            not isinstance(exit_decision, dict)
+            or "compatibility_contribution" not in exit_decision
+        ):
+            severity = out.get("severity")
+            sev_exit = severity.get("exit_code") if isinstance(severity, dict) else None
+            if not isinstance(sev_exit, int) or isinstance(sev_exit, bool):
+                sev_exit = (
+                    legacy_exit_code(compatibility) if compatibility is not None else 0
+                )
+            exit_decision = {
+                **(exit_decision if isinstance(exit_decision, dict) else {}),
+                "compatibility_contribution": sev_exit,
+            }
+        out["run_outcome"] = run_outcome_dict_for_release(
+            str(raw_verdict) if raw_verdict is not None else "NO_CHANGE",
+            exit_decision,
+        )
+        return
+
     severity = out.get("severity")
     exit_code = severity.get("exit_code") if isinstance(severity, dict) else None
     if not isinstance(exit_code, int) or isinstance(exit_code, bool):

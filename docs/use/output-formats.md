@@ -640,18 +640,20 @@ from abicheck.schemas import (
 Every JSON report carries a top-level `report_schema_version` field
 (`MAJOR.MINOR`) so consumers can detect the contract version they are reading.
 
-> **`run_outcome` (schema 2.48).** Every JSON report (`compare`, `scan`, the
-> release fan-out, and the not-comparable refusal document alike) carries an
-> additive top-level `run_outcome` block — `compatibility`/`assurance`/
-> `gate`/`operational`/`lifecycle`, the report's independent-axis outcome
-> (ADR-063 D6) — alongside the unchanged `verdict`/`exit_code`/`severity`
-> fields; nothing existing changes meaning or is removed. `gate` is an
-> exit-code-free category (`none`/`addition_quality`/`potential_breaking`/
-> `abi_breaking`); `operational` names a run that never produced a real
-> compatibility verdict at all (`none`/`budget_overflow`/`not_comparable`/
-> `evidence_contract_error`/`extraction_error`); `compatibility` is `null`
-> only for a report representing a run that never compared anything (a
-> resolve-baseline failure, or a bootstrap/new-target advisory pass).
+> **`run_outcome`.** Every JSON report (`compare`/release, schema 2.48;
+> `scan`, schema 1.24; and the not-comparable refusal document alike)
+> carries an additive top-level `run_outcome` block —
+> `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, the
+> report's independent-axis outcome (ADR-063 D6) — alongside the unchanged
+> `verdict`/`exit_code`/`severity` fields; nothing existing changes
+> meaning or is removed. `gate` is an exit-code-free category
+> (`none`/`addition_quality`/`potential_breaking`/`abi_breaking`).
+> `operational` is `none` for a run that produced a real compatibility
+> verdict; any other value (`budget_overflow`/`not_comparable`/
+> `evidence_contract_error`/`extraction_error`) means the run never did,
+> and `compatibility` is `null` in exactly that case — a resolve-baseline
+> failure, a bootstrap/new-target advisory pass, or a not-comparable
+> refusal (`operational: "not_comparable"`).
 
 > **Two version numbers, two contracts.** `report_schema_version` (above)
 > versions the **comparison report** emitted by `compare`. It is distinct from

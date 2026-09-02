@@ -239,6 +239,25 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   contribution, so a completed member's result survives even though the
   set itself never finished.
 
+- **A legacy release report's `run_outcome.gate` no longer silently reads
+  `none` for a real `BREAKING`/`API_BREAK` verdict.** `augment_report`
+  previously ran `backfill_exit_block_fields` before `backfill_run_
+  outcome`, so a legacy release report's `exit` block (present or absent)
+  already had every `*_contribution` field — including
+  `compatibility_contribution` — unconditionally defaulted to `0` by the
+  time the run_outcome backfill saw it, indistinguishable from a real,
+  confirmed-clean release. The two backfills now run in the opposite
+  order, and the release branch falls back to `severity.exit_code` or the
+  legacy verdict mapping (mirroring the native-compare branch) whenever
+  the *original* `exit` block never carried `compatibility_contribution`
+  at all (CodeRabbit review).
+- Corrected `docs/use/output-formats.md`'s `run_outcome` summary: it now
+  distinguishes `scan`'s schema 1.24 from `compare`/release's 2.48, states
+  that a not-comparable refusal has `compatibility: null` alongside
+  `operational: "not_comparable"`, and clarifies that any non-`none`
+  `operational` value (not just the four named ones) means no
+  compatibility verdict was produced (CodeRabbit review).
+
 ### Changed
 
 - `abicheck/report_run_outcome.py` moved to `abicheck/report/run_outcome.py`

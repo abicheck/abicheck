@@ -585,8 +585,8 @@ def augment_report(
     out = dict(report)
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
-    backfill_exit_block_fields(out)
     backfill_run_outcome(out)
+    backfill_exit_block_fields(out)
     _stamp_schema_version(out, report)
     out["check_id"] = check_id
     out["target_id"] = check_id

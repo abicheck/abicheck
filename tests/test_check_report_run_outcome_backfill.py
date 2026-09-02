@@ -111,6 +111,40 @@ def test_old_release_report_gets_backfilled_run_outcome() -> None:
     assert run_outcome["compatibility"] == "BREAKING"
 
 
+def test_legacy_release_report_with_no_exit_or_severity_block_gets_a_real_gate() -> None:
+    """CodeRabbit review, fresh evidence: augment_report previously ran
+    backfill_exit_block_fields before backfill_run_outcome, so a legacy
+    release report with no exit block at all (pre-2.41) had one
+    unconditionally synthesized with every *_contribution defaulted to 0
+    -- indistinguishable from a real, confirmed-clean release -- before
+    backfill_run_outcome ever saw it. A BREAKING release report with
+    neither an exit nor a severity block must still get gate: abi_breaking
+    (the legacy verdict mapping), not none."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "BREAKING"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "BREAKING",
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["gate"] == "abi_breaking"
+
+
+def test_legacy_release_report_prefers_a_real_severity_exit_code() -> None:
+    report = {
+        "libraries": [{"name": "a", "verdict": "COMPATIBLE_WITH_RISK"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "COMPATIBLE_WITH_RISK",
+        "severity": {"exit_code": 1, "blocking": True, "blocking_categories": ["quality_issues"]},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["gate"] == "addition_quality"
+
+
 def test_report_already_carrying_run_outcome_is_left_untouched() -> None:
     sentinel = {
         "schema_version": "1.0",
