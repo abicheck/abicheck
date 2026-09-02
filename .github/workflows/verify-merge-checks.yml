@@ -305,6 +305,15 @@ jobs:
             let pending = [];
             let failed = [];
             let attempt = 0;
+            // Consecutive clean observations, not total loop iterations --
+            // resets to 0 whenever a poll finds something pending, so an
+            // earlier non-clean attempt can never count toward the streak a
+            // later clean read needs to satisfy (Codex review: the original
+            // `attempt >= MIN_CLEAN_ATTEMPTS` check counted total attempts,
+            // so a single clean read after any earlier pending one already
+            // satisfied `attempt >= 2` and exited on that first clean read
+            // alone -- exactly the bug MIN_CLEAN_ATTEMPTS was meant to close).
+            let cleanStreak = 0;
             for (;;) {
               attempt += 1;
               // `filter: 'all'` is required, not optional: the API defaults
@@ -334,29 +343,36 @@ jobs:
                 // known-bad.
                 break;
               }
-              // A clean result (`pending.length === 0`) on the very first
-              // attempt does not prove there is nothing left to see: a
-              // rerun that was queued before the merge can fail to be
-              // indexed by `checks.listForRef` *at all* yet, not merely
-              // show up as `queued` -- so the response looks identical to
-              // "nothing else exists" and "the current attempt hasn't been
-              // indexed yet" (Codex review, the symmetric case to the
-              // stale-failed-snapshot handling above). Requiring the clean
-              // result to hold across at least MIN_CLEAN_ATTEMPTS polls
-              // gives a not-yet-indexed rerun one more cycle to appear
-              // before this workflow declares victory; it cannot prove a
-              // rerun created even later doesn't exist, but a single
-              // instantaneous "looks fine" read provably cannot either.
-              if (pending.length === 0 && attempt >= MIN_CLEAN_ATTEMPTS) {
-                break;
+              // A clean result (`pending.length === 0`) on a single poll
+              // does not prove there is nothing left to see: a rerun that
+              // was queued before the merge can fail to be indexed by
+              // `checks.listForRef` *at all* yet, not merely show up as
+              // `queued` -- so the response looks identical to "nothing
+              // else exists" and "the current attempt hasn't been indexed
+              // yet" (Codex review, the symmetric case to the stale-failed-
+              // snapshot handling above). Requiring `cleanStreak` (not the
+              // raw attempt count) to reach MIN_CLEAN_ATTEMPTS means the
+              // clean result must hold across that many *consecutive*
+              // polls, giving a not-yet-indexed rerun one more cycle to
+              // appear before this workflow declares victory; it cannot
+              // prove a rerun created even later doesn't exist, but a
+              // single instantaneous "looks fine" read provably can't
+              // either.
+              if (pending.length === 0) {
+                cleanStreak += 1;
+                if (cleanStreak >= MIN_CLEAN_ATTEMPTS) {
+                  break;
+                }
+              } else {
+                cleanStreak = 0;
               }
               if (Date.now() >= deadline) {
                 break;
               }
               core.info(
                 pending.length === 0
-                  ? `Attempt ${attempt}: no problems observed yet, but confirming across ` +
-                    `${MIN_CLEAN_ATTEMPTS} attempts before accepting a clean result; ` +
+                  ? `Attempt ${attempt}: no problems observed yet (${cleanStreak}/` +
+                    `${MIN_CLEAN_ATTEMPTS} consecutive clean polls); ` +
                     `retrying in ${POLL_INTERVAL_MS / 1000}s.`
                   : `Attempt ${attempt}: ${pending.length} required check(s) not yet ` +
                     `observed as completed for PR #${target.number}'s head ${headSha}; ` +
