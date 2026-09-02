@@ -12122,25 +12122,47 @@ pre-flight, which already ran ahead of both its real-run and `--dry-run`
 branches, and `_run_artifact_set`'s own pre-flight ahead of `--artifact-set`
 discovery) — closing both the explicit-`--config` and auto-discovered
 halves for the CLI-reachable `scan` shapes. **The fourth,
-`service_scan.run_scan_set`, was left unwidened**: `service_scan.py` sits
-exactly at the AI-readiness 2000-line hard cap, and the widened call (5
-positional args + 2 new keyword args) doesn't fit `ruff format`'s
-column budget on one line — the resulting explosion would have pushed the
-file 8+ lines over. Trimming unrelated content elsewhere in that file to
-buy back the budget was rejected as its own kind of risk (that file's
-existing content is all load-bearing review-history documentation, not
-slack); adding it to `LARGE_FILE_ALLOWLIST` was rejected too, since that
-allowlist's own comment reserves it for pre-existing `scripts/`/`tests/`
-debt discovered when scanning was widened to those trees, not a fresh
-production-file exemption for an unrelated fix. So the change was reverted
-at that one call site and named here instead: `run_scan_set`'s own
-`.abicheck.yml`-only gap stays open for a **direct typed-API call with no
-CLI in front of it** (`from abicheck.service_scan import run_scan_set;
-run_scan_set(ScanRequest(...))`) — `scan --artifact-set`'s own CLI path is
-unaffected, since `cli_scan._run_artifact_set`'s pre-flight (now widened)
-already runs ahead of `run_scan_set` and catches the mismatch first. A
-future pass splitting `service_scan.py` under its own file-size budget
-would remove this constraint; not attempted reactively here.
+`service_scan.run_scan_set`, was left unwidened for one session**:
+`service_scan.py` sat exactly at the AI-readiness 2000-line hard cap, and
+the widened call (5 positional args + 2 new keyword args) didn't fit
+`ruff format`'s column budget on one line — the resulting explosion would
+have pushed the file 8+ lines over. Trimming unrelated content elsewhere
+in that file to buy back the budget was rejected as its own kind of risk
+(that file's existing content is all load-bearing review-history
+documentation, not slack); adding it to `LARGE_FILE_ALLOWLIST` was
+rejected too, since that allowlist's own comment reserves it for
+pre-existing `scripts/`/`tests/` debt discovered when scanning was
+widened to those trees, not a fresh production-file exemption for an
+unrelated fix. So the change was reverted at that one call site and named
+here instead: `run_scan_set`'s own `.abicheck.yml`-only gap stayed open
+for a **direct typed-API call with no CLI in front of it** (`from
+abicheck.service_scan import run_scan_set; run_scan_set(ScanRequest(...))`)
+— `scan --artifact-set`'s own CLI path was unaffected, since
+`cli_scan._run_artifact_set`'s pre-flight (already widened) already ran
+ahead of `run_scan_set` and caught the mismatch first.
+
+**Closed in a later session, by splitting `service_scan.py` rather than
+raising its baseline.** `_descendant_pgids`/`_kill_process_tree` — the
+process-group kill machinery behind `run_scan_subprocess`/
+`run_scan_set_subprocess`, with zero dependency on anything scan-specific
+— moved to the new `abicheck/workflows/scan_subprocess.py`, re-exported
+from `service_scan.py` for backward compatibility (mirroring
+`cxx20_pair_dialect.py`'s own precedent: a genuine one-directional edge,
+since the worker/harness functions that actually call back into
+`run_scan`/`run_scan_set` stayed in `service_scan.py`, avoiding the
+mutual-dependency shape a full move of the subprocess harness would have
+created). It lives under `workflows/` rather than as a new flat
+`service_`-prefixed root sibling, since ADR-061's `frozen_root_families`
+closes that family to new members and `service_scan.py` is itself already
+classified into the `workflows` layer via that layer's own `legacy_paths`.
+That freed enough room for `run_scan_set`'s own `scan_bazel_scoping_failure`
+call to forward `sources=`/`build_config=` too, landing at a new, lowered
+`architecture/debt.yaml` baseline (2000 → 1933) with real room left below
+the hard cap. `tests/test_bazel_root_targets_scan.py::
+test_run_scan_set_config_sourced_target_scope_raises_planning_error` pins
+it, the `run_scan_set` sibling of `test_run_scan_depth_headers_config_
+sourced_target_scope_raises_planning_error`. Phase 4 is now complete: all
+four pre-flight call sites forward `sources=`/`build_config=`.
 `tests/test_analysis_plan.py::TestBazelBuildTargetScoping` gained six new
 cases (config-sourced scope raises for `dump`/`compare`; an explicit
 `build_targets` still wins over a present config, with the failure message
