@@ -69,7 +69,10 @@ from .cli_compare_release_helpers import (
     _match_release_keys,
     _resolve_release_headers,
 )
-from .frontends.cli.options.params import _load_suppression_and_policy
+from .frontends.cli.options.params import (
+    DEFAULT_POLICY_PROFILE,
+    _load_suppression_and_policy,
+)
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
@@ -108,6 +111,10 @@ def _write_release_summary_file(
     contract_coverage_exit_contribution: int = 0,
     bundle_result: BundleDiffResult | None = None,
     matrix_result: DiffResult | None = None,
+    policy: str = DEFAULT_POLICY_PROFILE,
+    policy_file_path: Path | None = None,
+    suppress: Path | None = None,
+    pack_application: PackApplication | None = None,
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -116,17 +123,28 @@ def _write_release_summary_file(
     stamps, via the one shared helper ``_release_summary_effective_config_
     block`` so the two can never independently drift (Codex review, PR
     #803). Also gains the same ``exit`` block that report does, via the
-    same resolver (ADR-064 stage 1b, Codex review).
+    same resolver (ADR-064 stage 1b, Codex review). *policy*/
+    *policy_file_path*/*suppress*/*pack_application* (P1, CLI-audit) are the
+    release's own resolved policy inputs, forwarded so this sidecar's
+    ``effective_config_fields`` reflects the real policy every library was
+    compared under, same as the primary report (see
+    ``_release_summary_effective_config_block``'s own docstring).
     """
+    from .cli_compare_receipt import _release_summary_effective_config_block
     from .cli_compare_release_helpers import (
         _release_completed_compatibility_verdict,
         _release_global_verdict,
-        _release_summary_effective_config_block,
     )
     from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.gate import resolve_release_exit_decision_for_report
 
-    digest, fields = _release_summary_effective_config_block(severity_config)
+    digest, fields = _release_summary_effective_config_block(
+        severity_config,
+        policy=policy,
+        policy_file_path=policy_file_path,
+        suppress=suppress,
+        pack_application=pack_application,
+    )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict,
@@ -253,6 +271,10 @@ def _finalize_release_output(
     severity_config: SeverityConfig | None = None,
     contract_coverage_exit_contribution: int = 0,
     contract_coverage_failure_count: int = 0,
+    policy: str = DEFAULT_POLICY_PROFILE,
+    policy_file_path: Path | None = None,
+    suppress: Path | None = None,
+    pack_application: PackApplication | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -274,6 +296,10 @@ def _finalize_release_output(
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
         contract_coverage_failure_count=contract_coverage_failure_count,
         fail_on_removed=fail_on_removed,
+        policy=policy,
+        policy_file_path=policy_file_path,
+        suppress=suppress,
+        pack_application=pack_application,
     )
     _write_or_echo(output, text)
 
@@ -299,6 +325,10 @@ def _finalize_release_output(
             contract_coverage_exit_contribution=contract_coverage_exit_contribution,
             bundle_result=bundle_result,
             matrix_result=matrix_result,
+            policy=policy,
+            policy_file_path=policy_file_path,
+            suppress=suppress,
+            pack_application=pack_application,
         )
 
     # ADR-049 Phase 7's orthogonal contract-coverage axis, release/package

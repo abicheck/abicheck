@@ -198,7 +198,9 @@ if TYPE_CHECKING:
     type=int,
     default=0,
     show_default=True,
-    help="Number of parallel library comparisons (0 = auto-detect CPU count, the default).",
+    help="Number of parallel library comparisons (0 = auto-detect CPU count, "
+    "clamped to fit available memory -- see ABICHECK_RELEASE_JOB_MEM_GIB -- "
+    "the default). An explicit positive value is never memory-clamped.",
 )
 @click.option(
     "--manifest",
@@ -353,6 +355,14 @@ def compare_release_cmd(
     # (`_prepare_compare_release_inputs`). `()` (the default) is a true
     # no-op.
     config_includes: tuple[Path, ...] = (),
+    # D1: `compare`'s directory/package fan-out forwards the one `--depth`
+    # value it can actually honour on this path -- `"binary"` (an explicit
+    # assertion that clears header/build/source evidence, matching a
+    # single-pair `compare --depth binary`) -- resolved ahead of dispatch by
+    # `cli_resolve._reject_depth_for_set_inputs`, which rejects every other
+    # rung outright. `None` (the default) is a true no-op, matching every
+    # pre-existing caller.
+    depth: str | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -612,6 +622,7 @@ def compare_release_cmd(
                 contract_mode=contract_mode,
                 pack_application=pack_application,
                 compile_context=compile_context,
+                depth=depth,
             )
 
             if bundle_facts_out is not None and not no_bundle_analysis:
@@ -791,6 +802,10 @@ def compare_release_cmd(
                     contract_coverage_exit_contribution=contract_coverage_exit_contribution,
                     contract_coverage_failure_count=contract_coverage_failure_count,
                     fail_on_removed=fail_on_removed,
+                    policy=policy,
+                    policy_file_path=policy_file_path,
+                    suppress=suppress,
+                    pack_application=pack_application,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -815,6 +830,10 @@ def compare_release_cmd(
                 severity_config=severity_config,
                 contract_coverage_exit_contribution=contract_coverage_exit_contribution,
                 contract_coverage_failure_count=contract_coverage_failure_count,
+                policy=policy,
+                policy_file_path=policy_file_path,
+                suppress=suppress,
+                pack_application=pack_application,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

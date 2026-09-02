@@ -1227,12 +1227,26 @@ elif [[ "$MODE" == "compare" ]]; then
     # skipped rather than forwarded, so the comparison would quietly run
     # without the requested evidence and could miss a source-only break
     # while still reporting a clean/normal result -- fail loud instead
-    # (Codex review; --depth binary/headers is fine to drop silently, since
-    # nothing was actually requested that this shape can't provide).
+    # (Codex review).
     if [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" \
        || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
       echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
       exit 1
+    fi
+    # --depth binary requests *less* evidence than the fan-out already
+    # collects by default, and the CLI now accepts and honours it per
+    # library on this path (D1) -- forward it, same as the single-pair
+    # branch below. --depth headers is still rejected by the CLI here (the
+    # per-library fan-out has no per-library evidence-floor enforcement
+    # yet), so it is dropped rather than forwarded -- but with a visible
+    # ::notice:: instead of the previous silent drop (D2: that silent drop
+    # was asymmetric with the compile-context guard above, which fails loud
+    # for everything it can't honour rather than swallowing part of the
+    # request unannounced).
+    if [[ "${INPUT_DEPTH:-}" == "binary" ]]; then
+      add_single_flag "--depth" "${INPUT_DEPTH:-}"
+    elif [[ "${INPUT_DEPTH:-}" == "headers" ]]; then
+      echo "::notice::mode: compare with a directory/package operand (a release/bundle comparison) does not honour --depth headers yet -- the per-library fan-out has no per-library evidence-floor enforcement, so the request is dropped rather than forwarded (the comparison still runs, using whatever headers -H/--include-dir/.abicheck.yml already resolve for each library). Compare the libraries individually (mode: compare with single-file operands) to require header-level evidence."
     fi
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
@@ -2569,16 +2583,31 @@ _resolve_clean_exit_verdict() {
     VERDICT="$_v"
     ADVISORY_BREAK=true
     echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+  elif [[ "$_v" == "COMPATIBLE_WITH_RISK" ]]; then
+    # R1 (CLI-audit): exit 0 was previously hard-mapped to VERDICT=COMPATIBLE
+    # unconditionally, only escalating when the report said BREAKING/
+    # API_BREAK -- so a report the CLI itself classified
+    # COMPATIBLE_WITH_RISK (a real, gate-worthy tier the CLI's own exit-code
+    # doc names alongside COMPATIBLE/NO_CHANGE as "0 = compatible") still
+    # published `verdict: COMPATIBLE` and a "No binary ABI break detected"
+    # summary, silently dropping every risk finding from the Action's own
+    # output even though the JSON report carried them in full. This is not
+    # an advisory *break* the severity policy demoted (ADVISORY_BREAK stays
+    # false: nothing here is gated by fail-on-breaking/fail-on-api-break,
+    # which never match this tier), just a verdict the exit-0 branch must
+    # not silently launder into a plain COMPATIBLE.
+    VERDICT="$_v"
   fi
 }
 
-# Compatibility tiers, most severe last. Only these three are ranked: every
+# Compatibility tiers, most severe last. Only these four are ranked: every
 # other verdict (ERROR, BUDGET_OVERFLOW, SEVERITY_ERROR, ...) is a different
 # axis and must never be escalated away by this comparison.
 _verdict_rank() {
   case "$1" in
-    BREAKING) echo 3 ;;
-    API_BREAK) echo 2 ;;
+    BREAKING) echo 4 ;;
+    API_BREAK) echo 3 ;;
+    COMPATIBLE_WITH_RISK) echo 2 ;;
     COMPATIBLE) echo 1 ;;
     *) echo 0 ;;
   esac

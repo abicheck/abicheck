@@ -56,7 +56,13 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
+
+if TYPE_CHECKING:
+    from .pack_application import PackApplication
+    from .workflows.gate import SeverityConfig
 
 #: The ``compare`` kwargs that feed the compatibility configuration. Named
 #: here so the caller forwards exactly the mapping
@@ -782,3 +788,104 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     # disagreeing "resolved" configs on the same result (Codex review, fresh
     # evidence).
     result.evaluation_config = config
+
+
+def _release_summary_effective_config_block(
+    severity_config: SeverityConfig | None,
+    *,
+    policy: str = DEFAULT_POLICY_PROFILE,
+    policy_file_path: Path | None = None,
+    suppress: Path | None = None,
+    pack_application: PackApplication | None = None,
+) -> tuple[str, dict[str, str]]:
+    """The ``(digest, fields)`` pair for a release-level *summary* document
+    (the primary release JSON and ``--output-dir``'s ``summary.json``
+    alike) -- narrower than a per-library sidecar's own digest, since no
+    ``CompatibilityEvaluationConfig`` exists at release-summary scope at
+    all, so this always resolves the *baseline* tier (see
+    ``effective_config_digest.py``'s own docstring for the two tiers).
+
+    P1 (CLI-audit): this used to compute the baseline tier from a bare,
+    empty ``SimpleNamespace()`` -- carrying only *severity_config* -- so
+    ``policy.base``/``policy.reclassify``/``policy.overrides``/
+    ``suppressions`` all read empty regardless of the real
+    ``--policy``/``--policy-file``/``--suppress`` every library was
+    actually compared under, as if no policy existed at all. Every library
+    shares one such input (the per-library fan-out reloads it once per
+    library), so resolving it once more here the same way
+    (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
+    folding *pack_application* like
+    :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
+    does) reproduces what any one library's own report shows for these
+    fields. Reloaded rather than threaded down because no per-library
+    ``PolicyFile`` is retained at this scope -- the reload runs inside the
+    same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
+    opens, so it doesn't duplicate a warning already logged per-library.
+
+    Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``
+    -- lives here since both callers are at their own ``no_growth`` cap.
+    """
+    from types import SimpleNamespace
+
+    from .contract_context import suppression_config_for
+    from .effective_config_digest import (
+        effective_config_digest,
+        effective_config_fields,
+    )
+    from .frontends.cli.options.params import _load_suppression_and_policy
+
+    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if pack_application is not None:
+        from .pack_application import policy_file_with_packs
+
+        pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
+    suppression_config = suppression_config_for(suppression)
+    ec_result = SimpleNamespace(
+        policy=policy,
+        policy_file=pf,
+        suppression_source_sha256=(
+            suppression_config.sha256 if suppression_config is not None else None
+        ),
+    )
+    ec_scheme = "severity" if severity_config is not None else "legacy"
+    ec_fields = effective_config_fields(
+        ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
+    )
+    return effective_config_digest(ec_fields), ec_fields
+
+
+def _release_md_library_findings(library_results: list[dict[str, object]]) -> list[str]:
+    """Per-library findings (kind/symbol/description) -- symbol names
+    included. R2 (CLI-audit): the release Markdown report's own
+    ``## Libraries`` table is counts only; reuses ``entry["findings"]`` --
+    the same capped list ``cli_compare_release_matrix._release_finding_dicts``
+    already projects, built regardless of output format -- mirroring
+    ``cli_compare_release_helpers``'s existing per-finding sections
+    (``_release_md_bundle_findings``/``_release_md_matrix_findings``, which
+    call this). Notes a truncated list (``entry["findings_truncated"]``)
+    rather than presenting it as complete. Lives here (not next to its
+    callers) for the identical reason as
+    :func:`_release_summary_effective_config_block` above -- both
+    ``cli_compare_release_helpers.py``/``cli_compare_release_matrix.py``
+    are at their own ``no_growth`` cap.
+    """
+    lines: list[str] = []
+    for lib in library_results:
+        findings = lib.get("findings")
+        if not findings:
+            continue
+        lines += ["", f"### `{lib['library']}` Findings", ""]
+        for f in cast(list[dict[str, object]], findings):
+            symbol = f.get("symbol")
+            lines.append(
+                f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
+            )
+            description = f.get("description")
+            if description:
+                lines.append(f"  - {description}")
+        if lib.get("findings_truncated"):
+            lines.append(
+                "  - _...additional findings omitted; see `--format json` "
+                "or `--output-dir` for the complete list._"
+            )
+    return ["", "## Per-Library Findings", *lines] if lines else []

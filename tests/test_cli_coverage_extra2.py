@@ -134,6 +134,54 @@ class TestSetupVerbosity:
             logger.setLevel(original_level)
             logger.handlers = original_handlers
 
+    def test_repeated_calls_do_not_accumulate_handlers(self) -> None:
+        """P3 (CLI-audit): a directory/package `compare` calls this twice in
+        one process (the outer `compare` command, then again when it
+        dispatches to the internal `compare_release_cmd`) -- a naive
+        unconditional addHandler would leave two handlers on the shared
+        "abicheck" logger, so every later _logger.warning()/.info() call
+        (e.g. a policy override's "usually causes binary incompatibility"
+        warning) prints once per accumulated handler instead of once per
+        event. Must stay at exactly one handler regardless of call count."""
+        logger = logging.getLogger("abicheck")
+        original_level = logger.level
+        original_handlers = logger.handlers[:]
+        try:
+            _setup_verbosity(verbose=False)
+            _setup_verbosity(verbose=False)
+            _setup_verbosity(verbose=True)
+            own_handlers = [
+                h
+                for h in logger.handlers
+                if getattr(h, "_abicheck_verbosity_handler", False)
+            ]
+            assert len(own_handlers) == 1
+        finally:
+            logger.setLevel(original_level)
+            logger.handlers = original_handlers
+
+    def test_repeated_calls_emit_each_warning_exactly_once(self) -> None:
+        """Behavioral proof, not just a handler count: a single
+        logger.warning() call must print exactly once even after this
+        function ran more than once in the same process."""
+        import io
+
+        logger = logging.getLogger("abicheck")
+        original_level = logger.level
+        original_handlers = logger.handlers[:]
+        try:
+            _setup_verbosity(verbose=False)
+            _setup_verbosity(verbose=False)
+            captured = io.StringIO()
+            for h in logger.handlers:
+                if getattr(h, "_abicheck_verbosity_handler", False):
+                    h.stream = captured
+            logger.warning("only once")
+            assert captured.getvalue().count("only once") == 1
+        finally:
+            logger.setLevel(original_level)
+            logger.handlers = original_handlers
+
 
 # ---------------------------------------------------------------------------
 # _safe_write_output
@@ -323,7 +371,9 @@ class TestWriteSnapshotOutput:
         assert "requested evidence layer(s) not collected" in err
         assert "L4" in err and "L5" in err
 
-    def test_dependencies_excluded_by_default_before_writing(self, tmp_path: Path) -> None:
+    def test_dependencies_excluded_by_default_before_writing(
+        self, tmp_path: Path
+    ) -> None:
         """dump (no flag) drops system-header declarations from the written
         JSON by default, reusing
         dumper_scoping.scope_snapshot_excluding_dependencies."""
@@ -496,8 +546,16 @@ def test_relocated_snapshot_helpers_resolve_under_direct_module_execution(
     src.mkdir()
     (src / "foo.h").write_text("int foo(void);\n")
     proc = subprocess.run(
-        [sys.executable, "-m", "abicheck.cli", "dump", "--sources", str(src),
-         "-o", str(tmp_path / "out.json")],
+        [
+            sys.executable,
+            "-m",
+            "abicheck.cli",
+            "dump",
+            "--sources",
+            str(src),
+            "-o",
+            str(tmp_path / "out.json"),
+        ],
         capture_output=True,
         text=True,
     )

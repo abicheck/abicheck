@@ -489,6 +489,7 @@ Compare two ABI inputs and return the classified diff result.
 | `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `compile_context` | `CompileContext \| None` | `None` |
+| `depth` | `str \| None` | `None` |
 
 **Returns:** `CompareResult`
 
