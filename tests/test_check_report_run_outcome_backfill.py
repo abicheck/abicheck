@@ -78,6 +78,26 @@ def test_old_scan_report_gets_backfilled_run_outcome() -> None:
     assert run_outcome["gate"] == "abi_breaking"
 
 
+def test_old_scan_abort_report_reads_the_nested_diff_exit_shape() -> None:
+    """Codex review (P2), fresh evidence: cli_scan._emit_scan_abort_report's
+    own persisted JSON (pre-1.24, before that writer carried run_outcome
+    itself) nests the abort's preserved exit decision under diff.exit, not
+    the top-level exit key service_scan.ScanResult.report uses -- without
+    reading that legacy shape too, a pre-existing BUDGET_OVERFLOW report's
+    already-found ABI break was silently lost on backfill (gate: none
+    instead of abi_breaking)."""
+    report = {
+        "scan_schema_version": "1.23",
+        "verdict": "BUDGET_OVERFLOW",
+        "exit_code": 5,
+        "diff": {"exit": {"code": 5, "compatibility_contribution": 4}},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["gate"] == "abi_breaking"
+    assert run_outcome["operational"] == "budget_overflow"
+
+
 def test_old_release_report_gets_backfilled_run_outcome() -> None:
     report = {
         "libraries": [{"name": "a", "verdict": "BREAKING"}],

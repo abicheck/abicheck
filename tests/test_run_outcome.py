@@ -216,6 +216,56 @@ class TestRunOutcomeForScanFields:
         )
         assert outcome.operational is OperationalStatus.BUDGET_OVERFLOW
 
+    def test_late_abort_preserves_the_prior_break_verdict_not_just_the_gate(self):
+        """Codex review (P2), fresh evidence beyond the abort-gate fix
+        above: a late BUDGET_OVERFLOW that already found a real BREAKING
+        comparison must not report compatibility=None alongside
+        gate=abi_breaking -- that contradicts the documented rule that null
+        means nothing was compared. A persisted compatibility_contribution
+        of 2/4 is unambiguous and must be carried through as the matching
+        real Verdict."""
+        outcome = run_outcome_for_scan_fields(
+            "BUDGET_OVERFLOW", 5, severity_exit_code=4
+        )
+        assert outcome.compatibility is not None
+        assert outcome.compatibility.value == "BREAKING"
+        assert outcome.gate is PolicyGateDecision.ABI_BREAKING
+
+        outcome2 = run_outcome_for_scan_fields(
+            "EVIDENCE_CONTRACT_ERROR", 1, severity_exit_code=2
+        )
+        assert outcome2.compatibility is not None
+        assert outcome2.compatibility.value == "API_BREAK"
+
+    def test_late_abort_with_a_clean_prior_contribution_stays_ambiguous(self):
+        # A 0 contribution can't be told apart from NO_CHANGE/COMPATIBLE/
+        # COMPATIBLE_WITH_RISK -- must stay None, unlike the 2/4 case above.
+        outcome = run_outcome_for_scan_fields(
+            "BUDGET_OVERFLOW", 5, severity_exit_code=0
+        )
+        assert outcome.compatibility is None
+
+    def test_assurance_block_threaded_through_from_scan_outcome(self):
+        """Codex review (P2), fresh evidence: every scan writer passed no
+        assurance at all, so the independent assurance axis always read
+        None even when the report's own diff.analysis_assurance block was
+        fully computed."""
+        from abicheck.policy.outcome import run_outcome_dict_for_scan_outcome
+
+        aa_block = {"schema_version": "1.0", "status": "complete"}
+        outcome = run_outcome_dict_for_scan_outcome(
+            "COMPATIBLE", 0, {"analysis_assurance": aa_block}
+        )
+        assert outcome["assurance"] == aa_block
+
+    def test_assurance_block_threaded_through_from_scan_report(self):
+        from abicheck.policy.outcome import run_outcome_dict_for_scan
+
+        aa_block = {"schema_version": "1.0", "status": "complete"}
+        report = {"diff": {"analysis_assurance": aa_block}}
+        outcome = run_outcome_dict_for_scan("COMPATIBLE", 0, report=report)
+        assert outcome["assurance"] == aa_block
+
     def test_abort_report_compatibility_contribution_preferred_over_top_level(self):
         """Codex review (P1/P2): a late BUDGET_OVERFLOW that already found a
         real ABI break must preserve that gate, not zero it out just
@@ -1043,6 +1093,62 @@ class TestNotComparableRunOutcome:
 
 
 class TestRunOutcomeSchemaValidation:
+    def test_full_run_outcome_is_a_defined_schema_property(self):
+        """Codex review (P1), fresh evidence: scoped (--used-by/--required-
+        symbol) compare JSON emits the public full_run_outcome field
+        (cli_compare_fold._swap_in_scoped_run_outcome), but neither copy of
+        compare_report.schema.json defined it -- unlike the analogous
+        full_severity, which the two are meant to mirror."""
+        from pathlib import Path
+
+        for rel in (
+            "abicheck/schemas/compare_report.schema.json",
+            "docs/reference/schemas/v1/compare_report.schema.json",
+        ):
+            schema_path = Path(__file__).resolve().parent.parent / rel
+            schema = json.loads(schema_path.read_text())
+            props = schema["properties"]
+            assert "full_run_outcome" in props, rel
+            assert props["full_run_outcome"]["$ref"] == "#/$defs/run_outcome"
+
+    def test_scoped_json_with_full_run_outcome_validates_against_the_schema(self):
+        """A real (--used-by/--required-symbol) scoped compare report -- the
+        one shape that actually emits full_run_outcome -- still validates
+        against the published schema mirror now that the field is defined."""
+        from pathlib import Path
+
+        from abicheck import reporter
+        from abicheck.analysis_assurance import compute_analysis_assurance
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.model import AbiSnapshot
+
+        old = AbiSnapshot(library="libfoo", version="1.0")
+        new = AbiSnapshot(library="libfoo", version="1.1")
+        result = DiffResult(
+            library="libfoo", old_version="1.0", new_version="1.1", verdict=Verdict.NO_CHANGE
+        )
+        result.analysis_assurance = compute_analysis_assurance(result, old, new)
+        data = json.loads(reporter.to_json(result))
+        data["full_run_outcome"] = RunOutcome(
+            compatibility=None,
+            assurance=None,
+            gate=PolicyGateDecision.ABI_BREAKING,
+            operational=OperationalStatus.NONE,
+            lifecycle=TargetLifecycle.EXISTING,
+        ).to_dict()
+
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "docs"
+            / "reference"
+            / "schemas"
+            / "v1"
+            / "compare_report.schema.json"
+        )
+        schema = json.loads(schema_path.read_text())
+        jsonschema.validate(data, schema)
+
     def test_fresh_compare_report_validates_against_the_published_schema_mirror(self):
         from pathlib import Path
 

@@ -148,6 +148,40 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   well-formed `RunOutcome` block — the only shape
   `cli_compare_fold._swap_in_scoped_run_outcome` ever actually produces —
   before granting the exemption.
+- **`scan`'s `run_outcome.assurance` is no longer always `null`.** Every
+  scan writer (`ScanOutcome`, `ScanResult`, `ScanSetResult`) built its
+  `RunOutcome` with `assurance=None` unconditionally, even when the
+  report's own `diff.analysis_assurance` block was fully computed
+  (`cli_scan_baseline.py`'s `analysis_assurance_report_dict`). The three
+  scan writers now thread that already-serialized block through, and
+  `analysis_assurance_dict` accepts it directly (alongside the live
+  `AnalysisAssurance` object `compare`'s own writers pass) since scan never
+  holds the live object at the point it builds `run_outcome`.
+- **A late scan abort's `run_outcome.compatibility` no longer reads `null`
+  beside a real `gate`.** A `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`
+  abort that already found a real break restores `gate` from its
+  persisted `exit.compatibility_contribution` (an earlier fix in this same
+  fragment), but `compatibility` still parsed from the abort's own
+  sentinel verdict string and stayed `null` regardless — contradicting the
+  documented rule that `null` means nothing was compared. A `2`/`4`
+  persisted contribution (the two unambiguous cases) now maps to the
+  matching real `Verdict`; a `0` contribution stays `null`, since it can't
+  be told apart from `NO_CHANGE`/`COMPATIBLE`/`COMPATIBLE_WITH_RISK`.
+- **The legacy-report backfill now reads a pre-1.24 native scan abort
+  report's nested `diff.exit`, not just the top-level `exit` key.**
+  `cli_scan._emit_scan_abort_report`'s own persisted JSON shape nests the
+  abort's preserved exit decision under `diff.exit` — a different envelope
+  than `service_scan.ScanResult.report`'s top-level `exit`, which
+  `scan_report_abort_compatibility_contribution` reads. Without also
+  checking the nested shape, `backfill_run_outcome` silently downgraded an
+  already-found ABI break to the abort's own operational-only exit floor.
+- **`full_run_outcome` is now defined in the published report schema.**
+  Scoped (`--used-by`/`--required-symbol`) compare JSON has emitted this
+  field since `cli_compare_fold._swap_in_scoped_run_outcome` landed
+  earlier in this PR, but neither copy of `compare_report.schema.json`
+  declared it — unlike the analogous `full_severity`, which it mirrors.
+  Also registered `run_outcome`'s fact sources under the existing
+  `output-formats` documentation topic (`docs/_meta/topics.yaml`).
 
 ### Changed
 

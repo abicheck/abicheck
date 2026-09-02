@@ -90,12 +90,28 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     raw_verdict = out.get("verdict")
     if "scan_schema_version" in out:
         exit_code = out.get("exit_code")
+        report: dict[str, Any] = out
+        if "exit" not in out:
+            # `cli_scan._emit_scan_abort_report`'s own persisted JSON shape
+            # (pre-1.24, before that writer carried `run_outcome` itself)
+            # nests the abort's preserved exit decision under `diff.exit`,
+            # not the top-level `exit` key `scan_report_abort_compatibility_
+            # contribution` reads -- that top-level shape is only
+            # `service_scan.ScanResult.report`'s own, typed-API-only
+            # envelope (Codex review, fresh evidence: without this, a
+            # legacy BUDGET_OVERFLOW/EVIDENCE_CONTRACT_ERROR report's
+            # already-found ABI break was silently lost on backfill, since
+            # the reader found nothing at the top-level key it expected).
+            diff = out.get("diff")
+            nested_exit = diff.get("exit") if isinstance(diff, dict) else None
+            if isinstance(nested_exit, dict):
+                report = {**out, "exit": nested_exit}
         out["run_outcome"] = run_outcome_dict_for_scan(
             str(raw_verdict) if raw_verdict is not None else "",
             exit_code
             if isinstance(exit_code, int) and not isinstance(exit_code, bool)
             else 0,
-            report=out,
+            report=report,
         )
         return
     if "libraries" in out and "old_dir" in out:

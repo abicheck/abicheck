@@ -350,6 +350,7 @@ def run_outcome_for_scan_fields(
     contract_coverage_contribution: object = None,
     member_evidence_contract_error: bool = False,
     bundle_incomplete: bool = False,
+    assurance: object | None = None,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
@@ -407,6 +408,15 @@ def run_outcome_for_scan_fields(
     INCOMPLETE`` sentinel *verdict* the ``_SCAN_ABORT_VERDICT_OPERATIONAL``
     membership check above already covers, this is the case where the
     audit still went incomplete but *verdict* itself never says so.
+
+    *assurance*, when given, is the report's own already-serialized
+    ``analysis_assurance`` block (``cli_scan_baseline.py``'s
+    ``diff_summary["analysis_assurance"]``) -- stored on the returned
+    :class:`RunOutcome` as-is; :func:`analysis_assurance_dict` accepts this
+    already-``dict`` shape directly (Codex review, fresh evidence: every
+    scan writer was passing no assurance at all, so the axis always read
+    ``None`` even for a report whose own ``diff.analysis_assurance`` block
+    was fully computed).
     """
     operational = _SCAN_ABORT_VERDICT_OPERATIONAL.get(verdict, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE:
@@ -421,6 +431,22 @@ def run_outcome_for_scan_fields(
         compatibility = Verdict(verdict)
     except ValueError:
         compatibility = None
+        # *verdict* is one of the operational-only sentinels (e.g. a late
+        # BUDGET_OVERFLOW/EVIDENCE_CONTRACT_ERROR abort) -- but a persisted,
+        # validated *severity_exit_code* (the abort's own preserved
+        # `exit.compatibility_contribution`) can still say a real
+        # comparison completed and found a break before the abort fired
+        # (Codex review, fresh evidence: the earlier abort-gate fix restored
+        # `gate` from this same value but left `compatibility` at `None`
+        # regardless, contradicting `docs/use/output-formats.md`'s own
+        # "null means nothing was compared" rule for a report that clearly
+        # did compare something). Only 2/4 are unambiguous -- a `0`
+        # contribution cannot be told apart from NO_CHANGE/COMPATIBLE/
+        # COMPATIBLE_WITH_RISK, so it stays `None`, same as today.
+        if severity_exit_code == 2:
+            compatibility = Verdict.API_BREAK
+        elif severity_exit_code == 4:
+            compatibility = Verdict.BREAKING
 
     compat_exit_code = (
         severity_exit_code if severity_exit_code is not None else exit_code
@@ -458,7 +484,7 @@ def run_outcome_for_scan_fields(
 
     return RunOutcome(
         compatibility=compatibility,
-        assurance=None,
+        assurance=assurance,
         gate=gate,
         operational=operational,
         lifecycle=lifecycle,
@@ -538,6 +564,20 @@ def scan_report_coverage_contribution(report: object) -> object:
     )
 
 
+def scan_report_assurance_block(report: object) -> object:
+    """A scan report dict's own nested ``diff.analysis_assurance`` (already
+    serialized by ``cli_scan_baseline.py``'s ``analysis_assurance_report_
+    dict(diff).to_dict()``), or ``None`` when absent -- the identical
+    ``report.get("diff")`` traversal :func:`scan_report_severity_exit_code`
+    uses, for the sibling field. Returned unvalidated (``object``, not
+    ``dict | None``): :func:`analysis_assurance_dict` narrows it on read,
+    the same fail-closed-on-read-not-write principle every other reader in
+    this module follows.
+    """
+    diff = report.get("diff") if isinstance(report, dict) else None
+    return diff.get("analysis_assurance") if isinstance(diff, dict) else None
+
+
 def run_outcome_dict_for_scan_outcome(
     verdict: str, exit_code: int, diff_summary: object
 ) -> dict[str, Any]:
@@ -563,6 +603,9 @@ def run_outcome_dict_for_scan_outcome(
         exit_code,
         severity_exit_code=severity_exit_code,
         contract_coverage_contribution=coverage_contribution,
+        assurance=diff_summary.get("analysis_assurance")
+        if isinstance(diff_summary, dict)
+        else None,
     ).to_dict()
 
 
@@ -602,6 +645,7 @@ def run_outcome_dict_for_scan(
         contract_coverage_contribution=scan_report_coverage_contribution(report),
         member_evidence_contract_error=member_evidence_contract_error,
         bundle_incomplete=bundle_incomplete,
+        assurance=scan_report_assurance_block(report),
         lifecycle=lifecycle,
     ).to_dict()
 
@@ -698,9 +742,20 @@ def analysis_assurance_dict(assurance: object | None) -> dict[str, Any] | None:
     module may not import ``analysis_assurance`` at module scope (it is not
     one of the leaves ``policy/`` may depend on), so the check is done with
     a function-local import instead.
+
+    A plain ``dict`` is passed through unchanged (Codex review, fresh
+    evidence): ``scan``'s own writers never hold a live ``AnalysisAssurance``
+    object at the point they build ``RunOutcome`` -- only its own already-
+    serialized ``diff_summary["analysis_assurance"]`` block
+    (``cli_scan_baseline.py``'s ``analysis_assurance_report_dict(diff).
+    to_dict()`` result) -- so :attr:`RunOutcome.assurance` legitimately holds
+    either shape depending on the writer, and this is the one place both are
+    unwrapped to the same report-JSON shape.
     """
     from ..analysis_assurance import AnalysisAssurance
 
-    if not isinstance(assurance, AnalysisAssurance):
-        return None
-    return assurance.to_dict()
+    if isinstance(assurance, AnalysisAssurance):
+        return assurance.to_dict()
+    if isinstance(assurance, dict):
+        return assurance
+    return None

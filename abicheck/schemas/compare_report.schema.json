@@ -350,6 +350,10 @@
       "description": "Schema 2.9. The full-library severity gate result, present alongside severity only for a scoped (--used-by/--required-symbol(s)) compare whose gating result was recomputed for the scoped changes array -- mirrors the verdict/full_verdict split.",
       "$ref": "#/$defs/severity"
     },
+    "full_run_outcome": {
+      "description": "ADR-063 Phase 7. The full-library run_outcome, present alongside run_outcome only for a scoped (--used-by/--required-symbol(s)) compare whose run_outcome was recomputed for the scoped changes array -- mirrors the verdict/full_verdict and severity/full_severity splits.",
+      "$ref": "#/$defs/run_outcome"
+    },
     "changes": {
       "type": "array",
       "items": {
