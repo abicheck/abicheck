@@ -343,6 +343,39 @@ class TestImportLegacySnapshot:
         assert rebuilt["evidence_pack"] == doc["evidence_pack"]
 
 
+class TestRealLegacySchemaFixturesRoundTrip:
+    """`tests/fixtures/schema/v1.json` through `v5.json` are real, CI-golden
+    documents from `test_schema_compat.py`'s own backward-compatibility
+    contract -- a second Codex review round found the storage-v2 completeness
+    check (`missing_required_section_fields`) had regressed this exact
+    contract by requiring fields those genuinely older schema versions never
+    had at all (`platform`/`kabi`/`build_mode`/`source_mtime`/...). Every
+    fixture must import and export through the v1-v25 adapter cleanly."""
+
+    @pytest.mark.parametrize(
+        "fixture_name", ["v1.json", "v2.json", "v3.json", "v4.json", "v5.json"]
+    )
+    def test_a_real_schema_fixture_round_trips(self, fixture_name: str) -> None:
+        import json
+        from pathlib import Path
+
+        fixtures_dir = Path(__file__).resolve().parents[2] / "fixtures" / "schema"
+        doc = json.loads((fixtures_dir / fixture_name).read_text(encoding="utf-8"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        # v1.json predates `schema_version` entirely (the pre-versioning
+        # convention: an absent key reads as v1) -- the round trip correctly
+        # makes that implicit version explicit rather than reproducing the
+        # key's absence, so compare with it folded in on both sides.
+        expected = {**doc, "schema_version": doc.get("schema_version", 1)}
+        assert canonical_form(rebuilt) == canonical_form(expected)
+
+
 class TestMaxKnownSchemaVersion:
     """A document newer than this build knows how to interpret must be
     refused, not silently imported with an unrecognized `schema_version`

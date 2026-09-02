@@ -100,6 +100,40 @@ class TestSectionFieldsCompleteness:
         assert "semantic_ir" not in LEGACY_SECTION_KINDS
 
 
+class TestRequiredSectionFieldsMatchTheV1Fixture:
+    """`missing_required_section_fields`'s required set must never claim
+    more than schema v1's own real, CI-golden document actually carries --
+    a second Codex review round found the first attempt (requiring every
+    `_SECTION_FIELDS` key) broke exactly this, rejecting real v1-v5
+    documents that never had fields like `platform`/`build_mode` at all.
+    This test derives the expected required set directly from the real
+    fixture rather than restating `_REQUIRED_SECTION_FIELDS` by hand, so it
+    cannot silently drift from the ground truth it is meant to encode."""
+
+    def test_required_fields_are_exactly_the_v1_fixtures_present_keys(
+        self,
+    ) -> None:
+        import json
+        from pathlib import Path
+
+        from abicheck.storage.legacy_sections import (
+            _REQUIRED_SECTION_FIELDS,
+            split_legacy_document,
+        )
+
+        v1_path = (
+            Path(__file__).resolve().parents[2] / "fixtures" / "schema" / "v1.json"
+        )
+        v1_doc = json.loads(v1_path.read_text(encoding="utf-8"))
+        v1_sections = split_legacy_document(v1_doc)
+        for section_kind, required in _REQUIRED_SECTION_FIELDS.items():
+            present = set(v1_sections.get(section_kind, {}))
+            assert required <= present, (
+                f"{section_kind!r} requires {sorted(required - present)}, "
+                "which the real v1 fixture does not carry"
+            )
+
+
 class TestSplitLegacyDocument:
     def test_splits_by_section(self) -> None:
         doc = {"library": "libfoo.so.1", "types": [{"name": "Foo"}], "elf": {"a": 1}}

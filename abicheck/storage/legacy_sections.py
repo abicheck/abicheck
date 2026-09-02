@@ -218,56 +218,69 @@ for _section_kind, _fields in _SECTION_FIELDS.items():
         _FIELD_TO_SECTION[_field] = _section_kind
 del _section_kind, _fields, _field
 
-#: Fields a *real* `snapshot_to_dict()` document may legitimately omit even
-#: when the owning section is otherwise present -- everything else in
-#: `_SECTION_FIELDS` is a real `AbiSnapshot` dataclass field `asdict()`
-#: always emits (with `None`/a default value, never an absent key), so its
-#: absence from an otherwise-present section's payload is never a real
-#: snapshot's own doing (Codex review: a truncated section payload -- one
-#: whose *object* is validly hashed but whose JSON content itself has lost a
-#: key -- silently reads back as that field's empty/default value instead of
-#: surfacing as corruption). Kept to exactly the keys `serialization.
-#: snapshot_to_dict()`'s own conditional `d.pop(...)` calls (or, for the two
-#: non-dataclass keys, a genuinely optional origin) can drop:
-#:   - `"from_headers"`: popped when `from_headers_inferred` is true.
-#:   - `"build_source"`: popped when `snap.build_source is None`.
-#:   - `"build_source_pack"`/`"evidence_pack"`: mutually-exclusive spellings
-#:     of the same fact across schema versions (ADR-028's rename) -- a
-#:     current document carries the former, an old (pre-v8) one the latter,
-#:     so neither may be required unconditionally.
-#:   - `"dump_provenance"`: not an `AbiSnapshot` field at all -- added to the
-#:     document dict only by a real `dump` invocation's CLI write path,
-#:     after `snapshot_to_dict()` already ran.
-_OPTIONAL_SECTION_FIELDS: Mapping[str, frozenset[str]] = {
-    "debug": frozenset({"from_headers"}),
-    "build": frozenset({"build_source", "build_source_pack", "evidence_pack"}),
-    "provenance": frozenset({"dump_provenance"}),
+#: The *empirically minimal* subset of `_SECTION_FIELDS` a section's payload
+#: must carry once the section is present at all -- deliberately NOT "every
+#: field `_SECTION_FIELDS` lists for this section" (a first attempt at this
+#: check used exactly that and broke the documented v1-v25 legacy-document
+#: contract: `tests/fixtures/schema/v1.json` through `v5.json` are real,
+#: CI-golden, hand-maintained documents from schema versions that simply
+#: never had fields like `platform`/`kabi`/`build_mode`/`source_mtime` at
+#: all -- Codex review, second round). Most `AbiSnapshot` field additions are
+#: purely additive and were never tied to a `schema_version` bump in the
+#: first place (`serialization.py`'s own version-history comment: a bump
+#: happens only when the change is backward-incompatible or introduces a
+#: real-but-ambiguous value needing a reliability flag) -- so there is no
+#: reliable, document-derivable "introduced at version N" for most fields,
+#: and a hand-maintained one would either be guessed or silently go stale.
+#: What CAN be stated with confidence, because it is a real, tested,
+#: monotonic fact instead of a guess: every key present in schema v1 (the
+#: format's own minimum, before *any* version-gated field existed) is safe
+#: to require in any section that carries it at all, since `v1.json`
+#: through `v5.json` show the set only ever grows. This is deliberately a
+#: narrower guarantee than "every current-schema field is present" -- it
+#: still catches the concrete case Codex's original finding named (a
+#: `functions`/`types`/`elf`/... key silently dropped from an otherwise-
+#: present section), just not a newer, version-gated field's absence in an
+#: old document, which is legitimate, not corruption.
+#: `tests/unit/storage/test_legacy_sections.py`'s own test derives this
+#: table from the real v1 fixture directly, so it cannot silently drift from
+#: the ground truth it is meant to encode.
+_REQUIRED_SECTION_FIELDS: Mapping[str, frozenset[str]] = {
+    "binary": frozenset({"elf", "pe", "macho"}),
+    "declarations": frozenset({"functions", "variables", "enums", "typedefs", "sycl"}),
+    "types": frozenset({"types"}),
+    "debug": frozenset({"dwarf", "dwarf_advanced"}),
+    "layout": frozenset(),
+    "build": frozenset(),
+    "graph": frozenset(),
+    "provenance": frozenset({"library", "version"}),
 }
 
 
 def missing_required_section_fields(
     section_kind: str, payload: Mapping[str, Any]
 ) -> frozenset[str]:
-    """Which of *section_kind*'s `_SECTION_FIELDS` a real `snapshot_to_dict()`
-    document always carries, but *payload* (an already section-kind-
-    validated payload -- every key in *payload* is assumed to already belong
-    to *section_kind*) is missing.
+    """Which of *section_kind*'s `_REQUIRED_SECTION_FIELDS` -- the small,
+    empirically-grounded subset every schema version from v1 onward has
+    always carried -- *payload* (an already section-kind-validated payload
+    -- every key in *payload* is assumed to already belong to *section_kind*)
+    is missing.
 
     Callers reconstructing a legacy document from independently-addressable,
     persisted section objects (`storage.import_v1.export_legacy_snapshot`)
     use this to detect a truncated section -- one whose stored object hashed
-    and decoded fine, but whose JSON content itself has lost a field a real
-    write always includes -- before that gap silently reads back as the
-    field's empty/default value (Codex review). Returns an empty
-    `frozenset` for an unknown *section_kind*; callers that need to reject
-    that separately already do (`join_legacy_document`'s own check).
+    and decoded fine, but whose JSON content itself has lost a field every
+    real schema version includes -- before that gap silently reads back as
+    the field's empty/default value (Codex review). Deliberately does NOT
+    require every field `_SECTION_FIELDS` lists for the section -- see
+    `_REQUIRED_SECTION_FIELDS`'s own docstring for why that would reject
+    real, older-schema documents. Returns an empty `frozenset` for an
+    unknown *section_kind*; callers that need to reject that separately
+    already do (`join_legacy_document`'s own check).
     """
-    allowed = _SECTION_FIELDS.get(section_kind)
-    if allowed is None:
+    required = _REQUIRED_SECTION_FIELDS.get(section_kind)
+    if required is None:
         return frozenset()
-    required = frozenset(allowed) - _OPTIONAL_SECTION_FIELDS.get(
-        section_kind, frozenset()
-    )
     return required - set(payload)
 
 

@@ -293,7 +293,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
     from ....cli_dump_request import build_dump_request
     from ....cli_options import warn_deprecated_header_graph_flags
-    from ....dry_run import emit_dry_run, reject_dry_run_with_output
+    from ....dry_run import (
+        emit_dry_run,
+        reject_dry_run_with_output,
+        reject_output_inside_project_snapshot_dir,
+    )
 
     warn_deprecated_header_graph_flags(
         header_graph_deprecated, header_graph_includes_deprecated
@@ -305,6 +309,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             "--dry-run cannot be combined with --project-snapshot-dir: a dry "
             "run performs no analysis and writes no package directory."
         )
+    reject_output_inside_project_snapshot_dir(output, project_snapshot_dir)
     if output is None and snapshot_compression not in ("auto", "none"):
         raise click.UsageError(
             f"--compression {snapshot_compression} requires -o/--output -- "
