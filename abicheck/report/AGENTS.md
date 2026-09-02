@@ -23,7 +23,7 @@ needs no serializer of its own), `render_text.py` (the one-line `--stat`
 summary, `render_stat_document`), `render_xml.py` (JUnit),
 `render_markdown.py` (Markdown prose), `render_html.py` (HTML's reusable
 per-section formatters), and `render_html_document.py` (HTML's whole-document
-projection, `render_html_document`).
+projection). `scoped_gate.py` (below) mutates a JSON `dict`, not a result.
 
 **HTML now crosses the single canonical `ReportDocument` boundary; Markdown
 does not yet.** JSON, SARIF, JUnit, `--stat`, and now HTML construct a
@@ -33,8 +33,8 @@ frozen structs straight from a `DiffResult`, no intervening document.
 Converging Markdown is tracked in `duplication-and-convergence-assessment.md`'s
 Phase 4. HTML's whole-document formatting split out of `render_html.py` into
 the sibling `render_html_document.py` once the combined module passed the
-architecture check's new-file size ceiling: `render_html.py` keeps the
-reusable per-section renderers (`ChangeRow`, `render_changes_table`,
+architecture check's new-file ceiling: `render_html.py` keeps the reusable
+per-section renderers (`ChangeRow`, `render_changes_table`,
 `FileMetadataTable`/`render_file_metadata`, siblings); `render_html_document.py`
 owns only "assemble the complete page from a finished document"
 (`render_html_document`, its native/compat-mode halves, and the
@@ -85,11 +85,10 @@ element). `tests/unit/report/test_render_html.py`'s
 guard, parametrized over both HTML render modules: neither may import
 `report_classifications`, `checker_policy`, `severity`, `reclassify` or
 friends at all. An assertion on rendered strings cannot catch this class —
-the import list is what changes.
-Filtering that *looks* like formatting stays compute-side whenever it is
-really a report decision (which summary rows are non-empty; which reclassify
-rules are still active). Both modules keep every pre-split name that
-anything still resolves through — a re-export exists to avoid breaking a
+the import list is what changes. Filtering that *looks* like formatting
+stays compute-side when it is really a report decision (which summary rows
+are non-empty; which reclassify rules are still active). Both modules keep
+every pre-split name anything still resolves through — a re-export exists to avoid breaking a
 real caller, not to freeze a name forever (D8: "not retained solely because
 a test monkeypatches it... the test moves with the implementation"). HTML's
 whole-document closure retired several left with zero resolvers anywhere in
@@ -99,15 +98,16 @@ the repo, tests included, once every caller moved onto
 `_symbol_cell`/`_verdict_icon`, the six single-section `*_html` wrappers
 `generate_html_report` called directly before `build_html_document` existed,
 and `_compat_changes_table` once its only caller (the ABICC layout) moved
-onto `render_compat_changes_table` directly in `render_html_document.py`.
-`_abbr_symbol_text`/`_changes_table` -- the two with a real caller
-(`appcompat_html.py`, plus their own direct tests) -- are unaffected.
+onto `render_compat_changes_table` directly. `_abbr_symbol_text`/
+`_changes_table` -- with a real caller (`appcompat_html.py`) -- are unaffected.
 
-One piece of ADR-061 Phase 2 item 5 stays open: `cli_compare_fold.py`'s
-scoped-gate JSON fold, which needs this package's JSON builders to accept
-scoped-gate awareness natively rather than re-deriving already-built
-sections post-render. See ADR-061's Phase 2 status note for items 4 and 5's
-closed halves (per-finding verdict; the fold-ins' demangle scope).
+ADR-061 Phase 2 item 5 is now closed: `scoped_gate.py`'s `apply_scoped_gate`
+folds `--used-by`/`--required-symbol(s)` scoping into a JSON payload
+natively (from `reporter_contract_blocks.render_json_with_side_facts`,
+before rendering), not a render -> parse -> patch -> render pass over text.
+It imports legacy, still-flat `reporter`/`reporter_markdown` (same
+`layers.report.legacy_paths` layer) because `modules.yaml`'s
+`frozen_root_families` forbids a new `abicheck/reporter_*.py` sibling.
 
 ## Tests
 

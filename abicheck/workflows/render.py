@@ -111,6 +111,7 @@ def _render_json_output(
     show_impact: bool,
     severity_config: SeverityConfig | None,
     require_complete_analysis: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result as JSON, optionally including dependency
     info. See :func:`abicheck.service_render._render_json_output`."""
@@ -126,6 +127,7 @@ def _render_json_output(
             show_impact=show_impact,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
         ),
     )
 

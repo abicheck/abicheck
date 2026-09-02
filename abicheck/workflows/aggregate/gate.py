@@ -186,7 +186,7 @@ def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
     2. That alone was still not enough: a *well-formed but unrelated*
        ``full_run_outcome`` value, added to an otherwise-unscoped corrupt
        report, still earned the exemption -- the real writer
-       (``cli_compare_fold._ScopedFold.into_json``) never emits
+       (``report.scoped_gate.apply_scoped_gate``) never emits
        ``full_run_outcome`` without *also* unconditionally emitting
        ``full_verdict`` (set on every scoped fold, regardless of which flag
        triggered it) and at least one of ``used_by``/
@@ -217,7 +217,7 @@ def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
     5. Presence alone was still not enough for the *other* two markers
        either (Codex review, fresh evidence): ``full_verdict: null`` plus
        ``used_by: null`` satisfied both membership checks, though
-       ``cli_compare_fold._ScopedFold.into_json`` never emits either key
+       ``report.scoped_gate.apply_scoped_gate`` never emits either key
        with a ``null`` value -- it only ever sets ``full_verdict`` to the
        real pre-swap ``verdict`` string, and only ever adds ``used_by``/
        ``required_symbol_contract`` when that attribute is not ``None``.
@@ -321,10 +321,10 @@ def _fold_top_level_run_outcome(
     (:class:`_MalformedGate`), the same principle the surrounding
     ``severity``-block validation already applies. A **scoped**
     (``--used-by``/``--required-symbol``) ``compare`` report is
-    deliberately exempt: ``cli_compare_fold._swap_in_scoped_severity``
+    deliberately exempt: ``report.scoped_gate._swap_in_scoped_severity``
     rewrites ``severity.exit_code`` to ``result.scoped_exit_code`` --
     already folded with the orthogonal contract-coverage/analysis-
-    assurance floors -- while ``_swap_in_scoped_run_outcome`` rewrites
+    assurance floors -- while ``report.scoped_gate._swap_in_scoped_run_outcome`` rewrites
     ``run_outcome.gate`` from ``result.scoped_compatibility_contribution``,
     the deliberately *pre*-fold, compatibility-only value D6's own axis
     separation requires; the two legitimately differ by exactly that fold
@@ -343,7 +343,7 @@ def _fold_top_level_run_outcome(
             )
     else:
         # A scoped report's `severity.exit_code` is `scoped_exit_code`
-        # (`cli_compare_fold._swap_in_scoped_severity`) -- already folded
+        # (`report.scoped_gate._swap_in_scoped_severity`) -- already folded
         # with the orthogonal contract-coverage/analysis-assurance floors,
         # unlike an unscoped report's `severity.exit_code`, which every
         # other caller of this `GateInfo` treats as the pure compatibility-
