@@ -87,8 +87,13 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 # A check's full identity (ADR-047 §7): "target@profile#baseline_channel@requested_depth".
 # Each of the four components is constrained to a safe identifier charset (no
 # further '@'/'#' inside a component) so the delimiter-joined form stays
-# unambiguous. Mirrors the ``pattern`` in compare_report.schema.json's
-# ``check_id`` property.
+# unambiguous. Same accepted-string set as the ``pattern`` in
+# compare_report.schema.json's ``check_id`` property -- not the identical
+# regex text, since that pattern is published for external, cross-language
+# (ECMAScript) consumers and so uses a portable ``$(?!\n)`` end-assertion
+# instead of this module's Python-only ``\Z`` (Codex review, fresh
+# evidence: ``\Z`` is not a valid ECMAScript escape -- Ajv either rejects it
+# or treats it as a literal 'Z').
 #
 # G42 adds two further optional, composable tail segments, in this fixed
 # order: "!<environment_id>" (a named-environment qualifier -- reserved here,
@@ -105,7 +110,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 CHECK_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*"
     r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)"
-    r"(?:![A-Za-z0-9._-]+)?"
+    r"(?:![A-Za-z0-9][A-Za-z0-9._-]*)?"
     r"(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?\Z"
 )
 

@@ -888,6 +888,33 @@ class TestReportIdentityEnvelope:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(instance=payload, schema=schema)
 
+    def test_environment_id_starting_with_punctuation_is_rejected(self):
+        """Codex review, fresh evidence: build_check_id's own
+        validate_identifier() already required an initial alphanumeric
+        character for environment_id, but CHECK_ID_PATTERN (this Python-
+        side validator) and the published JSON Schema's ``pattern``
+        independently spelled the ``!<environment_id>`` segment's charset
+        as the more permissive ``[A-Za-z0-9._-]+`` -- so a check_id an
+        external producer constructed by hand (e.g. ``...!_prod``, never
+        producible by build_check_id itself) validated cleanly through
+        both public validators. Checks the Python-side eager validator
+        (via to_json's ValueError) and the schema pattern itself, the same
+        two-boundary shape as the trailing-newline test above."""
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@source!_prod"
+        with pytest.raises(ValueError, match="check_id"):
+            reporter.to_json(result)
+
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        schema = load_compare_report_schema()
+        payload["check_id"] = "libfoo@profile#channel@source!_prod"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=schema)
+
+        payload["check_id"] = "libfoo@profile#channel@source!prod"
+        jsonschema.validate(instance=payload, schema=schema)
+
     def test_explicit_id_qualified_check_id_round_trips_and_validates(self):
         """G42 'Explicit check identifiers': the full construct
         (build_check_id) -> validate-against-schema -> parse

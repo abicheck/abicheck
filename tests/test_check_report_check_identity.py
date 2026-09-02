@@ -107,6 +107,22 @@ class TestBuildCheckIdG42Tails:
         with pytest.raises(ValueError):
             build_check_id("libpvxs", "p", "c", "source", environment_id="rhel8\n")
 
+    def test_rejects_environment_id_starting_with_punctuation(self):
+        """Codex review, fresh evidence: build_check_id's own
+        validate_identifier() already required an initial alphanumeric
+        character for environment_id (same as explicit_id) -- this pins
+        that existing constructor-side behavior. The real gap Codex found
+        is that checker_types.CHECK_ID_PATTERN/contracts._CHECK_ID_RE and
+        the published JSON Schema independently spelled the environment_id
+        segment's charset as the more permissive [A-Za-z0-9._-]+ (no
+        initial-character constraint), so the public validators/parser
+        accepted an id (e.g. "...!_prod") this constructor could never
+        produce -- pinned by the sibling assertions in
+        test_report_schema.py (CHECK_ID_PATTERN via validate_check_id) and
+        test_aggregate_check_id_g42.py (_CHECK_ID_RE via parse_check_id)."""
+        with pytest.raises(ValueError):
+            build_check_id("libpvxs", "p", "c", "source", environment_id="_prod")
+
 
 class TestReportBuildersThreadExplicitId:
     """Each of the four public report-envelope builders backing
@@ -177,3 +193,29 @@ class TestReportBuildersThreadExplicitId:
             explicit_id="l4-plugin",
         )
         assert report["check_id"] == "libpvxs@p#c@headers~l4-plugin"
+
+    def test_augment_report_scan_shaped_report_bumps_scan_schema_version(self):
+        """Codex review, fresh evidence: a no-baseline audit run
+        (check-target's scan mode) augments a *scan*-shaped report
+        (detected by _stamp_schema_version via the presence of
+        scan_schema_version), and build_check_id is the single shared
+        constructor for both compare- and scan-shaped reports -- so the
+        widened check_id lexical contract (the ~<explicit_id>/
+        !<environment_id> tail) reaches a scan report too, not just a
+        compare one. Only REPORT_SCHEMA_VERSION had been bumped for G42;
+        this pins that SCAN_SCHEMA_VERSION was bumped in lockstep so a
+        scan consumer can feature-detect the widened shape."""
+        from abicheck.schemas import SCAN_SCHEMA_VERSION
+
+        report = {"scan_schema_version": "1.0", "verdict": "COMPATIBLE"}
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            explicit_id="l4-plugin",
+        )
+        assert out["scan_schema_version"] == SCAN_SCHEMA_VERSION
+        assert out["check_id"] == "libpvxs@p#c@headers~l4-plugin"

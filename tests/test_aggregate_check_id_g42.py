@@ -75,3 +75,17 @@ class TestParseCheckIdG42Tails:
         trailing ``\\n`` -- kept in lockstep with ``CHECK_ID_PATTERN``'s
         identical fix per this module's own docstring."""
         assert parse_check_id("libfoo@linux-gcc14#release@headers~myid\n") is None
+
+    def test_environment_id_starting_with_punctuation_is_rejected(self) -> None:
+        """Codex review, fresh evidence: ``_CHECK_ID_RE``'s environment_id
+        group was spelled ``[A-Za-z0-9._-]+`` (no initial-character
+        constraint), unlike every other identifier component here and
+        unlike ``build_check_id``'s own ``validate_identifier()`` -- so
+        this parser accepted an id (e.g. ``...!_prod``) the canonical
+        constructor could never produce. Kept in lockstep with
+        ``CHECK_ID_PATTERN``'s identical fix, same as the trailing-newline
+        case above."""
+        assert parse_check_id("libfoo@linux-gcc14#release@headers!_prod") is None
+        parsed = parse_check_id("libfoo@linux-gcc14#release@headers!prod")
+        assert parsed is not None
+        assert parsed.environment_id == "prod"
