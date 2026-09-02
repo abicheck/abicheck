@@ -2263,6 +2263,203 @@ def check_banned_imports(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: no asdict/mirror-deserializer for ProjectSnapshot DTOs (ADR-062
+# Phase 1 / ADR-063 Phase 8's D8 constraint)
+# ---------------------------------------------------------------------------
+
+#: The files ADR-063 Phase 8 landed as the `ProjectSnapshot` package's DTO
+#: layer — D8 requires each to build its wire form via an explicit,
+#: hand-written encoding (`SectionDTO.to_dict()`,
+#: `semantic_ir_codec.semantic_ir_to_document()`, ...), never
+#: `dataclasses.asdict()`. Unlike `serialization.py`'s legacy `AbiSnapshot`
+#: encoding — which deliberately keeps its own `asdict()` call, per D1's
+#: "Keep the physical envelope... No new binary codec" and ADR-062's own
+#: "no existing baseline is rewritten" promise — a new file added to this
+#: list starts under the identical constraint the day it lands, not as a
+#: later cleanup.
+_PROJECT_SNAPSHOT_DTO_FILES = (
+    "abicheck/storage/dto.py",
+    "abicheck/storage/import_v1.py",
+    "abicheck/project_snapshot_store.py",
+    # `semantic_ir_codec.py` is the hand-written encoder `dto.py`'s own
+    # `semantic_ir_to_dto`/`semantic_ir_from_dto` are built on
+    # (`semantic_ir_to_document`/`semantic_ir_from_document`) -- the module
+    # that actually builds the DTO payload this whole check exists to keep
+    # `asdict`-free, not just the thin envelope wrapping it. Omitting it let
+    # an `asdict()` call introduced into the function that actually
+    # constructs the payload pass this ERROR-level gate untouched (Codex
+    # review).
+    "abicheck/storage/semantic_ir_codec.py",
+)
+
+
+def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
+    """Every local bare name that resolves to `dataclasses.asdict`.
+
+    A plain `func.id == "asdict"` check only catches the literal spelling —
+    `from dataclasses import asdict as encode` binds the same function
+    under a name the check never looks for, so `encode(dto)` invoked the
+    forbidden helper without tripping it (Codex review). This resolves that
+    one hop: every `ImportFrom(module="dataclasses")` alias whose real name
+    is `asdict` contributes its bound local name (`asname` if given, else
+    `asdict` itself). Attribute-form calls (`dataclasses.asdict(...)`,
+    `dc.asdict(...)`) are unaffected by this function — the caller already
+    matches any `.asdict` attribute access regardless of which name the
+    module itself is bound to, so an aliased *module* import needs no
+    separate resolution here.
+
+    A second alias shape closes an identical gap one level up (Codex
+    review, a second finding on this same field): `import dataclasses;
+    encode = dataclasses.asdict` (or `import dataclasses as dc; encode =
+    dc.asdict`) is ordinary Python that binds `encode` to the same
+    function via a plain top-level assignment rather than an import
+    statement at all — the previous version of this function only ever
+    walked `ImportFrom` nodes, so `encode(dto)` passed silently here too.
+    Resolved by first collecting every local name bound to the
+    `dataclasses` *module* itself (`import dataclasses`/`import dataclasses
+    as dc`), then walking every `ast.Assign` whose value is an
+    `ast.Attribute` of the form `<module alias>.asdict` and adding each
+    assigned bare-name target.
+
+    A third alias shape closes the gap the previous fix's own docstring
+    named as out of scope and left for "a future alias of an alias"
+    (Codex review, a third finding on this same field): `from dataclasses
+    import asdict; encode = asdict; encode(dto)` reassigns an *already-
+    resolved* alias to a plain bare name via ordinary assignment, not a
+    module attribute — the previous fix's module-attribute branch only
+    matches `<module alias>.asdict`, not a direct `ast.Name` whose `id` is
+    already a known alias. Resolved by repeating a pass over every
+    assignment whose value is an `ast.Name` already in `aliases`, adding
+    each assigned bare-name target, until a pass adds nothing new — a
+    fixed-point loop rather than one hop, so an arbitrarily long alias
+    chain (`encode2 = encode`, `encode3 = encode2`, ...) is fully
+    resolved regardless of which order `ast.walk` visits the assignments
+    in.
+
+    A fourth alias shape closes a gap in the *binding form itself*, not a
+    further hop (Codex review, a fourth finding on this same field):
+    `encode: Callable = dataclasses.asdict` (or `encode: Callable =
+    asdict`) is an ordinary *annotated* assignment (`ast.AnnAssign`), which
+    every pass above ignored entirely — they only ever walked
+    `ast.Assign`, whose `targets`/`value` shape `ast.AnnAssign` does not
+    share (a single `target`, not a `targets` list, and `value` is
+    `None` for a bare annotation with no assignment at all). Resolved by
+    normalizing both node kinds through `_assignment_targets_and_value`
+    below into the one `(targets, value)` shape every pass already
+    consumes, rather than teaching each pass a second node type.
+    """
+    aliases: set[str] = {"asdict"}
+    module_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "dataclasses":
+            for alias in node.names:
+                if alias.name == "asdict":
+                    aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "dataclasses":
+                    module_aliases.add(alias.asname or alias.name)
+    assigns = [
+        parsed
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and (parsed := _assignment_targets_and_value(node)) is not None
+    ]
+    for targets, value in assigns:
+        if (
+            isinstance(value, ast.Attribute)
+            and value.attr == "asdict"
+            and isinstance(value.value, ast.Name)
+            and value.value.id in module_aliases
+        ):
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    aliases.add(target.id)
+    changed = True
+    while changed:
+        changed = False
+        for targets, value in assigns:
+            if not (isinstance(value, ast.Name) and value.id in aliases):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in aliases:
+                    aliases.add(target.id)
+                    changed = True
+    return aliases
+
+
+def _assignment_targets_and_value(
+    node: ast.Assign | ast.AnnAssign,
+) -> tuple[list[ast.expr], ast.expr] | None:
+    """*node* normalized to `(targets, value)`, or `None` if it binds
+    nothing (a bare annotation, `x: Callable`, with no `= ...`).
+
+    `ast.Assign.targets` is always a list (`a = b = value` is legal) and
+    always has a `value`; `ast.AnnAssign.target` is a single node and
+    `.value` is `Optional` (`None` for a bare annotation). Normalizing both
+    into the same shape here means every alias-resolution pass above
+    consumes one shape rather than needing a second branch per node kind.
+    """
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if node.value is None:
+        return None
+    return [node.target], node.value
+
+
+def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
+    """ADR-063 Phase 8's D8 constraint, made mechanical: zero
+    `dataclasses.asdict`/`asdict` call sites (including an aliased import,
+    e.g. `from dataclasses import asdict as encode`) in any
+    `ProjectSnapshot`-DTO file (see `_PROJECT_SNAPSHOT_DTO_FILES`). A first
+    draft of one of these files reaching for `asdict()` as a shortcut is
+    exactly the "second, unreviewed mirror deserializer" this phase's own
+    text names as the defect the whole DTO layer exists to avoid — this
+    check exists so that mistake fails CI instead of surviving review.
+    """
+    for rel in _PROJECT_SNAPSHOT_DTO_FILES:
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        asdict_aliases = _imported_asdict_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called_name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if called_name is None:
+                continue
+            # Attribute form (`x.asdict(...)`) matches the bare attribute
+            # name regardless of what `x` is bound to -- deliberately
+            # coarse, the same way the pre-existing check already was.
+            # Name form (`asdict(...)` or an aliased import) must resolve
+            # against the file's own imports, or `encode(dto)` after
+            # `from dataclasses import asdict as encode` passes silently.
+            is_violation = (
+                isinstance(func, ast.Attribute) and called_name == "asdict"
+            ) or (isinstance(func, ast.Name) and func.id in asdict_aliases)
+            if is_violation:
+                f.err(
+                    "project-snapshot-dto-no-asdict",
+                    f"{rel}:{node.lineno}: `asdict(...)` is not allowed in a "
+                    "ProjectSnapshot DTO file — ADR-063 Phase 8's D8 "
+                    "constraint requires an explicit, hand-written "
+                    "to_dict()/from_dict() per DTO, never a generic "
+                    "dataclass mirror",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Check: CLI interface contract (ADR-037 D10.1)
 # ---------------------------------------------------------------------------
 
@@ -3129,6 +3326,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
     "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
+    "project-snapshot-dto-no-asdict": check_project_snapshot_dto_no_asdict,
     "cli-contract": check_cli_contract,
     "engine-cli-boundary": check_engine_cli_boundary,
     "fact-detector-misuse": check_fact_detector_misuse,
