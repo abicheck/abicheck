@@ -33,6 +33,7 @@ import pytest
 from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder, build_snapshot_from_dwarf
 from abicheck.dwarf_unified import parse_dwarf
 from abicheck.elf_metadata import parse_elf_metadata
+from abicheck.model import AccessLevel
 from abicheck.model.identity import EntityKind, Namespace
 
 _GCC = "gcc"
@@ -59,6 +60,27 @@ def _can_compile() -> bool:
 
 
 _HAS_GCC = _can_compile()
+
+_GPP = "g++"
+
+
+def _has_gpp() -> bool:
+    """The C++ counterpart of ``_can_compile`` -- a real GCC install does
+    not guarantee a matching g++ (e.g. a C-only toolchain), so the three
+    C++ fixture classes below need their own gate rather than reusing
+    ``_HAS_GCC`` (matches ``test_dwarf_snapshot.py``'s own ``_has_gpp``)."""
+    if sys.platform != "linux":
+        return False
+    try:
+        result = subprocess.run(
+            [_GPP, "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    return result.returncode == 0
+
+
+_HAS_GPP = _has_gpp()
 
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
@@ -123,7 +145,7 @@ class TestDwarfEntityIdCLib:
         assert point_id.leaf_name == "Point"
 
 
-@pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
+@pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
 class TestDwarfEntityIdCppNamespacedRecords:
     """A namespaced C++ record's ``entity_id`` carries a real typed
     ``ScopePath``, and two distinct sibling records in the same namespace
@@ -145,7 +167,7 @@ class TestDwarfEntityIdCppNamespacedRecords:
         so_path = tmp_path / "libnested_entity.so"
         result = subprocess.run(
             [
-                _GCC.replace("gcc", "g++"),
+                _GPP,
                 "-shared",
                 "-fPIC",
                 "-g",
@@ -179,7 +201,7 @@ class TestDwarfEntityIdCppNamespacedRecords:
         assert base.entity_id != derived.entity_id
 
 
-@pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
+@pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
 class TestDwarfEntityIdNestedRecordDefaultAccess:
     """A nested record's ``Record`` scope-segment ``access`` (non-identity
     payload) must resolve to the ENCLOSING record's own language default
@@ -209,7 +231,7 @@ class TestDwarfEntityIdNestedRecordDefaultAccess:
         so_path = tmp_path / "libtriplenested_entity.so"
         result = subprocess.run(
             [
-                _GCC.replace("gcc", "g++"),
+                _GPP,
                 "-shared",
                 "-fPIC",
                 "-g",
@@ -242,7 +264,70 @@ class TestDwarfEntityIdNestedRecordDefaultAccess:
         )  # Inner has no access label inside a class
 
 
-@pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
+@pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
+class TestDwarfEntityIdUnlabelledMethodDefaultAccess:
+    """A ``Function``'s own ``access`` field (not the scope-segment payload
+    the class above covers) must resolve the identical default-access rule:
+    an unlabelled method inside a `class` is private by default, not public
+    (Codex review, PR #1015 -- ``_build_function`` read
+    ``DW_AT_accessibility`` with ``_access_from_dwarf``'s unconditional
+    public default instead of the enclosing record's own language default,
+    the same bug the record-scope-segment fix above already closed for
+    nested *types*, left open for methods).
+
+    Fixture uses ``= delete``, not an ordinary out-of-line method: GCC/Clang
+    both split every out-of-line member-function *definition* into a
+    separate ``DW_AT_specification``-linked DIE carrying no ``DW_AT_name``/
+    ``DW_AT_accessibility`` of its own (confirmed against real compiler
+    output from both) -- this codebase's DWARF walker does not resolve
+    ``DW_AT_specification``/``DW_AT_abstract_origin`` chains anywhere (a
+    separate, pre-existing, much larger gap, out of this fix's scope), so
+    an ordinary method's *declaration* DIE (the one actually carrying
+    ``DW_AT_accessibility`` or its absence) never reaches ``_build_function``
+    at all. A deleted method has no separate definition -- its declaration
+    DIE (bypassing the is-a-declaration skip via ``DW_AT_deleted``) is the
+    only DIE ``_process_subprogram`` ever sees for it, making it the one
+    real, compiler-observable case this fix is reachable through today."""
+
+    @pytest.fixture()
+    def widget_lib(self, tmp_path: Path) -> Path:
+        cpp = tmp_path / "lib.cpp"
+        cpp.write_text(
+            "class Widget {\n"
+            "  Widget(const Widget&) = delete;\n"
+            " public:\n"
+            "  Widget& operator=(const Widget&) = delete;\n"
+            "  Widget() = default;\n"
+            "  static int use(int x) { return x; }\n"
+            "};\n"
+            "int call_it(int x) { return Widget::use(x); }\n"
+        )
+        so_path = tmp_path / "libwidget_entity.so"
+        result = subprocess.run(
+            [_GPP, "-shared", "-fPIC", "-g", "-std=c++17", "-o", str(so_path), str(cpp)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_unlabelled_deleted_method_defaults_to_class_private(
+        self, widget_lib: Path
+    ) -> None:
+        elf_meta = parse_elf_metadata(widget_lib)
+        builder = _DwarfSnapshotBuilder(widget_lib, elf_meta)
+        builder.extract()
+
+        copy_ctor = next(f for f in builder.functions if f.name == "Widget::Widget")
+        assign_op = next(f for f in builder.functions if f.name == "Widget::operator=")
+        assert copy_ctor.is_deleted is True
+        assert copy_ctor.access == AccessLevel.PRIVATE  # no label -> class default
+        assert assign_op.is_deleted is True
+        assert assign_op.access == AccessLevel.PUBLIC  # explicitly labelled
+
+
+@pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
 class TestDwarfEntityIdAsmLabeledLinkageName:
     """A real, explicit linkage name that doesn't start with ``_Z`` (an
     ``asm("...")`` label) is structurally indistinguishable, from DWARF
@@ -269,7 +354,7 @@ class TestDwarfEntityIdAsmLabeledLinkageName:
         so_path = tmp_path / so_name
         result = subprocess.run(
             [
-                _GCC.replace("gcc", "g++"),
+                _GPP,
                 "-shared",
                 "-fPIC",
                 "-g",

@@ -114,6 +114,25 @@ class TestExportSymbolIdentityHelpers:
         assert fn.entity_id is not None
         assert fn.entity_id.leaf_name == "f"
 
+    def test_msvc_export_function_i686_mingw_double_underscore_itanium(self) -> None:
+        # i686 MinGW prepends its own leading underscore on top of Itanium
+        # mangling too -- a real "_Z3addii" export appears as "__Z3addii"
+        # in the PE export table, exclusively on 32-bit x86.
+        fn = msvc_export_function("__Z3addii", is_x86_32=True)
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra == ("mangled", "_Z3addii")
+        # Raw, observed evidence is preserved on the Function itself.
+        assert fn.name == "__Z3addii"
+
+    def test_msvc_export_function_x64_double_underscore_not_normalized(self) -> None:
+        # Without is_x86_32, "__Z..." is never assumed to be a decorated
+        # Itanium name -- an x64 export can't carry this convention at all,
+        # so a literal "__Z..." export there is treated as extern-C, same
+        # as any other unrecognized-prefix name.
+        fn = msvc_export_function("__Z3addii")
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra == ("extern_c",)
+
     def test_two_distinct_exports_never_collide(self) -> None:
         ids = {
             itanium_export_function(n).entity_id

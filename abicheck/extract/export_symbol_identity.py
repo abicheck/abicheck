@@ -192,10 +192,18 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
     "IMAGE_FILE_MACHINE_I386"`` read -- gates the decoration strip: it is a
     32-bit-x86-only linker convention, so it must default to *not*
     stripping (every other PE machine type keeps a leading underscore as
-    real, undecorated source-name evidence).
+    real, undecorated source-name evidence). It also gates one more 32-bit-
+    only normalization: i686 MinGW additionally prepends its own leading
+    underscore ABI convention on top of Itanium mangling (same convention
+    as Mach-O's own), so a real C++ export there is ``__Z...``, not
+    ``_Z...`` -- undone before mangling-prefix detection so the identity
+    agrees with the header-AST producer's own ``_Z...`` spelling (Codex
+    review, PR #1015; confirmed against real GNU binutils/LLVM documentation
+    of i686 MinGW's leading-underscore convention).
     """
-    is_extern_c = not (sym.startswith("?") or sym.startswith("_Z"))
-    leaf_name = _strip_pe_c_decoration(sym) if (is_extern_c and is_x86_32) else sym
+    normalized = sym[1:] if (is_x86_32 and sym.startswith("__Z")) else sym
+    is_extern_c = not (normalized.startswith("?") or normalized.startswith("_Z"))
+    leaf_name = _strip_pe_c_decoration(sym) if (is_extern_c and is_x86_32) else normalized
     return Function(
         name=sym,
         mangled=sym,
@@ -203,6 +211,9 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
         visibility=Visibility.ELF_ONLY,
         is_extern_c=is_extern_c,
         entity_id=entity_id_for_function(
-            (), leaf_name, mangled_name=msvc_export_mangled_name(sym), is_extern_c=is_extern_c
+            (),
+            leaf_name,
+            mangled_name=msvc_export_mangled_name(normalized),
+            is_extern_c=is_extern_c,
         ),
     )

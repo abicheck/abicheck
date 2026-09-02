@@ -14,16 +14,15 @@
 
 """DwarfSnapshotBuilder — build a complete AbiSnapshot from DWARF alone.
 
-ADR-003: When no headers are provided but DWARF debug info is present,
+ADR-003: when no headers are provided but DWARF debug info is present,
 this module builds a full AbiSnapshot from DWARF .debug_info, enabling
-type-aware artifact checks that are unavailable in symbol-only mode.
+type-aware artifact checks unavailable in symbol-only mode.
 
 DWARF provides: function signatures, struct/class layouts, enum definitions,
-variables, typedefs, inheritance, vtable entries, templates.
-DWARF does NOT provide: #define constants, default parameter values.
-
-Visibility filtering: only types/functions reachable from ELF exported
-symbols are included (DWARF × ELF intersection).
+variables, typedefs, inheritance, vtable entries, templates. It does NOT
+provide #define constants or default parameter values. Visibility
+filtering: only types/functions reachable from ELF exported symbols are
+included (DWARF × ELF intersection).
 """
 
 from __future__ import annotations
@@ -162,16 +161,12 @@ def build_snapshot_from_dwarf(
 
 # DIE tags whose children can hold ABI-relevant *top-level* declarations the
 # main traversal dispatches on (nested types, member functions, namespace/CU
-# members). Only these are descended into: every other tag — variables,
-# typedefs, enums (their enumerators are consumed in place), members, base/
-# pointer/qualifier type-chain DIEs, parameters — has no such descendant, so
-# pushing its children onto the work stack is pure overhead. Restricting the
-# descent this way, plus reusing one materialized child list per container for
-# both field-collection and descent, makes the walk single-pass over the DIE
-# tree (previously records' children were iterated twice — once to build fields,
-# once by the generic descent — and every leaf DIE's empty child list was still
-# materialized). ``iter_children()`` is the dominant DWARF-parse cost, so halving
-# the calls is the primary saving.
+# members). Only these are descended into — every other tag has no such
+# descendant, so pushing its children is pure overhead. Reusing one
+# materialized child list per container for both field-collection and
+# descent makes the walk single-pass over the DIE tree instead of iterating
+# records' children twice; ``iter_children()`` is the dominant DWARF-parse
+# cost, so halving the calls is the primary saving.
 #: struct/class/union DIE tags, shared by every "is this a record?" branch.
 _RECORD_TYPE_TAGS: frozenset[str] = frozenset(
     {"DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"}
@@ -423,8 +418,7 @@ class _DwarfSnapshotBuilder:
             die_name = _attr_str(die, "DW_AT_name")
             next_scope = scope
             next_scope_path = scope_path
-            # Absent DW_AT_accessibility matches the ENCLOSING record's own
-            # default, not unconditionally public (Codex review, PR #1015).
+            # Absent DW_AT_accessibility matches the ENCLOSING default (PR #1015).
             next_default_access = (
                 _default_member_access_for_tag(tag)
                 if tag in _RECORD_TYPE_TAGS
@@ -444,7 +438,7 @@ class _DwarfSnapshotBuilder:
                     _namespace_scope_segment(die, die_name),
                 )
             elif tag == "DW_TAG_subprogram":
-                self._process_subprogram(die, CU, scope, scope_path)
+                self._process_subprogram(die, CU, scope, scope_path, default_access)
                 continue  # don't descend into function body
             elif tag == "DW_TAG_variable":
                 self._process_variable(die, CU, scope, scope_path)
@@ -486,7 +480,12 @@ class _DwarfSnapshotBuilder:
     # -------------------------------------------------------------------
 
     def _process_subprogram(
-        self, die: Any, CU: Any, scope: str, scope_path: ScopePath = ()
+        self,
+        die: Any,
+        CU: Any,
+        scope: str,
+        scope_path: ScopePath = (),
+        default_access: AccessLevel = AccessLevel.PUBLIC,
     ) -> None:
         """Extract a function from DW_TAG_subprogram."""
         name = _attr_str(die, "DW_AT_name")
@@ -553,6 +552,7 @@ class _DwarfSnapshotBuilder:
                 is_deleted,
                 visibility=visibility,
                 scope_path=scope_path,
+                default_access=default_access,
             )
         )
 
@@ -567,15 +567,15 @@ class _DwarfSnapshotBuilder:
         is_deleted: bool,
         visibility: Visibility = Visibility.PUBLIC,
         scope_path: ScopePath = (),
+        default_access: AccessLevel = AccessLevel.PUBLIC,
     ) -> Function:
         """Construct a :class:`Function` from a (already surface-admitted)
-        ``DW_TAG_subprogram`` DIE.
+        ``DW_TAG_subprogram`` DIE. *default_access*: see ``_process_cu``'s
+        identical record-scope-segment default (Codex review, PR #1015).
 
         Pure DWARF→model mapping (N-C): admission/dedup live in
-        ``_process_subprogram``; this only reads DIE attributes and builds the
-        model object, so the DWARF-to-``Function`` translation is testable
-        without the surface-filtering path. It still records referenced type
-        names on the builder so the second extraction pass can reach them.
+        ``_process_subprogram``. Also records referenced type names on the
+        builder so the second extraction pass can reach them.
         """
         # Return type
         ret_type = "void"
@@ -634,7 +634,7 @@ class _DwarfSnapshotBuilder:
 
         # Access level
         access_val = _attr_int(die, "DW_AT_accessibility")
-        access = _access_from_dwarf(access_val)
+        access = _access_from_dwarf(access_val, default_access)
 
         # Vtable index
         vtable_index: int | None = None
