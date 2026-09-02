@@ -38,13 +38,14 @@ name: Verify Merge Checks
 # look identical at the instant this workflow's `push` handler fires (both
 # read `status != completed`) and are only distinguishable once a check
 # actually reaches `completed`: a check whose own recorded `completed_at` is
-# at or before the PR's `merged_at` (strict comparison, no added tolerance --
-# see the inline comment below) was genuinely done before the merge and this
-# workflow's query was just early; a `completed_at` after `merged_at` --
-# by any amount -- means the check finished *after* the merge and is a real
-# finding regardless of its conclusion. So the poll here is short (minutes,
-# for API lag only) and its result is judged against `merged_at`, not merely
-# against "did it eventually turn green."
+# strictly *before* the PR's `merged_at` was genuinely done before the merge
+# and this workflow's query was just early; a `completed_at` at or after
+# `merged_at` -- an exact match included, since GitHub's whole-second
+# timestamps can't prove which of two same-second events came first (see the
+# inline comment below) -- means the check cannot be shown to have finished
+# before the merge and is a real finding regardless of its conclusion. So the
+# poll here is short (minutes, for API lag only) and its result is judged
+# against `merged_at`, not merely against "did it eventually turn green."
 
 on:
   push:
@@ -258,19 +259,30 @@ jobs:
               for (const name of REQUIRED_CHECKS) {
                 const run = byName.get(name);
                 if (!run) {
-                  pending.push(`${name}: no eligible check run found for head ${headSha} (yet)`);
+                  pending.push(`${name}: no check run found for head ${headSha} (yet)`);
                   continue;
                 }
                 if (run.status !== 'completed') {
                   pending.push(`${name}: status=${run.status} on run ${run.id} (not yet completed)`);
                   continue;
                 }
+                // `>=`, not `>`: GitHub's REST timestamps are whole-second
+                // strings with no sub-second component, so a check that
+                // genuinely finished a fraction of a second after the merge
+                // can parse to the exact same millisecond value as
+                // `mergedAt`. That equality does not prove the check
+                // finished first -- it only proves the two rounded to the
+                // same second -- so per the same asymmetric principle above
+                // (a false failure is acceptable, a false pass is not), an
+                // exact match is treated as not proven safe rather than as
+                // a pass (Codex review).
                 const completedAt = run.completed_at ? Date.parse(run.completed_at) : NaN;
-                if (Number.isNaN(completedAt) || completedAt > mergedAt) {
+                if (Number.isNaN(completedAt) || completedAt >= mergedAt) {
                   failed.push(
                     `${name}: run ${run.id}'s completed_at=${run.completed_at ?? '(missing)'} is ` +
-                    `after merge time ${target.merged_at} -- this check was still running when ` +
-                    `the merge happened, not merely slow to be reported`
+                    `at or after merge time ${target.merged_at} -- this check cannot be proven to ` +
+                    `have finished strictly before the merge, at the second-granularity ` +
+                    `GitHub's timestamps carry`
                   );
                 } else if (!['success', 'neutral'].includes(run.conclusion)) {
                   pending.push(
