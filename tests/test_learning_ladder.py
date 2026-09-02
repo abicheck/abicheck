@@ -507,6 +507,18 @@ nav:
     assert any("one group per step in step order" in m for m in msgs)
 
 
+def test_missing_group_reports_once_without_a_page_cascade(tmp_path: Path) -> None:
+    """Groups are matched to steps by title: one missing group is one
+    finding naming the fix, not every later page reported twice."""
+    nav = NAV_OK.replace(
+        '    - "1. Deeper":\n      - C: learn/c.md\n      - D: learn/d.md\n'
+        "      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
+        "",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert len(msgs) == 1 and "one group per step in step order" in msgs[0]
+
+
 def test_page_in_another_steps_group_is_reported_from_both_sides(
     tmp_path: Path,
 ) -> None:

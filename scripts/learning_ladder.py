@@ -506,10 +506,21 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
                 f"{seq.tab}: nav groups {actual_titles} are not the ladder's steps "
                 f"{expected_titles}, one group per step in step order"
             )
-        for (title, pages), tier in zip(grouped, seq.tiers):
+        # Match groups to steps by title, not position: with one group
+        # missing or out of place, a positional pairing would check every
+        # later group against the wrong step and bury the one real finding
+        # above under a page-by-page cascade.
+        by_title = dict(grouped)
+        for tier in seq.tiers:
+            pages = by_title.get(nav_group_title(tier))
+            if pages is None:
+                continue
             out.extend(
                 _order_findings(
-                    f"{seq.tab} / {title}", pages, tier.members, tier.branches
+                    f"{seq.tab} / {nav_group_title(tier)}",
+                    pages,
+                    tier.members,
+                    tier.branches,
                 )
             )
     return out
