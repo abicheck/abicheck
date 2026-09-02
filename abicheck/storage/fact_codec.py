@@ -29,7 +29,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from ..model import Fact, FactStatus, SymbolBinding
+from ..model import AccessLevel, Fact, FactStatus, SymbolBinding
 
 if TYPE_CHECKING:
     from ..model import Function, RecordType
@@ -42,6 +42,7 @@ __all__ = [
     "decode_fact",
     "decode_fact_with_legacy_presence",
     "decode_field_facts",
+    "decode_param_facts",
     "decode_function_facts",
     "decode_record_facts",
     "decode_snapshot_facts",
@@ -94,6 +95,7 @@ _VARIABLE_FACT_KEYS = (
     "alignment_bits_fact",
     "elf_binding_fact",
     "deprecated_fact",
+    "access_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -124,6 +126,15 @@ _ELF_FACT_KEYS = (
     "has_init_fact",
     "has_fini_fact",
 )
+# ADR-063 Phase 5 (tenth batch): Param's own *_fact siblings -- nested one
+# level below "functions", the same shape _FIELD_FACT_KEYS has under
+# "types". Phase 0's is_va_list_fact was encoded by a single hardcoded
+# .get() line until this batch gave Param a second one.
+_PARAM_FACT_KEYS = (
+    "is_va_list_fact",
+    "is_restrict_fact",
+)
+
 _PE_FACT_KEYS = ("delay_imports_fact",)
 _MACHO_FACT_KEYS = ("rpaths_fact",)
 
@@ -153,7 +164,8 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
         for fact_key in _FUNCTION_FACT_KEYS:
             _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):
-            _encode_one(param_dict.get("is_va_list_fact"))
+            for fact_key in _PARAM_FACT_KEYS:
+                _encode_one(param_dict.get(fact_key))
     # AbiSnapshot's own case-(b) field -- a single top-level key, not
     # nested in a list like the four declaration dataclasses above.
     _encode_one(d.get("ast_resolved_standard_fact"))
@@ -358,6 +370,16 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
         elf_binding_fact = replace(
             elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
         )
+    access_fact = decode_fact_with_legacy_presence(
+        v, "access", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
+    )
+    if access_fact is not None and access_fact.value is not None:
+        # Same non-JSON-native value-type reconstruction elf_binding_fact
+        # needs just above: AccessLevel is a str-Enum, so a decoded value is
+        # a bare str until it is rebuilt, and `bridge_legacy_and_fact` then
+        # carries this same object back into the legacy `access` field --
+        # where every reader expects a real AccessLevel member.
+        access_fact = replace(access_fact, value=AccessLevel(access_fact.value))
     return {
         "source_header_fact": decode_fact(
             v.get("source_header_fact"),
@@ -373,6 +395,7 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
         "deprecated_fact": decode_fact_with_legacy_presence(
             v, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
         ),
+        "access_fact": access_fact,
     }
 
 
@@ -484,6 +507,13 @@ _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS = 38
 # AbiSnapshot.clang_deprecation_facts_reliable.
 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS = 39
 
+# ADR-063 Phase 5 (tenth batch): the schema_version Param.is_restrict_fact
+# and Variable.access_fact started being persisted at -- the last two
+# entries of this phase's own KNOWN_UNCONVERTED_ELIGIBLE_FACTS allowlist,
+# guarded by clang_restrict_facts_reliable and
+# castxml_var_access_facts_reliable respectively.
+_MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 40
+
 
 def decode_fact_with_legacy_presence(
     owner_dict: dict[str, Any],
@@ -508,6 +538,24 @@ def decode_fact_with_legacy_presence(
     if not raw and schema_version < min_schema_version and legacy_key not in owner_dict:
         return Fact.not_collected()
     return decode_fact(raw, schema_version, min_schema_version=min_schema_version)
+
+
+def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``Param`` ``Fact[...]`` sibling from one param dict.
+
+    One call, spread into the ``Param(**decode_param_facts(p), ...)``
+    constructor call, mirroring :func:`decode_record_facts` and siblings.
+    ``is_va_list_fact`` (ADR-063 Phase 0) was decoded by a single inline
+    ``decode_fact`` call in ``serialization.py`` until Phase 5's tenth
+    batch gave ``Param`` a second sibling; both live here now, so this
+    owner's decode wiring is one place rather than two.
+    """
+    return {
+        "is_va_list_fact": decode_fact(p.get("is_va_list_fact"), schema_version),
+        "is_restrict_fact": decode_fact_with_legacy_presence(
+            p, "is_restrict", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
+        ),
+    }
 
 
 def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, Any]:
@@ -668,6 +716,8 @@ def apply_legacy_fact_backfill(
     variables: list[Any] | None = None,
     enums: list[Any] | None = None,
     header_cv_facts_reliable_value: bool = True,
+    clang_restrict_facts_reliable_value: bool = True,
+    castxml_var_access_facts_reliable_value: bool = True,
     clang_field_initializer_facts_reliable_value: bool = True,
     clang_deprecation_facts_reliable_value: bool = True,
 ) -> None:
@@ -825,6 +875,22 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+            ),
+            # ADR-063 Phase 5 (tenth batch, schema v40): the last two
+            # case-(a) fields, each with its own guarding flag.
+            CaseAFactRule(
+                "Param",
+                "is_restrict",
+                _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
+                clang_restrict_facts_reliable_value,
+                False,
+            ),
+            CaseAFactRule(
+                "Variable",
+                "access",
+                _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
+                castxml_var_access_facts_reliable_value,
+                AccessLevel.PUBLIC,
             ),
         ),
         types=types,

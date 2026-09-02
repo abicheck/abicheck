@@ -617,6 +617,7 @@ _OWNER_FACT_KEY_TUPLES: dict[str, str] = {
     "_PE_FACT_KEYS": "PeMetadata",
     "_MACHO_FACT_KEYS": "MachoMetadata",
     "_FIELD_FACT_KEYS": "TypeField",
+    "_PARAM_FACT_KEYS": "Param",
 }
 
 

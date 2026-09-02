@@ -43,6 +43,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `MachoMetadata.rpaths` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
+| `Param.is_restrict` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
@@ -62,6 +63,7 @@ Phase 5 section for the design this page's data comes from.
 | `TypeField.is_const` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `TypeField.is_mutable` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `TypeField.is_volatile` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.access` | `AccessLevel` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
@@ -96,5 +98,3 @@ check fails if a new eligible field appears that isn't named here.
 
 | Field | Converted? |
 |-------|------------|
-| `Param.is_restrict` | not yet — tracked gap |
-| `Variable.access` | not yet — tracked gap |

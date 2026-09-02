@@ -358,4 +358,46 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "EnumType.is_scoped."
         ),
     ),
+    _E(
+        owner="Param",
+        field="is_restrict",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "Whether the parameter is a restrict-qualified pointer. Case "
+            "(a): a plain bool whose False cannot distinguish "
+            "\"not restrict\" from \"never determined\" -- a pre-v22 clang "
+            "snapshot reported False for every parameter, which "
+            "AbiSnapshot.clang_restrict_facts_reliable is what marks."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="access",
+        value_type="AccessLevel",
+        producing_backends=("castxml",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "public/protected/private for a static class member. Case (a), "
+            "and the one registered fact whose value type is neither a "
+            "bool, a number, a string nor a list: AccessLevel.PUBLIC is "
+            "both this field's resting value and a real answer, so only "
+            "AbiSnapshot.castxml_var_access_facts_reliable can mark a "
+            "pre-v24 castxml snapshot's blanket PUBLIC as a placeholder. "
+            "Decoded back into a real AccessLevel member (storage/"
+            "fact_codec.decode_variable_facts), the same reconstruction "
+            "elf_binding_fact needs."
+        ),
+    ),
 ]

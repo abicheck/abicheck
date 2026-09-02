@@ -464,6 +464,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "pre-v24-legacy-baseline case."
         ),
     ),
+    FactRow(
+        "Variable",
+        "access_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (tenth batch): Fact[AccessLevel] sibling of "
+            "access. NONE for both backends because neither names the "
+            "keyword -- each passes the real value and Variable."
+            "__post_init__'s bridge derives the Fact. Availability is "
+            "carried by AbiSnapshot.castxml_var_access_facts_reliable."
+        ),
+    ),
     FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
     FactRow("Variable", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
@@ -1154,6 +1167,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "only producer before that, so a cross-backend comparison of "
             "unchanged headers reported `param_restrict_changed` for every "
             "`restrict` parameter."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "is_restrict_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (tenth batch): Fact[bool] sibling of "
+            "is_restrict, bridge-derived on both backends the same way "
+            "Variable.access_fact is; guarded by AbiSnapshot."
+            "clang_restrict_facts_reliable."
         ),
     ),
     FactRow(

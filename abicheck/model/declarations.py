@@ -33,6 +33,10 @@ from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visi
 # bool | None (which would be a breaking change to this public dataclass's
 # type for every reader, not only the ones migrating to Fact[T]).
 _OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
+# ADR-063 Phase 5 (tenth batch): Param.is_restrict's own omission sentinel --
+# same shape as _OMITTED_IS_VA_LIST above (a bare False cannot double as an
+# omission marker), guarded by AbiSnapshot.clang_restrict_facts_reliable.
+_OMITTED_IS_RESTRICT: bool = cast(bool, _Omitted())
 # ADR-063 Phase 5 (ninth batch): `Function.deprecated`/`Variable.deprecated`
 # share the identical case-(a) shape -- `None` means "not deprecated" as
 # much as "not captured" (see Function.deprecated's own comment below), so
@@ -40,6 +44,11 @@ _OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
 # never by the value.
 _OMITTED_FUNC_DEPRECATED: str | None = cast("str | None", _Omitted())
 _OMITTED_VAR_DEPRECATED: str | None = cast("str | None", _Omitted())
+# ADR-063 Phase 5 (tenth batch): Variable.access's own omission sentinel.
+# AccessLevel.PUBLIC is both this field's resting value and a real answer,
+# so -- exactly like a bare False -- it cannot mark "nobody looked";
+# AbiSnapshot.castxml_var_access_facts_reliable carries that instead.
+_OMITTED_VAR_ACCESS: AccessLevel = cast("AccessLevel", _Omitted())
 
 
 @dataclass
@@ -49,7 +58,9 @@ class Param:
     kind: ParamKind = ParamKind.VALUE
     default: str | None = None  # has default value (value not preserved)
     pointer_depth: int = 0  # nesting: T=0, T*=1, T**=2
-    is_restrict: bool = False  # restrict-qualified pointer parameter
+    # ADR-063 Phase 5 (tenth batch): private omission sentinel, not a plain
+    # False -- see is_restrict_fact below and __post_init__.
+    is_restrict: bool = _OMITTED_IS_RESTRICT  # restrict-qualified pointer
     # ADR-063 Phase 0: defaults to a private omission sentinel, not False —
     # see is_va_list_fact below and __post_init__.
     is_va_list: bool = (
@@ -59,10 +70,15 @@ class Param:
     # comment in model/entities.py for the full rationale. A detector reads
     # this, never the plain is_va_list field above.
     is_va_list_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    # Fact[bool] sibling of is_restrict -- case (a), see the field's comment.
+    is_restrict_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(
             self.is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
+        )
+        self.is_restrict, self.is_restrict_fact = bridge_legacy_and_fact(
+            self.is_restrict, self.is_restrict_fact, _OMITTED_IS_RESTRICT, False
         )
 
 
@@ -298,7 +314,9 @@ class Variable:
     source_location: str | None = None
     is_const: bool = False  # const-qualified type (write → SIGSEGV)
     value: str | None = None  # initial value (compile-time constant, if known)
-    access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
+    # ADR-063 Phase 5 (tenth batch): private omission sentinel, not a plain
+    # AccessLevel.PUBLIC -- see access_fact below and __post_init__.
+    access: AccessLevel = _OMITTED_VAR_ACCESS  # public/protected/private
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
@@ -329,6 +347,8 @@ class Variable:
     alignment_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
     # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
     deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5 (tenth batch) -- case (a), see the field's own comment.
+    access_fact: Fact[AccessLevel] | None = field(default=None, kw_only=True)
     elf_binding_fact: Fact[SymbolBinding | None] | None = field(
         default=None, kw_only=True
     )
@@ -345,4 +365,7 @@ class Variable:
         )
         self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
             self.deprecated, self.deprecated_fact, _OMITTED_VAR_DEPRECATED, None
+        )
+        self.access, self.access_fact = bridge_legacy_and_fact(
+            self.access, self.access_fact, _OMITTED_VAR_ACCESS, AccessLevel.PUBLIC
         )
