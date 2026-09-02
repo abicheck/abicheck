@@ -2295,14 +2295,47 @@ def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
     matches any `.asdict` attribute access regardless of which name the
     module itself is bound to, so an aliased *module* import needs no
     separate resolution here.
+
+    A second alias shape closes an identical gap one level up (Codex
+    review, a second finding on this same field): `import dataclasses;
+    encode = dataclasses.asdict` (or `import dataclasses as dc; encode =
+    dc.asdict`) is ordinary Python that binds `encode` to the same
+    function via a plain top-level assignment rather than an import
+    statement at all — the previous version of this function only ever
+    walked `ImportFrom` nodes, so `encode(dto)` passed silently here too.
+    Resolved by first collecting every local name bound to the
+    `dataclasses` *module* itself (`import dataclasses`/`import dataclasses
+    as dc`), then walking every `ast.Assign` whose value is an
+    `ast.Attribute` of the form `<module alias>.asdict` and adding each
+    assigned bare-name target. Deliberately one hop only, matching the
+    finding: a *further* alias of an alias (`encode2 = encode`) is not
+    resolved, the same scope this function's `ImportFrom` half already
+    keeps.
     """
     aliases: set[str] = {"asdict"}
+    module_aliases: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.module != "dataclasses":
+        if isinstance(node, ast.ImportFrom) and node.module == "dataclasses":
+            for alias in node.names:
+                if alias.name == "asdict":
+                    aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "dataclasses":
+                    module_aliases.add(alias.asname or alias.name)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
             continue
-        for alias in node.names:
-            if alias.name == "asdict":
-                aliases.add(alias.asname or alias.name)
+        value = node.value
+        if (
+            isinstance(value, ast.Attribute)
+            and value.attr == "asdict"
+            and isinstance(value.value, ast.Name)
+            and value.value.id in module_aliases
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    aliases.add(target.id)
     return aliases
 
 

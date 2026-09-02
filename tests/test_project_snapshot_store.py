@@ -378,6 +378,40 @@ class TestReadManifestSummaryValidation:
         with pytest.raises(ValueError, match="duplicate id"):
             read_manifest_summary(tmp_path)
 
+    def test_case_colliding_variant_ids_are_refused(self, tmp_path: Path) -> None:
+        """Two distinct strings that a case-insensitive filesystem would
+        still treat as one `refs/variants/*.json` path. `PackageManifest`
+        already refuses this, but only on the eager `read_project_manifest`
+        path; the lazy primitives this test exercises must refuse it too
+        (Codex review)."""
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": ["Default", "default"],
+                "artifact_ids": [],
+            },
+        )
+        with pytest.raises(ValueError, match="collide"):
+            read_manifest_summary(tmp_path)
+
+    def test_unicode_normalization_colliding_artifact_ids_are_refused(
+        self, tmp_path: Path
+    ) -> None:
+        nfc = "caf" + "\u00e9"  # NFC: the accented e as one code point
+        nfd = "cafe" + "\u0301"  # NFD: plain e + a combining acute accent
+        assert nfc != nfd  # distinct Python strings, canonically equivalent text
+        self._write_manifest_json(
+            tmp_path,
+            {
+                "versions": _VALID_VERSIONS,
+                "variant_ids": [],
+                "artifact_ids": [nfc, nfd],
+            },
+        )
+        with pytest.raises(ValueError, match="collide"):
+            read_manifest_summary(tmp_path)
+
     def test_an_ordinary_current_manifest_is_still_readable(
         self, tmp_path: Path
     ) -> None:

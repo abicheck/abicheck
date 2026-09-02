@@ -197,3 +197,18 @@ class TestMaxKnownSchemaVersion:
         store = InMemoryObjectStore()
         manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
         assert manifest.versions.source_schema_version == 3
+
+    @pytest.mark.parametrize("malformed", [0, -1, -38])
+    def test_a_non_positive_schema_version_is_refused(self, malformed: int) -> None:
+        """`StorageVersions.source_schema_version` treats `0` (and, since it
+        clamps negative values too, anything non-positive) as its own
+        'unstated' sentinel -- so passing a non-positive *explicitly stated*
+        `schema_version` through unchecked would silently discard the
+        document's own claim about which producer epoch governed it,
+        degrading it to 'never stated' rather than preserving it as the
+        malformed value it is (Codex review)."""
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = malformed
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="positive"):
+            import_legacy_snapshot(doc, store=store, artifact_id="libfoo")

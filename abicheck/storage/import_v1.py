@@ -159,6 +159,28 @@ def import_legacy_snapshot(
                 "legacy_document schema_version must be an int, not "
                 f"{type(raw_schema_version).__name__} ({raw_schema_version!r})"
             )
+        if raw_schema_version <= 0:
+            # `StorageVersions.source_schema_version` is one of the
+            # *informational* axes (`versioning._stated_count`), which
+            # treats `0` (and, since it clamps a negative value to `0` too,
+            # anything non-positive) as "this axis was never stated" --
+            # correct for a field a real writer simply never populated, but
+            # wrong here: this branch only runs when the document *did*
+            # state `schema_version` explicitly. Passing a non-positive
+            # value through would silently degrade a legacy document's own
+            # claim about which producer epoch (and therefore which
+            # semantics) governed it into "unstated", discarding the exact
+            # provenance this field exists to preserve while still having
+            # gated the refusal above on that same value (Codex review, a
+            # second finding on this field: the non-integral-coercion fix
+            # closed one way to manufacture a fabricated version, this
+            # closes another).
+            raise ValueError(
+                "legacy_document schema_version must be a positive int, not "
+                f"{raw_schema_version!r} -- 0 or negative is this format's own "
+                "'unstated' sentinel, not a value a document may claim for "
+                "itself"
+            )
         source_schema_version = raw_schema_version
     else:
         # Absent key: `serialization.snapshot_from_dict`'s own pre-

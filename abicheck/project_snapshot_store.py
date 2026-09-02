@@ -82,6 +82,7 @@ from .storage.package import (
     ArtifactRef,
     PackageManifest,
     VariantRef,
+    _reject_filesystem_collisions,
     artifact_ref_relpath,
     object_relpath,
     variant_ref_relpath,
@@ -353,6 +354,19 @@ def _required_string_id_list(
     that trusts `variant_ids`/`artifact_ids` to name a package's membership
     (Codex review). Checked here, the one place both read paths already
     share, rather than duplicating the check in each caller.
+
+    Also refuses two distinct ids that a real filesystem would still treat
+    as the same path -- differing only by case, or by Unicode normalization
+    -- for the identical reason and via the identical
+    `_reject_filesystem_collisions` helper `PackageManifest.__post_init__`
+    already applies to `variant_refs`/`artifact_refs`. That check is, once
+    again, only reachable through the eager `read_project_manifest` path:
+    the lazy primitives this function backs never construct a
+    `PackageManifest`, so on a case- or normalization-insensitive
+    filesystem two members that collide on one `refs/*.json` path would
+    otherwise pass this door and fail only later, deep inside whichever ref
+    happens to load second (Codex review, a second finding on this same
+    field).
     """
     if field_name not in data:
         raise ValueError(f"{record} is missing required field {field_name!r}")
@@ -377,6 +391,7 @@ def _required_string_id_list(
             "a package's declared membership cannot name the same variant or "
             "artifact twice"
         )
+    _reject_filesystem_collisions(raw, field_name.removesuffix("s"))
     return tuple(raw)
 
 
