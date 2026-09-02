@@ -4740,13 +4740,13 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        answered once. Shares PR G2's own
                                        GateOptions prerequisite.
                                        Prerequisite landed (2026-09-02):
-                                       BUNDLE_FACTS_ARTIFACT_TYPE ("abicheck.
-                                       bundle-facts", schema_version 2) plus
-                                       the archive container's own
+                                       BUNDLE_FACTS_ARTIFACT_TYPE
+                                       ("abicheck.bundle-facts",
+                                       schema_version 2) plus the archive
+                                       container's own
                                        BUNDLE_ARCHIVE_ARTIFACT_TYPE, and
-                                       bundle_facts_serialization.
-                                       looks_like_bundle_facts_document() as
-                                       the classifier a future operand
+                                       bundle_facts_serialization.looks_like_bundle_facts_document()
+                                       as the classifier a future operand
                                        dispatcher will call. The
                                        BundleCompareRequest unification and
                                        the deletion below remain blocked on

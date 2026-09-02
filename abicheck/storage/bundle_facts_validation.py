@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def load_bundle_facts_dispatch(
@@ -157,12 +157,18 @@ def require_int_schema_version(value: Any, *, field: str, path: str | Path) -> i
     is an int subclass), and leak a raw TypeError for None instead of this
     module's own :class:`~abicheck.errors.SnapshotError` contract (Codex
     review). Moved here from ``bundle_facts.read_bundle_facts_archive``
-    for that module's own 800-line production cap."""
+    for that module's own 800-line production cap.
+
+    Returns *value* itself rather than ``int(value)`` (CodeRabbit review):
+    the ``isinstance`` check above already proves it's a real ``int``, and
+    coercing it again would call an ``int`` subclass's own overridden
+    ``__int__()``, which is free to return something other than the value
+    just validated."""
     from ..errors import SnapshotError
 
     if isinstance(value, bool) or not isinstance(value, int):
         raise SnapshotError(f"{path}: manifest {field} must be an integer, got {value!r}")
-    return int(value)
+    return cast(int, value)
 
 
 def load_bundle_facts_blob_json(
