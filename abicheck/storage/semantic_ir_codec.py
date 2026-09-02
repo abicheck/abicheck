@@ -209,11 +209,25 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     if not snap.semantic_ir_conflicts:
         d.pop("semantic_ir_conflicts", None)
     else:
+        # Validated on the way OUT as strictly as on the way in, and for a
+        # reason specific to writing: a non-string key survives in memory
+        # but `json.dumps` renders it as a string, so `{1: "first", "1":
+        # "second"}` writes one JSON object with two `"1"` keys and the load
+        # keeps whichever came last -- a conflict record discarded by the
+        # writer, before any reader could refuse it (CodeRabbit review).
         # Sorted for the same reason the occurrence list is: `json.dumps`
         # preserves a mapping's insertion order, so two runs that recorded
         # the same conflicts in a different order would otherwise write
         # different documents for identical state.
-        d["semantic_ir_conflicts"] = dict(sorted(snap.semantic_ir_conflicts.items()))
+        d["semantic_ir_conflicts"] = {
+            identity_text(key, "semantic_ir_conflicts key"): identity_text(
+                value, "semantic_ir_conflicts value"
+            )
+            for key, value in sorted(
+                _mapping(snap.semantic_ir_conflicts, "semantic_ir_conflicts").items(),
+                key=lambda item: identity_text(item[0], "semantic_ir_conflicts key"),
+            )
+        }
     ir = snap.semantic_ir
     if ir is None:
         d.pop("semantic_ir", None)

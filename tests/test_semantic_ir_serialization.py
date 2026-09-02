@@ -149,6 +149,23 @@ class TestDeterministicEncoding:
             backward, sort_keys=True
         )
 
+    @pytest.mark.parametrize("bad", [{1: "v"}, {"k": 2}, {None: "v"}, {"k": None}])
+    def test_a_malformed_conflict_map_is_refused_on_write(self, bad: dict) -> None:
+        """The writer validates as strictly as the reader, for a reason
+        specific to writing: a non-string key survives in memory but
+        `json.dumps` renders it as a string, so `{1: "first", "1": "second"}`
+        would write one object with two `"1"` keys and the load would keep
+        whichever came last — a record discarded by the writer, before any
+        reader could refuse it."""
+        with pytest.raises(TypeError, match="semantic_ir_conflicts"):
+            snapshot_to_dict(_snapshot(None, semantic_ir_conflicts=bad))
+
+    def test_a_json_key_collision_cannot_be_written(self) -> None:
+        with pytest.raises(TypeError):
+            snapshot_to_dict(
+                _snapshot(None, semantic_ir_conflicts={1: "first", "1": "second"})
+            )
+
     @given(keys=st.lists(_tags, min_size=2, max_size=5, unique=True))
     def test_conflict_map_order_does_not_change_the_document(
         self, keys: list[str]

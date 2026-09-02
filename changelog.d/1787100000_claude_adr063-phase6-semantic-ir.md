@@ -26,5 +26,8 @@
   one in the new `AbiSnapshot.semantic_ir_conflicts` — keyed per
   *occurrence*, since `fact_provenance`'s declaration-only key cannot
   separate two matched occurrence pairs sharing one `EntityId`. Matching is
-  fail-closed: a group with no unique complete matching is left entirely
-  unmerged rather than paired by guess.
+  fail-closed: two occurrences pair only when at most one side supplies a
+  disambiguator, and a group with no unique complete matching keeps every
+  occurrence from both sides rather than being paired by guess — except an
+  occurrence the two sides key *identically*, which is one occurrence by
+  definition and still merges.
