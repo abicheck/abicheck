@@ -17,6 +17,20 @@ name: Verify Merge Checks
 # about what was reviewed. Instead this looks up the merged PR (GitHub's own
 # commit<->PR association, which covers squash/merge/rebase alike) and
 # verifies its real, already-recorded head-SHA check results.
+#
+# Why this polls instead of taking one snapshot: this workflow's own `push`
+# trigger fires within ~1 second of the merge landing, which is *before*
+# GitHub has necessarily settled every required check's terminal state for
+# that head SHA -- branch protection only requires those checks to have been
+# green at the moment of merge, not to still be freshly re-queried a second
+# later. Three real merges (PRs #991/#993/#997) each failed this workflow
+# purely because a subset of `REQUIRED_CHECKS` still read `status=queued`/
+# `in_progress` at query time, with no actual failed conclusion anywhere --
+# a race in this workflow's own observation, not a slipped-through merge.
+# Polling with a bounded budget lets an in-flight (or freshly re-triggered)
+# check reach a terminal state before this workflow judges it, while a check
+# that is genuinely still not `completed` once the budget is exhausted -- or
+# one that completed with a bad conclusion at any point -- still fails loudly.
 
 on:
   push:
@@ -32,7 +46,7 @@ concurrency:
 jobs:
   verify-merge-checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: read
       checks: read
@@ -125,39 +139,86 @@ jobs:
 
             core.info(`Merge commit ${sha} <- PR #${target.number}, tested head ${headSha}`);
 
-            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: headSha,
-              per_page: 100,
-            });
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-            const byName = new Map();
-            for (const run of checkRuns) {
-              // A check can be re-run; keep only the most recently started.
-              // `Date.parse` of a missing/malformed `started_at` is `NaN`,
-              // and every comparison with `NaN` is false -- fall back to 0
-              // so a queued run with no `started_at` yet still loses to any
-              // real timestamp instead of winning by default.
-              const startedAt = r => (r.started_at ? Date.parse(r.started_at) : 0);
-              const existing = byName.get(run.name);
-              if (!existing || startedAt(run) >= startedAt(existing)) {
-                byName.set(run.name, run);
+            // Bounded poll budget, kept comfortably inside this job's own
+            // `timeout-minutes` so a still-pending check fails this workflow
+            // with a clear message rather than the job simply being killed.
+            const POLL_INTERVAL_MS = 30_000;
+            const MAX_WAIT_MS = 15 * 60 * 1000;
+            const deadline = Date.now() + MAX_WAIT_MS;
+
+            // Evaluates the current snapshot of check runs against
+            // REQUIRED_CHECKS, splitting problems into `pending` (not yet
+            // completed, or not yet observed at all -- both are still worth
+            // another poll) and `failed` (completed with a bad conclusion --
+            // terminal, no amount of waiting changes it). Keeping these
+            // separate is what lets the loop below fail fast on a real
+            // failure instead of waiting out the full budget for it.
+            function evaluate(checkRuns) {
+              const byName = new Map();
+              for (const run of checkRuns) {
+                // A check can be re-run; keep only the most recently started.
+                // `Date.parse` of a missing/malformed `started_at` is `NaN`,
+                // and every comparison with `NaN` is false -- fall back to 0
+                // so a queued run with no `started_at` yet still loses to any
+                // real timestamp instead of winning by default.
+                const startedAt = r => (r.started_at ? Date.parse(r.started_at) : 0);
+                const existing = byName.get(run.name);
+                if (!existing || startedAt(run) >= startedAt(existing)) {
+                  byName.set(run.name, run);
+                }
               }
+
+              const pending = [];
+              const failed = [];
+              for (const name of REQUIRED_CHECKS) {
+                const run = byName.get(name);
+                if (!run) {
+                  pending.push(`${name}: no check run found for head ${headSha} (yet)`);
+                } else if (run.status !== 'completed') {
+                  pending.push(`${name}: status=${run.status} (not yet completed)`);
+                } else if (!['success', 'neutral'].includes(run.conclusion)) {
+                  failed.push(`${name}: conclusion=${run.conclusion}`);
+                }
+              }
+              return { pending, failed };
             }
 
-            const problems = [];
-            for (const name of REQUIRED_CHECKS) {
-              const run = byName.get(name);
-              if (!run) {
-                problems.push(`${name}: no check run found for head ${headSha}`);
-              } else if (run.status !== 'completed') {
-                problems.push(`${name}: status=${run.status} (never completed)`);
-              } else if (!['success', 'neutral'].includes(run.conclusion)) {
-                problems.push(`${name}: conclusion=${run.conclusion}`);
+            let pending = [];
+            let failed = [];
+            let attempt = 0;
+            for (;;) {
+              attempt += 1;
+              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: headSha,
+                per_page: 100,
+              });
+              ({ pending, failed } = evaluate(checkRuns));
+
+              if (failed.length > 0) {
+                // A terminal failure is decisive regardless of what else is
+                // still pending -- waiting out the rest of the budget would
+                // only delay reporting a merge that is already known-bad.
+                break;
               }
+              if (pending.length === 0) {
+                break;
+              }
+              if (Date.now() >= deadline) {
+                break;
+              }
+              core.info(
+                `Attempt ${attempt}: ${pending.length} required check(s) not yet ` +
+                `completed for PR #${target.number}'s head ${headSha}; ` +
+                `retrying in ${POLL_INTERVAL_MS / 1000}s.`
+              );
+              await sleep(POLL_INTERVAL_MS);
             }
 
+            const problems = [...failed, ...pending];
             if (problems.length > 0) {
               core.setFailed(
                 `Merge commit ${sha} (PR #${target.number}, head ${headSha}) did not have ` +
