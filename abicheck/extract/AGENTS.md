@@ -30,6 +30,7 @@ inside this directory.
 | Change | Module |
 |---|---|
 | Header-AST parser backend (castxml or clang), split by parsed entity or parser-state responsibility per ADR-061 D9 | `headers/castxml/`, `headers/clang/` |
+| Reconciling two backends' `SemanticIR` (the hybrid merge, ADR-063 Phase 6) | `semantic_ir_merge.py` |
 | ELF/PE/Mach-O binary parsing | `binary/` (not yet created — still `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py`) |
 | DWARF/PDB debug-info parsing | `debug/` (not yet created) |
 | compile-commands/CMake/Bazel/Make build evidence | `build/` (not yet created) |
@@ -143,8 +144,7 @@ an explicit keyword-only parameter rather than importing it back through
 - **Don't reach back into a flat legacy module's private helpers.** A new
   module here imports the *public* surface of an unmigrated sibling (or, if
   none exists, that is itself a sign the shared piece needs its own leaf
-  module both sides can depend on — see ADR-061's own account of
-  `itanium_scope_components` for the pattern to avoid).
+  module both sides can depend on — see ADR-061 on `itanium_scope_components`).
 - **A migrated module must never import back through its old flat facade**
   (`abicheck.dumper`, `abicheck.service`, `abicheck.cli`) — that reintroduces
   exactly the reverse coupling this package exists to remove.

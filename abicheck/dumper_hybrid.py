@@ -120,6 +120,7 @@ from .dumper_castxml import (
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
+from .extract.semantic_ir_merge import merge_semantic_ir
 from .fact_provenance import (
     backfill_fact,
     enum_fact_key,
@@ -854,8 +855,19 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         provenance[var_fact_key(v.mangled, "visibility")] = "clang"
     merged_variables.extend(clang_only_variables)
 
+    # ADR-063 Phase 6: the semantic IR needs the same base-plus-backfill
+    # reconciliation every legacy field above already gets. Carrying
+    # castxml's through unchanged, while `functions`/`types` include
+    # clang-only and clang-backfilled data, would leave one freshly built
+    # snapshot's two representations disagreeing (extract/semantic_ir_merge.py).
+    merged_ir, ir_conflicts = merge_semantic_ir(
+        castxml_snap.semantic_ir, clang_snap.semantic_ir
+    )
+
     merged = replace(
         castxml_snap,
+        semantic_ir=merged_ir,
+        semantic_ir_conflicts={**castxml_snap.semantic_ir_conflicts, **ir_conflicts},
         functions=merged_functions,
         variables=merged_variables,
         types=merged_types,

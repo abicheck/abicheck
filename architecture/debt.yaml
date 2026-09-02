@@ -763,12 +763,12 @@
     },
     {
       "path": "abicheck/dumper_hybrid.py",
-      "baseline_lines": 1005,
+      "baseline_lines": 1018,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate. Raised by a further 16 in the same slice's follow-up (Codex review): constants itself is NOT merged the same way typedefs_qualified is, so constant_entity_ids needed an explicit filter to the keys castxml_snap.constants actually retains, or a clang-only constant would leave a phantom sidecar key with no matching entry.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate. Raised by a further 16 in the same slice's follow-up (Codex review): constants itself is NOT merged the same way typedefs_qualified is, so constant_entity_ids needed an explicit filter to the keys castxml_snap.constants actually retains, or a clang-only constant would leave a phantom sidecar key with no matching entry. Raised by a further 13 for ADR-063 Phase 6's first slice: merge_snapshots() must reconcile the two sub-snapshots' semantic_ir the same way it already reconciles every legacy field, or the merged snapshot's two representations disagree on every clang-only/clang-backfilled declaration. The matching/backfill algorithm itself lives in the new extract/semantic_ir_merge.py, so only the call-site plumbing lands here.",
       "review_by": "2026-11-30"
     },
     {
