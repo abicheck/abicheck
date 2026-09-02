@@ -169,6 +169,69 @@ class TestDwarfEntityIdCppNamespacedRecords:
 
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
+class TestDwarfEntityIdNestedRecordDefaultAccess:
+    """A nested record's ``Record`` scope-segment ``access`` (non-identity
+    payload) must resolve to the ENCLOSING record's own language default
+    (private for ``class``, public for ``struct``/``union``) when GCC omits
+    ``DW_AT_accessibility`` -- which it does exactly when the nested
+    declaration's access already matches that default (Codex review, PR
+    #1015): a nested class declared with no access label inside a `class`
+    is private by default, not the previous unconditional-public reading."""
+
+    @pytest.fixture()
+    def triple_nested_lib(self, tmp_path: Path) -> Path:
+        cpp = tmp_path / "lib.cpp"
+        cpp.write_text(
+            "class Outer {\n"
+            "  class Inner {\n"
+            "    class Deepest { public: int y; };\n"
+            "   public:\n"
+            "    int x;\n"
+            "    static Deepest get();\n"
+            "  };\n"
+            " public:\n"
+            "  static int make();\n"
+            "};\n"
+            "Outer::Inner::Deepest Outer::Inner::get() { return Deepest(); }\n"
+            "int Outer::make() { Inner i; i.x = 1; return i.x; }\n"
+        )
+        so_path = tmp_path / "libtriplenested_entity.so"
+        result = subprocess.run(
+            [
+                _GCC.replace("gcc", "g++"),
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-std=c++17",
+                "-o",
+                str(so_path),
+                str(cpp),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+        return so_path
+
+    def test_nested_class_default_access_is_private(
+        self, triple_nested_lib: Path
+    ) -> None:
+        elf_meta = parse_elf_metadata(triple_nested_lib)
+        builder = _DwarfSnapshotBuilder(triple_nested_lib, elf_meta)
+        builder.extract()
+
+        deepest = next(t for t in builder.types if t.name == "Outer::Inner::Deepest")
+        assert deepest.entity_id is not None
+        assert len(deepest.entity_id.scope) == 2
+        outer_segment, inner_segment = deepest.entity_id.scope
+        assert outer_segment.access == "public"  # Outer is top-level, no class default
+        assert (
+            inner_segment.access == "private"
+        )  # Inner has no access label inside a class
+
+
+@pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestDwarfEntityIdNonItaniumLinkageName:
     """A real, explicit linkage name that doesn't start with ``_Z`` (an
     ``asm("...")`` label on an ordinary C++ function) must still take the

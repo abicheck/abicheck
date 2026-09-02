@@ -16,14 +16,13 @@
 """ADR-063 Phase 2 (ELF-symbol-only slice): ``entity_id`` population in
 ``dumper_elf_fallback.py``'s header-less, export-table-only snapshot path.
 
-A raw ELF dynamic-symbol-table entry is unconditionally a real, observed,
-distinguishing linker identity -- unlike DWARF's own ``linkage_name or
-name`` fallback (see ``extract/dwarf_scope.py``'s own docstring), this
-producer never constructs a ``Function``/``Variable`` except FROM an actual
-export, so there is no "no real distinguishing spelling" case to guard
-against. Every exported symbol therefore takes the genuine-mangled-name
-branch, regardless of whether it happens to carry an Itanium ``_Z`` prefix
-(Codex review, PR #1015, mirroring the identical DWARF finding).
+See ``_elf_fallback_mangled_name``'s own docstring for the full "why":
+symbol-table-only evidence cannot distinguish a genuine plain-C export from
+a real, explicitly-linked non-Itanium C++ export (both are just a bare,
+un-prefixed identifier string), so this producer defaults to matching the
+two header-AST/DWARF backends' own extern-"C" convention for the far more
+common plain-C case, an accepted, documented residual gap for the rarer
+asm-labeled case (Codex review, PR #1015, two rounds).
 """
 
 from __future__ import annotations
@@ -59,41 +58,43 @@ def test_itanium_mangled_export_gets_mangled_entity_id() -> None:
     assert func.entity_id.extra == ("mangled", "_Z3addii")
 
 
-def test_plain_c_export_gets_mangled_entity_id_too() -> None:
-    """No `("extern_c",)` tag here: a plain C symbol is just as real and
-    distinguishing an export as a mangled one, so it takes the identical
-    genuine-mangled branch — see this module's own docstring."""
+def test_plain_c_export_matches_the_extern_c_convention() -> None:
+    """No ``("mangled", ...)`` tag here: this matches the two header-AST/
+    DWARF backends' own ``("extern_c",)`` convention for a genuine plain-C
+    export -- see this module's own docstring for why that is the accepted
+    default rather than always trusting the raw symbol as "mangled"."""
     snap = _snap({"plain_c_fn"})
     func = next(f for f in snap.functions if f.name == "plain_c_fn")
     assert func.entity_id is not None
-    assert func.entity_id.extra == ("mangled", "plain_c_fn")
+    assert func.entity_id.extra == ("extern_c",)
+    assert func.entity_id.leaf_name == "plain_c_fn"
 
 
-def test_non_itanium_but_real_linkage_name_is_not_misclassified() -> None:
-    """The bug this test guards: a real, explicitly-linked, non-Itanium
-    export (e.g. an ``asm("custom_name")``-labeled C++ function) must not
-    collapse onto the same scope-free ``extern_c`` tag a genuinely
-    unrelated plain-C symbol of the same name elsewhere would use --
-    `Function.is_extern_c`'s own `_Z`-prefix heuristic is not a
-    trustworthy signal, but `entity_id` no longer reads it for this gate."""
+def test_asm_labeled_export_is_a_documented_residual_gap() -> None:
+    """A real, explicitly-linked, non-Itanium export (e.g. an
+    ``asm("custom_name")``-labeled C++ function) is structurally
+    indistinguishable from a genuine plain-C export in symbol-table-only
+    evidence, so it takes the identical extern-"C"-shaped branch here --
+    an accepted, documented limitation (see this module's own docstring
+    and ``_elf_fallback_mangled_name``'s), not a bug this test is pinning
+    as "correct": it exists so a future attempt to disambiguate this case
+    doesn't silently regress the far more common plain-C one instead."""
     snap = _snap({"custom_cpp_name"})
     func = next(f for f in snap.functions if f.name == "custom_cpp_name")
-    # The pre-existing, unrelated heuristic still misreads this as
-    # extern-"C" -- not this producer's `entity_id` construction to fix.
     assert func.is_extern_c is True
     assert func.entity_id is not None
-    assert func.entity_id.extra == ("mangled", "custom_cpp_name")
+    assert func.entity_id.extra == ("extern_c",)
 
 
-def test_variable_export_gets_mangled_entity_id() -> None:
+def test_variable_export_matches_the_extern_c_convention() -> None:
     snap = _snap(set(), {"plain_c_var"})
     var = next(v for v in snap.variables if v.name == "plain_c_var")
     assert var.entity_id is not None
     assert var.entity_id.kind == EntityKind.VARIABLE
-    assert var.entity_id.extra == ("mangled", "plain_c_var")
+    assert var.entity_id.extra == ("extern_c",)
 
 
-def test_two_distinct_exports_never_collide() -> None:
+def test_distinct_exports_never_collide_regardless_of_mangling() -> None:
     snap = _snap({"_Z3addii", "custom_cpp_name", "plain_c_fn"})
     ids = {f.entity_id for f in snap.functions}
     assert len(ids) == 3

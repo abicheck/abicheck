@@ -172,6 +172,11 @@ def build_snapshot_from_dwarf(
 # once by the generic descent — and every leaf DIE's empty child list was still
 # materialized). ``iter_children()`` is the dominant DWARF-parse cost, so halving
 # the calls is the primary saving.
+#: struct/class/union DIE tags, shared by every "is this a record?" branch.
+_RECORD_TYPE_TAGS: frozenset[str] = frozenset(
+    {"DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"}
+)
+
 _DESCEND_TAGS: frozenset[str] = frozenset(
     {
         # Compilation-unit roots (top DIE) — their children are the CU's decls.
@@ -180,9 +185,7 @@ _DESCEND_TAGS: frozenset[str] = frozenset(
         "DW_TAG_type_unit",
         # Namespaces and records nest further ABI-relevant declarations.
         "DW_TAG_namespace",
-        "DW_TAG_structure_type",
-        "DW_TAG_class_type",
-        "DW_TAG_union_type",
+        *_RECORD_TYPE_TAGS,
     }
 )
 
@@ -400,12 +403,12 @@ class _DwarfSnapshotBuilder:
     def _process_cu(self, CU: Any) -> None:
         """Walk all DIEs in one Compilation Unit."""
         top_die = CU.get_top_DIE()
-        stack: collections.deque[tuple[Any, str, ScopePath]] = collections.deque(
-            [(top_die, "", ())]
+        stack: collections.deque[tuple[Any, str, ScopePath, AccessLevel]] = (
+            collections.deque([(top_die, "", (), AccessLevel.PUBLIC)])
         )
 
         while stack:
-            die, scope, scope_path = stack.pop()
+            die, scope, scope_path, default_access = stack.pop()
             tag = die.tag
 
             # Skip function bodies / inlined frames — we handle
@@ -420,6 +423,13 @@ class _DwarfSnapshotBuilder:
             die_name = _attr_str(die, "DW_AT_name")
             next_scope = scope
             next_scope_path = scope_path
+            # Absent DW_AT_accessibility matches the ENCLOSING record's own
+            # default, not unconditionally public (Codex review, PR #1015).
+            next_default_access = (
+                _default_member_access_for_tag(tag)
+                if tag in _RECORD_TYPE_TAGS
+                else default_access
+            )
             # Materialize a container's children at most once and reuse the list
             # for both field-collection (records/enums) and the descent push, so
             # ``iter_children()`` (the dominant DWARF-parse cost) runs once per DIE,
@@ -438,11 +448,7 @@ class _DwarfSnapshotBuilder:
                 continue  # don't descend into function body
             elif tag == "DW_TAG_variable":
                 self._process_variable(die, CU, scope, scope_path)
-            elif tag in (
-                "DW_TAG_structure_type",
-                "DW_TAG_class_type",
-                "DW_TAG_union_type",
-            ):
+            elif tag in _RECORD_TYPE_TAGS:
                 qualified = f"{scope}::{die_name}" if (scope and die_name) else die_name
                 children = list(die.iter_children())
                 self._process_record_type(die, CU, scope, scope_path, children)
@@ -453,7 +459,7 @@ class _DwarfSnapshotBuilder:
                         *scope_path,
                         _record_scope_segment(
                             die_name,
-                            access=_access_from_dwarf(access_val).value,
+                            access=_access_from_dwarf(access_val, default_access).value,
                         ),
                     )
             elif tag == "DW_TAG_enumeration_type":
@@ -471,7 +477,9 @@ class _DwarfSnapshotBuilder:
                 if children is None:
                     children = list(die.iter_children())
                 for child in reversed(children):
-                    stack.append((child, next_scope, next_scope_path))
+                    stack.append(
+                        (child, next_scope, next_scope_path, next_default_access)
+                    )
 
     # -------------------------------------------------------------------
     # Subprogram (function) extraction
@@ -1689,11 +1697,7 @@ class _DwarfSnapshotBuilder:
                 target_name = _attr_str(target, "DW_AT_name")
                 target_tag = target.tag
 
-                if target_tag in (
-                    "DW_TAG_structure_type",
-                    "DW_TAG_class_type",
-                    "DW_TAG_union_type",
-                ):
+                if target_tag in _RECORD_TYPE_TAGS:
                     if not target_name and qualified not in self._seen_type_names:
                         # Anonymous struct/union — register under the qualified
                         # typedef name so same-named typedefs in different
@@ -1862,7 +1866,7 @@ class _DwarfSnapshotBuilder:
                 _attr_int(die, "DW_AT_byte_size"),
             )
 
-        if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+        if tag in _RECORD_TYPE_TAGS:
             name = _attr_str(die, "DW_AT_name") or "<anon>"
             return (name, _attr_int(die, "DW_AT_byte_size"))
 
