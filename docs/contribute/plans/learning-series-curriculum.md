@@ -31,6 +31,10 @@ its count), and `docs/contribute/usecase-registry.yaml`.
 
 ## 1. What exists today
 
+> Historical snapshot at the time of the review. The nav groups named
+> below no longer exist — see the [§5 amendment](#5-proposed-target-shape)
+> for the numbered-step sidebar that replaced them.
+
 The learning material is physically one directory but is navigated as two
 tabs (`docs/AGENTS.md` "Layout"):
 

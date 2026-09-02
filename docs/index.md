@@ -38,8 +38,8 @@ needs:
    is educational material that needs no abicheck knowledge: what ABI/API
    compatibility is, why libraries break their consumers, and how to design
    against it. Start at Step 1 — [ABI in Five Minutes](learn/abi-series/abi-in-5-minutes.md)
-   assumes nothing, and the overview page's nine numbered steps take you
-   from there to checking a multi-binary product in CI — and keep the
+   assumes nothing, and the overview page's numbered steps take you from
+   there through checking a multi-binary product in CI — and keep the
    [example encyclopedia](reference/examples/index.md) as a catalog of real breaks.
 2. **Use the tool** — the [User Guide](start/getting-started.md) takes you from install
    and first check through CI integration to specialised workflows;

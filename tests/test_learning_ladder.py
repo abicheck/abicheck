@@ -29,6 +29,7 @@ at the end.
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import sys
 from pathlib import Path
 
@@ -65,13 +66,13 @@ sequences:
   educational:
     tab: Learn
     tiers:
-      - id: 0
+      - id: 1
         title: Start
         floor: beginner
         members:
           - learn/a.md
           - learn/b.md
-      - id: 1
+      - id: 2
         title: Deeper
         floor: intermediate
         members:
@@ -173,10 +174,10 @@ nav:
   - Home: index.md
   - Learn:
     - Overview: learn/hub.md
-    - "0. Start":
+    - "1. Start":
       - A: learn/a.md
       - B: learn/b.md
-    - "1. Deeper":
+    - "2. Deeper":
       - C: learn/c.md
       - D: learn/d.md
       - Go Deeper (optional):
@@ -268,7 +269,7 @@ def test_member_below_tier_floor_is_an_error_even_when_monotonic(
     )
     docs, ladder = _build(tmp_path, ladder_text=text)
     msgs = _run(docs, ladder)
-    assert any("learn/c.md" in m and "below tier 1" in m for m in msgs)
+    assert any("learn/c.md" in m and "below step 2" in m for m in msgs)
 
 
 def test_branch_below_its_parent_is_an_error(tmp_path: Path) -> None:
@@ -308,7 +309,7 @@ def test_link_that_is_nowhere_a_member_is_an_error(tmp_path: Path) -> None:
         _page("advanced", "stray"), encoding="utf-8"
     )
     msgs = _run(docs, ladder)
-    assert any("learn/stray.md" in m and "member of no tier" in m for m in msgs)
+    assert any("learn/stray.md" in m and "member of no step" in m for m in msgs)
 
 
 def test_tool_track_link_must_exist(tmp_path: Path) -> None:
@@ -483,9 +484,9 @@ def test_no_mkdocs_file_skips_the_sidebar_rule(tmp_path: Path) -> None:
 
 
 def test_sidebar_group_titles_must_be_the_numbered_steps(tmp_path: Path) -> None:
-    nav = NAV_OK.replace('"1. Deeper"', "Deeper")
+    nav = NAV_OK.replace('"2. Deeper"', "Deeper")
     msgs = _run_with_nav(tmp_path, nav)
-    assert any("not the ladder's steps" in m and "'1. Deeper'" in m for m in msgs)
+    assert any("not the ladder's steps" in m and "'2. Deeper'" in m for m in msgs)
 
 
 def test_sidebar_groups_must_be_in_step_order(tmp_path: Path) -> None:
@@ -493,11 +494,11 @@ def test_sidebar_groups_must_be_in_step_order(tmp_path: Path) -> None:
 nav:
   - Learn:
     - Overview: learn/hub.md
-    - "1. Deeper":
+    - "2. Deeper":
       - C: learn/c.md
       - D: learn/d.md
       - CB: learn/c-branch.md
-    - "0. Start":
+    - "1. Start":
       - A: learn/a.md
       - B: learn/b.md
   - Concepts:
@@ -511,7 +512,7 @@ def test_missing_group_reports_once_without_a_page_cascade(tmp_path: Path) -> No
     """Groups are matched to steps by title: one missing group is one
     finding naming the fix, not every later page reported twice."""
     nav = NAV_OK.replace(
-        '    - "1. Deeper":\n      - C: learn/c.md\n      - D: learn/d.md\n'
+        '    - "2. Deeper":\n      - C: learn/c.md\n      - D: learn/d.md\n'
         "      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
         "",
     )
@@ -526,9 +527,9 @@ def test_page_in_another_steps_group_is_reported_from_both_sides(
         "      - B: learn/b.md\n", "      - B: learn/b.md\n      - D: learn/d.md\n"
     )
     msgs = _run_with_nav(tmp_path, nav)
-    assert any("1. Deeper" in m and "learn/d.md is missing" in m for m in msgs)
+    assert any("2. Deeper" in m and "learn/d.md is missing" in m for m in msgs)
     assert any(
-        "0. Start" in m and "learn/d.md" in m and "places it elsewhere" in m
+        "1. Start" in m and "learn/d.md" in m and "places it elsewhere" in m
         for m in msgs
     )
 
@@ -541,7 +542,7 @@ def test_members_out_of_ladder_order_inside_a_group_is_an_error(
         "      - B: learn/b.md\n      - A: learn/a.md\n",
     )
     msgs = _run_with_nav(tmp_path, nav)
-    assert any("0. Start" in m and "not in ladder order" in m for m in msgs)
+    assert any("1. Start" in m and "not in ladder order" in m for m in msgs)
 
 
 def test_branch_before_its_parent_in_the_sidebar_is_an_error(tmp_path: Path) -> None:
@@ -549,10 +550,10 @@ def test_branch_before_its_parent_in_the_sidebar_is_an_error(tmp_path: Path) -> 
 nav:
   - Learn:
     - Overview: learn/hub.md
-    - "0. Start":
+    - "1. Start":
       - A: learn/a.md
       - B: learn/b.md
-    - "1. Deeper":
+    - "2. Deeper":
       - CB: learn/c-branch.md
       - C: learn/c.md
       - D: learn/d.md
@@ -560,7 +561,7 @@ nav:
     - X: learn/x.md
 """
     msgs = _run_with_nav(tmp_path, nav)
-    assert any("learn/c-branch.md sits before learn/c.md" in m for m in msgs)
+    assert any("learn/c-branch.md must follow learn/c.md directly" in m for m in msgs)
 
 
 def test_sibling_branches_out_of_ladder_order_is_an_error(tmp_path: Path) -> None:
@@ -602,7 +603,7 @@ def test_branch_between_later_members_is_an_error(tmp_path: Path) -> None:
     )
     (docs.parent / "mkdocs.yml").write_text(nav, encoding="utf-8")
     msgs = _run(docs, ladder)
-    assert any("learn/c-branch.md sits between later members" in m for m in msgs)
+    assert any("learn/c-branch.md must follow learn/c.md directly" in m for m in msgs)
     trailing = NAV_OK.replace(
         "      - D: learn/d.md\n", "      - D: learn/d.md\n      - E: learn/e.md\n"
     )
@@ -617,17 +618,31 @@ def test_hub_must_sit_directly_under_the_first_sequences_tab(
         "  - Concepts:\n", "  - Concepts:\n    - Overview: learn/hub.md\n"
     )
     msgs = _run_with_nav(tmp_path, moved)
-    assert any("Learn: the hub learn/hub.md must sit directly under" in m for m in msgs)
+    assert any(
+        "Learn: the hub learn/hub.md must be the first entry directly under" in m
+        for m in msgs
+    )
     assert any("Concepts / Concepts: the hub" in m for m in msgs)
+
+
+def test_hub_listed_after_the_steps_is_an_error(tmp_path: Path) -> None:
+    last = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
+        "  - Concepts:\n", "    - Overview: learn/hub.md\n  - Concepts:\n"
+    )
+    msgs = _run_with_nav(tmp_path, last)
+    assert any("must be the first entry directly under" in m for m in msgs)
 
 
 def test_hub_inside_a_step_group_is_an_error(tmp_path: Path) -> None:
     inside = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
-        '    - "0. Start":\n', '    - "0. Start":\n      - Overview: learn/hub.md\n'
+        '    - "1. Start":\n', '    - "1. Start":\n      - Overview: learn/hub.md\n'
     )
     msgs = _run_with_nav(tmp_path, inside)
-    assert any("Learn: the hub learn/hub.md must sit directly under" in m for m in msgs)
-    assert any("Learn / 0. Start: the hub" in m for m in msgs)
+    assert any(
+        "Learn: the hub learn/hub.md must be the first entry directly under" in m
+        for m in msgs
+    )
+    assert any("Learn / 1. Start: the hub" in m for m in msgs)
 
 
 def test_branch_right_after_its_parent_is_also_accepted(tmp_path: Path) -> None:
@@ -702,9 +717,82 @@ def test_step_label_numbers_the_educational_sequence_only(tmp_path: Path) -> Non
     _, ladder_path = _build(tmp_path)
     ladder = ll.load_ladder(ladder_path)
     edu, concepts = ladder.sequences
-    assert ll.step_label(edu, edu.tiers[1]) == "Step 1"
+    assert ll.step_label(edu, edu.tiers[1]) == "Step 2"
     assert ll.step_label(concepts, concepts.tiers[0]) == "Concepts c1"
-    assert ll.nav_group_title(edu.tiers[1]) == "1. Deeper"
+    assert ll.nav_group_title(edu.tiers[1]) == "2. Deeper"
+
+
+def test_numbered_steps_must_be_contiguous_from_one(tmp_path: Path) -> None:
+    """The hub renders a numbered sequence as a Markdown ordered list, which
+    numbers items positionally, so ids that are not 1..n would show one
+    number on the hub and another in the sidebar and footers."""
+    text = BASE_LADDER.replace(
+        "      - id: 2\n        title: Deeper", "      - id: 3\n        title: Deeper"
+    )
+    docs, ladder = _build(tmp_path, ladder_text=text, footers=False)
+    msgs = _run(docs, ladder)
+    assert len(msgs) == 1 and "numbered steps must be ids ['1', '2']" in msgs[0]
+
+
+class TestOrderFindingsProperties:
+    """`_order_findings` is a reusable grouping-order primitive, so its
+    contract is stated as invariants over a small exhaustive domain rather
+    than only through the sidebar tests above: every permutation of one
+    step's pages is either one of the layouts the rule admits — built here
+    by an independent construction — or reported, never both."""
+
+    MEMBERS = ["m1", "m2", "m3"]
+    BRANCHES = {"m1": ["b1", "b2"], "m2": ["b3"]}
+    PAGES = MEMBERS + ["b1", "b2", "b3"]
+
+    @classmethod
+    def accepted_layouts(cls) -> set[tuple[str, ...]]:
+        """Each parent's branches sit either directly after it or in the
+        trailing block after the last member, and the branches keep their
+        ladder order among themselves."""
+        layouts: set[tuple[str, ...]] = set()
+        parents = [m for m in cls.MEMBERS if m in cls.BRANCHES]
+        ladder_order = [b for bs in cls.BRANCHES.values() for b in bs]
+        for inline in itertools.product([True, False], repeat=len(parents)):
+            pages: list[str] = []
+            trailing: list[str] = []
+            for member in cls.MEMBERS:
+                pages.append(member)
+                branches = cls.BRANCHES.get(member, [])
+                if member in parents and inline[parents.index(member)]:
+                    pages.extend(branches)
+                else:
+                    trailing.extend(branches)
+            layout = pages + trailing
+            if [p for p in layout if p in ladder_order] == ladder_order:
+                layouts.add(tuple(layout))
+        return layouts
+
+    def test_exactly_the_admitted_layouts_are_clean(self) -> None:
+        accepted = self.accepted_layouts()
+        assert len(accepted) == 3  # both inline, both trailing, m1 inline only
+        for perm in itertools.permutations(self.PAGES):
+            findings = ll._order_findings("g", list(perm), self.MEMBERS, self.BRANCHES)
+            assert (findings == []) == (perm in accepted), (perm, findings)
+
+    def test_branch_mapping_iteration_order_never_changes_the_verdict(
+        self,
+    ) -> None:
+        reversed_branches = dict(reversed(list(self.BRANCHES.items())))
+        for perm in itertools.permutations(self.PAGES):
+            a = ll._order_findings("g", list(perm), self.MEMBERS, self.BRANCHES)
+            b = ll._order_findings("g", list(perm), self.MEMBERS, reversed_branches)
+            assert (a == []) == (b == []), perm
+
+    def test_every_absent_page_and_every_stray_page_is_named(self) -> None:
+        for dropped in self.PAGES:
+            pages = [p for p in self.PAGES if p != dropped]
+            findings = ll._order_findings("g", pages, self.MEMBERS, self.BRANCHES)
+            assert any(f"{dropped} is missing" in m for m in findings), dropped
+        findings = ll._order_findings(
+            "g", self.PAGES + ["stray"], self.MEMBERS, self.BRANCHES
+        )
+        assert any("stray is in this nav group" in m for m in findings)
 
 
 def test_real_repository_ladder_is_clean() -> None:

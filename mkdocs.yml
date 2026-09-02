@@ -208,8 +208,9 @@ nav:
       - Consumer Models: learn/consumer-models.md
       - Build Profile Comparability: learn/build-profile-comparability.md
       - Static & Header-Only Contracts: learn/static-and-header-only.md
-    # Steps 1-5 need no abicheck knowledge; the tool enters here, with the
-    # categorically different "how do you catch it" question.
+    # Steps 1-5 teach the problem and the reader's own promise; from here
+    # on the subject is catching breaks -- the categorically different
+    # "how do you catch it" question, where checking tools enter.
     - "6. Detect Breaks":
       - Detecting Breaks: learn/abi-series/08-detection.md
       - Assurance Beyond Static Checking: learn/assurance-methods.md

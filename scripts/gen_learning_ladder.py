@@ -48,7 +48,6 @@ from learning_ladder import (  # noqa: E402
     DOCS,
     LADDER_PATH,
     Ladder,
-    Sequence,
     Tier,
     load_ladder,
     page_level,
@@ -119,17 +118,13 @@ def _pages_line(ladder: Ladder, docs: Path, tier: Tier) -> str:
     return pages
 
 
-def _is_numbered(seq: Sequence) -> bool:
-    return all(t.id.isdigit() for t in seq.tiers)
-
-
 def render_ladder(ladder: Ladder, docs: Path) -> str:
     """The educational sequence as a numbered list (one item per step, its
     number being the step's id), then every other sequence as a bulleted
     list under a bold caption naming its tab."""
     out: list[str] = [GENERATED_NOTE, ""]
     for seq in ladder.sequences:
-        numbered = _is_numbered(seq)
+        numbered = seq.numbered
         if not numbered:
             out.append(f"**{seq.tab} tab — the tool's own sequence**")
             out.append("")

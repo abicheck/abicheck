@@ -59,7 +59,7 @@ path, not the nav position.
   tab level):
   - The **educational track** — general ABI/API compatibility knowledge that
     holds regardless of which tool you use — is navigated under the
-    **ABI/API Compatibility** tab as **nine numbered steps, and the sidebar
+    **ABI/API Compatibility** tab as **numbered steps, and the sidebar
     is the reading order**: one nav group per step of
     `docs/_meta/learning-ladder.yaml`, titled `<n>. <title>`, in step
     order, holding that step's pages in ladder order (the hub sits alone
@@ -76,14 +76,15 @@ path, not the nav position.
     numbered Parts read straight through Steps 2-4) → **5. Define Your
     Contract** (direction, consumer models, build-profile comparability,
     static/header-only) → **6. Detect Breaks** (`abi-series/08-detection.md`
-    + `assurance-methods.md`; the tool enters here) → **7. In Practice**
+    + `assurance-methods.md`; from here the subject is catching breaks) → **7. In Practice**
     (where in the pipeline, surface growth, rollout and governance, triage)
     → **8. At Scale** (products, template-heavy libraries, system-library
     discipline, runtime floors, environment drift, packages and consumers)
     → **9. Beyond Static ABI** (behavioral, data/wire, ownership,
-    concurrency). A Part's own "Series navigation" breadcrumb (top of each
-    `abi-series/0N-*.md` page) lists exactly Parts 0-7, the numbered spine
-    inside those steps. To move a page or a step, edit the ladder file and
+    concurrency). Each Part's own "Series navigation" breadcrumb (top of
+    `abi-series/00-*.md` … `07-*.md`; `08-detection.md` is Step 6's first
+    page, not a Part, and carries none) lists exactly Parts 0-7, the
+    numbered spine inside those steps. To move a page or a step, edit the ladder file and
     `mkdocs.yml` together, then regenerate the hub
     (`python scripts/gen_learning_ladder.py`) and rewrite the affected
     footers. An earlier layout grouped this tab by *question asked*

@@ -50,8 +50,8 @@ Rules the file encodes (each is an ERROR):
   somewhere after its parent and branches in ladder order among
   themselves, each branch either directly after its parent or in the
   trailing go-deeper block — or lists the whole sequence flat in the same
-  order (the Concepts tab). The hub sits directly under the first
-  sequence's tab, as its overview, and nowhere else.
+  order (the Concepts tab). The hub is the first entry directly under the
+  first sequence's tab, as its overview, and appears nowhere else.
   This is what keeps the sidebar, the hub's step list, and every page's
   footer telling one reading order instead of three.
 
@@ -70,7 +70,6 @@ from learning_nav_order import nav_groups
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 DOCS = REPO_DIR / "docs"
-MKDOCS = REPO_DIR / "mkdocs.yml"
 LADDER_PATH = DOCS / "_meta" / "learning-ladder.yaml"
 CHECK = "learning-ladder"
 
@@ -138,6 +137,12 @@ class Sequence:
 
     def ordered_members(self) -> list[str]:
         return [m for tier in self.tiers for m in tier.members]
+
+    @property
+    def numbered(self) -> bool:
+        """Readers see this sequence as `Step 1` … `Step n` (ids are the step
+        numbers); the hub renders it as an ordered list."""
+        return all(t.id.isdigit() for t in self.tiers)
 
 
 @dataclass
@@ -274,6 +279,17 @@ def load_ladder(path: Path = LADDER_PATH) -> Ladder:
                         ),
                     )
             seq.tiers.append(tier)
+        if seq.numbered:
+            ids = [t.id for t in seq.tiers]
+            want = [str(i) for i in range(1, len(ids) + 1)]
+            if ids != want:
+                # Markdown numbers an ordered list positionally, so the hub
+                # would silently show different numbers from the sidebar's
+                # "<id>. <title>" groups and the footers' "Step <id>".
+                raise LadderError(
+                    f"sequences.{key}: numbered steps must be ids {want} in order "
+                    f"(got {ids}); the hub renders them as an ordered list"
+                )
         ladder.sequences.append(seq)
 
     for i, path_raw in enumerate(raw.get("paths") or []):
@@ -299,8 +315,8 @@ def load_ladder(path: Path = LADDER_PATH) -> Ladder:
 def _place(ladder: Ladder, entry: Entry) -> None:
     if entry.page in ladder.index:
         raise LadderError(
-            f"{entry.page}: placed twice (tier {ladder.index[entry.page].tier_id} and "
-            f"tier {entry.tier_id}); every page belongs to exactly one tier"
+            f"{entry.page}: placed twice (step {ladder.index[entry.page].tier_id} and "
+            f"step {entry.tier_id}); every page belongs to exactly one step"
         )
     ladder.index[entry.page] = entry
 
@@ -352,7 +368,7 @@ def short_title(title: str) -> str:
 def step_label(seq: Sequence, tier: Tier) -> str:
     """How a step is named to readers: `Step 3` on the educational sequence
     (whose ids are the step numbers), `Concepts c2` elsewhere."""
-    return f"Step {tier.id}" if tier.id.isdigit() else f"{seq.tab} {tier.id}"
+    return f"Step {tier.id}" if seq.numbered else f"{seq.tab} {tier.id}"
 
 
 def footer_links(page: str, text: str) -> list[str] | None:
@@ -398,7 +414,10 @@ def _order_findings(
     plus every branch, with members in ladder order and each branch after
     the page it hangs from."""
     out: list[str] = []
-    all_branches = [b for bs in branches.values() for b in bs]
+    # Ladder order of the branches: parents in member order, then each
+    # parent's branches in YAML order -- never the mapping's own iteration
+    # order.
+    all_branches = [b for m in members for b in branches.get(m, [])]
     expected = members + all_branches
     for page in expected:
         if page not in pages:
@@ -415,16 +434,6 @@ def _order_findings(
             f"{label}: members are not in ladder order (expected "
             f"{' → '.join(placed_members)})"
         )
-    for parent, bs in branches.items():
-        for branch in bs:
-            if (
-                parent in position
-                and branch in position
-                and position[branch] < position[parent]
-            ):
-                out.append(
-                    f"{label}: {branch} sits before {parent}, the page it hangs from"
-                )
     # Branches keep the ladder's own order among themselves too (parents in
     # member order, siblings in YAML order): they are all "advanced", so the
     # level gate would let two of them swap while the sidebar stopped
@@ -435,24 +444,22 @@ def _order_findings(
             f"{label}: go-deeper pages are not in ladder order (expected "
             f"{' → '.join(placed_branches)})"
         )
-    # A branch sits in one of two places the hub also renders: directly
-    # after the page it hangs from (with only that page's other branches in
-    # between) or in the trailing "go deeper" block after the step's last
-    # member. Anywhere else -- between two later members -- is a position
-    # the ladder has no reading for.
+    # A parent's branches sit as one block in one of the two places the hub
+    # also renders: directly after the page they hang from, or in the
+    # trailing "go deeper" block after the step's last member. Split between
+    # the two, before the parent, or between two later members is a
+    # position the ladder has no reading for.
     last_member = max((position[m] for m in placed_members), default=-1)
     for parent, bs in branches.items():
-        if parent not in position:
+        present = [b for b in bs if b in position]
+        if parent not in position or not present:
             continue
-        for branch in bs:
-            if branch not in position or position[branch] < position[parent]:
-                continue
-            between = pages[position[parent] + 1 : position[branch]]
-            if position[branch] > last_member or all(p in bs for p in between):
-                continue
+        inline = pages[position[parent] + 1 : position[parent] + 1 + len(present)]
+        trailing = all(position[b] > last_member for b in present)
+        if inline != present and not trailing:
             out.append(
-                f"{label}: {branch} sits between later members; a go-deeper page "
-                f"follows {parent} directly or closes the step after its last member"
+                f"{label}: {', '.join(present)} must follow {parent} directly as one "
+                "block or close the step together after its last member"
             )
     return out
 
@@ -466,10 +473,14 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
     # another learning tab.
     home = ladder.sequences[0].tab
     home_key = f"{home} / {home}"
-    if ladder.hub not in groups.get(home_key, []):
+    # `nav_groups` keeps nav order across its keys, so "first entry under
+    # the tab" means: the tab's loose pages come before any step group, and
+    # the hub heads them.
+    home_keys = [key for key in groups if key.startswith(f"{home} / ")]
+    if home_keys[:1] != [home_key] or groups[home_key][:1] != [ladder.hub]:
         out.append(
-            f"{home}: the hub {ladder.hub} must sit directly under this tab, "
-            "as its overview"
+            f"{home}: the hub {ladder.hub} must be the first entry directly under "
+            "this tab, as its overview"
         )
     for key, pages in groups.items():
         if key != home_key and ladder.hub in pages:
@@ -539,9 +550,9 @@ def check_learning_ladder(
 ) -> None:
     """Report every ladder-rule violation on `f` (a Findings with `.err`).
 
-    `mkdocs_path` defaults to the repository's `mkdocs.yml` for the real
-    docs tree and to `<docs>/../mkdocs.yml` for a fixture tree; the sidebar
-    rule is skipped when that file does not exist."""
+    `mkdocs_path` defaults to the `mkdocs.yml` beside the docs tree
+    (`<docs>/../mkdocs.yml`, the repository's own for the real tree); the
+    sidebar rule is skipped when that file does not exist."""
     if not ladder_path.is_file():
         f.err(CHECK, f"{ladder_path.name}: missing")
         return
@@ -552,7 +563,7 @@ def check_learning_ladder(
         return
 
     if mkdocs_path is None:
-        mkdocs_path = MKDOCS if docs == DOCS else docs.parent / "mkdocs.yml"
+        mkdocs_path = docs.resolve().parent / "mkdocs.yml"
     if mkdocs_path.is_file():
         for msg in nav_findings(ladder, mkdocs_path.read_text(encoding="utf-8")):
             f.err(CHECK, msg)
@@ -592,7 +603,7 @@ def check_learning_ladder(
             f.err(
                 CHECK,
                 f"{page}: not placed in docs/_meta/learning-ladder.yaml (every learn page "
-                "except the hub is a member or branch of exactly one tier)",
+                "except the hub is a member or branch of exactly one step)",
             )
 
     # Floors, monotonicity, branches.
@@ -606,7 +617,7 @@ def check_learning_ladder(
                 if LEVEL_RANK[lvl] < LEVEL_RANK[tier.floor]:
                     f.err(
                         CHECK,
-                        f"{member}: level {lvl} is below tier {tier.id} ({tier.title}) floor {tier.floor}",
+                        f"{member}: level {lvl} is below step {tier.id} ({tier.title}) floor {tier.floor}",
                     )
                 if previous is not None and LEVEL_RANK[lvl] < LEVEL_RANK[previous[1]]:
                     f.err(
@@ -627,7 +638,7 @@ def check_learning_ladder(
                     if LEVEL_RANK[blvl] < LEVEL_RANK[tier.floor]:
                         f.err(
                             CHECK,
-                            f"{branch}: level {blvl} is below tier {tier.id} floor {tier.floor}",
+                            f"{branch}: level {blvl} is below step {tier.id} floor {tier.floor}",
                         )
             for link in tier.links:
                 if link in ladder.index:
@@ -635,12 +646,12 @@ def check_learning_ladder(
                 if link.startswith("learn/"):
                     f.err(
                         CHECK,
-                        f"{link}: linked from tier {tier.id} but a member of no tier (a link "
+                        f"{link}: linked from step {tier.id} but a member of no step (a link "
                         "is a pointer, not a place to hide an unclassified page)",
                     )
                 elif not (docs / link).is_file():
                     f.err(
-                        CHECK, f"{link}: linked from tier {tier.id} but does not exist"
+                        CHECK, f"{link}: linked from step {tier.id} but does not exist"
                     )
 
     # Paths.
@@ -652,7 +663,7 @@ def check_learning_ladder(
             if entry is None:
                 f.err(
                     CHECK,
-                    f"path {rp.role!r}: {page} is not a member or branch of any tier",
+                    f"path {rp.role!r}: {page} is not a member or branch of any step",
                 )
                 continue
             if page in seen:

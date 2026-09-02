@@ -9,11 +9,13 @@ generated: false
 ---
 # ABI/API Compatibility — A Learning Series
 
-Nine steps, from "what is an ABI?" to checking a multi-binary product in
-CI. Steps 1–5 need no abicheck knowledge at all; the tool enters at Step 6.
-Read the steps in order — each assumes the ones before it — and follow the
-**Ladder** line at the bottom of every page to the next one. The sidebar
-lists the same steps in the same order.
+Numbered steps, from "what is an ABI?" through checking a multi-binary
+product in CI to what no static check can decide. Steps 1–5 are about the
+problem and the promise you are making; from Step 6 on they are about
+catching breaks, which is where checking tools such as abicheck become the
+subject. Read the steps in order — each assumes the ones before it — and
+follow the **Ladder** line at the bottom of every page to the next one. The
+sidebar lists the same steps in the same order.
 
 ## Start here
 
