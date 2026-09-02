@@ -166,20 +166,28 @@ jobs:
             // running.
             //
             // No tolerance is added to the `completed_at` vs. `merged_at`
-            // comparison below -- it is a strict `>`, full stop. Two earlier
+            // comparison below -- `completedAt >= mergedAt` is decisive,
+            // full stop (an exact match included, since GitHub's whole-
+            // second timestamps can't prove which of two same-second events
+            // came first -- see the inline comment below). Two earlier
             // versions of this workflow added a grace window (90s, then 2s)
             // reasoned as "clock-skew/recording slack", but `completed_at` and
             // `merged_at` are both timestamps GitHub itself records on its own
             // systems: any added allowance is not correcting for skew, it is
             // accepting that much genuine post-merge execution time, which is
             // exactly the slipped-through-merge case this audit exists to
-            // detect (Codex review, twice). `Date.parse` of GitHub's ISO 8601
+            // detect (Codex review). `Date.parse` of GitHub's ISO 8601
             // timestamps already gives the finest comparison the API's own
             // second-granularity data supports -- there is nothing left to
             // pad for.
             const POLL_INTERVAL_MS = 20_000;
             const MAX_WAIT_MS = 3 * 60 * 1000;
             const deadline = Date.now() + MAX_WAIT_MS;
+            // A clean (`pending.length === 0`) result must hold across at
+            // least this many polls before being accepted -- see the loop's
+            // own comment below for why a single clean read can't be
+            // trusted (Codex review).
+            const MIN_CLEAN_ATTEMPTS = 2;
 
             // Evaluates the current snapshot of check runs against
             // REQUIRED_CHECKS. Only a `completed_at` after `merged_at` is
@@ -326,16 +334,33 @@ jobs:
                 // known-bad.
                 break;
               }
-              if (pending.length === 0) {
+              // A clean result (`pending.length === 0`) on the very first
+              // attempt does not prove there is nothing left to see: a
+              // rerun that was queued before the merge can fail to be
+              // indexed by `checks.listForRef` *at all* yet, not merely
+              // show up as `queued` -- so the response looks identical to
+              // "nothing else exists" and "the current attempt hasn't been
+              // indexed yet" (Codex review, the symmetric case to the
+              // stale-failed-snapshot handling above). Requiring the clean
+              // result to hold across at least MIN_CLEAN_ATTEMPTS polls
+              // gives a not-yet-indexed rerun one more cycle to appear
+              // before this workflow declares victory; it cannot prove a
+              // rerun created even later doesn't exist, but a single
+              // instantaneous "looks fine" read provably cannot either.
+              if (pending.length === 0 && attempt >= MIN_CLEAN_ATTEMPTS) {
                 break;
               }
               if (Date.now() >= deadline) {
                 break;
               }
               core.info(
-                `Attempt ${attempt}: ${pending.length} required check(s) not yet ` +
-                `observed as completed for PR #${target.number}'s head ${headSha}; ` +
-                `retrying in ${POLL_INTERVAL_MS / 1000}s (short window for API lag only).`
+                pending.length === 0
+                  ? `Attempt ${attempt}: no problems observed yet, but confirming across ` +
+                    `${MIN_CLEAN_ATTEMPTS} attempts before accepting a clean result; ` +
+                    `retrying in ${POLL_INTERVAL_MS / 1000}s.`
+                  : `Attempt ${attempt}: ${pending.length} required check(s) not yet ` +
+                    `observed as completed for PR #${target.number}'s head ${headSha}; ` +
+                    `retrying in ${POLL_INTERVAL_MS / 1000}s (short window for API lag only).`
               );
               await sleep(POLL_INTERVAL_MS);
             }
