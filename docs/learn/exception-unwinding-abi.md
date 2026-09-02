@@ -173,3 +173,7 @@ for why a bare `noexcept` toggle classifies as risk rather than a hard
 break, and [Modern C/C++ and Toolchain ABI Hazards](modern-cpp-toolchain-hazards.md)
 for the `-fno-exceptions`/`-fno-rtti` build-flag row in context with its
 siblings.
+
+---
+
+**Ladder:** ← [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) · Tier 2 · Mechanics · [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) →

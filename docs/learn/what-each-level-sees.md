@@ -508,8 +508,9 @@ and the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-e
 
 ---
 
-**Next:** [Evidence & Detectability](evidence-and-detectability.md) tracks each
-layer's false-positive / false-negative contribution as a CI gate and maps the
-`L0`–`L5` layers to the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect) ·
-[Limitations](limitations.md) is the authoritative per-change detectability
-matrix.
+Ready to run it? [Source-Scan Depth](../use/scan-levels.md) owns the `--depth`
+choice.
+
+---
+
+**Ladder:** ← [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) · Concepts c2 · The evidence model · [ELF-Only Mode and Symbol Filtering](elf-symbol-filtering.md) →

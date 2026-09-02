@@ -115,3 +115,7 @@ Two abicheck features map directly onto this page:
 The design patterns that keep the surface small — opaque handles, Pimpl,
 version scripts, `-fvisibility=hidden` + explicit exports — are the subject of
 [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md).
+
+---
+
+**Ladder:** ← [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) · Tier 1 · Foundations · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) →

@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - concurrency-and-initialization
 depends_on:
@@ -119,3 +119,7 @@ for the broader category and why static analysis structurally cannot decide
 it, and [Ownership & Lifetime Contracts](ownership-and-lifetime.md) for the
 adjacent, similarly signature-invisible contract about who owns what and for
 how long.
+
+---
+
+**Ladder:** ← [Ownership & Lifetime Contracts](ownership-and-lifetime.md) · Tier 8 · Beyond static ABI · [Series overview](abi-api-handling.md) →

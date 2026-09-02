@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - ownership-and-lifetime
 depends_on:
@@ -167,3 +167,7 @@ for the broader category this belongs to, and
 [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md)
 for the pimpl/opaque-handle patterns that make an ownership contract part of
 a stable, checkable ABI boundary.
+
+---
+
+**Ladder:** ← [Data, Wire & Storage Compatibility](data-wire-compatibility.md) · Tier 8 · Beyond static ABI · [Concurrency & Initialization Contracts](concurrency-and-initialization.md) →

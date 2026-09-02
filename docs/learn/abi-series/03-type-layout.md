@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/diff_types.py
+lifecycle: active
+generated: false
+---
 # Part 3 — Type Layout Breaks
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -252,3 +262,7 @@ silently flips the calling convention.
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [BREAKING examples](../../reference/examples/by-verdict/breaking.md) ·
 [COMPATIBLE examples](../../reference/examples/by-verdict/compatible.md)
+
+---
+
+**Ladder:** ← [Part 2 — Symbol Contract Breaks](02-symbol-contracts.md) · Tier 2 · Mechanics · [Part 4 — C++ ABI Specifics](04-cpp-abi.md) →

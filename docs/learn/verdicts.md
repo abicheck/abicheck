@@ -3,7 +3,7 @@ doc_type: explanation
 audience:
   - library-maintainer
   - ci-owner
-level: beginner
+level: intermediate
 canonical_for:
   - verdicts
 depends_on:
@@ -305,3 +305,7 @@ exit 0
 ---
 
 Full exit code reference: [Exit Codes](../reference/exit-codes.md)
+
+---
+
+**Ladder:** ← [Series overview](abi-api-handling.md) · Concepts c1 · Reading a result · [Contract-Aware Compatibility](contract-aware-compatibility.md) →

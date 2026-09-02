@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - msvc-pe-abi-model
 depends_on:
@@ -169,3 +169,7 @@ checker) can verify.
 _See also: [Platform Support](../reference/platforms.md) · [Part 4 — C++ ABI](abi-series/04-cpp-abi.md) ·
 [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) ·
 [Detecting Breaks](abi-series/08-detection.md)._
+
+---
+
+**Ladder:** ← [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) · Tier 2 · Mechanics · [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) →

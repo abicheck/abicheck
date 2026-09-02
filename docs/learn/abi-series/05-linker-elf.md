@@ -1,3 +1,14 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/diff_versioning.py
+  - abicheck/diff_platform.py
+lifecycle: active
+generated: false
+---
 # Part 5 — ELF & Linker-Level Concerns
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -321,3 +332,7 @@ dependency the library doesn't even define.
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [Platforms reference](../../reference/platforms.md) ·
 [Quality examples](../../reference/examples/by-category/quality.md)
+
+---
+
+**Ladder:** ← [Part 4 — C++ ABI Specifics](04-cpp-abi.md) · Tier 2 · Mechanics · [Part 6 — Subtle & Transitive Breaks](06-transitive-breaks.md) →

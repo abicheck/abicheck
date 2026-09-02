@@ -3,7 +3,7 @@ doc_type: explanation
 audience:
   - contributor
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - impact-analysis
 depends_on:
@@ -254,3 +254,7 @@ would misrepresent what abicheck actually knows, so unimplemented fields are
 left out of the schema entirely rather than always-`null`. See
 [ADR-052](../contribute/adr/052-unified-impact-assessment-model.md) for the
 full list of what this slice deliberately does not implement.
+
+---
+
+**Ladder:** ← [Graph Coverage & Negative Evidence](graph-coverage.md) · Concepts c3 · Internals · [Series overview](abi-api-handling.md) →

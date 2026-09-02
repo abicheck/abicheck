@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+depends_on:
+  - abicheck/semver.py
+lifecycle: active
+generated: false
+---
 # Part 0 — Compatibility as a Product Contract
 
 > **Series navigation:** **0. Product Contract** ·
@@ -318,3 +328,7 @@ any other tool) needs to even see a given change, read
 _See also: [Verdicts](../verdicts.md) · [Policy Profiles](../../use/policies.md) ·
 [Evidence & Detectability](../evidence-and-detectability.md) ·
 [Examples Encyclopedia](../../reference/examples/index.md)._
+
+---
+
+**Ladder:** ← [Glossary](glossary.md) · Tier 1 · Foundations · [Part 1 — Foundations: From Source Code to a Running Process](01-foundations.md) →

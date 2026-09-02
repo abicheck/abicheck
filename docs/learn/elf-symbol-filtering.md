@@ -129,3 +129,7 @@ See also: [Limitations & Known Boundaries](limitations.md) for the rest of
 abicheck's practical boundary list, and
 [Evidence & Detectability](evidence-and-detectability.md) for why L0
 (symbols-only) evidence is structurally blind to source-level API changes.
+
+---
+
+**Ladder:** ← [What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md) · Concepts c2 · The evidence model · [Limitations & Known Boundaries](limitations.md) →

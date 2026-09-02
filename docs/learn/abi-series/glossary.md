@@ -1,3 +1,11 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+level: beginner
+lifecycle: active
+generated: false
+---
 # Glossary
 
 Quick definitions for the recurring terms in the
@@ -52,3 +60,7 @@ concept is developed in full.
 *Back to the [series overview](../abi-api-handling.md) · the
 [ABI Cheat Sheet](../abi-cheat-sheet.md) · the
 [Examples Encyclopedia](../../reference/examples/index.md).*
+
+---
+
+**Ladder:** ← [ABI Cheat Sheet](../abi-cheat-sheet.md) · Tier 0 · Orientation · [Part 0 — Compatibility as a Product Contract](00-product-contract.md) →

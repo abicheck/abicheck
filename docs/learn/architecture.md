@@ -3,7 +3,7 @@ doc_type: explanation
 audience:
   - library-maintainer
   - contributor
-level: intermediate
+level: advanced
 summarizes:
   - platform-support-matrix
   - evidence-model
@@ -301,3 +301,7 @@ Source of truth: `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `R
 ## Error model
 
 Public exceptions are defined in `abicheck/errors.py`. Tool errors produce exit code `1`.
+
+---
+
+**Ladder:** ← [Limitations & Known Boundaries](limitations.md) · Concepts c3 · Internals · [Source & Build Data](build-source-data.md) →

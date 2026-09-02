@@ -221,3 +221,7 @@ toolchain/runtime side of static linking, and
 [Behavioral & Semantic Compatibility](behavioral-compatibility.md) for why
 an inline body's behavior — not just its signature — is the real contract
 in the header-only case.
+
+---
+
+**Ladder:** ← [Build Profile Comparability](build-profile-comparability.md) · Tier 3 · Define the contract · [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) →

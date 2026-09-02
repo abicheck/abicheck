@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/policy_file.py
+lifecycle: active
+generated: false
+---
 # Part 7 — Designing for Stability
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -443,8 +453,9 @@ real release decision, these are where to verify it:
   of its checklist and additionally covers enums, unions, bitfields, alignment,
   TLS, and transitive/dependency leaks.
 
-*This is the last part of the sequential Learning Series. Next: leave the
-mechanism-by-mechanism track and read
-[Detecting Breaks](08-detection.md) — the Verification & Assurance
-capstone that turns Parts 0–7's mechanisms into an evidence-gathering and
-tooling strategy — or go back to the [series overview](../abi-api-handling.md).*
+*Next on the ladder: [Dependency & Runtime Floors](../dependency-floors.md) opens
+the at-scale tier — or go back to the [series overview](../abi-api-handling.md).*
+
+---
+
+**Ladder:** ← [Assurance Beyond Static Checking: What Each Verification Method Actually Proves](../assurance-methods.md) · Tier 6 · Design · [Dependency & Runtime Floors](../dependency-floors.md) →

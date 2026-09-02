@@ -110,3 +110,7 @@ different":
 - [CI Gating Pipeline](../use/ci-gating.md) — wiring abicheck's own static
   check into a release pipeline; the assurance methods above are the
   complementary jobs that sit alongside it, not inside it.
+
+---
+
+**Ladder:** ← [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) · Tier 4 · Evidence and detection · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) →

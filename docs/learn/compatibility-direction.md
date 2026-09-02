@@ -144,3 +144,7 @@ See also: [Product Contract §5](abi-series/00-product-contract.md#5-name-your-c
 naming your contract shape, and [Plugin Systems](../use/plugin-systems.md)
 for the consumer-scoped mechanics that make a specific direction checkable
 against a specific real consumer.
+
+---
+
+**Ladder:** ← [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) · Tier 3 · Define the contract · [Consumer Models](consumer-models.md) →

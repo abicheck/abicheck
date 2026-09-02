@@ -275,3 +275,7 @@ exit codes, the `--diagnostic-comparison` flag, and the JSON `reason` shape
 _See also: [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) ·
 [Evidence & Detectability](evidence-and-detectability.md) ·
 [Environment & Toolchain Drift](environment-drift.md)._
+
+---
+
+**Ladder:** ← [Consumer Models](consumer-models.md) · Tier 3 · Define the contract · [Static & Header-Only Contracts](static-and-header-only.md) →

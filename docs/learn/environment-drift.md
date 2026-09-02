@@ -1,3 +1,13 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+depends_on:
+  - abicheck/environment_matrix.py
+lifecycle: active
+generated: false
+---
 # Environment & Toolchain Drift
 
 Two builds of the *same source* can differ in ABI-relevant ways because the
@@ -156,3 +166,7 @@ Compiler and standard-library drift is covered by `toolchain_version_changed`
 abicheck parses ELF in pure Python (pyelftools), so its *analysis results* do
 not depend on the host's installed binutils version — unlike tools that shell
 out to `readelf` or link against elfutils.
+
+---
+
+**Ladder:** ← [Dependency & Runtime Floors](dependency-floors.md) · Tier 7 · At scale · [Behavioral & Semantic Compatibility](behavioral-compatibility.md) →

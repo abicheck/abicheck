@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - data-wire-compatibility
 depends_on:
@@ -137,3 +137,7 @@ mechanics this dimension frequently piggybacks on, and
 [Behavioral & Semantic Compatibility](behavioral-compatibility.md) for the
 adjacent question of whether an *operation's* meaning, not a *value's*
 meaning, stayed the same.
+
+---
+
+**Ladder:** ← [Behavioral & Semantic Compatibility](behavioral-compatibility.md) · Tier 8 · Beyond static ABI · [Ownership & Lifetime Contracts](ownership-and-lifetime.md) →

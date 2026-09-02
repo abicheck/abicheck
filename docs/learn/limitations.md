@@ -395,3 +395,7 @@ BREAKING findings. That filter runs **whether or not headers are supplied**:
 For the exact filtered prefixes, the filter's known limitations, and how
 header scoping works on PE/Mach-O, see [ELF-Only Mode and Symbol
 Filtering](elf-symbol-filtering.md).
+
+---
+
+**Ladder:** ← [ELF-Only Mode and Symbol Filtering](elf-symbol-filtering.md) · Concepts c2 · The evidence model · [Architecture](architecture.md) →

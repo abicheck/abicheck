@@ -1,3 +1,13 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+level: beginner
+depends_on:
+  - abicheck/change_registry.py
+lifecycle: active
+generated: false
+---
 # ABI Cheat Sheet
 
 Quick-reference card for shared-library maintainers. Scannable in 2 minutes.
@@ -222,3 +232,7 @@ Exits non-zero on any 🔴 BREAKING or 🟠 API_BREAK finding. Add `--suppress s
 | ✅ | NO_CHANGE | Identical ABI |
 
 Full verdict semantics: [Verdicts](verdicts.md) | All example cases: [Scenario Catalog](https://github.com/abicheck/abicheck/tree/main/examples)
+
+---
+
+**Ladder:** ← [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) · Tier 0 · Orientation · [Glossary](abi-series/glossary.md) →

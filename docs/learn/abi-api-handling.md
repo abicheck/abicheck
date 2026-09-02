@@ -125,6 +125,57 @@ flowchart LR
 > see a given change at all — read it alongside any part when you're wondering
 > "why did the tool catch this but not that?"
 
+## The ladder
+
+Every page has a tier and a level. Read tiers in order; within a tier follow
+the arrows. "Go deeper" pages are optional side reads that return you to the
+spine. Both tables below are rendered from `docs/_meta/learning-ladder.yaml`,
+the one owner of the reading order.
+
+<!-- BEGIN GENERATED: learning-ladder -->
+<!-- This block is rendered from docs/_meta/learning-ladder.yaml by gen_learning_ladder.py — do not edit by hand. Edit the YAML and run `python scripts/gen_learning_ladder.py`. -->
+
+**ABI/API Compatibility**
+
+| Tier | Level | Pages |
+|---|---|---|
+| Tier 0 · Orientation | beginner | [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) → [ABI Cheat Sheet](abi-cheat-sheet.md) → [Glossary](abi-series/glossary.md) |
+| Tier 1 · Foundations | beginner → intermediate | [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → [What Is Part of Your ABI Surface?](abi-surface.md) |
+| Tier 2 · Mechanics | intermediate | [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → [Part 3 — Type Layout Breaks](abi-series/03-type-layout.md) → [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) (go deeper: [Class Layout ABI & API: Problems and Detection](class-layout-abi.md), [Exception Unwinding: The Machinery Behind `noexcept`](exception-unwinding-abi.md), [Modern C/C++ and Toolchain ABI Hazards](modern-cpp-toolchain-hazards.md)) → [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) (go deeper: [The MSVC/PE ABI Model](msvc-pe-abi-model.md)) → [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) |
+| Tier 3 · Define the contract | intermediate | [Compatibility Direction](compatibility-direction.md) → [Consumer Models](consumer-models.md) → [Build Profile Comparability](build-profile-comparability.md) → [Static & Header-Only Contracts](static-and-header-only.md)<br>also: [Contract-Aware Compatibility](contract-aware-compatibility.md) (on the Concepts tab) |
+| Tier 4 · Evidence and detection | intermediate | [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) → [Assurance Beyond Static Checking: What Each Verification Method Actually Proves](assurance-methods.md)<br>also: [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) (on the Concepts tab); [What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md) (on the Concepts tab) |
+| Tier 5 · Practice | intermediate | *(pages land as the plan's PRs merge)*<br>also: [Baseline Management](../use/baseline-management.md) (tool guide) |
+| Tier 6 · Design | intermediate | [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) |
+| Tier 7 · At scale | advanced | [Dependency & Runtime Floors](dependency-floors.md) → [Environment & Toolchain Drift](environment-drift.md) |
+| Tier 8 · Beyond static ABI | advanced | [Behavioral & Semantic Compatibility](behavioral-compatibility.md) → [Data, Wire & Storage Compatibility](data-wire-compatibility.md) → [Ownership & Lifetime Contracts](ownership-and-lifetime.md) → [Concurrency & Initialization Contracts](concurrency-and-initialization.md) |
+
+**Concepts**
+
+| Tier | Level | Pages |
+|---|---|---|
+| c1 · Reading a result | intermediate | [Verdicts](verdicts.md) → [Contract-Aware Compatibility](contract-aware-compatibility.md) |
+| c2 · The evidence model | intermediate | [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) → [What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md) → [ELF-Only Mode and Symbol Filtering](elf-symbol-filtering.md) → [Limitations & Known Boundaries](limitations.md) |
+| c3 · Internals | advanced | [Architecture](architecture.md) → [Source & Build Data](build-source-data.md) → [Graph Coverage & Negative Evidence](graph-coverage.md) → [Unified Impact Assessment](impact-analysis.md) |
+
+<!-- END GENERATED: learning-ladder -->
+
+### Reading paths by role
+
+<!-- BEGIN GENERATED: learning-paths -->
+<!-- This block is rendered from docs/_meta/learning-ladder.yaml by gen_learning_ladder.py — do not edit by hand. Edit the YAML and run `python scripts/gen_learning_ladder.py`. -->
+
+| Role | Path (tier · page) | Then |
+|---|---|---|
+| New C/C++ library author | 0 · [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) → 1 · [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → 1 · [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → 2 · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → 2 · [Part 3 — Type Layout Breaks](abi-series/03-type-layout.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| C++ library maintainer | 1 · [Part 1 — Foundations: From Source Code to a Running Process](abi-series/01-foundations.md) → 2 · [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) → 2 · [Class Layout ABI & API: Problems and Detection](class-layout-abi.md) → 2 · [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| CI / release engineer | 3 · [Compatibility Direction](compatibility-direction.md) → 4 · [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) → c1 · [Verdicts](verdicts.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| Distribution / package maintainer | 2 · [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) → 7 · [Dependency & Runtime Floors](dependency-floors.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| Product / SDK owner (several binaries) | 1 · [Part 0 — Compatibility as a Product Contract](abi-series/00-product-contract.md) → 3 · [Consumer Models](consumer-models.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| Plugin / SDK author | 2 · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) → 3 · [Compatibility Direction](compatibility-direction.md) → 3 · [Consumer Models](consumer-models.md) → 6 · [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) | [Choose Your Workflow](../start/choose-your-workflow.md) |
+| AI agent / automated reviewer | c1 · [Verdicts](verdicts.md) → c2 · [Evidence & Detectability: What Each Method Can and Cannot See](evidence-and-detectability.md) | [Output Formats](../use/output-formats.md) |
+
+<!-- END GENERATED: learning-paths -->
+
 ## Pick a reading path for your role
 
 The series is ordered, but you rarely need all of it at once. These paths get

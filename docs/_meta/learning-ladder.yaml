@@ -1,0 +1,180 @@
+# docs/_meta/learning-ladder.yaml — reading order for the learning series.
+#
+# Two ordered reading sequences over docs/learn/. Every learn page except
+# the hub belongs to exactly one sequence, as a member of exactly one tier.
+# A tier may additionally *link* pages that are members elsewhere; a link
+# never counts for completeness and is never checked for level.
+# `branches` are optional side reads hanging off a member (Tier 2's "go
+# deeper" pages): they must be >= the level of the page they hang from and
+# are otherwise outside the sequence's monotonicity check.
+#
+# A page's level is declared once, in its own front matter. A tier's
+# `floor:` is a property of the tier, not a second declaration of any
+# page's level: every member must be >= it, so a whole tier cannot be
+# quietly downgraded while the sequence stays monotonic.
+#
+# `paths:` are the hub's reading paths by role, as data, so the role table
+# is rendered from the same source as the ladder and checked against it:
+# each entry's pages must be members or branches and must walk the ladder
+# strictly upward (same-tier reversals and repeats are errors).
+#
+# Rendered onto docs/learn/abi-api-handling.md by scripts/gen_learning_ladder.py;
+# the rules are enforced by scripts/check_docs_contract.py (learning-ladder).
+# Plan: docs/contribute/plans/learning-series-page-specs.md §A1.
+
+version: 1
+hub: learn/abi-api-handling.md          # renders the ladder; exempt from it
+
+sequences:
+  educational:
+    tab: "ABI/API Compatibility"
+    tiers:
+      - id: 0
+        title: Orientation
+        floor: beginner
+        members:
+          - learn/abi-series/abi-in-5-minutes.md
+          - learn/abi-cheat-sheet.md
+          - learn/abi-series/glossary.md
+      - id: 1
+        title: Foundations
+        floor: beginner            # first member; last member is intermediate
+        members:
+          - learn/abi-series/00-product-contract.md
+          - learn/abi-series/01-foundations.md
+          - learn/abi-surface.md
+      - id: 2
+        title: Mechanics
+        floor: intermediate
+        members:
+          - learn/abi-series/02-symbol-contracts.md
+          - learn/abi-series/03-type-layout.md
+          - page: learn/abi-series/04-cpp-abi.md
+            branches:
+              - learn/class-layout-abi.md
+              - learn/exception-unwinding-abi.md
+              - learn/modern-cpp-toolchain-hazards.md
+          - page: learn/abi-series/05-linker-elf.md
+            branches:
+              - learn/msvc-pe-abi-model.md
+          - learn/abi-series/06-transitive-breaks.md
+      - id: 3
+        title: Define the contract
+        floor: intermediate
+        members:
+          - learn/compatibility-direction.md
+          - learn/consumer-models.md
+          - learn/build-profile-comparability.md
+          - learn/static-and-header-only.md
+        links:
+          - learn/contract-aware-compatibility.md   # member of `concepts`
+      - id: 4
+        title: Evidence and detection
+        floor: intermediate
+        members:
+          - learn/abi-series/08-detection.md
+          - learn/assurance-methods.md
+        links:
+          - learn/evidence-and-detectability.md
+          - learn/what-each-level-sees.md
+      - id: 5
+        title: Practice
+        floor: intermediate
+        members: []                # the practice pages land one PR at a time
+        links:
+          - use/baseline-management.md              # tool track, case 1
+      - id: 6
+        title: Design
+        floor: intermediate
+        members:
+          - learn/abi-series/07-designing-for-stability.md
+      - id: 7
+        title: At scale
+        floor: advanced
+        members:
+          - learn/dependency-floors.md
+          - learn/environment-drift.md
+      - id: 8
+        title: Beyond static ABI
+        floor: advanced
+        members:
+          - learn/behavioral-compatibility.md
+          - learn/data-wire-compatibility.md
+          - learn/ownership-and-lifetime.md
+          - learn/concurrency-and-initialization.md
+
+  concepts:
+    tab: Concepts
+    tiers:
+      - id: c1
+        title: Reading a result
+        floor: intermediate
+        members:
+          - learn/verdicts.md
+          - learn/contract-aware-compatibility.md
+      - id: c2
+        title: The evidence model
+        floor: intermediate
+        members:
+          - learn/evidence-and-detectability.md
+          - learn/what-each-level-sees.md
+          - learn/elf-symbol-filtering.md
+          - learn/limitations.md
+      - id: c3
+        title: Internals
+        floor: advanced
+        members:
+          - learn/architecture.md
+          - learn/build-source-data.md
+          - learn/graph-coverage.md
+          - learn/impact-analysis.md
+
+# Reading paths by role. `after:` is the one tool-track hand-off (a `start/`
+# or `use/` page) and is not ordered. Pages that do not exist yet are added
+# to the path in the PR that creates them.
+paths:
+  - role: New C/C++ library author
+    pages:
+      - learn/abi-series/abi-in-5-minutes.md
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-series/01-foundations.md
+      - learn/abi-series/02-symbol-contracts.md
+      - learn/abi-series/03-type-layout.md
+      - learn/abi-series/07-designing-for-stability.md
+    after: start/choose-your-workflow.md
+  - role: C++ library maintainer
+    pages:
+      - learn/abi-series/01-foundations.md
+      - learn/abi-series/04-cpp-abi.md
+      - learn/class-layout-abi.md              # branch of Part 4
+      - learn/abi-series/06-transitive-breaks.md
+      - learn/abi-series/07-designing-for-stability.md
+    after: start/choose-your-workflow.md
+  - role: CI / release engineer
+    pages:
+      - learn/compatibility-direction.md
+      - learn/abi-series/08-detection.md
+      - learn/verdicts.md                      # concepts, after the educational tiers
+    after: start/choose-your-workflow.md
+  - role: Distribution / package maintainer
+    pages:
+      - learn/abi-series/05-linker-elf.md
+      - learn/dependency-floors.md
+    after: start/choose-your-workflow.md
+  - role: Product / SDK owner (several binaries)
+    pages:
+      - learn/abi-series/00-product-contract.md
+      - learn/consumer-models.md
+    after: start/choose-your-workflow.md
+  - role: Plugin / SDK author
+    pages:
+      - learn/abi-series/02-symbol-contracts.md
+      - learn/compatibility-direction.md
+      - learn/consumer-models.md
+      - learn/abi-series/07-designing-for-stability.md
+    after: start/choose-your-workflow.md
+  - role: AI agent / automated reviewer
+    pages:
+      - learn/verdicts.md
+      - learn/evidence-and-detectability.md
+    after: use/output-formats.md

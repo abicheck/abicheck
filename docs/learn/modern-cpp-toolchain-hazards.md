@@ -61,3 +61,7 @@ See also: [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) for the
 core, pre-C++11 mechanisms this page's hazards sit alongside, and
 [Exception Unwinding](exception-unwinding-abi.md) for the
 `-fno-exceptions`/`-fno-rtti` machinery in full.
+
+---
+
+**Ladder:** ← [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) · Tier 2 · Mechanics · [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) →

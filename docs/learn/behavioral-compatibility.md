@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - behavioral-compatibility
 depends_on:
@@ -124,3 +124,7 @@ adjacent question of whether *serialized* values stay meaningful across a
 release, and
 [Evidence & Detectability](evidence-and-detectability.md) for the full
 model of what static comparison can and cannot prove.
+
+---
+
+**Ladder:** ← [Environment & Toolchain Drift](environment-drift.md) · Tier 8 · Beyond static ABI · [Data, Wire & Storage Compatibility](data-wire-compatibility.md) →

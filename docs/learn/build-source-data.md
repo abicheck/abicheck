@@ -1,3 +1,15 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+canonical_for:
+  - build-target-scoping
+depends_on:
+  - abicheck/buildsource/model.py
+lifecycle: active
+generated: false
+---
 # Source & Build Data
 
 abicheck primarily compares **built artifacts** — binaries (L0), debug info
@@ -808,3 +820,7 @@ old `--allow-build-query` gate is now a deprecated no-op — and it still never 
 
 See ADR-028 (umbrella) and ADR-029 (build context) under
 [Development → ADRs](../contribute/adr/index.md) for the full design.
+
+---
+
+**Ladder:** ← [Architecture](architecture.md) · Concepts c3 · Internals · [Graph Coverage & Negative Evidence](graph-coverage.md) →

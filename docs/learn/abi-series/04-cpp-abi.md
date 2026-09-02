@@ -1,3 +1,14 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/diff_types.py
+  - abicheck/demangle.py
+lifecycle: active
+generated: false
+---
 # Part 4 — C++ ABI Specifics
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -471,3 +482,7 @@ conventions, and TLS models — all recorded in the `.so` itself.
 [Risk examples](../../reference/examples/by-verdict/compatible-risk.md) ·
 [Exception Unwinding](../exception-unwinding-abi.md) ·
 [Modern C/C++ and Toolchain ABI Hazards](../modern-cpp-toolchain-hazards.md)
+
+---
+
+**Ladder:** ← [Part 3 — Type Layout Breaks](03-type-layout.md) · Tier 2 · Mechanics · [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) →

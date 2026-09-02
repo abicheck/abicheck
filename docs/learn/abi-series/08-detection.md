@@ -1,3 +1,13 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - scripts/evidence_tiers.py
+lifecycle: active
+generated: false
+---
 # Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -236,3 +246,7 @@ verdict and minimum evidence tier:
   per-source capability matrix this page summarizes.
 - [Choose Your Workflow](../../start/choose-your-workflow.md) — turn the
   evidence you *have* into the right command for your CI.
+
+---
+
+**Ladder:** ← [Static & Header-Only Contracts](../static-and-header-only.md) · Tier 4 · Evidence and detection · [Assurance Beyond Static Checking: What Each Verification Method Actually Proves](../assurance-methods.md) →

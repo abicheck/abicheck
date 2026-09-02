@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+depends_on:
+  - abicheck/elf_metadata.py
+lifecycle: active
+generated: false
+---
 # Part 1 — Foundations: From Source Code to a Running Process
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -494,12 +504,17 @@ Throughout the rest of the series, look for callouts like this:
 
 ## Next
 
-Now that you know what a symbol is and how it's resolved, the most direct way to
-break a library is to make a symbol the loader needs *disappear* or *change
-meaning*. That is the subject of the next page.
+Now that you know what a symbol is and how it's resolved, one question decides
+what counts as a break at all: which of those symbols and types are *yours to
+keep*. That is the subject of the next page; the break families follow it.
 
-➡️ **[Part 2 — Symbol Contract Breaks](02-symbol-contracts.md)**
+➡️ **[What Is Part of Your ABI Surface?](../abi-surface.md)** — then
+[Part 2 — Symbol Contract Breaks](02-symbol-contracts.md).
 
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [Verdicts](../verdicts.md) ·
 [Examples Encyclopedia](../../reference/examples/index.md)
+
+---
+
+**Ladder:** ← [Part 0 — Compatibility as a Product Contract](00-product-contract.md) · Tier 1 · Foundations · [What Is Part of Your ABI Surface?](../abi-surface.md) →

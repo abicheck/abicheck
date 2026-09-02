@@ -130,13 +130,13 @@ nav:
     - Contract-Aware Compatibility: learn/contract-aware-compatibility.md
     - Evidence & Detectability: learn/evidence-and-detectability.md
     - What Each Level Sees: learn/what-each-level-sees.md
+    - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
+    - Limitations: learn/limitations.md
     - Architecture: learn/architecture.md
     - Build Info & Sources (build-source data): learn/build-source-data.md
     - Graph Coverage & Negative Evidence: learn/graph-coverage.md
     - Unified Impact Assessment: learn/impact-analysis.md
     - Environment & Toolchain Drift: learn/environment-drift.md
-    - ELF-Only Mode and Symbol Filtering: learn/elf-symbol-filtering.md
-    - Limitations: learn/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:
     - CLI Reference: reference/cli-reference.md
@@ -192,14 +192,14 @@ nav:
       - Symbol Contracts: learn/abi-series/02-symbol-contracts.md
       - Type Layout: learn/abi-series/03-type-layout.md
       - C++ ABI: learn/abi-series/04-cpp-abi.md
-      - Class Layout ABI & API: learn/class-layout-abi.md
       - Linker & ELF: learn/abi-series/05-linker-elf.md
       - Transitive Breaks: learn/abi-series/06-transitive-breaks.md
+      - Class Layout ABI & API: learn/class-layout-abi.md
     - Beyond ABI:
+      - Static & Header-Only Contracts: learn/static-and-header-only.md
       - Behavioral & Semantic Compatibility: learn/behavioral-compatibility.md
       - Data, Wire & Storage Compatibility: learn/data-wire-compatibility.md
       - Ownership & Lifetime Contracts: learn/ownership-and-lifetime.md
-      - Static & Header-Only Contracts: learn/static-and-header-only.md
       - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
     - Platforms & Toolchains:
       - Exception Unwinding: learn/exception-unwinding-abi.md
@@ -265,6 +265,12 @@ nav:
 exclude_docs: |
   CLAUDE.md
   AGENTS.md
+
+# A link to a heading that no longer exists is reported (and fails under
+# --strict). The learning-series plan moves hub sections whose anchors other
+# pages link; this is what catches a stale fragment.
+validation:
+  anchors: warn
 
 plugins:
   - search

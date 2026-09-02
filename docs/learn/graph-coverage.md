@@ -1,3 +1,13 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+depends_on:
+  - abicheck/buildsource/graph_facts.py
+lifecycle: active
+generated: false
+---
 # Graph Coverage & Negative Evidence
 
 The optional embedded [L5 source graph](build-source-data.md) can prove a
@@ -134,3 +144,7 @@ for the full design, and
 [`examples/case195_header_graph_ambiguous_rename_not_reconciled`](../reference/examples/case195_header_graph_ambiguous_rename_not_reconciled.md)
 for a reconciled rename and its deliberately-unreconciled ambiguous
 counterpart.
+
+---
+
+**Ladder:** ← [Source & Build Data](build-source-data.md) · Concepts c3 · Internals · [Unified Impact Assessment](impact-analysis.md) →
