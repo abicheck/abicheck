@@ -182,4 +182,4 @@ guides carry the exact commands, flags and CI YAML:
 
 ---
 
-**Ladder:** ← [Assurance Beyond Static Checking: What Each Verification Method Actually Proves](assurance-methods.md) · Tier 5 · Practice · [Report the Surface, Not Only the Breaks](surface-growth.md) →
+**Ladder:** ← [Assurance Beyond Static Checking](assurance-methods.md) · Step 7 · In Practice · [Report the Surface, Not Only the Breaks](surface-growth.md) →

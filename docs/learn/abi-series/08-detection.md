@@ -13,18 +13,9 @@ generated: false
 ---
 # Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough
 
-> **Series navigation:** [0. Product Contract](00-product-contract.md) ·
-> [1. Foundations](01-foundations.md) ·
-> [2. Symbol Contracts](02-symbol-contracts.md) ·
-> [3. Type Layout](03-type-layout.md) ·
-> [4. C++ ABI](04-cpp-abi.md) ·
-> [5. Linker & ELF](05-linker-elf.md) ·
-> [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> **Detecting Breaks**
-
-> This page is the Verification & Assurance capstone: Parts 0–7 teach what
-> breaks; this page asks how you catch it before you ship.
+> This page opens Step 6 of the series, *Detect Breaks*. It is not "Part 8":
+> Parts 0–7 teach what breaks and how to design against it; this page asks
+> how you catch a break before you ship, which is where abicheck enters.
 
 Parts 0–7 explained the *mechanisms*: what the compiler bakes into a binary, and
 which changes corrupt that contract. This page turns the telescope around and asks
@@ -205,7 +196,7 @@ verdict and minimum evidence tier:
 
 - Back to the [series hub](../abi-api-handling.md) for the other parts.
 - [Assurance Beyond Static Checking](../assurance-methods.md) — this page's
-  direct sibling in the Verification & Assurance group: what to run for the
+  direct sibling in Step 6: what to run for the
   part §3 says no static tool (abicheck included) can reach — behaviour,
   wire/storage compatibility, lifetime, and concurrency contracts.
 - [Evidence & Detectability](../evidence-and-detectability.md) — the full
@@ -215,4 +206,4 @@ verdict and minimum evidence tier:
 
 ---
 
-**Ladder:** ← [Static & Header-Only Contracts](../static-and-header-only.md) · Tier 4 · Evidence and detection · [Assurance Beyond Static Checking: What Each Verification Method Actually Proves](../assurance-methods.md) →
+**Ladder:** ← [Static & Header-Only Contracts](../static-and-header-only.md) · Step 6 · Detect Breaks · [Assurance Beyond Static Checking](../assurance-methods.md) →

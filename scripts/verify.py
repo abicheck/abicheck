@@ -379,7 +379,7 @@ STEPS: tuple[Step, ...] = (
         description="Use-case registry vs. human docs drift gate",
     ),
     Step(
-        # The learning-series hub's ladder and role-path tables are rendered
+        # The learning-series hub's step list and role-path table are rendered
         # from docs/_meta/learning-ladder.yaml; this is the drift half only
         # (the ladder's rules run inside docs-contract).
         "learning-ladder",

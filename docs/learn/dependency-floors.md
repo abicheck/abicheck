@@ -220,4 +220,4 @@ established fixes keep both audiences:
 
 ---
 
-**Ladder:** ← [How System Libraries Stay Compatible](system-library-discipline.md) · Tier 7 · At scale · [Environment & Toolchain Drift](environment-drift.md) →
+**Ladder:** ← [How System Libraries Stay Compatible](system-library-discipline.md) · Step 8 · At Scale · [Environment & Toolchain Drift](environment-drift.md) →

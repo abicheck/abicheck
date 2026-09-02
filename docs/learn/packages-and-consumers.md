@@ -145,4 +145,4 @@ ordinary C++ comparison would miss
 
 ---
 
-**Ladder:** ← [Environment & Toolchain Drift](environment-drift.md) · Tier 7 · At scale · [Behavioral & Semantic Compatibility](behavioral-compatibility.md) →
+**Ladder:** ← [Environment & Toolchain Drift](environment-drift.md) · Step 8 · At Scale · [Behavioral & Semantic Compatibility](behavioral-compatibility.md) →
