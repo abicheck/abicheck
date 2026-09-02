@@ -430,20 +430,45 @@
   `InputSpec`/`DumpRequest`/`CompareRequest`) — only the auto-discovery half
   closes for them; `scan`'s own `ScanRequest.build_config` field already
   provided that seam, so both halves close for the three updated call
-  sites. **The fourth, `service_scan.run_scan_set`, was deliberately left
-  unwidened**: that file sits exactly at the AI-readiness 2000-line hard
-  cap, the widened call doesn't fit `ruff format`'s column budget on one
-  line, and a hard-cap file is not a `LARGE_FILE_ALLOWLIST` candidate for a
-  fix this narrow (that allowlist's own comment reserves it for pre-existing
-  `scripts/`/`tests/` debt, not a new production-file exemption). A direct
-  `run_scan_set(ScanRequest(...))` typed-API call with no CLI in front of it
-  is the one shape this residual leaves open — `scan --artifact-set`'s own
-  CLI pre-flight in `cli_scan._run_artifact_set` already forwards both
-  values ahead of this call, so the CLI path is unaffected. Named explicitly
-  as out of scope for this slice, per this ADR's own governing "acknowledged
-  gap over risky reactive patch" convention, rather than forced in under a
-  file-size constraint; see `docs/contribute/known-gaps.md`'s matching
-  entry.
+  sites. **The fourth, `service_scan.run_scan_set`, was left unwidened at
+  the time** because that file sat exactly at the AI-readiness 2000-line
+  hard cap, the widened call didn't fit `ruff format`'s column budget on
+  one line, and a hard-cap file is not a `LARGE_FILE_ALLOWLIST` candidate
+  for a fix this narrow (that allowlist's own comment reserves it for
+  pre-existing `scripts/`/`tests/` debt, not a new production-file
+  exemption). A direct `run_scan_set(ScanRequest(...))` typed-API call with
+  no CLI in front of it was the one shape this residual left open — `scan
+  --artifact-set`'s own CLI pre-flight in `cli_scan._run_artifact_set`
+  already forwarded both values ahead of this call, so the CLI path was
+  unaffected. Named explicitly as out of scope for that slice, per this
+  ADR's own governing "acknowledged gap over risky reactive patch"
+  convention, rather than forced in under a file-size constraint.
+  **Third slice, closing this residual: the fourth call site is now
+  widened too, by buying back the line-budget room rather than raising the
+  baseline.** `_descendant_pgids`/`_kill_process_tree` — the process-group
+  kill machinery behind `run_scan_subprocess`/`run_scan_set_subprocess`,
+  with zero dependency on anything scan-specific — moved to the new
+  `abicheck/workflows/scan_subprocess.py` (a genuine one-directional edge,
+  mirroring `cxx20_pair_dialect.py`'s own precedent: the worker/harness
+  functions that actually call back into `run_scan`/`run_scan_set` stayed
+  in `service_scan.py`, avoiding the mutual-dependency shape a full move of
+  the subprocess harness would have created). That module lives under
+  `workflows/` rather than as a new flat `service_`-prefixed root sibling —
+  ADR-061's `frozen_root_families` closes that family to new members, and
+  the architecture gate's own error message names the fix directly
+  ("create the responsibility package owner"); `service_scan.py` itself is
+  already classified into the `workflows` layer via that layer's own
+  `legacy_paths`. Freeing ~90 lines let `run_scan_set`'s own
+  `scan_bazel_scoping_failure` call forward `sources=`/`build_config=` the
+  same way the three already-updated call sites do, landing at a new,
+  lowered `architecture/debt.yaml` baseline (2000 → 1933) with real room
+  left below the hard cap rather than exactly at it. `docs/contribute/
+  known-gaps.md`'s matching entry records this as closed; `tests/
+  test_bazel_root_targets_scan.py::
+  test_run_scan_set_config_sourced_target_scope_raises_planning_error` pins
+  it, the `run_scan_set` sibling of `test_run_scan_depth_headers_config_
+  sourced_target_scope_raises_planning_error`. **Phase 4 is now complete —
+  all four pre-flight call sites forward `sources=`/`build_config=`.**
 - **Phase 5** (the fact/capability registry, generalizing
   `change_registry.py`'s `ChangeKindMeta` pattern from change *kinds* to
   *facts*) is **complete**: both the registry infrastructure and the full

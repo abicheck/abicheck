@@ -51,6 +51,17 @@ from .policy.outcome import run_outcome_dict_for_scan
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
 
+# The process-group kill machinery behind run_scan_subprocess/
+# run_scan_set_subprocess lives in the leaf `workflows.scan_subprocess` module
+# (moved for this module's own line-budget room, ADR-063 Phase 4's residual --
+# see that module's own docstring), re-exported here so every existing
+# `from .service_scan import _kill_process_tree`/`_descendant_pgids` call site
+# is unaffected.
+from .workflows.scan_subprocess import (
+    _descendant_pgids as _descendant_pgids,
+    _kill_process_tree as _kill_process_tree,
+)
+
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
     from .environment_matrix import EnvironmentMatrix
@@ -820,8 +831,12 @@ class ScanResult:
             "exit_code": self.exit_code,
             "findings": len(self.findings),
             "layers": [layer.to_dict() for layer in self.layers],
-            "confidence": {k: list(v) for k, v in self.confidence.items()}, "estimate": [e.to_dict() for e in self.estimate],
-            "report": dict(self.report), "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code, report=self.report),
+            "confidence": {k: list(v) for k, v in self.confidence.items()},
+            "estimate": [e.to_dict() for e in self.estimate],
+            "report": dict(self.report),
+            "run_outcome": run_outcome_dict_for_scan(
+                self.verdict, self.exit_code, report=self.report
+            ),
         }
 
     @staticmethod
@@ -953,7 +968,23 @@ class ScanSetResult:
             ],
             "bundle_finding_count": len(self.bundle_findings),
             "bundle_verdict": self.bundle_verdict,
-            "bundle_incomplete": self.bundle_incomplete, "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code, member_evidence_contract_error=any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in self.per_artifact), member_not_comparable=any(a.result.verdict == "NOT_COMPARABLE" for a in self.per_artifact), bundle_incomplete=self.bundle_incomplete, member_verdicts=[*(a.result.verdict for a in self.per_artifact), self.bundle_verdict]),
+            "bundle_incomplete": self.bundle_incomplete,
+            "run_outcome": run_outcome_dict_for_scan(
+                self.verdict,
+                self.exit_code,
+                member_evidence_contract_error=any(
+                    a.result.verdict == "EVIDENCE_CONTRACT_ERROR"
+                    for a in self.per_artifact
+                ),
+                member_not_comparable=any(
+                    a.result.verdict == "NOT_COMPARABLE" for a in self.per_artifact
+                ),
+                bundle_incomplete=self.bundle_incomplete,
+                member_verdicts=[
+                    *(a.result.verdict for a in self.per_artifact),
+                    self.bundle_verdict,
+                ],
+            ),
         }
 
 
@@ -1482,117 +1513,6 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
         q.put(("err", f"{type(exc).__name__}: {exc}"))
 
 
-def _descendant_pgids(root_pid: int) -> set[int]:
-    """Every process-group id in *root_pid*'s live process tree (POSIX,
-    best-effort). A clang/castxml child spawned via ``deadline.run_bounded``
-    detaches into its own session/group, so a plain ``killpg(root_pgid)``
-    no longer reaches it even though the PPID chain still leads back to
-    *root_pid*. Walking a live ``ps -eo pid,ppid`` snapshot finds every such
-    descendant's own pgid too, so it can be killed alongside the worker's
-    group instead of surviving as an orphan (Codex review, PR #591). Empty
-    set on any failure (missing ``ps``, non-POSIX, ...) -- never raises.
-    """
-    import os
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["ps", "-eo", "pid=,ppid="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return set()
-    children: dict[int, list[int]] = {}
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        try:
-            pid, ppid = int(parts[0]), int(parts[1])
-        except ValueError:
-            continue
-        children.setdefault(ppid, []).append(pid)
-    pgids: set[int] = set()
-    stack, seen = [root_pid], set()
-    while stack:
-        pid = stack.pop()
-        if pid in seen:
-            continue
-        seen.add(pid)
-        try:
-            pgids.add(os.getpgid(pid))
-        except (ProcessLookupError, PermissionError, AttributeError, OSError):
-            pass
-        stack.extend(children.get(pid, []))
-    return pgids
-
-
-def _kill_process_tree(proc: Any) -> None:
-    """Terminate *proc* and every group in its process tree (best-effort,
-    never raises). Killing only ``proc``'s own group used to miss a clang/
-    castxml child detached into its own session via ``deadline.run_bounded``
-    (needed so *its* inner-timeout ``killpg`` can't self-kill the worker,
-    but also made it invisible to this outer ``killpg``).
-    :func:`_descendant_pgids` finds it by PPID while ``proc`` is alive, so it
-    gets killed here too instead of surviving as an orphan (Codex review,
-    PR #591).
-    """
-    import os
-    import signal
-
-    if not proc.is_alive():
-        return
-    try:
-        own_pgid = os.getpgrp()
-    except (AttributeError, OSError):
-        try:
-            proc.terminate()
-        except (OSError, AttributeError):
-            pass
-        proc.join(5)
-        return
-    pgids: set[int] = set()
-    try:
-        pgids.add(os.getpgid(proc.pid))
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
-        pass
-    pgids |= _descendant_pgids(proc.pid)
-    # Only kill *proc*'s own group when it actually detached into its own (``os. setsid`` ran). If it timed out
-    # before that, its pgid still equals the parent's group — killpg would then terminate the MCP server itself, so
-    # that group is excluded and only its (already-detached) descendants, if any, are targeted (Codex review).
-    pgids.discard(own_pgid)
-    # Unconditional: proc itself never detached (own_pgid was excluded above precisely because it's still in the
-    # parent's group), so it is never reached by the killpg sweep below over *descendant* groups. Skipping this when
-    # pgids is non-empty left the direct worker process running forever whenever it had spawned a detached
-    # clang/castxml child but had not itself detached (CodeRabbit review, PR #591).
-    try:
-        proc.terminate()
-    except (OSError, AttributeError):
-        pass
-    if not pgids:
-        proc.join(5)
-        return
-    for pgid in pgids:
-        try:
-            os.killpg(pgid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    proc.join(3)
-    # Unconditional SIGKILL sweep, not gated on proc's own exit: a detached
-    # clang/castxml session or a SIGTERM-ignoring grandchild can outlive the
-    # grace period even once the direct worker has already exited (mirrors
-    # deadline._kill_process_tree's same escalation fix).
-    for pgid in pgids:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    proc.join(5)
-
-
 def run_scan_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
     """Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()``.
 
@@ -1798,7 +1718,20 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
 
     _, _, _, _, _, _, ed, cm = _resolve_member_scan_level(req)
     _bi = req.compile_db or req.build_info
-    if _bf := scan_bazel_scoping_failure(req.headers, ed, cm, _bi, req.build_targets):
+    # sources=/build_config= closes the config-sourced (no explicit --build-target)
+    # root-target-scope dry-run/execution parity gap here too, now that this file
+    # has the line-budget room -- see docs/contribute/adr/063-one-semantic-pipeline.md's
+    # Phase 4 status entry ("Second slice" / residual) and the matching entry in
+    # docs/contribute/known-gaps.md.
+    if _bf := scan_bazel_scoping_failure(
+        req.headers,
+        ed,
+        cm,
+        _bi,
+        req.build_targets,
+        sources=req.sources,
+        build_config=req.build_config,
+    ):
         raise PlanningError((_bf,))
 
     # Start the shared budget clock *before* set discovery/validation, not after (Codex review):

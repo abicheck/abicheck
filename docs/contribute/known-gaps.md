@@ -165,37 +165,52 @@ looked like the obvious fix and wasn't.
   already running ahead of both their real-run and `--dry-run` branches)
   were each updated to forward their own already-in-scope
   `sources`/`build_config` locals. **The fourth, `service_scan.
-  run_scan_set`, was deliberately left unwidened**: `service_scan.py` sits
-  exactly at the AI-readiness 2000-line hard cap, and the widened call
-  doesn't fit `ruff format`'s column budget on one line — the resulting
-  explosion would have pushed the file over. Adding it to
+  run_scan_set`, was deliberately left unwidened for one session**:
+  `service_scan.py` sat exactly at the AI-readiness 2000-line hard cap, and
+  the widened call didn't fit `ruff format`'s column budget on one line —
+  the resulting explosion would have pushed the file over. Adding it to
   `LARGE_FILE_ALLOWLIST` was rejected (that allowlist is reserved for
   pre-existing `scripts:`/`tests/` debt, not a fresh production-file
   exemption for an unrelated fix); trimming unrelated content in that
   already-densely-reviewed file to buy back the budget was rejected too. So
-  this one call site keeps its pre-fix behavior: a direct
+  this one call site kept its pre-fix behavior for a while: a direct
   `run_scan_set(ScanRequest(...))` typed-API call with no CLI in front of
-  it still won't see the `.abicheck.yml`-only scope pre-flight (it still
-  fails, just later and less cleanly, inside real embedding) — `scan
-  --artifact-set`'s own CLI path is unaffected, since
-  `cli_scan._run_artifact_set`'s pre-flight (now widened) already runs
-  ahead of `run_scan_set` and catches the mismatch first. A future pass
-  splitting `service_scan.py` under its own file-size budget would remove
-  this constraint; not attempted reactively here. See
+  it wouldn't see the `.abicheck.yml`-only scope pre-flight (it still
+  failed, just later and less cleanly, inside real embedding) — `scan
+  --artifact-set`'s own CLI path was unaffected throughout, since
+  `cli_scan._run_artifact_set`'s pre-flight (already widened) already ran
+  ahead of `run_scan_set` and caught the mismatch first.
+  **Closed in a later session, by splitting `service_scan.py` rather than
+  raising its baseline.** `_descendant_pgids`/`_kill_process_tree` — the
+  process-group kill machinery behind `run_scan_subprocess`/
+  `run_scan_set_subprocess`, with zero dependency on anything scan-specific
+  — moved to the new `abicheck/workflows/scan_subprocess.py`, re-exported
+  from `service_scan.py` for backward compatibility (mirroring
+  `cxx20_pair_dialect.py`'s own precedent: a genuine one-directional edge,
+  since the worker/harness functions that actually call back into
+  `run_scan`/`run_scan_set` stayed put, avoiding the mutual-dependency
+  shape a full move of the subprocess harness would have created). That
+  bought back the room `run_scan_set`'s own `scan_bazel_scoping_failure`
+  call needed to forward `sources=`/`build_config=` too, landing at a new,
+  lowered `architecture/debt.yaml` baseline (2000 → 1933) rather than
+  exactly at the hard cap. See
   `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
-  ("Second slice") and `docs/contribute/plans/one-semantic-pipeline.md`'s
+  ("Second slice" / "Third slice") and `docs/contribute/plans/one-semantic-pipeline.md`'s
   matching Phase 4 update for the full accounting, and
   `tests/test_analysis_plan.py::TestBazelBuildTargetScoping`/`tests/
   test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`/
   `tests/test_bazel_root_targets_scan.py::
-  test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`
-  for the regression coverage (the last of these also replaces this
+  test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`/
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_set_config_sourced_target_scope_raises_planning_error`
+  for the regression coverage (the third-to-last of these also replaces this
   paragraph's earlier pinning of the *pre-fix* `click.ClickException` leak
   from the typed `run_scan()` API with the now-clean `PlanningError`,
   raised earlier too, from `run_scan_core`'s own pre-flight check rather
   than leaking out of `_build_new_snapshot`'s pre-existing `except
   AbicheckError` wart — that wart itself is unrelated and stays open, see
-  this entry's earlier notes on it).
+  this entry's earlier notes on it). **Phase 4 is now complete: all four
+  pre-flight call sites forward `sources=`/`build_config=`.**
   **A later Codex/CodeRabbit review round found the `.abicheck.yml` fix
   itself had a second, distinct gap — not deferrable the way the dry-run
   parity gap above was, since this one had a direct, bounded fix.** At

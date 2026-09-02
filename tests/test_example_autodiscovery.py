@@ -323,6 +323,24 @@ def _find_cxx_compiler() -> str | None:
     return None
 
 
+def _subprocess_failure_detail(
+    r: subprocess.CompletedProcess[str], limit: int = 800
+) -> str:
+    """Diagnostic text for a failed ``subprocess.CompletedProcess``.
+
+    MSVC (``cl.exe``) and MSBuild (the generator ``cmake --build`` drives on
+    Windows) write compiler/linker errors to *stdout*, not stderr — unlike
+    gcc/clang. A diagnostic built from ``r.stderr`` alone is silently empty
+    for every MSVC/MSBuild failure: a real CI escape had five Windows
+    `cmake --build` failures each report "cmake build failed for caseXXX:"
+    with nothing after the colon, hiding the actual error. Concatenates both
+    streams — stdout first, since that's where the real error usually is on
+    Windows — each truncated to *limit* characters.
+    """
+    parts = [s[:limit] for s in (r.stdout, r.stderr) if s]
+    return "\n".join(parts) if parts else "(no output captured)"
+
+
 def _compile_shared(src: Path, out: Path) -> None:
     """Compile *src* into a shared library at *out*.
 
@@ -356,7 +374,8 @@ def _compile_shared(src: Path, out: Path) -> None:
     r = subprocess.run(args, capture_output=True, text=True)
     if r.returncode != 0:
         pytest.fail(
-            f"Compile failed for {src.name} (exit {r.returncode}):\n{r.stderr[:800]}"
+            f"Compile failed for {src.name} (exit {r.returncode}):\n"
+            f"{_subprocess_failure_detail(r)}"
         )
 
 
@@ -388,7 +407,10 @@ def _build_with_cmake(
             capture_output=True, text=True, timeout=60,
         )
         if r.returncode != 0:
-            pytest.fail(f"cmake configure failed for {case_name}:\n{r.stderr[:600]}")
+            pytest.fail(
+                f"cmake configure failed for {case_name}:\n"
+                f"{_subprocess_failure_detail(r, limit=600)}"
+            )
 
     # Build only this case's targets (--config for multi-config generators).
     # Under pytest-xdist, serialize cmake --build calls on the shared build
@@ -411,7 +433,10 @@ def _build_with_cmake(
             build_cmd, capture_output=True, text=True, timeout=120,
         )
     if r.returncode != 0:
-        pytest.fail(f"cmake build failed for {case_name}:\n{r.stderr[:600]}")
+        pytest.fail(
+            f"cmake build failed for {case_name}:\n"
+            f"{_subprocess_failure_detail(r, limit=600)}"
+        )
 
     # Find the built libraries
     v1_lib = _find_built_lib(case_out, "v1")
@@ -447,6 +472,58 @@ def _find_built_lib(directory: Path, name: str) -> Path | None:
                 if lib.exists():
                     return lib
     return None
+
+
+# ---------------------------------------------------------------------------
+# _subprocess_failure_detail: no compiler/cmake needed, runs in the fast lane
+# ---------------------------------------------------------------------------
+def _completed(
+    stdout: str = "", stderr: str = "", returncode: int = 1
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["dummy"], returncode=returncode, stdout=stdout, stderr=stderr
+    )
+
+
+def test_subprocess_failure_detail_surfaces_stdout_only_output() -> None:
+    """The exact shape MSVC/MSBuild produce: the real error is on stdout,
+    stderr is empty. A stderr-only diagnostic (the pre-fix behaviour) would
+    render this as the empty string -- reproducing the real CI escape where
+    five Windows `cmake --build` failures each showed "cmake build failed
+    for caseXXX:" with nothing after the colon."""
+    r = _completed(stdout="error C2039: 'foo': is not a member of 'Bar'")
+    detail = _subprocess_failure_detail(r)
+    assert "error C2039" in detail
+
+
+def test_subprocess_failure_detail_surfaces_stderr_only_output() -> None:
+    """Negative control: a gcc/clang-shaped failure (stderr only, stdout
+    empty) must not regress -- the fix adds stdout, it doesn't drop stderr."""
+    r = _completed(stderr="fatal error: 'foo.h' file not found")
+    detail = _subprocess_failure_detail(r)
+    assert "fatal error" in detail
+
+
+def test_subprocess_failure_detail_includes_both_streams() -> None:
+    """A tool that writes to both streams (e.g. a warning on stderr plus the
+    real error on stdout) must not have either one silently dropped."""
+    r = _completed(stdout="stdout error text", stderr="stderr warning text")
+    detail = _subprocess_failure_detail(r)
+    assert "stdout error text" in detail
+    assert "stderr warning text" in detail
+
+
+def test_subprocess_failure_detail_no_output_is_explicit() -> None:
+    """Both streams empty (e.g. a killed process) must say so explicitly,
+    not silently render as an empty string indistinguishable from a bug in
+    the diagnostic itself."""
+    assert _subprocess_failure_detail(_completed()) == "(no output captured)"
+
+
+def test_subprocess_failure_detail_truncates_each_stream_independently() -> None:
+    r = _completed(stdout="A" * 2000, stderr="B" * 2000)
+    detail = _subprocess_failure_detail(r, limit=100)
+    assert detail == ("A" * 100) + "\n" + ("B" * 100)
 
 
 # ---------------------------------------------------------------------------
