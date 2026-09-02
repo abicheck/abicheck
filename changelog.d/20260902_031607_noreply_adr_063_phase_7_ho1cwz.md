@@ -624,6 +624,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   correct at 4. Now unions the recovered gate category in via the same
   `_run_outcome_gate_exit_and_category` helper the scan-abort fix above
   introduced.
+- **`ScanSetResult`'s `run_outcome` now propagates a member's
+  `NOT_COMPARABLE` status too, not only `EVIDENCE_CONTRACT_ERROR`**
+  (Codex review, fresh evidence): when one artifact in a `scan
+  --artifact-set` returns `NOT_COMPARABLE` while a different member
+  supplies the set-level real verdict (e.g. `BREAKING`), the aggregation
+  only promoted a member's `EVIDENCE_CONTRACT_ERROR` — a `BREAKING`
+  member alongside a `NOT_COMPARABLE` one previously serialized
+  `run_outcome.operational: "none"`, so a consumer of the new
+  authoritative block couldn't tell that part of the artifact set was
+  never compared. `run_outcome_for_scan_fields`/`run_outcome_dict_for_scan`
+  gained a new `member_not_comparable` parameter mirroring the existing
+  `member_evidence_contract_error` one exactly (same "only when otherwise
+  `NONE`" fold-in rule), and `ScanSetResult.to_dict()` now passes it.
 
 ### Changed
 

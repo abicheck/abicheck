@@ -348,6 +348,7 @@ def run_outcome_for_scan_fields(
     severity_exit_code: int | None = None,
     contract_coverage_contribution: object = None,
     member_evidence_contract_error: bool = False,
+    member_not_comparable: bool = False,
     bundle_incomplete: bool = False,
     assurance: object | None = None,
     member_compatibility_verdict: str | None = None,
@@ -384,46 +385,42 @@ def run_outcome_for_scan_fields(
     compatibility-gate contribution, fail-closed, exactly like the reader
     this mirrors (``workflows.aggregate.gate._contract_coverage_exit``).
 
-    *member_evidence_contract_error*, when ``True``, folds
-    :attr:`OperationalStatus.EVIDENCE_CONTRACT_ERROR` in even though *verdict*/
-    *exit_code* don't name it directly -- :class:`~abicheck.service_scan.
-    ScanSetResult`'s own ``_aggregate_scan_set_verdict`` deliberately lets a
-    *stronger* member's ``API_BREAK``/``BREAKING`` verdict win the reported
-    ``verdict``/``exit_code`` over a *different* member's ``EVIDENCE_
-    CONTRACT_ERROR`` (visible in ``per_artifact``, but never the set-level
-    verdict once a real break outranks it) -- without this, that member
-    abort has no signal left in ``run_outcome`` at all (Codex review). Never
-    overrides an operational status already derived from *verdict*/
-    *exit_code* (e.g. a set-level ``BUDGET_OVERFLOW``, which already
-    dominates every member per that same function's own step 1).
+    *member_evidence_contract_error*/*member_not_comparable*, when ``True``,
+    fold ``EVIDENCE_CONTRACT_ERROR``/``NOT_COMPARABLE`` in even though
+    *verdict*/*exit_code* don't name either directly --
+    ``_aggregate_scan_set_verdict`` deliberately lets a *stronger* member's
+    ``API_BREAK``/``BREAKING`` win the reported verdict over a *different*
+    member's abort (visible in ``per_artifact``, but never the set-level
+    verdict once a real break outranks it), which otherwise left that
+    member's abort with no signal in ``run_outcome`` at all. Never overrides
+    an operational status already derived from *verdict*/*exit_code* (e.g. a
+    set-level ``BUDGET_OVERFLOW``, which already dominates every member per
+    that same function's own step 1).
 
-    *bundle_incomplete*, when ``True``, folds
-    :attr:`OperationalStatus.EXTRACTION_ERROR` in under the identical "only
-    when otherwise ``NONE``" rule -- the sibling gap
-    :meth:`~abicheck.service_scan.ScanSetResult`'s own ``run_scan_set`` case
+    *bundle_incomplete*, when ``True``, folds ``EXTRACTION_ERROR`` in under
+    the identical "only when otherwise ``NONE``" rule -- the sibling gap
     where a *stronger* member wins the reported ``verdict`` while the
-    cross-library bundle audit itself never ran (Codex review): unlike the
+    cross-library bundle audit itself never ran: unlike the
     ``BUNDLE_INCOMPLETE`` sentinel *verdict* already covered above, this is
     the case where the audit went incomplete but *verdict* never says so.
 
     *assurance*, when given, is the report's own already-serialized
     ``analysis_assurance`` block (``cli_scan_baseline.py``'s
     ``diff_summary["analysis_assurance"]``) -- stored as-is, accepted
-    directly by :func:`analysis_assurance_dict` (Codex review: every scan
-    writer previously passed no assurance).
+    directly by :func:`analysis_assurance_dict`.
 
     *member_compatibility_verdict*, when given, is the worst REAL
-    per-member verdict a caller with no ``report=`` already computed
-    (:class:`~abicheck.service_scan.ScanSetResult`'s set-level abort case)
-    -- resolves *compatibility* precisely when *verdict* is a sentinel,
-    since exit code alone can't tell NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_
-    RISK apart (Codex review, fresh evidence).
+    per-member verdict a caller with no ``report=`` already computed -- it
+    resolves *compatibility* precisely when *verdict* is a sentinel, since
+    exit code alone can't tell NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK apart.
     """
     operational = _SCAN_ABORT_VERDICT_OPERATIONAL.get(verdict, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE:
         operational = _SCAN_EXIT_CODE_OPERATIONAL.get(exit_code, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE and member_evidence_contract_error:
         operational = OperationalStatus.EVIDENCE_CONTRACT_ERROR
+    if operational is OperationalStatus.NONE and member_not_comparable:
+        operational = OperationalStatus.NOT_COMPARABLE
     if operational is OperationalStatus.NONE and bundle_incomplete:
         operational = OperationalStatus.EXTRACTION_ERROR
 
@@ -646,6 +643,7 @@ def run_outcome_dict_for_scan(
     *,
     report: object = None,
     member_evidence_contract_error: bool = False,
+    member_not_comparable: bool = False,
     bundle_incomplete: bool = False,
     member_verdicts: Iterable[object] | None = None,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
@@ -672,8 +670,9 @@ def run_outcome_dict_for_scan(
     never lost just because a later member aborted and dominates
     ``verdict``/``exit_code``.
 
-    *member_evidence_contract_error*/*bundle_incomplete* forward unchanged to
-    :func:`run_outcome_for_scan_fields` -- see that function's own docstring.
+    *member_evidence_contract_error*/*member_not_comparable*/*bundle_
+    incomplete* forward unchanged to :func:`run_outcome_for_scan_fields` --
+    see that function's own docstring.
     """
     compat_exit_code = scan_report_severity_exit_code(report)
     if compat_exit_code is None:
@@ -691,6 +690,7 @@ def run_outcome_dict_for_scan(
         severity_exit_code=compat_exit_code,
         contract_coverage_contribution=scan_report_coverage_contribution(report),
         member_evidence_contract_error=member_evidence_contract_error,
+        member_not_comparable=member_not_comparable,
         bundle_incomplete=bundle_incomplete,
         assurance=scan_report_assurance_block(report),
         member_compatibility_verdict=getattr(worst_member, "value", None),

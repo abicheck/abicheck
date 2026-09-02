@@ -277,3 +277,31 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         }
         outcome = run_outcome_dict_for_scan("BREAKING", 4, report=report)
         assert outcome["gate"] == "abi_breaking"
+
+    def test_scan_set_result_propagates_a_members_not_comparable_status(self):
+        """Codex review, fresh evidence: when one artifact returns
+        NOT_COMPARABLE while another supplies the set-level real verdict,
+        the aggregation only promoted member EVIDENCE_CONTRACT_ERROR
+        statuses -- a BREAKING member plus a NOT_COMPARABLE member
+        serialized run_outcome.operational as "none", so a consumer of the
+        structured block couldn't tell that part of the set was never
+        compared."""
+        from pathlib import Path
+
+        from abicheck.service_scan import ScanArtifactResult, ScanResult, ScanSetResult
+
+        breaking = ScanResult(verdict="BREAKING", exit_code=4)
+        not_comparable = ScanResult(verdict="NOT_COMPARABLE", exit_code=6)
+        result = ScanSetResult(
+            verdict="BREAKING",
+            exit_code=4,
+            per_artifact=[
+                ScanArtifactResult(artifact=Path("a.so"), result=breaking),
+                ScanArtifactResult(artifact=Path("b.so"), result=not_comparable),
+            ],
+        )
+
+        report = result.to_dict()
+
+        assert report["run_outcome"]["operational"] == "not_comparable"
+        assert report["run_outcome"]["gate"] == "abi_breaking"
