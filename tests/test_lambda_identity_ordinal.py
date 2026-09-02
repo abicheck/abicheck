@@ -58,7 +58,11 @@ from abicheck.model.identity import (
     entity_id_for_type,
 )
 from abicheck.model.occurrence import OccurrenceId
-from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+from abicheck.model.semantic_ir import (
+    CanonicalEntity,
+    SemanticIR,
+    semantic_ir_conflict_key,
+)
 from abicheck.name_classification import strip_anonymous_type_location
 from abicheck.qualified_name_segments import (
     _walk_rewrite_strings,
@@ -1117,3 +1121,72 @@ class TestFrozenDataclassesReachableFromTheWalkAreRebuilt:
         assert (
             renumbered_entity.canonical_spelling.value == snap.types[0].qualified_name
         )
+
+    def test_semantic_ir_conflicts_key_is_renumbered_to_match_a_fresh_lookup(
+        self,
+    ) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001):
+        ``AbiSnapshot.semantic_ir_conflicts`` is keyed by
+        ``semantic_ir_conflict_key(occurrence_id, fact_name)`` -- a
+        length-prefixed PACKED string (``model.identity._packed``). Naively
+        text-rewriting that string in place (the way every other reachable
+        string is rewritten) corrupts it: the outer length prefix no longer
+        matches the rewritten marker text's real (different) length, so the
+        stored key ends up equal to neither its own old form nor a freshly
+        recomputed one -- silently making the stored conflict diagnostic
+        unreachable via the one lookup path (``semantic_ir_conflict_key``)
+        any real consumer would use. Confirmed to fail (the key stays a
+        stale/corrupted mismatch) against a version of this function that
+        added ``"semantic_ir_conflicts"`` straight to `_LAMBDA_IDENTITY_
+        FIELDS` instead of recomputing it via
+        ``model.semantic_ir.renumber_conflict_keys``.
+        """
+        marker = _closure("task_group.h", 20, 4)
+        eid = entity_id_for_type((Namespace("ns"),), f"Wrapper<{marker}>")
+        occ_id = OccurrenceId(eid)
+        old_key = semantic_ir_conflict_key(occ_id, "canonical_spelling")
+        semantic_ir = SemanticIR(
+            occurrences={
+                occ_id: CanonicalEntity(
+                    canonical_spelling=Fact.present(f"ns::Wrapper<{marker}>")
+                )
+            }
+        )
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            semantic_ir=semantic_ir,
+            semantic_ir_conflicts={old_key: repr("clang's discarded value")},
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        assert snap.semantic_ir is not None
+        (renumbered_occ_id,) = snap.semantic_ir.occurrences.keys()
+        fresh_key = semantic_ir_conflict_key(renumbered_occ_id, "canonical_spelling")
+
+        assert fresh_key in snap.semantic_ir_conflicts
+        assert old_key not in snap.semantic_ir_conflicts
+        assert snap.semantic_ir_conflicts[fresh_key] == repr("clang's discarded value")
+
+    def test_semantic_ir_conflicts_untouched_when_nothing_needs_renumbering(
+        self,
+    ) -> None:
+        eid = entity_id_for_type((), "Plain")
+        occ_id = OccurrenceId(eid)
+        key = semantic_ir_conflict_key(occ_id, "canonical_spelling")
+        semantic_ir = SemanticIR(
+            occurrences={
+                occ_id: CanonicalEntity(canonical_spelling=Fact.present("Plain"))
+            }
+        )
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            # Still needs a closure marker SOMEWHERE for the cheap
+            # "anything to renumber at all" check to actually run the walk.
+            types=[_record("Other", qualified=_closure("task_group.h", 10, 2))],
+            semantic_ir=semantic_ir,
+            semantic_ir_conflicts={key: repr("value")},
+        )
+        renumber_anonymous_closure_identities(snap)
+        assert snap.semantic_ir_conflicts == {key: repr("value")}

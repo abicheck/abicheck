@@ -61,6 +61,7 @@ __all__ = [
     "CanonicalEntity",
     "SemanticIR",
     "canonical_cv_qualification",
+    "renumber_conflict_keys",
     "semantic_ir_conflict_key",
 ]
 
@@ -243,3 +244,58 @@ def semantic_ir_conflict_key(occurrence_id: OccurrenceId, fact_name: str) -> str
     would silently discard the first.
     """
     return _packed(canonical_key(occurrence_id), fact_name)
+
+
+def renumber_conflict_keys(
+    conflicts: dict[str, str],
+    old_occurrence_ids: Iterable[OccurrenceId],
+    new_semantic_ir: SemanticIR,
+) -> None:
+    """Re-key *conflicts* (``AbiSnapshot.semantic_ir_conflicts``) after its
+    matching ``SemanticIR.occurrences`` keys were renumbered elsewhere
+    (``qualified_name_segments.renumber_anonymous_closure_identities``,
+    ADR-063 Phase 6 second slice, Codex review, PR #1001).
+
+    Each conflict key is :func:`semantic_ir_conflict_key` — a
+    length-prefixed packed string — that an in-place substring rewrite of
+    an embedded closure/anonymous-marker (the same rewrite already correctly
+    applied to ``CanonicalEntity.canonical_spelling`` and every legacy
+    field) would corrupt: the outer length prefix would no longer match the
+    rewritten text's real length, producing a string that equals neither
+    the original key nor a freshly-recomputed one for the renumbered
+    occurrence. This function instead recomputes each affected key fresh
+    from the paired old/new :class:`~abicheck.model.occurrence.OccurrenceId`
+    and the fact names *new_semantic_ir*'s own matching entity actually
+    carries (:meth:`CanonicalEntity.fact_items` — the exhaustive set
+    :func:`semantic_ir_conflict_key` is ever called with; see
+    ``extract/semantic_ir_merge.py``, this dict's only writer).
+
+    *old_occurrence_ids* must be ``new_semantic_ir.occurrences``'s own keys
+    *before* they were rewritten, in the identical order (both built by
+    iterating one dict, before and after its keys were replaced) — paired
+    positionally. A no-op if the two sequences differ in length (a rare
+    post-renumber key collision onto one entity: bail rather than guess a
+    wrong correspondence, the same fail-closed posture this module's
+    matching logic already takes elsewhere). Mutates *conflicts* in place;
+    an occurrence pair that didn't actually change contributes nothing
+    (checked by equality, not identity, so this is safe to call whether or
+    not the caller already knows which pairs changed).
+    """
+    old_ids = list(old_occurrence_ids)
+    new_ids = list(new_semantic_ir.occurrences)
+    if not conflicts or len(old_ids) != len(new_ids):
+        return
+    rewritten: dict[str, str] = {}
+    for old_occ_id, new_occ_id in zip(old_ids, new_ids):
+        if old_occ_id == new_occ_id:
+            continue
+        entity = new_semantic_ir.occurrences.get(new_occ_id)
+        if entity is None:
+            continue
+        for fact_name, _fact in entity.fact_items():
+            old_key = semantic_ir_conflict_key(old_occ_id, fact_name)
+            if old_key in conflicts:
+                rewritten[semantic_ir_conflict_key(new_occ_id, fact_name)] = (
+                    conflicts.pop(old_key)
+                )
+    conflicts.update(rewritten)

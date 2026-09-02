@@ -685,8 +685,30 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     def _rewrite(text: str) -> str:
         return apply_anonymous_type_ordinals(text, ordinals)
 
+    # ADR-063 Phase 6 (second slice, Codex review, PR #1001): captured
+    # BEFORE the generic walk below replaces `semantic_ir`'s own keys --
+    # `semantic_ir_conflicts`' packed keys can't be fixed up by the same
+    # in-place text rewrite (see `model.semantic_ir.renumber_conflict_keys`'
+    # own docstring for exactly why: it would corrupt the packed length
+    # prefix), so this needs the old/new OccurrenceId pairing instead.
+    old_semantic_ir = getattr(snapshot, "semantic_ir", None)
+    old_occurrence_ids = (
+        list(old_semantic_ir.occurrences) if old_semantic_ir is not None else None
+    )
+
     for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
         new_container = _walk_rewrite_strings(container, _rewrite)
         if new_container is not container:
             setattr(snapshot, field_name, new_container)
+
+    conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
+    new_semantic_ir = getattr(snapshot, "semantic_ir", None)
+    if old_occurrence_ids is not None and conflicts and new_semantic_ir is not None:
+        # Local import: this module is otherwise import-free (its own
+        # docstring) precisely so it stays cheaply importable from broad,
+        # early contexts -- confined to this rare (real conflicts + a real
+        # marker present at all) branch rather than paid by every caller.
+        from .model.semantic_ir import renumber_conflict_keys
+
+        renumber_conflict_keys(conflicts, old_occurrence_ids, new_semantic_ir)
     return snapshot
