@@ -13216,6 +13216,35 @@ wrapped in `_Atomic(...)`, rather than trying to fold the wrapper into
 one already-dense pattern. Pinned by a new regression test using an
 `_Atomic`-wrapped `Variable`.
 
+**The `_Atomic(...)`-wrapped form can itself be wrapped again, eighteenth
+round, fresh evidence -- fixed by factoring the wrapping pattern out and
+applying it uniformly around both atoms, not by chasing each new shape
+with another alternative.** `const _Atomic(void (*)(int)) callback`,
+`_Atomic(void (*)(int)) *callback`, and an array of atomic callbacks
+render as `"const _Atomic(FunctionType*)"`, `"_Atomic(FunctionType*)*"`,
+and `"_Atomic(FunctionType*)[3]"` respectively -- a cv-prefix/sigil/array
+wrapper OUTSIDE the `_Atomic(...)` parens, on top of the wrapper already
+recognized INSIDE them. The seventeenth round's fix treated `_Atomic(...)`
+as only ever the WHOLE string (its own two-alternative regex had no
+wrapping outside either branch), so none of these further-wrapped shapes
+matched, and the normalizer published castxml's opaque fallback as
+present -- the same false-conflict-in-a-hybrid-dump failure mode every
+prior round in this thread has fixed, just for another wrapping position.
+Rather than adding a THIRD alternative (and inevitably a fourth once a
+combination of wrapper positions surfaces next), the fix restructures the
+regex around two reusable fragments -- `_CASTXML_OPAQUE_FUNCTION_TYPE_
+CV_PREFIX` (the leading `const`/`volatile` run) and `_CASTXML_OPAQUE_
+FUNCTION_TYPE_WRAPPING` (the repeating sigil/array-with-trailing-cv
+suffix) -- and an `_CASTXML_OPAQUE_FUNCTION_TYPE_ATOM` alternation
+(`FunctionType` bare, or `_Atomic(FunctionType` + the SAME wrapping
+pattern + `)`) that the cv-prefix and wrapping are then applied around
+UNIFORMLY, once, regardless of which atom matched. A nested SECOND
+`_Atomic(...)` is deliberately not modeled -- this normalizer has no
+observed evidence castxml ever emits one -- so the wrapping pattern used
+inside the parens is the same one used outside them, just not applied
+recursively. Pinned by a parametrized regression test covering all three
+newly-reported shapes.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

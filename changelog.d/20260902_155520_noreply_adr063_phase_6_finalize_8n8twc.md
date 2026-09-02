@@ -224,3 +224,14 @@
   treatment of `_Atomic(...)` on the unresolved-sentinel side — since an
   earlier revision had no `_Atomic(...)` branch at all and fell through
   to publishing the opaque base value as present.
+  The `_Atomic(...)`-wrapped form can itself be wrapped again
+  (`"const _Atomic(FunctionType*)"`, `"_Atomic(FunctionType*)*"`,
+  `"_Atomic(FunctionType*)[3]"`) — a cv-prefix/sigil/array wrapper
+  OUTSIDE the `_Atomic(...)` parens, on top of the wrapper already
+  recognized inside them. Rather than adding another one-off
+  alternative, the regex is now built from two reusable fragments (a
+  leading cv-keyword-run pattern, and a repeating sigil/array-with-
+  trailing-cv wrapping pattern) applied UNIFORMLY around either atom
+  (bare `FunctionType`, or the whole `_Atomic(...)` group) — closing
+  this and any other single-level wrapping-position combination at
+  once, rather than one more special case.

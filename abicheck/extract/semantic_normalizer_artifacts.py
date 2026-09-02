@@ -169,15 +169,38 @@ CLANG_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
 #: so this shape fell through as a real, present spelling, conflicting in
 #: a hybrid dump against clang's complete `_Atomic(void (*)(int))`
 #: spelling while keeping the opaque, useless base value.
-_CASTXML_OPAQUE_FUNCTION_TYPE_INNER = (
-    r"(?:(?:const|volatile)\s+)*FunctionType"
+#:
+#: **The `_Atomic(...)`-wrapped form can ITSELF be wrapped again, the
+#: same way the bare tag can (Codex review, eighteenth round, fresh
+#: evidence).** `const _Atomic(void (*)(int)) callback`,
+#: `_Atomic(void (*)(int)) *callback`, and an array of atomic callbacks
+#: render as `"const _Atomic(FunctionType*)"`, `"_Atomic(FunctionType*)*"`,
+#: and `"_Atomic(FunctionType*)[N]"` respectively -- a cv-prefix/sigil/
+#: array wrapper OUTSIDE the `_Atomic(...)` parens, on top of the wrapper
+#: already recognized INSIDE them. The seventeenth round's fix treated
+#: `_Atomic(...)` as only ever the WHOLE string, so none of these
+#: further-wrapped shapes matched, and the normalizer published
+#: castxml's opaque fallback as present -- a false conflict against
+#: clang's complete declarator in a hybrid dump, instead of backfilling
+#: it. Fixed by factoring the cv-prefix/sigil/array wrapping into its own
+#: reusable pattern and applying it uniformly around BOTH atoms (the bare
+#: tag, and the whole `_Atomic(...)` group) rather than duplicating it
+#: for each: nesting a SECOND `_Atomic(...)` is not modeled (this
+#: normalizer has no evidence castxml ever emits one), so the wrapping
+#: pattern used inside the parens is the same one used outside them,
+#: just not recursively.
+_CASTXML_OPAQUE_FUNCTION_TYPE_CV_PREFIX = r"(?:(?:const|volatile)\s+)*"
+_CASTXML_OPAQUE_FUNCTION_TYPE_WRAPPING = (
     r"(?:\s*(?:[*&]|\[\d*\])(?:\s+(?:const|volatile))*)*"
 )
+_CASTXML_OPAQUE_FUNCTION_TYPE_ATOM = (
+    r"(?:_Atomic\(FunctionType"
+    rf"{_CASTXML_OPAQUE_FUNCTION_TYPE_WRAPPING}\)|FunctionType)"
+)
 _CASTXML_OPAQUE_FUNCTION_TYPE_RE = re.compile(
-    r"^(?:"
-    rf"_Atomic\({_CASTXML_OPAQUE_FUNCTION_TYPE_INNER}\)"
-    rf"|{_CASTXML_OPAQUE_FUNCTION_TYPE_INNER}"
-    r")$"
+    rf"^{_CASTXML_OPAQUE_FUNCTION_TYPE_CV_PREFIX}"
+    rf"{_CASTXML_OPAQUE_FUNCTION_TYPE_ATOM}"
+    rf"{_CASTXML_OPAQUE_FUNCTION_TYPE_WRAPPING}$"
 )
 
 

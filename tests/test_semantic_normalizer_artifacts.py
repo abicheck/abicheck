@@ -29,6 +29,8 @@ literal spelling -- the producer-specific-artifact recognition rules that
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.extract.semantic_normalizer import normalize_header_ast
 from abicheck.model.declarations import Function, Param, Variable
 from abicheck.model.identity import (
@@ -276,6 +278,49 @@ def test_normalize_header_ast_castxml_atomic_wrapped_opaque_function_type() -> N
         name="callback",
         mangled="callback",
         type="_Atomic(FunctionType*)",
+        entity_id=entity_id_for_variable((), "callback", mangled_name="callback"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "raw_type",
+    [
+        "const _Atomic(FunctionType*)",
+        "_Atomic(FunctionType*)*",
+        "_Atomic(FunctionType*)[3]",
+    ],
+)
+def test_normalize_header_ast_castxml_wrapped_atomic_opaque_function_type(
+    raw_type: str,
+) -> None:
+    """The `_Atomic(...)`-wrapped form can itself be wrapped again, the
+    same way the bare tag can (Codex review, eighteenth round, fresh
+    evidence): `const _Atomic(void (*)(int)) callback`,
+    `_Atomic(void (*)(int)) *callback`, and an array of atomic callbacks
+    render as `"const _Atomic(FunctionType*)"`,
+    `"_Atomic(FunctionType*)*"`, and `"_Atomic(FunctionType*)[3]"`
+    respectively -- a cv-prefix/sigil/array wrapper OUTSIDE the
+    `_Atomic(...)` parens, on top of the wrapper already recognized
+    inside them. An earlier revision treated `_Atomic(...)` as only ever
+    the whole string, so none of these further-wrapped shapes matched,
+    and the normalizer published castxml's opaque fallback as present --
+    a false conflict against clang's complete declarator in a hybrid
+    dump."""
+    var = Variable(
+        name="callback",
+        mangled="callback",
+        type=raw_type,
         entity_id=entity_id_for_variable((), "callback", mangled_name="callback"),
     )
     ir = normalize_header_ast(
