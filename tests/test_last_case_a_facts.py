@@ -38,6 +38,8 @@ from abicheck.model import (
     FactStatus,
     Function,
     Param,
+    RecordType,
+    TypeField,
     Variable,
 )
 from abicheck.model.fact_registry import FACT_REGISTRY, KNOWN_UNCONVERTED_ELIGIBLE_FACTS
@@ -345,12 +347,12 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
             # A DWARF block is real evidence its producer ran.
             (
                 "elf-dwarf",
-                {"platform": "elf", "dwarf": {"has_debug_info": True}},
+                {"platform": "elf", "dwarf": {"has_dwarf": True}},
                 FactStatus.PRESENT,
             ),
             (
                 "elf-dwarf-advanced",
-                {"platform": "elf", "dwarf_advanced": {"cu_count": 1}},
+                {"platform": "elf", "dwarf_advanced": {"has_dwarf": True}},
                 FactStatus.PRESENT,
             ),
             # ELF alone, no debug block: nothing that produces CV facts ran.
@@ -375,6 +377,54 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         f = snapshot_from_dict(d).types[0].fields[0]
         assert f.is_const_fact.status is expected
 
+    def test_a_placeholder_dwarf_block_is_not_dwarf_evidence(self) -> None:
+        """A symbols-only ELF dump still persists DWARF blocks.
+
+        Codex review, PR #995: ``_build_symbol_only_snapshot`` writes a
+        fully-populated ``DwarfMetadata()``/``AdvancedDwarfMetadata()`` with
+        ``has_dwarf: false`` for a binary that has no debug info at all, and
+        their serialized form is a **non-empty mapping** -- so "the block is
+        truthy" reads as DWARF evidence when there is none. Built here by
+        serializing a real snapshot rather than hand-writing the dict,
+        because the placeholder's real shape is exactly what a hand-written
+        fixture would get wrong.
+        """
+        from abicheck.model.dwarf_facts import (
+            AdvancedDwarfMetadata,
+            DwarfMetadata,
+        )
+
+        snap = AbiSnapshot(
+            library="l.so",
+            version="1",
+            from_headers=False,
+            platform="elf",
+            dwarf=DwarfMetadata(),
+            dwarf_advanced=AdvancedDwarfMetadata(),
+            types=[
+                RecordType(
+                    name="W",
+                    kind="class",
+                    fields=[TypeField(name="m", type="int", is_const=False)],
+                )
+            ],
+        )
+        d = snapshot_to_dict(snap)
+        d["schema_version"] = _PRE_CASE_A
+        for raw_field in d["types"][0]["fields"]:  # a pre-conversion document
+            for key in [k for k in raw_field if k.endswith("_fact")]:
+                del raw_field[key]
+
+        assert d["dwarf"], "the placeholder block must stay non-empty"
+        assert d["dwarf"]["has_dwarf"] is False
+        got = snapshot_from_dict(json.loads(json.dumps(d)))
+        assert got.types[0].fields[0].is_const_fact.status is FactStatus.NOT_COLLECTED
+
+        # ... and the same document with real debug info keeps its fact.
+        d["dwarf"]["has_dwarf"] = True
+        got = snapshot_from_dict(json.loads(json.dumps(d)))
+        assert got.types[0].fields[0].is_const_fact.status is FactStatus.PRESENT
+
     def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
         # TypeField.is_const names dwarf among its producers, and this
         # document evidences dwarf, so its value is real evidence — the
@@ -382,7 +432,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         d = _minimal_dict(
             schema_version=_PRE_CASE_A,
             from_headers=False,
-            dwarf={"has_debug_info": True},
+            dwarf={"has_dwarf": True},
             types=[
                 {
                     "name": "W",

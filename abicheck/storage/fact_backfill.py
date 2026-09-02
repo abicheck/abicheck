@@ -148,8 +148,13 @@ def evidenced_producers(
       satisfies too); a recorded ``ast_producer`` narrows to that one
       backend, ``"hybrid"`` (or an unrecorded producer on a confirmed
       header snapshot) admits both.
-    - ``dwarf`` only when the document carries a DWARF block, which every
-      DWARF-derived snapshot writes (``dwarf_snapshot.py``/``dumper.py``).
+    - ``dwarf`` only when a DWARF block reports ``has_dwarf`` -- **not**
+      merely when the block exists (Codex review, PR #995): a symbols-only
+      ELF dump persists a fully-populated placeholder
+      ``DwarfMetadata()``/``AdvancedDwarfMetadata()`` with ``has_dwarf:
+      false`` (``dumper_elf_fallback._build_symbol_only_snapshot``), whose
+      serialized form is a non-empty mapping and so passes a truthiness
+      test. See :func:`_has_dwarf_evidence`.
     - ``elf``/``pe``/``macho`` from the document's own ``platform``.
 
     Deliberately **never** inferred: ``pdb``, ``btf`` and ``ctf``. No
@@ -168,11 +173,27 @@ def evidenced_producers(
             evidenced.add(ast_producer)
         else:
             evidenced |= _HEADER_AST_BACKENDS
-    if d.get("dwarf") or d.get("dwarf_advanced"):
+    if _has_dwarf_evidence(d):
         evidenced.add("dwarf")
     if platform in {"elf", "pe", "macho"}:
         evidenced.add(platform)
     return frozenset(evidenced)
+
+
+def _has_dwarf_evidence(d: dict[str, Any]) -> bool:
+    """Whether a DWARF block in *d* reports real debug info.
+
+    Both blocks carry an explicit ``has_dwarf`` (``model/dwarf_facts.py``),
+    which is the only honest signal: a binary with no debug info still gets
+    a placeholder block written for it, so "the key is present" and even
+    "the mapping is non-empty" are both true for a snapshot that has no
+    DWARF at all. A non-mapping value (a truncated or hand-authored
+    document) is no evidence either.
+    """
+    return any(
+        isinstance(block, dict) and bool(block.get("has_dwarf"))
+        for block in (d.get("dwarf"), d.get("dwarf_advanced"))
+    )
 
 
 def _unproduceable(owner: str, field: str, evidenced: frozenset[str]) -> bool:
