@@ -271,30 +271,30 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
 #: but **not yet converted** to a ``Fact[T]`` sibling — an allowlist-and-
 #: shrink baseline, the identical convention ``fact_field_readers.
 #: KNOWN_UNMIGRATED_READERS``/``IMPORT_CYCLE_ALLOWLIST`` already establish
-#: elsewhere in this codebase. Every entry here is a real, currently-open
-#: gap this ADR's own Governing Invariant requires naming rather than
-#: silently converting to a fake-clean check — see ``scripts/
-#: fact_registry_completeness.py`` for the scan that keeps this list
-#: honest in both directions (an entry that no longer matches a real,
-#: still-unconverted field fails the check; a real eligible field missing
-#: from this list, or from ``FACT_REGISTRY``, also fails it).
+#: elsewhere in this codebase.
 #:
-#: Case (a) — flag-backed (``REFERENCE_FLAG_COVERAGE`` minus the three
-#: fields Phase 0 already converted: ``RecordType.vtable``/
-#: ``vptr_offset_bits``, ``Param.is_va_list``):
-_CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
-)
+#: **Both halves are now empty: ADR-063 Phase 5's field-by-field conversion
+#: is complete.** Every field that scan is able to find eligible — case (a)
+#: (guarded by a ``*_facts_reliable`` flag, i.e. every pair
+#: :data:`REFERENCE_FLAG_COVERAGE` names) and case (b) (already tri-state at
+#: its own declared type, with a documented backend/schema-dependence
+#: comment) — carries a ``Fact[T]`` sibling and exactly one
+#: ``FactDefinition``. These two tuples are deliberately kept (rather than
+#: deleted along with their last entry) because ``scripts/
+#: fact_registry_completeness.py`` checks them in *both* directions: a
+#: newly-added eligible field that nobody converted fails the gate
+#: outright, and re-listing it here — the shrink-only baseline's one
+#: legitimate use — is a reviewed decision that must be visible in a diff,
+#: not an absent constant a future contributor would have to reinvent. An
+#: entry that no longer matches a real, still-unconverted field fails the
+#: same check, so neither half can quietly go stale.
+_CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = ()
 
-#: Case (b) — already tri-state (``X | None``) at the field's own declared
-#: type, with a documented backend/schema-dependence comment, no separate
-#: reliability flag. ``RecordType.is_final`` (the plan's own headline
-#: example) is deliberately absent here — see ``fact_registry_entries.
-#: FACT_REGISTRY``, it is this phase's first real conversion. The five
-#: binary-format fields on ``ElfMetadata``/``PeMetadata``/``MachoMetadata``
-#: (schema-version-driven, not backend-driven) that used to live here were
-#: converted in Phase 5's seventh batch (schema v37) and are now in
-#: ``FACT_REGISTRY`` instead — see ``model/elf_facts.py``/``pe_facts.py``/
-#: ``macho_facts.py``.
+#: Case (b) — see the note above; emptied in Phase 5's seventh batch
+#: (schema v37), when the last five binary-format fields on ``ElfMetadata``/
+#: ``PeMetadata``/``MachoMetadata`` were converted (``model/elf_facts.py``/
+#: ``pe_facts.py``/``macho_facts.py``). Case (a) followed in batches eight
+#: through ten (schema v38-v40).
 _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = ()
 
 KNOWN_UNCONVERTED_ELIGIBLE_FACTS: frozenset[tuple[str, str]] = frozenset(

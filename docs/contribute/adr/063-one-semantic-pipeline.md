@@ -446,11 +446,11 @@
   entry.
 - **Phase 5** (the fact/capability registry, generalizing
   `change_registry.py`'s `ChangeKindMeta` pattern from change *kinds* to
-  *facts*) has landed its registry infrastructure and one real, worked-
-  example field conversion — not the full field-by-field population the
-  plan's own Scope section describes, which it explicitly frames as
-  proceeding "field by field... each conversion is its own small commit,"
-  not a single PR. `abicheck/model/fact_registry.py` (new) defines
+  *facts*) is **complete**: both the registry infrastructure and the full
+  field-by-field population the plan's own Scope section describes,
+  landed as the sequence of small, independently-reviewable commits that
+  section calls for (schema v30 through v40) rather than one PR.
+  `abicheck/model/fact_registry.py` (new) defines
   `FactDefinition`/`FactLifecycle`/`FactRegistry`, the case-(a)
   `REFERENCE_FLAG_COVERAGE` inventory (every `*_facts_reliable` flag on
   `AbiSnapshot` and the exact fields it gates — built against the real
@@ -483,20 +483,61 @@
   tri-state-annotation-plus-documented-ambiguity heuristic) that isn't yet
   converted — each such field must be named in `fact_registry.
   KNOWN_UNCONVERTED_ELIGIBLE_FACTS`, an allowlist-and-shrink baseline
-  (~30 fields today, spanning `TypeField`/`Function`/`Variable`/
-  `RecordType`/`EnumType`/`AbiSnapshot`/`ElfMetadata`/`PeMetadata`/
-  `MachoMetadata`) mirroring `fact_field_readers.KNOWN_UNMIGRATED_READERS`'s
-  own convention exactly, rather than a silently-passing check. A stale
+  mirroring `fact_field_readers.KNOWN_UNMIGRATED_READERS`'s
+  own convention exactly, rather than a silently-passing check (it stood
+  at ~30 fields when the infrastructure landed and is empty today — see
+  below). A stale
   allowlist entry (naming a field that's since been converted, or no
   longer exists) fails the same way. `scripts/gen_fact_capability_
   matrix.py` (new) renders the registry into `docs/reference/
   fact-registry.md`, a fully-generated page (`gen_detector_spec.py`'s
   pattern, not `gen_backend_capability_matrix.py`'s splice-into-hand-
   authored-page one — this page has no hand-authored narrative to
-  preserve). **Deliberately not attempted in this phase, named explicitly
-  rather than left as a silent gap**: converting any of the ~30
-  `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` entries themselves (each is its own
-  reviewed, small commit per the plan's own Scope section); generating the
+  preserve). **Where the population landed.** The registry
+  covers 45 facts across ten owners. Phase 0's five fields and
+  `RecordType.is_final` came first; batches two through seven converted
+  the case-(b) population (`RecordType`'s remaining six, `EnumType`'s two,
+  `Variable`'s three, `Function`'s ten, `AbiSnapshot.
+  ast_resolved_standard`, and the five binary-format fields on
+  `ElfMetadata`/`PeMetadata`/`MachoMetadata`, schema v31-v37); batches
+  eight through ten converted the **case-(a)** population — the harder
+  half, where the field's own resting value (`False`, `None` meaning "not
+  deprecated", `AccessLevel.PUBLIC`) is a legitimate answer and only a
+  snapshot-level `*_facts_reliable` flag can say whether anyone looked:
+  `TypeField`'s five fields (v38), the `deprecated` family across
+  `Function`/`Variable`/`RecordType`/`EnumType` plus `EnumType.is_scoped`
+  (v39), and `Param.is_restrict`/`Variable.access` (v40).
+  `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` is now the **empty set** — the
+  allowlist stays declared (both halves) because `fact_registry_
+  completeness.py` checks it in both directions, so a newly-added eligible
+  field fails the gate outright rather than joining a silent baseline.
+
+  Two pieces of shared machinery came out of the case-(a) half rather than
+  being written per field. `storage/fact_codec.apply_case_a_fact_backfill`
+  replaced the three loops ADR-063 Phase 0 open-coded for
+  `vtable`/`vptr_offset_bits`/`is_va_list` with one navigator plus a
+  `CaseAFactRule` tuple (`apply_legacy_fact_backfill` is now a thin
+  wrapper stating Phase 0's own three rules through it), so a converted
+  field's "this legacy document's value is a placeholder its flag marks
+  untrustworthy" correction is a table row; and
+  `decode_fact_with_legacy_presence` closes the matching decode-side gap —
+  for a case-(a) field, a document omitting the *legacy* key means "no
+  evidence", which the reader's own `.get(key, False)` default would
+  otherwise launder into a confirmed value. The conversions also surfaced
+  five real mutation traps in production merge paths
+  (`dumper_hybrid._merge_field`/`_merge_variable`, `tu_merge`'s
+  `_more_public_of`/`_merge_variables`, `tu_merge_provenance`), each a
+  bare `dataclasses.replace()` that the bridge's "explicit Fact wins" rule
+  turns into a silently-reverted write; all now use
+  `replace_with_fact_sync()`, and `_blank_provenance` derives its
+  fact-blanking from its own blanked-field list so a future conversion
+  cannot reintroduce it.
+
+  **Deliberately not attempted in this phase, named explicitly
+  rather than left as a silent gap**: a detector actually *branching* on
+  `FactStatus` (no fact reaches `CONSUMED`; every registered entry sits at
+  `PERSISTED`, exactly as Phase 0's own status note scoped it);
+  generating the
   model field, the serialization encode/decode pair, or a suppression/
   report-schema wiring from the registry (the plan's own Design/Acceptance
   sections name all three as separate, out-of-scope codegen designs); and

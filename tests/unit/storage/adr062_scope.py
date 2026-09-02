@@ -41,7 +41,8 @@ import pathlib
 #: Modules that are not ADR-062 Phase 0 primitives. G40's content-addressed
 #: bundle archive and its guards, per `abicheck/storage/AGENTS.md`, plus
 #: ADR-063's own snapshot encode/decode/legacy-backfill helpers (Phase 0's
-#: Fact[T] pair `fact_codec`/`enum_codec`, Phase 2's `entity_id_codec`,
+#: Fact[T] pair `fact_codec`/`enum_codec`, Phase 5's `fact_backfill` and the
+#: `fact_schema_versions` leaf they share, Phase 2's `entity_id_codec`,
 #: which keeps the parse-time `EntityId` carrier out of the wire format, and
 #: Phase 3's `surface_graph_codec`, the identical shape for
 #: `AbiSnapshot.surface_graph`) — a third, independent body of work in this
@@ -59,6 +60,8 @@ NON_ADR062_MODULES = frozenset(
         "json_budget",
         "zstd_frame_guard",
         "fact_codec",
+        "fact_backfill",
+        "fact_schema_versions",
         "enum_codec",
         "entity_id_codec",
         "surface_graph_codec",
