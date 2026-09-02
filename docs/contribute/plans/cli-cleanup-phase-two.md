@@ -2204,10 +2204,10 @@ pipelines a fourth time.
   >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
   >    around a resolve-time embed.
   > 2. **The L4 extractor default still diverges, in more than one pairing.**
-  >    **Update (2026-09-02): the *explicit-request* half is closed; only the
-  >    unflagged-default half below remains.** `scan`'s candidate resolution
-  >    no longer ignores the `--ast-frontend`/`compile.frontend` it was
-  >    actually given: `scan_engine`'s call site now passes
+  >    **Update (2026-09-02): the *named-backend* half is closed; the
+  >    `auto` half below remains.** `scan`'s candidate resolution no longer
+  >    ignores a `--ast-frontend`/`compile.frontend` that names a concrete
+  >    backend: `scan_engine`'s call site now passes
   >    `service_compare_evidence.explicit_source_extractor(
   >    compile_context) or "auto"`, and that helper *delegates to*
   >    `effective_frontend` rather than re-deriving a second resolution, so
@@ -2239,8 +2239,20 @@ pipelines a fourth time.
   >    as untreated.
   >
   >    **What is deliberately still open**, and is what the rest of this item
-  >    describes: the *unflagged* default. `scan`'s candidate resolution
-  >    hardcodes `source_extractor="auto"`
+  >    describes: `auto` itself -- **including an `auto` the user typed out**,
+  >    not just an omitted flag (Codex review, PR #990, reproduced directly:
+  >    `--ast-frontend auto` given to both `dump` and `scan --against` over
+  >    unchanged source still yields `COMPATIBLE_WITH_RISK` /
+  >    `source_fact_coverage_incomplete`, because `dump` resolves `auto` to
+  >    castxml and `scan` to clang). Honoring a *typed* `auto` while an
+  >    omitted one kept clang was considered and rejected as strictly worse:
+  >    the same word would select different backends depending on whether it
+  >    was typed, and `CompileContext.frontend` carries the identical string
+  >    either way (the CLI's typed-vs-default signal exists to rank an
+  >    explicit value above a config one, not to change what the value
+  >    resolves to). The only coherent fix is to make the word mean one thing
+  >    across commands, which is the default change below. `scan`'s candidate
+  >    resolution hardcodes `source_extractor="auto"`
   >    (`embed_build_source`, ignoring whatever `--ast-frontend` scan itself
   >    received), which resolves to clang; `compare`'s implicit-dump operand
   >    and the typed `execute_dump_request` pipeline reach

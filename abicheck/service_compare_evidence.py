@@ -113,20 +113,35 @@ L4_SOURCE_EXTRACTORS: frozenset[str] = frozenset({"castxml", "clang"})
 def explicit_source_extractor(
     compile: CompileContext | None,
 ) -> str | None:
-    """The L4 replay backend *explicitly* requested, or ``None`` for "unstated".
+    """The L4 replay backend explicitly *named*, or ``None`` for anything else.
 
-    Exists so a caller that must not change its own *unflagged* default can
-    still honor an explicit ``--ast-frontend`` / ``compile.frontend`` the same
-    way every other resolver does. ``scan``'s candidate resolution is that
-    caller: it has always let its L4 replay take
-    ``_make_source_extractor``'s own clang reading of ``"auto"`` (see
-    ``scan_engine``'s call site), so adopting :func:`effective_frontend`
+    Exists so a caller that must not change its own ``auto`` behaviour can
+    still honor a *named* backend the same way every other resolver does.
+    ``scan``'s candidate resolution is that caller: it has always let its L4
+    replay take ``_make_source_extractor``'s own clang reading of ``"auto"``
+    (see ``scan_engine``'s call site), so adopting :func:`effective_frontend`
     wholesale would newly *require* castxml for a plain ``scan --depth
-    source`` that works with clang today. Answering only the explicit case
-    keeps that default untouched while closing the real defect underneath it
-    -- ``scan --ast-frontend castxml`` silently replaying L4 through clang,
-    which is what made a ``scan --against`` candidate non-comparable with a
-    ``dump`` baseline taken with the identical flag.
+    source`` that works with clang today. Answering only the named case keeps
+    that behaviour untouched while closing the real defect underneath it --
+    ``scan --ast-frontend castxml`` silently replaying L4 through clang, which
+    is what made a ``scan --against`` candidate non-comparable with a ``dump``
+    baseline taken with the identical flag.
+
+    **"Named" means ``castxml``/``clang``, never ``auto`` -- including an
+    ``auto`` the user typed out** (Codex review, PR #990). That is a real
+    remaining divergence, not an oversight: ``scan`` resolves ``auto`` to
+    clang and ``dump``/``compare`` resolve it to castxml, so
+    ``--ast-frontend auto`` on both sides still reproduces the spurious
+    ``source_fact_coverage_incomplete`` verdict on unchanged source
+    (reproduced directly while reviewing this). It is deliberately left to
+    the plan's PR 3A item 2, because the only coherent fix is to make the
+    *word* mean one thing across commands -- i.e. the default change this
+    function exists to avoid. Honoring a typed ``auto`` while an omitted one
+    kept clang would be strictly worse: the same word would select different
+    backends depending on whether it was typed, and ``CompileContext.frontend``
+    is the same string either way (the CLI's own typed-vs-default signal
+    exists only to rank an explicit value above a config one, not to change
+    what the value resolves to).
 
     Deliberately delegates to :func:`effective_frontend` rather than
     re-deriving the resolution, so an explicit request cannot resolve to one
