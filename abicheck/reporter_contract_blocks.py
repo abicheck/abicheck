@@ -392,6 +392,8 @@ def render_json_with_side_facts(
     indent: int,
     severity_config: SeverityConfig | None = None,
     gate: GateDecision | None = None,
+    show_only: str | None = None,
+    contract_evaluation: bool = False,
 ) -> str:
     """The one shared tail of every ``reporter.py`` JSON builder: fold in
     the two ADR-061 Phase 2 item 5 facts (:func:`add_suppression_audit`,
@@ -426,12 +428,32 @@ def render_json_with_side_facts(
     own (`report/AGENTS.md`'s "Prohibited responsibilities"), and a second,
     independent evaluation is exactly how ``run_outcome`` could silently
     drift from the ``severity`` block's own gate as either evolves.
+
+    *show_only* and *contract_evaluation* feed
+    :func:`~abicheck.report.scoped_gate.apply_scoped_gate` (ADR-061 Phase 2
+    item 5), called last, after ``run_outcome``/``suppression_audit``/
+    ``evidence_depth`` are all in *d* -- the scoped-gate fold needs
+    ``run_outcome`` present to swap it, and folds the same ``dict`` every
+    other side fact just landed in, natively, rather than the
+    render -> parse -> patch -> render pass ``cli_compare_fold.py``'s
+    ``_ScopedFold.into_json`` used to make over the rendered text. It is a
+    no-op for every caller whose *result* carries no ``used_by``/
+    ``required_symbols`` (i.e. every render that isn't a
+    ``--used-by``/``--required-symbol`` compare).
     """
     from .report.run_outcome import run_outcome_dict_for_diff_result
+    from .report.scoped_gate import apply_scoped_gate
 
     d["run_outcome"] = run_outcome_dict_for_diff_result(result, severity_config, gate)
     add_suppression_audit(d, result)
     add_evidence_depth(d, result)
+    apply_scoped_gate(
+        d,
+        result,
+        severity_config=severity_config,
+        show_only=show_only,
+        contract_evaluation=contract_evaluation,
+    )
     return render_json(ReportDocument.from_mapping(d), indent=indent)
 
 

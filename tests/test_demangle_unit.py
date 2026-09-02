@@ -738,3 +738,70 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
     finally:
         dm._BATCH_CACHE_FAIL.discard(sym)
         dm.demangle.cache_clear()
+
+
+class TestPrewarmDemangleFromJsonValue:
+    """`prewarm_demangle_from_json_value` -- ADR-061 Phase 2's HTML closure
+    (Codex review, fresh evidence): `render_html_document` can now run
+    standalone on a document built or deserialized in an earlier process,
+    with no compute-side prewarm ever having populated the cache, so this
+    primitive has to find every embeddable symbol *by walking the document's
+    own JSON shape* rather than by name-listing fields -- the general
+    invariant a single reported field would not have proven."""
+
+    def test_batches_tokens_found_at_every_nesting_depth(self):
+        """Tokens live at every JSON shape a real ReportDocument mixes:
+        directly under a dict key, inside a list, inside a tuple, and nested
+        several dicts deep -- one batched subprocess call must resolve all
+        of them, not one per occurrence."""
+        value = {
+            "top": "_ZN3foo3barEv",
+            "rows": [
+                {"symbol": "_ZN3baz4quxEv", "old_value": "int"},
+                {"affected_symbols": ("_ZN3abc3defEv",)},
+            ],
+            "nested": {"deeper": {"still": ["_ZN3ghi3jklEv"]}},
+            "irrelevant": {"count": 3, "flag": True, "note": None},
+        }
+        expected = {
+            "_ZN3foo3barEv": "foo::bar()",
+            "_ZN3baz4quxEv": "baz::qux()",
+            "_ZN3abc3defEv": "abc::def()",
+            "_ZN3ghi3jklEv": "ghi::jkl()",
+        }
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="\n".join(expected[sym] for sym in sorted(expected)) + "\n",
+                    stderr="",
+                )
+                _mod.prewarm_demangle_from_json_value(value)
+                assert mock_run.call_count == 1, (
+                    "expected one batched c++filt call for every token found "
+                    f"across the tree, got {mock_run.call_count}"
+                )
+
+            # Every symbol is now a pure cache hit -- no further subprocess.
+            with patch("subprocess.run") as mock_run_after:
+                for sym, want in expected.items():
+                    assert _mod.demangle(sym, accept_macho_prefix=True) == want
+                mock_run_after.assert_not_called()
+
+    def test_no_tokens_makes_no_call(self):
+        value = {"a": ["b", "c"], "d": (1, 2, None, True), "e": {"f": "plain text"}}
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                _mod.prewarm_demangle_from_json_value(value)
+        mock_run.assert_not_called()
+
+    def test_non_string_scalars_do_not_raise(self):
+        """ints/floats/bools/None reach the walk unscathed -- a real document
+        carries plenty of them (counts, exit codes, flags) -- and contribute
+        no token, so the return value is the same "did nothing" `None` a
+        function with no explicit `return` always gives."""
+        result = _mod.prewarm_demangle_from_json_value(
+            {"n": 3, "f": 1.5, "b": False, "none": None, "empty": {}, "l": []}
+        )
+        assert result is None

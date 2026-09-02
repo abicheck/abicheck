@@ -66,8 +66,6 @@ from .reporter_markdown import (
     _build_impact_table as _build_impact_table,
     _build_internal_rtti_note as _build_internal_rtti_note,
     _build_leaf_type_sections as _build_leaf_type_sections,
-    _build_library_files_section as _build_library_files_section,
-    _build_severity_sections as _build_severity_sections,
     _build_severity_summary_md as _build_severity_summary_md,
     _finding_id as _finding_id,
     _fmt_size as _fmt_size,
@@ -160,6 +158,7 @@ def to_stat_json(
     *,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
+    show_only: str | None = None, contract_evaluation: bool = False,
 ) -> str:
     """JSON output for --stat mode: summary only, no changes array.
 
@@ -169,6 +168,9 @@ def to_stat_json(
     the compatibility verdict. Without it, ``--stat`` output has historically
     bypassed severity handling entirely (it short-circuits in
     ``service.render_output`` before format dispatch).
+
+    *show_only*/*contract_evaluation* feed only the scoped-gate fold at the
+    tail of ``render_json_with_side_facts`` -- no ``changes`` array here to filter.
     """
     summary = build_summary(result)
     effective_policy = result.policy or "strict_abi"
@@ -229,7 +231,7 @@ def to_stat_json(
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
@@ -332,7 +334,7 @@ def _to_json_leaf(
     show_only: str | None = None,
     *,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False, include_exit_decision: bool = True,
+    require_complete_analysis: bool = False, include_exit_decision: bool = True, contract_evaluation: bool = False,
 ) -> str:
     """Leaf-change mode JSON output.
 
@@ -562,7 +564,7 @@ def _to_json_leaf(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _add_entries_to_root_causes(
@@ -645,7 +647,7 @@ def _to_json_root_cause(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False, include_exit_decision: bool = True,
+    require_complete_analysis: bool = False, include_exit_decision: bool = True, contract_evaluation: bool = False,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
 
@@ -770,7 +772,7 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1141,26 +1143,24 @@ def to_json(
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
     include_exit_decision: bool = True,  # exit block (2.41); see exit_decision.py
+    contract_evaluation: bool = False,  # ADR-061 P2 item 5
 ) -> str:
     if stat:
         return to_stat_json(
             result, indent=indent, severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-        )
+            require_complete_analysis=require_complete_analysis, show_only=show_only, contract_evaluation=contract_evaluation)
 
     if report_mode == "leaf":
         return _to_json_leaf(
-            result, indent=indent, show_only=show_only,
-            severity_config=severity_config,
+            result, indent=indent, show_only=show_only, severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision)
+            include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
 
     if report_mode == "root-cause":
         return _to_json_root_cause(
-            result, indent=indent, show_only=show_only,
-            severity_config=severity_config,
+            result, indent=indent, show_only=show_only, severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision)
+            include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
 
     changes = list(result.changes)
     if show_only:
@@ -1216,7 +1216,7 @@ def to_json(
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

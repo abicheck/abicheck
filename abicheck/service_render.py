@@ -134,6 +134,8 @@ def render_output(
             result,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
+            show_only=show_only,
+            contract_evaluation=contract_evaluation,
         )
 
     if (stat and fmt != "junit") or fmt == ONELINE_FORMAT:
@@ -150,6 +152,7 @@ def render_output(
             show_impact=show_impact,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
         )
 
     if fmt == "sarif":
@@ -246,6 +249,7 @@ def _render_json_output(
     show_impact: bool,
     severity_config: SeverityConfig | None,
     require_complete_analysis: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result as JSON, optionally including dependency info."""
     base = to_json(
@@ -255,6 +259,7 @@ def _render_json_output(
         show_impact=show_impact,
         severity_config=severity_config,
         require_complete_analysis=require_complete_analysis,
+        contract_evaluation=contract_evaluation,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         import json

@@ -3,45 +3,63 @@
 
 """Pure HTML projection for html_report.py's structured sections.
 
-ADR-061 Phase 2 item 1's last open format. ``html_report.py`` historically
-built its ``<div>``/``<table>``/``<span>`` markup directly while walking a
+ADR-061 Phase 2 item 1's HTML closure. ``html_report.py`` historically built
+its ``<div>``/``<table>``/``<span>`` markup directly while walking a
 ``DiffResult`` -- format decisions (tag structure, inline styles, emoji,
 colour palette, cell order) were interleaved with the business logic that
 decides *what* belongs in a section (which changes fall in which bucket,
 which policy rules are still active, whether a gate blocked and on which
 categories, what a table's cell values are).
 
-This module is the render half of that split, and it is the exact
-counterpart of ``render_markdown.py`` for prose, ``render_json.py`` for
-JSON, and ``render_xml.py`` for JUnit XML. Each ``compute_*`` function in
-``html_report.py`` reads a ``DiffResult``/``Change`` sequence and returns
-one of the small, frozen dataclasses below -- plain data: strings, ints,
-bools and tuples, never a pre-built markup fragment. The ``render_*``
-function here consumes that structure and returns the same HTML string the
-pre-split function used to build in one step.
+This module is the render half of that split for the *reusable, per-section*
+pieces, and it is the exact counterpart of ``render_markdown.py`` for prose,
+``render_json.py`` for JSON, and ``render_xml.py`` for JUnit XML. Each
+``compute_*`` function in ``html_report.py`` reads a ``DiffResult``/
+``Change`` sequence and returns one of the small, frozen dataclasses below --
+plain data: strings, ints, bools and tuples, never a pre-built markup
+fragment. The ``render_*`` function here consumes that structure and returns
+the same HTML string the pre-split function used to build in one step.
 
-The three low-level per-change formatters (``abbr_symbol_text``,
-``symbol_cell``, ``render_changes_table``) and the ABICC-style
-``render_compat_changes_table`` live here too, moved rather than left in
-``html_report.py``, for the same reason ``_format_change_md`` moved into
-``render_markdown.py``: each takes a duck-typed ``Change``/``object`` and
-returns a formatted string with no ``DiffResult`` traversal or policy
-decision of its own, so it belongs on the render side of the split -- and
-keeping them here (rather than in ``html_report.py``, which needs to call
-into this module for every ``render_*`` function) avoids a same-layer import
-cycle between the two modules. ``html_report.py`` re-exports all of them
-under their original private names (``_abbr_symbol_text``, ``_symbol_cell``,
-``_changes_table``, ``_compat_changes_table``, ``_verdict_icon``) so every
-existing call site and its direct test coverage resolves unchanged.
+The two low-level per-change formatters (``abbr_symbol_text``,
+``render_changes_table``) and the ABICC-style ``render_compat_changes_table``
+live here too, moved rather than left in ``html_report.py``, for the same
+reason ``_format_change_md`` moved into ``render_markdown.py``: each takes a
+JSON-safe :class:`ChangeRow` and returns a formatted string with no
+``DiffResult``/``Change`` traversal or policy decision of its own, so it
+belongs on the render side of the split -- and keeping them here (rather
+than in ``html_report.py``, which needs to call into this module for every
+``render_*`` function) avoids a same-layer import cycle between the two
+modules. ``html_report.py`` re-exports the ones it still calls directly
+under their original private names (``_abbr_symbol_text``, ``_changes_table``)
+so every existing call site and its direct test coverage resolves unchanged.
+``render_compat_changes_table`` has no such wrapper: the whole-document
+closure moved its only caller (the ABICC-compatible layout) onto
+``report.render_html_document`` directly, retiring the pre-split
+``_compat_changes_table`` alongside it -- see this module's own test suite
+(``tests/unit/report/test_render_html.py``) for its direct coverage now.
 
-Every ``render_*`` function here is behaviour-preserving by construction:
-each was extracted line-for-line from the pre-split function it replaces,
-with only the *source* of each value changed (a struct field instead of a
-re-derivation from ``DiffResult``/``Change``). See
+Every per-section ``render_*`` function here is behaviour-preserving by
+construction: each was extracted line-for-line from the pre-split function it
+replaces, with only the *source* of each value changed (a struct field
+instead of a re-derivation from ``DiffResult``/``Change``). See
 ``tests/test_html_template_golden.py`` for the byte-exact contract this
 rests on -- in particular the ``main_report_rich.html`` and
 ``main_report_scoped.html`` cases, added against the pre-split code
 specifically to pin the sections below.
+
+**The whole-document projection that literally closes item 1** --
+``render_html_document``, which crosses the single canonical
+``ReportDocument`` boundary every other format (JSON, SARIF, JUnit,
+``--stat``) already crosses -- lives in the sibling module
+:mod:`abicheck.report.render_html_document`, not here: routing the whole
+document through this module too pushed it past the architecture check's
+new-file size ceiling, and the two responsibilities are genuinely distinct
+(this module's structs and formatters are reusable building blocks; that
+module owns only "assemble the complete page from a finished document").
+`ChangeRow` retires the previous ``id(change)``-keyed ``ChangeRowFactsById``
+lookup table entirely: it is an ordinary, JSON-round-trippable value, so no
+identity-based indexing trick is needed to carry a change's resolved facts
+alongside its raw display fields.
 """
 
 from __future__ import annotations
@@ -87,64 +105,59 @@ def abbr_symbol_text(raw: str, demangle: bool = True) -> str:
     return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
 
 
-def symbol_cell(change: object, demangle: bool = True) -> str:
-    """Symbol cell for one Change -- see abbr_symbol_text's own contract."""
-    return abbr_symbol_text(getattr(change, "symbol", "") or "", demangle)
-
-
 @dataclass(frozen=True)
-class ChangeRowFacts:
-    """The per-change facts a table cell needs that are *decisions*, not
-    formatting: which kind string the change carries, which category that
-    kind belongs to, its one-line impact text, and its ABICC severity band.
+class ChangeRow:
+    """One change's already-resolved facts and raw display fields, entirely
+    as JSON-safe scalars and tuples -- the ``ReportDocument``-shaped
+    counterpart to a live ``Change`` object (ADR-061 Phase 2 item 1).
 
-    Each is a registry lookup (`report_classifications.kind_str`/`category`/
-    `severity`, `checker_policy.impact_for`), so resolving them here rather
-    than mid-render is what keeps this module free of any report- or
-    policy-classification import at all -- a Codex review on the split's own
-    PR correctly held that calling those lookups from inside a ``render_*``
-    left real decisions on the render side, against this package's stated
-    contract that a renderer "decides nothing".
-
-    The ``Change`` objects themselves still reach the renderer unformatted,
-    as ``render_markdown.py`` established: a section whose whole job is
-    "list some changes" holds the changes, not a pre-built string. Only the
-    derived lookups are hoisted.
+    ``kind``/``category``/``impact``/``severity`` are registry lookups
+    (`report_classifications.kind_str`/`category`/`severity`,
+    `checker_policy.impact_for`) resolved once per change by
+    ``html_report.compute_full_change_rows`` -- a Codex review on this
+    module's original split correctly held that calling those lookups from
+    inside a ``render_*`` function left real decisions on the render side,
+    against this package's stated contract that a renderer "decides
+    nothing". The remaining fields are raw, undemangled strings pulled
+    straight off the ``Change``: escaping and demangling stay a render-time
+    formatting choice, same as every other symbol-bearing cell in this
+    module. ``None`` means the source ``Change`` never carried that field;
+    an empty tuple means it carried an empty collection.
     """
 
     kind: str
     category: str
     impact: str
     severity: str
+    symbol: str
+    description: str
+    old_value: str
+    new_value: str
+    source_location: str | None
+    affected_symbols: tuple[str, ...]
+    caused_count: int
+    contract_relevance: str | None
+    contract_reason_code: str | None
+    contract_assurance: str | None
+    compatibility_decision: str | None
+    contract_evidence_refs: tuple[str, ...]
+    correlated_change_kind: str | None
 
 
-#: ``{id(change): ChangeRowFacts}`` for one render. Keyed by identity rather
-#: than by the change itself because ``Change`` is not hashable -- the same
-#: reason ``report/finding.py``'s ``findings_by_change_id`` is, and like it,
-#: never persisted past the render that built it.
-ChangeRowFactsById = dict[int, ChangeRowFacts]
-
-
-def render_changes_table(
-    changes: list[object],
-    facts: ChangeRowFactsById,
-    demangle: bool = True,
-) -> str:
-    if not changes:
+def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> str:
+    if not rows:
         return "<p class='empty'>No changes in this category.</p>"
 
-    rows = []
-    for ch in changes:
-        row = facts[id(ch)]
+    out_rows = []
+    for row in rows:
         ks = row.kind
         cat = row.category
-        raw_desc = getattr(ch, "description", "") or ""
-        desc = html.escape(demangle_text(raw_desc) if demangle else raw_desc)
-        old_val = abbr_symbol_text(str(getattr(ch, "old_value", "") or ""), demangle)
-        new_val = abbr_symbol_text(str(getattr(ch, "new_value", "") or ""), demangle)
-        sym_cell = symbol_cell(ch, demangle)
-        loc = getattr(ch, "source_location", None)
-        affected = getattr(ch, "affected_symbols", None)
+        desc = html.escape(
+            demangle_text(row.description) if demangle else row.description
+        )
+        old_val = abbr_symbol_text(row.old_value, demangle)
+        new_val = abbr_symbol_text(row.new_value, demangle)
+        sym_cell = abbr_symbol_text(row.symbol, demangle)
 
         # Build extended description with impact + affected + location
         desc_parts = [desc]
@@ -153,42 +166,44 @@ def render_changes_table(
                 f"<div style='font-size:0.85em; color:#666; margin-top:3px;'>"
                 f"💡 {html.escape(row.impact)}</div>"
             )
-        if affected:
-            names = ", ".join(abbr_symbol_text(s, demangle) for s in affected[:5])
-            suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
+        if row.affected_symbols:
+            names = ", ".join(
+                abbr_symbol_text(s, demangle) for s in row.affected_symbols[:5]
+            )
+            suffix = (
+                f" (+{len(row.affected_symbols) - 5} more)"
+                if len(row.affected_symbols) > 5
+                else ""
+            )
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#1565c0; margin-top:2px;'>"
                 f"📎 Affected: <code>{names}</code>{suffix}</div>"
             )
-        if loc:
+        if row.source_location:
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
-                f"📍 {html.escape(loc)}</div>"
+                f"📍 {html.escape(row.source_location)}</div>"
             )
-        caused_count = getattr(ch, "caused_count", 0)
-        if caused_count > 0:
+        if row.caused_count > 0:
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#e65100; margin-top:2px;'>"
-                f"🔗 {caused_count} derived change(s) collapsed</div>"
+                f"🔗 {row.caused_count} derived change(s) collapsed</div>"
             )
         # CLI-audit P1: same per-finding contract-decision parity SARIF's
         # `properties`/JUnit's `<properties>` carry (always IN_CONTRACT/
         # NOT_APPLICABLE here; `gate_contribution` omitted, its own follow-up).
-        contract_relevance = getattr(ch, "contract_relevance", None)
-        if contract_relevance is not None:
-            bits = [f"relevance: {html.escape(str(contract_relevance.value))}"]
-            reason = getattr(ch, "contract_reason_code", None)
-            if reason:
-                bits.append(f"reason: {html.escape(str(reason))}")
-            assurance = getattr(ch, "contract_assurance", None)
-            if assurance is not None:
-                bits.append(f"assurance: {html.escape(str(assurance.value))}")
-            decision = getattr(ch, "compatibility_decision", None)
-            if decision is not None:
-                bits.append(f"decision: {html.escape(str(decision.value))}")
-            evidence_refs = getattr(ch, "contract_evidence_refs", None)
-            if evidence_refs:
-                bits.append(f"evidence: {html.escape(', '.join(evidence_refs))}")
+        if row.contract_relevance is not None:
+            bits = [f"relevance: {html.escape(row.contract_relevance)}"]
+            if row.contract_reason_code:
+                bits.append(f"reason: {html.escape(row.contract_reason_code)}")
+            if row.contract_assurance is not None:
+                bits.append(f"assurance: {html.escape(row.contract_assurance)}")
+            if row.compatibility_decision is not None:
+                bits.append(f"decision: {html.escape(row.compatibility_decision)}")
+            if row.contract_evidence_refs:
+                bits.append(
+                    f"evidence: {html.escape(', '.join(row.contract_evidence_refs))}"
+                )
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#6a1b9a; margin-top:2px;'>"
                 f"📜 Contract — {' · '.join(bits)}</div>"
@@ -196,16 +211,15 @@ def render_changes_table(
         # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE sharing its
         # evidence gap with a co-reported TYPE_VTABLE_CHANGED) -- only
         # JSON/SARIF rendered this field before (Codex review).
-        correlated = getattr(ch, "correlated_change_kind", None)
-        if correlated:
+        if row.correlated_change_kind:
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
-                f"🔗 See also: <code>{html.escape(str(correlated))}</code> "
+                f"🔗 See also: <code>{html.escape(row.correlated_change_kind)}</code> "
                 f"finding for the same symbol</div>"
             )
         full_desc = "".join(desc_parts)
 
-        rows.append(
+        out_rows.append(
             f"<tr>"
             f"<td><span class='kind-badge'>{html.escape(ks)}</span></td>"
             f"<td class='sym'>{sym_cell}</td>"
@@ -216,7 +230,7 @@ def render_changes_table(
             f"</tr>"
         )
 
-    body = "\n".join(rows)
+    body = "\n".join(out_rows)
     return f"""<table class='changes'>
   <thead>
     <tr>
@@ -231,34 +245,30 @@ def render_changes_table(
 
 
 def render_compat_changes_table(
-    items: list[object],
-    facts: ChangeRowFactsById,
+    rows: tuple[ChangeRow, ...],
     show_severity: bool = False,
 ) -> str:
     """Render a changes table in ABICC style."""
-    if not items:
+    if not rows:
         return "<p>No changes.</p>"
     h = html.escape
-    rows = []
-    for ch in items:
-        row = facts[id(ch)]
-        ks = row.kind
-        sym = h(getattr(ch, "symbol", "") or "")
-        desc = h(getattr(ch, "description", "") or "")
-        old_val = h(str(getattr(ch, "old_value", "") or ""))
-        new_val = h(str(getattr(ch, "new_value", "") or ""))
+    out_rows = []
+    for row in rows:
+        sym = h(row.symbol)
+        desc = h(row.description)
+        old_val = h(row.old_value)
+        new_val = h(row.new_value)
         sev_cell = f"<td>{row.severity}</td>" if show_severity else ""
         # Cross-detector correlation: this ABICC-compatible table has its own
         # separate rendering from render_changes_table above, needing the same
         # note (Codex review, fresh evidence).
-        correlated = getattr(ch, "correlated_change_kind", None)
-        if correlated:
+        if row.correlated_change_kind:
             desc += (
                 f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
-                f"🔗 See also: <code>{h(str(correlated))}</code></div>"
+                f"🔗 See also: <code>{h(row.correlated_change_kind)}</code></div>"
             )
-        rows.append(
-            f"<tr><td class='sym'>{sym}</td><td>{h(ks)}</td>"
+        out_rows.append(
+            f"<tr><td class='sym'>{sym}</td><td>{h(row.kind)}</td>"
             f"{sev_cell}<td>{desc}</td><td>{old_val}</td><td>{new_val}</td></tr>"
         )
     sev_hdr = "<th>Severity</th>" if show_severity else ""
@@ -266,7 +276,7 @@ def render_compat_changes_table(
         f"<table class='problem'><thead><tr>"
         f"<th>Symbol</th><th>Kind</th>{sev_hdr}"
         f"<th>Description</th><th>Old</th><th>New</th>"
-        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        f"</tr></thead><tbody>{''.join(out_rows)}</tbody></table>"
     )
 
 

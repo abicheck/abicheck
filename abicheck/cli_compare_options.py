@@ -322,10 +322,10 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
 
     Default ON for the human-facing formats (markdown/review/html), OFF for
     machine formats (json/sarif/junit) whose consumers match on the raw
-    mangled symbol. HTML demangles safely because ``html_report.
-    _symbol_cell``/``_changes_table`` always run ``demangle_text`` BEFORE
-    ``html.escape`` — never the reverse — so a demangled signature's own
-    ``<``/``>``/``&`` are escaped like any other text, not injected raw
+    mangled symbol. HTML demangles safely because ``report.render_html.
+    abbr_symbol_text``/``render_changes_table`` always run ``demangle_text``
+    BEFORE ``html.escape`` — never the reverse — so a demangled signature's
+    own ``<``/``>``/``&`` are escaped like any other text, not injected raw
     (this was previously assumed unsafe and HTML defaulted OFF; abicheck
     code-review report item 8). An explicit flag always wins over the
     per-format default.

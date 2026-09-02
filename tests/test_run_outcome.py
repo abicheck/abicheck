@@ -491,7 +491,7 @@ class TestGateInfoFromReportDataStructuredFirst:
         (deliberately pre-fold, compatibility-only, per D6's axis
         separation) -- the two legitimately differ whenever a coverage/
         assurance floor applies. full_run_outcome's presence (only set by
-        cli_compare_fold._swap_in_scoped_run_outcome) is what must exempt
+        report.scoped_gate._swap_in_scoped_run_outcome) is what must exempt
         this from the contradiction check, not silently coincide with it.
 
         A genuine compatibility break on the scoped gate (run_outcome.gate
@@ -560,7 +560,7 @@ class TestGateInfoFromReportDataStructuredFirst:
         an arbitrary `full_run_outcome` value (anything, even None) and have
         the authoritative cross-check silently disabled. The exemption must
         require full_run_outcome to itself be a well-formed RunOutcome
-        block, the only shape cli_compare_fold._swap_in_scoped_run_outcome
+        block, the only shape report.scoped_gate._swap_in_scoped_run_outcome
         ever actually produces."""
         from abicheck.workflows.aggregate.gate import _MalformedGate
 
@@ -578,8 +578,8 @@ class TestGateInfoFromReportDataStructuredFirst:
         """Codex review (P2), fresh evidence beyond the previous garbage-
         value fix: a *well-formed* full_run_outcome alone was still enough
         to earn the exemption, even attached to an otherwise-unscoped
-        corrupt report -- the real writer (cli_compare_fold._ScopedFold.
-        into_json) never emits full_run_outcome without also unconditionally
+        corrupt report -- the real writer (report.scoped_gate.
+        apply_scoped_gate) never emits full_run_outcome without also unconditionally
         emitting full_verdict and at least one of used_by/
         required_symbol_contract. Without those markers too, the exemption
         must not apply."""
@@ -659,7 +659,7 @@ class TestGateInfoFromReportDataStructuredFirst:
 
     def test_null_scoped_markers_do_not_bypass_the_check(self):
         """Codex review, fresh evidence beyond the schema-type fix above:
-        `_ScopedFold.into_json` never emits `full_verdict`/`used_by`/
+        `report.scoped_gate.apply_scoped_gate` never emits `full_verdict`/`used_by`/
         `required_symbol_contract` with an explicit null -- but the exemption
         previously only checked *key presence*. `full_verdict: None` (fails
         Verdict parsing), or both scoped markers explicitly `None` (matches
@@ -1109,7 +1109,7 @@ class TestRunOutcomeSchemaValidation:
     def test_full_run_outcome_is_a_defined_schema_property(self):
         """Codex review (P1), fresh evidence: scoped (--used-by/--required-
         symbol) compare JSON emits the public full_run_outcome field
-        (cli_compare_fold._swap_in_scoped_run_outcome), but neither copy of
+        (report.scoped_gate._swap_in_scoped_run_outcome), but neither copy of
         compare_report.schema.json defined it -- unlike the analogous
         full_severity, which the two are meant to mirror."""
         from pathlib import Path
