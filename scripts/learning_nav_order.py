@@ -84,10 +84,11 @@ def _strip_comment(line: str) -> str:
 def _nav_events(
     mkdocs_text: str, tabs: tuple[str, ...]
 ) -> list[tuple[str, str, str | None]]:
-    """The nav block as ordered events: `("group", key, None)` when a group
-    under one of `tabs` opens and `("page", key, path)` for each page, where
-    `key` is `"<tab> / <group>"` (`"<tab> / <tab>"` for a page directly under
-    the tab). Deeper nesting folds into the nearest enclosing group."""
+    """The nav block as ordered events: `("tab", tab, None)` when one of
+    `tabs` opens, `("group", key, None)` when a group under it opens and
+    `("page", key, path)` for each page, where `key` is `"<tab> / <group>"`
+    (`"<tab> / <tab>"` for a page directly under the tab). Deeper nesting
+    folds into the nearest enclosing group."""
     lines = mkdocs_text.split("\n")
     in_nav = False
     events: list[tuple[str, str, str | None]] = []
@@ -115,6 +116,8 @@ def _nav_events(
         if indent == tab_indent:
             current_tab = title if title in tabs and not value else None
             current_group = None
+            if current_tab is not None:
+                events.append(("tab", current_tab, None))
             continue
         if current_tab is None:
             continue
@@ -146,6 +149,8 @@ def nav_groups(
     """
     groups: dict[str, list[str]] = {}
     for kind, key, value in _nav_events(mkdocs_text, tabs):
+        if kind == "tab":
+            continue
         pages = groups.setdefault(key, [])
         if kind == "page" and value is not None:
             pages.append(value)
@@ -155,12 +160,14 @@ def nav_groups(
 def duplicate_nav_groups(
     mkdocs_text: str, tabs: tuple[str, ...] = LEARNING_TABS
 ) -> list[str]:
-    """Group keys that open more than once under one of `tabs`, in order of
-    first appearance — `nav_groups` would silently merge their pages."""
+    """Group keys that open more than once under one of `tabs`, and tabs
+    that themselves open more than once (reported by their bare name), in
+    order of first appearance — `nav_groups` would silently merge their
+    pages either way."""
     seen: list[str] = []
     dupes: list[str] = []
     for kind, key, _ in _nav_events(mkdocs_text, tabs):
-        if kind != "group":
+        if kind == "page":
             continue
         if key in seen and key not in dupes:
             dupes.append(key)

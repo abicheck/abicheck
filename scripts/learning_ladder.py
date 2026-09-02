@@ -501,8 +501,10 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
     groups = nav_groups(mkdocs_text, tabs=tabs)
     out: list[str] = []
     for key in duplicate_nav_groups(mkdocs_text, tabs=tabs):
+        what = "tab" if key in tabs else "nav group"
         out.append(
-            f"{key}: this nav group appears more than once; a step is exactly one group"
+            f"{key}: this {what} appears more than once; a sequence is one tab and "
+            "a step is one group"
         )
     # The hub renders the ladder, so it belongs directly under the first
     # sequence's tab as that tab's overview -- not inside a step, and not on

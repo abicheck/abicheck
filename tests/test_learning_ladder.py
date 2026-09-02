@@ -488,6 +488,15 @@ def test_duplicate_step_group_in_the_sidebar_is_an_error(tmp_path: Path) -> None
     )
 
 
+def test_duplicate_learning_tab_is_an_error(tmp_path: Path) -> None:
+    """Two top-level tabs with the sequence's name, each holding half the
+    steps, would merge into one ordered view in the reader while MkDocs
+    renders two tabs; the duplicate tab itself is reported."""
+    nav = NAV_OK.replace('    - "2. Deeper":\n', '  - Learn:\n    - "2. Deeper":\n')
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("Learn: this tab appears more than once" in m for m in msgs)
+
+
 def test_neighbours_follow_members_then_hub_and_branches_rejoin(tmp_path: Path) -> None:
     ladder = ll.load_ladder(_build(tmp_path)[1])
     assert ladder.neighbours("learn/a.md") == ("learn/hub.md", "learn/b.md")

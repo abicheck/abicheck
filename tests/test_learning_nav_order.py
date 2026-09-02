@@ -78,6 +78,10 @@ def test_duplicate_nav_groups_are_named_once_in_order() -> None:
     )
     assert lno.duplicate_nav_groups(nav) == ["ABI/API Compatibility / Start"]
     assert lno.duplicate_nav_groups(NAV) == []
+    twice = NAV.replace(
+        "  - Reference:\n", "  - Concepts:\n    - Y: learn/y.md\n  - Reference:\n"
+    )
+    assert lno.duplicate_nav_groups(twice) == ["Concepts"]
     # the merged view still holds both halves, in order
     assert lno.nav_groups(nav)["ABI/API Compatibility / Start"] == [
         "learn/hub.md",
