@@ -2307,10 +2307,22 @@ def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
     `dataclasses` *module* itself (`import dataclasses`/`import dataclasses
     as dc`), then walking every `ast.Assign` whose value is an
     `ast.Attribute` of the form `<module alias>.asdict` and adding each
-    assigned bare-name target. Deliberately one hop only, matching the
-    finding: a *further* alias of an alias (`encode2 = encode`) is not
-    resolved, the same scope this function's `ImportFrom` half already
-    keeps.
+    assigned bare-name target.
+
+    A third alias shape closes the gap the previous fix's own docstring
+    named as out of scope and left for "a future alias of an alias"
+    (Codex review, a third finding on this same field): `from dataclasses
+    import asdict; encode = asdict; encode(dto)` reassigns an *already-
+    resolved* alias to a plain bare name via ordinary assignment, not a
+    module attribute — the previous fix's module-attribute branch only
+    matches `<module alias>.asdict`, not a direct `ast.Name` whose `id` is
+    already a known alias. Resolved by repeating a pass over every
+    `ast.Assign` whose value is an `ast.Name` already in `aliases`, adding
+    each assigned bare-name target, until a pass adds nothing new — a
+    fixed-point loop rather than one hop, so an arbitrarily long alias
+    chain (`encode2 = encode`, `encode3 = encode2`, ...) is fully
+    resolved regardless of which order `ast.walk` visits the assignments
+    in.
     """
     aliases: set[str] = {"asdict"}
     module_aliases: set[str] = set()
@@ -2323,9 +2335,8 @@ def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
             for alias in node.names:
                 if alias.name == "dataclasses":
                     module_aliases.add(alias.asname or alias.name)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
+    assigns = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
+    for node in assigns:
         value = node.value
         if (
             isinstance(value, ast.Attribute)
@@ -2336,6 +2347,17 @@ def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     aliases.add(target.id)
+    changed = True
+    while changed:
+        changed = False
+        for node in assigns:
+            value = node.value
+            if not (isinstance(value, ast.Name) and value.id in aliases):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id not in aliases:
+                    aliases.add(target.id)
+                    changed = True
     return aliases
 
 

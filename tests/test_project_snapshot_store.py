@@ -187,6 +187,54 @@ class TestDirectoryObjectStore:
         digest = store.put(content)
         assert store.get(digest) == content
 
+    def test_putting_content_again_repairs_a_corrupted_existing_json_object(
+        self, tmp_path: Path
+    ) -> None:
+        """A previously stored object corrupted on disk (out from under
+        this store, not through `put()`/`get()`) must not make a later
+        `put()` of the same, correct content silently "succeed" over the
+        known-bad file merely because a path already exists there -- that
+        would publish a manifest referencing a file `get()` will only
+        later discover is broken (Codex review). `put()` must verify an
+        existing path before trusting it, and repair it if it doesn't
+        match."""
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put({"a": 1})
+        _algorithm, _sep, hexdigest = digest.partition(":")
+        path = tmp_path / "objects" / "sha256" / hexdigest[:2] / f"{hexdigest}.json.zst"
+        # Corrupt the stored object out from under the store, the same way
+        # test_a_corrupted_json_object_is_refused_rather_than_silently_returned
+        # simulates external corruption -- valid, well-formed zstd bytes,
+        # just the wrong content.
+        other_digest = store.put({"a": 999})
+        _other_algorithm, _other_sep, other_hex = other_digest.partition(":")
+        other_path = (
+            tmp_path / "objects" / "sha256" / other_hex[:2] / f"{other_hex}.json.zst"
+        )
+        path.write_bytes(other_path.read_bytes())
+        # put()'ing the *original* content again must repair the file
+        # rather than treating its mere existence as success.
+        digest_again = store.put({"a": 1})
+        assert digest_again == digest
+        assert store.get(digest) == {"a": 1}
+
+    def test_putting_content_again_repairs_a_corrupted_existing_raw_object(
+        self, tmp_path: Path
+    ) -> None:
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put(b"real content")
+        _algorithm, _sep, hexdigest = digest.partition(":")
+        path = tmp_path / "objects" / "sha256" / hexdigest[:2] / f"{hexdigest}.bin.zst"
+        other_digest = store.put(b"a different payload entirely")
+        _other_algorithm, _other_sep, other_hex = other_digest.partition(":")
+        other_path = (
+            tmp_path / "objects" / "sha256" / other_hex[:2] / f"{other_hex}.bin.zst"
+        )
+        path.write_bytes(other_path.read_bytes())
+        digest_again = store.put(b"real content")
+        assert digest_again == digest
+        assert store.get(digest) == b"real content"
+
 
 class TestManifestRoundTrip:
     def test_full_package_round_trips_through_a_real_directory(
@@ -454,6 +502,21 @@ class TestReadVariantArtifactPair:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(content), encoding="utf-8")
 
+    def _write_manifest_json(
+        self, root: Path, variant_ids: list[str], artifact_ids: list[str]
+    ) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "versions": _VALID_VERSIONS,
+                    "variant_ids": variant_ids,
+                    "artifact_ids": artifact_ids,
+                }
+            ),
+            encoding="utf-8",
+        )
+
     def test_a_matched_pair_round_trips(self, tmp_path: Path) -> None:
         doc = snapshot_to_dict(_snapshot_with_ir())
         store = DirectoryObjectStore(tmp_path)
@@ -467,7 +530,9 @@ class TestReadVariantArtifactPair:
         self, tmp_path: Path
     ) -> None:
         """The exact repro: `v1.json` lists no artifacts, but `a.json`
-        claims `variant_id: "v1"`."""
+        claims `variant_id: "v1"` -- both published in `manifest.json` so
+        this exercises the ref-cross-check, not the membership check."""
+        self._write_manifest_json(tmp_path, ["v1"], ["a"])
         self._write_ref(
             tmp_path / "refs" / "variants" / "v1.json", {"variant_id": "v1"}
         )
@@ -481,6 +546,7 @@ class TestReadVariantArtifactPair:
     def test_an_artifact_naming_a_different_variant_is_refused(
         self, tmp_path: Path
     ) -> None:
+        self._write_manifest_json(tmp_path, ["v1", "v2"], ["a"])
         self._write_ref(
             tmp_path / "refs" / "variants" / "v1.json",
             {"variant_id": "v1", "artifact_ids": ["a"]},
@@ -492,4 +558,53 @@ class TestReadVariantArtifactPair:
         with pytest.raises(
             ValueError, match="does not belong to the requested variant"
         ):
+            read_variant_artifact_pair(tmp_path, "v1", "a")
+
+    def test_a_variant_id_not_published_in_the_manifest_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """A directory of stale, injected, or since-removed `refs/*.json`
+        files -- self-consistent with each other, but never published in
+        `manifest.json` -- must not read as a valid package pair (Codex
+        review)."""
+        self._write_manifest_json(tmp_path, [], [])
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json",
+            {"variant_id": "v1", "artifact_ids": ["a"]},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v1", "kind": "elf"},
+        )
+        with pytest.raises(ValueError, match="not a variant_id published"):
+            read_variant_artifact_pair(tmp_path, "v1", "a")
+
+    def test_an_artifact_id_not_published_in_the_manifest_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        self._write_manifest_json(tmp_path, ["v1"], [])
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json",
+            {"variant_id": "v1", "artifact_ids": ["a"]},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v1", "kind": "elf"},
+        )
+        with pytest.raises(ValueError, match="not an artifact_id published"):
+            read_variant_artifact_pair(tmp_path, "v1", "a")
+
+    def test_no_manifest_json_at_all_is_refused(self, tmp_path: Path) -> None:
+        """A bare directory of ref files, with no `manifest.json` at all,
+        must not silently succeed just because the two ref documents agree
+        with each other."""
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json",
+            {"variant_id": "v1", "artifact_ids": ["a"]},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v1", "kind": "elf"},
+        )
+        with pytest.raises(FileNotFoundError):
             read_variant_artifact_pair(tmp_path, "v1", "a")

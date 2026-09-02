@@ -64,6 +64,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .errors import SnapshotError
 from .snapshot_io import (
     SnapshotCompression,
     read_snapshot_bytes,
@@ -196,12 +197,48 @@ class DirectoryObjectStore:
     def _raw_path(self, digest: str) -> Path:
         return self._root / _object_raw_relpath(digest)
 
+    @staticmethod
+    def _existing_json_object_is_valid(path: Path, digest: str, algorithm: str) -> bool:
+        """Whether *path* already holds content that hashes to *digest*
+        under *algorithm* -- read defensively, since any read/parse
+        failure here means the existing file is not trustworthy
+        (corrupted, truncated, hand-edited into something unparseable),
+        not a reason for `put()` to raise instead of just overwriting it.
+        """
+        try:
+            content = canonical_form(json.loads(read_snapshot_bytes(path)))
+        except (SnapshotError, OSError, ValueError, TypeError):
+            return False
+        return semantic_digest(content, algorithm=algorithm) == digest
+
+    @staticmethod
+    def _existing_raw_object_is_valid(path: Path, digest: str, algorithm: str) -> bool:
+        try:
+            payload = read_snapshot_bytes(path)
+        except (SnapshotError, OSError):
+            return False
+        return raw_digest(payload, algorithm=algorithm) == digest
+
     def put(self, content: Any, *, algorithm: str = "sha256") -> str:
         if _is_binary_buffer(content):
             payload = bytes(content)
             digest = raw_digest(payload, algorithm=algorithm)
             path = self._raw_path(digest)
-            if not path.exists():
+            # Verify, never merely trust, an existing path before skipping
+            # the write: a previously stored object corrupted or partially
+            # replaced out from under this store -- on disk, not through
+            # `put()`/`get()` -- would otherwise let a `put()` for the
+            # *original*, correct content silently "succeed" over the
+            # known-bad file, publishing a manifest that references it; the
+            # corruption would then surface only once a later `get()` call
+            # happened to read it (Codex review). Idempotent either way:
+            # matching content is left alone, non-matching or unreadable
+            # content is overwritten with the content this call was
+            # actually asked to store.
+            if not (
+                path.exists()
+                and self._existing_raw_object_is_valid(path, digest, algorithm)
+            ):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 write_snapshot_bytes(
                     payload,
@@ -213,7 +250,10 @@ class DirectoryObjectStore:
         stripped = strip_capture_metadata(content)
         digest = semantic_digest(stripped, algorithm=algorithm)
         path = self._json_path(digest)
-        if not path.exists():
+        if not (
+            path.exists()
+            and self._existing_json_object_is_valid(path, digest, algorithm)
+        ):
             path.parent.mkdir(parents=True, exist_ok=True)
             _write_canonical_json_text(
                 canonical_json(stripped),
@@ -538,9 +578,33 @@ def read_variant_artifact_pair(
     guarantee `PackageManifest` already gives a caller that loads
     everything.
 
-    Raises `ValueError` if the two documents disagree about whether this
-    pair belongs together, in either direction.
+    First checks both ids against `manifest.json`'s own published
+    membership via `read_manifest_summary` (Codex review, a second finding
+    on this same function): checking only that the two *ref documents*
+    agree with each other says nothing about whether either one is
+    actually part of *this* package -- a directory of stale, injected, or
+    since-removed `refs/*.json` files with no `manifest.json` at all (or
+    one that no longer lists either id) would otherwise still return a
+    self-consistent-looking pair. Routing through `read_manifest_summary`
+    first also means this function inherits its fail-closed D2 version
+    check (`check_reader_compatibility`) for free, rather than bypassing it
+    the way going straight to the two ref files would.
+
+    Raises `ValueError` if either id isn't published in `manifest.json`, or
+    if the two ref documents disagree about whether this pair belongs
+    together, in either direction.
     """
+    summary = read_manifest_summary(root)
+    if variant_id not in summary.variant_ids:
+        raise ValueError(
+            f"{variant_id!r} is not a variant_id published in this "
+            "package's manifest.json"
+        )
+    if artifact_id not in summary.artifact_ids:
+        raise ValueError(
+            f"{artifact_id!r} is not an artifact_id published in this "
+            "package's manifest.json"
+        )
     variant = read_variant_ref(root, variant_id)
     artifact = read_artifact_ref(root, artifact_id)
     if artifact.variant_id != variant_id:

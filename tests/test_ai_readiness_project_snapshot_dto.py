@@ -173,6 +173,66 @@ def test_an_unrelated_module_attribute_assignment_is_not_flagged(
     assert f.errors == []
 
 
+def test_a_direct_name_reassignment_of_an_imported_asdict_is_still_detected(
+    car, tmp_path, monkeypatch
+):
+    """`from dataclasses import asdict; encode = asdict; encode(dto)` --
+    reassigning an already-resolved alias to a plain bare name via
+    ordinary assignment, not a module attribute, must not slip past the
+    check either (Codex review, a third finding on this same field: the
+    module-attribute-assignment fix only matches `<module alias>.asdict`,
+    not a direct `ast.Name` that is itself already a known alias)."""
+    bad_file = tmp_path / "dto.py"
+    bad_file.write_text(
+        "from dataclasses import asdict\n"
+        "encode = asdict\n"
+        "def to_dict(self):\n"
+        "    return encode(self)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "_PROJECT_SNAPSHOT_DTO_FILES", ("dto.py",))
+    f = car.Findings()
+    car.check_project_snapshot_dto_no_asdict(f)
+    assert any("asdict" in message for _check, message in f.errors)
+
+
+def test_a_multi_hop_alias_chain_is_fully_resolved(car, tmp_path, monkeypatch):
+    """`encode2 = encode` -- a further alias of an already-resolved alias
+    -- must resolve too, regardless of chain length."""
+    bad_file = tmp_path / "dto.py"
+    bad_file.write_text(
+        "from dataclasses import asdict\n"
+        "encode = asdict\n"
+        "encode2 = encode\n"
+        "def to_dict(self):\n"
+        "    return encode2(self)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "_PROJECT_SNAPSHOT_DTO_FILES", ("dto.py",))
+    f = car.Findings()
+    car.check_project_snapshot_dto_no_asdict(f)
+    assert any("asdict" in message for _check, message in f.errors)
+
+
+def test_an_unrelated_name_reassignment_is_not_flagged(car, tmp_path, monkeypatch):
+    """Reassigning an unrelated name must not be swept into the alias set."""
+    good_file = tmp_path / "dto.py"
+    good_file.write_text(
+        "def fields(self):\n    return []\n"
+        "other = fields\n"
+        "def to_dict(self):\n"
+        "    return {f: 1 for f in other(self)}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "_PROJECT_SNAPSHOT_DTO_FILES", ("dto.py",))
+    f = car.Findings()
+    car.check_project_snapshot_dto_no_asdict(f)
+    assert f.errors == []
+
+
 def test_an_unrelated_name_that_happens_to_be_called_asdict_alone_is_flagged_only_when_bare(
     car, tmp_path, monkeypatch
 ):
