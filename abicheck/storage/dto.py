@@ -54,6 +54,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from ..model.semantic_ir import SemanticIR
@@ -107,6 +108,43 @@ _MIGRATIONS: Mapping[
 }
 
 
+def _freeze(value: Any) -> Any:
+    """*value* — already `canonical_form`'s output, so a tree of only
+    `dict`/`list`/`str`/`int`/`float`/`bool`/`None` — rebuilt so nothing
+    reachable from a `SectionDTO` after construction is mutable: every
+    mapping becomes a `MappingProxyType` over a `dict` of already-frozen
+    values, every list becomes a `tuple` of already-frozen values.
+
+    `canonical_form` already rebuilds every container, so `__post_init__`'s
+    stored `payload` never aliases the caller's own object — but the
+    rebuilt containers were still ordinary, mutable `dict`/`list`, reachable
+    both through `dto.payload` directly and through a *nested* value inside
+    an earlier `to_dict()` call's return, either of which could then mutate
+    this frozen DTO's own stored content after construction already
+    validated it (Codex review, a second finding on the same field after
+    the copy-on-construction fix: a shallow copy stops the *caller's*
+    mapping from aliasing this DTO's storage, but does nothing once the
+    values inside that storage are themselves mutable)."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _unfreeze(value: Any) -> Any:
+    """The inverse of `_freeze` — a fresh, ordinary, mutable `dict`/`list`
+    tree, detached from this DTO's own frozen storage. `to_dict()` returns
+    this rather than a shallow copy of `payload` so a caller holding its
+    return value can mutate it freely without reaching back into (or being
+    confused for) this DTO's immutable internal state."""
+    if isinstance(value, MappingProxyType):
+        return {key: _unfreeze(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_unfreeze(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class SectionDTO:
     """One D7 content-addressed object's wire envelope.
@@ -145,24 +183,36 @@ class SectionDTO:
                 f"got {self.section_schema_version!r}"
             )
         _mapping(self.payload, "payload")
-        # A fresh, normalized structure -- never the caller's own mapping.
-        # `payload` is a frozen dataclass field, but `Mapping`/`dict` are
-        # themselves mutable, so holding the caller's object let a later
-        # mutation of that same object (or of `dto.payload` directly, since
-        # nothing prevents reaching into a plain dict) silently change this
-        # DTO's content -- including the bytes `to_dict()` later returns --
-        # after construction already validated it (Codex review).
-        # `canonical_form` both copies (every nested mapping/sequence is
-        # rebuilt) and normalizes, so two payloads that are the same content
-        # in a different key/insertion order also compare and serialize
-        # identically from here on.
-        object.__setattr__(self, "payload", canonical_form(self.payload))
+        # A fresh, normalized, and now fully immutable structure -- never
+        # the caller's own mapping, and never reachable for mutation through
+        # `dto.payload` or a value nested inside it either. `payload` is a
+        # frozen dataclass field, but `Mapping`/`dict` are themselves
+        # mutable, so holding the caller's object -- or even a fresh but
+        # ordinary `dict`/`list` copy of it -- let a later mutation of that
+        # object, or of `dto.payload` (or something nested inside it)
+        # directly, silently change this DTO's content -- including the
+        # bytes `to_dict()` later returns -- after construction already
+        # validated it (Codex review, two rounds: first the caller's own
+        # mapping aliasing this DTO's storage, then the storage itself
+        # staying mutable underneath the top level). `canonical_form` copies
+        # and normalizes (so two payloads that are the same content in a
+        # different key/insertion order compare and serialize identically),
+        # and `_freeze` then makes every mapping and sequence in the result
+        # immutable, recursively.
+        object.__setattr__(self, "payload", _freeze(canonical_form(self.payload)))
 
     def to_dict(self) -> dict[str, Any]:
+        # `_unfreeze`, not `dict(self.payload)`: the latter only copies the
+        # outer mapping, leaving every nested value shared with this DTO's
+        # own frozen storage -- immutable now, per `_freeze` above, but a
+        # caller expecting a plain, JSON-serializable, mutable document
+        # would otherwise receive `MappingProxyType`/`tuple` values it
+        # cannot write back into a `dict`/`list`-shaped shape without
+        # rebuilding it itself.
         return {
             "section_kind": self.section_kind,
             "section_schema_version": self.section_schema_version,
-            "payload": dict(self.payload),
+            "payload": _unfreeze(self.payload),
         }
 
     @classmethod

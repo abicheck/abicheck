@@ -52,23 +52,58 @@ class TestSectionDTO:
 
         assert dto.to_dict() == before
         assert dto.payload["a"] == 1
-        assert dto.payload["nested"]["x"] == [1, 2, 3]
+        assert dto.payload["nested"]["x"] == (1, 2, 3)  # type: ignore[index]
         assert "new_key" not in dto.payload
 
-    def test_mutating_dto_payload_directly_is_inert_for_a_fresh_dto(self) -> None:
-        """`dto.payload` is itself a fresh object built by `__post_init__`,
-        not an alias to anything else the caller can still reach -- mutating
-        it does not retroactively change a *second*, independently-built
-        `SectionDTO` over equal content."""
-        payload = {"a": 1}
+    def test_dto_payload_is_immutable_at_the_top_level(self) -> None:
+        """`dto.payload` is a `MappingProxyType`, not a plain `dict` -- item
+        assignment is refused outright rather than merely discouraged."""
         dto = SectionDTO(
-            section_kind="graph", section_schema_version=1, payload=payload
-        )
-        reference = SectionDTO(
             section_kind="graph", section_schema_version=1, payload={"a": 1}
         )
-        dto.payload["a"] = 999  # type: ignore[index]
-        assert reference.to_dict()["payload"] == {"a": 1}
+        with pytest.raises(TypeError):
+            dto.payload["a"] = 999  # type: ignore[index]
+
+    def test_dto_payload_is_immutable_at_every_nested_level(self) -> None:
+        """A payload's nested mapping/sequence values are frozen too --
+        `MappingProxyType`/`tuple`, not a `dict`/`list` a caller could still
+        reach in and mutate (Codex review: a shallow copy on construction
+        stops the caller's own mapping from aliasing this DTO's storage, but
+        does nothing once the values *inside* that storage are themselves
+        mutable)."""
+        dto = SectionDTO(
+            section_kind="graph",
+            section_schema_version=1,
+            payload={"nested": {"x": [1, 2, 3]}},
+        )
+        nested = dto.payload["nested"]
+        with pytest.raises(TypeError):
+            nested["x"] = "surprise"  # type: ignore[index]
+        inner_list = dto.payload["nested"]["x"]  # type: ignore[index]
+        assert isinstance(inner_list, tuple)
+        with pytest.raises(AttributeError):
+            inner_list.append(4)  # type: ignore[attr-defined]
+
+    def test_to_dict_returns_a_detached_mutable_copy(self) -> None:
+        """`to_dict()`'s return value must be an ordinary, mutable
+        `dict`/`list` tree a caller can freely edit -- and editing it,
+        including a *nested* value, must never reach back into the DTO's
+        own frozen storage (Codex review: `to_dict()` previously copied only
+        the outer mapping, so a caller mutating a nested value in its return
+        still mutated this frozen DTO's own content)."""
+        dto = SectionDTO(
+            section_kind="graph",
+            section_schema_version=1,
+            payload={"nested": {"x": [1, 2, 3]}},
+        )
+        encoded = dto.to_dict()
+        assert isinstance(encoded["payload"], dict)
+        assert isinstance(encoded["payload"]["nested"], dict)
+        assert isinstance(encoded["payload"]["nested"]["x"], list)
+        encoded["payload"]["nested"]["x"].append(4)
+        encoded["payload"]["new_key"] = "surprise"
+        assert dto.payload["nested"]["x"] == (1, 2, 3)  # type: ignore[index]
+        assert "new_key" not in dto.payload
 
     def test_empty_section_kind_is_refused(self) -> None:
         with pytest.raises(ValueError):
