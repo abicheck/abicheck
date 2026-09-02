@@ -141,7 +141,7 @@ from .model import (
 from .model.identity import EntityId, EntityKind, with_mangled_name
 from .model.mangled_name import _skip_template_args, itanium_scope_components
 from .model.occurrence import OccurrenceId
-from .model.semantic_ir import CanonicalEntity, SemanticIR
+from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name
 
 _CTOR_MARKER = "{ctor}"
@@ -303,6 +303,64 @@ def _macho_normalize_semantic_ir(ir: SemanticIR | None) -> SemanticIR | None:
             if new_entity_id is not None and new_entity_id != entity_id:
                 rewrites[entity_id] = new_entity_id
     return _rewrite_semantic_ir_entity_ids(ir, rewrites)
+
+
+def _drop_unmatched_constant_occurrences(
+    ir: SemanticIR | None,
+    conflicts: dict[str, str],
+    kept_entity_ids: set[EntityId],
+) -> tuple[SemanticIR | None, dict[str, str]]:
+    """*ir*/*conflicts* with every ``CONSTANT`` occurrence whose ``EntityId``
+    is not in *kept_entity_ids* dropped, every other occurrence untouched
+    (ADR-063 Phase 6 fourth slice, Codex review, fresh evidence).
+
+    ``merged.constants`` (unlike every other flat field this function
+    builds) deliberately stays ``castxml_snap.constants`` verbatim -- see
+    that field's own comment at its ``replace()`` call site for why a
+    clang-only key cannot be unioned in the way ``typedefs_qualified`` is.
+    ``merge_semantic_ir`` has no such special case: it is generic over
+    every ``EntityKind`` and appends an overlay-only occurrence (a clang-
+    only constant) into the merged IR unconditionally, the same as it would
+    for a clang-only function/variable/type/enum -- all of which genuinely
+    ARE unioned into their own flat fields, unlike constants. Left
+    unfiltered, a clang-only constant would surface through ``semantic_ir``
+    with no corresponding entry in ``merged.constants``/``constant_
+    entity_ids`` at all, an occurrence naming a "declaration" the rest of
+    the snapshot does not know exists. *kept_entity_ids* is the exact same
+    set the caller already derives for the final, unioned-then-filtered
+    ``constant_entity_ids`` (filtered to ``castxml_snap.constants``'s own
+    keys) -- passed in rather than recomputed, so the two cannot drift.
+
+    ``None`` in, ``None`` out, mirroring :func:`_rewrite_semantic_ir_
+    entity_ids`'s convention. A no-op (returns *ir*/*conflicts* unchanged)
+    when nothing needed dropping.
+    """
+    if ir is None:
+        return ir, conflicts
+    kept: dict[OccurrenceId, CanonicalEntity] = {}
+    dropped: list[tuple[OccurrenceId, CanonicalEntity]] = []
+    for occ_id, entity in ir.occurrences.items():
+        if (
+            occ_id.entity_id.kind is not EntityKind.CONSTANT
+            or occ_id.entity_id in kept_entity_ids
+        ):
+            kept[occ_id] = entity
+        else:
+            dropped.append((occ_id, entity))
+    if not dropped:
+        return ir, conflicts
+    filtered_ir = SemanticIR(occurrences=kept)
+    if not conflicts:
+        return filtered_ir, conflicts
+    dropped_keys = {
+        semantic_ir_conflict_key(occ_id, fact_name)
+        for occ_id, entity in dropped
+        for fact_name, _fact in entity.fact_items()
+    }
+    filtered_conflicts = {
+        key: value for key, value in conflicts.items() if key not in dropped_keys
+    }
+    return filtered_ir, filtered_conflicts
 
 
 def _strip_itanium_template_suffix(component: str) -> str:
@@ -996,6 +1054,24 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         castxml_snap.semantic_ir, ctor_dtor_entity_id_rewrites
     )
     merged_ir, ir_conflicts = merge_semantic_ir(castxml_semantic_ir, clang_semantic_ir)
+    # `merged.constants` deliberately stays castxml-only (see that field's
+    # own comment below) -- `merged_constant_entity_ids` is exactly its
+    # sidecar, computed here rather than inline in `replace()` below so
+    # `_drop_unmatched_constant_occurrences` can use the identical kept-id
+    # set to filter `merged_ir`'s own CONSTANT occurrences to match, instead
+    # of a clang-only constant occurrence surviving in `semantic_ir` with no
+    # corresponding flat entry at all (Codex review, fresh evidence).
+    merged_constant_entity_ids = {
+        key: value
+        for key, value in {
+            **clang_snap.constant_entity_ids,
+            **castxml_snap.constant_entity_ids,
+        }.items()
+        if key in castxml_snap.constants
+    }
+    merged_ir, ir_conflicts = _drop_unmatched_constant_occurrences(
+        merged_ir, ir_conflicts, set(merged_constant_entity_ids.values())
+    )
 
     merged = replace(
         castxml_snap,
@@ -1041,15 +1117,10 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # every sidecar key has a real constant behind it; a key clang
         # alone resolved an identity for, that castxml also kept, still
         # wins clang's identity as it did before, since clang is spread
-        # first in the union below.
-        constant_entity_ids={
-            key: value
-            for key, value in {
-                **clang_snap.constant_entity_ids,
-                **castxml_snap.constant_entity_ids,
-            }.items()
-            if key in castxml_snap.constants
-        },
+        # first in the union below. Computed above (`merged_constant_
+        # entity_ids`), not inlined here, so `_drop_unmatched_constant_
+        # occurrences` filters `semantic_ir` against the identical set.
+        constant_entity_ids=merged_constant_entity_ids,
         ast_producer="hybrid",
         ast_toolchain={
             **{

@@ -80,3 +80,26 @@
   `template_arguments`, since it has no captured type for either to
   describe. No detector, verdict, or exit code changes — `SemanticIR`
   remains additive and unread by the existing pipeline.
+  A hybrid dump's merge now filters unmatched clang-only `CONSTANT`
+  occurrences out of the merged `semantic_ir` too
+  (`dumper_hybrid._drop_unmatched_constant_occurrences`), matching the
+  pre-existing, deliberate decision to keep the legacy `constants` field
+  castxml-only — without this, a clang-only constant surfaced through
+  `semantic_ir` with no corresponding flat entry at all. A clang-produced
+  compound-initializer constant (`dumper_clang_expr._expr_fingerprint`'s
+  own build-stable structural fingerprint, not a spelling of the source
+  text) is now marked `Fact.unsupported()` rather than `Fact.present(...)`,
+  since that module's own docstring is explicit that cross-backend constant
+  values are not expected to match for this case — publishing it as
+  present made every unchanged compound constant report a spurious hybrid
+  conflict.
+  `_has_unresolved_component`'s depth tracker is now a bracket-KIND-aware
+  stack rather than a flat counter: a real right-shift operator inside a
+  parenthesized non-type template argument (`"S<(N >> 1 ? 1 : 2)>"`) is not
+  two nested template closers, and a flat counter's per-character `>`
+  decrement wrongly dropped the running depth to zero while still inside
+  the parenthesized expression, misreading a resolved ternary's own `"?"`
+  as the sentinel. A `">"` now only closes a template level when the
+  innermost still-open bracket is itself a `"<"` (a genuine
+  `vector<vector<int>>`-style double-close via one `">>"` still works
+  correctly); otherwise it is left untouched as a real operator character.

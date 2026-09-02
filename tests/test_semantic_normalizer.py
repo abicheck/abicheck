@@ -339,6 +339,56 @@ def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     assert entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_shift_operator_in_template_argument_is_not_unresolved() -> (
+    None
+):
+    """A right-shift operator inside a parenthesized non-type template
+    argument is not two nested template closers -- a flat depth counter
+    decrements once per ``>`` character, so ``">>"`` in ``"S<(N >> 1 ? 1 :
+    2)>"`` wrongly drops the running depth to zero WHILE STILL inside the
+    ``(...)`` grouping, misreading the ternary's own ``"?"`` as the
+    sentinel (Codex review, seventh round, fresh evidence: confirmed
+    against a real ``clang++ -Xclang -ast-dump=json`` repro for exactly
+    this ``qualType`` shape on a dependent function return/variable type).
+    A ``">"`` only legitimately closes a template level when the innermost
+    still-open bracket is itself a ``"<"``; here it is a ``"("``, so both
+    ``">"``s in ``">>"`` are real, resolved shift-operator characters."""
+    fn = _function("f", "void", ("S<(N >> 1 ? 1 : 2)>",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+
+
+def test_normalize_header_ast_nested_template_closers_still_pop_correctly() -> None:
+    """A genuine ``">>"`` closing TWO nested template levels
+    (``"vector<vector<int>>"``) still pops both, unlike the shift-operator
+    case above -- the innermost still-open bracket is a ``"<"`` both times
+    this ``>`` is processed, which is exactly the discriminator that tells
+    the two shapes apart."""
+    fn = _function("f", "void", ("vector<vector<int>>?",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    # The trailing "?" sits OUTSIDE both template closes (both "<"s are
+    # correctly popped by the ">>" ahead of it), so it IS the sentinel at
+    # real depth zero -- unresolved, not a false negative from an
+    # over-eager stack that never popped.
+    assert not entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_unresolved_atomic_wrapper_is_failed() -> None:
     """castxml's own ``AtomicType`` branch renders an unresolved wrapped
     type as the literal ``"_Atomic(?)"`` -- a REAL paren pair as part of
@@ -860,3 +910,28 @@ def test_normalize_header_ast_constants_default_to_empty() -> None:
         producer="castxml",
     )
     assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_clang_expr_fingerprint_constant_is_unsupported() -> None:
+    """A clang-produced compound-initializer constant (``dumper_clang_expr.
+    _expr_fingerprint``'s own ``"expr:" + sha256(...)[:16]`` encoding) is
+    NOT published as a confirmed spelling -- it is a build-stable
+    STRUCTURAL fingerprint, not a spelling of the source text, and that
+    module's own docstring is explicit that cross-backend constant values
+    are not expected to match for this case (Codex review, sixth round,
+    fresh evidence: an earlier revision published it as ``Fact.present``,
+    which made `merge_semantic_ir` report a spurious conflict against
+    castxml's real initializer text for an unchanged compound constant)."""
+    eid = entity_id_for_constant((), "kSum")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        constants={"kSum": "expr:0123456789abcdef"},
+        constant_entity_ids={"kSum": eid},
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"

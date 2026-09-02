@@ -228,6 +228,24 @@ _CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile)\b")
 #: is treated as transparent rather than a real, depth-increasing paren.
 _ATOMIC_WRAPPER_PREFIX = "_Atomic("
 
+#: ``dumper_clang_expr._expr_fingerprint``'s own literal prefix
+#: (``"expr:" + sha256(...)[:16]``) -- the value it stamps onto a
+#: constant's compound initializer (anything beyond a lone literal) is a
+#: build-stable STRUCTURAL fingerprint, not a spelling of the source text,
+#: and that module's own docstring is explicit that "cross-backend constant
+#: *values* are not expected to match" for exactly this case (castxml's
+#: `init` always carries the raw source-text initializer, never a
+#: fingerprint). Used in :func:`normalize_header_ast`'s constants loop
+#: (Codex review, sixth round, fresh evidence) to recognize this one
+#: producer-specific encoding structurally -- by the value's own shape, not
+#: by branching on ``producer == "clang"`` -- and mark it
+#: ``Fact.unsupported()`` rather than ``Fact.present(...)``, the same
+#: "state genuinely incomparable evidence honestly" discipline ADR-063
+#: Phase 0 established: publishing the fingerprint as a confirmed spelling
+#: would make `merge_semantic_ir` report a spurious conflict against
+#: castxml's real initializer text for every unchanged compound constant.
+_CLANG_EXPR_FINGERPRINT_PREFIX = "expr:"
+
 
 def _has_unresolved_component(raw_type: str) -> bool:
     """Whether *raw_type* embeds castxml's unresolved-type sentinel
@@ -279,8 +297,34 @@ def _has_unresolved_component(raw_type: str) -> bool:
     ``_Atomic(...)`` is also real, valid C11 syntax for an otherwise
     fully-resolved type (``"_Atomic(int)"``), which this special-casing
     does not disturb: only a literal ``"?"`` inside it is ever flagged.
+
+    **Tracks a bracket-kind-aware STACK, not a flat depth counter (Codex
+    review, seventh round, fresh evidence): a real right-shift operator
+    inside a parenthesized non-type template argument is not two template
+    closers.** For a resolved dependent type like ``"S<(N >> 1 ? 1 :
+    2)>"``, a flat counter treats each ``>`` in the ``>>`` independently --
+    decrementing depth twice for what is actually one shift-operator token
+    sitting inside the `(...)` grouping, not two nested `<...>` closes --
+    which drops the running depth to zero WHILE STILL INSIDE the
+    parenthesized expression and misreads the ternary's own ``"?"`` as the
+    sentinel, at real depth > 0. A ``">"`` legitimately closes a template
+    level only when the innermost still-open bracket is itself a ``"<"``
+    (``vector<vector<int>>``'s own ``>>`` closes two, since each one's
+    innermost open bracket at the time it's processed IS a ``"<"``); when
+    the innermost open bracket is a ``"("``/``"["`` instead, a ``">"`` is a
+    real, resolved operator character belonging to that expression --
+    comparison or shift -- and must not be popped as a bracket at all. A
+    ``")"``/``"]"`` still pops unconditionally (matching this function's
+    existing "never raise, degrade gracefully on malformed/adversarial
+    input" discipline for every other close), and every genuinely
+    ambiguous ``"<"`` (a real less-than operator, not a template open) is
+    an accepted, PRE-EXISTING residual this fix does not attempt to
+    solve -- doing so needs real expression parsing, and no concrete
+    evidence of that specific shape has been found the way this ``">>"``
+    shape was (Codex review, with a real ``clang++ -Xclang
+    -ast-dump=json`` repro).
     """
-    depth = 0
+    stack: list[str] = []
     i = 0
     n = len(raw_type)
     while i < n:
@@ -288,11 +332,20 @@ def _has_unresolved_component(raw_type: str) -> bool:
             i += len(_ATOMIC_WRAPPER_PREFIX)
             continue
         ch = raw_type[i]
-        if ch in "([<":
-            depth += 1
-        elif ch in ")]>":
-            depth = max(0, depth - 1)
-        elif ch == _UNRESOLVED_TYPE_SENTINEL and depth == 0:
+        if ch in "([":
+            stack.append(ch)
+        elif ch in ")]":
+            if stack:
+                stack.pop()
+        elif ch == "<":
+            stack.append(ch)
+        elif ch == ">":
+            if stack and stack[-1] == "<":
+                stack.pop()
+            # else: a real comparison/shift-operator character sitting
+            # inside a paren/bracket expression context, not a template
+            # closer -- leave the stack untouched.
+        elif ch == _UNRESOLVED_TYPE_SENTINEL and not stack:
             return True
         i += 1
     return False
@@ -624,11 +677,19 @@ def normalize_header_ast(
         value = constants.get(qualified_name)
         if value is None:
             continue
-        # No unresolved-sentinel check and no `cv_qualification` -- unlike a
-        # typedef/function/variable's type spelling, a constant's value text
-        # never comes from `type_name_uncached`'s resolver at all (see this
-        # module's own docstring, "Scope of the fourth slice"), so there is
-        # no "?" placeholder to guard against and no captured type for
-        # `cv_qualification` to describe.
-        _add_occurrence(occurrences, entity_id, Fact.present(value), producer=producer)
+        # No unresolved-sentinel check -- unlike a typedef/function/
+        # variable's type spelling, a constant's value text never comes
+        # from `type_name_uncached`'s resolver at all (see this module's
+        # own docstring, "Scope of the fourth slice"), so there is no "?"
+        # placeholder to guard against. No `cv_qualification` either: there
+        # is no captured type for it to describe.
+        spelling_fact = (
+            Fact.unsupported(
+                "clang's compound-initializer fingerprint is not a "
+                "cross-backend-comparable value spelling"
+            )
+            if value.startswith(_CLANG_EXPR_FINGERPRINT_PREFIX)
+            else Fact.present(value)
+        )
+        _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
     return SemanticIR(occurrences=occurrences)

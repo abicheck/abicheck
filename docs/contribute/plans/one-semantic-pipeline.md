@@ -12894,6 +12894,49 @@ filtering pass Phase 2 already applies), so there is no dependency-header
 constant occurrence for that function to additionally exclude, unlike
 functions/variables/types/enums which are scoped post-hoc.
 
+**Fourth slice, three fixes (Codex review, seventh round, fresh evidence
+each).** (1) `merged.constants` deliberately stays `castxml_snap.constants`
+verbatim (a pre-existing exception, unrelated to this slice -- see that
+field's own comment), but `merge_semantic_ir` is generic over every
+`EntityKind` and appends an unmatched clang-only `CONSTANT` occurrence into
+the merged IR unconditionally, the same as it correctly does for a
+clang-only function/variable/type/enum (all of which genuinely ARE unioned
+into their own flat fields, unlike constants). Left unfiltered, a
+clang-only constant would surface through `semantic_ir` with no
+corresponding entry in `merged.constants`/`constant_entity_ids` at all --
+`dumper_hybrid._drop_unmatched_constant_occurrences` closes the gap,
+filtering the merged IR's `CONSTANT` occurrences (and their conflict-key
+entries) to the identical kept-entity-id set `constant_entity_ids`'s own
+union-then-filter already computes. (2) `dumper_clang_expr._expr_
+fingerprint` stamps a compound constant initializer (anything beyond a
+lone literal) with a build-stable STRUCTURAL fingerprint
+(`"expr:" + sha256(...)[:16]`), not a spelling of the source text -- that
+module's own docstring is explicit that cross-backend constant *values*
+are not expected to match for this case. Publishing the fingerprint as
+`Fact.present(...)` made `merge_semantic_ir` report a spurious conflict
+against castxml's real initializer text for every unchanged compound
+constant; `normalize_header_ast` now recognizes the fingerprint's own
+literal prefix structurally (by the value's own shape, not by branching on
+`producer == "clang"`) and marks it `Fact.unsupported()` instead -- the
+same "state genuinely incomparable evidence honestly" discipline ADR-063
+Phase 0 established. (3) `_has_unresolved_component`'s depth tracker is now
+a bracket-KIND-aware stack, not a flat counter: for a resolved dependent
+type like `"S<(N >> 1 ? 1 : 2)>"`, a flat counter decrements once per `>`
+character, so the real right-shift operator's `">>"` wrongly drops the
+running depth to zero WHILE STILL inside the `(...)` grouping, misreading
+the ternary's own `"?"` as the sentinel at real depth > 0 (confirmed
+against a real `clang++ -Xclang -ast-dump=json` repro for exactly this
+`qualType` shape on a dependent function return/variable type). A `">"`
+now only legitimately closes a template level when the innermost
+still-open bracket is itself a `"<"` (`vector<vector<int>>`'s own `">>"`
+still correctly closes two); when the innermost open bracket is a
+`"("`/`"["` instead, a `">"` is a real, resolved operator character
+belonging to that expression and is left untouched. A genuinely ambiguous
+bare `"<"` (a real less-than operator, not a template open) remains an
+accepted, pre-existing residual this fix does not attempt to solve -- doing
+so needs real expression parsing, and no concrete evidence of that
+specific shape has been found the way this `">>"` shape was.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

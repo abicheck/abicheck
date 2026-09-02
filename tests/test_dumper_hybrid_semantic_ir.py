@@ -29,7 +29,11 @@ from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.model import AbiSnapshot, Function, Param
 from abicheck.model.fact import Fact
-from abicheck.model.identity import entity_id_for_function, entity_id_for_type
+from abicheck.model.identity import (
+    entity_id_for_constant,
+    entity_id_for_function,
+    entity_id_for_type,
+)
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import (
     CanonicalEntity,
@@ -249,6 +253,75 @@ class TestCtorDtorSyntheticKeyRewritePropagation:
         assert merged.semantic_ir.occurrences[clang_occ].template_arguments.value == (
             "int",
         )
+
+
+class TestHybridDropsUnmatchedConstantOccurrences:
+    """ADR-063 Phase 6 fourth slice (Codex review, seventh round, fresh
+    evidence): ``merged.constants`` deliberately stays ``castxml_snap.
+    constants`` verbatim (a pre-existing, unrelated exception -- see that
+    field's own comment in ``merge_snapshots()``), but ``merge_semantic_ir``
+    is generic over every ``EntityKind`` and would otherwise append an
+    unmatched clang-only ``CONSTANT`` occurrence into the merged IR
+    unconditionally -- ``_drop_unmatched_constant_occurrences`` closes that
+    gap so ``semantic_ir`` never names a constant the rest of the snapshot
+    does not know exists.
+    """
+
+    def test_clang_only_constant_occurrence_is_dropped(self) -> None:
+        kept_eid = entity_id_for_constant((), "kShared")
+        clang_only_eid = entity_id_for_constant((), "kClangOnly")
+        merged = merge_snapshots(
+            _snap(
+                SemanticIR({OccurrenceId(kept_eid): _entity("1")}),
+                "castxml",
+                constants={"kShared": "1"},
+                constant_entity_ids={"kShared": kept_eid},
+            ),
+            _snap(
+                SemanticIR(
+                    {
+                        OccurrenceId(kept_eid): _entity("1"),
+                        OccurrenceId(clang_only_eid): _entity("2"),
+                    }
+                ),
+                "clang",
+                constants={"kShared": "1", "kClangOnly": "2"},
+                constant_entity_ids={
+                    "kShared": kept_eid,
+                    "kClangOnly": clang_only_eid,
+                },
+            ),
+        )
+        assert merged.semantic_ir is not None
+        assert set(merged.semantic_ir.occurrences) == {OccurrenceId(kept_eid)}
+        # The legacy field stays castxml-only, matching the flat
+        # `constants`/`constant_entity_ids` behavior this test guards --
+        # `kClangOnly` was correctly never promoted into either.
+        assert merged.constants == {"kShared": "1"}
+        assert merged.constant_entity_ids == {"kShared": kept_eid}
+
+    def test_matched_constant_is_kept_and_backfilled_normally(self) -> None:
+        """A constant present in `castxml_snap.constants` on both sides is
+        an ordinary matched pair -- untouched by the new filter, still
+        eligible for the usual base-plus-backfill reconciliation."""
+        eid = entity_id_for_constant((), "kShared")
+        occ = OccurrenceId(eid)
+        merged = merge_snapshots(
+            _snap(
+                SemanticIR({occ: CanonicalEntity(canonical_spelling=Fact.failed("x"))}),
+                "castxml",
+                constants={"kShared": "1"},
+                constant_entity_ids={"kShared": eid},
+            ),
+            _snap(
+                SemanticIR({occ: _entity("1")}),
+                "clang",
+                constants={"kShared": "1"},
+                constant_entity_ids={"kShared": eid},
+            ),
+        )
+        assert merged.semantic_ir is not None
+        assert merged.semantic_ir.occurrences[occ].canonical_spelling.value == "1"
 
 
 class TestLegacyFieldsAreUnaffected:
