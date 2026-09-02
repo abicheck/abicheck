@@ -192,3 +192,36 @@ class TestRejectUnsupportedAgainstOperand:
         f = tmp_path / "snap.json"
         f.write_text("{}", encoding="utf-8")
         reject_unsupported_against_operand(f)  # must not raise
+
+
+class TestWriteProjectSnapshotPackageEmptyLibrary:
+    """`dump_source_only`'s own `library` field is an empty string for any
+    `--sources`/`--build-info` hint whose `Path.name` is empty (`--sources
+    .`, or any other path ending without a final component) -- `ArtifactRef`
+    rejects an empty `artifact_id` outright, so `_write_project_snapshot_
+    package` must not pass that empty string through unchanged (Codex
+    review, on PR #1014's own `--sources .` case)."""
+
+    def test_an_empty_library_falls_back_to_a_safe_artifact_id(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.cli_buildsource import _write_project_snapshot_package
+
+        doc = snapshot_to_dict(AbiSnapshot(library="", version="1.0.0"))
+        root = tmp_path / "pkg"
+        _write_project_snapshot_package(doc, root, "")  # must not raise
+        assert (root / "refs" / "artifacts" / "source.json").is_file()
+
+    def test_dump_sources_dot_does_not_fail_writing_the_package(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact reported scenario, at the level the fix actually lives:
+        `dump_source_only`'s own `library = hint.name if hint is not None
+        else "source"` yields `""` for `Path(".").name`."""
+        from abicheck.cli_buildsource import _write_project_snapshot_package
+
+        library = Path(".").name
+        assert library == ""
+        doc = snapshot_to_dict(AbiSnapshot(library=library, version="1.0.0"))
+        root = tmp_path / "pkg"
+        _write_project_snapshot_package(doc, root, library)  # must not raise

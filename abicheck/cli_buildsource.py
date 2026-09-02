@@ -548,13 +548,20 @@ def _write_project_snapshot_package(
 
     *library* becomes the package's single `ArtifactRef.artifact_id` --
     matching `import_legacy_snapshot`'s own "one artifact per snapshot"
-    A1.3 shape a real `dump` invocation always produces. Any `SnapshotError`/
-    `OSError`/`ValueError` from the write (a bad path, a permission error, a
-    payload this build's own current schema version cannot re-import --
-    should never happen for a payload this same build just produced, but
-    checked exactly as strictly as the legacy `-o` write path already is)
-    is translated into the identical `click.ClickException` contract
-    `write_snapshot_and_report` already applies to the legacy write.
+    A1.3 shape a real `dump` invocation always produces. `dump_source_only`'s
+    own `library` field can be an empty string (`--sources .`, or any other
+    source path whose `Path.name` is empty), and `ArtifactRef` rejects an
+    empty `artifact_id` outright -- falls back to `"source"` in that case
+    (the same fallback `dump_source_only` itself already uses for `library`
+    when *no* `--sources`/`--build-info` hint exists at all) rather than
+    letting `--project-snapshot-dir` turn a `--sources .` invocation that
+    would otherwise succeed into a hard failure (Codex review). Any other
+    `SnapshotError`/`OSError`/`ValueError` from the write (a bad path, a
+    permission error, a payload this build's own current schema version
+    cannot re-import -- should never happen for a payload this same build
+    just produced, but checked exactly as strictly as the legacy `-o` write
+    path already is) is translated into the identical `click.ClickException`
+    contract `write_snapshot_and_report` already applies to the legacy write.
     """
     from .errors import SnapshotError
     from .serialization import SCHEMA_VERSION
@@ -564,7 +571,7 @@ def _write_project_snapshot_package(
         write_legacy_snapshot_package(
             payload,
             project_snapshot_dir,
-            artifact_id=library,
+            artifact_id=library or "source",
             max_known_schema_version=SCHEMA_VERSION,
         )
     except (SnapshotError, OSError, ValueError) as exc:
