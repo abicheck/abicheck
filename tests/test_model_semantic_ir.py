@@ -193,6 +193,37 @@ class TestCanonicalCvQualification:
                 cv_qualification=Fact.present(("volatile", "const")),
             )
 
+    @pytest.mark.parametrize("constructor", [Fact.present, Fact.partial])
+    def test_every_usable_status_is_canonicalized(self, constructor: object) -> None:
+        """`PARTIAL` is usable evidence everywhere else in this IR, so a
+        status-specific check would accept a non-canonical spelling from one
+        constructor and reject the identical value from the other — two
+        spellings of one qualification, which is what canonicalization exists
+        to prevent."""
+        with pytest.raises(ValueError, match="not canonical"):
+            CanonicalEntity(
+                canonical_spelling=Fact.present("Foo"),
+                cv_qualification=constructor(("volatile", "const")),  # type: ignore[operator]
+            )
+        # ...and the canonical spelling is accepted from both, so the check
+        # is not simply rejecting the status.
+        entity = CanonicalEntity(
+            canonical_spelling=Fact.present("Foo"),
+            cv_qualification=constructor(("const", "volatile")),  # type: ignore[operator]
+        )
+        assert entity.cv_qualification.is_present
+
+    @pytest.mark.parametrize(
+        "fact",
+        [Fact.not_collected(), Fact.unsupported(), Fact.failed("no"), Fact.present(None)],
+    )
+    def test_a_fact_with_no_usable_value_is_not_checked(self, fact: object) -> None:
+        entity = CanonicalEntity(
+            canonical_spelling=Fact.present("Foo"),
+            cv_qualification=fact,  # type: ignore[arg-type]
+        )
+        assert entity.cv_qualification == fact
+
     def test_confirmed_absence_is_present_and_empty(self) -> None:
         entity = CanonicalEntity(
             canonical_spelling=Fact.present("Foo"),

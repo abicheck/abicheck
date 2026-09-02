@@ -212,7 +212,10 @@ def merge_semantic_ir(
             # strictly worse outcome than either merging or keeping both --
             # and keeping both is not representable (Codex review). What
             # stays fail-closed is what the ambiguity is actually about:
-            # no occurrence is paired with a *differently* keyed one.
+            # a pairing is refused only when both sides supply a
+            # disambiguator and they disagree, never merely because two
+            # keys differ (castxml supplies none, so the ordinary match
+            # pairs an empty key against a non-empty one).
             for occ in base_ids:
                 merged[occ] = base.occurrences[occ]
             for occ in overlay_ids:

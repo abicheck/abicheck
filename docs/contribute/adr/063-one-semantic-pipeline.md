@@ -531,9 +531,12 @@
   disagreement keeping castxml's value and recording the discarded one
   per *occurrence* (`fact_provenance`'s declaration-only key cannot
   separate two matched pairs sharing one `EntityId`), and a fail-closed
-  matcher that never pairs an occurrence with a differently-keyed one — a
+  matcher whose one refusal is a *two-sided* disagreement: two occurrences
+  pair when at most one side supplies a disambiguator (castxml routinely
+  supplies none, so this is the ordinary case, and the two keys then
+  legitimately differ), and never when both supply one and they differ. A
   group with no unique complete matching keeps every occurrence from both
-  sides, while an occurrence the two sides key *identically* still merges,
+  sides; an occurrence the two sides key *identically* still merges there,
   since one `OccurrenceId` names one occurrence and discarding the
   overlay's copy would lose the evidence this step exists to preserve. Each of the plan's four review-falsified matching rules is
   pinned as a property test (`tests/test_semantic_ir_merge.py`); one of

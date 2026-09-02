@@ -12509,7 +12509,10 @@ its own stated reasoning:
    one occurrence by that type's own definition, so an exact key match is
    not a guessed pairing: it merges under the ordinary base-plus-backfill
    rule. What stays fail-closed is what the ambiguity is actually about —
-   no occurrence is ever paired with a *differently* keyed one.
+   two occurrences pair only when at most one side supplies a
+   disambiguator, never when both supply one and they disagree. (Differing
+   *keys* are not themselves the refusal: castxml supplies no disambiguator
+   at all, so the ordinary match pairs an empty key with a non-empty one.)
 3. **The "two occurrences on one side sharing a non-empty disambiguator"
    ambiguity is unreachable from a real `SemanticIR`**, because that pair
    *is* one `OccurrenceId` and therefore one dict key. The guard stays (the

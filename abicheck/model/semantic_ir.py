@@ -52,7 +52,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from .availability import FactStatus
 from .fact import Fact
 from .identity import EntityId, _packed
 from .occurrence import OccurrenceId, canonical_key
@@ -129,7 +128,15 @@ class CanonicalEntity:
 
     def __post_init__(self) -> None:
         cv = self.cv_qualification
-        if cv.status is FactStatus.PRESENT and cv.value is not None:
+        # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
+        # everywhere else in this IR (`Fact.is_present`,
+        # `resolved_fact_count`, the hybrid merge's backfill), so checking
+        # only `PRESENT` would accept a non-canonical ("volatile", "const")
+        # from a partial fact while rejecting the identical present one --
+        # two spellings of one qualification, which is what canonicalization
+        # exists to prevent, and a false hybrid conflict when two backends
+        # land on different ones (Codex review).
+        if cv.is_present and cv.value is not None:
             canonical = canonical_cv_qualification(cv.value)
             if tuple(cv.value) != canonical:
                 raise ValueError(
@@ -153,7 +160,8 @@ class CanonicalEntity:
         )
 
     def resolved_fact_count(self) -> int:
-        """How many of this entity's facts are ``PRESENT`` — the ranking
+        """How many of this entity's facts carry usable evidence
+        (``PRESENT``/``PARTIAL``, i.e. ``Fact.is_present``) — the ranking
         :meth:`SemanticIR.canonical_entities` reduces on."""
         return sum(1 for _, fact in self.fact_items() if fact.is_present)
 
