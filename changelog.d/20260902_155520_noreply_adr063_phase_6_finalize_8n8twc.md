@@ -17,11 +17,15 @@
   never ends up with one representation keyed under the retired synthetic
   identity while another already carries the real one — the same treatment
   a pre-existing Mach-O mangled-name normalization gap needed and now gets.
-  An unresolved type is detected structurally (a substring test, since
-  castxml composes its `"?"` placeholder into the enclosing spelling for a
-  pointer/reference/array/cv-qualified pointee), not by exact-string match,
-  and the same fix applies to the pre-existing typedef-underlying-type
-  check. `dumper.py`'s PE and Mach-O dumps now populate `AbiSnapshot.
+  An unresolved type is detected structurally — depth-tracked over
+  `()`/`[]`/`<>` so a real, resolved type that legally contains a literal
+  `"?"` (e.g. clang's spelling of a dependent ternary inside a
+  `decltype(...)`) is never mistaken for castxml's own unresolved-type
+  placeholder, which the resolver only ever composes into the enclosing
+  spelling for a pointer/reference/array/cv-qualified pointee at nesting
+  depth zero — not by exact-string or plain-substring match, and the same
+  fix applies to the pre-existing typedef-underlying-type check.
+  `dumper.py`'s PE and Mach-O dumps now populate `AbiSnapshot.
   semantic_ir` too (previously ELF-only), via a new shared choke point,
   `extract/header_ast_fields.parse_header_ast_fields`. No detector,
   verdict, or exit code changes — `SemanticIR` remains additive and unread

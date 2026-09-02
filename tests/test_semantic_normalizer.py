@@ -317,6 +317,27 @@ def test_normalize_header_ast_unresolved_pointer_param_type_is_failed() -> None:
     assert not entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
+    """A real, fully-resolved type spelling can legally contain a literal
+    ``"?"`` -- clang emits one verbatim for a dependent ternary expression
+    inside ``decltype(...)`` (Codex review, third round, fresh evidence:
+    this reproduces against a version of ``_has_unresolved_component`` that
+    used a plain substring test instead of depth-tracking). The sentinel's
+    own ``"?"`` never sits inside a ``(...)``/``<...>`` grouping; this
+    one does, so it must NOT be treated as unresolved."""
+    fn = _function("f", "void", ("S<decltype(flag ? A{} : B{})>",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_function_cv_qualification() -> None:
     """A member function's ``is_const``/``is_volatile`` populate
     ``cv_qualification`` in canonical order, separately from the spelling

@@ -169,11 +169,36 @@ def _has_unresolved_component(raw_type: str) -> bool:
     typedef branch's own ``underlying`` value, which is always the
     OUTERMOST ``type_name()`` call's result with nothing further wrapped
     around it) misses every one of these composite shapes for a function/
-    parameter/variable type. ``"?"`` is not a legal token in any real
-    C/C++ type spelling, so a plain substring test is safe: it can only
-    ever fire on this sentinel, never on a real, resolved type.
+    parameter/variable type.
+
+    **A plain substring test is NOT safe (Codex review, third round, fresh
+    evidence): a real, fully-resolved type spelling CAN legally contain a
+    literal ``"?"`` character** -- clang emits one verbatim for a
+    dependent, unevaluated ternary expression inside a `decltype(...)` (a
+    non-type template argument/parameter's own spelling, e.g.
+    ``"S<decltype(flag ? A{} : B{})>"``). Distinguishing the two requires
+    exactly the discriminator that makes this safe again: every
+    ``"?"`` this resolver's own sentinel ever produces sits at NESTING
+    DEPTH ZERO in the string -- the recursive wrapping above only ever
+    prepends/appends a bare pointer/reference sigil, array brackets, or a
+    cv keyword directly beside it, never inside a `(...)`/`<...>`
+    grouping -- while a ternary's ``"?"`` is, by C++ grammar, only ever
+    reachable inside an expression context, which for a *type* spelling
+    means inside a `decltype(...)`'s parens or a template argument list's
+    angle brackets (both already open by the time such a ``"?"`` is
+    reached). So this function walks *raw_type* tracking depth over
+    ``()``/``[]``/``<>``, and reports unresolved only for a ``"?"`` found
+    at depth 0 -- never one already inside a bracketed grouping.
     """
-    return _UNRESOLVED_TYPE_SENTINEL in raw_type
+    depth = 0
+    for ch in raw_type:
+        if ch in "([<":
+            depth += 1
+        elif ch in ")]>":
+            depth = max(0, depth - 1)
+        elif ch == _UNRESOLVED_TYPE_SENTINEL and depth == 0:
+            return True
+    return False
 
 
 def _function_spelling_fact(fn: Function) -> Fact[str]:

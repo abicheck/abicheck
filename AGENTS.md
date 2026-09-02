@@ -188,23 +188,31 @@ Core pipeline (in order of data flow):
    pair is never collapsed; `CanonicalEntity` holds only the non-identity
    payload). Persisted as `AbiSnapshot.semantic_ir` (schema v38,
    `storage/semantic_ir_codec.py`) and reconciled across the two header-AST
-   backends by `extract/semantic_ir_merge.py`. **Second slice landed:**
+   backends by `extract/semantic_ir_merge.py`. **Third slice landed:**
    `extract/semantic_normalizer.py`'s `normalize_header_ast` projects each
-   header-AST backend's already-parsed `RecordType`/`EnumType`/typedef
-   output (both `dumper_castxml.py` and `dumper_clang.py` already carry a
-   real `entity_id` on each, per Phase 2's option (a)) into a real
-   `SemanticIR`, wired through `dumper_manifest.resolve_header_ast_result`
-   so both the legacy single-TU ELF dump and a real manifest dump populate
-   it — a real `dump()`/`compare()` now carries a non-empty `semantic_ir`,
-   including through `--ast-frontend hybrid`'s reconciliation. Functions,
-   variables, and constants are not normalized yet (a function's/variable's
-   canonical *signature* spelling is exactly the still-open cross-backend
-   canonicalization problem, not a mechanical projection — see that
-   module's own docstring), and the PE/Mach-O header-AST assembly sites in
-   `dumper.py` are not yet wired (that file sits at its `architecture/
-   debt.yaml` no-growth baseline — see the ELF site's own comment there).
-   BTF/CTF/PDB remain fully unmigrated: those backends do not populate
-   `entity_id` at all yet.
+   header-AST backend's already-parsed `RecordType`/`EnumType`/typedef/
+   `Function`/`Variable` output (all already carry a real `entity_id`, per
+   Phase 2's option (a)) into a real `SemanticIR` — functions/variables
+   reuse the same cross-backend spelling primitives `entity_id_for_function`/
+   `resolve_function_identity` already apply
+   (`model.signature_normalization.
+   canonicalize_function_signature_param_type` per parameter,
+   `name_classification.canonicalize_type_name` for the return/variable
+   type), with `is_const`/`is_volatile` carried via `CanonicalEntity.
+   cv_qualification`. Wired through `dumper_manifest.
+   resolve_header_ast_result` (legacy single-TU ELF dump and a real
+   manifest dump) and, via the new `extract/header_ast_fields.
+   parse_header_ast_fields` choke point, `dumper.py`'s `_dump_pe`/
+   `_dump_macho` too — every header-AST platform now populates
+   `semantic_ir`, including through `--ast-frontend hybrid`'s
+   reconciliation (`dumper_hybrid.py`'s own Mach-O mangled-name and
+   ctor/dtor synthetic-key identity rewrites are propagated into
+   `semantic_ir` via `_rewrite_semantic_ir_entity_ids`, so a hybrid merge
+   never leaves one representation keyed under a retired identity another
+   already moved past). Constants are still not normalized
+   (`parse_constants()` captures only a value expression, never a type
+   string, to canonicalize). BTF/CTF/PDB remain fully unmigrated: those
+   backends do not populate `entity_id` at all yet.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

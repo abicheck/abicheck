@@ -12717,9 +12717,10 @@ directly (a matched synthetic ctor's `semantic_ir` occurrence ends up under
 the real, rewritten key, not duplicated or left stale under the synthetic
 one).
 
-**The unresolved-type-sentinel check is a substring test, not exact
-equality (Codex review, PR #1012, second round, fresh evidence).** castxml's
-own type resolver (`extract/headers/castxml/type_resolution.py`'s
+**The unresolved-type-sentinel check tracks nesting depth, not a plain
+substring test, and definitely not exact equality (Codex review, PR #1012,
+second and third rounds, fresh evidence each time).** castxml's own type
+resolver (`extract/headers/castxml/type_resolution.py`'s
 `type_name_uncached`) composes an unresolved nested type into the enclosing
 spelling -- a pointer/reference/array wrapping an unresolvable pointee
 renders as `"?*"`/`"?&"`/`"?[]"`, a cv-qualified one as `"const ?"` -- so an
@@ -12727,10 +12728,23 @@ exact-equality check (correct only for the typedef branch's `underlying`
 value, always the outermost `type_name()` result with nothing further
 wrapped around it) misses every composite shape for a function/parameter/
 variable type, and shares the identical gap for a typedef whose underlying
-type is itself one of these composite shapes. `_has_unresolved_component`
-(a substring test -- `"?"` is not a legal token in any real C/C++ type
-spelling, so it can only ever fire on this sentinel) replaces the
-exact-equality check everywhere, typedef branch included.
+type is itself one of these composite shapes (second round: fixed with a
+plain substring test). **The third round found a plain substring test is
+itself unsafe**: a real, fully-resolved type spelling can legally contain a
+literal `"?"` -- clang emits one verbatim for a dependent, unevaluated
+ternary expression inside a `decltype(...)` (e.g. a non-type template
+argument's own spelling, `"S<decltype(flag ? A{} : B{})>"`), which a
+substring test wrongly marks `Fact.failed(...)`, discarding real canonical
+evidence. `_has_unresolved_component` now tracks nesting depth over
+`()`/`[]`/`<>` instead: castxml's own sentinel-composing recursion never
+emits a `"?"` inside such a grouping -- it only ever prepends/appends a
+bare pointer/reference sigil, array brackets, or a cv keyword directly
+beside it -- while a ternary's `"?"` is, by C++ grammar, only reachable
+inside an expression context that for a type spelling means already being
+inside `decltype(...)`'s parens or a template argument list's angle
+brackets. So a `"?"` found at nesting depth zero is the sentinel; one found
+at depth > 0 is real, resolved evidence. Replaces the exact-equality check
+everywhere, typedef branch included.
 `dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
 the second slice deliberately left unwired, per that slice's own note) now
 populate `semantic_ir` too, via a new shared choke point,
