@@ -1627,6 +1627,7 @@ def _dump_elf(
         constants=ast_result.constants,
         typedef_entity_ids=ast_result.typedef_entity_ids,
         constant_entity_ids=ast_result.constant_entity_ids,
+        semantic_ir=ast_result.semantic_ir,
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,

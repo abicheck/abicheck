@@ -574,9 +574,29 @@ def _render(result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path) -> st
 
 
 def _render_json(result: Any, *, old_facts_path: Path, new_dir: Path) -> str:
+    from ....report.run_outcome import run_outcome_dict_for_diff_result
     from ....reporter import to_json
 
     libraries = {diff.library: json.loads(to_json(diff)) for diff in result.per_library}
+    # ADR-063 Phase 7 (Codex review, fresh evidence): every compare/release
+    # JSON report carries `run_outcome`; this summary previously omitted it.
+    # `frontends` may not import `policy` directly (architecture/
+    # modules.yaml), so this reuses `run_outcome_dict_for_diff_result` --
+    # `report`-classified, already used by `reporter.py`'s own JSON entry
+    # points -- rather than `run_outcome_dict_for_release`/`legacy_exit_
+    # code`. It duck-types on `result.verdict`/`result.analysis_assurance`
+    # (absent here, so `assurance` stays `None`), which a `BundleDiffResult`
+    # satisfies the same way a `DiffResult` does. No `SeverityConfig`/gate is
+    # available here (this summary carries no `exit` block at all), so both
+    # are `None` -- the function's own documented "no severity_config"
+    # fallback to the legacy verdict->exit mapping. Unlike the live
+    # directory/package release fan-out, `result.verdict` here is always a
+    # real `Verdict` -- `BundleDiffResult.verdict`/`.per_library_verdict`/
+    # `.bundle_verdict` are each `max(...)` over real per-DiffResult/bundle-
+    # finding verdicts, never the "ERROR"/"not_comparable" operational
+    # sentinels a per-library dump failure would produce in the live fan-out
+    # -- so `operational` stays `none`.
+    run_outcome = run_outcome_dict_for_diff_result(result, None, None)
     summary: dict[str, object] = {
         "mode": "bundle_facts",
         "old_bundle_facts": str(old_facts_path),
@@ -584,6 +604,7 @@ def _render_json(result: Any, *, old_facts_path: Path, new_dir: Path) -> str:
         "verdict": result.verdict.value,
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
+        "run_outcome": run_outcome,
         "libraries": libraries,
         "bundle_findings": [
             {

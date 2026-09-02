@@ -20,13 +20,17 @@ locator: code inside this package imports its siblings' implementation
 modules directly (see ``AGENTS.md``).
 
 ADR-062 Phase 0's availability/identity/canonical-encoding/versioning
-primitives, plus Phase 1's ``package`` module (the storage-format-v2 plan's
-A1.1: the ``ProjectSnapshot`` manifest/ref/object-store *model*, not yet a
-writer). Nothing here is wired into a producer, reader, or comparison path
-yet, so every existing snapshot, baseline set, and ``BundleFacts`` document
-is unchanged. ADR-059's physical envelope (compression, atomic writes,
-decompression-bomb limits) stays in ``abicheck/snapshot_io.py`` and is
-deliberately not reimplemented here.
+primitives, plus Phase 1's ``package``/``dto``/``import_v1`` modules (the
+storage-format-v2 plan's A1.1-A1.3: the ``ProjectSnapshot`` manifest/ref/
+object-store model, its per-section DTO envelope, and the v1-v25 import
+adapter). The real, directory-backed writer/reader
+(``abicheck.project_snapshot_store``) lives outside this package, since it
+needs ``snapshot_io`` and this package may import only ``model``. Nothing
+here is wired into ``dump``/``compare``/``scan`` yet, so every existing
+snapshot, baseline set, and ``BundleFacts`` document produced or read by
+those commands is unchanged. ADR-059's physical envelope (compression,
+atomic writes, decompression-bomb limits) stays in
+``abicheck/snapshot_io.py`` and is deliberately not reimplemented here.
 """
 
 from __future__ import annotations
@@ -45,6 +49,14 @@ from .canonical import (
     semantic_digest,
     strip_capture_metadata,
 )
+from .dto import (
+    SECTION_SCHEMA_VERSIONS,
+    SEMANTIC_IR_SECTION_KIND,
+    SectionDTO,
+    migrate_section_dto,
+    semantic_ir_from_dto,
+    semantic_ir_to_dto,
+)
 from .identity import (
     EntityId,
     EntityKind,
@@ -54,6 +66,7 @@ from .identity import (
     OccurrenceSet,
     elf_symbol_occurrence,
 )
+from .import_v1 import LEGACY_DOCUMENT_SECTION_KIND, import_legacy_snapshot
 from .package import (
     MANIFEST_RELPATH,
     SECTION_KINDS,
@@ -89,6 +102,7 @@ __all__ = [
     "FactStatus",
     "IdentityConflict",
     "InMemoryObjectStore",
+    "LEGACY_DOCUMENT_SECTION_KIND",
     "MANIFEST_RELPATH",
     "ObjectRef",
     "ObjectStore",
@@ -100,6 +114,9 @@ __all__ = [
     "ProducerIdentity",
     "ReaderCompatibility",
     "SECTION_KINDS",
+    "SECTION_SCHEMA_VERSIONS",
+    "SEMANTIC_IR_SECTION_KIND",
+    "SectionDTO",
     "StorageVersions",
     "UNSTATED_VERSION",
     "VariantRef",
@@ -108,9 +125,13 @@ __all__ = [
     "canonical_json",
     "check_reader_compatibility",
     "elf_symbol_occurrence",
+    "import_legacy_snapshot",
+    "migrate_section_dto",
     "object_relpath",
     "raw_digest",
     "semantic_digest",
+    "semantic_ir_from_dto",
+    "semantic_ir_to_dto",
     "strip_capture_metadata",
     "variant_ref_relpath",
 ]

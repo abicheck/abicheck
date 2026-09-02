@@ -62,9 +62,11 @@ from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
+from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
+from .check_report_run_outcome import backfill_run_outcome, synthetic_run_outcome
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix). ``\Z``, not ``$`` -- the latter also
@@ -272,6 +274,10 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
+    # ADR-063 Phase 7: zero `run_outcome.gate` too, never `.operational` (see `final_exit_code`'s invariant).
+    run_outcome = report.get("run_outcome")
+    if isinstance(run_outcome, dict):
+        report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
     # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
     # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
     # *prefers* it over the top-level `exit_code` zeroed just above -- so
@@ -491,20 +497,24 @@ def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
     ``aggregate.py``'s ``_VALID_GATE_EXIT = {0, 1, 2, 4}``; 8 itself is not a
     legal ``severity.exit_code`` and would raise ``_MalformedGate`` there).
     Only escalates -- never downgrades an already->=4 severity block, though 4
-    is already that ceiling so there is nothing to downgrade from.
+    is already that ceiling so there is nothing to downgrade from. The two
+    escalations below are independent (Codex review, fresh evidence): a pre-severity legacy report can still carry `run_outcome`, which an early return gated on `severity` alone previously left unescalated.
     """
     severity = out.get("severity")
-    if not isinstance(severity, dict) or severity.get("exit_code", 0) >= 4:
-        return
-    cats = list(severity.get("blocking_categories") or [])
-    if "abi_breaking" not in cats:
-        cats.append("abi_breaking")
-    out["severity"] = {
-        **severity,
-        "exit_code": 4,
-        "blocking": True,
-        "blocking_categories": cats,
-    }
+    if isinstance(severity, dict) and severity.get("exit_code", 0) < 4:
+        cats = list(severity.get("blocking_categories") or [])
+        if "abi_breaking" not in cats:
+            cats.append("abi_breaking")
+        out["severity"] = {
+            **severity,
+            "exit_code": 4,
+            "blocking": True,
+            "blocking_categories": cats,
+        }
+    # ADR-063 Phase 7: fold into `run_outcome.gate` too (no-op if absent), independently of `severity` above.
+    run_outcome = out.get("run_outcome")
+    if isinstance(run_outcome, dict):
+        out["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.ABI_BREAKING.value}
 
 
 def _classify_verdict(
@@ -578,6 +588,7 @@ def augment_report(
     check_id = build_check_id(
         name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
+    backfill_run_outcome(out)
     backfill_exit_block_fields(out)
     _stamp_schema_version(out, report)
     out["check_id"] = check_id
@@ -674,6 +685,7 @@ def build_operational_error_report(
         "operational_errors": [{"kind": resolve_outcome, "message": resolve_message}],
         "publication": {"state": "skipped", "channels": []},
         "verdict": OPERATIONAL_ERROR_VERDICT,
+        "run_outcome": synthetic_run_outcome(operational=OperationalStatus.EXTRACTION_ERROR),
     }
     _apply_optional_envelope_fields(
         report, project=project, head_sha=head_sha, base_ref=base_ref,
@@ -719,6 +731,7 @@ def build_bootstrap_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": BOOTSTRAP_VERDICT,
         "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.BOOTSTRAP),
     }
     _apply_optional_envelope_fields(
         report, project=project, head_sha=head_sha, base_ref=base_ref,
@@ -771,6 +784,7 @@ def build_new_target_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": NEW_TARGET_VERDICT,
         "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET),
     }
     _apply_optional_envelope_fields(
         report, project=project, head_sha=head_sha, base_ref=base_ref,

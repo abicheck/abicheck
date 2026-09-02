@@ -12,7 +12,7 @@
   different `analysis:`. `check_id`'s pattern also reserves a second,
   composable `!<environment_id>` tail segment for a later phase (named
   deployment environments); omitting both tails produces the unchanged,
-  pre-existing `check_id` shape. Report schema bumped to 2.48.
+  pre-existing `check_id` shape. Report schema bumped to 2.49.
   `checks[].id` also threads all the way through
   `actions/check-target`/`check-project.yml`/`check-single.yml` (a new
   `explicit-id` input), not just `abicheck project plan`'s generated

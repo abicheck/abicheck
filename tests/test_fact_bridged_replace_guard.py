@@ -38,7 +38,7 @@ spellings, per AGENTS.md's "fix the cause, not the instance".
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -135,6 +135,20 @@ def _module_paths() -> list[Path]:
     return sorted(_PKG.rglob("*.py"))
 
 
+def _rel(path: Path) -> str:
+    """Repo-relative path with **forward slashes on every platform**.
+
+    ``str(Path)`` renders ``abicheck\\tu_merge.py`` on Windows, which matches
+    no key in either allowlist below — so every allowlisted call site read as
+    unreviewed and all four tests failed there while passing on Linux (real
+    CI failure, `unit-tests (windows-latest, 3.13)`). The allowlists are
+    written with POSIX separators because that is how this repo names files
+    everywhere else, so the normalization belongs here rather than in
+    twelve hand-written keys.
+    """
+    return path.relative_to(_PKG.parent).as_posix()
+
+
 def _enclosing_function(tree: ast.Module, node: ast.AST) -> str:
     best = "<module>"
     for candidate in ast.walk(tree):
@@ -179,7 +193,7 @@ def _named_violations() -> list[tuple[str, int, str, list[str]]]:
             )
             if not unsynced:
                 continue
-            rel = str(path.relative_to(_PKG.parent))
+            rel = _rel(path)
             func = _enclosing_function(tree, node)
             unreviewed = [
                 name
@@ -203,7 +217,7 @@ def _starred_calls() -> list[tuple[str, int, str]]:
             if not _is_replace_call(node):
                 continue
             if any(kw.arg is None for kw in node.keywords):
-                rel = str(path.relative_to(_PKG.parent))
+                rel = _rel(path)
                 found.append((rel, node.lineno, _enclosing_function(tree, node)))
     return found
 
@@ -240,7 +254,7 @@ class TestNoUnsyncedReplace:
         live: set[tuple[str, str, str]] = set()
         for path in _module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            rel = str(path.relative_to(_PKG.parent))
+            rel = _rel(path)
             for node in ast.walk(tree):
                 if not _is_replace_call(node):
                     continue
@@ -253,6 +267,69 @@ class TestNoUnsyncedReplace:
         assert not stale, (
             "allowlisted call sites that no longer exist (or that now sync "
             f"their sibling) — shrink the list: {stale}"
+        )
+
+    def test_relative_paths_are_computed_platform_independently(self) -> None:
+        """`_rel` must be built via `.as_posix()`, never bare `str(Path)`.
+
+        `Path.relative_to(...)` renders with the *host's native* separator
+        — `str()` of a relative path is `abicheck\\dwarf_snapshot.py` on
+        Windows — while every allowlist key above is spelled with forward
+        slashes. `str(rel)` on Windows therefore never equals any allowlist
+        key, so `_named_violations`/`_starred_calls` never find their own
+        allowlisted entries and every one of the three tests above failed
+        on the `windows-latest` CI lane: real, allowlisted, already-safe
+        call sites read as unreviewed violations, and every genuinely-live
+        allowlist entry read as stale, for every PR run on that lane.
+
+        Exercises `_rel` itself, not just a source-text scan for one banned
+        spelling (Codex review): a scan checking only the literal bare-str
+        call, applied to `relative_to(...)`'s own result, stays green
+        through a refactor that assigns the relative path to a variable
+        before calling `str()`, renames `path`, or uses an f-string --
+        none of which change the underlying bug. A fake path object whose
+        `relative_to` returns a `PureWindowsPath` (rendered with a
+        backslash separator on *every* host, not just real Windows)
+        drives `_rel`'s real code end to end, so a regression in `_rel`'s
+        own implementation -- whatever its source spelling -- fails this
+        assertion directly, on any host.
+
+        Parametrized over several independently-chosen path shapes, not
+        just the one two-component `abicheck/dwarf_snapshot.py` path the
+        original failure happened to name (Codex review): an
+        implementation that normalized only, say, the first backslash
+        (`s.replace("\\\\", "/", 1)`) would satisfy a single-shape
+        assertion while still breaking a real multi-backslash key like
+        `abicheck/extract/semantic_ir_merge.py`.
+        """
+        windows_paths = [
+            PureWindowsPath("abicheck") / "dwarf_snapshot.py",
+            PureWindowsPath("abicheck") / "extract" / "semantic_ir_merge.py",
+            PureWindowsPath("abicheck") / "storage" / "package.py",
+            PureWindowsPath("tests") / "unit" / "storage" / "test_dto.py",
+        ]
+        for windows_path in windows_paths:
+
+            class _FakeWindowsPath:
+                def relative_to(self, _other: Path) -> PureWindowsPath:
+                    return windows_path
+
+            result = _rel(_FakeWindowsPath())  # type: ignore[arg-type]
+            assert result == windows_path.as_posix()
+            assert "\\" not in result
+
+        # A source-level backstop for the same invariant, kept alongside
+        # the behavioral assertion above rather than in place of it: it
+        # catches a *reintroduction* immediately, by name, rather than only
+        # once some future edit's own behavior drifts enough to trip the
+        # assertion above.
+        source = Path(__file__).read_text(encoding="utf-8")
+        banned = "str" + "(path.relative_to("
+        assert banned not in source, (
+            "rel must be computed via path.relative_to(...).as_posix(), "
+            "never the bare str(...) form -- see this test's own "
+            "docstring for why the latter silently breaks every allowlist "
+            "match on Windows"
         )
 
 

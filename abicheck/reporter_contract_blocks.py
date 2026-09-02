@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .checker_types import Change, DiffResult
-    from .severity import SeverityConfig
+    from .severity import GateDecision, SeverityConfig
 
 
 def add_contract_context(
@@ -386,27 +386,50 @@ def add_evidence_depth(d: dict[str, Any], result: DiffResult) -> None:
 
 
 def render_json_with_side_facts(
-    d: dict[str, Any], result: DiffResult, *, indent: int
+    d: dict[str, Any],
+    result: DiffResult,
+    *,
+    indent: int,
+    severity_config: SeverityConfig | None = None,
+    gate: GateDecision | None = None,
 ) -> str:
     """The one shared tail of every ``reporter.py`` JSON builder: fold in
     the two ADR-061 Phase 2 item 5 facts (:func:`add_suppression_audit`,
-    :func:`add_evidence_depth`), then render.
+    :func:`add_evidence_depth`) and the ADR-063 Phase 7 ``run_outcome``
+    block, then render.
 
     ``reporter.py`` itself is on the architecture debt ledger's no-growth
     list (see this module's own docstring) -- its four JSON builders
     (``to_json``, ``_to_json_leaf``, ``_to_json_root_cause``, ``to_stat_
     json``) each already end with ``return render_json(ReportDocument.
     from_mapping(d), indent=indent)``; swapping that line for ``return
-    render_json_with_side_facts(d, result, indent=indent)`` adds the two
+    render_json_with_side_facts(d, result, indent=indent)`` adds these
     facts to all four without growing the file by a net line, instead of
-    each site carrying its own two-line call (which would). ``to_stat_
+    each site carrying its own multi-line call (which would). ``to_stat_
     json`` joined the other three later (Codex review, fresh evidence) --
     ``--stat --format json`` had been the one JSON mode still silently
     omitting both facts, an oversight rather than a deliberate scope
     decision (it already carries several other side-fact-shaped blocks:
     ``severity``, ``analysis_assurance``, ``confidence``, the effective-
-    config digest).
+    config digest). *severity_config* is threaded through by every one of
+    those four callers (each already has it in scope) purely so
+    ``run_outcome.gate`` is computed under the same scheme
+    (``severity``/legacy) ``d["severity"]`` itself was, without a fifth
+    call needing to duplicate that resolution.
+
+    *gate* is each caller's own already-computed :func:`~abicheck.policy.
+    gate_decision.gate_decision_for_result` value (``None`` when
+    *severity_config* is ``None``, matching that function's own contract)
+    -- threaded through rather than recomputed a second time inside
+    ``run_outcome_dict_for_diff_result`` (Codex review, fresh evidence): a
+    report-level projection may not calculate a new gate decision of its
+    own (`report/AGENTS.md`'s "Prohibited responsibilities"), and a second,
+    independent evaluation is exactly how ``run_outcome`` could silently
+    drift from the ``severity`` block's own gate as either evolves.
     """
+    from .report.run_outcome import run_outcome_dict_for_diff_result
+
+    d["run_outcome"] = run_outcome_dict_for_diff_result(result, severity_config, gate)
     add_suppression_audit(d, result)
     add_evidence_depth(d, result)
     return render_json(ReportDocument.from_mapping(d), indent=indent)

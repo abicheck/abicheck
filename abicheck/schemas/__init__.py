@@ -688,7 +688,12 @@ from typing import Any
 #:       settings previously published an identical
 #:       ``surface.scope_to_public_surface`` value despite retaining
 #:       genuinely different findings.
-REPORT_SCHEMA_VERSION = "2.48"  #: G42 phase 1 (explicit check identifiers): ``check_id``'s pattern gains two optional, composable tail segments -- ``!<environment_id>`` (reserved) and ``~<explicit_id>`` (a project author's ``checks[].id``) -- additive to the existing four-component shape.
+#: 2.48 -- ADR-063 Phase 7: every JSON report gains an additive top-level
+#:       ``run_outcome`` block (``policy.outcome.RunOutcome.to_dict()`` --
+#:       ``compatibility``/``assurance``/``gate``/``operational``/
+#:       ``lifecycle``), alongside the unchanged ``verdict``/``exit_code``/
+#:       ``severity`` fields.
+REPORT_SCHEMA_VERSION = "2.49"  #: G42 phase 1 (explicit check identifiers): ``check_id``'s pattern gains two optional, composable tail segments -- ``!<environment_id>`` (reserved) and ``~<explicit_id>`` (a project author's ``checks[].id``) -- additive to the existing four-component shape. Renumbered from a conflicting 2.48 when the origin/main merge claimed that version first for ADR-063 Phase 7's ``run_outcome`` block (same "renumber, don't reuse" convention as the 2.32/2.36/2.38 entries above).
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -1010,7 +1015,8 @@ REPORT_SCHEMA_VERSION = "2.48"  #: G42 phase 1 (explicit check identifiers): ``c
 #:        same round as `compare`'s report_schema_version 2.46 entry: ``policy.reconcile_build_context`` and ``surface.scope_to_public_surface_requested`` were both added.
 #: 1.21 -- ``scan --against``'s baseline summary gains ``coverage_warnings`` (Codex review), mirroring `compare`'s own top-level field of the same name/shape -- e.g. a byte-identical-binaries warning. Additive key, omitted when empty.
 #: 1.22 -- ADR-064 stage 1b, mirrors `compare`'s 2.47 entry: ``ExitDecision.to_dict``'s five new keys reach ``diff.exit`` too, and a ``NOT_COMPARABLE`` baseline outcome now persists a real ``diff.exit`` block (previously ``diff`` was only ``{"reason": <message>}``).
-SCAN_SCHEMA_VERSION = "1.23"  #: ADR-064 stage 1b (Codex review, PR #967): the typed ``ScanResult`` envelope's own ``report`` key -- ``ScanResult.to_dict()``'s ``report``, not the CLI's ``diff`` block above -- now nests a real ``exit`` block for a ``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR`` abort (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`), where it used to be `{}`.
+#: 1.23 -- ADR-064 stage 1b (Codex review, PR #967): the typed ``ScanResult`` envelope's own ``report`` key -- ``ScanResult.to_dict()``'s ``report``, not the CLI's ``diff`` block above -- now nests a real ``exit`` block for a ``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR`` abort (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`), where it used to be `{}`.
+SCAN_SCHEMA_VERSION = "1.24"  #: ADR-063 Phase 7, mirrors `compare`'s 2.48 entry: every scan JSON producer (``ScanOutcome.to_dict()``, the typed ``ScanResult.to_dict()``/``ScanSetResult.to_dict()``) gains an additive top-level ``run_outcome`` block, alongside the unchanged ``verdict``/``exit_code`` fields.
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

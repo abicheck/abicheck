@@ -355,17 +355,22 @@ def _compare_one_library(
             else "scope_mismatch"
         )
         if output_dir:
+            from .report.not_comparable import (
+                OperationalStatus,
+                not_comparable_document,
+            )
             from .schemas import REPORT_SCHEMA_VERSION
 
             lib_report_path = output_dir / f"{old_path.stem}.json"
-            doc = {
-                "report_schema_version": REPORT_SCHEMA_VERSION,
-                "library": old_path.name,
-                "old_version": old_version,
-                "new_version": new_version,
-                "verdict": None,
-                "reason": {"kind": kind, "message": str(exc)},
-            }
+            doc = not_comparable_document(
+                old_path.name,
+                old_version,
+                new_version,
+                kind,
+                str(exc),
+                report_schema_version=REPORT_SCHEMA_VERSION,
+                operational=OperationalStatus.NOT_COMPARABLE,
+            ).to_mapping()
             _safe_write_output(lib_report_path, json.dumps(doc, indent=2))
         return {
             "library": old_path.name,

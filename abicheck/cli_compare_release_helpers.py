@@ -73,6 +73,67 @@ def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_resul
     return worst
 
 
+#: The two release-level sentinels that are not real `Verdict` values and
+#: must never mask a *different*, already-completed compatibility result
+#: on `RunOutcome.compatibility`'s own independent axis (Codex review, fresh
+#: evidence): `worst_verdict`'s own `_RELEASE_VERDICT_ORDER` rollup ranks
+#: both above every real verdict by design (an operational failure/refusal
+#: dominates the release's own reported "verdict"), which is exactly the
+#: right behavior for the *reported* release verdict but the wrong one for
+#: `run_outcome.compatibility`, a genuinely separate axis.
+_RELEASE_OPERATIONAL_SENTINELS = frozenset({"ERROR", "not_comparable"})
+
+
+def _release_completed_compatibility_verdict(
+    library_results: list[dict[str, object]],
+    release_global_verdict: str,
+    *,
+    release_global_ran: bool,
+) -> str | None:
+    """The worst real `Verdict` among *library_results* + *release_global_
+    verdict*, with the two operational sentinels excluded -- for
+    ``run_outcome.compatibility``, never for the release's own reported
+    ``verdict`` (``worst_verdict`` stays exactly what it always was).
+
+    One `BREAKING` library plus a second, unrelated library's `ERROR` still
+    surfaces `compatibility: "BREAKING"` here, even though `worst_verdict`
+    itself (correctly) reports `"ERROR"` -- the real compatibility result
+    is not lost just because a different library's operational failure
+    dominates the release-level rollup.
+
+    Returns ``None`` -- never the floor ``"NO_CHANGE"`` -- when no real
+    compatibility result was actually observed at all (every library
+    result is one of the two operational sentinels, and no bundle/probe-
+    matrix comparison ran either): `run_outcome.compatibility` must stay
+    unknown, not falsely claim a clean completed comparison (Codex review,
+    fresh evidence). *release_global_ran* -- whether a bundle or matrix
+    comparison actually ran -- must be passed explicitly rather than
+    inferred from *release_global_verdict* alone: `_release_global_
+    verdict`'s own floor default is `"NO_CHANGE"`, indistinguishable from a
+    real completed no-change bundle/matrix result by string value alone.
+    """
+    worst: str | None = None
+    for entry in library_results:
+        v = str(entry.get("verdict", "NO_CHANGE"))
+        if v in _RELEASE_OPERATIONAL_SENTINELS:
+            continue
+        if worst is None or _RELEASE_VERDICT_ORDER.get(
+            v, 0
+        ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+            worst = v
+    if (
+        release_global_ran
+        and release_global_verdict not in _RELEASE_OPERATIONAL_SENTINELS
+        and (
+            worst is None
+            or _RELEASE_VERDICT_ORDER.get(release_global_verdict, 0)
+            > _RELEASE_VERDICT_ORDER.get(worst, 0)
+        )
+    ):
+        worst = release_global_verdict
+    return worst
+
+
 def _resolve_release_headers(
     headers: tuple[Path, ...],
     old_headers_only: tuple[Path, ...],
@@ -1041,6 +1102,9 @@ def _format_release_json(
         for lib in library_results
         if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
     ]
+    from .report.not_comparable import run_outcome_dict_for_release
+    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    exit_dict = resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, release_global_verdict).to_dict()
     summary: dict[str, object] = {
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
@@ -1050,12 +1114,38 @@ def _format_release_json(
         "unmatched_old": [old_map[k].name for k in removed_keys],
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
-        "exit": resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, _release_global_verdict(bundle_result, matrix_result)).to_dict(),
+        "exit": exit_dict,
+        "run_outcome": run_outcome_dict_for_release(
+            _release_completed_compatibility_verdict(
+                library_results,
+                release_global_verdict,
+                release_global_ran=(
+                    bundle_result is not None or matrix_result is not None
+                ),
+            ),
+            exit_dict,
+        ),
     }
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
     # which categories are gated to error and bucket findings accordingly.
     if severity_config is not None:
+        # Escalate to 4 (the abi_breaking ceiling) when the removed-required-
+        # library axis is what's driving run_outcome.gate above, mirroring
+        # buildsource/check_report.py's _escalate_removed_library_severity
+        # exactly (Codex review, fresh evidence): without this, a severity-
+        # scheme release whose ordinary findings contribute 0 emits
+        # severity.exit_code: 0 alongside run_outcome.gate: abi_breaking --
+        # the exact disagreement GateInfo.from_report_data's own
+        # contradiction check (this same PR) fails closed on, turning a
+        # legitimate --fail-on-removed-library escalation into an
+        # unavailable target for aggregate rather than preserving it.
+        removed_lib_contribution = exit_dict.get("removed_required_library_contribution")
+        escalated_exit_code = (
+            max(severity_exit_code or 0, 4)
+            if isinstance(removed_lib_contribution, int) and removed_lib_contribution != 0
+            else severity_exit_code
+        )
         summary["severity"] = {
             "config": {
                 "abi_breaking": severity_config.abi_breaking.value,
@@ -1063,7 +1153,7 @@ def _format_release_json(
                 "quality_issues": severity_config.quality_issues.value,
                 "addition": severity_config.addition.value,
             },
-            "exit_code": severity_exit_code,
+            "exit_code": escalated_exit_code,
         }
     # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
     # release/package parity), max()-aggregated across every library. Only

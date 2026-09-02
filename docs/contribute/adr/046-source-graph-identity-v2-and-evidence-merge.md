@@ -31,7 +31,7 @@ acceptance), a structured `list[GraphEdge]` path — plus the `primary_path`/
 mapping and what's still deferred). See "D1 implementation"/"D2
 implementation"/"D3 implementation"/"D4 implementation"/"D5
 implementation"/"D6 implementation" below.
-**Verified:** main@55feabc on 2026-08-21
+**Verified:** main@40f0063 on 2026-09-02
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
