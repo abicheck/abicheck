@@ -773,12 +773,12 @@
     },
     {
       "path": "abicheck/dumper_scoping.py",
-      "baseline_lines": 1350,
+      "baseline_lines": 1381,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 61 for ADR-063 Phase 6's second slice (Codex review, PR #1001): scope_snapshot_excluding_dependencies()'s dataclasses.replace() carried snap.semantic_ir over unfiltered, so an excluded dependency type/enum stayed reachable through the filtered snapshot's own canonical IR even though the flat types/enums lists correctly dropped it. _scoped_semantic_ir() closes the gap the same header-origin-filter way the existing flat-field filtering already does.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 61 for ADR-063 Phase 6's second slice (Codex review, PR #1001): scope_snapshot_excluding_dependencies()'s dataclasses.replace() carried snap.semantic_ir over unfiltered, so an excluded dependency type/enum stayed reachable through the filtered snapshot's own canonical IR even though the flat types/enums lists correctly dropped it. _scoped_semantic_ir() closes the gap the same header-origin-filter way the existing flat-field filtering already does. Raised by 31 more in the same PR (second Codex review round): the same function's own semantic_ir_conflicts dict was still left unfiltered for an excluded occurrence -- _scoped_semantic_ir() now returns both the scoped IR and a semantic_ir_conflicts filtered by exact key membership (never a text rewrite, so no risk of the packed-key corruption model.semantic_ir.renumber_conflict_keys was built to avoid for the unrelated renumbering case).",
       "review_by": "2026-11-30"
     },
     {
