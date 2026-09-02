@@ -433,6 +433,7 @@ topics:
       - learn/where-in-the-pipeline.md
       - learn/rollout-and-governance.md
       - learn/products-not-libraries.md
+      - learn/packages-and-consumers.md
 
   integration-scenario-selection:
     canonical_page: integration/index.md
@@ -566,6 +567,29 @@ topics:
     allowed_summaries:
       - learn/abi-series/04-cpp-abi.md
       - learn/limitations.md
+
+  system-library-discipline:
+    canonical_page: learn/system-library-discipline.md
+    fact_sources:
+      - abicheck/policies/glibc_symbol_versioned.yaml
+      - abicheck/diff_versioning.py
+    allowed_summaries:
+      - learn/abi-series/05-linker-elf.md
+      - learn/abi-series/07-designing-for-stability.md
+      - learn/rollout-and-governance.md
+
+  packages-and-consumers:
+    canonical_page: learn/packages-and-consumers.md
+    fact_sources:
+      - abicheck/package.py
+      - abicheck/debian_symbols.py
+    task_pages:
+      - use/python-extensions.md
+      - use/debian-symbols.md
+      - start/scanning-conda-packages.md
+      - integration/scenarios/packages-and-sdks.md
+    allowed_summaries:
+      - learn/abi-series/01-foundations.md
 
   class-layout:
     canonical_page: learn/class-layout-abi.md

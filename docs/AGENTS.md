@@ -68,11 +68,11 @@ path, not the nav position.
     1-2-3-4-5-6, plus `class-layout-abi.md`) → **Beyond ABI** (behavioral,
     data/wire, ownership, static/header-only, concurrency) → **Platforms &
     Toolchains** (exception unwinding, modern-toolchain hazards, runtime
-    floors, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
+    floors, environment drift, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
     7) → **Verification & Assurance** (`abi-series/08-detection.md` +
     `assurance-methods.md`) → **Practice** (where in the pipeline, surface
     growth, rollout and governance, triage) → **At Scale** (products, template-heavy
-    libraries) → **Quick Reference** (glossary). This is a
+    libraries, system-library discipline, packages and consumers) → **Quick Reference** (glossary). This is a
     nav-only regroup of what was once a flat "Deep Dives" list plus a
     separately-numbered "Learning Series" — a Part's own numbered "Series
     navigation" breadcrumb (top of each `abi-series/0N-*.md` page) still
@@ -80,7 +80,7 @@ path, not the nav position.
   - The **tool track** — how abicheck itself models and reports compatibility
     — is navigated under the **Concepts** tab: verdicts,
     `evidence-and-detectability.md`, `architecture.md`, build/source data,
-    graph coverage, impact assessment, environment drift,
+    graph coverage, impact assessment,
     `elf-symbol-filtering.md` (a specific abicheck scan-mode behavior, not
     general ABI knowledge — kept out of the educational tab even though its
     file lives in the same directory), and `limitations.md`.

@@ -99,8 +99,10 @@ sequences:
         members:
           - learn/products-not-libraries.md
           - learn/template-heavy-libraries.md
+          - learn/system-library-discipline.md
           - learn/dependency-floors.md
           - learn/environment-drift.md
+          - learn/packages-and-consumers.md
       - id: 8
         title: Beyond static ABI
         floor: advanced
@@ -172,7 +174,9 @@ paths:
     pages:
       - learn/abi-series/05-linker-elf.md
       - learn/products-not-libraries.md
+      - learn/system-library-discipline.md
       - learn/dependency-floors.md
+      - learn/packages-and-consumers.md
     after: start/choose-your-workflow.md
   - role: Product / SDK owner (several binaries)
     pages:

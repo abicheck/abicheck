@@ -140,7 +140,8 @@ source-level churn is accepted) and `plugin_abi` (a host/plugin boundary).
 Ecosystem profiles build on `strict_abi` where a platform's own documented
 rules differ — `qt_kde_cpp`, `msvc_pe`, `mach_o_dylib`, `rust_c_ffi`,
 `glibc_symbol_versioned` among them
-([Policy Profiles § Built-in use-case profiles](../use/policies.md#built-in-use-case-profiles)):
+([How System Libraries Stay Compatible](system-library-discipline.md) gives
+that last one its full treatment):
 
 ```bash
 abicheck compare old.json new.so -H include/ --policy sdk_vendor

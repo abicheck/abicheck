@@ -136,7 +136,6 @@ nav:
     - Build Info & Sources (build-source data): learn/build-source-data.md
     - Graph Coverage & Negative Evidence: learn/graph-coverage.md
     - Unified Impact Assessment: learn/impact-analysis.md
-    - Environment & Toolchain Drift: learn/environment-drift.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:
     - CLI Reference: reference/cli-reference.md
@@ -206,6 +205,7 @@ nav:
       - Exception Unwinding: learn/exception-unwinding-abi.md
       - Modern C/C++ and Toolchain ABI Hazards: learn/modern-cpp-toolchain-hazards.md
       - Dependency & Runtime Floors: learn/dependency-floors.md
+      - Environment & Toolchain Drift: learn/environment-drift.md
       - The MSVC/PE ABI Model: learn/msvc-pe-abi-model.md
     - Designing Stable Interfaces:
       - Designing for Stability: learn/abi-series/07-designing-for-stability.md
@@ -228,6 +228,8 @@ nav:
     - At Scale:
       - "Products, Not Libraries": learn/products-not-libraries.md
       - Template- and Header-Heavy Libraries: learn/template-heavy-libraries.md
+      - How System Libraries Stay Compatible: learn/system-library-discipline.md
+      - Packages and Consumers: learn/packages-and-consumers.md
     - Quick Reference:
       - "Glossary": learn/abi-series/glossary.md
   # The case catalog: every break scenario as a compilable fixture, browsable

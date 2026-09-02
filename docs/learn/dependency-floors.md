@@ -220,4 +220,4 @@ established fixes keep both audiences:
 
 ---
 
-**Ladder:** ← [Template- and Header-Heavy Libraries](template-heavy-libraries.md) · Tier 7 · At scale · [Environment & Toolchain Drift](environment-drift.md) →
+**Ladder:** ← [How System Libraries Stay Compatible](system-library-discipline.md) · Tier 7 · At scale · [Environment & Toolchain Drift](environment-drift.md) →
