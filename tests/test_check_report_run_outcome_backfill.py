@@ -94,6 +94,23 @@ def test_old_scan_report_gets_backfilled_run_outcome() -> None:
     assert run_outcome["gate"] == "abi_breaking"
 
 
+def test_old_scan_report_with_malformed_exit_code_derives_gate_from_verdict() -> None:
+    """Codex review, fresh evidence: a legacy scan report with a missing/
+    malformed top-level exit_code previously defaulted the fallback to 0
+    unconditionally -- for a genuinely BREAKING verdict this read as a
+    false gate: none once forwarded, since report= has nothing else to
+    find a contribution in on a report this corrupted."""
+    report = {
+        "scan_schema_version": "1.21",
+        "verdict": "BREAKING",
+        "exit_code": "bogus",
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["gate"] == "abi_breaking"
+
+
 def test_old_scan_abort_report_reads_the_nested_diff_exit_shape() -> None:
     """Codex review (P2), fresh evidence: cli_scan._emit_scan_abort_report's
     own persisted JSON (pre-1.24, before that writer carried run_outcome
@@ -375,6 +392,59 @@ def test_legacy_release_report_rejects_an_out_of_range_severity_fallback() -> No
     out = _augment(dict(report))
     run_outcome = out["run_outcome"]
     assert run_outcome["gate"] == "abi_breaking"
+
+
+def test_legacy_release_report_infers_operational_from_member_error_sentinel() -> None:
+    """Codex review, fresh evidence: a release produced before operational_
+    error_contribution/not_comparable_contribution existed can still have
+    a member verdict of "ERROR" -- forwarding the legacy exit block
+    unchanged (neither newer key present) left run_outcome.operational:
+    none despite a library having failed to compare, unlike the native
+    writer which always derives both contributions itself."""
+    report = {
+        "libraries": [
+            {"name": "a", "verdict": "COMPATIBLE"},
+            {"name": "b", "verdict": "ERROR"},
+        ],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "ERROR",
+        "exit": {"compatibility_contribution": 0},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["operational"] == "extraction_error"
+
+
+def test_legacy_release_report_infers_operational_from_not_comparable_sentinel() -> (
+    None
+):
+    report = {
+        "libraries": [{"name": "a", "verdict": "not_comparable"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "not_comparable",
+        "exit": {"compatibility_contribution": 0},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["operational"] == "not_comparable"
+
+
+def test_old_standalone_refusal_report_preserves_not_comparable() -> None:
+    """Codex review, fresh evidence: report.not_comparable's own pre-2.48
+    shape (verdict: null plus a structured reason.kind), before that
+    writer carried run_outcome itself, previously hit the generic fallback
+    and hard-coded operational: none -- contradicting the current native
+    writer, which always records NOT_COMPARABLE for this exact shape."""
+    report = {
+        "verdict": None,
+        "reason": {"kind": "scope_mismatch", "message": "boom"},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] is None
+    assert run_outcome["operational"] == "not_comparable"
 
 
 def test_report_already_carrying_run_outcome_is_left_untouched() -> None:

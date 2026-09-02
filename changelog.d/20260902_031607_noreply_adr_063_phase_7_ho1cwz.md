@@ -373,6 +373,26 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   against. Both reads now share one strict validator,
   `_is_schema_valid_run_outcome`, checking every required key's declared
   type/enum against `$defs.run_outcome` (Codex review, two rounds).
+- **A legacy scan report's missing/malformed top-level `exit_code` no
+  longer defaults to `0` unconditionally.** For a genuinely `BREAKING`/
+  `API_BREAK` verdict, that default read as a false `gate: none` once
+  forwarded (a report this corrupted has no `severity`/`exit` block for
+  `report=` to find a real contribution in either). The fallback is now
+  derived from the real verdict via the same legacy-verdict mapping the
+  release/compare branches already use (Codex review).
+- **A legacy release report's `operational` axis is now inferred from the
+  top-level/member `"ERROR"`/`"not_comparable"` sentinels when the newer
+  `operational_error_contribution`/`not_comparable_contribution` exit
+  keys are absent entirely** (a release produced before those fields
+  existed). Forwarding the legacy `exit` block unchanged previously left
+  `run_outcome.operational: none` despite a library having failed or
+  refused comparison (Codex review).
+- **A pre-2.48 standalone comparability refusal (`report.not_comparable`'s
+  own `verdict: null` + `reason.kind` shape, from before that writer
+  carried `run_outcome` itself) no longer loses its `not_comparable`
+  status on backfill.** The generic-report fallback previously hard-coded
+  `operational: none` for this shape, contradicting the current native
+  writer (Codex review).
 
 ### Changed
 

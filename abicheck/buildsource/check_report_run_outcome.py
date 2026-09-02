@@ -103,16 +103,41 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     this leaf may not import that module) reuses :func:`synthetic_run_
     outcome` so its one real axis (``operational``/``lifecycle``) survives
     upgrade instead of defaulting away (Codex review, fresh evidence). A
-    native compare-shaped report (none of the above) derives ``gate`` from
-    whichever exit code is available (``severity.exit_code`` if present,
-    else the legacy verdict mapping) and ``compatibility`` from ``verdict``
-    directly.
+    pre-2.48 standalone comparability refusal (``verdict: null`` plus a
+    ``reason.kind`` marker -- ``report.not_comparable``'s own shape, before
+    that writer carried ``run_outcome`` itself) similarly reuses
+    :func:`synthetic_run_outcome` with ``operational=NOT_COMPARABLE``
+    (Codex review, fresh evidence). A native compare-shaped report (none of
+    the above) derives ``gate`` from whichever exit code is available
+    (``severity.exit_code`` if present, else the legacy verdict mapping)
+    and ``compatibility`` from ``verdict`` directly.
     """
     if "run_outcome" in out:
         return
+    from ..change_registry_types import Verdict
+    from ..policy.severity import legacy_exit_code
+
     raw_verdict = out.get("verdict")
     if "scan_schema_version" in out:
         exit_code = out.get("exit_code")
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            # A missing/malformed top-level `exit_code` previously defaulted
+            # to 0 unconditionally -- for a legacy report whose `verdict` is
+            # a real BREAKING/API_BREAK, that read as a false gate: none
+            # once forwarded (`report=`'s own severity/abort readers find
+            # nothing either, on a report this corrupted). Derive the
+            # fallback from the real verdict instead, the same legacy-
+            # verdict mapping the release/compare branches already use
+            # (Codex review, fresh evidence).
+            try:
+                scan_verdict = (
+                    Verdict(raw_verdict) if isinstance(raw_verdict, str) else None
+                )
+            except ValueError:
+                scan_verdict = None
+            exit_code = (
+                legacy_exit_code(scan_verdict) if scan_verdict is not None else 0
+            )
         report: dict[str, Any] = out
         if "exit" not in out:
             # `cli_scan._emit_scan_abort_report`'s own persisted JSON shape
@@ -162,17 +187,13 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             )
         out["run_outcome"] = run_outcome_dict_for_scan(
             str(raw_verdict) if raw_verdict is not None else "",
-            exit_code
-            if isinstance(exit_code, int) and not isinstance(exit_code, bool)
-            else 0,
+            exit_code,
             report=report,
             member_verdicts=member_verdicts,
             member_evidence_contract_error=member_evidence_contract_error,
             bundle_incomplete=bool(out.get("bundle_incomplete")),
         )
         return
-    from ..change_registry_types import Verdict
-    from ..policy.severity import legacy_exit_code
 
     compatibility: Verdict | None
     try:
@@ -256,6 +277,27 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
                 **(exit_decision if isinstance(exit_decision, dict) else {}),
                 "compatibility_contribution": sev_exit,
             }
+        # Infer the operational axis from the legacy top-level/member
+        # sentinels when the newer contribution keys are absent from `exit`
+        # entirely (Codex review, fresh evidence): a release produced before
+        # `not_comparable_contribution`/`operational_error_contribution`
+        # existed can still have a top-level or member verdict of
+        # `"not_comparable"`/`"ERROR"` (`_RELEASE_OPERATIONAL_SENTINELS`),
+        # and forwarding that legacy `exit` block unchanged left `run_
+        # outcome.operational: none` despite a library having failed or
+        # refused comparison -- unlike the native writer, which always
+        # derives both contributions itself. `not_comparable` takes
+        # precedence, mirroring `run_outcome_dict_for_release`'s own
+        # `not_comparable_contribution`-preferred-over-`operational_error_
+        # contribution` order.
+        if "not_comparable_contribution" not in exit_decision:
+            if "not_comparable" in member_candidates:
+                exit_decision = {**exit_decision, "not_comparable_contribution": 1}
+            elif (
+                "operational_error_contribution" not in exit_decision
+                and "ERROR" in member_candidates
+            ):
+                exit_decision = {**exit_decision, "operational_error_contribution": 1}
         out["run_outcome"] = run_outcome_dict_for_release(
             release_verdict,
             exit_decision,
@@ -288,6 +330,20 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         return
     if out.get("baseline_new_target") is True:
         out["run_outcome"] = synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET)
+        return
+    # A pre-2.48 standalone comparability refusal (`report.not_comparable.
+    # not_comparable_document`'s own `{"verdict": null, "reason": {"kind":
+    # ..., "message": ...}}` shape, before that writer carried `run_outcome`
+    # itself) reaches here too -- the generic fallback below would hard-code
+    # `operational: none`, contradicting the current native writer, which
+    # always records `NOT_COMPARABLE` for this exact shape (Codex review,
+    # fresh evidence). Recognized by the `reason.kind` marker, since
+    # `raw_verdict` is `None` for this shape either way.
+    reason = out.get("reason")
+    if isinstance(reason, dict) and "kind" in reason:
+        out["run_outcome"] = synthetic_run_outcome(
+            operational=OperationalStatus.NOT_COMPARABLE
+        )
         return
 
     severity = out.get("severity")
