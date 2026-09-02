@@ -31,6 +31,7 @@ from ..dwarf_utils import (
     attr_bool as _attr_bool,
     attr_str as _attr_str,
     decode_member_location as _decode_member_location,
+    resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
 from ..model import AccessLevel
@@ -38,10 +39,57 @@ from ..model import AccessLevel
 __all__ = [
     "access_from_dwarf",
     "default_member_access_for_tag",
+    "format_qualified_type_name",
     "local_vptr_member_offset_bits",
     "record_kind_from_tag",
     "variable_is_const",
 ]
+
+_DECLARATOR_TAGS = (
+    "DW_TAG_pointer_type",
+    "DW_TAG_reference_type",
+    "DW_TAG_rvalue_reference_type",
+)
+
+
+def format_qualified_type_name(
+    qualifier: str, inner_info: tuple[str, int], die: Any, CU: Any
+) -> tuple[str, int]:
+    """Render a ``DW_TAG_const_type``/``DW_TAG_volatile_type``/
+    ``DW_TAG_restrict_type`` node (*die*) as ``(name, byte_size)``, placing
+    *qualifier* on the correct side of *inner_info*'s own name.
+
+    DWARF's qualifier nodes carry no positional information of their own --
+    the caller (``dwarf_snapshot._compute_type_name``) must decide where to
+    print the qualifier purely from what *die*'s own immediate
+    ``DW_AT_type`` points at. C++'s declarator grammar spells a qualifier
+    on a pointer/reference itself AFTER the sigil (``int* const``, a const
+    pointer) but a qualifier on anything else BEFORE it (``const int``) --
+    so ``int* const`` (qualifier wraps a ``DW_TAG_pointer_type`` directly)
+    and ``const int*`` (qualifier wraps only the pointee, sitting one level
+    deeper) must render as different text. Without this distinction both
+    collapse to the identical ``"const int *"`` (Codex review, PR #1021,
+    fresh evidence), silently losing the const-pointer-vs-pointer-to-const
+    distinction from the reconstructed spelling -- only the separate,
+    structural ``Variable.is_const``/``cv_qualification`` fields (see
+    :func:`variable_is_const`) still carry it correctly.
+    """
+    name, size = inner_info
+    if _qualifier_wraps_declarator(die, CU):
+        return (f"{name} {qualifier}", size)
+    return (f"{qualifier} {name}", size)
+
+
+def _qualifier_wraps_declarator(die: Any, CU: Any) -> bool:
+    """Whether *die*'s own immediate ``DW_AT_type`` is a pointer/reference
+    type -- see :func:`format_qualified_type_name`'s own docstring."""
+    if "DW_AT_type" not in die.attributes:
+        return False
+    try:
+        inner_die = _resolve_die_ref(die, "DW_AT_type", CU)
+    except Exception:  # noqa: BLE001
+        return False
+    return inner_die is not None and inner_die.tag in _DECLARATOR_TAGS
 
 
 def record_kind_from_tag(tag: str) -> str:
@@ -92,11 +140,14 @@ def local_vptr_member_offset_bits(child: Any) -> int | None:
     return _decode_member_location(loc.value if loc is not None else None) * 8
 
 
+_TRANSPARENT_QUALIFIER_TAGS = ("DW_TAG_volatile_type", "DW_TAG_restrict_type")
+
+
 def variable_is_const(type_die: Any, CU: Any) -> bool:
     """Whether a variable's own OUTERMOST declared type is const-qualified,
     walking the LEADING run of pure cv-qualifier wrapper DIEs
-    (``DW_TAG_const_type``/``DW_TAG_volatile_type``) rather than checking
-    only the immediate one.
+    (``DW_TAG_const_type``/``DW_TAG_volatile_type``/``DW_TAG_restrict_type``)
+    rather than checking only the immediate one.
 
     ``const volatile int cv`` and ``volatile const int cv`` are the
     identical type in C++ (qualifier order in source is not semantically
@@ -108,7 +159,14 @@ def variable_is_const(type_die: Any, CU: Any) -> bool:
     die's own tag (this function's own previous, inline form in
     ``dwarf_snapshot.py``) silently reported ``is_const=False`` for a
     genuinely const-qualified variable (Codex review, PR #1021, fresh
-    evidence). Bounded to 10 wrapper levels -- the same defensive limit
+    evidence). ``DW_TAG_restrict_type`` is transparent to this walk for the
+    identical reason (Codex review, PR #1021, second round, fresh
+    evidence): a real ``int * const restrict`` global nests
+    ``DW_TAG_restrict_type`` outside ``DW_TAG_const_type``, so a walk that
+    stopped at any qualifier tag it didn't specifically recognize as
+    "keep going" silently lost the known ``const`` behind a `restrict`
+    wrapper the same way the first round lost it behind `volatile`.
+    Bounded to 10 wrapper levels -- the same defensive limit
     ``dwarf_snapshot._DwarfSnapshotBuilder._count_pointer_depth`` already
     uses for an analogous DIE-chain walk -- so a malformed or (in
     principle) cyclic DWARF chain can't loop forever; no real C++
@@ -118,7 +176,7 @@ def variable_is_const(type_die: Any, CU: Any) -> bool:
     while type_die is not None and depth < 10:
         if type_die.tag == "DW_TAG_const_type":
             return True
-        if type_die.tag != "DW_TAG_volatile_type":
+        if type_die.tag not in _TRANSPARENT_QUALIFIER_TAGS:
             return False
         type_die = _resolve_type_die(type_die, CU)
         depth += 1

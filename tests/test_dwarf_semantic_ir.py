@@ -99,11 +99,14 @@ def _build_snapshot(so_path: Path):
 @pytest.mark.skipif(not _HAS_GPP, reason="g++ not available")
 class TestDwarfSemanticIrCvQualification:
     """The money case: a DWARF-only dump's ``cv_qualification`` must
-    correctly distinguish a const POINTER from a pointer to const DATA, even
-    though ``dwarf_snapshot``'s own type-name reconstruction renders both
-    with the IDENTICAL text (``"const int *"``) -- only the structural
-    ``Variable.is_const`` field (read directly for ``producer="dwarf"``, see
-    ``extract/semantic_normalizer.py``'s own docstring) can tell them apart.
+    correctly distinguish a const POINTER from a pointer to const DATA.
+    ``dwarf_snapshot``'s own type-name reconstruction now spells the two
+    distinctly too (``"int * const"`` vs. ``"const int *"``, see
+    ``extract.dwarf_records.format_qualified_type_name``), but
+    ``cv_qualification`` reads the structural ``Variable.is_const`` field
+    directly for ``producer="dwarf"`` (see ``extract/semantic_normalizer.py``'s
+    own docstring) rather than re-parsing the spelling, so this class checks
+    that source, not the reconstructed text.
     """
 
     @pytest.fixture()
@@ -159,14 +162,17 @@ class TestDwarfSemanticIrCvQualification:
         assert self._cv_qualification_for(snapshot, "g_const_ptr") == ("const",)
 
     def test_pointer_to_const_is_not_top_level(self, snapshot) -> None:
-        """``const int*`` -- the pointee is const, the pointer is not. This
-        is the discriminating case: ``dwarf_snapshot``'s own type-name
-        reconstruction renders this variable's ``.type`` with the exact same
-        text as ``g_const_ptr`` above (``"const int *"``) -- only the
-        structural ``is_const`` field distinguishes them."""
+        """``const int*`` -- the pointee is const, the pointer is not.
+
+        ``dwarf_snapshot``'s own type-name reconstruction now distinguishes
+        this from ``g_const_ptr`` above (``"const int *"`` vs. ``"int *
+        const"`` -- see ``extract.dwarf_records.format_qualified_type_name``),
+        so the structural ``is_const``/``cv_qualification`` fields and the
+        spelling itself agree, rather than only the structural fields
+        carrying the distinction a shared spelling used to hide."""
         const_ptr = next(v for v in snapshot.variables if v.name == "g_const_ptr")
         ptr_to_const = next(v for v in snapshot.variables if v.name == "g_ptr_to_const")
-        assert const_ptr.type == ptr_to_const.type
+        assert const_ptr.type != ptr_to_const.type
         assert self._cv_qualification_for(snapshot, "g_ptr_to_const") == ()
 
     def test_volatile_is_a_documented_gap_not_a_false_absence(self, snapshot) -> None:

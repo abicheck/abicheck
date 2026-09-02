@@ -83,6 +83,38 @@ def _dwarf_semantic_ir(snap: AbiSnapshot) -> SemanticIR:
     )
 
 
+def _dwarf_types_semantic_ir(types: list[RecordType]) -> SemanticIR:
+    """The :func:`_dwarf_semantic_ir` counterpart for the symbol-only
+    fallback (Codex review, PR #1021, fresh evidence): when the DWARF walk
+    found real record types but no functions/variables of its own (a DSO
+    combining DWARF-bearing C++ objects with assembly-only exported
+    symbols), ``_try_dwarf_snapshot`` returns those *types* alone rather
+    than a full snapshot, and ``_build_symbol_only_snapshot`` below
+    preserves them (see its own docstring) -- but until this function
+    existed, it never normalized them, so a headerless dump omitted
+    ``semantic_ir`` entirely despite holding DWARF entities with valid
+    ``entity_id``s.
+
+    Deliberately narrower than :func:`_dwarf_semantic_ir`: *types* is the
+    only DWARF-derived evidence this fallback snapshot carries at all (no
+    ``enums``/typedefs are captured on this path, and the snapshot's own
+    ``functions``/``variables`` are raw ELF-export-table entries with no
+    DWARF backing -- see ``_build_symbol_only_snapshot``'s own docstring --
+    so including them here would misattribute a ``producer="dwarf"``
+    occurrence to evidence DWARF never actually supplied). Their absence
+    from the returned ``SemanticIR`` is honest sparseness, not a gap: a
+    caller finding no occurrence for one of their entity IDs correctly
+    learns "no structural evidence", not "confirmed empty".
+    """
+    return normalize_header_ast(
+        types=types,
+        enums=(),
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="dwarf",
+    )
+
+
 def _try_dwarf_snapshot(
     so_path: Path,
     elf_meta: ElfMetadata,
@@ -215,4 +247,6 @@ def _build_symbol_only_snapshot(
         language_profile=profile_hint,
     )
     _populate_elf_visibility(snapshot)
+    if dwarf_only_types:
+        snapshot.semantic_ir = _dwarf_types_semantic_ir(dwarf_only_types)
     return snapshot
