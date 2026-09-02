@@ -6,11 +6,13 @@
   parsing (`frontends/cli/scan_inputs.py`) and its `--artifact-set` member
   resolution and rendering (`frontends/cli/scan_artifact_set.py`) now have
   owners inside the `frontends` responsibility package, taking `cli_scan.py`
-  from 2000 to 1720 lines. Every moved name is re-exported under its original
+  from 2000 to 1772 lines. Every moved name is re-exported under its original
   spelling, so existing call sites and `monkeypatch` targets resolve
-  unchanged. `stable_abi.py` is classified `model` (a 209-line leaf importing
-  only the already-`model` `stable_abi_data.py`), which is what let the ABI3
-  floor parser move with the rest.
+  unchanged. ABI3 version parsing (`parse_abi3_version`/`format_version`)
+  moved out of `stable_abi.py` into a new `model/abi3_version.py`, so the
+  frontend can reach the parser without the module's compatibility-policy
+  classifiers (`classify`, `is_private_symbol`) becoming `model` alongside
+  it; `stable_abi.py` re-exports both names unchanged.
 - **Internal (ADR-061 D5): `reporter.py` down from 1998 to 1747 lines.** The
   application-compatibility projection (`appcompat_to_json`/
   `appcompat_to_markdown` plus the five section builders only they use) moved
