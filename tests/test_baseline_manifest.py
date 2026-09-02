@@ -15,12 +15,9 @@
 """Unit tests for ``actions/baseline/build_manifest.py``.
 
 Pure-Python tests over synthetic snapshot JSON files (no compiler, no real
-`abicheck dump` needed) -- ``actions/baseline/run.sh`` is what actually
-produces the per-library snapshots this script reads; see
-``tests/test_action_baseline.py`` for the bash-level orchestration
-(including one ``integration``-marked end-to-end test with real compiled
-libraries).
-"""
+`abicheck dump` needed) -- see ``tests/test_action_baseline.py`` for the
+bash-level orchestration (including one ``integration``-marked end-to-end
+test with real compiled libraries)."""
 
 from __future__ import annotations
 
@@ -222,10 +219,9 @@ class TestBuildManifestBasics:
         assert manifest["snapshot_schema"] == 9
 
     def test_dump_provenance_is_recorded_per_artifact(self, tmp_path: Path) -> None:
-        """Audit finding: the baseline manifest recorded profile/schema/
-        fact-set but never each library's actual --depth contract -- a
-        snapshot's dump_provenance block (cli_dump_helpers.
-        fold_dump_provenance_into_json) must flow through to the manifest."""
+        """Audit finding: the manifest recorded profile/schema/fact-set but
+        never each library's --depth contract -- dump_provenance must flow
+        through (cli_dump_helpers.fold_dump_provenance_into_json)."""
         provenance = {
             "requested_depth": "build",
             "effective_depth": "build",
@@ -310,6 +306,25 @@ class TestBuildManifestBasics:
             "name": "abicheck-clang-canonical",
             "version": 1,
         }
+
+    def test_fact_set_read_from_a_real_sectioned_snapshot(self, tmp_path: Path) -> None:
+        """ADR-062/063 Phase 8 (Codex review): a real dump's fields nest
+        under a sectioned envelope's "sections" now; _read_snapshot_meta
+        must unwrap it, not read raw.get(...) against the wrapper."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        fact_set = {"name": "abicheck-clang-canonical", "version": 1}
+        flat = snapshot_to_dict(AbiSnapshot(library="libfoo", version="1.0.0"))
+        flat["schema_version"] = 9
+        flat["build_source"] = {"source_abi": {"coverage": {"fact_set": fact_set}}}
+        sectioned = to_sectioned_document(flat, max_known_schema_version=SCHEMA_VERSION)
+        (tmp_path / "libfoo.abicheck.json").write_text(json.dumps(sectioned))
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        assert manifest["fact_set"] == fact_set
+        assert manifest["snapshot_schema"] == 9
 
     def test_fact_set_recorded_when_consistent(self, tmp_path: Path) -> None:
         fact_set = {"name": "abicheck-clang-canonical", "version": 1}
@@ -450,10 +465,8 @@ def _write_compressed_snapshot(
 
 
 class TestBuildManifestCompressedSnapshots:
-    """ADR-059 (baseline-set manifest v2 slice): a dumped snapshot may be
-    gzip/zstd-compressed (``dump --compression``) rather than plain JSON --
-    build_manifest.py must discover it under any canonical suffix and read
-    it the same way a plain snapshot is read."""
+    """ADR-059: a dumped snapshot may be gzip/zstd-compressed rather than
+    plain JSON -- build_manifest.py must discover any canonical suffix."""
 
     @pytest.mark.parametrize(
         ("suffix", "compression"),
@@ -483,10 +496,8 @@ class TestBuildManifestCompressedSnapshots:
         assert manifest["artifacts"][0]["compression"] == "none"
 
     def test_content_hash_matches_across_encodings(self, tmp_path: Path) -> None:
-        """The same logical snapshot, dumped plain vs. compressed, must
-        produce the identical recorded sha256 -- ADR-059 keeps compression a
-        pure storage envelope, and the manifest's freshness/digest checks
-        must not become encoding-sensitive."""
+        """The same logical snapshot, plain vs. compressed, must produce the
+        identical recorded sha256 -- compression is a pure storage envelope."""
         plain_dir = tmp_path / "plain"
         gz_dir = tmp_path / "gz"
         plain_dir.mkdir()
@@ -515,12 +526,9 @@ class TestBuildManifestCompressedSnapshots:
         self, tmp_path: Path
     ) -> None:
         """Codex review: if a stray plain snapshot and a real compressed one
-        coexist (e.g. an incomplete cleanup from a previous run using a
-        different --compression setting, or a caller invoking this script
-        directly without run.sh's own cleanup), discovery must not silently
-        prefer one over the other -- that risks recording a stale snapshot
-        in the manifest without it being regenerated/validated this run.
-        This is stale state to fail loudly on, not a priority order."""
+        coexist (e.g. an incomplete cleanup from a prior --compression run),
+        discovery must not silently prefer one -- that risks recording a
+        stale snapshot. Fail loudly on this, not a priority order."""
         _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
         _write_compressed_snapshot(
             tmp_path / "libfoo.abicheck.json.zst", library="libfoo", compression="zstd"
@@ -1479,20 +1487,13 @@ class TestMainCli:
 class TestRecomputeContentDigestFromDiskRefusesEscapes:
     """Regression (Codex review, PR #726): an EXISTING (previously-
     published) asset's manifest.json is untrusted content restored from
-    that archive -- a broken or malicious one naming an absolute path or a
+    that archive -- a broken/malicious one naming an absolute or
     ``"../"``-escaping ``snapshot``/``binary`` could otherwise point
-    outside the extracted archive (e.g. at this same publish job's own
-    fresh baseline directory, which exists on disk at the same time),
-    hashing THAT file instead and coincidentally matching
-    ``NEW_CONTENT_DIGEST`` -- taking the safe-retry exit for a broken
-    asset a real consumer's ``resolve_target()``/``resolve_bundle()``
-    would later reject outright. ``recompute_content_digest_from_disk``
-    never performed the resolver's own containment check
-    (``_resolve_under_baseline_dir`` in
-    ``abicheck/buildsource/baseline_set.py``); ``_resolve_under_base_dir``
-    is this module's own standalone re-implementation of the identical
-    guard (this file is deliberately dependency-free of the ``abicheck``
-    package)."""
+    outside the extracted archive and hash a coincidentally-matching file,
+    taking the safe-retry exit for an asset a real ``resolve_target()``/
+    ``resolve_bundle()`` would later reject. ``_resolve_under_base_dir`` is
+    this module's own standalone re-implementation of the resolver's
+    containment check (this file is dependency-free of ``abicheck``)."""
 
     def test_snapshot_path_escaping_base_dir_is_refused(self, tmp_path: Path) -> None:
         base_dir = tmp_path / "extracted"
@@ -1597,9 +1598,7 @@ class TestStageBinary:
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         artifact = manifest["artifacts"][0]
         assert artifact["binary"] == "binaries/libfoo"
-        assert (
-            artifact["binary_sha256"] == hashlib.sha256(b"fake-elf-bytes").hexdigest()
-        )
+        assert artifact["binary_sha256"] == hashlib.sha256(b"fake-elf-bytes").hexdigest()
 
     def test_non_staged_entry_has_no_binary_fields(self, tmp_path: Path) -> None:
         _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")

@@ -260,6 +260,34 @@ class TestReserialization:
         with pytest.raises(IncompatibleSnapshotSchemaError):
             snapshot_from_dict(d)
 
+    def test_sectioned_envelope_bump_hard_rejects_a_pre_phase_8_reader(
+        self, monkeypatch
+    ):
+        """ADR-062/063 Phase 8 (redesign, Codex review, fresh evidence):
+        snapshot_to_json() now writes storage.sectioned_document's envelope
+        instead of a flat document -- a wire-format change, not just a new
+        field. SCHEMA_VERSION was bumped specifically so a reader whose own
+        SCHEMA_VERSION still names the pre-redesign value (41) hits this
+        module's existing hard-rejection path instead of silently reading
+        every top-level field of a real sectioned document as absent/empty
+        (the sections are nested under "sections", which such a reader has
+        no code to unwrap). Simulates that older reader by pinning this
+        module's own SCHEMA_VERSION back to 41 -- everything else about the
+        check (the >= _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION gate) is
+        unchanged."""
+        from abicheck import serialization
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.model import AbiSnapshot
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        doc = json.loads(serialization.snapshot_to_json(snap))
+        assert serialization.is_sectioned_document(doc)
+        assert doc["schema_version"] == serialization.SCHEMA_VERSION > 41
+
+        monkeypatch.setattr(serialization, "SCHEMA_VERSION", 41)
+        with pytest.raises(IncompatibleSnapshotSchemaError):
+            serialization.snapshot_from_dict(doc)
+
     def test_older_version_warns_when_a_fact_is_degraded(self):
         """A snapshot older than SCHEMA_VERSION used to load with no signal
         at all -- the *_facts_reliable flags degraded silently, and CI

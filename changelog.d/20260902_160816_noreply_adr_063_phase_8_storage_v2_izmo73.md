@@ -15,5 +15,12 @@
   to. The sectioned document also records which sections it was written
   with, so a document missing an entire section (not just a field within
   one) is rejected loudly on read instead of silently reading back as
-  empty/removed content; `scan --against`'s `dependency_scope` peek now
-  reads the sectioned shape correctly too.
+  empty/removed content — the directory-backed package's own reader now
+  rejects the inverse case (an unadvertised extra section) too; `scan
+  --against`'s `dependency_scope` peek now reads the sectioned shape
+  correctly too. `SCHEMA_VERSION` is bumped (41 → 42) to cover this: the
+  wire format itself changed, not just a field, so a pre-Phase-8 abicheck
+  build now cleanly refuses a sectioned snapshot instead of silently
+  reading it as an empty one. `actions/baseline/build_manifest.py` (the
+  baseline-set publishing Action) also unwraps the sectioned shape before
+  reading a snapshot's metadata and hashing its stable content.
