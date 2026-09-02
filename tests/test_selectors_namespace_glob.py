@@ -87,6 +87,16 @@ class TestNamespaceSegmentSplitting:
     def test_unmatched_bracket_is_literal_not_a_class(self) -> None:
         assert _bracket_class_end("foo[bar", 3) == -1
 
+    def test_negated_class_with_immediate_closing_bracket_as_literal_member(self) -> None:
+        # "[!]" immediately followed by "]" -- the "]" right after the
+        # negation is a literal class member, not the closer.
+        assert _bracket_class_end("[!]abc]", 0) == 6
+
+    def test_split_falls_back_to_literal_on_an_unclosed_bracket(self) -> None:
+        # No genuine bracket class here (never closed) -- "::" inside it is
+        # still a real segment boundary, unlike the closed-class case above.
+        assert _split_namespace_segments("ns::[abc") == ["ns", "[abc"]
+
     def test_collapse_adjacent_globstars(self) -> None:
         assert _collapsed_namespace_segments("a::**::**::b") == ["a", "**", "b"]
 
@@ -151,6 +161,21 @@ class TestSegmentGlobMatcherAncestorWalk:
         assert matcher.match("x::a::y::b")
         assert matcher.match("a::b")
         assert not matcher.match("x::a::y::c")
+
+    def test_trailing_globstar_after_wildcarded_run_uses_the_tail_regex(self) -> None:
+        # A pattern with 2+ globstars AND a trailing "**" immediately
+        # preceded by a wildcarded run (here "c*") is the one shape
+        # _SegmentGlobMatcher special-cases into its own `_tail` regex
+        # instead of the ordinary run/globstar DP walk -- exercised via
+        # both match() and matches_any_ancestor() (the tail branch each
+        # method itself needs, not just the run/globstar path the simpler
+        # multi-globstar test above covers).
+        matcher = _compile_namespace_glob("a::b*::**::a::c*::**", "namespace")
+        assert matcher is not None
+        assert matcher.match("a::bx::a::cy::zz")
+        assert not matcher.match("a::bx::a::nope")
+        assert matcher.matches_any_ancestor("a::bx::a::cy::extra")
+        assert not matcher.matches_any_ancestor("a::bx::a::nope::extra")
 
     def test_multiple_globstars_reject_large_non_matching_input_quickly(self) -> None:
         """The DP rewrite's whole reason to exist: this must not hang."""
