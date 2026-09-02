@@ -193,6 +193,26 @@ class TestCompareExitZeroReportsCompatibleWithRisk:
         )
         assert outputs["verdict"] == "COMPATIBLE", outputs
 
+    def test_job_summary_carries_a_verdict_banner(self, tmp_path: Path) -> None:
+        """P2 follow-up (Codex review, PR #1016): the job-summary's own
+        ``case $VERDICT`` dispatch had no ``COMPATIBLE_WITH_RISK`` arm and no
+        ``*)`` default, so a bash `case` with no match silently omits the
+        whole banner -- `add-job-summary: true` published a summary with the
+        findings table but no verdict line at all for this tier."""
+        bindir = _stub_abicheck(tmp_path, exit_code=0, report=_risk_report())
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert "COMPATIBLE_WITH_RISK" in outputs["_summary"], outputs
+
 
 class TestFallbackTextReportsCompatibleWithRisk:
     """P2 (Codex review, PR #1016): ``_report_compat_verdict``'s markdown/

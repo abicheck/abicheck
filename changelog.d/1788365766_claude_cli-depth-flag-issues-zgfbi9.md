@@ -77,3 +77,7 @@
   directory/package release compare, or any `--write markdown=...` that
   suppresses it) whose rendered report said `COMPATIBLE_WITH_RISK` still
   published plain `COMPATIBLE`.
+- **The composite Action's job summary now has a `COMPATIBLE_WITH_RISK`
+  banner.** Its verdict dispatch had no matching arm (and no default), so a
+  bash `case` with nothing to match silently omitted the whole verdict line
+  from the summary for this tier, even with `add-job-summary: true`.

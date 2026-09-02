@@ -212,7 +212,21 @@ def _reject_depth_for_set_inputs(ctx: click.Context) -> str | None:
       explicit ``--depth binary`` assertion the fan-out can't provide, so it
       is accepted here and forwarded to every pair (mirrors a single-pair
       ``compare --depth binary``, which just clears header/build/source
-      evidence rather than requiring anything new).
+      evidence rather than requiring anything new). **Inherits, rather than
+      introduces, a pre-existing limitation** (Codex review, PR #1016, not
+      fixed here): this only clears *separately supplied* header/include
+      inputs. A directory/package member that is itself an already-dumped
+      JSON snapshot carrying richer embedded evidence (header facts, a
+      ``from_headers=True`` snapshot on disk) still loads that evidence
+      verbatim -- ``enforce_requested_depth``'s own docstring already
+      documents this exact "floor, not a ceiling" behavior for a single-pair
+      ``compare --depth binary`` against two such snapshots, which has never
+      projected requested depth down for a pre-built input either. This
+      decision only brings the fan-out to parity with that pre-existing,
+      already-accepted behavior; it does not extend it, and closing the
+      underlying gap (stripping higher-level facts from a snapshot operand
+      to actually enforce depth as a ceiling) is separate, repo-wide work,
+      not specific to directory/package operands.
     * ``headers`` is still rejected, but for a narrower, distinct reason than
       build/source: the fan-out *does* resolve per-pair header evidence
       (the same ``-H``/compile-context plumbing a plain directory `compare`

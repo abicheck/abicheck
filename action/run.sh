@@ -3017,6 +3017,15 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       COMPATIBLE)
         echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
         ;;
+      COMPATIBLE_WITH_RISK)
+        # R1 follow-up (Codex review, PR #1016): VERDICT can carry this tier
+        # since _resolve_clean_exit_verdict stopped laundering it into plain
+        # COMPATIBLE, but this dispatch had no matching arm -- a bash `case`
+        # with no match and no `*)` default silently omits the whole banner,
+        # so `add-job-summary: true` published a summary with every finding
+        # table but no verdict line at all for this tier.
+        echo "> **Verdict: COMPATIBLE_WITH_RISK** ⚠️ — Binary-compatible, but carries deployment risk; review advised (see findings below)."
+        ;;
       SEVERITY_ERROR)
         # SEVERITY_ERROR (exit code 1) means a severity-config category is
         # gating the check — it does NOT mean the checker found an ABI/API
