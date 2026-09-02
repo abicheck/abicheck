@@ -1313,12 +1313,6 @@ def compute_library_files(
     )
 
 
-def _build_library_files_section(
-    old_meta: LibraryMetadata | None, new_meta: LibraryMetadata | None
-) -> list[str]:
-    return _rmd.render_library_files_section(compute_library_files(old_meta, new_meta))
-
-
 def compute_severity_sections(
     breaking: list[Change],
     source_breaks: list[Change],
@@ -1396,21 +1390,6 @@ def compute_severity_sections(
             )
 
     return _rmd.SeveritySectionsData(groups=tuple(groups))
-
-
-def _build_severity_sections(
-    breaking: list[Change],
-    source_breaks: list[Change],
-    risk: list[Change],
-    compatible: list[Change],
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> list[str]:
-    return _rmd.render_severity_sections(
-        compute_severity_sections(
-            breaking, source_breaks, risk, compatible, severity_config=severity_config
-        )
-    )
 
 
 def compute_not_evaluated(
@@ -1614,10 +1593,18 @@ def to_review_digest(
     filtered-internal, the release recommendation, a manual-review banner when
     public-header scoping fell back (issue #235), and the top impacted symbols.
     Distinct from to_markdown (the full report) — this is the "presentation"
-    layer over the same machine-readable decision contract.
+    layer over the same machine-readable decision contract. ADR-061 Phase 2
+    item 1: crosses the canonical ``ReportDocument`` boundary via
+    ``report/render_markdown_document.py`` — the same fact/formatting split
+    JSON/SARIF/JUnit/``--stat``/HTML already use.
     """
-    return _rmd.render_review_digest(
-        compute_review_digest(result, severity_config=severity_config)
+    from .report.render_markdown_document import (
+        build_review_digest_document,
+        render_review_digest_document,
+    )
+
+    return render_review_digest_document(
+        build_review_digest_document(result, severity_config=severity_config)
     )
 
 
@@ -1702,10 +1689,6 @@ def compute_headline_table(
     )
 
 
-def _markdown_headline_table(result: DiffResult, emoji: str, label: str) -> list[str]:
-    return _rmd.render_headline_table(compute_headline_table(result, emoji, label))
-
-
 def to_markdown(
     result: DiffResult,
     *,
@@ -1740,101 +1723,26 @@ def to_markdown(
     if alternate is not None:
         return _out(alternate)
 
-    v = result.verdict
-    emoji = _VERDICT_EMOJI[v]
-    label = _VERDICT_LABEL[v]
-
-    old_meta = getattr(result, "old_metadata", None)
-    new_meta = getattr(result, "new_metadata", None)
-
-    # Apply show-only filter if provided (display-only, does not affect verdict)
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        # A filter can keep a finding while dropping the co-reported one its
-        # own correlated_change_kind names -- clear the now-dangling note
-        # rather than reference a finding this view no longer shows.
-        changes = _suppress_dangling_correlation_notes(changes)
-
-    # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
-    # classification + summary in one place, shared across formats.
-    from .report_model import ReportModel
-
-    model = ReportModel.from_result(result, changes=changes)
-    breaking, source_breaks, risk, compatible = (
-        model.breaking,
-        model.source_breaks,
-        model.risk,
-        model.compatible,
+    # ADR-061 Phase 2 item 1: the default (full-mode) view crosses the
+    # canonical ReportDocument boundary via report/render_markdown_document.py
+    # -- the same fact/formatting split JSON/SARIF/JUnit/--stat/HTML already
+    # use. `demangle` is applied inside the document renderer itself (the
+    # document's own "demangle" field), not by this function's `_out`.
+    from .report.render_markdown_document import (
+        build_markdown_document,
+        render_markdown_document,
     )
 
-    lines = _markdown_headline_table(result, emoji, label)
-    # When most of the breaking count is RTTI / internal-namespace churn, say so
-    # up front — otherwise a huge count from a library lacking -fvisibility=hidden
-    # buries the handful of genuine public-API breaks.
-    lines += _build_internal_rtti_note(breaking)
-
-    _append_confidence_section(lines, result)
-
-    _append_policy_section(lines, result)
-
-    if show_recommendation:
-        _append_recommendation_section(lines, result)
-
-    # Severity configuration summary when provided
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
+    return render_markdown_document(
+        build_markdown_document(
+            result,
+            show_only=show_only,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            show_recommendation=show_recommendation,
+            demangle=demangle,
         )
-
-    if show_only:
-        lines.append(
-            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
-        )
-        lines.append("")
-
-    if old_meta or new_meta:
-        lines += _build_library_files_section(old_meta, new_meta)
-
-    lines += _build_severity_sections(
-        breaking,
-        source_breaks,
-        risk,
-        compatible,
-        severity_config=severity_config,
     )
-
-    lines += _build_not_evaluated_section(model.not_evaluated)
-
-    lines += _build_environment_drift_section(changes)
-
-    if not changes:
-        if show_only and result.changes:
-            lines.append("_No changes match the current filter._")
-        else:
-            lines.append("_No ABI changes detected._")
-
-    _append_redundancy_note(lines, result)
-    _append_suppression_note(lines, result)
-    _append_out_of_surface_note(lines, result)
-
-    if show_impact:
-        lines.append("")
-        lines += _build_impact_table(result, displayed_changes=changes)
-
-    lines += _footer_lines()
-    return _out("\n".join(lines))
 
 
 def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | None:

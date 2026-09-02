@@ -66,8 +66,6 @@ from .reporter_markdown import (
     _build_impact_table as _build_impact_table,
     _build_internal_rtti_note as _build_internal_rtti_note,
     _build_leaf_type_sections as _build_leaf_type_sections,
-    _build_library_files_section as _build_library_files_section,
-    _build_severity_sections as _build_severity_sections,
     _build_severity_summary_md as _build_severity_summary_md,
     _finding_id as _finding_id,
     _fmt_size as _fmt_size,
