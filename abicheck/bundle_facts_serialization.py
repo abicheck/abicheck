@@ -59,13 +59,59 @@ if TYPE_CHECKING:
     from .snapshot_io import SnapshotWriteResult
 
 
+def looks_like_bundle_facts_document(data: Any) -> bool:
+    """Classify a decoded JSON object as a stored :class:`~abicheck.
+    bundle_facts.BundleFacts` document (CLI cleanup phase two, PR I
+    prerequisite).
+
+    This is the strong discriminator `BUNDLE_FACTS_SCHEMA_VERSION`'s own
+    docstring (`bundle_facts.py`) calls for -- a pure, read-only classifier
+    over already-decoded JSON, with no side effects and no dependency on
+    `bundle_facts_from_dict`'s own (more permissive) reading rules. Two
+    tiers, in order:
+
+    1. **Explicit marker** (schema_version 2+): `data["artifact_type"]` is
+       present -- trusted outright, whichever way it answers. A document
+       that names a *different* artifact type must never be reclassified as
+       bundle facts just because it happens to also carry a
+       `per_library_snapshots`-shaped key; the explicit marker is the whole
+       point of having one.
+    2. **Shape fallback** (v1, pre-marker documents): `artifact_type` is
+       absent entirely -- the only signal available before this marker
+       existed is `per_library_snapshots` being present and mapping-shaped,
+       mirroring `bundle_facts_from_dict`'s own mandatory-key check. This is
+       a real, accepted false-positive surface (an unrelated document that
+       happens to define that one key) inherited from the v1 format itself,
+       not introduced here -- closing it further would mean rejecting
+       genuine v1 baselines already persisted in users' CI, which
+       `BUNDLE_FACTS_SCHEMA_VERSION`'s own docstring rules out.
+
+    Does not itself decode JSON, open a file, or validate the document
+    beyond this one question -- a caller wanting the parsed
+    :class:`~abicheck.bundle_facts.BundleFacts` (or its validation errors)
+    still goes through :func:`bundle_facts_from_dict`."""
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
+
+    if not isinstance(data, dict):
+        return False
+    if "artifact_type" in data:
+        return data.get("artifact_type") == BUNDLE_FACTS_ARTIFACT_TYPE
+    return isinstance(data.get("per_library_snapshots"), dict)
+
+
 def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
-    JSON-able dict (G38 Phase 2)."""
+    JSON-able dict (G38 Phase 2).
+
+    ``artifact_type`` is always written from *facts* itself, not hardcoded
+    to the current :data:`~abicheck.bundle_facts.BUNDLE_FACTS_ARTIFACT_TYPE`
+    constant -- the dataclass field is the single source of truth for what
+    gets serialized, matching every other field here."""
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
 
     return {
+        "artifact_type": facts.artifact_type,
         "schema_version": facts.schema_version,
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": {
@@ -98,6 +144,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     doesn't know to consult (Codex review).
     """
     from .bundle_facts import (
+        BUNDLE_FACTS_ARTIFACT_TYPE,
         BUNDLE_FACTS_SCHEMA_VERSION,
         DEFAULT_VARIANT_FINGERPRINT,
         BundleFacts,
@@ -116,6 +163,21 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"abicheck (supports up to schema_version "
             f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
             "bundle facts file."
+        )
+    # A v1 document (schema_version 1, predating this marker) carries no
+    # `artifact_type` key at all -- defaults to the current value, same
+    # back-compat treatment as the missing-`schema_version` case just above.
+    # A document that *does* carry the key but names a different artifact
+    # type is rejected outright rather than silently accepted: whoever built
+    # it declared it as something else, and reading it as bundle facts
+    # anyway would score a comparison against a document nobody asked to be
+    # read this way (CLI cleanup phase two, PR I prerequisite -- the whole
+    # point of the explicit marker is that it is trusted, not advisory).
+    artifact_type = d.get("artifact_type", BUNDLE_FACTS_ARTIFACT_TYPE)
+    if artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
+        raise ValueError(
+            f"bundle facts: unexpected artifact_type {artifact_type!r} "
+            f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
         )
     # "per_library_snapshots" is mandatory, not merely defaulted: a
     # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
@@ -138,6 +200,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         )
     raw_manifest = d.get("manifest")
     return BundleFacts(
+        artifact_type=artifact_type,
         schema_version=schema_version,
         variant_fingerprint=str(
             d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)

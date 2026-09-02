@@ -4730,15 +4730,28 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
                                        syntax refinement (DONE) was the one
                                        piece independent of the semantics work
 PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
-      (NEW, not started)                explicit artifact_type discriminator
-                                       on BundleFacts, operand classification
+      (prerequisite DONE; classifier/    explicit artifact_type discriminator
+       request/deletion not started)     on BundleFacts, operand classification
                                        instead of a mode flag, and one
                                        BundleCompareRequest over live/live +
                                        stored/live + live/stored +
                                        stored/stored, with the full
                                        evaluation/gate/report/dry-run surface
                                        answered once. Shares PR G2's own
-                                       GateOptions prerequisite
+                                       GateOptions prerequisite.
+                                       Prerequisite landed (2026-09-02):
+                                       BUNDLE_FACTS_ARTIFACT_TYPE ("abicheck.
+                                       bundle-facts", schema_version 2) plus
+                                       the archive container's own
+                                       BUNDLE_ARCHIVE_ARTIFACT_TYPE, and
+                                       bundle_facts_serialization.
+                                       looks_like_bundle_facts_document() as
+                                       the classifier a future operand
+                                       dispatcher will call. The
+                                       BundleCompareRequest unification and
+                                       the deletion below remain blocked on
+                                       PR G2's GateOptions, which does not
+                                       exist yet
       └─ then DELETE compare --old-bundle-facts
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
       (NEW, not started)                --bundle-system-providers/--bundle-

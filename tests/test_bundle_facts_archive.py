@@ -29,7 +29,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
+from abicheck.bundle_facts import (
+    BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+    BundleFacts,
+    capture_bundle_facts,
+)
 from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.errors import SnapshotError
@@ -311,8 +315,13 @@ class TestBundleFactsArchiveFormat:
         save_bundle_facts(facts, out, format="archive")
 
         loaded = load_bundle_facts(out)
-        assert loaded.per_library_snapshots["a.so"] is not loaded.per_library_snapshots["b.so"]
-        assert loaded.per_library_snapshots["a.so"] == loaded.per_library_snapshots["b.so"]
+        assert (
+            loaded.per_library_snapshots["a.so"]
+            is not loaded.per_library_snapshots["b.so"]
+        )
+        assert (
+            loaded.per_library_snapshots["a.so"] == loaded.per_library_snapshots["b.so"]
+        )
         # Mutating one must not leak into the other.
         loaded.per_library_snapshots["a.so"].version = "mutated"
         assert loaded.per_library_snapshots["b.so"].version != "mutated"
@@ -405,7 +414,9 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(ValueError, match="unknown format"):
             load_bundle_facts(out, format="yaml")
 
-    def test_load_rejects_a_newer_container_schema_version(self, tmp_path: Path) -> None:
+    def test_load_rejects_a_newer_container_schema_version(
+        self, tmp_path: Path
+    ) -> None:
         """The container's own schema_version (manifest/blob shape) is a
         separate axis from bundle_facts_schema_version -- a newer one must
         fail closed, not be silently misread as version 1 (Codex review)."""
@@ -414,7 +425,13 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "future.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
-            writer.write_manifest({"schema_version": 999, "library_blobs": {}})
+            writer.write_manifest(
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 999,
+                    "library_blobs": {},
+                }
+            )
 
         with pytest.raises(IncompatibleSnapshotSchemaError, match="999"):
             load_bundle_facts(out, format="archive")
@@ -440,6 +457,7 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "never_existed_schema_version.bundlefacts.archive.zip"
         manifest: dict[str, object] = {
+            "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
             "schema_version": 1,
             "bundle_facts_schema_version": 1,
             "library_blobs": {},
@@ -478,6 +496,7 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "bad-schema-version.bundlefacts.archive.zip"
         manifest: dict[str, object] = {
+            "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
             "schema_version": 1,
             "bundle_facts_schema_version": 1,
             "library_blobs": {},
@@ -489,7 +508,9 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match=f"{field} must be an integer"):
             load_bundle_facts(out, format="archive")
 
-    def test_load_rejects_a_manifest_missing_library_blobs(self, tmp_path: Path) -> None:
+    def test_load_rejects_a_manifest_missing_library_blobs(
+        self, tmp_path: Path
+    ) -> None:
         """A manifest.json with no 'library_blobs' key at all (a malformed
         or unrelated zip) must be rejected outright rather than silently
         loading as an empty, valid-looking BundleFacts (Codex review)."""
@@ -497,7 +518,13 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "malformed.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
-            writer.write_manifest({"schema_version": 1, "bundle_facts_schema_version": 1})
+            writer.write_manifest(
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                }
+            )
 
         with pytest.raises(ValueError, match="library_blobs"):
             load_bundle_facts(out, format="archive")
@@ -514,6 +541,7 @@ class TestBundleFactsArchiveFormat:
         with BundleArchiveWriter(out) as writer:
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"a.so": ["not", "a", "hash"]},
@@ -535,6 +563,7 @@ class TestBundleFactsArchiveFormat:
         with BundleArchiveWriter(out) as writer:
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {},
@@ -558,7 +587,12 @@ class TestBundleFactsArchiveFormat:
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(b"[1, 2, 3]")
             writer.write_manifest(
-                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
             )
 
         with pytest.raises(ValueError, match="must decode to a JSON object"):
@@ -578,9 +612,16 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "malformed_snapshot_shape.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
-            h = writer.put_blob(json_module.dumps({"functions": [None]}).encode("utf-8"))
+            h = writer.put_blob(
+                json_module.dumps({"functions": [None]}).encode("utf-8")
+            )
             writer.write_manifest(
-                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
             )
 
         with pytest.raises(SnapshotError, match="malformed snapshot shape"):
@@ -599,13 +640,20 @@ class TestBundleFactsArchiveFormat:
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(deeply_nested.encode("utf-8"))
             writer.write_manifest(
-                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
             )
 
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts(out, format="archive")
 
-    def test_load_translates_a_deeply_nested_manifest_blob(self, tmp_path: Path) -> None:
+    def test_load_translates_a_deeply_nested_manifest_blob(
+        self, tmp_path: Path
+    ) -> None:
         """Same as above, for the second blob-decode site (`manifest_blob`,
         the `InstantiationManifest` payload)."""
         from abicheck.storage.bundle_archive import BundleArchiveWriter
@@ -616,6 +664,7 @@ class TestBundleFactsArchiveFormat:
             h = writer.put_blob(deeply_nested.encode("utf-8"))
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {},
@@ -651,6 +700,7 @@ class TestBundleFactsArchiveFormat:
             h = writer.put_blob(payload.encode("utf-8"))
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"a.so": h, "b.so": h},
@@ -660,7 +710,9 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts(out, format="archive")
 
-    def test_load_translates_invalid_json_in_a_library_blob(self, tmp_path: Path) -> None:
+    def test_load_translates_invalid_json_in_a_library_blob(
+        self, tmp_path: Path
+    ) -> None:
         """Even ordinary malformed JSON (not just a recursion-limit
         payload) in a blob must translate to this module's own error
         vocabulary, not a raw `json.JSONDecodeError`."""
@@ -670,7 +722,12 @@ class TestBundleFactsArchiveFormat:
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(b"{not valid json")
             writer.write_manifest(
-                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
             )
 
         with pytest.raises(SnapshotError, match="not valid JSON"):
@@ -718,3 +775,60 @@ class TestBundleFactsArchiveFormat:
         loaded = load_bundle_facts(out, format="archive")
         assert loaded.per_library_snapshots.keys() == facts.per_library_snapshots.keys()
 
+
+# ---------------------------------------------------------------------------
+# artifact_type discriminator on the archive container itself (CLI cleanup
+# phase two, PR I prerequisite -- "The archive container ... is a separate
+# axis and gets the same treatment" as the plain-JSON BundleFacts document).
+# Unlike that document's own marker, this one is required, not defaulted:
+# the archive format has never shipped in a release.
+# ---------------------------------------------------------------------------
+
+
+class TestBundleFactsArchiveArtifactTypeDiscriminator:
+    def test_save_writes_the_marker(self, tmp_path: Path) -> None:
+        import json as _json
+        import zipfile as _zipfile
+
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "x.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        with _zipfile.ZipFile(out) as zf:
+            manifest = _json.loads(zf.read("manifest.json"))
+        assert manifest["artifact_type"] == BUNDLE_ARCHIVE_ARTIFACT_TYPE
+
+    def test_load_rejects_a_missing_artifact_type(self, tmp_path: Path) -> None:
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "no_marker.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {},
+                }
+            )
+
+        with pytest.raises(IncompatibleSnapshotSchemaError, match="artifact_type"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_rejects_a_mismatched_artifact_type(self, tmp_path: Path) -> None:
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "wrong_marker.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(
+                {
+                    "artifact_type": "something-else",
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {},
+                }
+            )
+
+        with pytest.raises(IncompatibleSnapshotSchemaError, match="something-else"):
+            load_bundle_facts(out, format="archive")

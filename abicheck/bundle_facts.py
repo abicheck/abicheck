@@ -46,7 +46,10 @@ from typing import TYPE_CHECKING, Any
 from .bundle_manifest import InstantiationManifest
 from .model import AbiSnapshot
 from .storage.bundle_facts_validation import (
-    check_bundle_facts_json_budget,
+    BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+    load_bundle_facts_blob_json,
+    require_int_schema_version,
+    validate_bundle_archive_artifact_type,
     validated_alias_map,
     validated_filename_map,
 )
@@ -61,8 +64,13 @@ log = logging.getLogger(__name__)
 #: Schema version for the persisted `BundleFacts` container itself --
 #: independent of `AbiSnapshot.SCHEMA_VERSION` (each per-library snapshot
 #: already carries its own), since the container's own shape (what fields
-#: `BundleFacts` has) can evolve on its own timeline.
-BUNDLE_FACTS_SCHEMA_VERSION = 1
+#: `BundleFacts` has) can evolve on its own timeline. Bumped to 2 for the
+#: `BUNDLE_FACTS_ARTIFACT_TYPE` marker below.
+BUNDLE_FACTS_SCHEMA_VERSION = 2
+
+#: Self-describing document-type marker; see `bundle_facts_serialization.
+#: looks_like_bundle_facts_document` for the classifier built on it.
+BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
 #: Schema version for G40's content-addressed archive *container* --
 #: independent of `BUNDLE_FACTS_SCHEMA_VERSION` above (the container's own
@@ -132,7 +140,8 @@ class BundleFacts:
     own ``path.name`` fallback for a versioned DSO with no usable
     ``DT_SONAME``, else it silently goes unreported for a stored-baseline
     comparison a live one would have caught (Codex review). Empty for a
-    caller that didn't pass real paths, same as ``filesystem_aliases``."""
+    caller that didn't pass real paths, same as ``filesystem_aliases``.
+    ``artifact_type`` is always :data:`BUNDLE_FACTS_ARTIFACT_TYPE` here."""
 
     schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT
@@ -140,6 +149,7 @@ class BundleFacts:
     manifest: InstantiationManifest | None = None
     filesystem_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
     library_filenames: dict[str, str] = field(default_factory=dict)
+    artifact_type: str = BUNDLE_FACTS_ARTIFACT_TYPE
 
 
 def capture_bundle_facts(
@@ -499,6 +509,7 @@ def write_bundle_facts_archive(
         )
 
     container_manifest = {
+        "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
         "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
         "bundle_facts_schema_version": facts.schema_version,
         "variant_fingerprint": facts.variant_fingerprint,
@@ -577,35 +588,17 @@ def read_bundle_facts_archive(
 
     *max_json_object_nodes* overrides :data:`DEFAULT_MAX_JSON_OBJECT_NODES`
     for this call's per-blob budget -- see that constant's own docstring."""
-    import json as _json
-
     from .bundle_manifest import manifest_from_dict
     from .errors import IncompatibleSnapshotSchemaError, SnapshotError
     from .storage.bundle_archive import BundleArchiveReader
 
     def _load_blob_json(raw: bytes, description: str) -> Any:
-        # Mirrors read_manifest()'s own translation -- neither invalid
-        # JSON nor a RecursionError may surface raw here either (Codex).
-        # The shared pre-scan bounds both container-node count (object
-        # AND array, unlike object_pairs_hook alone) and nesting depth
-        # before json.loads() ever runs -- the latter because relying on
-        # json.loads() itself to raise RecursionError isn't portable
-        # (Python 3.14 parses 10,000 levels of `[[[...]]]` with none).
-        check_bundle_facts_json_budget(raw, max_json_object_nodes, path=path, description=description)
-        try:
-            return _json.loads(raw)
-        except (UnicodeDecodeError, ValueError) as exc:
-            raise SnapshotError(f"{path}: {description} is not valid JSON: {exc}") from exc
-        except RecursionError as exc:
-            raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from exc
-
-    def _require_int_schema_version(value: Any, *, field: str) -> int:
-        # A bare int() would silently truncate 1.9, accept True/False as
-        # 1/0, and raise a bare TypeError for None instead of this
-        # module's own SnapshotError contract (Codex review).
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise SnapshotError(f"{path}: manifest {field} must be an integer, got {value!r}")
-        return int(value)
+        return load_bundle_facts_blob_json(
+            raw,
+            max_json_object_nodes=max_json_object_nodes,
+            path=path,
+            description=description,
+        )
 
     def _load_snapshot_dict(blob: dict[str, Any], description: str) -> AbiSnapshot:
         # snapshot_from_dict() can leak a raw TypeError/KeyError/
@@ -623,6 +616,7 @@ def read_bundle_facts_archive(
     )
     with reader_cm as reader:
         manifest = reader.read_manifest()
+        validate_bundle_archive_artifact_type(manifest, path=path)
         # The *container's* own schema_version (manifest/blob shape) is a
         # separate axis from bundle_facts_schema_version (the BundleFacts
         # shape it encodes) -- see the two constants' own comments. Both
@@ -636,7 +630,7 @@ def read_bundle_facts_archive(
                 raise IncompatibleSnapshotSchemaError(
                     f"{path}: manifest is missing required key {_field!r}."
                 )
-            _v = _require_int_schema_version(manifest[_field], field=_field)
+            _v = require_int_schema_version(manifest[_field], field=_field, path=path)
             if not 1 <= _v <= _max:
                 raise IncompatibleSnapshotSchemaError(
                     f"{path}: manifest {_field} {_v} is not a version this "

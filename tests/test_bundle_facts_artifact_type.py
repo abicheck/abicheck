@@ -1,0 +1,129 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""``BundleFacts``' plain-JSON ``artifact_type`` discriminator (CLI cleanup
+phase two, PR I prerequisite) -- a strong, explicit self-describing marker,
+distinct from the shape-based heuristic it supersedes.
+
+Split out of ``tests/test_bundle_facts.py`` (a ``debt.yaml``-tracked,
+no-growth test module -- new coverage goes in a sibling file instead of
+growing it further), mirroring that file's own small ``ElfMetadata``
+fixture style. See ``tests/test_bundle_facts_archive.py``'s own
+``TestBundleFactsArchiveArtifactTypeDiscriminator`` for the G40 archive
+container's separate, required marker.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from abicheck.bundle_facts import (
+    BUNDLE_FACTS_ARTIFACT_TYPE,
+    capture_bundle_facts,
+)
+from abicheck.bundle_facts_serialization import looks_like_bundle_facts_document
+from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.model import AbiSnapshot
+from abicheck.serialization import bundle_facts_from_dict, bundle_facts_to_dict
+
+
+def _meta(
+    *,
+    soname: str = "",
+    needed: list[str] | None = None,
+    exports: list[str] | None = None,
+    imports: list[str] | None = None,
+) -> ElfMetadata:
+    syms = [ElfSymbol(name=name, visibility="default") for name in exports or []]
+    imps = [ElfImport(name=name) for name in imports or []]
+    return ElfMetadata(
+        soname=soname or "", needed=needed or [], symbols=syms, imports=imps
+    )
+
+
+def _old_metadata() -> dict[str, ElfMetadata]:
+    return {
+        "libcore.so": _meta(soname="libcore.so", exports=["core_mul", "core_add"]),
+        "libalgo.so": _meta(
+            soname="libalgo.so",
+            needed=["libcore.so"],
+            imports=["core_mul"],
+        ),
+    }
+
+
+def _per_library_snapshots(metadata: dict[str, ElfMetadata]) -> dict[str, AbiSnapshot]:
+    return {
+        name: AbiSnapshot(library=name, version="old", elf=meta)
+        for name, meta in metadata.items()
+    }
+
+
+class TestBundleFactsArtifactTypeDiscriminator:
+    def test_artifact_type_round_trips(self) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        assert d["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
+        assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
+    def test_missing_artifact_type_defaults_to_current(self) -> None:
+        # A v1 document (schema_version 1) predates this marker entirely --
+        # it must still load, and get the current artifact_type assigned.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        del d["artifact_type"]
+        assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
+    def test_mismatched_artifact_type_is_rejected(self) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        d["artifact_type"] = "something-else"
+
+        with pytest.raises(ValueError, match="artifact_type"):
+            bundle_facts_from_dict(d)
+
+
+class TestLooksLikeBundleFactsDocument:
+    """Two-tier classification: an explicit ``artifact_type`` key is trusted
+    outright (in both the match and mismatch directions) -- shape-based
+    fallback applies only when the key is fully absent (a legacy v1
+    document)."""
+
+    def test_true_for_a_document_with_the_correct_marker(self) -> None:
+        assert looks_like_bundle_facts_document(
+            {"artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE}
+        )
+
+    def test_false_for_a_wrong_marker_even_with_bundle_facts_shape(self) -> None:
+        # The explicit marker is trusted outright -- a wrong marker is
+        # rejected even though the rest of the document is shaped exactly
+        # like real bundle facts, proving there is no shape fallback once
+        # the key is present.
+        assert not looks_like_bundle_facts_document(
+            {
+                "artifact_type": "something-else",
+                "per_library_snapshots": {},
+            }
+        )
+
+    def test_true_for_a_legacy_v1_document_with_no_marker_key(self) -> None:
+        assert looks_like_bundle_facts_document({"per_library_snapshots": {}})
+
+    def test_false_for_a_non_dict_input(self) -> None:
+        assert not looks_like_bundle_facts_document(["not", "a", "dict"])
+        assert not looks_like_bundle_facts_document(None)
+
+    def test_false_for_a_dict_with_neither_key(self) -> None:
+        assert not looks_like_bundle_facts_document({"schema_version": 2})
