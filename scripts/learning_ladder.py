@@ -44,13 +44,14 @@ Rules the file encodes (each is an ERROR):
   increasing along the entry.
 - **Footers match the ladder.** Every member/branch page carries one
   `**Ladder:**` footer line whose two links are its ladder neighbours.
-- **The sidebar is the ladder.** In `mkdocs.yml`, a sequence's tab either
-  carries one nav group per step — titled `<id>. <title>`, in step order,
+- **The sidebar is the ladder.** In `mkdocs.yml`, a numbered sequence's
+  tab carries one nav group per step — titled `<id>. <title>`, in step order,
   holding exactly that step's members in ladder order, each branch
   somewhere after its parent and branches in ladder order among
   themselves, each branch either directly after its parent or in the
-  trailing go-deeper block — or lists the whole sequence flat in the same
-  order (the Concepts tab). The hub is the first entry directly under the
+  trailing go-deeper block; any other sequence's tab lists it flat in the
+  same order (the Concepts tab) — the shape is declared by the sequence,
+  not read off whatever the nav contains. The hub is the first entry directly under the
   first sequence's tab, as its overview, and appears nowhere else.
   This is what keeps the sidebar, the hub's step list, and every page's
   footer telling one reading order instead of three.
@@ -499,6 +500,22 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
         ]
         if not grouped and not flat and flat_key not in groups:
             out.append(f"{seq.tab}: tab not found in mkdocs.yml nav")
+            continue
+        # The sequence declares its sidebar shape: a numbered sequence is
+        # one group per step, any other is a flat list. Deciding from what
+        # the nav happens to contain would let the step groups vanish -- or
+        # the flat tab grow groups -- unnoticed.
+        if seq.numbered and not grouped:
+            out.append(
+                f"{seq.tab}: numbered steps must be one nav group per step "
+                f"(expected {[nav_group_title(t) for t in seq.tiers]}), not a flat list"
+            )
+            continue
+        if not seq.numbered and grouped:
+            out.append(
+                f"{seq.tab}: this sequence is listed flat, in ladder order; nav groups "
+                f"{[title for title, _ in grouped]} are not allowed here"
+            )
             continue
         if not grouped:
             members = seq.ordered_members()

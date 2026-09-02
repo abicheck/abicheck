@@ -673,6 +673,36 @@ def test_flat_tab_must_list_its_sequence_in_order(tmp_path: Path) -> None:
     assert any("Concepts" in m and "learn/a.md" in m and "elsewhere" in m for m in msgs)
 
 
+def test_numbered_sequence_may_not_be_flattened(tmp_path: Path) -> None:
+    """Flattening the stepped tab removes the step groups the sidebar exists
+    to show; the pages being in order is not enough."""
+    nav = """
+nav:
+  - Learn:
+    - Overview: learn/hub.md
+    - A: learn/a.md
+    - B: learn/b.md
+    - C: learn/c.md
+    - D: learn/d.md
+    - CB: learn/c-branch.md
+  - Concepts:
+    - X: learn/x.md
+"""
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any(
+        "Learn: numbered steps must be one nav group per step" in m for m in msgs
+    )
+
+
+def test_flat_sequence_may_not_grow_groups(tmp_path: Path) -> None:
+    nav = NAV_OK.replace(
+        "  - Concepts:\n    - X: learn/x.md\n",
+        '  - Concepts:\n    - "c1. Model":\n      - X: learn/x.md\n',
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("Concepts: this sequence is listed flat" in m for m in msgs)
+
+
 def test_missing_tab_is_an_error(tmp_path: Path) -> None:
     nav = "nav:\n  - Home: index.md\n"
     msgs = _run_with_nav(tmp_path, nav)
