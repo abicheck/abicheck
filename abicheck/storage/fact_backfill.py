@@ -54,6 +54,7 @@ __all__ = [
     "CaseAFactRule",
     "apply_case_a_fact_backfill",
     "apply_legacy_fact_backfill",
+    "evidenced_producers",
 ]
 
 
@@ -118,28 +119,116 @@ def _owner_pairs(
         raise ValueError(f"no raw-document navigation known for owner {owner!r}")
 
 
-#: The two header-AST producers. A fact whose registered
-#: ``producing_backends`` name only these cannot have been observed by a
-#: run that never parsed a header, however trustworthy its reliability flag
-#: reads -- see :func:`_needs_header_ast`.
+#: The two header-AST producers -- evidenced only by a snapshot whose header
+#: provenance is *recorded* (see :func:`evidenced_producers`).
 _HEADER_AST_BACKENDS: frozenset[str] = frozenset({"castxml", "clang"})
 
 
-def _needs_header_ast(owner: str, field: str) -> bool:
-    """Whether only a header-AST parse can produce this fact.
+def evidenced_producers(
+    *,
+    header_provenance_confirmed: bool,
+    ast_producer: str | None,
+    platform: str | None,
+) -> frozenset[str]:
+    """Which fact producers this raw document shows actually ran.
 
-    Answered from the fact's own ``FACT_REGISTRY`` entry rather than from a
+    "Which backends *could* produce this fact in principle" is the wrong
+    question for a legacy load, and answering it is how two review rounds
+    found the same defect twice (Codex, PR #993): a header-AST-only fact
+    survived on a non-header snapshot, and then ``TypeField.is_const``/
+    ``is_volatile`` survived on a **PE/PDB** snapshot because their registry
+    entry names ``dwarf`` -- a producer that document has no trace of, and
+    one whose fresh equivalent (``pdb_model._record_from_layout``) states
+    ``UNSUPPORTED`` outright. The question is which producers *this
+    document* evidences:
+
+    - ``castxml``/``clang`` only when header provenance is **recorded**
+      (an inferred ``from_headers`` is a guess a legacy DWARF-only dump
+      satisfies too); a recorded ``ast_producer`` narrows to that one
+      backend, ``"hybrid"`` (or an unrecorded producer on a confirmed
+      header snapshot) admits both.
+    - ``elf``/``pe``/``macho`` from the document's own ``platform``.
+
+    **No debug-info producer is ever credited from a debug block.** The
+    ``dwarf``/``dwarf_advanced`` blocks are this codebase's debug *storage*,
+    not a format claim, and every non-DWARF producer writes into them with
+    ``has_dwarf=True``: ``btf_metadata.BtfMetadata.to_dwarf_metadata`` and its
+    CTF sibling (via ``dumper_debug._resolve_debug_metadata``) and
+    ``pdb_metadata.parse_pdb_debug_info``. Nothing inside a legacy document
+    says which of them ran -- ``dwarf_advanced.has_dwarf`` is not the
+    discriminator it looks like either, since
+    ``dwarf_presence._section_presence_metadata`` sets it for BTF and CTF on
+    the ``--debug-presence-only`` path. Two review rounds were spent
+    narrowing this inference (Codex, PR #995: first the placeholder block's
+    truthiness, then PE); the third finding is that the inference itself is
+    the bug, because the storage layer cannot answer a question the payload
+    does not record. So a populated debug block evidences *nothing*, and a
+    fact resting on a debug producer alone downgrades.
+
+    Four rules in :func:`apply_legacy_fact_backfill`'s table name ``dwarf``
+    -- ``TypeField.is_const``/``is_volatile`` and ``RecordType.vtable``/
+    ``vptr_offset_bits`` (Codex review, PR #995, eighth round: an earlier
+    draft of this docstring claimed only the first two, having enumerated
+    the fields ADR-063 Phase 5 converted rather than the whole table).
+    Every one of them also names both header-AST backends, so a *recorded*
+    header snapshot is unaffected; the reach is a legacy **non-header**
+    document still holding the resting default, where the claim narrows and
+    the value never does -- a record with a real vtable keeps it and stays
+    ``PRESENT``.
+
+    The vtable pair is deliberately not carved out. A DWARF-derived
+    ``vtable: []`` on a non-polymorphic record is a real "the producer ran
+    and established nothing is there" observation, and losing it is a cost.
+    But it is not *recoverable* here: the only way to keep it would be to
+    read ``platform == "elf"`` plus a populated debug block as DWARF, which
+    is precisely the inference the round above removed, and which a BTF or
+    CTF snapshot satisfies identically while carrying no vtable information
+    at all. On ``main`` today that same ``vtable: []`` reads ``PRESENT`` on a
+    PE/PDB and a symbols-only ELF document too, so the uniform answer
+    replaces a broader over-claim rather than a narrower correct one.
+
+    A **fresh** snapshot is unaffected in every case: it persists each
+    ``<field>_fact`` directly and :func:`apply_case_a_fact_backfill` skips
+    any entry that already carries one. Recording the resolved format
+    (``dumper.resolved_debug_format``) in the snapshot would not change that
+    -- it would name the producer only for documents that never needed this
+    correction.
+
+    So the evidenced set is exactly the two bullets above: ``dwarf``,
+    ``pdb``, ``btf`` and ``ctf`` are never inferred. No fact in the registry
+    names any of them as its *only* producer, so nothing is left with no
+    reachable producer at all -- and a future one would fail closed
+    (downgraded to ``NOT_COLLECTED``) rather than silently claim itself.
+
+    Takes no raw document by design: needing one back would mean this layer
+    is reading the payload to decide what it means again.
+    """
+    evidenced: set[str] = set()
+    if header_provenance_confirmed:
+        if ast_producer in _HEADER_AST_BACKENDS:
+            evidenced.add(ast_producer)
+        else:
+            evidenced |= _HEADER_AST_BACKENDS
+    if platform in {"elf", "pe", "macho"}:
+        evidenced.add(platform)
+    return frozenset(evidenced)
+
+
+def _unproduceable(owner: str, field: str, evidenced: frozenset[str]) -> bool:
+    """Whether no producer this document evidences can have observed the fact.
+
+    Answered from the fact's own ``FACT_REGISTRY`` entry rather than a
     second hand-maintained list -- the registry ADR-063 Phase 5 exists to
     build is the one place a fact's producers are declared, so a future
     change to them reaches this decision automatically. An unregistered
     field answers ``False``: this correction only ever *narrows* a claim,
     so an unknown fact keeps the pre-existing behaviour rather than being
-    silently downgraded on a guess.
+    downgraded on a guess.
     """
     entry = FACT_REGISTRY.get(f"{owner}.{field}")
     if entry is None:
         return False
-    return set(entry.producing_backends) <= _HEADER_AST_BACKENDS
+    return not (set(entry.producing_backends) & evidenced)
 
 
 def apply_case_a_fact_backfill(
@@ -147,7 +236,13 @@ def apply_case_a_fact_backfill(
     *,
     schema_version: int,
     rules: tuple[CaseAFactRule, ...],
-    header_provenance_confirmed: bool = True,
+    # Required, never defaulted: a default here would be a value standing in
+    # for missing evidence (storage/AGENTS.md rule 3), and the value it stood
+    # in for -- both header-AST backends -- is the most permissive one there
+    # is, so an omitted argument would keep a header-only fact PRESENT on a
+    # document with no header provenance at all (CodeRabbit review, PR #995).
+    # A caller with nothing to report passes `frozenset()`.
+    evidenced: frozenset[str],
     **decoded: list[Any],
 ) -> None:
     """Downgrade every case-(a) fact a legacy document cannot vouch for.
@@ -165,10 +260,11 @@ def apply_case_a_fact_backfill(
 
     Only ever *downgrades*, and only for a document that predates the
     field's own conversion: a v(N)+ document's ``<field>_fact`` was decoded
-    explicitly at construction time and is authoritative.
-    ``header_provenance_confirmed`` carries the second downgrade reason (see
-    the body): a producer that never parsed a header cannot have observed a
-    header-AST-only fact, which no reliability flag expresses.
+    explicitly at construction time and is authoritative. ``evidenced``
+    carries the second downgrade reason (see the body and
+    :func:`evidenced_producers`): a producer this document shows no trace of
+    cannot have observed a fact only it produces, which no reliability flag
+    expresses.
     """
     for rule in rules:
         if schema_version >= rule.min_schema_version:
@@ -185,24 +281,27 @@ def apply_case_a_fact_backfill(
         # confirmed fact the fresh equivalent of that same snapshot reports
         # as NOT_COLLECTED.
         #
-        # The caller passes header provenance that is *recorded*, never
-        # inferred (Codex review, second round): a document predating the
-        # `from_headers` key has it guessed from "does this snapshot carry
-        # declarations at all", which a legacy DWARF-only dump satisfies
-        # exactly as a header dump does -- `serialization.py` marks that
-        # guess with `from_headers_inferred` for precisely this reason. An
-        # inferred True is UNKNOWN provenance, and unknown fails closed
-        # here, the same way an absent `ast_producer` is read as "possibly
-        # clang-family" rather than silently trusted.
+        # "Unproduceable" is answered against the producers this DOCUMENT
+        # evidences, not against the ones that could produce the fact in
+        # principle -- see `evidenced_producers`, which two review rounds
+        # shaped: recorded (never inferred) header provenance, a real DWARF
+        # block, the document's own platform.
         unreliable = not rule.reliable
-        unproduceable = not header_provenance_confirmed and _needs_header_ast(
-            rule.owner, rule.field
-        )
+        unproduceable = _unproduceable(rule.owner, rule.field, evidenced)
         if not (unreliable or unproduceable):
             continue
         fact_key = f"{rule.field}_fact"
         for raw, obj in _owner_pairs(d, rule.owner, decoded):
-            if fact_key in raw:
+            # Skip only an entry carrying a *usable* fact, not merely the
+            # key. A `"<field>_fact": {}` or `: null` decodes to nothing
+            # (`decode_fact`'s own `if not raw`), so the owning dataclass's
+            # bridge derives the fact from the legacy value instead -- and
+            # keying this on presence let such an entry past the producer
+            # gate entirely, resolving PRESENT on a document with no
+            # evidence for it at all (CodeRabbit review, PR #995). Falsy is
+            # the same "no fact here" test the decoder already applies, so
+            # the two halves cannot disagree about what the document says.
+            if raw.get(fact_key):
                 continue
             if unreliable:
                 setattr(obj, rule.field, rule.normalized_default)
@@ -226,7 +325,13 @@ def apply_legacy_fact_backfill(
     clang_va_list_facts_reliable_value: bool,
     ast_producer_value: str | None,
     *,
-    header_provenance_confirmed: bool = True,
+    # Required, never defaulted: a default here would be a value standing in
+    # for missing evidence (storage/AGENTS.md rule 3), and the value it stood
+    # in for -- both header-AST backends -- is the most permissive one there
+    # is, so an omitted argument would keep a header-only fact PRESENT on a
+    # document with no header provenance at all (CodeRabbit review, PR #995).
+    # A caller with nothing to report passes `frozenset()`.
+    evidenced: frozenset[str],
     variables: list[Any] | None = None,
     enums: list[Any] | None = None,
     header_cv_facts_reliable_value: bool = True,
@@ -407,7 +512,7 @@ def apply_legacy_fact_backfill(
                 AccessLevel.PUBLIC,
             ),
         ),
-        header_provenance_confirmed=header_provenance_confirmed,
+        evidenced=evidenced,
         types=types,
         functions=funcs,
         variables=variables or [],

@@ -92,6 +92,9 @@ sort every change into one of those buckets — *before* you ship the new one.
 You now have the one idea the whole series builds on: **the compiler bakes the
 library's promises into the caller and never re-checks them.**
 
+- **[How a Break Shows Up](../how-a-break-shows-up.md)** — the next page on
+  the ladder: the eight ways a break reaches you, and which evidence first
+  reveals each.
 - **[Part 0 — Compatibility as a Product Contract](00-product-contract.md)** —
   why "is this a break?" depends on what you *promised*, not just what changed.
   Start here if you like framing before mechanism.
@@ -103,4 +106,4 @@ library's promises into the caller and never re-checks them.**
 
 ---
 
-**Ladder:** ← [Series overview](../abi-api-handling.md) · Tier 0 · Orientation · [How a Break Shows Up](../how-a-break-shows-up.md) →
+**Ladder:** ← [Series overview](../abi-api-handling.md) · Step 1 · Start Here · [How a Break Shows Up](../how-a-break-shows-up.md) →

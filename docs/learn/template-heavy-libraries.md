@@ -149,4 +149,4 @@ without a binary.
 
 ---
 
-**Ladder:** ← [Products, Not Libraries](products-not-libraries.md) · Tier 7 · At scale · [How System Libraries Stay Compatible](system-library-discipline.md) →
+**Ladder:** ← [Products, Not Libraries](products-not-libraries.md) · Step 8 · At Scale · [How System Libraries Stay Compatible](system-library-discipline.md) →

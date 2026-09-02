@@ -20,8 +20,7 @@ generated: false
 > **4. C++ ABI** ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -398,4 +397,4 @@ conventions, and TLS models — all recorded in the `.so` itself.
 
 ---
 
-**Ladder:** ← [Part 3 — Type Layout Breaks](03-type-layout.md) · Tier 2 · Mechanics · [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) →
+**Ladder:** ← [Part 3 — Type Layout Breaks](03-type-layout.md) · Step 3 · How Breaks Happen · [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) →

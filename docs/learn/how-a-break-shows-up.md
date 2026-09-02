@@ -163,4 +163,4 @@ have no generated case pages).
 
 ---
 
-**Ladder:** ← [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) · Tier 0 · Orientation · [ABI Cheat Sheet](abi-cheat-sheet.md) →
+**Ladder:** ← [ABI in Five Minutes](abi-series/abi-in-5-minutes.md) · Step 1 · Start Here · [ABI Cheat Sheet](abi-cheat-sheet.md) →

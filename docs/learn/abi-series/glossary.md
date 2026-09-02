@@ -68,4 +68,4 @@ concept is developed in full.
 
 ---
 
-**Ladder:** ← [ABI Cheat Sheet](../abi-cheat-sheet.md) · Tier 0 · Orientation · [Part 0 — Compatibility as a Product Contract](00-product-contract.md) →
+**Ladder:** ← [ABI Cheat Sheet](../abi-cheat-sheet.md) · Step 1 · Start Here · [Part 0 — Compatibility as a Product Contract](00-product-contract.md) →
