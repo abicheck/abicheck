@@ -501,13 +501,20 @@ _ACCEPTED_KILL_LOSS = {
     # Drives `actions/collect-facts`'s scripts the same way, and hits the same
     # subprocess re-entry.
     "tests/test_action_collect_facts.py": frozenset(
-        {"abicheck.checker_policy", "abicheck.name_classification"}
+        {
+            "abicheck.checker_policy",
+            "abicheck.name_classification",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
+        }
     ),
     "tests/test_action_check_target.py": frozenset(
         {
             "abicheck.checker_policy",
             "abicheck.finding_identity",
             "abicheck.name_classification",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
         }
     ),
     # Drives `action/run.sh`, which execs the real `abicheck` console script
@@ -520,6 +527,8 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
         }
@@ -536,6 +545,8 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
         }
@@ -554,6 +565,8 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
             "abicheck.suppression",

@@ -97,6 +97,29 @@ or a CLI flag directly is in the wrong layer.
   (`public_surface_closure.py -> export_surface.py -> public_surface.py` and
   siblings) — see this module's own docstring for the full reasoning.
 
+- `selectors.py` / `selectors_namespace_glob.py` — ADR-063 D10
+  (implementation plan Phase 9): the shared selector-matching primitive
+  (`SelectorSet`) behind `suppression.py`'s `Suppression` and
+  `reclassify.py`'s `ReclassifyRule` — one grammar (`symbol`/
+  `symbol_pattern`/`type_pattern`/`member_name`/`namespace`/
+  `entity_namespace`/`cause_namespace`/`source_location`/`change_kind`/
+  `binding`/`finding_id`/`expires`) instead of two independently-maintained
+  copies. **Genuinely dependency-free leaves** — zero import of
+  `checker_types.py`/`suppression.py`/`reclassify.py`/`policy_file.py`/
+  `finding_identity.py`, checked directly by
+  `scripts/check_architecture.py` (narrower than the general
+  `policy -> compare` layer edge, which would otherwise permit
+  `finding_identity.py`) — which is what lets `reclassify.py` import
+  `selectors.py` **statically**: before this phase it built a `Suppression`
+  instance purely for its selector grammar, resolved via a runtime
+  `importlib.import_module` call to dodge the cycle a static import would
+  have closed (`policy_file -> reclassify -> suppression -> checker_types
+  -> policy_file`); now neither module needs to import the other.
+  `selectors_namespace_glob.py` holds the fnmatch/regex namespace-glob
+  compilation machinery, split out purely to keep `selectors.py` itself
+  under the 800-line cap below (mechanical extraction, same pattern as
+  `public_surface.py`/`public_surface_closure.py` above).
+
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.

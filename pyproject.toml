@@ -392,6 +392,8 @@ only_mutate = [
     "abicheck/finding_identity.py",  # canonical/normalized finding identity
     "abicheck/name_classification.py",  # internal/public name classification
     "abicheck/suppression.py",  # suppression rule matching
+    "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)
+    "abicheck/policy/selectors_namespace_glob.py",  # namespace-glob compile/match (moved out of suppression.py)
     "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
     "abicheck/serialization.py",  # snapshot (de)serialization
 ]

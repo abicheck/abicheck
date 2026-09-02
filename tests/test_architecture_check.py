@@ -743,3 +743,102 @@ def test_main_without_base_resolution_still_catches_real_violations(
     exit_code = architecture.main(["--root", str(root)])
 
     assert exit_code == 1
+
+
+# --- ADR-063 D10: policy/selectors.py leaf-import-purity gate -------------
+
+
+def test_selector_leaf_purity_passes_with_no_denylisted_import(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _add_package(root, "policy", "")
+    _write(
+        root / "abicheck/policy/selectors.py",
+        "import re\nfrom ..checker_policy import ChangeKind\n",
+    )
+
+    assert "selector-leaf-purity" not in _rules(root)
+
+
+def test_selector_leaf_purity_rejects_deliberately_reintroduced_cycle(
+    tmp_path: Path,
+) -> None:
+    """A throwaway fixture module reintroducing exactly the import the ADR-063
+    D10 leaf contract forbids must fail this gate closed."""
+    root = _tree(tmp_path)
+    _add_package(root, "policy", "")
+    _write(
+        root / "abicheck/policy/selectors.py",
+        "from abicheck.suppression import Suppression\n",
+    )
+
+    findings = check_repository(root)
+    rules = {finding.rule for finding in findings}
+
+    assert "selector-leaf-purity" in rules
+    selector_findings = [f for f in findings if f.rule == "selector-leaf-purity"]
+    assert any("abicheck.suppression" in f.message for f in selector_findings)
+
+
+def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> None:
+    for denied in (
+        "abicheck.policy_file",
+        "abicheck.checker_types",
+        "abicheck.suppression",
+        "abicheck.reclassify",
+        "abicheck.finding_identity",
+    ):
+        root = _tree(tmp_path / denied)
+        _add_package(root, "policy", "")
+        _write(
+            root / "abicheck/policy/selectors.py",
+            f"import {denied}\n",
+        )
+
+        assert "selector-leaf-purity" in _rules(root), denied
+
+
+def test_selector_leaf_purity_rejects_submodule_import_too(tmp_path: Path) -> None:
+    """A `from abicheck.finding_identity import x` -- not just a bare
+    `import abicheck.finding_identity` -- must also be caught."""
+    root = _tree(tmp_path)
+    _add_package(root, "policy", "")
+    _write(
+        root / "abicheck/policy/selectors.py",
+        "from abicheck.finding_identity import report_canonical_finding_id\n",
+    )
+
+    assert "selector-leaf-purity" in _rules(root)
+
+
+def test_selector_leaf_purity_is_a_noop_when_the_file_does_not_exist(
+    tmp_path: Path,
+) -> None:
+    root = _tree(tmp_path)
+
+    assert "selector-leaf-purity" not in _rules(root)
+
+
+def test_selector_leaf_purity_covers_the_namespace_glob_sibling_too(
+    tmp_path: Path,
+) -> None:
+    """A denylisted import added to ``selectors_namespace_glob.py`` -- not
+    just ``selectors.py`` itself -- must fail this gate too (Codex review,
+    PR #1002): ``selectors.py`` imports from that sibling, so a regression
+    there taints ``selectors.py`` transitively while a check scoped to
+    ``selectors.py``'s own source text alone would miss it."""
+    root = _tree(tmp_path)
+    _add_package(root, "policy", "")
+    _write(root / "abicheck/policy/selectors.py", "")
+    _write(
+        root / "abicheck/policy/selectors_namespace_glob.py",
+        "from abicheck.reclassify import ReclassifyRule\n",
+    )
+
+    findings = check_repository(root)
+    selector_findings = [f for f in findings if f.rule == "selector-leaf-purity"]
+
+    assert selector_findings
+    assert any(
+        "selectors_namespace_glob.py" in f.message and "abicheck.reclassify" in f.message
+        for f in selector_findings
+    )

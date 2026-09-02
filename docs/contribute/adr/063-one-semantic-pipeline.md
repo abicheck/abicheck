@@ -706,7 +706,43 @@
   `docs/contribute/plans/storage-format-v2.md`'s "Landed in Phase 1"
   section and `docs/contribute/adr/062-project-snapshot-storage-v2.md`'s
   own Status for the jointly-maintained, authoritative account.
-- **Phases 9–10** are still unimplemented design text.
+- **Phase 9** (selector/suppression/reclassification consolidation, D10) is
+  **complete**: `abicheck/policy/selectors.py`'s new `SelectorSet` is the
+  one selector-matching grammar (`symbol`/`symbol_pattern`/`type_pattern`/
+  `member_name`/`namespace`/`entity_namespace`/`cause_namespace`/
+  `source_location`/`change_kind`/`binding`/`finding_id`/`expires`)
+  `suppression.py`'s `Suppression` and `reclassify.py`'s `ReclassifyRule`
+  each build internally and delegate all validation/matching to, replacing
+  two independently-maintained copies of the same fnmatch/regex/namespace-
+  glob machinery. The leaf is genuinely dependency-free — zero import of
+  `checker_types.py`/`suppression.py`/`reclassify.py`/`policy_file.py`/
+  `finding_identity.py`, enforced by a new `scripts/check_architecture.py`
+  gate scoped to this one file (narrower than the general
+  `policy -> compare` layer edge, which would otherwise permit an import of
+  `finding_identity.py`) — which is what lets `reclassify.py` import it
+  **statically**: before this phase, `reclassify.py` built a `Suppression`
+  instance purely for its selector grammar, resolved through a runtime
+  `importlib.import_module` call specifically to dodge the import cycle a
+  static `Suppression` import would have closed (`policy_file ->
+  reclassify -> suppression -> checker_types -> policy_file`); that
+  workaround, and its module-docstring justification, are both gone — the
+  cycle no longer exists, because neither module needs to import the
+  other any more. The `finding_id` matcher (`Suppression`-only —
+  `ReclassifyRule` never sets one) is a plain string-equality comparison
+  against an already-computed `report_canonical_finding_id(change)` the
+  caller passes in, not a `finding_identity.py` import from inside the leaf
+  — a first draft of this phase's own selector code made exactly that
+  upward-dependency mistake Phase 2 already caught and corrected for
+  `model/identity.py`, and it was corrected here the identical way before
+  landing. `selectors.py`'s own namespace-glob compilation machinery moved
+  into a sibling leaf, `selectors_namespace_glob.py`, purely to keep both
+  files under the 800-line architecture-gate ceiling (mechanical
+  extraction, not a redesign). Selector-matching *behavior* is unchanged —
+  every existing `suppression.py`/`reclassify.py` selector test still
+  passes unmodified against the shared matcher, and the FP-rate/mutation-
+  score gates show no regression, matching this phase's own acceptance
+  criteria that it moves matching logic without changing what matches.
+- **Phase 10** is still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this

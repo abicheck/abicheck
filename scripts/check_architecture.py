@@ -41,6 +41,37 @@ DEBT_FIELDS = frozenset(
     }
 )
 
+# ADR-063 D10 (implementation plan Phase 9): abicheck/policy/selectors.py is
+# the shared selector-matching leaf `suppression.py`'s `Suppression` and
+# `reclassify.py`'s `ReclassifyRule` both build on. Its whole reason to
+# exist is letting `reclassify.py` import it *statically* without recreating
+# the import cycle `policy_file -> reclassify -> suppression -> checker_types
+# -> policy_file` a static `Suppression` import once closed (the module used
+# to work around that with a runtime `importlib.import_module` call). That
+# only holds if the leaf itself never imports back into any module on that
+# cycle -- and this denylist is strictly narrower than the general
+# `policy -> compare` layer edge already permits (`finding_identity.py` is
+# classified into the `compare` layer, which `policy` may otherwise import),
+# so the general dependency-direction check below would not catch a
+# regression here on its own. Checked directly against each leaf file's own
+# imports, not modeled as a layer.
+#
+# Covers `selectors_namespace_glob.py` too, not just `selectors.py` itself
+# (Codex review, PR #1002): `selectors.py` imports from that sibling, so a
+# denylisted import added there would taint `selectors.py` transitively
+# while passing a check scoped to `selectors.py`'s own source text alone.
+_SELECTOR_LEAF_PATHS: tuple[str, ...] = (
+    "abicheck/policy/selectors.py",
+    "abicheck/policy/selectors_namespace_glob.py",
+)
+_SELECTOR_LEAF_DENYLIST: tuple[str, ...] = (
+    "abicheck.policy_file",
+    "abicheck.checker_types",
+    "abicheck.suppression",
+    "abicheck.reclassify",
+    "abicheck.finding_identity",
+)
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -382,6 +413,36 @@ def _imports(
     return result
 
 
+def _check_selector_leaf_purity(root: Path, findings: list[Finding]) -> None:
+    """ADR-063 D10: every path in ``_SELECTOR_LEAF_PATHS`` must import
+    nothing from ``_SELECTOR_LEAF_DENYLIST`` -- see that constant's own
+    comment for why, and ``_SELECTOR_LEAF_PATHS``' own comment for why both
+    files are covered, not just ``selectors.py``.
+
+    A no-op for any path that doesn't exist (e.g. a miniature test tree that
+    only builds one of the two), so this check stays silent everywhere
+    except these leaf modules and any fixture that deliberately creates one.
+    """
+    for leaf_path in _SELECTOR_LEAF_PATHS:
+        path = root / leaf_path
+        if not path.is_file():
+            continue
+        module = _module_name(root, path)
+        for lineno, target in _imports(path, module, findings):
+            if target in _SELECTOR_LEAF_DENYLIST or any(
+                target.startswith(name + ".") for name in _SELECTOR_LEAF_DENYLIST
+            ):
+                findings.append(
+                    Finding(
+                        "selector-leaf-purity",
+                        f"{path.relative_to(root)}:{lineno}: must not import "
+                        f"{target!r} -- ADR-063 D10 leaf-module contract "
+                        f"({leaf_path} may not depend on any of "
+                        f"{', '.join(_SELECTOR_LEAF_DENYLIST)})",
+                    )
+                )
+
+
 def _layer_for(
     module: str, root: Path, layers: Mapping[str, dict[str, Any]]
 ) -> str | None:
@@ -510,6 +571,7 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     modules = _load_mapping(root / "architecture/modules.yaml", findings)
     debt = _load_mapping(root / "architecture/debt.yaml", findings)
     layers = _validate_modules(modules, findings)
+    _check_selector_leaf_purity(root, findings)
     limits = modules.get("limits", {})
     production_limit = (
         limits.get("production", 800) if isinstance(limits, dict) else 800
