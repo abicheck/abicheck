@@ -27,6 +27,7 @@
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
         "abicheck/report_side_facts.py",
+        "abicheck/stable_abi.py",
         "abicheck/stable_abi_data.py",
         "abicheck/errors.py"
       ]

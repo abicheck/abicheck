@@ -473,7 +473,7 @@
     },
     {
       "path": "abicheck/cli_scan.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1720,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",

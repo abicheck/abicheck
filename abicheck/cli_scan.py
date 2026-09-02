@@ -47,12 +47,10 @@ side-effect at the bottom of :mod:`abicheck.cli` so ``@main.command`` runs.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -126,6 +124,29 @@ from .frontends.cli.options.params import (
     SIDED_PATH_PARAM,
     _load_suppression_and_policy,
 )
+from .frontends.cli.scan_artifact_set import (  # noqa: F401 - re-exported under original names
+    _COMPARISON_ONLY_FLAGS,
+    _reject_comparison_only_flags,
+    _render_artifact_set_text,
+    _render_member_findings_lines,
+    _resolve_artifact_set_paths,
+)
+
+# ADR-061: `scan`'s CLI input parsing moved to a sibling once this module hit
+# the 2000-line hard cap. Imported under the original private spellings so
+# every existing call site here -- and the tests/comments that name them --
+# resolves unchanged; a `monkeypatch.setattr(cli_scan, "_parse_budget", ...)`
+# still rebinds the global this module's own callers look up.
+from .frontends.cli.scan_inputs import (  # noqa: F401 - re-exported under original names
+    _DURATION_UNITS,
+    _git_changed_paths,
+    _normalize_depth_inputs,
+    _parse_abi3_floor,
+    _parse_budget,
+    _resolve_auto_source_method,
+    _resolve_changed_seed,
+    _scan_explicit_flags,
+)
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
 # scan_engine.py, not here — this module is a thin Click front-end over it
@@ -151,10 +172,11 @@ from .workflows.extraction import (  # noqa: F401 - re-exported for tests
     run_preprocessor_scan,
     scan_files,
 )
-from .workflows.scan_config import RiskScore, score_changed_paths
+from .workflows.scan_config import score_changed_paths
 
 if TYPE_CHECKING:
     from .workflows.scan_abort_result import ScanAbortAxis
+    pass
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -164,14 +186,10 @@ _merge_compile_config = merge_compile_config
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
 #: generic error code (1) so CI can tell a budget overflow from a real break.
-_EXIT_BUDGET_OVERFLOW = 5
-
-#: Suffixes ``time``-style duration strings accept (``15m``, ``900s``, ``1h``).
-_DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
-
 #: Valid per-check severity levels for ``--crosscheck KEY=LEVEL``. ``off`` removes
 #: the check; the others keep it enabled (the label rides into the report).
 _CROSSCHECK_LEVELS = frozenset({"off", "info", "warning", "error"})
+
 
 #: ChangeKinds that ride the same advisory→gating promotion path as the
 #: cross-checks but are NOT toggleable engine checks. Accepted as
@@ -189,61 +207,6 @@ _CROSSCHECK_LEVELS = frozenset({"off", "info", "warning", "error"})
 #: *compare* verdict/severity path (like every other RISK kind), not this one;
 #: adding them here would accept the flag but silently fail to honour it.
 _PROMOTABLE_FINDING_KINDS = frozenset({"python_stable_abi_violation"})
-
-
-def _parse_budget(value: str | None) -> float | None:
-    """Parse a ``time``-style duration (``15m``/``900s``/``1h``) to seconds.
-
-    A bare number is read as seconds. Returns ``None`` for an empty value; raises
-    :class:`click.BadParameter` for an unparseable one.
-    """
-    if not value:
-        return None
-    raw = value.strip().lower()
-    unit = 1
-    if raw and raw[-1] in _DURATION_UNITS:
-        unit = _DURATION_UNITS[raw[-1]]
-        raw = raw[:-1]
-    try:
-        amount = float(raw)
-    except ValueError as exc:
-        raise click.BadParameter(
-            f"invalid --budget {value!r}; use e.g. 15m, 900s, 1h"
-        ) from exc
-    if amount < 0:
-        raise click.BadParameter(f"--budget must be non-negative, got {value!r}")
-    return amount * unit
-
-
-def _git_changed_paths(since: str, cwd: Path | None) -> list[str] | None:
-    """Paths changed vs. a git ref via ``git diff --name-only`` (no shell).
-
-    Returns the changed-path list on success (possibly **empty** for a no-op
-    diff), or ``None`` when the seed could not be produced (missing git / non-repo
-    / bad ref). The caller distinguishes the two: a successful empty diff is a
-    valid "nothing changed" seed (auto → s0), whereas ``None`` means no seed and
-    auto falls back to the mode preset (ADR-035 D7 / Codex review).
-    """
-    try:
-        proc = subprocess.run(
-            ["git", "diff", "--name-only", f"{since}...HEAD"],
-            cwd=str(cwd) if cwd is not None else None,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        click.echo(f"warning: --since: could not run git diff: {exc}", err=True)
-        return None
-    if proc.returncode != 0:
-        click.echo(
-            f"warning: --since {since!r}: git diff failed "
-            f"({proc.stderr.strip() or 'non-zero exit'}); scanning broadly.",
-            err=True,
-        )
-        return None
-    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
 
 
 def _parse_crosschecks(
@@ -283,110 +246,6 @@ def _parse_crosschecks(
             severities[key] = level
     return frozenset(enabled), severities
 
-
-def _normalize_depth_inputs(
-    depth: EvidenceDepth,
-    headers: tuple[Path, ...],
-    baseline_header: tuple[Path, ...],
-    sources: Path | None,
-    build_info: Path | None,
-) -> tuple[tuple[Path, ...], tuple[Path, ...], Path | None, Path | None]:
-    """Prune inputs that would collect evidence above the effective scan depth."""
-    if depth is not EvidenceDepth.BINARY:
-        return headers, baseline_header, sources, build_info
-    return (), (), None, None
-
-
-def _render_text(out: ScanOutcome, *, show_suppressed: bool = False) -> str:
-    """Render the human-facing scan report by composing its section blocks."""
-    lines: list[str] = []
-    lines += render_summary_lines(out)
-    lines += render_coverage_lines(out)
-    lines += render_crosscheck_lines(out)
-    lines += render_pattern_lines(out)
-    lines += render_preprocessor_lines(out)
-    lines += render_baseline_lines(out, show_suppressed=show_suppressed)
-    lines += render_verdict_lines(out)
-    return "\n".join(lines)
-
-
-def _resolve_changed_seed(
-    changed_paths_opt: tuple[str, ...],
-    since: str | None,
-    sources: Path | None,
-) -> tuple[list[str], str, bool]:
-    """Resolve the changed-path seed → ``(changed, changed_src, seeded)``.
-
-    ``--changed-path`` wins; else ``--since`` via git; else none. ``seeded`` tracks
-    whether a *valid* seed was produced — a successful empty diff (seeded, no
-    paths) is distinct from a missing/failed seed (not seeded): the former lets
-    auto pick s0 (no-op PR), the latter falls back to the broad mode preset
-    (ADR-035 D7 / Codex review).
-    """
-    if changed_paths_opt:
-        return list(changed_paths_opt), "--changed-path", True
-    if since:
-        git_changed = _git_changed_paths(since, sources)
-        if git_changed is None:
-            return [], f"--since {since} (seed failed; broad scope)", False
-        return git_changed, f"--since {since}", True
-    return [], "none (no diff seed; broad scope)", False
-
-
-def _parse_abi3_floor(abi3: str | None) -> tuple[int, int] | None:
-    """Parse the --abi3 target ``Py_LIMITED_API`` floor, or ``None`` when off.
-
-    An invalid floor (non-3 major, implausible minor, trailing junk) is a usage
-    error.
-    """
-    if abi3 is None:
-        return None
-    from . import stable_abi
-
-    floor = stable_abi.parse_abi3_version(abi3)
-    if floor is None:
-        raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
-    return floor
-
-
-def _resolve_auto_source_method(
-    sm: SourceMethod | None,
-    dp: EvidenceDepth | None,
-    mode_explicit: bool,
-    seeded: bool,
-    risk: RiskScore,
-) -> tuple[SourceMethod | None, bool, Any]:
-    """Opt an unpinned scan into risk-driven auto (ADR-037 D5).
-
-    The unset dial means 'auto' — only when *nothing* was pinned (no --depth, no
-    --source-method, no explicit --mode). auto uses the risk score ONLY when a
-    valid diff seed was produced; a missing/failed seed falls back to the mode
-    preset so a bad-ref CI run doesn't silently drop all L3-L5 evidence.
-    """
-    if sm is None and dp is None and not mode_explicit:
-        sm = SourceMethod.AUTO
-    is_auto = sm is SourceMethod.AUTO
-    auto_method = risk.recommended_method if (is_auto and seeded) else None
-    return sm, is_auto, auto_method
-
-
-def _scan_explicit_flags(
-    source_method: str | None,
-    depth: str | None,
-) -> tuple[bool, bool]:
-    """The two deliberately-distinct 'explicit' notions (ADR-037), as a pair.
-
-    ``level_explicit`` — consent to auto-run build.query (a non-auto
-    --source-method, or --depth ONLY when no --source-method is given).
-    ``pinned_explicit`` — the auto-strict evidence contract (an explicit --depth
-    always pins, or a non-auto --source-method). --mode is never a pin.
-    """
-    sm_pin = source_method is not None and source_method != SourceMethod.AUTO.value
-    level_explicit = sm_pin or (source_method is None and depth is not None)
-    pinned_explicit = (depth is not None) or sm_pin
-    return level_explicit, pinned_explicit
-
-
 def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
     """This run's compatibility exit code *before* the coverage floor was folded.
 
@@ -408,6 +267,19 @@ def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
         if isinstance(code, int):
             return code
     return _verdict_exit_code(outcome.verdict)
+
+
+def _render_text(out: ScanOutcome, *, show_suppressed: bool = False) -> str:
+    """Render the human-facing scan report by composing its section blocks."""
+    lines: list[str] = []
+    lines += render_summary_lines(out)
+    lines += render_coverage_lines(out)
+    lines += render_crosscheck_lines(out)
+    lines += render_pattern_lines(out)
+    lines += render_preprocessor_lines(out)
+    lines += render_baseline_lines(out, show_suppressed=show_suppressed)
+    lines += render_verdict_lines(out)
+    return "\n".join(lines)
 
 
 def _render_scan_report_text(
@@ -552,160 +424,6 @@ def _emit_scan_abort_report(
     if secondary_fmt == "json" and secondary_output:
         _safe_write_output(secondary_output, text)
         click.echo(f"Secondary report written to {secondary_output}", err=True)
-
-
-def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
-    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
-
-    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
-    cleanup phase two, PR 5 -- the comma-separated single-string form this
-    replaced is gone, no alias). A single value naming a directory expands
-    to every discoverable shared library in it (``explicit=False`` -- an
-    unsupported file found this way is silently skipped, mirroring
-    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
-    an explicit path list, one member per occurrence, every member of which
-    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
-    """
-    from .workflows.extraction import discover_shared_libraries
-
-    if len(spec) == 1:
-        candidate = Path(spec[0])
-        if candidate.is_dir():
-            return discover_shared_libraries(candidate), False
-    paths: list[Path] = []
-    for part in spec:
-        p = Path(part)
-        if not p.exists():
-            raise click.UsageError(f"--artifact-set member not found: {part}")
-        paths.append(p)
-    return paths, True
-
-
-def _render_member_findings_lines(result: Any) -> list[str]:
-    """Render one artifact-set member's cross-check/pattern/preprocessor
-    findings for text output (P2, Codex review): the artifact-set text
-    report previously showed only ``path: verdict`` per member -- unlike the
-    single-binary ``scan``'s richly-rendered report and the aggregate JSON's
-    nested ``report``, it gave no finding descriptions or evidence
-    explaining *why* a member was flagged, leaving CLI/Action-summary users
-    unable to act on the result.
-
-    Reuses the same section renderers the single-binary path uses
-    (:func:`render_crosscheck_lines`/:func:`render_pattern_lines`/
-    :func:`render_preprocessor_lines`) via a minimal attribute shim, since
-    those renderers only ever read the report's already-plain-dict
-    ``crosscheck``/``pattern_scan``/``preprocessor_scan`` keys -- not any
-    behavior specific to the full :class:`~abicheck.scan_engine.ScanOutcome`
-    object ``ScanArtifactResult.result.report`` was flattened from.
-    """
-    report = result.report or {}
-    if not report:
-        return []
-    shim = SimpleNamespace(
-        crosscheck=report.get("crosscheck") or {},
-        crosscheck_severities=report.get("crosscheck_severities") or {},
-        pattern=report.get("pattern_scan") or {},
-        preprocessor=report.get("preprocessor_scan") or {},
-        audit=report.get("mode") == "audit",
-    )
-    lines = render_crosscheck_lines(shim)
-    lines += render_pattern_lines(shim)
-    lines += render_preprocessor_lines(shim)
-    return [f"  {ln}" if ln else "" for ln in lines]
-
-
-def _render_artifact_set_text(result: Any) -> str:
-    """Human-facing render of a :class:`ScanSetResult` (ADR-056).
-
-    Reuses :func:`bundle.render_bundle_findings_markdown` (G34 Phase 4) for
-    the bundle-findings section, the same helper
-    ``cli_compare_release_helpers._release_md_bundle_findings`` calls for
-    the two-sided ``compare``/release path — one rendering for
-    :class:`bundle.BundleFinding`, regardless of which side produced it.
-    """
-    from .bundle import render_bundle_findings_markdown
-
-    lines: list[str] = [
-        f"Artifact-set scan verdict: {result.verdict} (exit {result.exit_code})",
-        "",
-        "Per-artifact results:",
-    ]
-    for member in result.per_artifact:
-        lines.append(f"  {member.artifact}: {member.result.verdict}")
-        lines.extend(_render_member_findings_lines(member.result))
-    lines.append("")
-    if result.bundle_incomplete:
-        lines.append("Bundle analysis: incomplete (artifact-set discovery failed)")
-    elif result.verdict == "BUDGET_OVERFLOW":
-        # CodeRabbit review: run_scan_set() returns BUDGET_OVERFLOW before
-        # ever calling audit_bundle() -- bundle_incomplete/bundle_verdict
-        # stay at their ScanSetResult defaults (False/None), so without
-        # this branch the report fell through to the else below and
-        # printed the misleading "Bundle analysis: None (0 finding(s))"
-        # instead of stating the bundle audit never ran.
-        lines.append("Bundle analysis: not run (budget overflow)")
-    else:
-        lines.append(
-            f"Bundle analysis: {result.bundle_verdict} "
-            f"({len(result.bundle_findings)} finding(s))"
-        )
-        lines.extend(render_bundle_findings_markdown(result.bundle_findings))
-    return "\n".join(lines)
-
-
-_COMPARISON_ONLY_FLAGS = {
-    "suppress": "--suppress",
-    "policy_file_path": "--policy",
-    "policy": "--policy",
-    "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
-    "severity_preset": "--severity-preset",
-    "exit_code_scheme": "--exit-code-scheme",
-    "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
-    "env_matrix_path": "--env-matrix",
-    "contract_mode": "--contract",
-    # ADR-049 D8: a pack's only application here is the baseline comparison's
-    # policy file, so without one it would configure nothing.
-    "pack_paths": "--pack",
-    # The findings/suppressed cap only applies to the --against summary
-    # `_baseline_summary` builds -- without a baseline there is no such
-    # summary to cap.
-    "max_findings": "--max-findings",
-    # P0.4: the exit-code floor `--require-complete-analysis` imposes is
-    # folded alongside `--against`'s own verdict/coverage exit code
-    # (`_run_baseline_compare`) -- without a baseline there is no such
-    # exit code to floor. `analysis_assurance` is still always computed and
-    # available in --format json for an audit-only scan; only the flag that
-    # makes it *gate* requires a comparison.
-    "require_complete_analysis": "--require-complete-analysis",
-}
-
-
-def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
-    """Reject any flag from :data:`_COMPARISON_ONLY_FLAGS` given explicitly
-    on the command line, for a scan that has no ``--against`` baseline to
-    apply them to.
-
-    Shared by both the ``--against``-less single-binary path and the
-    ``--artifact-set`` path (always audit-only, ADR-056 D2 -- Codex review:
-    the single-binary check alone left this validation reachable only via
-    ``against is None``, which the ``--artifact-set`` branch's early
-    ``return`` never passes through, so these flags were silently parsed,
-    validated, and then discarded for a set instead of erroring).
-    """
-    ctx = click.get_current_context()
-    explicit = [
-        flag
-        for dest, flag in _COMPARISON_ONLY_FLAGS.items()
-        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
-    ]
-    if explicit:
-        noun = "flag" if len(explicit) == 1 else "flags"
-        raise click.UsageError(
-            f"{', '.join(explicit)} only take effect with --against (they "
-            f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
-            f"{noun} or {no_baseline_reason}."
-        )
-
 
 def _run_artifact_set(
     *,
@@ -904,6 +622,8 @@ def _run_artifact_set(
         click.echo(text)
     if result.exit_code != 0:
         sys.exit(result.exit_code)
+
+_EXIT_BUDGET_OVERFLOW = 5
 
 
 def _resolve_scan_evaluation_config(
