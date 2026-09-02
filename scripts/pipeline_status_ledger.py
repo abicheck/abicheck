@@ -111,8 +111,13 @@ _PIPELINE_SUPPORTED_SCHEMA_VERSION = 1
 _PIPELINE_TOP_LEVEL_FIELDS = frozenset(
     {"schema_version", "as_of_commit", "as_of_date", "concepts"}
 )
-_PIPELINE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_PIPELINE_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
+#: `\Z` (not a bare `$`), since a YAML block scalar (`as_of_commit: |`) is
+#: parsed with its trailing newline intact and `$` matches immediately
+#: before a final `\n` too -- `\Z` only matches the true end of string, so a
+#: newline-terminated non-SHA value is correctly rejected (a real review
+#: finding on PR #1019).
+_PIPELINE_DATE_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
+_PIPELINE_COMMIT_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
 
 
 def load_pipeline_status(f: Findings) -> dict[str, object] | None:

@@ -145,14 +145,20 @@ removal under 15% done. Concretely, the review found:
   or reclassification neither this plan nor ADR-063 currently schedules.
 
 **None of this contradicts any individual phase's own "Landed"/"Still not
-landed" accounting above or in ADR-063** — every *landed slice* met its own
-stated acceptance criteria at the time it landed. That is narrower than
-"every phase is complete": Phase 3's own D5 text remains unfulfilled for
-the reason recorded in its "Amendment" note, Phase 6's acceptance-criteria
-fixture (a closure-parameterized template) is still unmet, and several
-later phases are explicitly still in progress — each says so plainly in
-its own status paragraph above, and this review does not dispute any of
-those self-reports. The review's point is that the plan's phase
+landed" accounting elsewhere in this plan** — every *landed slice* met its
+own stated acceptance criteria at the time it landed. (ADR-063 itself no
+longer carries this per-phase accounting at all: PR 0 removed its
+duplicated status block, leaving this plan's own per-phase sections as the
+primary source, plus the machine-readable ledger at
+`docs/_meta/one-semantic-pipeline-status.yaml` for the concept-level
+authority split — see the "Adopted sub-phases" table above for how the two
+relate.) That is narrower than "every phase is complete": Phase 3's
+own D5 text remains unfulfilled for the reason recorded in its "Amendment"
+note, Phase 6's acceptance-criteria fixture (a closure-parameterized
+template) is still unmet, and several later phases are explicitly still in
+progress — each says so plainly in its own status paragraph elsewhere in
+this document, and this review does not dispute any of those self-reports.
+The review's point is that the plan's phase
 list, read end to end, did not until this update contain a phase whose job
 is "make the new representation the *only* one a consumer can reach" for
 `SemanticIR`, `Fact` semantics, or a single resolved runtime context — only
