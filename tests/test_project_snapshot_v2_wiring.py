@@ -141,6 +141,49 @@ class TestProjectSnapshotLegacyRoundTrip:
         with pytest.raises(SnapshotError, match=dropped_kind):
             read_legacy_snapshot_document(root)
 
+    def test_read_legacy_snapshot_document_rejects_an_unadvertised_section(
+        self, tmp_path: Path
+    ) -> None:
+        """The inverse contradiction (Codex review, fresh evidence): a
+        stale/corrupted artifact ref that carries a section
+        `manifest.json`'s own `section_schema_versions` never advertised at
+        all -- e.g. one copied in from another package -- must be refused
+        too, not just a missing one. `export_legacy_snapshot` would
+        otherwise still merge that unaccounted-for section's content into
+        the rebuilt document.
+
+        A minimal, header-less snapshot never writes a `semantic_ir`
+        section, so injecting one -- a real, self-consistent `SectionDTO`
+        object, not just a mismatched ref -- exercises the manifest
+        cross-check itself, not the unrelated per-DTO kind-consistency
+        check `export_legacy_snapshot` already applies first."""
+        from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
+        from abicheck.project_snapshot_store import DirectoryObjectStore
+        from abicheck.storage.dto import SEMANTIC_IR_SECTION_KIND, SectionDTO
+        from abicheck.storage.package import artifact_ref_relpath
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        root = _write_package(tmp_path, snap)
+        art_path = root / artifact_ref_relpath("libfoo.so.1")
+        art = json.loads(art_path.read_text(encoding="utf-8"))
+        assert SEMANTIC_IR_SECTION_KIND not in art["sections"], (
+            "a header-less snapshot must not already publish a semantic_ir "
+            "section, or this test no longer exercises an injected one"
+        )
+        bogus_dto = SectionDTO(
+            section_kind=SEMANTIC_IR_SECTION_KIND,
+            section_schema_version=1,
+            payload={},
+        )
+        digest = DirectoryObjectStore(root).put(bogus_dto.to_dict())
+        art["sections"][SEMANTIC_IR_SECTION_KIND] = {
+            "kind": SEMANTIC_IR_SECTION_KIND,
+            "digest": digest,
+        }
+        art_path.write_text(json.dumps(art), encoding="utf-8")
+        with pytest.raises(SnapshotError, match=SEMANTIC_IR_SECTION_KIND):
+            read_legacy_snapshot_document(root)
+
 
 class TestIsProjectSnapshotPackageDir:
     def test_true_for_a_real_package(self, tmp_path: Path) -> None:

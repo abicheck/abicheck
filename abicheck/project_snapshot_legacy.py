@@ -239,9 +239,9 @@ def read_legacy_snapshot_document(
     # is expected and not itself a corruption signal -- multi-artifact
     # packages are documented above as out of this function's scope anyway.
     if len(summary.artifact_ids) == 1:
-        missing_sections = set(summary.versions.section_schema_versions) - set(
-            artifact.sections
-        )
+        advertised = set(summary.versions.section_schema_versions)
+        actual = set(artifact.sections)
+        missing_sections = advertised - actual
         if missing_sections:
             raise SnapshotError(
                 f"{root} artifact {artifact_id!r} is missing section(s) "
@@ -249,6 +249,21 @@ def read_legacy_snapshot_document(
                 "section_schema_versions advertises -- the artifact ref is "
                 "stale or corrupted; refusing to silently synthesize empty "
                 "defaults for lost evidence"
+            )
+        # The inverse contradiction (Codex review, fresh evidence): a stale
+        # or corrupted artifact ref could also carry a section
+        # manifest.json never advertised at all -- e.g. a `semantic_ir`
+        # object copied in from another package -- which `export_legacy_
+        # snapshot` would still merge into the rebuilt document. Reject
+        # that too, not just the missing-section direction.
+        extra_sections = actual - advertised
+        if extra_sections:
+            raise SnapshotError(
+                f"{root} artifact {artifact_id!r} has section(s) "
+                f"{sorted(extra_sections)} that manifest.json's "
+                "section_schema_versions does not advertise -- the artifact "
+                "ref is stale or corrupted; refusing to merge unaccounted-for "
+                "section content"
             )
     store = DirectoryObjectStore(root)
     return export_legacy_snapshot(
