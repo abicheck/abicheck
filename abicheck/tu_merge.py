@@ -961,7 +961,10 @@ def _merge_identical_modulo_provenance(
     return (
         winner
         if winner.deprecated == deprecated
-        else replace(winner, deprecated=deprecated)  # type: ignore[type-var]
+        # replace_with_fact_sync: `deprecated` is Fact[...]-bridged (ADR-063
+        # Phase 5), so a bare replace() would carry the stale sibling forward
+        # and revert this pick.
+        else replace_with_fact_sync(winner, deprecated=deprecated)
     )
 
 
@@ -1191,7 +1194,9 @@ def _merge_variables(
     # only `other` carries must not leak onto `base` when `other` is
     # private (round 18).
     deprecated = _pick_deprecated(base, other, secondary_is_private=other_is_private)
-    return replace(base, value=value, deprecated=deprecated)
+    # replace_with_fact_sync for `deprecated`'s Fact[...] sibling (ADR-063
+    # Phase 5); `value` has none, so it passes through unchanged.
+    return replace_with_fact_sync(base, value=value, deprecated=deprecated)
 
 
 def _record_kinds_compatible(a_kind: str, b_kind: str) -> bool:

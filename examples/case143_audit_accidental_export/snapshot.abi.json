@@ -124,6 +124,11 @@
       },
       "deleted_from_dwarf": false,
       "deprecated": null,
+      "deprecated_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "elf_binding": "global",
       "elf_binding_fact": {
         "diagnostics": [],
@@ -209,6 +214,11 @@
       },
       "deleted_from_dwarf": false,
       "deprecated": null,
+      "deprecated_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "elf_binding": "global",
       "elf_binding_fact": {
         "diagnostics": [],
@@ -298,7 +308,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 38,
+  "schema_version": 39,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

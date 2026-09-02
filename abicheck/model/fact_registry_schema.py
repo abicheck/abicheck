@@ -283,11 +283,6 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
 #: fields Phase 0 already converted: ``RecordType.vtable``/
 #: ``vptr_offset_bits``, ``Param.is_va_list``):
 _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
-    ("Function", "deprecated"),
-    ("Variable", "deprecated"),
-    ("RecordType", "deprecated"),
-    ("EnumType", "deprecated"),
-    ("EnumType", "is_scoped"),
     ("Param", "is_restrict"),
     ("Variable", "access"),
 )

@@ -322,6 +322,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (ninth batch): Fact[str | None] sibling of "
+            "deprecated. NONE for both backends because neither names the "
+            "keyword -- each passes the real value and the dataclass's own "
+            "__post_init__ bridge derives the Fact, the same honest reading "
+            "this matrix already records for every other bridge-derived "
+            "sibling. Availability is carried by AbiSnapshot.clang_"
+            "deprecation_facts_reliable."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_override",
         _FULL,
         _FULL,
@@ -501,6 +516,16 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "Variable",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as Function.deprecated_fact -- see that row's "
+            "own note."
+        ),
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     FactRow(
@@ -963,6 +988,16 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as Function.deprecated_fact -- see that row's "
+            "own note."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "entity_id",
         _FULL,
         _FULL,
@@ -1027,11 +1062,33 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "EnumType",
+        "is_scoped_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (ninth batch): Fact[bool | None] sibling of "
+            "is_scoped, guarded by the same clang_deprecation_facts_"
+            "reliable flag its own conversion batch shares. NONE for the "
+            "same bridge-derived reason as Function.deprecated_fact."
+        ),
+    ),
+    FactRow(
+        "EnumType",
         "deprecated",
         _FULL,
         _FULL,
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
+    ),
+    FactRow(
+        "EnumType",
+        "deprecated_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Same shape as Function.deprecated_fact -- see that row's "
+            "own note."
+        ),
     ),
     FactRow("EnumType", "qualified_name", _FULL, _FULL),
     FactRow(

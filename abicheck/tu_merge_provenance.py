@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Protocol, TypeVar
 
-from .model import Fact, ScopeOrigin
+from .model import Fact, ScopeOrigin, replace_with_fact_sync
 from .provenance import classify_origin, header_from_location
 
 __all__ = [
@@ -136,11 +136,17 @@ def _blank_provenance(entity: _T) -> _T:
     # ADR-063 Phase 5, Codex review P1: source_header_fact must blank too,
     # or __post_init__'s "explicit Fact wins" rule reasserts the stale
     # value -- hasattr-gated since not every owner has converted it yet.
-    extra: dict[str, object] = (
-        {"source_header_fact": Fact.not_collected()}
-        if hasattr(entity, "source_header_fact")
-        else {}
-    )
+    # ADR-063 Phase 5: every blanked field that has one must blank its
+    # Fact[...] sibling too, or __post_init__'s "explicit Fact wins" rule
+    # reasserts the stale value. Derived from the blanked field list itself
+    # rather than named one at a time, so a later conversion of any of them
+    # cannot reintroduce the same P1 (hasattr-gated, since not every owner
+    # has converted every field yet).
+    extra: dict[str, object] = {
+        f"{name}_fact": Fact.not_collected()
+        for name in ("source_header", "deprecated")
+        if hasattr(entity, f"{name}_fact")
+    }
     return replace(  # type: ignore[type-var]
         entity,
         source_location=None,
@@ -319,5 +325,5 @@ def _with_more_public_provenance(
                 merged, source_header_fact=other.source_header_fact
             )
     if merged.deprecated != deprecated:
-        merged = replace(merged, deprecated=deprecated)  # type: ignore[type-var]
+        merged = replace_with_fact_sync(merged, deprecated=deprecated)
     return merged

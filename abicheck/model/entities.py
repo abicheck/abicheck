@@ -51,6 +51,10 @@ _OMITTED_IS_MUTABLE: bool = cast("bool", _Omitted())
 # / clang_deprecation_facts_reliable, not the value.
 _OMITTED_FIELD_DEFAULT: str | None = cast("str | None", _Omitted())
 _OMITTED_FIELD_DEPRECATED: str | None = cast("str | None", _Omitted())
+# ADR-063 Phase 5 (ninth batch): the same shape for RecordType's and
+# EnumType's own `deprecated`.
+_OMITTED_RECORD_DEPRECATED: str | None = cast("str | None", _Omitted())
+_OMITTED_ENUM_DEPRECATED: str | None = cast("str | None", _Omitted())
 
 
 @dataclass
@@ -222,8 +226,11 @@ class RecordType:
     # dumper/loader could not determine (DWARF/symbols-only mode, older
     # snapshots). The diff skips comparison when either side is None.
     is_abstract: bool | None = None
-    # See Function.deprecated for the message-string convention.
-    deprecated: str | None = None
+    # See Function.deprecated for the message-string convention. ADR-063
+    # Phase 5 (ninth batch): defaults to a private omission sentinel, since
+    # `None` is a real value here ("not deprecated"), never an availability
+    # signal -- AbiSnapshot.clang_deprecation_facts_reliable carries that.
+    deprecated: str | None = _OMITTED_RECORD_DEPRECATED
 
     # ── ADR-063 Phase 0: Fact[T] siblings for the fields AGENTS.md's
     # "Known gaps" names as actively causing fabricated findings from
@@ -314,6 +321,8 @@ class RecordType:
     )
     qualified_name_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.bases, self.bases_fact = bridge_legacy_and_fact(
@@ -357,6 +366,9 @@ class RecordType:
         self.source_header, self.source_header_fact = bridge_legacy_and_fact(
             self.source_header, self.source_header_fact, None, None
         )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_RECORD_DEPRECATED, None
+        )
 
     def resolved_bases(self) -> list[str]:
         """``bases_fact``, safely narrowed (ADR-063 Phase 0) -- a short,
@@ -394,8 +406,11 @@ class EnumType:
     # determine (DWARF/symbols-only mode, older snapshots, non-castxml
     # header producers). The diff skips comparison when either side is None.
     is_scoped: bool | None = None
-    # See Function.deprecated for the message-string convention.
-    deprecated: str | None = None
+    # See Function.deprecated for the message-string convention. ADR-063
+    # Phase 5 (ninth batch): defaults to a private omission sentinel, since
+    # `None` is a real value here ("not deprecated"), never an availability
+    # signal -- AbiSnapshot.clang_deprecation_facts_reliable carries that.
+    deprecated: str | None = _OMITTED_ENUM_DEPRECATED
     # Namespace/enclosing-class-qualified spelling, mirroring
     # ``RecordType.qualified_name`` (same bare-``name``-collision motivation:
     # PR #608 follow-up). ``name`` stays bare for the same DWARF-parity and
@@ -416,6 +431,13 @@ class EnumType:
     # pattern every other case-(b) field in this batch uses.
     qualified_name_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5 (ninth batch), both case (a) and both guarded by
+    # AbiSnapshot.clang_deprecation_facts_reliable: `is_scoped` needs no
+    # omission sentinel (its own None already means "not determined" --
+    # castxml is its only real producer), `deprecated` does (None means
+    # "not deprecated" there).
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    is_scoped_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.qualified_name, self.qualified_name_fact = bridge_legacy_and_fact(
@@ -423,6 +445,12 @@ class EnumType:
         )
         self.source_header, self.source_header_fact = bridge_legacy_and_fact(
             self.source_header, self.source_header_fact, None, None
+        )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_ENUM_DEPRECATED, None
+        )
+        self.is_scoped, self.is_scoped_fact = bridge_legacy_and_fact(
+            self.is_scoped, self.is_scoped_fact, None, None
         )
 
 

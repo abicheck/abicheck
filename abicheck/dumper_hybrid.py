@@ -548,7 +548,11 @@ def _merge_variable(
     value = backfill_fact(
         v.deprecated, clang_v.deprecated if clang_v else None, key, provenance
     )
-    return replace(v, deprecated=value) if value != v.deprecated else v
+    # replace_with_fact_sync, not replace: `deprecated` carries a Fact[...]
+    # sibling since ADR-063 Phase 5's ninth batch, and a bare replace() lets
+    # the stale sibling win under __post_init__'s "explicit Fact wins" rule,
+    # silently reverting this backfill (model/fact.py's documented trap).
+    return replace_with_fact_sync(v, deprecated=value) if value != v.deprecated else v
 
 
 #: G28 Phase 4 layout facts castxml either never populates at all

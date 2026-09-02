@@ -33,6 +33,13 @@ from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visi
 # bool | None (which would be a breaking change to this public dataclass's
 # type for every reader, not only the ones migrating to Fact[T]).
 _OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
+# ADR-063 Phase 5 (ninth batch): `Function.deprecated`/`Variable.deprecated`
+# share the identical case-(a) shape -- `None` means "not deprecated" as
+# much as "not captured" (see Function.deprecated's own comment below), so
+# availability is carried by AbiSnapshot.clang_deprecation_facts_reliable,
+# never by the value.
+_OMITTED_FUNC_DEPRECATED: str | None = cast("str | None", _Omitted())
+_OMITTED_VAR_DEPRECATED: str | None = cast("str | None", _Omitted())
 
 
 @dataclass
@@ -130,7 +137,9 @@ class Function:
     # skipping a None on either side of a single pair — that would silently
     # miss every real "gained/lost deprecated" transition, since one side of
     # a real transition is always None (not-deprecated) by construction.
-    deprecated: str | None = None
+    # ADR-063 Phase 5 (ninth batch): private omission sentinel, see
+    # deprecated_fact below and _OMITTED_FUNC_DEPRECATED above.
+    deprecated: str | None = _OMITTED_FUNC_DEPRECATED
     # Explicit C++11 `override` specifier on a virtual method declaration.
     # Tri-state like is_explicit/is_hidden_friend: True/False = captured;
     # None = dumper/loader does not know (older snapshots, DWARF/symbols-only
@@ -229,6 +238,8 @@ class Function:
     elf_binding_fact: Fact[SymbolBinding | None] | None = field(
         default=None, kw_only=True
     )
+    # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     is_compiler_generated_fact: Fact[bool | None] | None = field(
         default=None, kw_only=True
     )
@@ -265,6 +276,9 @@ class Function:
         self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
             self.elf_binding, self.elf_binding_fact, None, None
         )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_FUNC_DEPRECATED, None
+        )
         self.is_compiler_generated, self.is_compiler_generated_fact = (
             bridge_legacy_and_fact(
                 self.is_compiler_generated,
@@ -294,8 +308,9 @@ class Variable:
     # alignment when a dumper can resolve it. None = not captured (older
     # snapshots / dumpers without support).
     alignment_bits: int | None = None
-    # See Function.deprecated for the message-string convention.
-    deprecated: str | None = None
+    # See Function.deprecated for the message-string convention, and
+    # _OMITTED_VAR_DEPRECATED for ADR-063 Phase 5's sentinel rationale.
+    deprecated: str | None = _OMITTED_VAR_DEPRECATED
     # See Function.elf_binding for the ELF-linkage rationale; same population
     # path (dumper_elf_symbols._populate_elf_visibility).
     elf_binding: SymbolBinding | None = None
@@ -312,6 +327,8 @@ class Variable:
     # (unlike qualified_name_fact on the other two dataclasses).
     source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     alignment_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     elf_binding_fact: Fact[SymbolBinding | None] | None = field(
         default=None, kw_only=True
     )
@@ -325,4 +342,7 @@ class Variable:
         )
         self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
             self.elf_binding, self.elf_binding_fact, None, None
+        )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_VAR_DEPRECATED, None
         )

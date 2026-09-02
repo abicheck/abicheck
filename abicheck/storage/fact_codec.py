@@ -61,6 +61,7 @@ _TYPE_FACT_KEYS = (
     "is_trivially_copyable_fact",
     "qualified_name_fact",
     "source_header_fact",
+    "deprecated_fact",
 )
 
 # ADR-063 Phase 5 (eighth batch): TypeField's own case-(a) *_fact siblings.
@@ -81,6 +82,8 @@ _FIELD_FACT_KEYS = (
 _ENUM_FACT_KEYS = (
     "qualified_name_fact",
     "source_header_fact",
+    "deprecated_fact",
+    "is_scoped_fact",
 )
 
 # ADR-063 Phase 5 (fourth batch): Variable's own case-(b) *_fact siblings --
@@ -90,6 +93,7 @@ _VARIABLE_FACT_KEYS = (
     "source_header_fact",
     "alignment_bits_fact",
     "elf_binding_fact",
+    "deprecated_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -106,6 +110,7 @@ _FUNCTION_FACT_KEYS = (
     "hidden_friend_owner_fact",
     "elf_binding_fact",
     "is_compiler_generated_fact",
+    "deprecated_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -296,6 +301,9 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
         ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            t, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
     }
 
 
@@ -315,6 +323,12 @@ def decode_enum_facts(e: dict[str, Any], schema_version: int) -> dict[str, Any]:
             e.get("source_header_fact"),
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+        ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            e, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
+        "is_scoped_fact": decode_fact_with_legacy_presence(
+            e, "is_scoped", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
         ),
     }
 
@@ -356,6 +370,9 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
         ),
         "elf_binding_fact": elf_binding_fact,
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            v, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
     }
 
 
@@ -425,6 +442,9 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
         ),
+        "deprecated_fact": decode_fact_with_legacy_presence(
+            f, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
     }
 
 
@@ -456,6 +476,13 @@ _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS = 38
 # clang_deprecation_facts_reliable), so they are named separately here
 # rather than folded into the CV constant above.
 _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS = 38
+
+# ADR-063 Phase 5 (ninth batch): the schema_version the `deprecated` family
+# (Function/Variable/RecordType/EnumType -- TypeField's own landed one batch
+# earlier, at v38) and EnumType.is_scoped started being persisted at. All
+# five are case (a), guarded by the one flag that already covers them:
+# AbiSnapshot.clang_deprecation_facts_reliable.
+_MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS = 39
 
 
 def decode_fact_with_legacy_presence(
@@ -638,6 +665,8 @@ def apply_legacy_fact_backfill(
     clang_va_list_facts_reliable_value: bool,
     ast_producer_value: str | None,
     *,
+    variables: list[Any] | None = None,
+    enums: list[Any] | None = None,
     header_cv_facts_reliable_value: bool = True,
     clang_field_initializer_facts_reliable_value: bool = True,
     clang_deprecation_facts_reliable_value: bool = True,
@@ -758,7 +787,48 @@ def apply_legacy_fact_backfill(
                 clang_deprecation_facts_reliable_value,
                 None,
             ),
+            # ADR-063 Phase 5 (ninth batch, schema v39): the other four
+            # `deprecated` surfaces plus EnumType.is_scoped, all guarded by
+            # the same flag TypeField.deprecated is -- one rule each, which
+            # is the whole point of the rule table.
+            CaseAFactRule(
+                "Function",
+                "deprecated",
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+                clang_deprecation_facts_reliable_value,
+                None,
+            ),
+            CaseAFactRule(
+                "Variable",
+                "deprecated",
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+                clang_deprecation_facts_reliable_value,
+                None,
+            ),
+            CaseAFactRule(
+                "RecordType",
+                "deprecated",
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+                clang_deprecation_facts_reliable_value,
+                None,
+            ),
+            CaseAFactRule(
+                "EnumType",
+                "deprecated",
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+                clang_deprecation_facts_reliable_value,
+                None,
+            ),
+            CaseAFactRule(
+                "EnumType",
+                "is_scoped",
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+                clang_deprecation_facts_reliable_value,
+                None,
+            ),
         ),
         types=types,
         functions=funcs,
+        variables=variables or [],
+        enums=enums or [],
     )
