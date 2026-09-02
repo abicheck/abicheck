@@ -1919,6 +1919,34 @@ is not yet decided; nothing has assigned it `model` (or anywhere else) in
 `architecture/modules.yaml`, and that decision, not the import check, is
 what `cli_params.py`'s move still waits on.
 
+**Update: `cli_params.py`'s physical move is now done, and every module named
+above as its blocker is now classified.** `buildsource.scan_levels` and
+`abicheck/policies/__init__.py` (the tiny, dependency-free built-in-policy-name
+lookup `cli_params.py` needs alongside it) both landed as `model` in
+`architecture/modules.yaml`, and `policy_file`/`suppression`'s own
+`frontends -> policy` edges were already closed by the `workflows/policy_file.py`
+and `workflows/suppression.py` facades this section's "PolicyFile" and
+"`service.py`-thinning" investigations describe below. With every prerequisite
+satisfied, `abicheck/cli_params.py` moved to
+`abicheck/frontends/cli/options/params.py` (git `554276cc`) — not a documented
+public Python API path (absent from `service.__all__` and the generated
+`python-api-reference.md`), so migration rule 3 applied without a compatibility
+shim: every internal caller (10 production modules, 4 test files) now imports
+the new location directly, and `frontends/cli/moved.py`'s `cli.__getattr__`
+lazy-resolution table was repointed too (its `_load_suppression_and_policy`
+entry still named the retired `abicheck.cli_params` string, invisible to a
+plain import-statement grep). `python scripts/check_architecture.py` reports 0
+findings against the moved module's real import graph; `mypy abicheck/` stays
+clean. This closes the option-cluster half of Phase 4's blocker in full — all
+six of the modules the "star, not a tangle" re-measurement named above
+(`cli_params`, `cli_profiles`, `cli_options_contract`, `cli_contract_options`,
+`cli_help`, and the `cli_options.py` hub they orbit) are `frontends` in
+`architecture/modules.yaml` today. Five of the six have physically relocated
+into the package (`cli_params.py` this update, the other four in Phase 4's own
+earlier slice above); `cli_options.py` itself — the hub every one of them is
+imported from — is classified but not yet physically moved, still tracked by
+its own `no_growth` `architecture/debt.yaml` entry pending that slice.
+
 So Phase 4's `service.py` half is **blocked on real, unfinished work at both
 levels this note originally distinguished**: the two dozen imports named
 above still need classifying, exposing through an allowed canonical surface,
