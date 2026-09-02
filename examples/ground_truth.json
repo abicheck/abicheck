@@ -3936,7 +3936,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "param-type-change",
    "variant_of": null
   },
   "case03_compat_addition": {
@@ -3953,7 +3953,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "compat-addition",
    "variant_of": null
   },
   "case04_no_change": {
@@ -3970,7 +3970,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "no-change",
    "variant_of": null
   },
   "case05_soname": {
@@ -3987,7 +3987,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "soname",
    "variant_of": null
   },
   "case06_visibility": {
@@ -4004,7 +4004,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "visibility",
    "variant_of": null
   },
   "case07_struct_layout": {
@@ -4021,7 +4021,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "embedded-type-size-increased",
    "variant_of": null
   },
   "case08_enum_value_change": {
@@ -4055,7 +4055,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "cpp-vtable",
    "variant_of": null
   },
   "case100_experimental_removed_without_replacement": {
@@ -4073,7 +4073,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "experimental-removed-without-replacement",
    "variant_of": null
   },
   "case101_inline_namespace_version_bumped": {
@@ -4090,7 +4090,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "inline-namespace-version-bumped",
    "variant_of": null
   },
   "case102_frozen_runtime_signature_changed": {
@@ -4107,7 +4107,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "frozen-runtime-signature-changed",
    "variant_of": null
   },
   "case103_toolchain_flag_drift": {
@@ -4124,7 +4124,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "toolchain-flag-drift",
    "variant_of": null
   },
   "case104_glibcxx_dual_abi_flip": {
@@ -4142,7 +4142,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "glibcxx-dual-abi-flip",
    "variant_of": null
   },
   "case105_concept_tightening": {
@@ -4159,7 +4159,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "concept-tightening",
    "variant_of": null
   },
   "case106_ctor_became_explicit": {
@@ -4176,7 +4176,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "ctor-became-explicit",
    "variant_of": null
   },
   "case107_task_scheduler_init_removed": {
@@ -4249,7 +4249,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "return-type",
    "variant_of": null
   },
   "case110_concurrent_unordered_map_api_drift": {
@@ -4319,7 +4319,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "abi-tag-changed",
    "variant_of": null
   },
   "case114_char8t_migration": {
@@ -4336,7 +4336,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "char8t-migration",
    "variant_of": null
   },
   "case115_bit_int_width_changed": {
@@ -4353,7 +4353,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "bit-int-width-changed",
    "variant_of": null
   },
   "case116_atomic_qualifier_changed": {
@@ -4370,7 +4370,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "atomic-qualifier-changed",
    "variant_of": null
   },
   "case117_no_unique_address": {
@@ -4387,7 +4387,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "no-unique-address",
    "variant_of": null
   },
   "case118_internal_struct_field_added_scoped": {
@@ -4404,7 +4404,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "internal-struct-field-added-scoped",
    "variant_of": null
   },
   "case119_internal_struct_field_removed_scoped": {
@@ -4421,7 +4421,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "internal-struct-field-removed-scoped",
    "variant_of": null
   },
   "case11_global_var_type": {
@@ -4438,7 +4438,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "global-var-type",
    "variant_of": null
   },
   "case120_internal_struct_reordered_scoped": {
@@ -4455,7 +4455,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "internal-struct-reordered-scoped",
    "variant_of": null
   },
   "case121_kernel_btf_struct_field_added": {
@@ -4489,7 +4489,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "template-signature-uninstantiated",
    "variant_of": null
   },
   "case123_default_argument_removed": {
@@ -4506,7 +4506,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "default-argument-removed",
    "variant_of": null
   },
   "case124_header_constant_value_changed": {
@@ -4523,7 +4523,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "header-constant-value-changed",
    "variant_of": null
   },
   "case125_class_became_final": {
@@ -4540,7 +4540,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "class-became-final",
    "variant_of": null
   },
   "case126_sycl_device_impl_ptr": {
@@ -4576,7 +4576,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "data-object-size-changed",
    "variant_of": null
   },
   "case128_symbol_binding_strengthened": {
@@ -4593,7 +4593,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "symbol-binding-strengthened",
    "variant_of": null
   },
   "case129_struct_return_convention": {
@@ -4610,7 +4610,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "struct-return-convention",
    "variant_of": null
   },
   "case12_function_removed": {
@@ -4644,7 +4644,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "exceptions-mode-flip",
    "variant_of": null
   },
   "case131_rtti_mode_flip": {
@@ -4661,7 +4661,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "rtti-mode-flip",
    "variant_of": null
   },
   "case132_threadsafe_statics_flip": {
@@ -4678,7 +4678,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "threadsafe-statics-flip",
    "variant_of": null
   },
   "case133_tls_model_flip": {
@@ -4695,7 +4695,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "tls-model-flip",
    "variant_of": null
   },
   "case134_relro_weakened": {
@@ -4712,7 +4712,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "relro-weakened",
    "variant_of": null
   },
   "case135_stack_canary_removed": {
@@ -4729,7 +4729,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "stack-canary-removed",
    "variant_of": null
   },
   "case136_executable_stack_removed": {
@@ -4746,8 +4746,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
-   "variant_of": null
+   "rule_slug": "executable-stack-flag-changed",
+   "variant_of": "case49_executable_stack"
   },
   "case137_runpath_changed": {
    "entity": "rule",
@@ -4763,7 +4763,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "runpath-changed",
    "variant_of": null
   },
   "case138_needed_added": {
@@ -4780,7 +4780,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "needed-added",
    "variant_of": null
   },
   "case139_symbol_version_node_removed": {
@@ -4797,8 +4797,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
-   "variant_of": null
+   "rule_slug": "symbol-version-node-removed",
+   "variant_of": "case65_symbol_version_removed"
   },
   "case13_symbol_versioning": {
    "entity": "rule",
@@ -4814,7 +4814,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "symbol-versioning",
    "variant_of": null
   },
   "case140_empty_base_optimization_lost": {
@@ -4831,7 +4831,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "empty-base-optimization-lost",
    "variant_of": null
   },
   "case141_versioned_symbol_scheme": {
@@ -4849,7 +4849,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "versioned-symbol-scheme",
    "variant_of": null
   },
   "case142_vtable_slot_count_binary_only": {
@@ -4866,7 +4866,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "vtable-slot-count-binary-only",
    "variant_of": null
   },
   "case143_audit_accidental_export": {
@@ -4882,7 +4882,7 @@
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "audit-accidental-export",
    "variant_of": null
   },
   "case144_audit_private_header_leak": {
@@ -4898,7 +4898,7 @@
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "audit-private-header-leak",
    "variant_of": null
   },
   "case145_audit_unversioned_export": {
@@ -4914,7 +4914,7 @@
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "audit-unversioned-export",
    "variant_of": null
   },
   "case146_audit_rtti_for_internal": {
@@ -4930,7 +4930,7 @@
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "audit-rtti-for-internal",
    "variant_of": null
   },
   "case147_scan_depth_ladder": {
@@ -4995,8 +4995,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
-   "variant_of": null
+   "rule_slug": "embedded-type-size-increased",
+   "variant_of": "case07_struct_layout"
   },
   "case150_xcheck_export_public_pair": {
    "entity": "scenario",
@@ -5042,7 +5042,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "enum-size-flag-flip",
    "variant_of": null
   },
   "case153_struct_packing_flip": {
@@ -5057,7 +5057,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "struct-packing-flip",
    "variant_of": null
   },
   "case154_lto_mode_flip": {
@@ -5072,7 +5072,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "lto-mode-flip",
    "variant_of": null
   },
   "case155_char_signedness_flip": {
@@ -5087,7 +5087,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "char-signedness-flip",
    "variant_of": null
   },
   "case156_public_macro_removed": {
@@ -5102,7 +5102,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "public-macro-removed",
    "variant_of": null
   },
   "case157_inline_function_removed": {
@@ -5117,7 +5117,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "inline-function-removed",
    "variant_of": null
   },
   "case158_public_typedef_removed": {
@@ -5132,7 +5132,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "public-typedef-removed",
    "variant_of": null
   },
   "case15_noexcept_change": {
@@ -5149,7 +5149,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "noexcept-change",
    "variant_of": null
   },
   "case160_public_api_internal_dep_added": {
@@ -5164,7 +5164,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "public-api-gains-internal-dependency",
    "variant_of": null
   },
   "case161_target_dependency_added": {
@@ -5179,7 +5179,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "target-dependency-added",
    "variant_of": null
   },
   "case162_symbol_source_owner_changed": {
@@ -5194,7 +5194,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "symbol-source-owner-changed",
    "variant_of": null
   },
   "case163_python_kwarg_renamed": {
@@ -5211,7 +5211,7 @@
    "artifact_shape": "stub-pair",
    "validation_owner": "python-api",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "python-kwarg-renamed",
    "variant_of": null
   },
   "case164_preproc_conditional_field": {
@@ -5226,7 +5226,7 @@
    "artifact_shape": "snapshot-pair",
    "validation_owner": "reconcile",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "preproc-conditional-field",
    "variant_of": null
   },
   "case165_polymorphic_nonvirtual_dtor": {
@@ -5243,7 +5243,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "polymorphic-nonvirtual-dtor",
    "variant_of": null
   },
   "case166_ref_qualifier_added": {
@@ -5260,7 +5260,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "ref-qualifier-added",
    "variant_of": null
   },
   "case167_base_became_virtual": {
@@ -5277,7 +5277,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "base-became-virtual",
    "variant_of": null
   },
   "case168_virtual_method_devirtualized": {
@@ -5294,7 +5294,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "virtual-method-devirtualized",
    "variant_of": null
   },
   "case169_overload_added": {
@@ -5311,7 +5311,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "overload-added",
    "variant_of": null
   },
   "case16_inline_to_non_inline": {
@@ -5328,7 +5328,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "inline-function-outlined",
    "variant_of": null
   },
   "case170_env_runtime_floor_raised": {
@@ -5344,7 +5344,7 @@
    "artifact_shape": "snapshot-pair",
    "validation_owner": "compare-cases",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "env-runtime-floor-raised",
    "variant_of": null
   },
   "case171_static_tls_introduced": {
@@ -5361,7 +5361,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "static-tls-introduced",
    "variant_of": null
   },
   "case172_vtable_thunk_offset_changed": {
@@ -5378,7 +5378,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "vtable-thunk-offset-changed",
    "variant_of": null
   },
   "case173_vtt_slot_count_changed": {
@@ -5395,7 +5395,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "vtt-slot-count-changed",
    "variant_of": null
   },
   "case174_secondary_vtable_group_changed": {
@@ -5412,7 +5412,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "secondary-vtable-group-changed",
    "variant_of": null
   },
   "case175_kabi_crc_changed": {
@@ -5459,7 +5459,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "long-double-abi-changed",
    "variant_of": null
   },
   "case178_unnamed_type_in_public_abi": {
@@ -5476,7 +5476,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "unnamed-type-in-public-abi",
    "variant_of": null
   },
   "case179_cet_protection_weakened": {
@@ -5493,7 +5493,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "cet-protection-weakened",
    "variant_of": null
   },
   "case17_template_abi": {
@@ -5510,7 +5510,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "template-abi",
    "variant_of": null
   },
   "case180_symbol_binding_lost_unique": {
@@ -5527,7 +5527,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "symbol-binding-lost-unique",
    "variant_of": null
   },
   "case181_xcheck_public_to_internal_dependency": {
@@ -5543,7 +5543,7 @@
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "xcheck-public-to-internal-dependency",
    "variant_of": null
   },
   "case182_accidental_export_removed_still_breaking": {
@@ -5560,7 +5560,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "accidental-export-removed-still-breaking",
    "variant_of": null
   },
   "case183_internal_version_node_churn": {
@@ -5577,7 +5577,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "internal-version-node-churn",
    "variant_of": null
   },
   "case184_internal_enum_churn_scoped": {
@@ -5594,7 +5594,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "internal-enum-churn-scoped",
    "variant_of": null
   },
   "case185_inherited_override_reuses_slot": {
@@ -5611,7 +5611,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "inherited-override-reuses-slot",
    "variant_of": null
   },
   "case186_c_api_pointee_const_abi_neutral": {
@@ -5628,7 +5628,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "api-pointee-const-abi-neutral",
    "variant_of": null
   },
   "case187_public_struct_private_field_type": {
@@ -5646,7 +5646,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "public-struct-private-field-type",
    "variant_of": null
   },
   "case188_public_class_private_base_class": {
@@ -5664,7 +5664,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "public-class-private-base-class",
    "variant_of": null
   },
   "case189_public_function_private_parameter_type": {
@@ -5682,7 +5682,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "public-function-private-parameter-type",
    "variant_of": null
   },
   "case190_public_inline_function_references_internal_constant": {
@@ -5697,8 +5697,8 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [],
-   "rule_slug": null,
-   "variant_of": null
+   "rule_slug": "public-api-gains-internal-dependency",
+   "variant_of": "case160_public_api_internal_dep_added"
   },
   "case191_header_only_graph_field_type": {
    "entity": "scenario",
@@ -5732,7 +5732,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "dependency-leak",
    "variant_of": null
   },
   "case19_enum_member_removed": {
@@ -5749,7 +5749,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "enum-member-removed",
    "variant_of": null
   },
   "case20_enum_member_value_changed": {
@@ -5783,7 +5783,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "method-became-static",
    "variant_of": null
   },
   "case22_method_const_changed": {
@@ -5800,7 +5800,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "method-const-changed",
    "variant_of": null
   },
   "case23_pure_virtual_added": {
@@ -5817,7 +5817,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "pure-virtual-added",
    "variant_of": null
   },
   "case24_union_field_removed": {
@@ -5834,7 +5834,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "union-field-removed",
    "variant_of": null
   },
   "case25_enum_member_added": {
@@ -5851,7 +5851,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "enum-member-added",
    "variant_of": null
   },
   "case26_union_field_added": {
@@ -5868,7 +5868,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "union-field-added",
    "variant_of": null
   },
   "case26b_union_field_added_compatible": {
@@ -5885,7 +5885,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "union-field-added-compatible",
    "variant_of": null
   },
   "case27_symbol_binding_weakened": {
@@ -5902,7 +5902,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "symbol-binding-weakened",
    "variant_of": null
   },
   "case28_typedef_opaque": {
@@ -5919,7 +5919,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "typedef-opaque",
    "variant_of": null
   },
   "case29_ifunc_transition": {
@@ -5936,7 +5936,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "ifunc-transition",
    "variant_of": null
   },
   "case30_field_qualifiers": {
@@ -5953,7 +5953,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "field-qualifiers",
    "variant_of": null
   },
   "case31_enum_rename": {
@@ -5970,7 +5970,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "enum-rename",
    "variant_of": null
   },
   "case32_param_defaults": {
@@ -5987,7 +5987,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "param-defaults",
    "variant_of": null
   },
   "case33_pointer_level": {
@@ -6004,7 +6004,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "pointer-level",
    "variant_of": null
   },
   "case34_access_level": {
@@ -6021,7 +6021,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "access-level",
    "variant_of": null
   },
   "case35_field_rename": {
@@ -6038,7 +6038,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "field-rename",
    "variant_of": null
   },
   "case36_anon_struct": {
@@ -6055,7 +6055,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "anon-struct",
    "variant_of": null
   },
   "case37_base_class": {
@@ -6072,7 +6072,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "base-class",
    "variant_of": null
   },
   "case38_virtual_methods": {
@@ -6089,7 +6089,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "virtual-methods",
    "variant_of": null
   },
   "case39_var_const": {
@@ -6106,7 +6106,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "var-const",
    "variant_of": null
   },
   "case40_field_layout": {
@@ -6123,7 +6123,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "field-layout",
    "variant_of": null
   },
   "case41_type_changes": {
@@ -6141,7 +6141,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "type-changes",
    "variant_of": null
   },
   "case42_type_alignment_changed": {
@@ -6158,7 +6158,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "type-alignment-changed",
    "variant_of": null
   },
   "case43_base_class_member_added": {
@@ -6175,7 +6175,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "base-class-member-added",
    "variant_of": null
   },
   "case44_cyclic_type_member_added": {
@@ -6192,7 +6192,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "cyclic-type-member-added",
    "variant_of": null
   },
   "case45_multi_dim_array_change": {
@@ -6209,7 +6209,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "multi-dim-array-change",
    "variant_of": null
   },
   "case46_pointer_chain_type_change": {
@@ -6226,7 +6226,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "pointer-chain-type-change",
    "variant_of": null
   },
   "case47_inline_to_outlined": {
@@ -6243,8 +6243,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
-   "variant_of": null
+   "rule_slug": "inline-function-outlined",
+   "variant_of": "case16_inline_to_non_inline"
   },
   "case48_leaf_struct_through_pointer": {
    "entity": "rule",
@@ -6260,7 +6260,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "leaf-struct-through-pointer",
    "variant_of": null
   },
   "case49_executable_stack": {
@@ -6277,7 +6277,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "executable-stack-flag-changed",
    "variant_of": null
   },
   "case50_soname_inconsistent": {
@@ -6294,7 +6294,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "soname-inconsistent",
    "variant_of": null
   },
   "case51_protected_visibility": {
@@ -6311,7 +6311,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "protected-visibility",
    "variant_of": null
   },
   "case52_rpath_leak": {
@@ -6328,7 +6328,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "rpath-leak",
    "variant_of": null
   },
   "case53_namespace_pollution": {
@@ -6345,7 +6345,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "namespace-pollution",
    "variant_of": null
   },
   "case54_used_reserved_field": {
@@ -6362,7 +6362,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "used-reserved-field",
    "variant_of": null
   },
   "case55_type_kind_changed": {
@@ -6379,7 +6379,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "type-kind-changed",
    "variant_of": null
   },
   "case56_struct_packing_changed": {
@@ -6396,7 +6396,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "struct-packing-changed",
    "variant_of": null
   },
   "case57_enum_underlying_size_changed": {
@@ -6413,7 +6413,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "enum-underlying-size-changed",
    "variant_of": null
   },
   "case58_var_removed": {
@@ -6430,7 +6430,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "var-removed",
    "variant_of": null
   },
   "case59_func_became_inline": {
@@ -6447,7 +6447,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "func-became-inline",
    "variant_of": null
   },
   "case60_base_class_position_changed": {
@@ -6464,7 +6464,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "base-class-position-changed",
    "variant_of": null
   },
   "case61_var_added": {
@@ -6481,7 +6481,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "var-added",
    "variant_of": null
   },
   "case62_type_field_added_compatible": {
@@ -6498,7 +6498,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "type-field-added-compatible",
    "variant_of": null
   },
   "case63_bitfield_changed": {
@@ -6515,7 +6515,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "bitfield-changed",
    "variant_of": null
   },
   "case64_calling_convention_changed": {
@@ -6532,7 +6532,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "calling-convention-changed",
    "variant_of": null
   },
   "case65_symbol_version_removed": {
@@ -6549,7 +6549,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "symbol-version-node-removed",
    "variant_of": null
   },
   "case66_language_linkage_changed": {
@@ -6567,7 +6567,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "language-linkage-changed",
    "variant_of": null
   },
   "case67_tls_var_size_changed": {
@@ -6584,7 +6584,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "tls-var-size-changed",
    "variant_of": null
   },
   "case68_virtual_method_added": {
@@ -6601,7 +6601,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "virtual-method-added",
    "variant_of": null
   },
   "case69_trivial_to_nontrivial": {
@@ -6618,7 +6618,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "trivial-to-nontrivial",
    "variant_of": null
   },
   "case70_flexible_array_member_changed": {
@@ -6636,7 +6636,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "flexible-array-member-changed",
    "variant_of": null
   },
   "case71_inline_namespace_moved": {
@@ -6653,7 +6653,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "inline-namespace-moved",
    "variant_of": null
   },
   "case72_covariant_return_changed": {
@@ -6671,7 +6671,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "covariant-return-changed",
    "variant_of": null
   },
   "case73_typedef_underlying_changed": {
@@ -6688,7 +6688,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "typedef-underlying-changed",
    "variant_of": null
   },
   "case74_detail_base_class_changed": {
@@ -6705,7 +6705,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "detail-base-class-changed",
    "variant_of": null
   },
   "case75_detail_embedded_by_value": {
@@ -6722,7 +6722,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "detail-embedded-by-value",
    "variant_of": null
   },
   "case76_detail_pimpl_vtable_changed": {
@@ -6739,7 +6739,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "detail-pimpl-vtable-changed",
    "variant_of": null
   },
   "case77_detail_templated_base_changed": {
@@ -6756,7 +6756,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "detail-templated-base-changed",
    "variant_of": null
   },
   "case78_task_arena_attach_tag": {
@@ -6791,7 +6791,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "missing-template-instantiation",
    "variant_of": null
   },
   "case80_pimpl_shared_to_unique": {
@@ -6808,7 +6808,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "pimpl-shared-to-unique",
    "variant_of": null
   },
   "case81_serialization_tag_reassigned": {
@@ -6825,7 +6825,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "serialization-tag-reassigned",
    "variant_of": null
   },
   "case82_sycl_overload_set_removed": {
@@ -6859,7 +6859,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "cpu-dispatch-isa-dropped",
    "variant_of": null
   },
   "case84_bundle_soname_skew": {
@@ -6894,7 +6894,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "internal-template-signature-changed",
    "variant_of": null
   },
   "case86_tag_struct_renamed": {
@@ -6911,7 +6911,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "tag-struct-renamed",
    "variant_of": null
   },
   "case87_default_template_arg_changed": {
@@ -6928,7 +6928,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "default-template-arg-changed",
    "variant_of": null
   },
   "case88_cpo_kind_changed": {
@@ -6945,7 +6945,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "cpo-kind-changed",
    "variant_of": null
   },
   "case89_inline_accessor_renamed_pimpl_member": {
@@ -6962,7 +6962,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "inline-accessor-renamed-pimpl-member",
    "variant_of": null
   },
   "case90_bundle_intra_dep_removed": {
@@ -7066,7 +7066,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "allocator-nested-typedef-removed",
    "variant_of": null
   },
   "case96_hidden_friend_removed": {
@@ -7083,7 +7083,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "hidden-friend-removed",
    "variant_of": null
   },
   "case97_api_depends_on_consumer_env": {
@@ -7100,7 +7100,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "api-depends-on-consumer-env",
    "variant_of": null
   },
   "case98_cxx_standard_floor_raised": {
@@ -7117,7 +7117,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "cxx-standard-floor-raised",
    "variant_of": null
   },
   "case99_experimental_graduated": {
@@ -7135,7 +7135,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [],
-   "rule_slug": null,
+   "rule_slug": "experimental-graduated",
    "variant_of": null
   },
   "case192_call_graph_break_survives_suppression": {

@@ -89,10 +89,57 @@ RELATED_RULES: dict[str, list[str]] = {
     "case94_empty_tag_gained_state": ["empty-tag-type-gains-state"],
 }
 
-# Worked rule/variant consolidation (Phase 2 slice): two duplicate/near-
-# duplicate pairs the design doc names explicitly. `rule_slug` is the
-# canonical family; `variant_of` names the canonical case within it (null on
-# the canonical case itself).
+# Rule/variant consolidation (Phase 2). Every `rule`-entity case gets a
+# `rule_slug` -- for a case with no known duplicate, `_default_rule_slug()`
+# below derives one mechanically from the case's own name, so the family
+# name always exists even for a rule nobody has found a sibling for yet.
+# This table exists only for a case whose canonical family differs from
+# that mechanical default: a genuine duplicate/near-duplicate pair, found by
+# clustering every `rule`-entity case on its exact `expected_kinds` set and
+# reading each candidate cluster's README to separate a true duplicate
+# (same underlying mechanism, restated) from cases that merely share a
+# `ChangeKind` while demonstrating a different one (which stay independent
+# rules with their own default slug, not listed here). `rule_slug` is the
+# canonical family name both sides of a pair share; `variant_of` names the
+# canonical case within it (null on the canonical case itself, including a
+# canonical case listed here only to pin a shared slug for its variant(s)).
+#
+# Pairs confirmed as genuine duplicates this pass, with the read that ruled
+# each one in:
+#   case01/case12  -- both a plain exported-function removal, same evidence.
+#   case08/case20  -- same enum-member-value-changed rule; case20 adds
+#                      public-surface scoping as a variant condition.
+#   case16/case47  -- byte-for-byte the same mechanism (an inline method
+#                      moved out-of-line gains a real exported symbol) under
+#                      different demo names -- confirmed by diffing the two
+#                      READMEs, not just matching expected_kinds.
+#   case49/case136 -- case136's own README calls itself "the fix
+#                      counterpart to case49", but the technical
+#                      demonstration (GNU_STACK RWE -> RW) and even the
+#                      library source are identical, not just complementary.
+#   case65/case139 -- both a hard BREAKING symbol-version-node removal
+#                      (consumer records a version dependency the loader can
+#                      no longer satisfy); case139 adds the "old symbol name
+#                      persists, folded into a different node" nuance as a
+#                      variant, kept distinct from case183 (same ChangeKind
+#                      but COMPATIBLE_WITH_RISK -- a private/internal-node
+#                      naming convention changes the verdict, not just the
+#                      demo, so it stays its own rule).
+#   case160/case190 -- same L5 "public API gains an internal dependency"
+#                      rule; case190 narrows it to the inline-function case
+#                      (the dependency is invisible to every artifact-level
+#                      diff, not just source-graph-level).
+#
+# Clusters reviewed and NOT merged (same ChangeKind, different mechanism or
+# verdict, so each keeps its own default slug): case03/16/47/62/185 (func_added
+# from four unrelated causes); case07/14/17/18/36/40/44/48 (type_size_changed
+# from eight unrelated causes -- case07/case14 *are* a duplicate pair, C vs
+# C++, see below); case09/case38; case46/case102; case74/75/76/77 (the
+# "leaked internal types" pattern family -- four distinct embedding
+# mechanisms, deliberately not collapsed, per AGENTS.md's own worked
+# case01/case12 vs case08/case20 caution against over-consolidating); case97/182;
+# case137/52 (RUNPATH changed vs. RUNPATH build-path leak -- different
+# transition, different lesson); case43/77.
 RULE_FAMILIES: dict[str, tuple[str, str | None]] = {
     "case01_symbol_removal": ("exported-function-removed", None),
     "case12_function_removed": ("exported-function-removed", "case01_symbol_removal"),
@@ -100,6 +147,31 @@ RULE_FAMILIES: dict[str, tuple[str, str | None]] = {
     "case20_enum_member_value_changed": (
         "enum-member-value-changed",
         "case08_enum_value_change",
+    ),
+    "case07_struct_layout": ("embedded-type-size-increased", None),
+    "case14_cpp_class_size": ("embedded-type-size-increased", "case07_struct_layout"),
+    "case16_inline_to_non_inline": ("inline-function-outlined", None),
+    "case47_inline_to_outlined": (
+        "inline-function-outlined",
+        "case16_inline_to_non_inline",
+    ),
+    "case49_executable_stack": ("executable-stack-flag-changed", None),
+    "case136_executable_stack_removed": (
+        "executable-stack-flag-changed",
+        "case49_executable_stack",
+    ),
+    "case65_symbol_version_removed": ("symbol-version-node-removed", None),
+    "case139_symbol_version_node_removed": (
+        "symbol-version-node-removed",
+        "case65_symbol_version_removed",
+    ),
+    "case160_public_api_internal_dep_added": (
+        "public-api-gains-internal-dependency",
+        None,
+    ),
+    "case190_public_inline_function_references_internal_constant": (
+        "public-api-gains-internal-dependency",
+        "case160_public_api_internal_dep_added",
     ),
 }
 
@@ -111,6 +183,23 @@ def _case_number(case_name: str) -> int:
     if not m:
         raise ValueError(f"can't parse case number from {case_name!r}")
     return int(m.group(1))
+
+
+def _default_rule_slug(case_name: str) -> str:
+    """A rule case not listed in RULE_FAMILIES still gets a canonical
+    `rule_slug` -- mechanically derived from its own case name (the part
+    after `caseNN_`, hyphenated) rather than left null, so "does this rule
+    have a name" never depends on whether a sibling duplicate happens to
+    have been found yet. A case that *is* in RULE_FAMILIES uses that
+    entry's hand-reviewed slug instead (set by the caller before falling
+    back to this).
+    """
+    rest = _CASE_NUM_RE.sub("", case_name, count=1).lstrip("_")
+    # A letter-suffixed case number (26b) leaves the letter on `rest`'s
+    # front (b_union_field...) after the digit-only regex strips just the
+    # digits -- drop a lone leading letter segment before the underscore.
+    rest = re.sub(r"^[a-z]_", "", rest)
+    return rest.replace("_", "-")
 
 
 def _kind_to_topic() -> dict[str, str]:
@@ -301,7 +390,14 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             topics = ["controls"]
 
         artifact_shape = _artifact_shape(case_dir, case_num, fixtures, mode)
-        rule_slug, variant_of = RULE_FAMILIES.get(case_name, (None, None))
+        if case_name in RULE_FAMILIES:
+            rule_slug, variant_of = RULE_FAMILIES[case_name]
+        elif entity == "rule":
+            rule_slug, variant_of = _default_rule_slug(case_name), None
+        else:
+            # A scenario composes rules via `related_rules` instead of
+            # having one rule_slug of its own.
+            rule_slug, variant_of = None, None
 
         assert scenario_kind is None or entity == "scenario", (
             f"{case_name}: scenario_kind is set ({scenario_kind!r}) but "

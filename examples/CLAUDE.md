@@ -122,16 +122,36 @@ scenario: `case-study`/`project-topology`/`capability`/`audit`),
 for the full rationale and remaining phases.
 
 **A duplicate demonstration of the same rule is a *variant*, not a second
-concept.** `case01_symbol_removal`/`case12_function_removed` (both a plain
-exported-function removal) and `case08_enum_value_change`/
-`case20_enum_member_value_changed` (the same enum-member-value-change rule,
-case20 additionally exercising public-surface scoping) are the worked
-example: `rule_slug` names the shared family, `variant_of` points a variant
-back at its canonical case. Neither pair was deleted or merged — these
-remain independent, individually-gated calibration fixtures; only the
-taxonomy records that they encode one rule, not two. Don't delete a case to
-"deduplicate" it without checking `variant_of`/`related_rules` first and
-updating every consumer that counts cases.
+concept.** Every `rule`-entity case carries a `rule_slug`: a mechanically
+derived, ecosystem-neutral name by default, or a hand-reviewed shared slug
+when a genuine duplicate/near-duplicate was found. Seven pairs are
+confirmed duplicates so far (`variant_of` points the variant back at its
+canonical case; see `scripts/gen_catalog_taxonomy.py`'s `RULE_FAMILIES` for
+the full read behind each):
+
+| Rule | Canonical | Variant |
+|---|---|---|
+| `exported-function-removed` | case01_symbol_removal | case12_function_removed |
+| `enum-member-value-changed` | case08_enum_value_change | case20_enum_member_value_changed (public-surface scoping) |
+| `embedded-type-size-increased` | case07_struct_layout | case14_cpp_class_size (C++) |
+| `inline-function-outlined` | case16_inline_to_non_inline | case47_inline_to_outlined |
+| `executable-stack-flag-changed` | case49_executable_stack | case136_executable_stack_removed |
+| `symbol-version-node-removed` | case65_symbol_version_removed | case139_symbol_version_node_removed |
+| `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | case190_public_inline_function_references_internal_constant (inline-function case) |
+
+None of these pairs was deleted or merged — every case remains an
+independent, individually-gated calibration fixture; only the taxonomy
+records that a pair encodes one rule, not two. **Sharing a `ChangeKind` is
+not the same as being a duplicate**: several clusters that share
+`expected_kinds` were reviewed and deliberately *not* merged because they
+demonstrate different mechanisms or reach a different verdict (e.g.
+case183_internal_version_node_churn shares `symbol_version_node_removed`
+with the pair above but its private-node-naming convention downgrades the
+verdict to `COMPATIBLE_WITH_RISK`, so it stays its own rule) — see the
+`RULE_FAMILIES` docstring for the full list of reviewed-and-rejected
+clusters. Don't delete a case to "deduplicate" it without checking
+`variant_of`/`related_rules` first and updating every consumer that counts
+cases.
 
 ## What NOT to do
 

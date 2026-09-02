@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented + a worked Phase 2 slice; Phases 3-6 not started.
+**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2's rule/variant classification pass complete (every `rule`-entity case now carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded); Phases 3-6 not started.
 
 ## Problem
 
@@ -63,7 +63,7 @@ unaffected. Each of the 197 entries carries:
 | `artifact_shape` | `compiled-pair`, `snapshot-pair`, `snapshot-audit`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:`/`mode:` fields when a case declares them (authoritative over any file-scan heuristic; `snapshot-audit` is a single-release G20 scan, `snapshot-pair` an old/new comparison), else from what the case directory actually ships |
 | `validation_owner` | which runner family exercises the case (mirrors `examples/CLAUDE.md`'s "owner families" list) |
 | `related_rules` | rule slugs a scenario composes — populated only for the scenarios the design discussion named explicitly (see the module docstring's "Known gaps") |
-| `rule_slug` / `variant_of` | the Phase 2 worked example below |
+| `rule_slug` / `variant_of` | every `rule`-entity case's canonical family name and, for a confirmed duplicate, the case it's a variant of — see "What Phase 2 implements" below |
 
 Entity/scenario_kind/ecosystem classification for the scenario families
 (bundles, G20 audit, oneTBB/SYCL/oneMKL/Linux-kernel case studies) is by
@@ -73,36 +73,81 @@ other case defaults to `entity: rule`, `ecosystem: generic`.
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` gates
 drift the same way every other `gen_*.py` generator in this repo does.
 
-## What the Phase 2 slice implements
+## What Phase 2 implements
 
-A worked, non-destructive consolidation of the two duplicate/near-duplicate
-pairs named above, via `rule_slug`/`variant_of` rather than deleting either
-case (these are calibration fixtures — `examples/CLAUDE.md`'s "don't modify
-a case's source or expected verdict without understanding what failure mode
-it encodes"):
+Non-destructive consolidation via `rule_slug`/`variant_of` rather than
+deleting any case (these are calibration fixtures — `examples/CLAUDE.md`'s
+"don't modify a case's source or expected verdict without understanding
+what failure mode it encodes"), in two parts:
 
-- `exported-function-removed`: `case01_symbol_removal` (canonical) ←
-  `case12_function_removed` (variant).
-- `enum-member-value-changed`: `case08_enum_value_change` (canonical) ←
-  `case20_enum_member_value_changed` (variant — public-header enum not
-  reachable from an exported signature, exercising public-surface scoping).
+**Every `rule`-entity case (167 of them) now carries a `rule_slug`.** A case
+with no known duplicate gets one mechanically derived from its own case name
+(`gen_catalog_taxonomy._default_rule_slug`, e.g. `case02_param_type_change`
+→ `param-type-change`) — so "does this rule have a canonical name" never
+depends on whether a sibling duplicate happens to have been found yet.
+
+**Seven pairs were confirmed as genuine duplicates**, found by clustering
+every `rule`-entity case on its exact `expected_kinds` set (13 clusters, 37
+candidate cases) and reading each cluster's actual README content — not
+just the shared `ChangeKind` — to separate a true duplicate from a case that
+merely shares a `ChangeKind` while demonstrating a different mechanism or
+reaching a different verdict:
+
+| Rule | Canonical | Variant |
+|---|---|---|
+| `exported-function-removed` | case01_symbol_removal | case12_function_removed |
+| `enum-member-value-changed` | case08_enum_value_change | case20_enum_member_value_changed (public-surface scoping) |
+| `embedded-type-size-increased` | case07_struct_layout | case14_cpp_class_size (C++ variant) |
+| `inline-function-outlined` | case16_inline_to_non_inline | case47_inline_to_outlined (confirmed by diffing the two READMEs byte-for-byte, not just matching `expected_kinds`) |
+| `executable-stack-flag-changed` | case49_executable_stack | case136_executable_stack_removed (identical transition and library source, despite the README framing it as a separate "fix direction" case) |
+| `symbol-version-node-removed` | case65_symbol_version_removed | case139_symbol_version_node_removed (adds the "symbol name persists, folded into a different node" nuance) |
+| `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | case190_public_inline_function_references_internal_constant (narrows to the inline-function case) |
 
 Each variant case's README gained a short "Related rule" cross-reference to
-its canonical case (see `examples/case12_function_removed/README.md`,
-`examples/case20_enum_member_value_changed/README.md`).
+its canonical case (e.g. `examples/case12_function_removed/README.md`,
+`examples/case47_inline_to_outlined/README.md`).
 
-The remaining 195 cases' `rule_slug`/`variant_of` are `null` — this slice
-does not attempt full rule-family classification of the whole catalog; see
-"Known gaps" below.
+**Clusters reviewed and deliberately *not* merged**, because they share a
+`ChangeKind` but demonstrate a different mechanism or reach a different
+verdict — each keeps its own default rule_slug: `case03`/`16`/`47`/`62`/`185`
+(`func_added` from four unrelated causes — plain addition, un-inlining twice
+over, vtable-slot reuse, opaque-struct-plus-accessor); `case07`/`14`/`17`/
+`18`/`36`/`40`/`44`/`48` (`type_size_changed` from eight unrelated causes —
+case07/case14 *are* the C/C++ duplicate pair above, the other six are
+distinct mechanisms: template instantiation, transitive dependency leak,
+anonymous union, compound multi-axis stress case, cyclic self-reference,
+embedding propagation); `case09`/`38` (a compound four-changes-at-once
+stress case is not a duplicate of the single-mechanism one); `case46`/`102`
+(pointer-chain vs. frozen-namespace-runtime-entry — unrelated mechanisms);
+`case65`/`139`/`183` (case183's private/internal-node naming convention
+downgrades its verdict to `COMPATIBLE_WITH_RISK`, so it stays separate from
+the case65/139 pair even though all three share the `ChangeKind`);
+`case74`/`75`/`76`/`77` (the "leaked internal types" pattern family — four
+distinct embedding mechanisms: base-class inheritance, embed-by-value,
+pimpl+vtable, templated base — deliberately kept as four rules, not
+collapsed into one, the same restraint AGENTS.md's own case01/12 vs.
+case08/20 discussion calls for); `case43`/`77` (plain base-class field
+addition vs. template-instantiation layout shift); `case97`/`182`
+(macro-gated conditional export vs. undocumented accidental export);
+`case137`/`52` (RUNPATH newly added vs. RUNPATH build-path leak — different
+transition, different lesson). See `scripts/gen_catalog_taxonomy.py`'s
+`RULE_FAMILIES` docstring for the same list with the read behind each call.
+
+`related_rules` on scenario entities remains incomplete (only the handful
+the design discussion named explicitly) — see "Known gaps" below.
 
 ## Known gaps / remaining phases
 
 Not attempted in this change (from the original six-phase migration):
 
-- **Phase 2, remainder** — review the rest of the catalog for further
-  true duplicates vs. legitimate variants, and populate `rule_slug`/
-  `variant_of` catalog-wide. `related_rules` on scenario entities is
-  similarly incomplete.
+- **Phase 2, `related_rules` on scenario entities** — only the handful of
+  scenarios the design discussion named explicitly (`case108`, `case112`,
+  `case126`, `case94`) carry `related_rules`; the other ~26 scenario cases
+  (bundles, the remaining oneTBB/SYCL case studies, the G20
+  capability/audit cases) don't yet declare which rules they compose. The
+  rule/variant classification pass itself (every `rule`-entity case's
+  `rule_slug`, and the 13-cluster/37-case duplicate review) is done — see
+  "What Phase 2 implements" above.
 - **Phase 3** — make every path resolver in the codebase
   (`benchmark_comparison.py`, `gen_examples_docs.py`,
   `check_ai_readiness.py`, the various validators) go through a declarative
@@ -124,8 +169,13 @@ Not attempted in this change (from the original six-phase migration):
 - `scripts/gen_catalog_taxonomy.py` (new) — the taxonomy generator.
 - `examples/ground_truth.json` — new `taxonomy` top-level key.
 - `examples/case12_function_removed/README.md`,
-  `examples/case20_enum_member_value_changed/README.md` — added "Related
-  rule" cross-references.
+  `examples/case20_enum_member_value_changed/README.md`,
+  `examples/case14_cpp_class_size/README.md`,
+  `examples/case47_inline_to_outlined/README.md`,
+  `examples/case136_executable_stack_removed/README.md`,
+  `examples/case139_symbol_version_node_removed/README.md`,
+  `examples/case190_public_inline_function_references_internal_constant/README.md`
+  — added "Related rule" cross-references.
 - `examples/CLAUDE.md` — documents the new taxonomy block and the
   rule/variant relationship.
 - `scripts/CLAUDE.md` — inventory row for the new script.

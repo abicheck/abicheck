@@ -91,3 +91,45 @@ def test_related_rules_are_non_empty_strings():
     for case_name, entry in gt["taxonomy"].items():
         for rule in entry["related_rules"]:
             assert isinstance(rule, str) and rule, case_name
+
+
+def test_every_rule_entity_has_a_rule_slug_scenarios_do_not():
+    """Phase 2's rule/variant pass: a rule case's family name should never
+    depend on whether a sibling duplicate happens to have been found yet
+    (see _default_rule_slug's docstring) -- a scenario composes rules via
+    related_rules instead and carries no rule_slug of its own."""
+    gt = _load_ground_truth()
+    for case_name, entry in gt["taxonomy"].items():
+        if entry["entity"] == "rule":
+            assert entry["rule_slug"], f"{case_name}: rule entity with no rule_slug"
+        else:
+            assert entry["rule_slug"] is None, (
+                f"{case_name}: scenario entity has rule_slug={entry['rule_slug']!r}"
+            )
+
+
+def test_rule_slug_unique_outside_confirmed_variant_families():
+    """A rule_slug shared by two cases must mean a real, recorded variant_of
+    relationship -- an accidental slug collision (e.g. two differently-named
+    cases mechanically deriving the same slug) would otherwise silently
+    merge two unrelated rules."""
+    gt = _load_ground_truth()
+    taxonomy = gt["taxonomy"]
+    by_slug: dict[str, list[str]] = {}
+    for case_name, entry in taxonomy.items():
+        if entry["entity"] != "rule":
+            continue
+        by_slug.setdefault(entry["rule_slug"], []).append(case_name)
+    for slug, members in by_slug.items():
+        if len(members) == 1:
+            continue
+        canonical = [m for m in members if taxonomy[m]["variant_of"] is None]
+        variants = [m for m in members if taxonomy[m]["variant_of"] is not None]
+        assert len(canonical) == 1, (
+            f"{slug}: expected exactly one canonical, got {canonical}"
+        )
+        for v in variants:
+            assert taxonomy[v]["variant_of"] == canonical[0], (
+                f"{slug}: {v} shares this slug but variant_of doesn't point at "
+                f"the canonical case {canonical[0]!r}"
+            )
