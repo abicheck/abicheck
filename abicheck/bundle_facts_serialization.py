@@ -245,19 +245,23 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
                 f"bundle facts: unexpected artifact_type {given_artifact_type!r} "
                 f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
             )
-        # Codex review, fresh evidence: even the *correct* marker is
-        # self-contradictory on a document explicitly declaring
-        # schema_version 1 -- artifact_type was added in schema_version 2,
-        # so no genuinely-v1 document (predating the marker's existence)
-        # could ever carry it. A writer never produces this combination
-        # (bundle_facts_to_dict() always pairs the marker with the current
-        # schema_version); reaching here means a malformed or hand-edited
-        # document, not a real legacy one.
-        if schema_version == 1:
+        # Codex review, fresh evidence (twice): even the *correct* marker
+        # is self-contradictory on a document declaring a schema_version
+        # below 2 -- artifact_type was added in schema_version 2, so no
+        # genuinely-pre-marker document could ever carry it. The first cut
+        # of this check only rejected exactly schema_version == 1, letting
+        # 0, a negative value, or a fractional value int(...) normalizes
+        # below 1 slip through unrejected; use < 2 so every such value is
+        # covered, not just the one legacy encoding. A writer never
+        # produces any of these combinations (bundle_facts_to_dict()
+        # always pairs the marker with the current schema_version);
+        # reaching here means a malformed or hand-edited document, not a
+        # real legacy one.
+        if schema_version < 2:
             raise ValueError(
-                "bundle facts: schema_version 1 predates artifact_type "
-                "(added in schema_version 2) -- a v1 document may not "
-                "declare it"
+                f"bundle facts: schema_version {schema_version} predates "
+                "artifact_type (added in schema_version 2) -- such a "
+                "document may not declare it"
             )
     else:
         # No try/except needed here (unlike looks_like_bundle_facts_document's

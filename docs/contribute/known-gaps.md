@@ -6008,9 +6008,10 @@ looked like the obvious fix and wasn't.
   "artifact_type discriminator" prerequisite). That PR's own plan text
   states the ordinary "Merge criteria" machine-contract obligations
   (packaged *and* documented schema copies, JSON Schema validation) apply
-  when a manifest changes, and `BUNDLE_FACTS_SCHEMA_VERSION`'s 1→2 bump
-  for the new `artifact_type`/`BUNDLE_ARCHIVE_ARTIFACT_TYPE` markers is
-  exactly that kind of change — but a repo-wide search confirms neither
+  when a manifest changes, and the bump `BUNDLE_FACTS_SCHEMA_VERSION` (in
+  `abicheck/bundle_facts.py`) got for the new `artifact_type`/
+  `BUNDLE_ARCHIVE_ARTIFACT_TYPE` markers is exactly that kind of change —
+  but a repo-wide search confirms neither
   container has ever had a schema file: `abicheck/schemas/` covers
   `compare_report`, `aggregate_report`, `build_evidence`, and
   `build_source_pack` only, and `docs/reference/schemas/v1/` mirrors that
@@ -6028,7 +6029,8 @@ looked like the obvious fix and wasn't.
   schema now only to revise it again for that landing would be wasted
   work on the exact same axis. Tracked here rather than deferred silently;
   the schema-authoring work belongs with (or immediately after) whichever
-  PR actually stabilizes `BundleFacts`' final v2-era shape -- the
+  PR actually stabilizes `BundleFacts`' shape at its current
+  `BUNDLE_FACTS_SCHEMA_VERSION` (`abicheck/bundle_facts.py`) -- the
   `BundleCompareRequest` PR itself, or a dedicated follow-up if that PR's
   own scope doesn't naturally include it.
 
