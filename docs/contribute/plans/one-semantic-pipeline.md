@@ -194,8 +194,12 @@ to stop.
 target — evaluated once 6B (or an equivalent) has landed at least one real
 cohort, not before: the pipeline is complete only when (1) every front end builds one
 request type; (2) every real execution resolves one execution context;
-(3) every extractor's output reaches one `SemanticSnapshot`; (4) the checker
-reads no backend-specific or legacy snapshot collection directly;
+(3) every extractor's output reaches one canonical `SemanticIR` (Phase 6's
+own type — no new type is proposed here; `AbiSnapshot.semantic_ir` remains
+the persisted container); (4) the checker
+reads no backend-specific or legacy `AbiSnapshot` collection
+(`.functions`/`.types`/…) directly, only `SemanticIR` through the read
+index Phase 6B defines;
 (5) every detector consuming an availability-bearing fact explicitly
 branches on its `FactStatus`; (6) stable-entity matching goes through
 `EntityId`, with string identity as a named legacy fallback only;

@@ -20,8 +20,11 @@ per-concept status, use:*
   source, updated in the same PR that lands a slice;*
 - *`docs/_meta/one-semantic-pipeline-status.yaml` — a machine-readable,
   per-concept summary (primitive/producers/consumers/authority/
-  removal_gate) generated from the plan's own state, for a quick
-  "who's authoritative today" check without reading the whole plan;*
+  removal_gate), structurally validated but hand-maintained content
+  (no generator derives it from the plan or the codebase — update it in
+  the same PR that changes a concept's status, exactly like the plan
+  and this pointer), for a quick "who's authoritative today" check
+  without reading the whole plan;*
 - *`docs/contribute/adr/index.md`'s own ADR-063 row — a short paraphrase
   for readers browsing the ADR index, kept in sync with the two sources
   above rather than restating them.*
