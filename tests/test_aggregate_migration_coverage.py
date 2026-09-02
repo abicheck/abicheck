@@ -303,6 +303,36 @@ def test_not_comparable_refusal_with_run_outcome_blocks_via_operational_axis_onl
     assert loaded.reason is not None and "scope_mismatch" in loaded.reason
 
 
+def test_not_comparable_refusal_with_a_malformed_run_outcome_fails_closed_not_crashing(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `_run_outcome_gate_and_operational`
+    raises `_MalformedGate` (rather than returning `None`) for a PRESENT
+    but schema-invalid `run_outcome` -- every other branch that calls it
+    wraps the call in a `try`/`except _MalformedGate`, but this refusal
+    branch previously called it bare. A corrupt `run_outcome` on a
+    `verdict: null` + `reason.kind` refusal must land the target
+    unavailable with a malformed-gate reason, not raise an exception out of
+    `_load_report_file` and abort the whole aggregation command."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+                "run_outcome": {"gate": "not_a_real_value", "operational": "none"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
 def test_bundle_incomplete_preserves_the_completed_members_compatibility_verdict(
     tmp_path: Path,
 ) -> None:

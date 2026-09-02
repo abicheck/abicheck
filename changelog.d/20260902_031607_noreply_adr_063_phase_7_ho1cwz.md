@@ -500,6 +500,24 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   own docstring states the contract explicitly (`compatibility` stays
   unknown, never the dishonest `"NO_CHANGE"` floor) — the backfill now
   honors it by passing `None` instead.
+- **The `_load_report_file` refusal branch (native `compare`'s own
+  `verdict: null` + `reason.kind` shape) now catches `_MalformedGate`
+  from its own `run_outcome` read** (Codex review, fresh evidence):
+  `_run_outcome_gate_and_operational` raises that exception for a
+  PRESENT but schema-invalid `run_outcome`, and every other branch
+  that calls it wraps the call in exactly this `try`/`except` — this
+  refusal branch previously called it bare, so a corrupt block aborted
+  the whole aggregation command instead of landing the target
+  unavailable with a malformed-gate reason like every sibling case.
+- **A legacy scan report's `exit_code` fallback now also fires for a
+  real int outside `scan`'s legacy exit scheme `{0, 2, 4, 5, 6}`, not
+  only a missing/non-int value** (Codex review, fresh evidence):
+  `run_outcome_for_scan_fields` itself silently floors an out-of-scheme
+  `compat_exit_code` to `0` (folding it into `operational` instead) —
+  correct for a code that genuinely is operational-only, but a bogus
+  code like `99` discarded a real `BREAKING`/`API_BREAK` verdict's own
+  gate contribution, backfilling `run_outcome.gate: "none"` for a
+  report whose `verdict` string still said otherwise.
 
 ### Changed
 

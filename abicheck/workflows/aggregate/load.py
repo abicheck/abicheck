@@ -159,30 +159,23 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
 
 def _run_outcome_compatibility_verdict(data: Mapping[str, Any]) -> Verdict | None:
     """The report's own top-level ``run_outcome.compatibility``, parsed as a
-    real :class:`Verdict`, or ``None``.
-
-    Distinct from :func:`parse_report_verdict`, which reads the sibling
-    top-level ``verdict`` key: for a report whose own root ``verdict`` is
-    itself a non-``Verdict`` sentinel string (a `scan --artifact-set`'s
-    ``BUNDLE_INCOMPLETE``, a `compare-release` summary's lowercase
-    ``"not_comparable"``), ``run_outcome.compatibility`` may still carry a
-    real, already-established completed-comparison result the sentinel
-    string itself discards (Codex review, fresh evidence -- see the call
-    sites below).
+    real :class:`Verdict`, or ``None``. Distinct from :func:`parse_report_
+    verdict`, which reads the sibling top-level ``verdict`` key: for a
+    report whose root ``verdict`` is a non-``Verdict`` sentinel string (a
+    `scan --artifact-set`'s ``BUNDLE_INCOMPLETE``, a `compare-release`
+    summary's lowercase ``"not_comparable"``), ``run_outcome.compatibility``
+    may still carry a real, already-established result the sentinel string
+    discards (Codex review, fresh evidence).
 
     Requires the *whole* block to be schema-valid (:func:`_is_schema_valid_
     run_outcome`), not merely that ``compatibility`` itself parses
-    (CodeRabbit review, fresh evidence): a forged/truncated
-    ``{"run_outcome": {"compatibility": "BREAKING"}}`` -- missing
-    ``gate``/``operational``/``schema_version``/``lifecycle`` -- previously
-    still earned this opportunistic recovery, letting a bare compatibility
-    string alone make a genuinely incomplete abort report read as analyzed
-    and preserve its findings/digest. A present-but-invalid block is
-    treated the same as an absent one here (returns ``None``, not a raised
-    ``_MalformedGate``): unlike the authoritative gate readers elsewhere in
-    this module, this function is purely an opportunistic verdict-recovery
-    helper, and every call site already has its own fully-validated,
-    fail-closed gate computed independently of this return value.
+    (CodeRabbit review, fresh evidence): a truncated ``{"run_outcome":
+    {"compatibility": "BREAKING"}}`` -- missing ``gate``/``operational``/
+    ``schema_version``/``lifecycle`` -- previously still earned this
+    opportunistic recovery. A present-but-invalid block is treated the same
+    as an absent one (returns ``None``, no raised ``_MalformedGate``): this
+    is purely opportunistic verdict recovery, and every call site already
+    has its own fully-validated, fail-closed gate independent of this value.
     """
     run_outcome = data.get("run_outcome")
     if not isinstance(run_outcome, Mapping) or not _is_schema_valid_run_outcome(
@@ -526,26 +519,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         blocking_categories = frozenset(
             {scan_abort_category}
         ) | _member_abort_categories(data)
-        # `BUNDLE_INCOMPLETE` is the one sentinel of the four where a real
-        # comparison typically DID complete: unlike a true abort (nothing
-        # ever compared), it fires only after every member scanned cleanly
-        # and just the cross-library bundle audit itself never ran --
-        # `run_outcome_dict_for_scan` already preserves the worst completed
-        # member's real compatibility verdict at `run_outcome.compatibility`
-        # (`service_scan.run_scan_set`'s own `member_verdicts=` wiring).
-        # Codex review, fresh evidence (second round): a *late* `BUDGET_
-        # OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` abort can carry a real
-        # completed verdict there too -- the writer reconstructs it from
-        # whatever completed before the abort fired -- so this reads
-        # `run_outcome.compatibility` unconditionally for all four sentinels
-        # rather than only `BUNDLE_INCOMPLETE`. `_run_outcome_compatibility_
-        # verdict` already returns `None` for an old/run_outcome-less report
-        # or one where nothing genuinely completed, so this is a pure
-        # widening with no regression for those cases. Forcing `verdict=
-        # None` when a real one is available would discard it and wrongly
-        # report the target as unavailable/unanalyzed even though the
-        # operational axis alone already accounts for the abort/skipped
-        # audit itself.
+        # `BUNDLE_INCOMPLETE` typically has a real completed comparison
+        # (unlike a true abort): it fires only after every member scanned
+        # cleanly and just the bundle audit never ran, and `run_outcome_
+        # dict_for_scan` preserves the worst completed member's verdict at
+        # `run_outcome.compatibility`. A *late* `BUDGET_OVERFLOW`/`EVIDENCE_
+        # CONTRACT_ERROR` abort can carry one too (Codex review, fresh
+        # evidence, second round) -- read unconditionally for all four
+        # sentinels rather than only `BUNDLE_INCOMPLETE`; `_run_outcome_
+        # compatibility_verdict` still returns `None` when nothing genuinely
+        # completed, so this is a pure widening, no regression there.
         compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
@@ -665,7 +648,25 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             kind = reason_obj["kind"]
             message = reason_obj.get("message")
             detail = f": {message}" if isinstance(message, str) and message else ""
-            run_outcome = _run_outcome_gate_and_operational(data)
+            # `_run_outcome_gate_and_operational` fails closed with a raised
+            # `_MalformedGate` for a PRESENT but schema-invalid `run_outcome`
+            # (distinct from a genuinely absent one, which returns `None`) --
+            # every other branch that calls it wraps the call in exactly this
+            # try/except, so a corrupt block here must land the target
+            # unavailable too, not abort the whole aggregation command
+            # (Codex review, fresh evidence).
+            try:
+                run_outcome = _run_outcome_gate_and_operational(data)
+            except _MalformedGate as exc:
+                return _LoadedReport(
+                    target_id=target_id,
+                    verdict=None,
+                    gate=None,
+                    library=data.get("library"),
+                    head_sha=head_sha,
+                    reason=f"report gate decision is malformed: {exc}",
+                    path=path,
+                )
             if run_outcome is not None:
                 refusal_gate_dec, refusal_operational = run_outcome
                 refusal_exit_code = fold_gate_and_operational(

@@ -52,6 +52,19 @@ __all__ = ["backfill_run_outcome", "synthetic_run_outcome"]
 #: outside this set is exactly as untrustworthy as a missing/non-int one.
 _VALID_COMPAT_CONTRIBUTION = frozenset({0, 1, 2, 4})
 
+#: `scan`'s own legacy top-level exit scheme (AGENTS.md's exit-code table:
+#: 0 compatible, 2 API break, 4 ABI break, 5 budget overflow, 6 not
+#: comparable) -- the exact `int` domain a pre-severity-scheme scan report's
+#: root `exit_code` may legitimately hold. A value outside this set is
+#: exactly as untrustworthy as a missing/non-int one (Codex review, fresh
+#: evidence): `run_outcome_for_scan_fields` itself already silently floors
+#: an out-of-scheme `compat_exit_code` to 0 (folding it into `operational`
+#: instead) -- correct for a code that genuinely IS operational-only (5/6),
+#: but for a bogus code like 99 it discarded a real BREAKING/API_BREAK
+#: verdict's own gate contribution, backfilling `run_outcome.gate: "none"`
+#: for a report whose `verdict` string says otherwise.
+_VALID_LEGACY_SCAN_EXIT = frozenset({0, 2, 4, 5, 6})
+
 
 def synthetic_run_outcome(
     *,
@@ -121,7 +134,11 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     raw_verdict = out.get("verdict")
     if "scan_schema_version" in out:
         exit_code = out.get("exit_code")
-        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        if (
+            not isinstance(exit_code, int)
+            or isinstance(exit_code, bool)
+            or exit_code not in _VALID_LEGACY_SCAN_EXIT
+        ):
             # A missing/malformed top-level `exit_code` previously defaulted
             # to 0 unconditionally -- for a legacy report whose `verdict` is
             # a real BREAKING/API_BREAK, that read as a false gate: none
@@ -129,7 +146,13 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             # nothing either, on a report this corrupted). Derive the
             # fallback from the real verdict instead, the same legacy-
             # verdict mapping the release/compare branches already use
-            # (Codex review, fresh evidence).
+            # (Codex review, fresh evidence). An out-of-scheme-but-still-int
+            # code (e.g. `99`) is exactly as untrustworthy as a missing one
+            # (Codex review, fresh evidence, second round): without this,
+            # `run_outcome_for_scan_fields` itself floors it to a `compat_
+            # exit_code` of 0 (`_GATE_EXIT_CODE.values()` membership check),
+            # backfilling `run_outcome.gate: "none"` for a report whose real
+            # `verdict` string still says BREAKING/API_BREAK.
             try:
                 scan_verdict = (
                     Verdict(raw_verdict) if isinstance(raw_verdict, str) else None

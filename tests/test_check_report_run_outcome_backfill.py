@@ -111,6 +111,27 @@ def test_old_scan_report_with_malformed_exit_code_derives_gate_from_verdict() ->
     assert run_outcome["gate"] == "abi_breaking"
 
 
+def test_old_scan_report_with_out_of_scheme_exit_code_derives_gate_from_verdict() -> (
+    None
+):
+    """Codex review, fresh evidence (second round): an `exit_code` that IS
+    a real int but outside `scan`'s legacy scheme {0,2,4,5,6} (e.g. `99`)
+    is exactly as untrustworthy as a missing/non-int one -- without this,
+    `run_outcome_for_scan_fields` itself silently floors an out-of-scheme
+    `compat_exit_code` to 0 (folding it into `operational` instead),
+    backfilling `run_outcome.gate: "none"` for a report whose real
+    `verdict` string still says BREAKING."""
+    report = {
+        "scan_schema_version": "1.21",
+        "verdict": "BREAKING",
+        "exit_code": 99,
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["gate"] == "abi_breaking"
+
+
 def test_old_scan_abort_report_reads_the_nested_diff_exit_shape() -> None:
     """Codex review (P2), fresh evidence: cli_scan._emit_scan_abort_report's
     own persisted JSON (pre-1.24, before that writer carried run_outcome
