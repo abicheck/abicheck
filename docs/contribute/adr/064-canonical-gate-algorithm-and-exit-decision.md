@@ -726,7 +726,18 @@ lands in two stages rather than one atomic change:
       isolated-snippet tests that extract `_json_report_src` without
       running the real command-assembly section keep behaving exactly as
       before (`tests/test_action_run_sh_helpers.py::TestEffectiveFormat`,
-      `tests/test_action_run_sh_pr_json.py`). Still open: the release
+      `tests/test_action_run_sh_pr_json.py`). **A same-PR review round
+      (Codex, fresh evidence) found a third site of the identical class**:
+      `_text_report_content` -- the text-report counterpart
+      `_severity_gate_exit`/`_severity_gate_categories` both read through --
+      gated on the bare `$FORMAT` too, so a `format: json` step whose own
+      `extra-args` overrode to `--format text` (with `output-file` set)
+      wrote real text to `$OUTPUT_FILE` that this function still refused to
+      read, silently losing the severity-gate line and publishing the
+      generic `ERROR` instead of `SEVERITY_ERROR`. Fixed the same way --
+      gated on `${_EFFECTIVE_FORMAT:-${FORMAT:-}}` (`tests/
+      test_action_run_sh_helpers.py::TestTextReportContentEffectiveFormat`).
+      Still open: the release
       fan-out's `GateOptions` unification, the typed-API half of this
       parity pass, the `--format text` gap named above, and a real
       `--artifact-set` member-level evidence-contract signal for the Action

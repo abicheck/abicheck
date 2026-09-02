@@ -2417,8 +2417,19 @@ _severity_gate_exit() {
 # stdout-only search still published ERROR for a severity-policy result
 # (Codex review) -- the same defect as the JSON-only search before it, one
 # level down.
+#
+# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- same
+# effective-format-override class as `_STDOUT_JSON_FILE`/`_json_report_src`
+# (see `_effective_format`'s own docstring): a `format: json` step whose own
+# `extra-args` overrides to `--format text` really does write text to
+# `$OUTPUT_FILE`, and this check used to still read `$ABICHECK_OUTPUT`
+# instead (empty, since `-o` was used), losing the severity-gate line
+# entirely (Codex review, fresh evidence, PR #998). Falls back to
+# `${FORMAT:-}` when `$_EFFECTIVE_FORMAT` is unset, same as the other two
+# sites, so any isolated-snippet test exercising this function alone keeps
+# behaving exactly as before this fix.
 _text_report_content() {
-  if [[ "${FORMAT:-}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
     cat "${OUTPUT_FILE}"
   else
     printf '%s' "${ABICHECK_OUTPUT:-}"
