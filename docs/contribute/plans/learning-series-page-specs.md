@@ -269,8 +269,10 @@ generator only renders):
   two levels, as tier 1 does.
 - **Paths are walks up the ladder.** Every `paths:` entry names only
   members or branches. Each page resolves to its full ladder index
-  (sequence, tier, member position — a branch takes its parent's
-  position), and walking `pages` that index is *strictly* increasing: no
+  (sequence, tier, member position, branch flag — a branch sorts right
+  after the page it hangs from and before that page's next member, so a
+  parent-to-own-branch step is an increase), and walking `pages` that
+  index is *strictly* increasing: no
   same-tier reversal, no repeated page, and `concepts` only after the
   entry's `educational` pages. Comparing tier positions alone would let
   two pages of one tier appear in reverse order, which is exactly the
@@ -1133,8 +1135,11 @@ Sections:
    plan defers, at pointer depth only.
 
 Runs: the RPM and Debian compares in full, the tar and conda operand
-variants one line each, the `--abi3` scan, and a `--used-by` compare
-against a Python interpreter or binding. Cases: 121, 163, 170, 175, 176,
+variants one line each, the `--abi3` scan, and a `--required-symbol`
+compare for the names a `dlopen`/`dlsym` binding resolves at runtime
+(`--used-by` fits only a binding that has link-time imports from the
+library; the interpreter itself imports none of the extension's entry
+points, so scoping to it captures nothing). Cases: 121, 163, 170, 175, 176,
 82, 126. Links, not restatements: all four task pages (the three how-tos
 and S13). Done when: each of the four package formats has one runnable
 command (RPM and Debian with their debug sidecars, tar and conda as the

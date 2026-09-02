@@ -115,10 +115,16 @@ the copy was made. Two consequences. The direction of the promise is the
 usual one — the library must keep what the copy assumes
 ([Compatibility Direction](compatibility-direction.md)) — but the copy can
 be wrong from the start, and a check against the *header* would pass while
-the binding is broken. And for `--used-by`, the application is the
-binding's *loader*: the interpreter or the Rust binary that `dlopen`s the
-library, whose imports are what the comparison scopes to
-([Consumer Models](consumer-models.md)).
+the binding is broken. And the consumer-scoped check has to match how the
+binding binds: `--used-by` scopes to the imports recorded in an application
+binary, so it fits a binding linked against the library at build time, but
+a `ctypes` or `dlopen`-based binding resolves its names at runtime and the
+interpreter that loads it imports none of them. State those names as the
+contract instead ([Consumer Models](consumer-models.md)):
+
+```bash
+abicheck compare old.so new.so --required-symbol foo_open --required-symbol foo_read
+```
 
 ## Kernel and accelerator ABIs
 

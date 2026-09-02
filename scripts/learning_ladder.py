@@ -38,8 +38,9 @@ Rules the file encodes (each is an ERROR):
   front matter only; every member and branch must be >= its tier's `floor:`.
 - **Links must be members elsewhere** (or an existing tool-track page).
 - **Paths are walks up the ladder.** Every `paths:` page resolves to its full
-  ladder index (sequence, tier, member position; a branch takes its
-  parent's) and that index is strictly increasing along the entry.
+  ladder index (sequence, tier, member position, branch flag; a branch
+  sorts right after its parent and before the parent's next member) and
+  that index is strictly increasing along the entry.
 - **Footers match the ladder.** Every member/branch page carries one
   `**Ladder:**` footer line whose two links are its ladder neighbours.
 
