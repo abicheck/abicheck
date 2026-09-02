@@ -324,6 +324,28 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `EVIDENCE_CONTRACT_ERROR` scan-set member) never completed. The category
   union is now independent of whether the numeric exit code itself needs
   raising (Codex review).
+- **The scoped-gate exemption in `workflows/aggregate/gate.py` now
+  validates the complete `full_run_outcome` shape, not just that it
+  parses.** `RunOutcome.from_dict` is a deliberately lenient reader (only
+  `gate`/`operational` must parse; `compatibility`/`lifecycle` degrade
+  silently) for its other callers, so a minimal, forged two-key
+  `full_run_outcome` alongside `full_verdict`/`used_by` still earned the
+  exemption on an otherwise-unscoped, corrupted report. The exemption now
+  additionally requires every key `$defs.run_outcome`
+  (`compare_report.schema.json`) declares required to actually be present
+  (Codex review).
+- **A legacy release report's `exit.compatibility_contribution` is now
+  also rejected when it's an out-of-scheme integer** (e.g. `99`), not just
+  a non-int/bool value — falling back to `severity.exit_code`/the legacy
+  verdict mapping the same way a missing key already does, instead of
+  letting `run_outcome_dict_for_release`'s own scheme-membership check
+  silently normalize it to `0` (Codex review).
+- Corrected `docs/use/output-formats.md`'s `run_outcome` summary: `
+  operational` is described as an independent axis rather than proof that
+  no compatibility result exists — a late budget/evidence abort can retain
+  an already-completed verdict, and a release/scan set can report one
+  member's real result alongside a different member's independent
+  operational failure (Codex review).
 
 ### Changed
 

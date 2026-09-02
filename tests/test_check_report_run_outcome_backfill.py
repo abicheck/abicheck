@@ -336,6 +336,27 @@ def test_legacy_release_report_rejects_a_malformed_compatibility_contribution() 
     assert run_outcome["gate"] == "abi_breaking"
 
 
+def test_legacy_release_report_rejects_an_out_of_range_compatibility_contribution() -> (
+    None
+):
+    """Codex review, fresh evidence beyond the malformed-value fix above:
+    an integer outside the 0/1/2/4 compatibility-gate scheme (99 here)
+    still passed the isinstance(int) check and was forwarded as-is --
+    run_outcome_dict_for_release's own scheme-membership check then
+    silently normalized it to 0 (gate: none), turning a legacy BREAKING
+    report with a corrupted exit block into a falsely clean target."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "BREAKING"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "BREAKING",
+        "exit": {"compatibility_contribution": 99},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["gate"] == "abi_breaking"
+
+
 def test_report_already_carrying_run_outcome_is_left_untouched() -> None:
     sentinel = {
         "schema_version": "1.0",

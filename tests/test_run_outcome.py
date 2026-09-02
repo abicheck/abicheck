@@ -583,6 +583,33 @@ class TestGateInfoFromReportDataStructuredFirst:
         with pytest.raises(_MalformedGate):
             GateInfo.from_report_data(data)
 
+    def test_minimal_full_run_outcome_does_not_bypass_the_check(self):
+        """Codex review (P2), fresh evidence beyond the two fixes above:
+        RunOutcome.from_dict only requires gate/operational to parse (a
+        deliberately lenient reader for its OTHER callers) -- so a minimal,
+        forged two-key full_run_outcome (missing schema_version/
+        compatibility/assurance/lifecycle) alongside full_verdict/used_by
+        still earned the exemption. The exemption must additionally
+        require every key $defs.run_outcome declares required to actually
+        be present, not merely that the two present keys parse."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.NONE, OperationalStatus.NONE
+            ),
+            "full_run_outcome": {"gate": "none", "operational": "none"},
+            "full_verdict": "BREAKING",
+            "used_by": ["app.so"],
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
     def test_operational_failure_folds_into_an_otherwise_clean_severity_block(self):
         """The orthogonal-axes fold: RunOutcome.operational raises an
         otherwise-clean severity gate, exactly the shape ADR-049 Phase 7's

@@ -648,12 +648,17 @@ Every JSON report carries a top-level `report_schema_version` field
 > `verdict`/`exit_code`/`severity` fields; nothing existing changes
 > meaning or is removed. `gate` is an exit-code-free category
 > (`none`/`addition_quality`/`potential_breaking`/`abi_breaking`).
-> `operational` is `none` for a run that produced a real compatibility
-> verdict; any other value (`budget_overflow`/`not_comparable`/
-> `evidence_contract_error`/`extraction_error`) means the run never did,
-> and `compatibility` is `null` in exactly that case — a resolve-baseline
-> failure, a bootstrap/new-target advisory pass, or a not-comparable
-> refusal (`operational: "not_comparable"`).
+> `operational` is an **independent** axis, not proof that no compatibility
+> result exists: it is `none` when nothing operational went wrong, and any
+> other value (`budget_overflow`/`not_comparable`/`evidence_contract_error`/
+> `extraction_error`) flags an incomplete part of the run — but `compatibility`
+> can still be non-`null` alongside it, e.g. a late budget/evidence abort
+> that retains an already-completed verdict, or a release/scan set whose
+> reported `compatibility` is one member's real result while a *different*
+> member independently failed operationally. `compatibility` is `null`
+> only when no real comparison ran at all: a resolve-baseline failure, a
+> bootstrap/new-target advisory pass, or a not-comparable refusal
+> (`operational: "not_comparable"`).
 
 > **Two version numbers, two contracts.** `report_schema_version` (above)
 > versions the **comparison report** emitted by `compare`. It is distinct from

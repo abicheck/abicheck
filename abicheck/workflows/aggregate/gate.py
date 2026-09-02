@@ -22,6 +22,12 @@ from abicheck.policy.outcome import (
 
 COVERAGE_INCOMPLETE_EXIT = 1
 _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
+#: The keys `$defs.run_outcome` (`compare_report.schema.json`) declares
+#: required -- `RunOutcome.from_dict` deliberately does not enforce all of
+#: these itself (see `_has_valid_full_run_outcome`'s own docstring, point 3).
+_RUN_OUTCOME_REQUIRED_KEYS = frozenset(
+    {"schema_version", "compatibility", "assurance", "gate", "operational", "lifecycle"}
+)
 _LEGACY_SEVERITY: dict[Verdict, int] = {
     Verdict.NO_CHANGE: 0,
     Verdict.COMPATIBLE: 0,
@@ -94,6 +100,20 @@ def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
        least one of ``result.used_by``/``result.required_symbols`` is
        non-``None``). Requiring the same three markers together is what a
        corrupt report cannot forge without also being a genuine scoped one.
+    3. Still not enough (Codex review, fresh evidence): ``RunOutcome.
+       from_dict`` is a lenient, best-effort reader (it only requires
+       ``gate``/``operational`` to parse; ``compatibility`` degrades
+       silently to ``None`` and ``lifecycle`` defaults to ``EXISTING``
+       rather than failing on a malformed/absent value -- deliberately so,
+       per its own docstring, for its OTHER callers that read an
+       already-genuine block back). A partially rewritten unscoped report
+       could therefore forge a minimal two-key ``full_run_outcome: {"gate":
+       ..., "operational": ...}`` alongside the other two markers and still
+       earn the exemption. This function additionally requires every key
+       ``$defs.run_outcome`` (``compare_report.schema.json``) declares
+       required -- ``schema_version``/``compatibility``/``assurance``/
+       ``gate``/``operational``/``lifecycle`` -- to actually be present, the
+       one property ``RunOutcome.from_dict`` deliberately doesn't enforce.
     """
     from abicheck.policy.outcome import RunOutcome
 
@@ -101,7 +121,12 @@ def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
         return False
     if "used_by" not in data and "required_symbol_contract" not in data:
         return False
-    return RunOutcome.from_dict(data.get("full_run_outcome")) is not None
+    full_run_outcome = data.get("full_run_outcome")
+    if not isinstance(full_run_outcome, Mapping):
+        return False
+    if not _RUN_OUTCOME_REQUIRED_KEYS.issubset(full_run_outcome.keys()):
+        return False
+    return RunOutcome.from_dict(full_run_outcome) is not None
 
 
 def _run_outcome_blocking_categories(

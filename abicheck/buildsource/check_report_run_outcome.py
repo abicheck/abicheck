@@ -46,6 +46,12 @@ from ..policy.outcome import (
 
 __all__ = ["backfill_run_outcome", "synthetic_run_outcome"]
 
+#: The shared 0/1/2/4 compatibility-gate exit scheme `policy.outcome.
+#: _GATE_EXIT_CODE`'s values are drawn from (not itself importable -- it's
+#: a private module constant) -- an `exit.compatibility_contribution` value
+#: outside this set is exactly as untrustworthy as a missing/non-int one.
+_VALID_COMPAT_CONTRIBUTION = frozenset({0, 1, 2, 4})
+
 
 def synthetic_run_outcome(
     *,
@@ -199,23 +205,24 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             else (str(raw_verdict) if raw_verdict is not None else "NO_CHANGE")
         )
         # `exit`, when present, is only trusted for `compatibility_
-        # contribution` if that specific key survived *and* holds a real
-        # int -- this runs before `backfill_exit_block_fields` (Codex
-        # review, fresh evidence: that backfill unconditionally defaults
-        # every missing `*_contribution` key, including this one, to 0,
-        # indistinguishable from a real confirmed-clean report; calling
-        # this first sees the true original shape). A present-but-malformed
-        # value (a string, `None`, a bool) is rejected the same way a
-        # missing key is -- trusting it as-is would let `run_outcome_dict_
-        # for_release`'s own `_int_contribution` silently normalize it to
-        # `0` (gate: none), turning a legacy `BREAKING` report with a
-        # corrupted `exit` block into a falsely clean target instead of
-        # falling back (Codex review, fresh evidence). Falls back to
-        # `severity.exit_code`, then the legacy verdict mapping over the
-        # recovered `worst_member` -- never the backfilled 0 -- so a legacy
-        # BREAKING release report with no exit/severity block still gets
-        # gate: abi_breaking instead of silently passing aggregation as
-        # clean.
+        # contribution` if that specific key survived *and* holds a real,
+        # in-scheme int -- this runs before `backfill_exit_block_fields`
+        # (Codex review, fresh evidence: that backfill unconditionally
+        # defaults every missing `*_contribution` key, including this one,
+        # to 0, indistinguishable from a real confirmed-clean report;
+        # calling this first sees the true original shape). A present-but-
+        # malformed value (a string, `None`, a bool) OR an out-of-scheme
+        # int (e.g. `99`) is rejected the same way a missing key is --
+        # trusting either as-is would let `run_outcome_dict_for_release`'s
+        # own `_int_contribution`/scheme-membership check silently
+        # normalize it to `0` (gate: none), turning a legacy `BREAKING`
+        # report with a corrupted `exit` block into a falsely clean target
+        # instead of falling back (Codex review, fresh evidence, two
+        # rounds). Falls back to `severity.exit_code`, then the legacy
+        # verdict mapping over the recovered `worst_member` -- never the
+        # backfilled 0 -- so a legacy BREAKING release report with no
+        # exit/severity block still gets gate: abi_breaking instead of
+        # silently passing aggregation as clean.
         exit_decision = out.get("exit")
         raw_contribution = (
             exit_decision.get("compatibility_contribution")
@@ -226,6 +233,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             not isinstance(exit_decision, dict)
             or not isinstance(raw_contribution, int)
             or isinstance(raw_contribution, bool)
+            or raw_contribution not in _VALID_COMPAT_CONTRIBUTION
         ):
             severity = out.get("severity")
             sev_exit = severity.get("exit_code") if isinstance(severity, dict) else None
