@@ -70,7 +70,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-from learning_nav_order import duplicate_nav_groups, nav_groups, nav_subgroups
+from learning_nav_order import (
+    duplicate_nav_groups,
+    nav_groups,
+    nav_page_count,
+    nav_subgroups,
+)
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 DOCS = REPO_DIR / "docs"
@@ -568,6 +573,14 @@ def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
         out.append(
             f"{home}: the hub {ladder.hub} is listed more than once under this tab; "
             "it is the one overview entry"
+        )
+    # The readers above are scoped to the learning tabs; the hub must not
+    # be listed under any other tab either.
+    total = nav_page_count(mkdocs_text, ladder.hub)
+    if total > 1:
+        out.append(
+            f"the hub {ladder.hub} is listed {total} times across the whole nav; "
+            f"it appears exactly once, first under the {home} tab"
         )
     for key, pages in groups.items():
         if key != home_key and ladder.hub in pages:

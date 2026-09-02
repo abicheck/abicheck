@@ -702,6 +702,17 @@ def test_hub_listed_twice_under_the_tab_is_an_error(tmp_path: Path) -> None:
     )
 
 
+def test_hub_also_under_a_non_learning_tab_is_an_error(tmp_path: Path) -> None:
+    """The learning-tab readers never see other tabs, so the hub is counted
+    across the whole nav."""
+    nav = NAV_OK.replace(
+        "  - Home: index.md\n",
+        "  - Home:\n    - Index: index.md\n    - Overview: learn/hub.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("listed 2 times across the whole nav" in m for m in msgs)
+
+
 def test_hub_inside_a_step_group_is_an_error(tmp_path: Path) -> None:
     inside = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
         '    - "1. Start":\n', '    - "1. Start":\n      - Overview: learn/hub.md\n'

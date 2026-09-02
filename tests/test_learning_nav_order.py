@@ -93,6 +93,16 @@ def test_nav_subgroups_keep_the_nesting_nav_groups_folds() -> None:
     assert lno.nav_subgroups(NAV) == {}
 
 
+def test_nav_page_count_sees_every_tab() -> None:
+    assert lno.nav_page_count(NAV, "learn/hub.md") == 1
+    everywhere = NAV.replace(
+        "    - CLI: reference/cli.md\n",
+        "    - CLI: reference/cli.md\n    - Hub: learn/hub.md\n",
+    )
+    assert lno.nav_page_count(everywhere, "learn/hub.md") == 2
+    assert lno.nav_page_count(NAV, "learn/nope.md") == 0
+
+
 def test_duplicate_nav_groups_are_named_once_in_order() -> None:
     nav = NAV.replace(
         "    - Mechanics:   # a comment\n",

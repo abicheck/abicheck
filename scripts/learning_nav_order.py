@@ -205,6 +205,26 @@ def duplicate_nav_groups(
     return dupes
 
 
+def nav_page_count(mkdocs_text: str, page: str) -> int:
+    """How many times `page` is listed anywhere in the nav block — every tab,
+    not only the learning ones the other readers are scoped to."""
+    count = 0
+    in_nav = False
+    for raw in mkdocs_text.split("\n"):
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+        if not in_nav:
+            in_nav = line.startswith("nav:")
+            continue
+        if not line.startswith(" ") and not line.startswith("-"):
+            break
+        m = _NAV_ITEM_RE.match(line)
+        if m and (m.group(5) or "").strip() == page:
+            count += 1
+    return count
+
+
 def page_level(docs: Path, page: str) -> str | None:
     path = docs / page
     if not path.is_file():
