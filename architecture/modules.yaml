@@ -173,6 +173,7 @@
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/buildsource/source_graph_compare.py",
+        "abicheck/comparability_profile.py",
         "abicheck/confidence.py",
         "abicheck/detector_registry.py",
         "abicheck/diff_abi_tags.py",
@@ -225,6 +226,7 @@
         "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
         "abicheck/type_reachability_spelling.py",
+        "abicheck/type_reachability_stdlib_spellings.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
     },
