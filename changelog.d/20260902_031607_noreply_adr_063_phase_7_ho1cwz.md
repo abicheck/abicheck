@@ -409,6 +409,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   markers previously still earned the exemption, letting an
   otherwise-BREAKING severity block bypass the gate check (Codex review,
   fresh evidence).
+- **`compare --old-bundle-facts`'s own JSON summary now carries
+  `run_outcome`, closing the one remaining exception to this repo's
+  "every compare/release JSON report carries `run_outcome`" contract**
+  (Codex review, fresh evidence). Reuses `report.run_outcome.
+  run_outcome_dict_for_diff_result` (already used by `reporter.py`'s own
+  JSON entry points) rather than a new `policy` import, since
+  `frontends` may not import `policy` directly.
 
 ### Changed
 
