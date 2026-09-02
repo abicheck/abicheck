@@ -207,7 +207,48 @@
   not established (`Anonymous`/`LocalToFunction` ordinals are only
   stable within one process's lifetime, and two prior attempts at ordinal
   stability were each reverted — see `model/identity.py`'s own docstring).
-  Those are the remaining items before Phase 2 is complete.
+  **Update (fourteenth/fifteenth slices, 2026-09-02): item (1) above is
+  now closed on the extraction side for every remaining producer.**
+  `dwarf_snapshot.py`'s DIE walk now threads a typed `ScopePath` (a new
+  `extract/dwarf_scope.py`), giving `RecordType`/`EnumType`/`Function`/
+  `Variable` a populated `entity_id` and a `typedef_entity_ids` sidecar for
+  DWARF too (`constant_entity_ids` stays empty for a DWARF-only snapshot, a
+  header-AST-only fact DWARF does not carry); `dumper_elf_fallback.py`'s
+  header-less export-table-only construction and, via a new shared
+  `extract/export_symbol_identity.py`, `dumper.py`'s own PE/Mach-O
+  header-less branches now populate `entity_id` too (recognizing both MSVC
+  and Itanium PE mangling, so a MinGW-built PE DLL's headerless and
+  header-backed dumps agree). Every DWARF/PE/Mach-O/ELF-symbol-table-only
+  *producer* now carries `entity_id` — the object class (1) said did not
+  exist. Diff-site wiring on top of that new object was carried out
+  narrowly, module by module: three real sites landed
+  (`diff_platform.py`'s ELF-fallback deleted-function finding,
+  `diff_platform_elf_symbols.py`'s exported-object size/alignment
+  findings); every other DWARF/PE/Mach-O/ELF-only call site was
+  individually reviewed and stays unwired for one of three structural
+  reasons, not because the pass stopped short — raw container facts with
+  no `entity_id`-carrying type in scope at all (the large majority, e.g.
+  every one of `diff_platform_elf_dynamic.py`'s/`diff_versioning.py`'s/
+  `diff_sycl.py`'s sites), DWARF-only layout structs
+  (`StructLayout`/`FieldInfo`/`EnumInfo`, `model/dwarf_facts.py`) which
+  still carry no `entity_id` of their own — a separate, deeper
+  extraction-side gap than "detector forgot to read it" — or a
+  batch-shaped finding aggregating several matched entities into one
+  `Change`, where this codebase's own convention is that no producer sets
+  `entity_id` on a batch finding at all. `diff_filtering.py`'s/
+  `type_reachability.py`'s string-suffix ambiguity trackers remain
+  unmigrated, unattempted given that code's own documented fragility.
+  Item (2) (the `entity:` alias promotion) was investigated a third time
+  and remains blocked for the identical reason — no established
+  cross-release-stable `EntityId.key` — though a new gating primitive,
+  `model/identity_stability.py::entity_id_is_cross_snapshot_stable()`, now
+  lets a future caller ask "does this id avoid the unstable
+  `Anonymous`/`LocalToFunction` construct in the first place" without
+  itself stabilizing anything; it is real, tested infrastructure with no
+  production consumer yet. See the implementation plan's Phase 2 section
+  (fourteenth/fifteenth slices) for the full accounting. Those, plus the
+  post-parse consumer migrations named above, are the remaining items
+  before Phase 2 is complete.
 - **Phase 3** ("public surface as a graph query over one evidence graph,"
   D5) has landed its plumbing across thirteen slices: `model/occurrence.py`
   (`OccurrenceId`/`canonical_key`); a `SurfaceGraphLike` structural
@@ -647,6 +688,42 @@
   acceptance-criteria fixture (a closure-parameterized template, which
   needs function/template-argument normalization) — see the plan's own
   "Still not landed" list for this slice.
+  **Third and fourth slices landed (2026-09-02): functions, variables, and
+  constants are now normalized, and PE/Mach-O header-AST assembly is
+  wired.** `normalize_header_ast` gained `functions=`/`variables=`
+  parameters (default `()`, so an unmigrated caller needs no change). A
+  function's `canonical_spelling` reuses the exact primitives
+  `entity_id_for_function`/`resolve_function_identity` already apply for
+  the identical cross-backend spelling problem
+  (`canonicalize_function_signature_param_type` per parameter,
+  `canonicalize_type_name` for the return type) rather than inventing a
+  third canonicalization; a variable's top-level CV-qualification is
+  derived structurally (mirroring `model.declarator_qualifiers`'s own
+  nesting-depth-aware discipline), not reused from the pre-existing
+  `Variable.is_const` field, which conflates a mutable pointer to const
+  data with a genuinely const declaration — a distinction three Codex
+  review rounds on PR #1012 progressively corrected, the same rounds that
+  also closed a hazard where a function keyed under castxml's synthetic
+  ctor/dtor identity, later rewritten during hybrid merge, could be left
+  orphaned in `semantic_ir` under its retired key (`_merge_functions` now
+  reports its own entity-id substitutions, applied to `semantic_ir` before
+  reconciliation). `_dump_pe`/`_dump_macho` now call the normalizer too
+  (the with-headers path for both formats already did, undocumented until
+  this slice). **Still not landed, unchanged by this update:**
+  DWARF/PDB/BTF/CTF backends produce no `SemanticIR` at all — this
+  normalizer canonicalizes identity a backend already resolved, it does
+  not resolve identity itself, so it needs each backend's own Phase 2
+  `EntityId` treatment first (DWARF's landed as Phase 2's fourteenth
+  slice, but this normalizer's own DWARF wiring has not); a
+  `--dump-manifest` multi-TU dump still loses occurrence-level detail,
+  since `tu_merge.merge_fragments` collapses same-identity declarations
+  across translation units before the normalizer ever runs (no worse than
+  the legacy flat fields already have for a manifest dump, but not yet the
+  IR's fuller multi-occurrence potential either); and
+  `CanonicalEntity.template_arguments` remains unpopulated by any backend,
+  so the phase's own closure-parameterized-template acceptance fixture is
+  still unmet. See the implementation plan's Phase 6 section (third/fourth
+  slices) for the full accounting.
 - **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
   is **implemented**: `abicheck/policy/outcome.py` (new) defines
   `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`
