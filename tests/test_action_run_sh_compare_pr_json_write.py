@@ -300,6 +300,51 @@ class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
         assert any(e["level"] == "error" for e in lib["annotations"])
 
 
+class TestSarifDefaultOutputFileUsesEffectiveFormat:
+    """Codex review, PR #998, fresh evidence: `format: sarif` with no
+    explicit `output-file:` defaults `OUTPUT_FILE` to
+    `abicheck-results.sarif` -- the exact path a workflow's own
+    `upload-sarif: true` step looks for. That default used to key off the
+    nominal `$FORMAT`, so `extra-args: --format json` (or any other
+    override away from sarif) still produced the default sarif-shaped
+    filename while writing genuinely non-SARIF content into it -- silently
+    feeding mismatched content to the CodeQL upload step. Gating the
+    default on the effective format instead means an override away from
+    sarif gets no default `-o` at all (output goes to stdout), so an
+    unrelated upload-sarif step fails loudly on a missing file rather than
+    silently uploading the wrong content.
+    """
+
+    def test_sarif_overridden_away_gets_no_default_output_file(
+        self, tmp_path: Path
+    ) -> None:
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_FORMAT": "sarif", "INPUT_EXTRA_ARGS": "--format json"},
+        )
+        assert "abicheck-results.sarif" not in argv, argv
+        assert "-o" not in argv.split(), argv
+
+    def test_plain_sarif_still_gets_the_default_output_file(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: the ordinary, unoverridden case must keep
+        # working exactly as before.
+        argv = _compare_argv(tmp_path, {"INPUT_FORMAT": "sarif"})
+        assert "abicheck-results.sarif" in argv, argv
+
+    def test_extra_args_overriding_to_sarif_still_gets_the_default(
+        self, tmp_path: Path
+    ) -> None:
+        # The reverse direction: a nominal non-sarif primary overridden *to*
+        # sarif should still get the default sarif filename.
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_FORMAT": "markdown", "INPUT_EXTRA_ARGS": "--format sarif"},
+        )
+        assert "abicheck-results.sarif" in argv, argv
+
+
 def test_both_branches_share_the_same_write_guard() -> None:
     """compare and scan must not drift apart on this.
 

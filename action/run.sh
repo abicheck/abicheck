@@ -1264,7 +1264,17 @@ elif [[ "$MODE" == "compare" ]]; then
     CMD+=(--dry-run)
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
+    # Gated on the effective format, not the nominal one (Codex review, PR
+    # #998, fresh evidence): `format: sarif` overridden by `extra-args
+    # --format json` (or any other non-sarif format) really does write
+    # non-SARIF content, and naming that file `abicheck-results.sarif` by
+    # default -- the exact path a workflow's own upload-sarif step (gated
+    # on the Action's nominal `format: sarif` input, which this shell
+    # variable cannot change) looks for -- would have silently fed
+    # mismatched content to CodeQL. Leaving `OUTPUT_FILE` unset here when
+    # the effective format isn't sarif means the upload step instead finds
+    # no file at all, a loud failure rather than a silent one.
+    if [[ "${_EFFECTIVE_FORMAT:-$FORMAT}" == "sarif" && -z "$OUTPUT_FILE" ]]; then
       OUTPUT_FILE="abicheck-results.sarif"
     fi
     if [[ -n "$OUTPUT_FILE" ]]; then
@@ -2226,7 +2236,14 @@ _emit_annotations() {
     # `_extra_args_write_json_path` recovers, there is nothing to discover
     # here, so say so rather than silently emitting nothing (Codex review,
     # fresh evidence).
-    if [[ "${FORMAT:-}" != "json" ]] && _extra_args_has_write_flag \
+    #
+    # Gated on the effective format, not the nominal one (Codex review, PR
+    # #998, fresh evidence): `format: json` overridden by `extra-args
+    # --format text` (say, alongside its own `--write markdown=...`) really
+    # does leave no JSON report anywhere -- `_src` above is correctly
+    # empty -- but the nominal check here suppressed this very diagnostic
+    # explaining why, since it still believed the primary was JSON.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && _extra_args_has_write_flag \
        && [[ -z "$(_extra_args_write_json_path)" ]]; then
       echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own --write targets a non-json format -- no JSON report is available to render annotations from. Use format: json, or point --write at json=PATH instead."
     fi

@@ -788,8 +788,35 @@ lands in two stages rather than one atomic change:
       leaving `_json_report_src` with nothing to find; closing this
       properly needs a new `_effective_output_file` helper with the same
       freshness/fingerprint discipline `_json_report_src` already applies
-      to `$OUTPUT_FILE`, not a narrow patch to one call site. Still open:
-      the release fan-out's `GateOptions` unification, the typed-API half of
+      to `$OUTPUT_FILE`, not a narrow patch to one call site. **A sixth
+      review round (Codex, fresh evidence) found two more sites of the same
+      class, both fixed in this PR since each was a narrow, in-scope
+      correction (unlike the two deferred above, neither needed a new
+      primitive):** (1) `format: sarif` with no `output-file:` input
+      defaults `$OUTPUT_FILE` to `abicheck-results.sarif` — the exact
+      filename a workflow's own `upload-sarif: true` step looks for — but
+      that default was keyed on the nominal `$FORMAT`, so `extra-args
+      --format json` (or any other override away from sarif) still wrote
+      real JSON into a file named as if it were SARIF, ready to be silently
+      fed to a `continue-on-error` CodeQL upload step (`action.yml`'s own
+      `if: inputs.format == 'sarif'` gate on that step reads the *nominal*
+      Action input and cannot see a shell-local override, so this could not
+      be closed by keying that step's own condition on the effective value
+      either — the fix instead makes the mismatch fail loudly: no default
+      `-o` is set when the effective format isn't sarif, so the upload step
+      finds no file rather than the wrong one). (2) `_emit_annotations`'s
+      own "no JSON report is available" diagnostic — printed when
+      `_json_report_src` correctly finds nothing — was itself gated on the
+      nominal `$FORMAT` inside that same `if`, so a `format: json` step
+      overridden to `--format text` (with its own `--write markdown=...`)
+      correctly rendered no annotations but suppressed the very message
+      explaining why. Both gated on `${_EFFECTIVE_FORMAT:-${FORMAT:-...}}`
+      like every other site (`tests/
+      test_action_run_sh_compare_pr_json_write.py::
+      TestSarifDefaultOutputFileUsesEffectiveFormat`, `tests/
+      test_action_run_sh_annotate_renderer.py::
+      test_effective_format_override_still_emits_the_diagnostic`). Still
+      open: the release fan-out's `GateOptions` unification, the typed-API half of
       this parity pass, the `--format text` gap named above, and a real
       `--artifact-set` member-level evidence-contract signal for the Action
       to consume.
