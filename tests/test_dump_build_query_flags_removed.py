@@ -61,6 +61,7 @@ class TestBuildQueryFlagsRemoved:
     def test_removed_flag_is_a_usage_error(
         self, tmp_path: Path, flag: str, value: str
     ) -> None:
+        """The old spelling is rejected outright, not silently accepted."""
         header = tmp_path / "api.h"
         header.write_text("int foo(int x);\n", encoding="utf-8")
         result = CliRunner().invoke(

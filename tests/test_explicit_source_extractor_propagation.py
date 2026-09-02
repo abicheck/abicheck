@@ -136,10 +136,12 @@ class _StopResolution(Exception):
 
 
 def _ctx(frontend: str) -> CompileContext:
+    """A context carrying only *frontend*, the one field under test."""
     return CompileContext(frontend=frontend)
 
 
 def _set_env(monkeypatch: pytest.MonkeyPatch, value: str | None) -> None:
+    """Set ``ABICHECK_AST_FRONTEND`` to *value*, or unset it for ``None``."""
     if value is None:
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     else:
@@ -297,6 +299,7 @@ class TestScanEngineCallSitePropagation:
     def test_an_explicit_frontend_reaches_the_l4_extractor(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Both concrete backends reach L4 replay when explicitly requested."""
         assert self._captured_source_extractor(monkeypatch, "castxml") == "castxml"
         assert self._captured_source_extractor(monkeypatch, "clang") == "clang"
 
@@ -336,5 +339,6 @@ class TestNeverRaises:
         ),
     )
     def test_answers_rather_than_raises(self, frontend: str) -> None:
+        """Every spelling gets an answer -- ``None`` or a real L4 backend."""
         answer = explicit_source_extractor(_ctx(frontend))
         assert answer is None or answer in L4_SOURCE_EXTRACTORS
