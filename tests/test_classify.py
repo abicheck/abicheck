@@ -154,6 +154,16 @@ class TestAbiJsonClassifier:
         p.write_text('{"section_kind": "changelog", "entries": []}')
         assert self.clf.accepts(p) is False
 
+    def test_incidental_top_level_sections_key_rejected(self, tmp_path: Path) -> None:
+        """Codex/CodeRabbit review, fresh evidence (second round): a
+        top-level "sections" key alone is still too generic -- an unrelated
+        document (an OpenAPI/docs-config-shaped file) can carry its own
+        top-level "sections" object with no "schema_version" immediately
+        before it. Must not be misclassified as an ABI snapshot."""
+        p = tmp_path / "openapi-like.json"
+        p.write_text('{"title": "API", "sections": {"intro": {"text": "hi"}}}')
+        assert self.clf.accepts(p) is False
+
     def test_real_sectioned_snapshot_accepted(self, tmp_path: Path) -> None:
         """ADR-063 Phase 8: a real sectioned document (the "sections" key
         genuinely at the top level, `to_sectioned_document`'s own shape)

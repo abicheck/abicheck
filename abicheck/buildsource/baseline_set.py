@@ -763,34 +763,26 @@ def _snapshot_digest_issue(
     even when the manifest recorded no ``sha256`` (an older/hand-authored
     manifest): without it, a truncated/corrupted/non-JSON snapshot file
     would still resolve as ``resolved`` purely because a file with the
-    right name exists on disk, for any baseline-set whose manifest happens
-    to have no recorded digest -- letting ``compare`` consume garbage
-    old-side content instead of getting this resolver's typed ``ambiguous``
-    outcome (Codex review). The digest comparison itself stays conditional
-    on ``expected_sha256`` being present, since older manifests never
-    recorded one.
+    right name exists on disk (Codex review). The digest comparison itself
+    stays conditional on ``expected_sha256`` being present.
 
     The schema-version check also always runs, reading the *snapshot's
     own* ``schema_version`` -- distinct from ``_schema_and_profile_check``,
-    which only looks at the manifest's aggregate ``snapshot_schema`` field.
-    An older/hand-authored manifest with no ``snapshot_schema`` has nothing
-    for that check to compare, but the snapshot file itself always carries
-    its own ``schema_version``; without checking it here too, a
-    forward-schema snapshot would still resolve as ``resolved`` and fail
-    opaquely in the later ``compare`` step instead of returning this
-    resolver's typed ``stale_schema`` outcome (Codex review). Returns the
+    which only looks at the manifest's aggregate ``snapshot_schema`` field
+    (absent on an older/hand-authored manifest). Returns the
     ``stale_schema`` outcome for that case; every other issue here returns
-    ``ambiguous``, matching this function's previous behavior.
+    ``ambiguous`` (Codex review).
 
     Reads through :func:`~abicheck.snapshot_io.read_snapshot_bytes` (ADR-059)
-    so a gzip/zstd-compressed baseline snapshot -- ``actions/baseline``'s
-    ``snapshot-compression`` input, or a hand-published compressed baseline
-    -- verifies exactly the same way a plain one does; magic-byte detection
-    means the recorded ``artifacts[].snapshot`` filename's suffix never has
-    to be trusted.
+    so a gzip/zstd-compressed baseline snapshot verifies exactly the same
+    way a plain one does, by magic-byte detection.
     """
     from ..errors import SnapshotError
     from ..snapshot_io import read_snapshot_bytes
+    from ..storage.sectioned_document import (
+        from_sectioned_document,
+        is_sectioned_document,
+    )
 
     try:
         raw = json.loads(read_snapshot_bytes(snapshot_path).decode("utf-8"))
@@ -812,6 +804,11 @@ def _snapshot_digest_issue(
             f"target {target!r}'s snapshot {snapshot_path.name!r} does not "
             "contain a JSON object -- the baseline-set is corrupt."
         )
+    # ADR-062/063 Phase 8 (Codex review): unwrap the sectioned envelope the
+    # same way build_manifest.py's _read_snapshot_meta() does before
+    # hashing, or the digest below would mismatch every new baseline.
+    if is_sectioned_document(raw):
+        raw = from_sectioned_document(raw)
     schema_version = raw.get("schema_version")
     if (
         isinstance(schema_version, int)

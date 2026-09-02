@@ -173,19 +173,19 @@ class AbiJsonClassifier(FileClassifier):
             # (storage.sectioned_document) buries "library" inside the
             # "declarations" section's payload, well past _JSON_PROBE_BYTES
             # for a real snapshot -- so it needs its own fingerprint.
-            # Matches the document's own top-level "sections" key the same
-            # way the entry above matches top-level "library" (preceded by
-            # start-of-string/comma/brace, so a "sections" key nested deep
-            # inside an unrelated document doesn't match this position) --
-            # not the nested per-SectionDTO "section_kind" key an earlier
-            # version of this fingerprint matched, which is common and
-            # generic enough to false-positive on an ordinary JSON file
-            # carrying that property for an unrelated reason (Codex/
-            # CodeRabbit review, fresh evidence). "sections" is always
-            # within the first few lines: `to_sectioned_document()` writes
-            # it as the second top-level key, right after `schema_version`.
+            # A top-level "sections" key alone (an earlier version of this
+            # fingerprint) is still too generic -- an unrelated document
+            # (OpenAPI, a docs config, ...) can carry its own top-level
+            # "sections" object (Codex/CodeRabbit review, fresh evidence,
+            # second round; the round before that found the same problem
+            # with the nested per-SectionDTO "section_kind" key). Match the
+            # exact adjacency `to_sectioned_document()` always writes
+            # instead: "schema_version" is the envelope's first key and
+            # "sections" its second, with nothing else between them --
+            # requiring both together, in that order, is far more specific
+            # than either key alone.
             "abicheck/sectioned-v1",
-            re.compile(r'(^|[,{])\s*"sections"\s*:\s*\{', re.MULTILINE),
+            re.compile(r'"schema_version"\s*:\s*\d+\s*,\s*"sections"\s*:\s*\{'),
         ),
         # Future formats — uncomment or add new entries here:
         # ("libabigail-json-v2", re.compile(r'"abi-corpus"\s*:', re.MULTILINE)),
