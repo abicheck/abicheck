@@ -181,22 +181,46 @@ jobs:
             const deadline = Date.now() + MAX_WAIT_MS;
 
             // Evaluates the current snapshot of check runs against
-            // REQUIRED_CHECKS, splitting problems into `pending` (not yet
-            // observed as completed -- still worth another poll, purely for
-            // API read-after-write lag) and `failed` (terminal: either a bad
-            // conclusion, or a `completed_at` that lands meaningfully after
-            // `merged_at`, which means the check was genuinely still running
-            // when the merge happened -- not this workflow's own lag, so no
-            // amount of further waiting should paper over it).
+            // REQUIRED_CHECKS. Only a `completed_at` after `merged_at` is
+            // immediately decisive (`failed`, terminal, no more polling can
+            // change it) -- everything else, including a *bad conclusion*,
+            // goes to `pending` and gets another poll. Two Codex review
+            // rounds on this exact function established why a bad
+            // conclusion can't be trusted as terminal on its own:
+            //
+            // 1. A rerun selected by "most recently started" could itself
+            //    have started *after* the merge -- excluded below by
+            //    filtering to runs with `started_at <= mergedAt` before
+            //    picking the latest, so a post-merge rerun (good or bad)
+            //    never displaces the run that actually existed at merge
+            //    time.
+            // 2. Symmetrically, a required check that was rerun and fixed
+            //    *before* the merge, whose passing rerun this workflow's
+            //    `checks.listForRef` snapshot hasn't indexed yet (ordinary
+            //    API read-after-write lag -- the same lag the poll loop
+            //    exists for in the first place), would otherwise be
+            //    reported as a hard failure on the strength of the earlier,
+            //    already-superseded bad run. So a bad conclusion on a
+            //    pre-merge run is treated as `pending` and re-polled, the
+            //    same as a not-yet-completed run -- only run out the clock
+            //    on it (report as a real failure) once the deadline is hit
+            //    with no better pre-merge run having appeared.
             function evaluate(checkRuns) {
+              const startedAt = r => (r.started_at ? Date.parse(r.started_at) : 0);
+              // A run that started after the merge is not part of "the
+              // state that existed at merge time" -- drop it before
+              // selecting the latest, so it can never win the "most
+              // recently started" comparison below (point 1 above).
+              const preMergeRuns = checkRuns.filter(r => startedAt(r) <= mergedAt);
+
               const byName = new Map();
-              for (const run of checkRuns) {
-                // A check can be re-run; keep only the most recently started.
-                // `Date.parse` of a missing/malformed `started_at` is `NaN`,
-                // and every comparison with `NaN` is false -- fall back to 0
-                // so a queued run with no `started_at` yet still loses to any
-                // real timestamp instead of winning by default.
-                const startedAt = r => (r.started_at ? Date.parse(r.started_at) : 0);
+              for (const run of preMergeRuns) {
+                // A check can be re-run; keep only the most recently started
+                // *pre-merge* run. `Date.parse` of a missing/malformed
+                // `started_at` is `NaN`, and every comparison with `NaN` is
+                // false -- fall back to 0 so a queued run with no
+                // `started_at` yet still loses to any real timestamp
+                // instead of winning by default.
                 const existing = byName.get(run.name);
                 if (!existing || startedAt(run) >= startedAt(existing)) {
                   byName.set(run.name, run);
@@ -208,7 +232,7 @@ jobs:
               for (const name of REQUIRED_CHECKS) {
                 const run = byName.get(name);
                 if (!run) {
-                  pending.push(`${name}: no check run found for head ${headSha} (yet)`);
+                  pending.push(`${name}: no pre-merge check run found for head ${headSha} (yet)`);
                   continue;
                 }
                 if (run.status !== 'completed') {
@@ -223,7 +247,10 @@ jobs:
                     `the merge happened, not merely slow to be reported`
                   );
                 } else if (!['success', 'neutral'].includes(run.conclusion)) {
-                  failed.push(`${name}: conclusion=${run.conclusion}`);
+                  pending.push(
+                    `${name}: conclusion=${run.conclusion} on a pre-merge run -- may be ` +
+                    `superseded by a newer pre-merge rerun not yet visible via the API`
+                  );
                 }
               }
               return { pending, failed };
@@ -243,9 +270,14 @@ jobs:
               ({ pending, failed } = evaluate(checkRuns));
 
               if (failed.length > 0) {
-                // A terminal failure is decisive regardless of what else is
-                // still pending -- waiting out the rest of the budget would
-                // only delay reporting a merge that is already known-bad.
+                // `failed` now only ever holds a `completed_at` after
+                // `merged_at` (a genuine post-merge completion) -- a bad
+                // conclusion on a pre-merge run lives in `pending` instead
+                // (see `evaluate()`'s own comment) and is not decisive here.
+                // A post-merge completion is decisive regardless of what
+                // else is still pending -- waiting out the rest of the
+                // budget would only delay reporting a merge that is already
+                // known-bad.
                 break;
               }
               if (pending.length === 0) {
