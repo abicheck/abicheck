@@ -3748,9 +3748,32 @@ second top-level spelling of the same fact.
 > [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md)'s own
 > matching update for the full account, including the one gap this leaves:
 > `--format text` with no JSON secondary output still reads as `ERROR`,
-> since `cli_scan.py` writes no report at all on that path. Still open:
-> the `GateOptions` rewrite, the typed-API half of the parity pass, and
-> that `--format text` gap.
+> since `cli_scan.py` writes no report at all on that path.
+>
+> **Update (2026-09-02): the release fan-out's `GateOptions` rewrite
+> landed** (`abicheck/policy/release_gate_options.py`'s `GateOptions`/
+> `resolve_release_gate_options` -- `policy/`'s own home for gate/severity
+> decisions, reached from the release fan-out's `cli_compare_release_helpers.py`
+> through `abicheck/workflows/gate.py`'s facade), closing the item PR B's own "finalized"
+> note reassigned here. `_resolve_release_severity_config`,
+> `_compute_release_severity_exit_code`, and `_fold_release_global_severity`
+> no longer independently re-derive the same `SeverityConfig` from the same
+> six raw preset/category/scheme strings at three separate call sites —
+> `resolve_release_gate_options` resolves it exactly once (pack folding via
+> the existing `apply_release_gate_pack`, plus the two scheme-dependent
+> corrections `compare_release_cmd` used to apply inline at its own call
+> site), and the two downstream functions now take the resulting
+> `GateOptions` object. Landed additively: no CLI surface and no externally
+> observable exit code changed (the existing severity/exit-code test suite's
+> call sites were updated to build a `GateOptions` instead of passing the
+> six raw strings directly, and every expected result stayed the same
+> against the new call shape), so — contrary to this ADR's
+> own original assumption that the shape change had to be atomic-stage work
+> alongside `--exit-code-scheme`'s removal — it did not need to wait for
+> stage 2. See ADR-064's own matching correction for the full account.
+> Still open: the typed-API half of the parity pass, the `--format
+> text` gap, and a real `--artifact-set` member-level evidence-contract
+> signal for the Action to consume.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4598,16 +4621,26 @@ the agreement so a future pass does not re-derive them as new:
   downward, `frontends → workflows`, and then the frontend gets an ordinary
   static import. A dynamic import to dodge an architecture detector is an
   acceptable transitional hack and an unacceptable end state.
-- **CI governance (PR 0B/P0) is still the oldest open item**, and the review
-  found the same shape from outside: Actions check-runs green on the exact
-  merge SHA, `Verify Merge Checks` success, but the commit *status* red from
-  `codecov/patch` (67.96% of diff vs a 90% target) and
-  `required_status_checks.enforcement_level: off`. Two decisions are owed,
-  not one: apply the prepared ruleset
-  (`.github/branch-protection-ruleset.json`), **and** decide whether patch
-  coverage is an authoritative merge gate — if it is, it goes in the required
-  set and PRs meet it; if it is not, it should stop painting merge SHAs red.
-  A permanently red `main` is indistinguishable from a broken one.
+- **CI governance (PR 0B/P0) is closed, by explicit decision, not by
+  completion.** At the time of this checkpoint it read as the oldest open
+  item — the review found the same shape from outside: Actions check-runs
+  green on the exact merge SHA, `Verify Merge Checks` success, but the
+  commit *status* red from `codecov/patch` and
+  `required_status_checks.enforcement_level: off`. Both decisions this
+  bullet used to say were owed have since been made, and made the same way:
+  the Ruleset **was** applied and did block merges on CI completion, exactly
+  as designed — and the maintainer then decided that trade-off isn't wanted
+  going forward. `required_status_checks` was removed from the Ruleset
+  (only `non_fast_forward` remains), `verify-merge-checks.yml` and its
+  dedicated tests were deleted outright, and — same call, same reasoning —
+  `codecov/patch` is not being promoted into the required set either: this
+  repo accepts an occasional red or incomplete merge over paying CI-completion
+  latency on every merge, full stop, and there is no plan to revisit that.
+  See `.github/AGENTS.md`'s "Required-status-check configuration —
+  deliberately not enforced" section for the durable statement of this
+  policy and PR 0's own "Superseded (2026-09)" note above for the mechanical
+  account of what was built, applied, and then reversed. No further
+  governance tightening is planned; this item does not reopen on its own.
 - **Generated plan status.** `plans/index.md`'s hand-maintained status prose
   goes stale between merge and the next docs pass (the review caught exactly
   that, below). The durable fix is not more careful hand-editing: take ADR
@@ -4639,9 +4672,11 @@ Recorded so they are not re-opened as work:
 
 ### Where this lands in the sequence
 
-Two new entries join the "Ordering" block below (PR I, PR J), and the review
-would run repository governance (PR A / PR 0B) ahead of everything as P0 —
-which is what this plan has said since PR 0 and has not happened yet.
+Two new entries join the "Ordering" block below (PR I, PR J). The review
+would have run repository governance (PR A / PR 0B) ahead of everything as
+P0; that item is now closed by explicit decision (see the corrected bullet
+above and PR 0's own "Superseded (2026-09)" note) rather than pending, so it
+no longer sits ahead of the sequence below waiting to happen.
 
 ## Merge criteria for every removal PR here
 
@@ -4688,8 +4723,20 @@ slice that made it safe.
 **Current, authoritative sequence:**
 
 ```text
-PR A  repository governance          = PR 0B — required checks / Ruleset,
-                                       exact-merge-SHA verification
+PR A  repository governance           = PR 0B — required checks / Ruleset,
+      (CLOSED, by decision)             exact-merge-SHA verification. Both
+                                       pieces were built and the Ruleset was
+                                       applied; the maintainer then decided
+                                       against merge-blocking CI going
+                                       forward and reversed it (Ruleset's
+                                       required_status_checks rule removed,
+                                       verify-merge-checks.yml deleted,
+                                       codecov/patch stays informational
+                                       too). See .github/AGENTS.md's
+                                       "Required-status-check configuration
+                                       — deliberately not enforced" section.
+                                       No further governance tightening is
+                                       planned
 PR B  effective configuration parity  — packs resolved once into one
       (DONE)                           CompatibilityEvaluationConfig, pack
                                        parity across every CLI command
@@ -4737,8 +4784,19 @@ PR F  trusted build config            = PR 3C — build.query executes only
       └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
          now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-      (ADR-064 accepted; stage 1a done,   schema / report / Action parity
-       stage 1b partially wired)
+      (ADR-064 accepted; stage 1a done,   schema / report / Action parity.
+       stage 1b: GateOptions landed       GateOptions (the release fan-out's
+       2026-09-02, rest partially wired)  own typed severity/exit-code-scheme
+                                       object) landed 2026-09-02
+                                       (abicheck/policy/release_gate_options.py,
+                                       reached from the frontends-classified
+                                       cli_compare_release_helpers.py through
+                                       workflows/gate.py's facade); still
+                                       open: the typed-API half of the
+                                       parity pass, the scan --format text
+                                       gap, a real --artifact-set member-level
+                                       evidence-contract signal for the
+                                       Action
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;
@@ -4764,11 +4822,21 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        BUNDLE_ARCHIVE_ARTIFACT_TYPE, and
                                        bundle_facts_serialization.looks_like_bundle_facts_document()
                                        as the classifier a future operand
-                                       dispatcher will call. The
-                                       BundleCompareRequest unification and
-                                       the deletion below remain blocked on
-                                       PR G2's GateOptions, which does not
-                                       exist yet
+                                       dispatcher will call. PR G2's own
+                                       GateOptions now exists too (landed
+                                       2026-09-02, see PR G2's own row) --
+                                       but scoped narrowly to the release
+                                       fan-out's own severity/exit-code-scheme
+                                       resolution, per ADR-064's actual
+                                       "GateOptions" section, not yet the
+                                       shared cross-front-end object this
+                                       row's own BundleCompareRequest sketch
+                                       implies. The BundleCompareRequest
+                                       unification and the deletion below
+                                       are not started; whether they reuse
+                                       this GateOptions class as-is or need
+                                       a broader one is this row's own design
+                                       question to resolve, not decided here
       └─ then DELETE compare --old-bundle-facts
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
       (NEW, not started)                --bundle-system-providers/--bundle-

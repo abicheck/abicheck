@@ -59,11 +59,12 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _release_md_libraries_table,
     _release_md_matrix_findings,
     _resolve_release_headers,
-    _resolve_release_severity_config,
+    _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     _run_bundle_analysis,
-    apply_release_gate_pack,
+    apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
     reject_bundle_facts_out_collision,
     reject_bundle_facts_out_dir_collision,
+    resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
     write_bundle_facts_out,
 )
 from .cli_compare_release_matrix import (
@@ -510,25 +511,22 @@ def compare_release_cmd(
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
-            # CLI cleanup phase two, "PR B" slice 2: fold a selected `kind:
-            # gate` pack's gate.exit_code_scheme/gate.severity.<category>
-            # into these same raw inputs, once, before every downstream
-            # consumer below (this function's own severity_config, the
-            # per-library JSON write inside _compare_release_libraries,
-            # _compute_release_severity_exit_code,
-            # _fold_release_global_severity) reads them — mirroring the
-            # `.abicheck.yml`-only `severity_preset = "default"` reassignment
-            # a few lines below, which the same downstream consumers already
-            # rely on seeing applied exactly once. A no-op without --pack or
-            # without a selected gate pack.
-            (
-                release_exit_code_scheme,
-                severity_preset,
-                severity_abi_breaking,
-                severity_potential_breaking,
-                severity_quality_issues,
-                severity_addition,
-            ) = apply_release_gate_pack(
+            # CLI cleanup phase two, ADR-064 "GateOptions" rewrite: one
+            # resolution replaces the release fan-out's previous three
+            # independent re-derivations of the same SeverityConfig from six
+            # raw preset/category/scheme strings. `resolve_release_gate_options`
+            # folds a selected `kind: gate` pack's gate.exit_code_scheme/
+            # gate.severity.<category> contribution
+            # (`apply_release_gate_pack`), then resolves the severity config
+            # and applies the same `.abicheck.yml`-only `exit_code_scheme:
+            # severity` default-preset fallback and forced-`legacy` clearing
+            # this call site used to apply itself. Every downstream consumer
+            # (this function's own `severity_config`, the per-library JSON
+            # write inside `_compare_release_libraries`,
+            # `_compute_release_severity_exit_code`,
+            # `_fold_release_global_severity`) now reads the resulting
+            # `GateOptions` instead of independently re-deriving it.
+            gate = resolve_release_gate_options(
                 pack_application,
                 release_exit_code_scheme=release_exit_code_scheme,
                 severity_preset=severity_preset,
@@ -537,42 +535,16 @@ def compare_release_cmd(
                 severity_quality_issues=severity_quality_issues,
                 severity_addition=severity_addition,
             )
-
             # Resolved before the compare pass (its inputs are plain CLI values, no
             # dependency on compare results) so persisted per-library annotations
             # (schema 2.43/2.44, computed inside _compare_release_libraries's
             # primary pass and read by the Action, not the CLI) reflect the same
             # severity-aware gate as the exit code below, instead of the legacy
-            # kind-set mapping. Returns None when no severity setting was in
-            # effect, or when compare's resolved config pins the legacy scheme
-            # for set inputs.
-            severity_config = _resolve_release_severity_config(
-                severity_preset,
-                severity_abi_breaking,
-                severity_potential_breaking,
-                severity_quality_issues,
-                severity_addition,
-            )
-            if release_exit_code_scheme == "severity" and severity_config is None:
-                # The resolved scheme is "severity" (e.g. .abicheck.yml's
-                # exit_code_scheme: severity with no severity: block at all) but
-                # no severity setting was ever in effect, so the raw-args resolution
-                # above returned None. The single-file compare path never hits
-                # this: its resolved_cfg.severity is unconditionally populated
-                # (defaulting to PRESET_DEFAULT) and only *gated* by scheme, not
-                # re-derived from raw flags. Mirror that here — including
-                # reassigning severity_preset so the two downstream helpers below
-                # that independently re-resolve from these same raw args
-                # (_compute_release_severity_exit_code, _fold_release_global_severity)
-                # agree with it, instead of also silently resolving None and
-                # falling back to the legacy verdict-based exit (Codex review on
-                # #549).
-                from .workflows.gate import PRESET_DEFAULT
-
-                severity_config = PRESET_DEFAULT
-                severity_preset = "default"
-            if release_exit_code_scheme == "legacy":
-                severity_config = None
+            # kind-set mapping. `None` when no severity setting was in effect,
+            # or when the resolved scheme pins legacy for set inputs.
+            severity_config = gate.severity
+            release_exit_code_scheme = gate.exit_code_scheme
+            severity_preset = gate.severity_preset
 
             # JUnit, bundle analysis, and annotations all reuse the
             # _diff_result (and, for JUnit, _old_snapshot) stashed in each
@@ -719,17 +691,12 @@ def compare_release_cmd(
 
             # Compute the severity-aware exit code while per-library DiffResults
             # are still stashed (before _strip_diff_results_and_adjust_verdict).
+            # `gate.severity is None` already covers both "legacy" and
+            # "nothing configured" -- see GateOptions's own docstring.
             severity_exit_code = (
                 None
-                if release_exit_code_scheme == "legacy"
-                else _compute_release_severity_exit_code(
-                    library_results,
-                    severity_preset,
-                    severity_abi_breaking,
-                    severity_potential_breaking,
-                    severity_quality_issues,
-                    severity_addition,
-                )
+                if gate.severity is None
+                else _compute_release_severity_exit_code(library_results, gate)
             )
 
             bundle_result: BundleDiffResult | None = None
@@ -779,11 +746,7 @@ def compare_release_cmd(
                     severity_exit_code,
                     bundle_result,
                     matrix_result,
-                    severity_preset,
-                    severity_abi_breaking,
-                    severity_potential_breaking,
-                    severity_quality_issues,
-                    severity_addition,
+                    gate,
                 )
 
             if secondary_output is not None:
