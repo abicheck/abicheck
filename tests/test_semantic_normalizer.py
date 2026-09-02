@@ -764,6 +764,35 @@ def test_normalize_header_ast_member_function_pointer_variable_keeps_own_qualifi
     assert entity.cv_qualification.value == ("const",)
 
 
+def test_normalize_header_ast_typedef_hidden_qualifier_is_a_known_limitation() -> None:
+    """A top-level qualifier hidden behind a typedef alias is NOT detected
+    -- a documented, accepted limitation, not a silent wrong answer (Codex
+    review, eighth round, fresh evidence): for ``typedef int * const
+    ConstPtr; extern ConstPtr p;``, both backends pass this normalizer the
+    ALIAS spelling (``"ConstPtr"``), which carries no sigil/keyword for the
+    text scan to find. Pins the current, honest ``()`` so a future fix
+    threading real desugared/structural evidence through has a test that
+    fails once it lands, rather than this gap silently persisting
+    unnoticed. See `_variable_top_level_cv_qualification`'s own docstring
+    ("Known, accepted limitation...") for what a real fix needs."""
+    var = Variable(
+        name="p",
+        mangled="p",
+        type="ConstPtr",
+        entity_id=entity_id_for_variable((), "p", mangled_name="p"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
 def test_normalize_header_ast_unresolved_variable_type_is_failed() -> None:
     """The identical unresolved-type sentinel on a variable's own type is a
     failure, not a confirmed ``"?"`` spelling (Codex review)."""

@@ -12937,6 +12937,29 @@ accepted, pre-existing residual this fix does not attempt to solve -- doing
 so needs real expression parsing, and no concrete evidence of that
 specific shape has been found the way this `">>"` shape was.
 
+**Known, accepted limitation, documented rather than fixed (Codex review,
+eighth round, fresh evidence): a top-level qualifier hidden behind a
+typedef is not detected.** For `typedef int * const ConstPtr; extern
+ConstPtr p;`, both backends pass `_variable_top_level_cv_qualification`
+the ALIAS spelling (`"ConstPtr"`) -- neither castxml's `type_name()` nor
+clang's plain (sugared) `qualType` resolves through the typedef the way
+this function's text scan would need to see the real `int * const`
+underneath, so it finds no sigil/keyword and reports a confirmed `()`
+even though the variable's real top-level qualification is `("const",)`.
+A real fix needs new structural evidence this function has no access to
+today: clang's separate `desugaredQualType` string (already used
+elsewhere for the identical problem on a field), and castxml's own
+structured, typedef-following resolver (`resolve_cv_restrict`, which
+already walks `Typedef`/`ElaboratedType` nodes) -- neither is currently
+threaded onto `Variable` for this function to read. Adding either is a
+new, per-backend model field (mirroring `Param.is_restrict`'s own
+structural-fact treatment), not a normalizer-only change -- the identical
+"model-shape decision for a future slice" conclusion this section already
+reached for `restrict`. Left undetected rather than guessed at from text
+that cannot see through the alias; pinned by a dedicated regression test
+(`test_normalize_header_ast_typedef_hidden_qualifier_is_a_known_limitation`)
+so a future fix has something that starts failing once it lands.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

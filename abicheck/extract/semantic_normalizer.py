@@ -458,6 +458,32 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
     pointer's own by-value qualifier region (``void (C::* const)(int)``'s
     `` const`` sits there, correctly attributed) -- never from the text
     after the parameter list closes.
+
+    **Known, accepted limitation: a top-level qualifier hidden behind a
+    typedef is not detected (Codex review, eighth round, fresh evidence).**
+    For ``typedef int * const ConstPtr; extern ConstPtr p;``, both backends
+    pass this function the ALIAS spelling (``"ConstPtr"``) as *type_str* --
+    neither castxml's ``type_name()`` nor clang's plain (sugared) ``qualType``
+    resolves through a typedef the way this function's own text scan would
+    need to see the real ``int * const`` underneath. This function then
+    finds no sigil and no keyword in ``"ConstPtr"`` and reports ``()``, a
+    CONFIRMED absence, even though the variable's real top-level
+    qualification is ``("const",)``. A real fix needs new structural
+    evidence this function does not have access to today: clang exposes a
+    separate ``desugaredQualType`` string precisely for this
+    (``dumper_clang_qualifiers.desugared_qualtype``, already used elsewhere
+    for the identical const/volatile-behind-a-typedef problem on a FIELD),
+    and castxml already has a structured, typedef-following resolver
+    (``resolve_cv_restrict``, which already walks through ``Typedef``/
+    ``ElaboratedType`` nodes) -- but neither is currently threaded onto
+    ``Variable`` for this function to read, and adding either is a new,
+    per-backend model field (mirroring ``Param.is_restrict``'s own
+    structural-fact treatment), not a normalizer-only change. Left
+    undetected (an honest, if incomplete, ``()``) rather than guessed at
+    from text that cannot see through the alias -- the same "state a real
+    structural gap rather than attempt a speculative heuristic" choice this
+    function's own `restrict` non-recognition already makes for a closely
+    related reason (see `_CV_KEYWORD_RE`'s own comment).
     """
     depth = 0
     last_sigil = -1

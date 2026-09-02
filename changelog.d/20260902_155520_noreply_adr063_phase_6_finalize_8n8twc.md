@@ -103,3 +103,13 @@
   innermost still-open bracket is itself a `"<"` (a genuine
   `vector<vector<int>>`-style double-close via one `">>"` still works
   correctly); otherwise it is left untouched as a real operator character.
+  A top-level qualifier hidden behind a typedef alias (`typedef int *
+  const ConstPtr; extern ConstPtr p;`) is a documented, accepted
+  limitation rather than a fix attempted here: neither backend's `Variable`
+  spelling resolves through the alias the way this text-based scan would
+  need to, and a real fix needs new structural evidence (clang's
+  `desugaredQualType`, castxml's typedef-following `resolve_cv_restrict`)
+  threaded onto `Variable` as a new field — a model-shape decision for a
+  future slice, the same conclusion already reached for `restrict`. Pinned
+  by a dedicated regression test so a future fix has something that starts
+  failing once it lands.
