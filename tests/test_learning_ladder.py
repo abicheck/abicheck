@@ -713,6 +713,15 @@ def test_hub_also_under_a_non_learning_tab_is_an_error(tmp_path: Path) -> None:
     assert any("listed 2 times across the whole nav" in m for m in msgs)
 
 
+def test_quoted_hub_under_another_tab_is_still_counted(tmp_path: Path) -> None:
+    nav = NAV_OK.replace(
+        "  - Home: index.md\n",
+        '  - Home:\n    - Index: index.md\n    - Copy: "learn/hub.md"\n',
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("listed 2 times across the whole nav" in m for m in msgs)
+
+
 def test_hub_inside_a_step_group_is_an_error(tmp_path: Path) -> None:
     inside = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
         '    - "1. Start":\n', '    - "1. Start":\n      - Overview: learn/hub.md\n'

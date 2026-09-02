@@ -101,6 +101,20 @@ def test_nav_page_count_sees_every_tab() -> None:
     )
     assert lno.nav_page_count(everywhere, "learn/hub.md") == 2
     assert lno.nav_page_count(NAV, "learn/nope.md") == 0
+    quoted = NAV.replace(
+        "    - CLI: reference/cli.md\n",
+        "    - CLI: reference/cli.md\n    - Hub: \"learn/hub.md\"\n    - Again: 'learn/hub.md'\n",
+    )
+    assert lno.nav_page_count(quoted, "learn/hub.md") == 3
+
+
+def test_quoted_page_values_are_read_unquoted() -> None:
+    quoted = NAV.replace(
+        "      - Part 2: learn/p2.md\n", '      - Part 2: "learn/p2.md"\n'
+    )
+    assert (
+        lno.nav_groups(quoted)["ABI/API Compatibility / Mechanics"][0] == "learn/p2.md"
+    )
 
 
 def test_duplicate_nav_groups_are_named_once_in_order() -> None:

@@ -81,6 +81,14 @@ def _strip_comment(line: str) -> str:
     return "".join(out).rstrip()
 
 
+def _unquote(value: str) -> str:
+    """A nav item's value with one layer of matching YAML quotes removed:
+    `"learn/x.md"` and `'learn/x.md'` name the same page as `learn/x.md`."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
 def _nav_events(
     mkdocs_text: str, tabs: tuple[str, ...]
 ) -> list[tuple[str, str, str | None]]:
@@ -113,7 +121,7 @@ def _nav_events(
             continue
         indent = len(m.group(1))
         title = (m.group(2) or m.group(3) or m.group(4) or "").strip()
-        value = (m.group(5) or "").strip()
+        value = _unquote((m.group(5) or "").strip())
         if tab_indent is None:
             tab_indent = indent
         if indent == tab_indent:
@@ -220,7 +228,7 @@ def nav_page_count(mkdocs_text: str, page: str) -> int:
         if not line.startswith(" ") and not line.startswith("-"):
             break
         m = _NAV_ITEM_RE.match(line)
-        if m and (m.group(5) or "").strip() == page:
+        if m and _unquote((m.group(5) or "").strip()) == page:
             count += 1
     return count
 
