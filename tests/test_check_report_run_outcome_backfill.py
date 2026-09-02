@@ -579,3 +579,24 @@ def test_removed_library_escalation_updates_run_outcome_gate_with_no_severity_bl
         analysis_exit_code=8,
     )
     assert out["run_outcome"]["gate"] == "abi_breaking"
+
+
+def test_legacy_release_backfill_includes_global_bundle_and_matrix_verdicts() -> None:
+    """Codex review, fresh evidence: a pre-2.48 release whose top-level
+    verdict is `ERROR`/`not_comparable` and whose every per-library entry
+    carries only that same sentinel can still have a completed GLOBAL
+    bundle-audit or cross-profile matrix comparison recording a real
+    `bundle_verdict`/`matrix_verdict`. The candidate list previously
+    examined only the root and per-library verdicts, so this shape
+    backfilled `run_outcome.compatibility: null` -- discarding the one
+    real, completed comparison this report actually carries."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "ERROR"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "ERROR",
+        "bundle_verdict": "BREAKING",
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"

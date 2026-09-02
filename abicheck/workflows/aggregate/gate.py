@@ -78,6 +78,50 @@ def _is_schema_valid_run_outcome(data: object) -> bool:
     return True
 
 
+def _run_outcome_compatibility_verdict(data: Mapping[str, Any]) -> Verdict | None:
+    """The report's own top-level ``run_outcome.compatibility``, parsed as a
+    real :class:`Verdict`, or ``None``. Distinct from ``parse_report_verdict``
+    (the sibling top-level ``verdict`` key): for a report whose root
+    ``verdict`` is a non-``Verdict`` sentinel (`scan --artifact-set`'s
+    ``BUNDLE_INCOMPLETE``, `compare-release`'s lowercase ``"not_comparable"``),
+    ``run_outcome.compatibility`` may still carry a real result the sentinel
+    discards.
+
+    Requires the *whole* block to be schema-valid
+    (:func:`_is_schema_valid_run_outcome`), not merely that ``compatibility``
+    itself parses: a truncated ``{"run_outcome": {"compatibility":
+    "BREAKING"}}`` must not earn this opportunistic recovery. A present-but-
+    invalid block is treated the same as absent (``None``, never raises
+    ``_MalformedGate``) -- every call site has its own fail-closed gate
+    independent of this value.
+    """
+    run_outcome = data.get("run_outcome")
+    if not isinstance(run_outcome, Mapping) or not _is_schema_valid_run_outcome(
+        run_outcome
+    ):
+        return None
+    raw = run_outcome.get("compatibility")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return Verdict(raw)
+    except ValueError:
+        return None
+
+
+def _has_valid_run_outcome_block(data: Mapping[str, Any]) -> bool:
+    """Whether ``run_outcome`` is present and schema-valid, regardless of its
+    ``compatibility`` value. Unlike :func:`_run_outcome_compatibility_verdict`
+    returning ``None`` -- which conflates "absent/invalid" with "valid but
+    legitimately null" -- a caller that must force a synthetic verdict only
+    for a genuinely absent block needs this distinction.
+    """
+    run_outcome = data.get("run_outcome")
+    return isinstance(run_outcome, Mapping) and _is_schema_valid_run_outcome(
+        run_outcome
+    )
+
+
 def _run_outcome_gate_and_operational(
     data: Mapping[str, Any],
 ) -> tuple[PolicyGateDecision, OperationalStatus] | None:

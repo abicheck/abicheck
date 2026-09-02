@@ -259,7 +259,19 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         # can't independently disagree about whether a completed result
         # exists.
         libraries = out.get("libraries")
-        member_candidates: list[object] = [raw_verdict]
+        # `bundle_verdict`/`matrix_verdict` (Codex review, fresh evidence):
+        # a completed GLOBAL bundle-audit or cross-profile matrix comparison
+        # can carry a real verdict even when every per-library entry above
+        # only carries the top-level ERROR/not_comparable sentinel -- omitting
+        # these left `run_outcome.compatibility: null` for a report whose
+        # bundle/matrix comparison genuinely completed, which then denied the
+        # aggregate findings-preservation fix (see `load.py`) any non-null
+        # verdict to key off.
+        member_candidates: list[object] = [
+            raw_verdict,
+            out.get("bundle_verdict"),
+            out.get("matrix_verdict"),
+        ]
         if isinstance(libraries, list):
             member_candidates.extend(
                 entry.get("verdict") for entry in libraries if isinstance(entry, dict)

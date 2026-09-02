@@ -541,6 +541,31 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `bundle_findings`/`matrix_findings` the release writer can still emit in
   this state were unconditionally dropped — now preserved, mirroring the
   `ERROR`/scan-abort branches' own incomplete-findings preservation.
+- **A release operational-ERROR report whose `run_outcome.compatibility` is
+  legitimately JSON `null` no longer has a `Verdict.BREAKING` fabricated for
+  it** (Codex review, fresh evidence, third round): the operational-ERROR
+  branch in `_load_report_file` only distinguished "recovered a real
+  verdict" from "recovered nothing," treating a valid, schema-complete
+  `run_outcome` block whose `compatibility` genuinely is `null` (e.g.
+  `build_operational_error_report`'s own extraction-failure report:
+  `compatibility: null`, `gate: none`, `operational: extraction_error`) the
+  same as a report with no `run_outcome` block at all — fabricating an
+  ABI-break verdict and an "analyzed" target count for a comparison that
+  never ran. A new `_has_valid_run_outcome_block` helper (moved to
+  `workflows/aggregate/gate.py` alongside `_run_outcome_compatibility_
+  verdict`, to keep `load.py` under the architecture gate's new-file-size
+  cap) now distinguishes the two cases; the gate's own exit-4/blocking floor
+  stays unconditional either way.
+- **The legacy release backfill's candidate-verdict list now also includes
+  `bundle_verdict`/`matrix_verdict`, not only the root and per-library
+  verdicts** (Codex review, fresh evidence): a pre-2.48 release whose
+  top-level verdict is `ERROR`/`not_comparable` and whose every per-library
+  entry carries only that same sentinel can still have a completed GLOBAL
+  bundle-audit or cross-profile matrix comparison recording a real verdict —
+  omitting these two fields backfilled `run_outcome.compatibility: null` for
+  a report that in fact had a genuine, completed comparison to preserve,
+  denying the release-refusal findings-preservation fix above any non-null
+  verdict to key off.
 
 ### Changed
 

@@ -46,10 +46,11 @@ from .gate import (
     _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
-    _is_schema_valid_run_outcome,
+    _has_valid_run_outcome_block,
     _is_valid_contribution,
     _MalformedGate,
     _run_outcome_blocking_categories,
+    _run_outcome_compatibility_verdict,
     _run_outcome_gate_and_operational,
     contract_coverage_blocks,
 )
@@ -155,37 +156,6 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
         if isinstance(raw, str) and _EFFECTIVE_CONFIG_DIGEST_RE.match(raw):
             return raw
     return None
-
-
-def _run_outcome_compatibility_verdict(data: Mapping[str, Any]) -> Verdict | None:
-    """The report's own top-level ``run_outcome.compatibility``, parsed as a
-    real :class:`Verdict`, or ``None``. Distinct from :func:`parse_report_
-    verdict` (the sibling top-level ``verdict`` key): for a report whose root
-    ``verdict`` is a non-``Verdict`` sentinel (`scan --artifact-set`'s
-    ``BUNDLE_INCOMPLETE``, `compare-release`'s lowercase ``"not_comparable"``),
-    ``run_outcome.compatibility`` may still carry a real result the sentinel
-    discards.
-
-    Requires the *whole* block to be schema-valid
-    (:func:`_is_schema_valid_run_outcome`), not merely that ``compatibility``
-    itself parses: a truncated ``{"run_outcome": {"compatibility":
-    "BREAKING"}}`` must not earn this opportunistic recovery. A present-but-
-    invalid block is treated the same as absent (``None``, never raises
-    ``_MalformedGate``) -- every call site has its own fail-closed gate
-    independent of this value.
-    """
-    run_outcome = data.get("run_outcome")
-    if not isinstance(run_outcome, Mapping) or not _is_schema_valid_run_outcome(
-        run_outcome
-    ):
-        return None
-    raw = run_outcome.get("compatibility")
-    if not isinstance(raw, str):
-        return None
-    try:
-        return Verdict(raw)
-    except ValueError:
-        return None
 
 
 #: The four synthetic ``verdict`` strings a native `scan` abort report (single
@@ -426,22 +396,24 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     # optional / unexpected policy could let pass, silently downgrading a hard
     # operational failure to a coverage gap.
     if data.get("verdict") == _OPERATIONAL_ERROR_VERDICT:
-        # Codex review, fresh evidence: a release's `run_outcome.compatibility`
-        # may already carry another library's real, completed verdict (the
-        # `ERROR` string names only the OPERATIONALLY failed one) -- read it
-        # rather than always fabricating `Verdict.BREAKING`. Falls back to the
-        # synthetic `Verdict.BREAKING` when no structured `run_outcome` is
-        # present (a pre-2.48 report, or a run_outcome-less writer), preserving
-        # this branch's original forced-blocking behavior exactly. The gate's
-        # own `exit_code`/`blocking_categories` stay unconditional either way
-        # -- an operational failure floors at 4 regardless of what else
-        # completed cleanly.
+        # A release's `run_outcome.compatibility` may already carry another
+        # library's real, completed verdict (the `ERROR` string names only
+        # the OPERATIONALLY failed one) -- read it rather than always
+        # fabricating `Verdict.BREAKING`. Falls back to the synthetic
+        # `Verdict.BREAKING` only when no *valid* run_outcome block is
+        # present at all (a pre-2.48 report). A valid block whose
+        # `compatibility` is legitimately `null` (e.g.
+        # `build_operational_error_report`'s own extraction-failure report)
+        # must NOT be treated the same as an absent block -- that fabricated
+        # an ABI-break verdict for a comparison that never ran. The gate's
+        # own `exit_code`/`blocking_categories` stay unconditional either way.
         error_compat_verdict = _run_outcome_compatibility_verdict(data)
+        error_has_valid_run_outcome = _has_valid_run_outcome_block(data)
         return _LoadedReport(
             target_id=target_id,
             verdict=(
                 error_compat_verdict
-                if error_compat_verdict is not None
+                if error_compat_verdict is not None or error_has_valid_run_outcome
                 else Verdict.BREAKING
             ),
             gate=GateInfo(
@@ -452,7 +424,12 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             ),
             library=data.get("library"),
             head_sha=head_sha,
-            reason=None,
+            reason=(
+                None
+                if error_compat_verdict is not None or not error_has_valid_run_outcome
+                else "operational error (library extraction/comparison failed; "
+                "no comparison completed)"
+            ),
             path=path,
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),

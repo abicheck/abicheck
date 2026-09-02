@@ -1019,3 +1019,76 @@ def test_artifact_set_budget_overflow_root_still_names_a_sibling_members_evidenc
     assert loaded.gate.blocking is True
     assert "budget_overflow" in loaded.gate.blocking_categories
     assert "evidence_contract_error" in loaded.gate.blocking_categories
+
+
+def test_operational_error_with_null_compatibility_does_not_fabricate_a_verdict(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (third round): a valid, schema-complete
+    `run_outcome` block whose `compatibility` is legitimately JSON `null`
+    (e.g. `build_operational_error_report`'s own extraction-failure report:
+    `compatibility: null`, `gate: none`, `operational: extraction_error`)
+    must NOT be treated the same as a genuinely absent block. Forcing
+    `Verdict.BREAKING` for this shape fabricated an ABI-break verdict and an
+    "analyzed" target count for a comparison that never ran. The gate's own
+    exit-4 floor stays unconditional either way."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "extraction_error",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("operational_error",)
+
+
+def test_legacy_error_release_with_no_run_outcome_still_forces_breaking(
+    tmp_path: Path,
+) -> None:
+    """A genuinely pre-2.48 release ERROR report (no `run_outcome` at all)
+    still forces the original synthetic `Verdict.BREAKING` -- confirms the
+    null-compatibility fix above didn't widen to cover the legacy no-
+    run_outcome case too, which must keep its original forced-blocking
+    shape exactly (pinned by `tests/test_aggregate.py`'s own
+    `TestNotComparableReportsBlockAggregation`-adjacent expectations for
+    this branch)."""
+    from abicheck.change_registry_types import Verdict
+
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [{"name": "a", "verdict": "ERROR"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is Verdict.BREAKING
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
