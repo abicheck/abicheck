@@ -132,8 +132,15 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         # itself) already completed with a real result (Codex review, fresh
         # evidence -- the legacy-backfill sibling of the fix `ScanSetResult.
         # to_dict()`'s own `member_verdicts=` wiring already applies to a
-        # *native* writer's report).
+        # *native* writer's report). `bundle_incomplete`/an `EVIDENCE_
+        # CONTRACT_ERROR` member are independent operational signals that
+        # survive even beside a *stronger* member's real verdict (a set
+        # whose root verdict is `BREAKING` can still have gone through with
+        # `bundle_incomplete: true`) -- derived the same unconditional way
+        # `ScanSetResult.to_dict()`'s own call already does, not gated on
+        # `verdict` naming an abort sentinel (Codex review, fresh evidence).
         member_verdicts: list[object] | None = None
+        member_evidence_contract_error = False
         per_artifact = out.get("per_artifact")
         if isinstance(per_artifact, list):
             member_verdicts = [
@@ -142,6 +149,11 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
                 if isinstance(entry, dict)
             ]
             member_verdicts.append(out.get("bundle_verdict"))
+            member_evidence_contract_error = any(
+                entry.get("verdict") == "EVIDENCE_CONTRACT_ERROR"
+                for entry in per_artifact
+                if isinstance(entry, dict)
+            )
         out["run_outcome"] = run_outcome_dict_for_scan(
             str(raw_verdict) if raw_verdict is not None else "",
             exit_code
@@ -149,6 +161,8 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             else 0,
             report=report,
             member_verdicts=member_verdicts,
+            member_evidence_contract_error=member_evidence_contract_error,
+            bundle_incomplete=bool(out.get("bundle_incomplete")),
         )
         return
     from ..change_registry_types import Verdict
@@ -185,20 +199,33 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             else (str(raw_verdict) if raw_verdict is not None else "NO_CHANGE")
         )
         # `exit`, when present, is only trusted for `compatibility_
-        # contribution` if that specific key survived -- this runs before
-        # `backfill_exit_block_fields` (Codex review, fresh evidence: that
-        # backfill unconditionally defaults every missing `*_contribution`
-        # key, including this one, to 0, indistinguishable from a real
-        # confirmed-clean report; calling this first sees the true original
-        # shape). Falls back to `severity.exit_code`, then the legacy
-        # verdict mapping over the recovered `worst_member` -- never the
-        # backfilled 0 -- so a legacy BREAKING release report with no
-        # exit/severity block still gets gate: abi_breaking instead of
-        # silently passing aggregation as clean.
+        # contribution` if that specific key survived *and* holds a real
+        # int -- this runs before `backfill_exit_block_fields` (Codex
+        # review, fresh evidence: that backfill unconditionally defaults
+        # every missing `*_contribution` key, including this one, to 0,
+        # indistinguishable from a real confirmed-clean report; calling
+        # this first sees the true original shape). A present-but-malformed
+        # value (a string, `None`, a bool) is rejected the same way a
+        # missing key is -- trusting it as-is would let `run_outcome_dict_
+        # for_release`'s own `_int_contribution` silently normalize it to
+        # `0` (gate: none), turning a legacy `BREAKING` report with a
+        # corrupted `exit` block into a falsely clean target instead of
+        # falling back (Codex review, fresh evidence). Falls back to
+        # `severity.exit_code`, then the legacy verdict mapping over the
+        # recovered `worst_member` -- never the backfilled 0 -- so a legacy
+        # BREAKING release report with no exit/severity block still gets
+        # gate: abi_breaking instead of silently passing aggregation as
+        # clean.
         exit_decision = out.get("exit")
+        raw_contribution = (
+            exit_decision.get("compatibility_contribution")
+            if isinstance(exit_decision, dict)
+            else None
+        )
         if (
             not isinstance(exit_decision, dict)
-            or "compatibility_contribution" not in exit_decision
+            or not isinstance(raw_contribution, int)
+            or isinstance(raw_contribution, bool)
         ):
             severity = out.get("severity")
             sev_exit = severity.get("exit_code") if isinstance(severity, dict) else None
@@ -250,7 +277,13 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         exit_code = legacy_exit_code(compatibility) if compatibility is not None else 0
     out["run_outcome"] = RunOutcome(
         compatibility=compatibility,
-        assurance=None,
+        # A schema 2.38-2.47 compare report already carries a completed,
+        # already-serialized `analysis_assurance` block (`reporter.py`'s own
+        # top-level key) -- passed through as-is rather than hard-coded to
+        # `None`, so the upgraded schema-2.48 report doesn't claim `run_
+        # outcome.assurance: null` alongside a contradictory non-null
+        # `analysis_assurance` (Codex review, fresh evidence).
+        assurance=out.get("analysis_assurance"),
         gate=policy_gate_decision_for_exit_code(exit_code),
         operational=OperationalStatus.NONE,
         lifecycle=TargetLifecycle.EXISTING,

@@ -70,6 +70,22 @@ def test_old_compare_report_without_severity_derives_gate_from_legacy_verdict() 
     assert run_outcome["gate"] == "potential_breaking"
 
 
+def test_old_compare_report_preserves_its_existing_analysis_assurance_block() -> None:
+    """Codex review, fresh evidence: a schema 2.38-2.47 compare report
+    already carries a completed, already-serialized top-level
+    analysis_assurance block (reporter.py's own key) -- hard-coding
+    run_outcome.assurance to None during backfill would claim assurance:
+    null alongside a contradictory non-null analysis_assurance in the
+    same upgraded report."""
+    report = {
+        "verdict": "COMPATIBLE",
+        "analysis_assurance": {"level": "high", "reasons": []},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["assurance"] == {"level": "high", "reasons": []}
+
+
 def test_old_scan_report_gets_backfilled_run_outcome() -> None:
     report = {"scan_schema_version": "1.21", "verdict": "BREAKING", "exit_code": 4}
     out = _augment(dict(report))
@@ -124,6 +140,47 @@ def test_old_scan_set_report_recovers_a_completed_member_verdict_from_budget_ove
     run_outcome = out["run_outcome"]
     assert run_outcome["compatibility"] == "COMPATIBLE_WITH_RISK"
     assert run_outcome["operational"] == "budget_overflow"
+
+
+def test_old_scan_set_report_carries_bundle_incomplete_beside_a_real_break() -> None:
+    """Codex review, fresh evidence: a pre-1.24 artifact-set report whose
+    root verdict is a real BREAKING (not an abort sentinel) can still have
+    gone through with bundle_incomplete: true -- the independent bundle-
+    audit failure must survive backfill beside the stronger compatibility
+    gate, the same way ScanSetResult.to_dict()'s own unconditional
+    bundle_incomplete= wiring already preserves it for a native writer."""
+    report = {
+        "scan_schema_version": "1.23",
+        "verdict": "BREAKING",
+        "exit_code": 4,
+        "per_artifact": [{"artifact": "a.so", "verdict": "BREAKING", "exit_code": 4}],
+        "bundle_verdict": None,
+        "bundle_incomplete": True,
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["operational"] == "extraction_error"
+
+
+def test_old_scan_set_report_carries_evidence_contract_error_member() -> None:
+    """Sibling of the bundle_incomplete case above: an EVIDENCE_CONTRACT_
+    ERROR member's own operational signal must survive backfill beside a
+    different, stronger member's real BREAKING verdict."""
+    report = {
+        "scan_schema_version": "1.23",
+        "verdict": "BREAKING",
+        "exit_code": 4,
+        "per_artifact": [
+            {"artifact": "a.so", "verdict": "BREAKING", "exit_code": 4},
+            {"artifact": "b.so", "verdict": "EVIDENCE_CONTRACT_ERROR", "exit_code": 1},
+        ],
+        "bundle_verdict": None,
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["operational"] == "evidence_contract_error"
 
 
 def test_old_operational_error_report_preserves_extraction_error() -> None:
@@ -257,6 +314,26 @@ def test_legacy_release_report_prefers_a_real_severity_exit_code() -> None:
     out = _augment(dict(report))
     run_outcome = out["run_outcome"]
     assert run_outcome["gate"] == "addition_quality"
+
+
+def test_legacy_release_report_rejects_a_malformed_compatibility_contribution() -> None:
+    """Codex review, fresh evidence: a present-but-malformed exit.
+    compatibility_contribution (a string here) was previously trusted as
+    authoritative just because the key survived -- run_outcome_dict_for_
+    release's own _int_contribution then silently normalized it to 0
+    (gate: none), turning a legacy BREAKING report with a corrupted exit
+    block into a falsely clean target instead of falling back to the
+    legacy verdict mapping."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "BREAKING"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "BREAKING",
+        "exit": {"compatibility_contribution": "not-a-number"},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["gate"] == "abi_breaking"
 
 
 def test_report_already_carrying_run_outcome_is_left_untouched() -> None:

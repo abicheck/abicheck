@@ -294,6 +294,36 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   builder writes and reuses `synthetic_run_outcome` for them, so a
   resolve-baseline failure keeps `operational: extraction_error` and a
   bootstrap/new-target pass keeps its `lifecycle` (Codex review).
+- **A pre-2.48 legacy compare report's backfilled `run_outcome.assurance`
+  no longer contradicts its own existing `analysis_assurance` block.**
+  The generic-report fallback previously hard-coded `assurance: None`;
+  it now passes the report's own already-serialized top-level
+  `analysis_assurance` block through unchanged when present (Codex
+  review).
+- **A legacy `--artifact-set` scan report's `bundle_incomplete`/an
+  `EVIDENCE_CONTRACT_ERROR` member no longer disappears when the set's
+  root verdict is a real, stronger `BREAKING`/`API_BREAK`.** The scan-set
+  backfill now derives these two independent operational signals from the
+  legacy envelope unconditionally (mirroring `ScanSetResult.to_dict()`'s
+  own unconditional wiring for a native writer), instead of only
+  recovering member/bundle *compatibility* verdicts (Codex review).
+- **A legacy release report's `exit.compatibility_contribution` is no
+  longer trusted merely for existing.** A present-but-malformed value (a
+  string, `None`, a bool) previously bypassed the `severity.exit_code`/
+  legacy-verdict fallback and was silently normalized to `0` by
+  `run_outcome_dict_for_release`'s own `_int_contribution`, turning a
+  corrupted `BREAKING` report into a falsely clean target; the backfill
+  now falls back the same way it already does for a missing key (Codex
+  review).
+- **`workflows/aggregate/gate.py`'s orthogonal-axis fold no longer drops
+  a real operational category beside a stronger compatibility gate.**
+  `operational_status_exit_code` caps every non-`NONE` member at exit `1`,
+  so beside e.g. `gate: abi_breaking` (exit `4`) the numeric `max()` never
+  raised `exit_code` and the whole `replace()` — including the category
+  union — was skipped, silently hiding that part of the run (e.g. an
+  `EVIDENCE_CONTRACT_ERROR` scan-set member) never completed. The category
+  union is now independent of whether the numeric exit code itself needs
+  raising (Codex review).
 
 ### Changed
 

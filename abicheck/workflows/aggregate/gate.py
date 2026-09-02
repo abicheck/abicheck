@@ -61,7 +61,9 @@ def _run_outcome_gate_and_operational(
         return None
     outcome = RunOutcome.from_dict(data.get("run_outcome"))
     if outcome is None:
-        raise _MalformedGate("'run_outcome' is present but not a valid RunOutcome block")
+        raise _MalformedGate(
+            "'run_outcome' is present but not a valid RunOutcome block"
+        )
     return outcome.gate, outcome.operational
 
 
@@ -214,15 +216,29 @@ def _fold_top_level_run_outcome(
             else (),
         )
     op_exit = operational_status_exit_code(operational)
+    # A real operational failure's own category is unioned in independently
+    # of whatever exit code it contributes (Codex review, fresh evidence):
+    # `operational_status_exit_code` caps every non-NONE member at exit `1`,
+    # so beside a *stronger* compatibility gate (e.g. `abi_breaking`, exit
+    # `4`) the `max()` below never raises `result.exit_code` and the
+    # category was previously dropped outright -- hiding that part of the
+    # run (e.g. an `EVIDENCE_CONTRACT_ERROR` member of a scan set) never
+    # completed, even though the aggregate's own numeric exit code is
+    # already correct.
+    blocking_categories = (
+        tuple(sorted({*result.blocking_categories, operational.value}))
+        if operational is not OperationalStatus.NONE
+        else result.blocking_categories
+    )
     if op_exit > result.exit_code:
         result = replace(
             result,
             exit_code=op_exit,
             blocking=True,
-            blocking_categories=tuple(
-                sorted({*result.blocking_categories, operational.value})
-            ),
+            blocking_categories=blocking_categories,
         )
+    elif blocking_categories != result.blocking_categories:
+        result = replace(result, blocking_categories=blocking_categories)
     return result
 
 

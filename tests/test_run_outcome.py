@@ -80,7 +80,10 @@ class TestPolicyGateDecisionOrdering:
 
 class TestFoldGateAndOperational:
     def test_none_and_none_is_zero(self):
-        assert fold_gate_and_operational(PolicyGateDecision.NONE, OperationalStatus.NONE) == 0
+        assert (
+            fold_gate_and_operational(PolicyGateDecision.NONE, OperationalStatus.NONE)
+            == 0
+        )
 
     @pytest.mark.parametrize(
         "operational",
@@ -124,7 +127,10 @@ class TestRunOutcomeDictRoundTrip:
         assert RunOutcome.from_dict(None) is None
         assert RunOutcome.from_dict("not a dict") is None
         assert RunOutcome.from_dict({}) is None
-        assert RunOutcome.from_dict({"gate": "not_a_real_value", "operational": "none"}) is None
+        assert (
+            RunOutcome.from_dict({"gate": "not_a_real_value", "operational": "none"})
+            is None
+        )
 
     def test_from_dict_defaults_lifecycle_to_existing_when_absent(self):
         restored = RunOutcome.from_dict({"gate": "none", "operational": "none"})
@@ -147,11 +153,15 @@ class TestRunOutcomeDictForDiffResultReusesGate:
         from abicheck.report.run_outcome import run_outcome_dict_for_diff_result
 
         result = DiffResult(
-            library="libfoo", old_version="1.0", new_version="1.1",
+            library="libfoo",
+            old_version="1.0",
+            new_version="1.1",
             verdict=Verdict.NO_CHANGE,
         )
         fake_gate = GateDecision(
-            scheme="severity", exit_code=4, blocking=True,
+            scheme="severity",
+            exit_code=4,
+            blocking=True,
             blocking_categories=("abi_breaking",),
         )
         out = run_outcome_dict_for_diff_result(result, None, fake_gate)
@@ -163,7 +173,9 @@ class TestRunOutcomeDictForDiffResultReusesGate:
         from abicheck.report.run_outcome import run_outcome_dict_for_diff_result
 
         result = DiffResult(
-            library="libfoo", old_version="1.0", new_version="1.1",
+            library="libfoo",
+            old_version="1.0",
+            new_version="1.1",
             verdict=Verdict.BREAKING,
         )
         out = run_outcome_dict_for_diff_result(result, None, None)
@@ -173,7 +185,10 @@ class TestRunOutcomeDictForDiffResultReusesGate:
 class TestRunOutcomeForScanFields:
     def test_ordinary_compatible_verdict(self):
         outcome = run_outcome_for_scan_fields("COMPATIBLE", 0)
-        assert outcome.compatibility is not None and outcome.compatibility.value == "COMPATIBLE"
+        assert (
+            outcome.compatibility is not None
+            and outcome.compatibility.value == "COMPATIBLE"
+        )
         assert outcome.gate is PolicyGateDecision.NONE
         assert outcome.operational is OperationalStatus.NONE
 
@@ -203,7 +218,9 @@ class TestRunOutcomeForScanFields:
         ADDITION_QUALITY -- mirroring GateInfo.from_scan_report's own
         identical raw-code special case (COVERAGE_INCOMPLETE_EXIT branch)."""
         outcome = run_outcome_for_scan_fields(
-            "COMPATIBLE", 1, contract_coverage_contribution=1,
+            "COMPATIBLE",
+            1,
+            contract_coverage_contribution=1,
         )
         assert outcome.gate is PolicyGateDecision.NONE
         assert outcome.operational is OperationalStatus.NONE
@@ -219,7 +236,9 @@ class TestRunOutcomeForScanFields:
         # A genuine break (2/4) must never be zeroed by an orthogonal
         # coverage contribution riding along on the same folded exit code.
         outcome = run_outcome_for_scan_fields(
-            "API_BREAK", 2, contract_coverage_contribution=1,
+            "API_BREAK",
+            2,
+            contract_coverage_contribution=1,
         )
         assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
 
@@ -228,7 +247,10 @@ class TestRunOutcomeForScanFields:
         # already compatibility-only -- the coverage-only special case must
         # never fire there (it isn't ambiguous in the first place).
         outcome = run_outcome_for_scan_fields(
-            "COMPATIBLE", 1, severity_exit_code=1, contract_coverage_contribution=1,
+            "COMPATIBLE",
+            1,
+            severity_exit_code=1,
+            contract_coverage_contribution=1,
         )
         assert outcome.gate is PolicyGateDecision.ADDITION_QUALITY
 
@@ -239,7 +261,9 @@ class TestRunOutcomeForScanFields:
         EVIDENCE_CONTRACT_ERROR -- without member_evidence_contract_error,
         that member's abort has no signal left in run_outcome at all."""
         outcome = run_outcome_for_scan_fields(
-            "API_BREAK", 2, member_evidence_contract_error=True,
+            "API_BREAK",
+            2,
+            member_evidence_contract_error=True,
         )
         assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
         assert outcome.operational is OperationalStatus.EVIDENCE_CONTRACT_ERROR
@@ -250,7 +274,9 @@ class TestRunOutcomeForScanFields:
         # never override an operational status already derived from
         # verdict/exit_code.
         outcome = run_outcome_for_scan_fields(
-            "BUDGET_OVERFLOW", 5, member_evidence_contract_error=True,
+            "BUDGET_OVERFLOW",
+            5,
+            member_evidence_contract_error=True,
         )
         assert outcome.operational is OperationalStatus.BUDGET_OVERFLOW
 
@@ -327,7 +353,9 @@ class TestRunOutcomeForScanFields:
             "exit": {"code": 1, "compatibility_contribution": 0},
         }
         outcome = run_outcome_dict_for_scan(
-            "EVIDENCE_CONTRACT_ERROR", 1, report=report,
+            "EVIDENCE_CONTRACT_ERROR",
+            1,
+            report=report,
         )
         # Not addition_quality: the abort report's own persisted
         # compatibility_contribution (0) is authoritative, not the
@@ -352,7 +380,9 @@ class TestRunOutcomeForScanFields:
         # operational's derived value -- it must never fire for an ordinary
         # verdict that merely also carries member_evidence_contract_error.
         outcome = run_outcome_for_scan_fields(
-            "API_BREAK", 2, member_evidence_contract_error=True,
+            "API_BREAK",
+            2,
+            member_evidence_contract_error=True,
         )
         assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
 
@@ -363,7 +393,9 @@ class TestRunOutcomeForScanFields:
 
 
 class TestGateInfoFromReportDataStructuredFirst:
-    def _run_outcome_block(self, gate: PolicyGateDecision, operational: OperationalStatus):
+    def _run_outcome_block(
+        self, gate: PolicyGateDecision, operational: OperationalStatus
+    ):
         return RunOutcome(
             compatibility=None, assurance=None, gate=gate, operational=operational
         ).to_dict()
@@ -582,6 +614,32 @@ class TestGateInfoFromReportDataStructuredFirst:
         assert gate is not None
         assert gate.exit_code == 4
 
+    def test_operational_category_survives_beside_a_stronger_gate(self):
+        """Codex review, fresh evidence: operational_status_exit_code caps
+        every non-NONE member at exit 1, so beside a *stronger* gate (exit
+        4) the numeric max() never raises exit_code -- the previous code
+        skipped the whole replace() in that case and silently dropped the
+        operational category from blocking_categories, hiding that part of
+        the run (e.g. an EVIDENCE_CONTRACT_ERROR member) never completed."""
+        data = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING,
+                OperationalStatus.EVIDENCE_CONTRACT_ERROR,
+            ),
+        }
+        gate = GateInfo.from_report_data(data)
+        assert gate is not None
+        assert gate.exit_code == 4
+        assert set(gate.blocking_categories) == {
+            "abi_breaking",
+            "evidence_contract_error",
+        }
+
 
 class TestGateInfoFromScanReportStructuredFirst:
     def _scan_report(self, verdict: str, exit_code: int, run_outcome: dict) -> dict:
@@ -655,7 +713,9 @@ class TestGateInfoFromScanReportStructuredFirst:
         from abicheck.workflows.aggregate.gate import _MalformedGate
 
         report = self._scan_report(
-            "COMPATIBLE", 0, {"gate": "bogus", "operational": "none"},
+            "COMPATIBLE",
+            0,
+            {"gate": "bogus", "operational": "none"},
         )
         with pytest.raises(_MalformedGate):
             GateInfo.from_scan_report(report)
@@ -676,7 +736,11 @@ class TestGateInfoFromScanReportStructuredFirst:
         contradicting = {
             "scan_schema_version": "1.24",
             "diff": {
-                "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []}
+                "severity": {
+                    "exit_code": 0,
+                    "blocking": False,
+                    "blocking_categories": [],
+                }
             },
             "run_outcome": RunOutcome(
                 compatibility=None,
@@ -691,11 +755,18 @@ class TestGateInfoFromScanReportStructuredFirst:
         invalid_gate = {
             "scan_schema_version": "1.24",
             "diff": {
-                "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []}
+                "severity": {
+                    "exit_code": 0,
+                    "blocking": False,
+                    "blocking_categories": [],
+                }
             },
             "run_outcome": {
-                "schema_version": "1.0", "compatibility": None, "assurance": None,
-                "gate": "bogus", "operational": "none",
+                "schema_version": "1.0",
+                "compatibility": None,
+                "assurance": None,
+                "gate": "bogus",
+                "operational": "none",
             },
         }
         with pytest.raises(_MalformedGate):
@@ -707,7 +778,9 @@ class TestGateInfoFromScanReportStructuredFirst:
             "scan_schema_version": "1.24",
             "diff": {
                 "severity": {
-                    "exit_code": 4, "blocking": True, "blocking_categories": ["abi_breaking"],
+                    "exit_code": 4,
+                    "blocking": True,
+                    "blocking_categories": ["abi_breaking"],
                 }
             },
             "run_outcome": RunOutcome(
@@ -775,18 +848,24 @@ class TestSyntheticBuilderRunOutcome:
 # ---------------------------------------------------------------------------
 
 
-def _compare_report_with_run_outcome(gate: PolicyGateDecision, operational: OperationalStatus):
+def _compare_report_with_run_outcome(
+    gate: PolicyGateDecision, operational: OperationalStatus
+):
     exit_code = fold_gate_and_operational(gate, operational)
     return {
         "report_schema_version": "2.48",
         "library": "libpvxs",
-        "verdict": "BREAKING" if gate is PolicyGateDecision.ABI_BREAKING else "COMPATIBLE",
+        "verdict": "BREAKING"
+        if gate is PolicyGateDecision.ABI_BREAKING
+        else "COMPATIBLE",
         "severity": {
             "config": {},
             "categories": {},
             "exit_code": exit_code,
             "blocking": exit_code != 0,
-            "blocking_categories": ["abi_breaking"] if gate is PolicyGateDecision.ABI_BREAKING else [],
+            "blocking_categories": ["abi_breaking"]
+            if gate is PolicyGateDecision.ABI_BREAKING
+            else [],
         },
         "run_outcome": RunOutcome(
             compatibility=None, assurance=None, gate=gate, operational=operational
@@ -904,7 +983,11 @@ class TestNotComparableRunOutcome:
 
         with pytest.raises(TypeError):
             not_comparable_document(  # type: ignore[call-arg]
-                "libfoo", "1.0", "2.0", "profile_mismatch", "profiles differ",
+                "libfoo",
+                "1.0",
+                "2.0",
+                "profile_mismatch",
+                "profiles differ",
                 report_schema_version="2.48",
             )
 
@@ -948,7 +1031,10 @@ class TestRunOutcomeSchemaValidation:
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="1.1")
         result = DiffResult(
-            library="libfoo", old_version="1.0", new_version="1.1", verdict=Verdict.NO_CHANGE
+            library="libfoo",
+            old_version="1.0",
+            new_version="1.1",
+            verdict=Verdict.NO_CHANGE,
         )
         result.analysis_assurance = compute_analysis_assurance(result, old, new)
         data = json.loads(reporter.to_json(result))
@@ -983,7 +1069,10 @@ class TestRunOutcomeSchemaValidation:
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="1.1")
         result = DiffResult(
-            library="libfoo", old_version="1.0", new_version="1.1", verdict=Verdict.NO_CHANGE
+            library="libfoo",
+            old_version="1.0",
+            new_version="1.1",
+            verdict=Verdict.NO_CHANGE,
         )
         result.analysis_assurance = compute_analysis_assurance(result, old, new)
         text = reporter.to_json(result)
