@@ -6131,3 +6131,50 @@ looked like the obvious fix and wasn't.
   own "generalize, or record the gap" convention — this was a direct
   timeout-value bump for an observed cancellation, not a verified capacity
   fix.
+
+- **`--depth` is a floor for live extraction, not a ceiling for a pre-built
+  snapshot — real, cross-cutting, and previously undocumented outside one
+  function's own docstring.** `enforce_requested_depth`
+  (`workflows/artifact/execute.py`) already fails a run when the *resolved*
+  evidence falls short of an explicit `--depth`, and its own docstring has
+  long carried this note: "this is a floor, not a ceiling. An input that is
+  an already-serialized JSON snapshot with richer embedded evidence than
+  `depth` requested still carries all of it — `resolve_input`'s `fmt ==
+  "json"` branch returns `load_snapshot(path)` verbatim... which `--depth`
+  has never projected down for a pre-built snapshot either." A Codex review
+  round on PR #1016 (D1: accepting `--depth binary` for a directory/package
+  compare) reproduced this concretely and flagged it as if newly
+  introduced: `compare old_dir new_dir --depth binary` over a directory of
+  saved JSON snapshots (rather than live binaries) still emits real
+  header-derived findings and can still publish `BREAKING`, because nothing
+  strips a snapshot's already-embedded evidence down to what was requested.
+  Checked and confirmed **not** a regression from that PR — a *single-pair*
+  `compare old.json new.json --depth binary` over two plain snapshots
+  reproduces the identical behavior today, unrelated to any directory/
+  package handling; PR #1016 only extended `--depth binary`'s
+  *acceptance* to a second operand shape that inherits a limitation the
+  single-pair path has always had. `cli_compare_options.
+  _reject_depth_for_set_inputs`'s docstring now cross-references this
+  entry so the directory/package path states the same acknowledged
+  limitation explicitly rather than silently inheriting an undocumented
+  one.
+  **Not fixed here, and the two obvious-looking fixes are each wrong for a
+  reason worth recording so they aren't re-attempted as the "obvious"
+  patch:** stripping a resolved snapshot's higher-level facts down to the
+  requested depth *before* comparing would work for this one call site, but
+  would also discard evidence a caller legitimately wants to keep on a
+  snapshot that gets reused for a *later* comparison at a higher depth —
+  `--depth` is meant to gate what a comparison *uses*, not to mutate a
+  snapshot's own persisted content. Rejecting `--depth binary` outright for
+  any operand backed by a pre-built snapshot (matching the pre-#1016
+  directory/package behavior) would reintroduce exactly the asymmetry D1
+  closed, since the single-pair path already accepts and silently
+  under-enforces the same combination. The real fix needs a
+  comparison-time projection — resolve the snapshot as today, then filter
+  what `checker.compare()` is allowed to see down to the requested rung,
+  keeping the resolved `AbiSnapshot` itself untouched — which is a real,
+  separate design question (which facts a given depth "sees" needs the
+  same explicit mapping `evidence_depth.py`'s own rank table already gives
+  requested-vs-resolved comparison, just applied the other direction), not
+  a one-line patch to either `resolve_input` or the two call sites that
+  triggered this entry.

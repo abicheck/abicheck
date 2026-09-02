@@ -226,7 +226,11 @@ def _reject_depth_for_set_inputs(ctx: click.Context) -> str | None:
       already-accepted behavior; it does not extend it, and closing the
       underlying gap (stripping higher-level facts from a snapshot operand
       to actually enforce depth as a ceiling) is separate, repo-wide work,
-      not specific to directory/package operands.
+      not specific to directory/package operands. See
+      ``docs/contribute/known-gaps.md``'s "``--depth`` is a floor for live
+      extraction, not a ceiling for a pre-built snapshot" entry for why the
+      two obvious-looking fixes (stripping the snapshot, or rejecting the
+      combination here) are each wrong.
     * ``headers`` is still rejected, but for a narrower, distinct reason than
       build/source: the fan-out *does* resolve per-pair header evidence
       (the same ``-H``/compile-context plumbing a plain directory `compare`
