@@ -18,22 +18,17 @@
 See ``docs/contribute/plans/one-semantic-pipeline.md``'s "Phase 2" section
 for the full design and landed-slice history -- that ADR/plan pair, not
 this docstring, is the authoritative status record. Landed: the
-``ScopePath``/``EntityId`` shape; both header-AST backends populating a
-parse-time ``entity_id`` carrier on ``RecordType``/``EnumType``/
-``Function``/``Variable``, persisted through ``serialization.py`` (schema
-v28); ``finding_identity.resolve_function_identity`` sharing this module's
-own signature canonicalization; ``Change`` gaining its own ``entity_id``
-carrier, populated across the function-diff path; and, as this module's own
-``EntityId.key`` property, the first read of that carrier by a real
-consumer (``finding_identity.resolve_change_identity``'s new alias --
-additive only, no existing primary/canonical id changes).
-``dwarf_snapshot.py``/``dumper_elf_fallback.py``/``dumper.py``'s PE and
-Mach-O export-only producers now populate it too. Still open: the
-mangled-name-is-genuine determination stays owned by
-``finding_identity.is_real_mangled_name``/``normalize_mangled_name``;
-``diff_filtering.py``/``type_reachability.py``'s consumer migrations; and
-promoting ``entity:`` to a real match tier (blocked on ``Anonymous``/
-``LocalToFunction`` ordinal cross-release instability, twice reverted).
+``ScopePath``/``EntityId`` shape; every header-AST/DWARF/export-table
+producer and matched-declaration flat-detector site populating
+``entity_id``; ``EntityId.key`` read as an additive ``entity:`` alias
+(``finding_identity.resolve_change_identity``). ``identity_stability.
+entity_id_is_cross_snapshot_stable`` (sibling leaf module) is a real,
+tested gating primitive for the ``Anonymous``/``LocalToFunction``
+cross-release-ordinal problem -- not a stabilizer (two of those were
+reverted), it excludes the unstable cases instead. Still open: mangled-
+name-is-genuine determination (``finding_identity``); ``diff_filtering.
+py``/``type_reachability.py``'s consumer migrations; and promoting
+``entity:`` to a real match tier -- the gate exists, not yet wired in.
 
 ``EntityKind``/``ObservationKind`` relocated here from ``storage.
 entity_ids`` (domain vocabulary belongs in ``model``, not the storage wire

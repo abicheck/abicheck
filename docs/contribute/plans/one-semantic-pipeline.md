@@ -10210,24 +10210,47 @@ given that module's own extensive, multiply-reviewed fragility (see its own
 module docstring) — a real rewrite risk this slice judged not worth taking
 on without the same adversarial review rigor that code's prior fixes
 received. Item (2), the `entity:` alias promotion, was investigated for a
-third time this slice and still has no accepted design for the
-suppression-facing hash: the same `Anonymous`/`LocalToFunction`
-within-one-parse-only ordinal limitation this phase's Design section
-already names blocks it identically for DWARF as for the two header-AST
-backends (DWARF's own DIE walk assigns no ordinals at all in this slice, so
-it inherits the identical gap rather than closing it). A gating primitive
-that gets real, safe use out of `entity:` without repeating either
-previously-reverted approach — restricting promotion to entities whose
-`EntityId.scope` contains no `Anonymous`/`LocalToFunction` segment, and
-wiring that restricted promotion only into `diff_filtering.py`'s
-internal-only, non-persisted `_deduplicate_cross_detector` rather than into
-`report_canonical_finding_id`'s suppression-facing hash — is a separate,
-deliberate follow-up documented rather than attempted under review
-pressure, since changing what `report_canonical_finding_id` hashes for any
-already-shipped finding shape would silently invalidate a user's existing
-stored `finding_id:` suppression rules, a backward-compatibility call this
-phase's own discipline treats as needing explicit maintainer sign-off, the
-same bar `IMPORT_CYCLE_ALLOWLIST` extensions are held to.
+third time this slice. The suppression-facing hash side still has no
+accepted design and stays exactly as blocked as before: the same
+`Anonymous`/`LocalToFunction` within-one-parse-only ordinal limitation
+this phase's Design section already names blocks it identically for
+DWARF as for the two header-AST backends (DWARF's own DIE walk assigns no
+ordinals at all in this slice, so it inherits the identical gap rather
+than closing it), and changing what `report_canonical_finding_id` hashes
+for any already-shipped finding shape would silently invalidate a user's
+existing stored `finding_id:` suppression rules — a backward-compatibility
+call this phase's own discipline treats as needing explicit maintainer
+sign-off, the same bar `IMPORT_CYCLE_ALLOWLIST` extensions are held to,
+and deliberately not made unilaterally here.
+
+What did land, as a genuinely new (not a third attempt at either
+previously-reverted) design: `model/identity_stability.py`'s
+`entity_id_is_cross_snapshot_stable(entity_id)` — a gating predicate, not
+a stabilizer. It makes no claim about the `Anonymous`/`LocalToFunction`
+ordinal instability at all; it only lets a caller ask "does this
+`EntityId` avoid the unstable construct in the first place" and refuse to
+treat a match as authoritative when it doesn't (`False` whenever any
+`scope` segment is `Anonymous`/`LocalToFunction`, or `extra` is the
+anonymous-self marker). Split into its own leaf module purely to stay
+under `identity.py`'s 800-line production cap — see that module's own
+docstring for the full design writeup, and
+`tests/test_identity_stability.py` for the Hypothesis-driven
+primitive-level property tests (AGENTS.md's own doctrine for a new
+reusable predicate) stating its contract: true for every all-stable
+scope regardless of shape/position, false for any single unstable
+segment regardless of where it sits in the chain, false for the
+anonymous-self `extra` marker independent of `scope`, and a pure
+function of its input. This predicate is real, tested, safe-to-use
+infrastructure — but it is deliberately **not** wired into
+`diff_filtering.py`'s `_deduplicate_cross_detector` (or anywhere else)
+this slice: that file carries the identical "extensive, multiply-
+reviewed fragility" this section's item (1) paragraph already declined
+to touch for the same reason, and a promotion consumer belongs behind
+the same adversarial review rigor that code's prior fixes received, not
+bundled into the slice that first makes the primitive available. A
+`True` result from this predicate is a necessary, not sufficient,
+precondition for any future promotion — see the module's own docstring
+for what a real consumer still has to establish beyond it.
 
 ---
 
