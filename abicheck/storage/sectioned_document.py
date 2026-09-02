@@ -36,7 +36,8 @@ independently versioned sections, structural completeness checking
     "types": {...},
     ...
   },
-  "section_schema_versions": {"declarations": 1, "types": 1, ...}
+  "section_schema_versions": {"declarations": 1, "types": 1, ...},
+  "source_schema_version": 42
 }
 ```
 
@@ -62,6 +63,7 @@ from .package import ArtifactRef, InMemoryObjectStore, ObjectRef
 __all__ = [
     "SECTION_SCHEMA_VERSIONS_KEY",
     "SECTIONS_KEY",
+    "SOURCE_SCHEMA_VERSION_KEY",
     "from_sectioned_document",
     "is_sectioned_document",
     "to_sectioned_document",
@@ -92,6 +94,29 @@ SECTIONS_KEY = "sections"
 #: manifest to check against.
 SECTION_SCHEMA_VERSIONS_KEY = "section_schema_versions"
 
+#: The top-level key recording the *legacy document's own* schema_version
+#: (`PackageManifest.versions.source_schema_version`) -- deliberately kept
+#: separate from this envelope's own top-level `schema_version` (Codex
+#: review, fresh evidence): `to_sectioned_document()` used to write the
+#: legacy document's version directly as the envelope's `schema_version`,
+#: which is only ever correct because every real caller happens to convert
+#: a document this same build just produced (whose own `schema_version`
+#: `serialization.snapshot_to_dict()` always stamps as the current
+#: `SCHEMA_VERSION`) -- the two numbers coincide today, but nothing enforced
+#: that. Converting a genuinely older-but-still-readable document (e.g. one
+#: loaded from disk at schema_version 41) would have stamped the ENVELOPE
+#: itself as version 41, which a pre-Phase-8 reader (understanding up to 41)
+#: would then NOT hard-reject -- defeating the whole point of the
+#: SCHEMA_VERSION bump this redesign made. The envelope's `schema_version`
+#: is now always the wire-format version the envelope itself was written at
+#: (`to_sectioned_document`'s `max_known_schema_version`); this key carries
+#: the legacy document's own version separately, purely so
+#: `from_sectioned_document`'s reconstructed flat document can still carry
+#: that document's true `schema_version` for `snapshot_from_dict`'s
+#: backward-compat field-reliability logic, unchanged from before this
+#: split.
+SOURCE_SCHEMA_VERSION_KEY = "source_schema_version"
+
 #: A fixed, meaningless artifact/variant id -- this module's documents are
 #: always single-artifact and never expose `ArtifactRef`/`PackageManifest`
 #: identity to any caller, so nothing outside this module ever reads these
@@ -117,6 +142,14 @@ def to_sectioned_document(
     already requires -- this build's own `serialization.SCHEMA_VERSION`, for
     every real caller (this function is always packaging a document this
     same build just produced, or one already validated readable by it).
+
+    The envelope's own top-level `schema_version` is *always*
+    *max_known_schema_version* -- the wire-format version this envelope was
+    written at -- never *legacy_document*'s own `schema_version` (Codex
+    review; see `SOURCE_SCHEMA_VERSION_KEY`'s own comment for why that
+    distinction matters). *legacy_document*'s own version is preserved
+    separately, under `SOURCE_SCHEMA_VERSION_KEY`, so `from_sectioned_document`
+    can still restore it onto the reconstructed flat document.
     """
     store = InMemoryObjectStore()
     manifest = import_legacy_snapshot(
@@ -132,9 +165,10 @@ def to_sectioned_document(
         for section_kind, ref in artifact.sections.items()
     }
     return {
-        "schema_version": manifest.versions.source_schema_version,
+        "schema_version": max_known_schema_version,
         SECTIONS_KEY: sections,
         SECTION_SCHEMA_VERSIONS_KEY: dict(manifest.versions.section_schema_versions),
+        SOURCE_SCHEMA_VERSION_KEY: manifest.versions.source_schema_version,
     }
 
 
@@ -169,6 +203,18 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(schema_version, int) or isinstance(schema_version, bool):
         raise ValueError(
             f"sectioned document schema_version must be an int, got {schema_version!r}"
+        )
+    # The legacy document's OWN schema_version (distinct from the envelope's
+    # `schema_version` just validated above -- see SOURCE_SCHEMA_VERSION_KEY's
+    # own comment) -- what gets restored onto the reconstructed flat
+    # document below, never the envelope's wire-format version.
+    source_schema_version = document.get(SOURCE_SCHEMA_VERSION_KEY)
+    if not isinstance(source_schema_version, int) or isinstance(
+        source_schema_version, bool
+    ):
+        raise ValueError(
+            f"sectioned document {SOURCE_SCHEMA_VERSION_KEY!r} must be an "
+            f"int, got {source_schema_version!r}"
         )
     stated_sections = document.get(SECTION_SCHEMA_VERSIONS_KEY)
     if not isinstance(stated_sections, Mapping):
@@ -211,5 +257,5 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
         sections=sections,
     )
     return export_legacy_snapshot(
-        artifact, store=store, source_schema_version=schema_version
+        artifact, store=store, source_schema_version=source_schema_version
     )

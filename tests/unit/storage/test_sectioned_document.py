@@ -76,6 +76,48 @@ class TestRoundTrip:
         assert canonical_form(rebuilt) == canonical_form(expected)
 
 
+class TestEnvelopeVersionIsSeparateFromSourceVersion:
+    """Codex review, fresh evidence: `to_sectioned_document()` used to
+    write the *legacy document's own* schema_version directly as the
+    envelope's top-level `schema_version` -- correct only because every
+    real caller converts a document this same build just produced (whose
+    own schema_version is always the current SCHEMA_VERSION). Converting a
+    genuinely older-but-still-readable document (e.g. one loaded from disk
+    at schema_version 41 or earlier) would have stamped the ENVELOPE
+    itself as that old version, which a pre-Phase-8 reader (understanding
+    up to schema_version 41) would then NOT hard-reject -- defeating the
+    whole point of this redesign's SCHEMA_VERSION bump."""
+
+    @pytest.mark.parametrize(
+        "fixture_name", ["v1.json", "v2.json", "v3.json", "v4.json", "v5.json"]
+    )
+    def test_converting_an_old_document_stamps_the_current_envelope_version(
+        self, fixture_name: str
+    ) -> None:
+        doc = json.loads((_FIXTURES_DIR / fixture_name).read_text(encoding="utf-8"))
+        old_version = doc.get("schema_version", 1)
+        assert old_version < SCHEMA_VERSION
+        sectioned = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        # The envelope itself must claim the CURRENT wire-format version --
+        # a pre-Phase-8 reader (understanding up to `old_version`) must see
+        # a schema_version it cannot understand and hard-reject, rather than
+        # `old_version` (which it would accept and misread).
+        assert sectioned["schema_version"] == SCHEMA_VERSION
+        # The legacy document's own version must still be recoverable, so
+        # the reconstructed flat document keeps its original identity.
+        assert sectioned["source_schema_version"] == old_version
+        rebuilt = from_sectioned_document(sectioned)
+        assert rebuilt["schema_version"] == old_version
+
+    def test_a_fresh_document_s_source_version_equals_the_envelope_version(
+        self,
+    ) -> None:
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        sectioned = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        assert sectioned["schema_version"] == SCHEMA_VERSION
+        assert sectioned["source_schema_version"] == SCHEMA_VERSION
+
+
 class TestFromSectionedDocumentRejectsMalformedInput:
     def test_a_non_object_sections_value_is_refused(self) -> None:
         with pytest.raises(ValueError, match="sections"):
@@ -92,6 +134,23 @@ class TestFromSectionedDocumentRejectsMalformedInput:
     def test_a_missing_schema_version_is_refused(self) -> None:
         with pytest.raises(ValueError, match="schema_version"):
             from_sectioned_document({"sections": {}})
+
+    def test_a_non_int_source_schema_version_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="source_schema_version"):
+            from_sectioned_document(
+                {
+                    "schema_version": 42,
+                    "sections": {},
+                    "section_schema_versions": {},
+                    "source_schema_version": "41",
+                }
+            )
+
+    def test_a_missing_source_schema_version_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="source_schema_version"):
+            from_sectioned_document(
+                {"schema_version": 42, "sections": {}, "section_schema_versions": {}}
+            )
 
     def test_a_truncated_section_payload_is_refused(self) -> None:
         """The same completeness check `import_v1.export_legacy_snapshot`

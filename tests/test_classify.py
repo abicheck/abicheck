@@ -164,6 +164,19 @@ class TestAbiJsonClassifier:
         p.write_text('{"title": "API", "sections": {"intro": {"text": "hi"}}}')
         assert self.clf.accepts(p) is False
 
+    def test_nested_schema_version_and_sections_keys_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review, fresh evidence (fourth round): "schema_version"
+        and "sections" both present somewhere in the probe window, but
+        NESTED inside another object rather than genuinely top-level, must
+        not be misclassified as the sectioned envelope shape. A plain
+        substring/regex search for the two keys matches at any nesting
+        depth; only real top-level-key tracking distinguishes this."""
+        p = tmp_path / "nested-lookalike.json"
+        p.write_text('{"schema_version": 1, "metadata": {"sections": {"a": 1}}}')
+        assert self.clf.accepts(p) is False
+
     def test_real_sectioned_snapshot_accepted(self, tmp_path: Path) -> None:
         """ADR-063 Phase 8: a real sectioned document (the "sections" key
         genuinely at the top level, `to_sectioned_document`'s own shape)
@@ -211,8 +224,14 @@ class TestAbiJsonClassifier:
         assert '"library"' not in text[:250]  # stays out of the shrunk probe window
         p = tmp_path / "libfoo-sorted.json"
         p.write_text(text)
-        self.clf._JSON_PROBE_BYTES = 250
-        assert self.clf.accepts(p) is True
+        # A LOCAL instance, not `self.clf` -- CodeRabbit review, fresh
+        # evidence: `self.clf` is a class attribute shared by every method
+        # on this test class, so mutating its `_JSON_PROBE_BYTES` here would
+        # persist across tests and could make a later test wrongly reject a
+        # valid large snapshot whose fingerprint falls past 250 bytes.
+        classifier = AbiJsonClassifier()
+        classifier._JSON_PROBE_BYTES = 250
+        assert classifier.accepts(p) is True
 
     def test_fingerprint_registry_extensible(self) -> None:
         """Ensure FINGERPRINTS is extensible and restored after mutation."""

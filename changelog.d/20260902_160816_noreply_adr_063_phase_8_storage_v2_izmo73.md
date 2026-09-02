@@ -31,4 +31,12 @@
   The sectioned-shape classifier fingerprint (`abicheck/classify.py`) now
   recognizes a valid document regardless of its top-level key order (e.g.
   `json.dumps(..., sort_keys=True)`), rather than requiring the exact
-  adjacency `to_sectioned_document()` happens to write.
+  adjacency `to_sectioned_document()` happens to write, and now tracks real
+  JSON nesting depth so a `"schema_version"`/`"sections"` pair nested
+  inside another object no longer false-positives as the envelope shape.
+  `to_sectioned_document()`'s envelope `schema_version` is now always the
+  current wire-format version, never the legacy document's own version --
+  the legacy version is preserved separately (`source_schema_version`) so a
+  document converted from an older-but-still-readable schema still stamps
+  an envelope a pre-Phase-8 reader correctly refuses, instead of one it
+  would (incorrectly) accept and misread.

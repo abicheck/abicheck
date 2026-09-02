@@ -96,6 +96,7 @@ from .package import (
 from .sectioned_document import (
     SECTION_SCHEMA_VERSIONS_KEY,
     SECTIONS_KEY,
+    SOURCE_SCHEMA_VERSION_KEY,
     from_sectioned_document,
     is_sectioned_document,
     to_sectioned_document,
@@ -139,6 +140,7 @@ __all__ = [
     "SECTION_SCHEMA_VERSIONS",
     "SECTION_SCHEMA_VERSIONS_KEY",
     "SEMANTIC_IR_SECTION_KIND",
+    "SOURCE_SCHEMA_VERSION_KEY",
     "SectionDTO",
     "StorageVersions",
     "UNSTATED_VERSION",

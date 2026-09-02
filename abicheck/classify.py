@@ -42,9 +42,86 @@ from __future__ import annotations
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _top_level_json_keys(text: str) -> set[str]:
+    """Best-effort top-level (depth-1) object key names appearing in *text*
+    -- a possibly-truncated prefix of a JSON document's UTF-8 text (the
+    fingerprint probe window this feeds may cut a real document off
+    mid-value, so this never requires *text* to be complete, valid JSON).
+
+    Tracks string/escape state and object/array nesting depth precisely
+    enough to distinguish a genuinely top-level key from one nested inside
+    a value or array (Codex review, fresh evidence: a plain substring/regex
+    search for a key name matches at ANY nesting depth -- e.g.
+    ``{"schema_version": 1, "metadata": {"sections": {}}}`` has a nested
+    "sections", not a top-level one, and must not be mistaken for the
+    sectioned envelope shape). Truncation just stops the scan early
+    (whatever top-level keys were already seen are still returned); it
+    never raises.
+    """
+    keys: set[str] = set()
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            key_depth = depth  # depth *before* this string, i.e. its own nesting level
+            str_start = i + 1
+            i += 1
+            while i < n:
+                c = text[i]
+                if c == "\\":
+                    i += 2  # skip the escape sequence's second character too
+                    continue
+                if c == '"':
+                    break
+                i += 1
+            else:
+                break  # truncated mid-string -- nothing more to learn
+            str_end = i
+            i += 1  # past the closing quote
+            if key_depth == 1:
+                j = i
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j < n and text[j] == ":":
+                    keys.add(text[str_start:str_end])
+            continue
+        if ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        i += 1
+    return keys
+
+
+def _fingerprint_matches(
+    matcher: re.Pattern[str] | Callable[[str], bool], text: str
+) -> bool:
+    """Run one `AbiJsonClassifier.FINGERPRINTS` entry's matcher against
+    *text* -- a compiled regex is `.search()`ed, a plain predicate is
+    called directly. The one place every fingerprint consumer dispatches
+    through, so the registry's two matcher shapes can't independently
+    drift between call sites."""
+    if isinstance(matcher, re.Pattern):
+        return matcher.search(text) is not None
+    return matcher(text)
+
+
+def _is_sectioned_document_fingerprint(head: str) -> bool:
+    """Whether *head* (a JSON document's probe-window prefix) carries both
+    of `storage.sectioned_document`'s own top-level markers -- "schema_version"
+    and "sections" -- as genuinely TOP-LEVEL keys, not merely present
+    somewhere at any nesting depth (see `_top_level_json_keys`'s own
+    docstring for why that distinction matters)."""
+    top_level = _top_level_json_keys(head)
+    return "schema_version" in top_level and "sections" in top_level
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +235,13 @@ class AbiJsonClassifier(FileClassifier):
 
     _JSON_PROBE_BYTES: int = 4096
 
-    # Registry: (label, compiled-pattern)
-    # Pattern is searched in the first _JSON_PROBE_BYTES bytes (decoded UTF-8).
-    FINGERPRINTS: list[tuple[str, re.Pattern[str]]] = [
+    # Registry: (label, matcher). A matcher is either a compiled regex
+    # (searched in the first _JSON_PROBE_BYTES bytes, decoded UTF-8) or a
+    # plain `Callable[[str], bool]` predicate over that same text -- for a
+    # fingerprint that needs more than a regex can express (e.g. genuinely
+    # top-level JSON key detection, which needs depth tracking, not just
+    # pattern matching; see `_is_sectioned_document_fingerprint`).
+    FINGERPRINTS: list[tuple[str, re.Pattern[str] | Callable[[str], bool]]] = [
         (
             "abicheck/abicc-v1",
             # Matches "library": as a JSON key (preceded by start-of-string,
@@ -183,28 +264,25 @@ class AbiJsonClassifier(FileClassifier):
             # `to_sectioned_document()` happens to write ("schema_version"
             # immediately followed by "sections") breaks the moment a
             # document is reserialized with reordered keys -- e.g.
-            # `json.dumps(..., sort_keys=True)`, or any JSON formatter --
-            # even though `from_sectioned_document()` itself accepts the
-            # document regardless of key order; `compare-release` directory
-            # discovery would then silently skip that (still perfectly
-            # valid) snapshot.
-            #
-            # The fix is to require "schema_version" and "sections" each
-            # independently, via lookaheads, rather than as one adjacent
-            # sequence -- co-occurrence of BOTH keys (one specific to any
-            # abicheck snapshot, the other specific to this envelope shape)
-            # is what stays rare in an unrelated document, without caring
-            # where either sits relative to the other. Deliberately does
-            # NOT also require "section_schema_versions": unlike the other
-            # two keys, `to_sectioned_document()` writes it dict-order
-            # *after* the (size-variable) "sections" payload, so on a real,
+            # `json.dumps(..., sort_keys=True)`, or any JSON formatter.
+            # A FOURTH round then found that requiring the two keys
+            # independently, via a plain substring/regex search, matches
+            # them at ANY nesting depth -- e.g.
+            # `{"schema_version": 1, "metadata": {"sections": {}}}` has a
+            # nested "sections", not a top-level one, but still matched.
+            # `_is_sectioned_document_fingerprint` closes that: it tracks
+            # JSON nesting depth (via `_top_level_json_keys`) so only a
+            # genuinely top-level "schema_version" and "sections" count,
+            # while staying tolerant of reordering and truncation the same
+            # way the round-3 fix was. Deliberately does NOT also require
+            # "section_schema_versions": unlike the other two keys,
+            # `to_sectioned_document()` writes it dict-order *after* the
+            # (size-variable) "sections" payload, so on a real,
             # content-heavy snapshot it can itself fall past the probe
             # window -- requiring it would reintroduce the same kind of
-            # false negative this fix exists to close.
+            # false negative the round-3 fix closed.
             "abicheck/sectioned-v1",
-            re.compile(
-                r'(?=[\s\S]*"schema_version"\s*:\s*\d+)(?=[\s\S]*"sections"\s*:\s*\{)'
-            ),
+            _is_sectioned_document_fingerprint,
         ),
         # Future formats — uncomment or add new entries here:
         # ("libabigail-json-v2", re.compile(r'"abi-corpus"\s*:', re.MULTILINE)),
@@ -236,7 +314,7 @@ class AbiJsonClassifier(FileClassifier):
         except OSError as exc:
             logger.warning("classify: cannot read JSON candidate %s: %s", path, exc)
             return False
-        return any(pat.search(head) for _, pat in self.FINGERPRINTS) or False
+        return any(_fingerprint_matches(pat, head) for _, pat in self.FINGERPRINTS)
 
 
 class CompressedAbiJsonClassifier(FileClassifier):
@@ -271,8 +349,8 @@ class CompressedAbiJsonClassifier(FileClassifier):
                 False  # recognizably compressed but undecodable -- reject, don't guess
             )
         head = prefix.decode("utf-8", errors="replace")
-        return (
-            any(pat.search(head) for _, pat in AbiJsonClassifier.FINGERPRINTS) or False
+        return any(
+            _fingerprint_matches(pat, head) for _, pat in AbiJsonClassifier.FINGERPRINTS
         )
 
 
@@ -312,9 +390,9 @@ class FallbackSniffClassifier(FileClassifier):
                     "classify: cannot read fallback JSON candidate %s: %s", path, exc
                 )
                 return False
-            return (
-                any(pat.search(probe) for _, pat in AbiJsonClassifier.FINGERPRINTS)
-                or False
+            return any(
+                _fingerprint_matches(pat, probe)
+                for _, pat in AbiJsonClassifier.FINGERPRINTS
             )
         return False
 
