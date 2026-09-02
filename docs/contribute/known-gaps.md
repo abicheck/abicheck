@@ -6200,16 +6200,25 @@ has to lose, and today the sidecar does.
 **SARIF is fixed** (this same PR, same review round): SARIF is itself
 well-formed JSON, and abicheck's SARIF renderer already stamps the native
 verdict string as `runs[0].properties.abiVerdict` (`sarif.py`'s
-`_result_for`) — so `_json_report_src` gained one more, deliberately
-last-resort branch that hands `format: sarif`'s own `OUTPUT_FILE` to
-`_report_query` when no PR_JSON/stdout-JSON/extra-write-json source
-exists, and `compat_verdict`'s query gained a fallback reading that same
-property. Every *other* query (annotations, severity_exit, coverage_where,
-blocking_categories, assurance_*) still silently answers "" against a
-SARIF document — same as the pre-existing "no report at all" case, since
-SARIF's schema has no equivalent top-level keys for any of them — so this
-extension is additive, not a behavior change for the common case where a
-full JSON sidecar already exists.
+`_result_for`) — so `_report_compat_verdict` gained its own, narrowly
+scoped last-resort branch that hands `format: sarif`'s own `OUTPUT_FILE`
+to `_report_query` when `_json_report_src` came back with nothing, and
+`compat_verdict`'s query gained a fallback reading that same property.
+Deliberately **not** a `_json_report_src` branch, even though a first
+version of this fix put it there: a Codex follow-up review caught that
+shape treating the bare SARIF document as a faithful abicheck-native JSON
+report for every other reader sharing that function too —
+`_can_reuse_primary_json` would `cp` it straight into `PR_JSON` for
+`cli_pr_comment` to misparse as an empty compare report, silently
+posting/overwriting the sticky PR comment with none of the real findings.
+`_json_report_src`'s contract stays exactly what it always was ("a
+faithful, unfiltered abicheck-native JSON report"); SARIF is consulted
+only from inside `_report_compat_verdict` itself, for `compat_verdict`
+alone. Every *other* query (annotations, severity_exit, coverage_where,
+blocking_categories, assurance_*) never sees the SARIF document at all —
+this extension is additive, not a behavior change for the common case
+where a full JSON sidecar already exists, and cannot regress a reader
+that never receives the SARIF path in the first place.
 
 **HTML is not fixed, and is a materially different problem, not the same
 one degree further:** HTML is not JSON. Recovering a verdict from
@@ -6223,8 +6232,8 @@ constraint noted above: even a correct HTML parser only closes this one
 combination (`format: html` + a conflicting `extra-args --write`), while
 the root constraint (`--write` cannot name two formats in one invocation)
 is itself unaddressed and would need to be fixed first for a *general*
-solution rather than one more per-format special case in `_json_report_src`.
-Not attempted here. If this combination becomes a real reported problem
+solution rather than one more per-format special case bolted onto a
+single reader function. Not attempted here. If this combination becomes a real reported problem
 rather than a review-found edge case, the honest fix is one of: (a) make
 `--write` accept multiple `FORMAT=PATH` operands (a real CLI capability
 change touching `secondary_output.py` and every command that declares the

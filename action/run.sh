@@ -2017,31 +2017,20 @@ _json_report_src() {
     # `_extra_args_write_json_path`'s own docstring for why this is needed
     # rather than falling through to "no report").
     echo "$_extra_write_json_path"
-  elif [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
-       && { [[ -z "${_output_file_pre_fp+x}" ]] \
-            || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
-    # Deliberately last, not folded into the `json`-format branch above:
-    # SARIF *is* well-formed JSON (unlike html/text/markdown), so it can
-    # answer `_report_query`'s `compat_verdict` from its own
-    # `runs[0].properties.abiVerdict` (see that query's own comment) --
-    # but only `compat_verdict`; every other query (annotations,
-    # severity_exit, coverage_where, blocking_categories, ...) reads a key
-    # SARIF's schema simply doesn't have and silently answers "" from it,
-    # same as today's "no report" case. This branch must therefore never
-    # win over PR_JSON/stdout-JSON/extra_write_json_path above when one of
-    # those full-fidelity abicheck-native sources exists -- it exists
-    # purely to close the gap where NONE of them does: `format: sarif`
-    # paired with an `extra-args --write <non-json>=...`, which both
-    # suppresses the automatic JSON sidecar (the guard a few hundred lines
-    # up) and occupies the one `--write` slot the CLI accepts per
-    # invocation, so there is no other JSON anywhere in this run's output
-    # (Codex review, PR #1016, fresh evidence). `format: html` has the
-    # identical gap and is NOT covered here -- HTML is not JSON, so
-    # answering its verdict would need real markup parsing, not a
-    # `json.load`; left as a documented, narrower limitation (`docs/
-    # contribute/known-gaps.md`).
-    echo "${OUTPUT_FILE}"
   fi
+  # Deliberately NOT a further fallback to a `format: sarif` OUTPUT_FILE
+  # here, even though SARIF is well-formed JSON (Codex review, fresh
+  # evidence, PR #1016): this function's contract is "a faithful,
+  # unfiltered abicheck-native JSON report" -- `_can_reuse_primary_json`
+  # trusts a non-empty answer here enough to `cp` it straight into
+  # `PR_JSON` for `cli_pr_comment` to parse as one, and several `_report_
+  # query` callers (severity_exit, coverage_where, annotations,
+  # blocking_categories) would silently misread SARIF's absence of their
+  # expected keys as "definitely no severity gate/no coverage gap/no
+  # annotations" rather than "cannot tell". A SARIF document answers
+  # `compat_verdict` alone; see `_report_compat_verdict`'s own SARIF
+  # fallback below, which reads `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly
+  # rather than routing through this shared function.
 }
 
 # Read one derived value out of the JSON report, whatever shape produced it.
@@ -2585,6 +2574,35 @@ _report_compat_verdict() {
   if [[ -n "$_answer" ]]; then
     echo "$_answer"
     return
+  fi
+  # `format: sarif` fallback, deliberately scoped to THIS function alone
+  # rather than a `_json_report_src` branch every other reader shares
+  # (Codex review, fresh evidence, PR #1016): a first version of this fix
+  # did widen `_json_report_src` itself, which made `_can_reuse_primary_
+  # json` treat a bare SARIF document as a faithful abicheck-native JSON
+  # report and `cp` it straight into `PR_JSON` for `cli_pr_comment` to
+  # parse -- silently posting/overwriting the sticky PR comment with an
+  # empty-looking report instead of the real findings, and letting
+  # `_severity_gate_categories`/coverage/annotation readers misread SARIF's
+  # missing keys as "definitely none" rather than "cannot tell". SARIF is
+  # only ever consulted here, for `compat_verdict` specifically, and only
+  # once `_json_report_src` already came back with nothing to read (no
+  # PR_JSON/stdout-JSON/extra_write_json_path -- see that function's own
+  # docstring for why: `format: sarif` paired with an `extra-args --write
+  # <non-json>=...` occupies the CLI's one `--write` slot and suppresses
+  # the automatic JSON sidecar, leaving no other JSON anywhere in this
+  # run's output). SARIF's own `runs[0].properties.abiVerdict` (`sarif.py`)
+  # carries the identical native verdict string `_report_query`'s
+  # `compat_verdict` case reads from ordinary abicheck JSON.
+  if [[ -z "$_src" && "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" \
+        && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+     && { [[ -z "${_output_file_pre_fp+x}" ]] \
+          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
+    _answer=$(_report_query "$OUTPUT_FILE" compat_verdict)
+    if [[ -n "$_answer" ]]; then
+      echo "$_answer"
+      return
+    fi
   fi
   # `sed -E`, not the basic-regex `\(a\|b\)` the other readers here get away
   # with not needing: BSD sed (macOS runners, which this Action supports and
