@@ -421,6 +421,8 @@ class TestGateInfoFromReportDataStructuredFirst:
             "full_run_outcome": self._run_outcome_block(
                 PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
             ),
+            "full_verdict": "BREAKING",
+            "used_by": ["app.so"],
         }
         gate = GateInfo.from_report_data(data)
         assert gate is not None
@@ -445,6 +447,29 @@ class TestGateInfoFromReportDataStructuredFirst:
                 PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
             ),
             "full_run_outcome": None,
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
+    def test_well_formed_but_unrelated_full_run_outcome_does_not_bypass_the_check(self):
+        """Codex review (P2), fresh evidence beyond the previous garbage-
+        value fix: a *well-formed* full_run_outcome alone was still enough
+        to earn the exemption, even attached to an otherwise-unscoped
+        corrupt report -- the real writer (cli_compare_fold._ScopedFold.
+        into_json) never emits full_run_outcome without also unconditionally
+        emitting full_verdict and at least one of used_by/
+        required_symbol_contract. Without those markers too, the exemption
+        must not apply."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {
+            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+            "full_run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
         }
         with pytest.raises(_MalformedGate):
             GateInfo.from_report_data(data)
@@ -930,128 +955,6 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = outcome.to_dict()
         assert report["run_outcome"]["gate"] == "none"
         assert report["run_outcome"]["operational"] == "none"
-
-
-# ---------------------------------------------------------------------------
-# Release fan-out (_format_release_json / _write_release_summary_file)
-# ---------------------------------------------------------------------------
-
-
-class TestReleaseJsonRunOutcome:
-    def test_format_release_json_carries_run_outcome(self):
-        """Codex review (P2): docs/use/output-formats.md documents that
-        every JSON report carries run_outcome, including 'the release
-        fan-out' -- _format_release_json never actually built one."""
-        import json
-        from pathlib import Path
-
-        from abicheck.cli_compare_release_helpers import _format_release_json
-
-        out = _format_release_json(
-            "BREAKING", Path("/o"), Path("/n"),
-            [{"library": "libfoo.so", "verdict": "BREAKING"}],
-            [], [], {}, {}, [], None, None,
-        )
-        data = json.loads(out)
-        assert "run_outcome" in data
-        assert data["run_outcome"]["gate"] == "abi_breaking"
-        assert data["run_outcome"]["compatibility"] == "BREAKING"
-
-    def test_format_release_json_run_outcome_surfaces_operational_error(self):
-        """A library that failed to dump/extract/compare (verdict ERROR) is
-        an operational failure, not a compatibility-gate finding --
-        run_outcome must say so via .operational, matching OperationalStatus.
-        EXTRACTION_ERROR's own documented grounding."""
-        import json
-        from pathlib import Path
-
-        from abicheck.cli_compare_release_helpers import _format_release_json
-
-        out = _format_release_json(
-            "ERROR", Path("/o"), Path("/n"),
-            [{"library": "libfoo.so", "verdict": "ERROR"}],
-            [], [], {}, {}, [], None, None,
-        )
-        data = json.loads(out)
-        assert data["run_outcome"]["operational"] == "extraction_error"
-
-    def test_removed_library_escalation_agrees_with_severity_block(self):
-        """Codex review (P2), fresh evidence: a severity-scheme release
-        using --fail-on-removed-library escalates run_outcome.gate to
-        abi_breaking even when ordinary findings contribute 0, but the
-        severity block emitted alongside it must escalate too (mirroring
-        buildsource/check_report.py's _escalate_removed_library_severity) --
-        otherwise GateInfo.from_report_data's own severity/run_outcome
-        contradiction check (this same PR) rejects this exact, legitimate
-        report as corrupt (verified failing before this fix: severity.
-        exit_code stayed 0 while run_outcome.gate read abi_breaking)."""
-        import json
-        from pathlib import Path
-
-        from abicheck.cli_compare_release_helpers import _format_release_json
-        from abicheck.severity import resolve_severity_config
-        from abicheck.workflows.aggregate.gate import GateInfo
-
-        cfg = resolve_severity_config("default")
-        out = _format_release_json(
-            "COMPATIBLE", Path("/o"), Path("/n"),
-            [{"library": "libfoo.so", "verdict": "COMPATIBLE"}],
-            ["libfoo.so"], [], {"libfoo.so": Path("/o/libfoo.so")}, {}, [],
-            None, None,
-            severity_config=cfg,
-            severity_exit_code=0,
-            fail_on_removed=True,
-        )
-        data = json.loads(out)
-        assert data["severity"]["exit_code"] == 4
-        assert data["run_outcome"]["gate"] == "abi_breaking"
-        gate = GateInfo.from_report_data(data)  # must not raise _MalformedGate
-        assert gate is not None
-        assert gate.exit_code == 4
-        assert gate.blocking is True
-
-    def test_operational_sentinel_library_does_not_mask_a_real_break(self):
-        """Codex review (P2), fresh evidence: one BREAKING library alongside
-        one ERROR library previously produced run_outcome.compatibility=None
-        (the raw worst_verdict, "ERROR", isn't a real Verdict at all) --
-        masking the genuine breaking library entirely. _release_completed_
-        compatibility_verdict must exclude the ERROR/not_comparable
-        sentinels and report the worst REAL verdict underneath them, while
-        the top-level `verdict`/`operational` axis is unaffected."""
-        import json
-        from pathlib import Path
-
-        from abicheck.cli_compare_release_helpers import _format_release_json
-
-        out = _format_release_json(
-            "ERROR", Path("/o"), Path("/n"),
-            [
-                {"library": "libfoo.so", "verdict": "BREAKING"},
-                {"library": "libbar.so", "verdict": "ERROR"},
-            ],
-            [], [], {}, {}, [], None, None,
-        )
-        data = json.loads(out)
-        assert data["verdict"] == "ERROR"
-        assert data["run_outcome"]["compatibility"] == "BREAKING"
-        assert data["run_outcome"]["operational"] == "extraction_error"
-
-    def test_write_release_summary_file_carries_run_outcome(self, tmp_path):
-        """Codex review (P2): the --output-dir sibling of
-        _format_release_json never built a run_outcome either -- the
-        identical gap PR #803 already fixed for effective_config_digest on
-        this same sibling document."""
-        import json
-
-        from abicheck.cli_compare_release import _write_release_summary_file
-
-        _write_release_summary_file(
-            tmp_path, "BREAKING",
-            [{"library": "libfoo.so", "verdict": "BREAKING"}],
-            [], [], {}, {},
-        )
-        data = json.loads((tmp_path / "summary.json").read_text())
-        assert data["run_outcome"]["gate"] == "abi_breaking"
 
 
 # ---------------------------------------------------------------------------

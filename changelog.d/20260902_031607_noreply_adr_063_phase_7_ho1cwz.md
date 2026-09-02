@@ -182,6 +182,23 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   declared it — unlike the analogous `full_severity`, which it mirrors.
   Also registered `run_outcome`'s fact sources under the existing
   `output-formats` documentation topic (`docs/_meta/topics.yaml`).
+- **The scoped-report exemption now requires the complete scoped shape, not
+  just a well-formed `full_run_outcome`.** A well-formed-but-unrelated
+  `full_run_outcome` value alone still earned the exemption — the real
+  writer (`cli_compare_fold._ScopedFold.into_json`) never emits it without
+  also unconditionally emitting `full_verdict` and at least one of
+  `used_by`/`required_symbol_contract`. `_has_valid_full_run_outcome` now
+  requires all three markers together.
+- **The release fan-out's `run_outcome.compatibility` no longer reports the
+  dishonest `"NO_CHANGE"` floor when nothing was actually compared.** When
+  every library result is `ERROR`/`not_comparable` and no bundle/matrix
+  comparison ran either, `_release_completed_compatibility_verdict`'s own
+  `"NO_CHANGE"` seed value previously leaked through unmodified, falsely
+  claiming a clean completed comparison. It now takes an explicit
+  `release_global_ran` flag and returns `None` in that case —
+  `_release_global_verdict`'s own floor default is indistinguishable from a
+  genuine no-change result by string value alone, so that flag has to be
+  passed explicitly rather than inferred from the verdict string.
 
 ### Changed
 

@@ -85,8 +85,11 @@ _RELEASE_OPERATIONAL_SENTINELS = frozenset({"ERROR", "not_comparable"})
 
 
 def _release_completed_compatibility_verdict(
-    library_results: list[dict[str, object]], release_global_verdict: str
-) -> str:
+    library_results: list[dict[str, object]],
+    release_global_verdict: str,
+    *,
+    release_global_ran: bool,
+) -> str | None:
     """The worst real `Verdict` among *library_results* + *release_global_
     verdict*, with the two operational sentinels excluded -- for
     ``run_outcome.compatibility``, never for the release's own reported
@@ -97,18 +100,35 @@ def _release_completed_compatibility_verdict(
     itself (correctly) reports `"ERROR"` -- the real compatibility result
     is not lost just because a different library's operational failure
     dominates the release-level rollup.
+
+    Returns ``None`` -- never the floor ``"NO_CHANGE"`` -- when no real
+    compatibility result was actually observed at all (every library
+    result is one of the two operational sentinels, and no bundle/probe-
+    matrix comparison ran either): `run_outcome.compatibility` must stay
+    unknown, not falsely claim a clean completed comparison (Codex review,
+    fresh evidence). *release_global_ran* -- whether a bundle or matrix
+    comparison actually ran -- must be passed explicitly rather than
+    inferred from *release_global_verdict* alone: `_release_global_
+    verdict`'s own floor default is `"NO_CHANGE"`, indistinguishable from a
+    real completed no-change bundle/matrix result by string value alone.
     """
-    worst = "NO_CHANGE"
+    worst: str | None = None
     for entry in library_results:
         v = str(entry.get("verdict", "NO_CHANGE"))
         if v in _RELEASE_OPERATIONAL_SENTINELS:
             continue
-        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+        if worst is None or _RELEASE_VERDICT_ORDER.get(
+            v, 0
+        ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
             worst = v
     if (
-        release_global_verdict not in _RELEASE_OPERATIONAL_SENTINELS
-        and _RELEASE_VERDICT_ORDER.get(release_global_verdict, 0)
-        > _RELEASE_VERDICT_ORDER.get(worst, 0)
+        release_global_ran
+        and release_global_verdict not in _RELEASE_OPERATIONAL_SENTINELS
+        and (
+            worst is None
+            or _RELEASE_VERDICT_ORDER.get(release_global_verdict, 0)
+            > _RELEASE_VERDICT_ORDER.get(worst, 0)
+        )
     ):
         worst = release_global_verdict
     return worst
@@ -1096,7 +1116,13 @@ def _format_release_json(
         "warnings": warning_msgs,
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(
-            _release_completed_compatibility_verdict(library_results, release_global_verdict),
+            _release_completed_compatibility_verdict(
+                library_results,
+                release_global_verdict,
+                release_global_ran=(
+                    bundle_result is not None or matrix_result is not None
+                ),
+            ),
             exit_dict,
         ),
     }

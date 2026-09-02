@@ -147,7 +147,11 @@ def _write_release_summary_file(
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(
             _release_completed_compatibility_verdict(
-                library_results, release_global_verdict
+                library_results,
+                release_global_verdict,
+                release_global_ran=(
+                    bundle_result is not None or matrix_result is not None
+                ),
             ),
             exit_dict,
         ),

@@ -66,24 +66,38 @@ def _run_outcome_gate_and_operational(
 
 
 def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
-    """Whether *data* carries a well-formed ``full_run_outcome`` block.
+    """Whether *data* has the complete shape a genuine scoped
+    (``--used-by``/``--required-symbol``) report always carries, earning the
+    ``run_outcome``/``severity`` contradiction exemption in
+    :func:`_fold_top_level_run_outcome`.
 
-    The scoped-report exemption in :func:`_fold_top_level_run_outcome` must
-    be earned by the report's actual shape, not merely by the presence of a
-    same-named key (Codex review, fresh evidence): the original check was
-    ``"full_run_outcome" in data``, so a corrupted or partially rewritten
-    *unscoped* report could pair a genuinely contradictory ``severity``/
-    ``run_outcome`` pair with an arbitrary ``full_run_outcome: null`` (or any
-    other garbage value) and have the authoritative cross-check silently
-    disabled. ``cli_compare_fold._swap_in_scoped_run_outcome`` only ever
-    stamps ``full_run_outcome`` as a copy of the original, well-formed
-    ``run_outcome`` dict, so requiring it to parse via
-    :meth:`~abicheck.policy.outcome.RunOutcome.from_dict` here restores that
-    it can only ever legitimately be present in exactly that scoped shape.
+    Two rounds of Codex review, both fresh evidence, on the same exemption:
+
+    1. The original check was bare key presence (``"full_run_outcome" in
+       data``), so a corrupted or partially rewritten *unscoped* report
+       could pair a genuinely contradictory ``severity``/``run_outcome``
+       pair with an arbitrary ``full_run_outcome: null`` (or any other
+       garbage value) and have the cross-check silently disabled. Fixed by
+       requiring ``full_run_outcome`` to itself parse via
+       :meth:`~abicheck.policy.outcome.RunOutcome.from_dict`.
+    2. That alone was still not enough: a *well-formed but unrelated*
+       ``full_run_outcome`` value, added to an otherwise-unscoped corrupt
+       report, still earned the exemption -- the real writer
+       (``cli_compare_fold._ScopedFold.into_json``) never emits
+       ``full_run_outcome`` without *also* unconditionally emitting
+       ``full_verdict`` (set on every scoped fold, regardless of which flag
+       triggered it) and at least one of ``used_by``/
+       ``required_symbol_contract`` (one of the two is always set --
+       ``_fold_scoped_compat_into_text`` returns unmodified text unless at
+       least one of ``result.used_by``/``result.required_symbols`` is
+       non-``None``). Requiring the same three markers together is what a
+       corrupt report cannot forge without also being a genuine scoped one.
     """
     from abicheck.policy.outcome import RunOutcome
 
-    if "full_run_outcome" not in data:
+    if "full_run_outcome" not in data or "full_verdict" not in data:
+        return False
+    if "used_by" not in data and "required_symbol_contract" not in data:
         return False
     return RunOutcome.from_dict(data.get("full_run_outcome")) is not None
 
