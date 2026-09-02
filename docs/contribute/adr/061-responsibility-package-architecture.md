@@ -809,6 +809,34 @@ which is deliberately short:
    (D10): `tests/test_html_report_demangle.py`'s redundant-`<abbr>` guard
    monkeypatched `html_report._demangle_symbol`, which is now an alias — it
    patches the implementation owner, `report.render_html`, instead.
+
+   **One review round on the split's own PR is worth recording, because it
+   names a failure mode this phase will hit again on the next format.** A
+   first revision moved the section builders but left three per-change
+   *registry lookups* inside the renderers — `report_classifications.
+   category`/`kind_str`/`severity` and `checker_policy.impact_for` — on the
+   reading that `render_markdown.py`'s own `_format_change_md` sets that
+   precedent. Codex correctly held that against this package's stated
+   contract ("a renderer ... decides nothing") those are decisions, not
+   formatting: each is a lookup into a registry whose answer a report
+   consumes, so leaving them render-side keeps real report/policy
+   classification on the wrong side of the boundary. They moved into a
+   `ChangeRowFacts` struct resolved by `html_report.compute_change_rows`
+   (keyed by `id(change)`, the same not-hashable shape
+   `report/finding.py`'s `findings_by_change_id` uses), and
+   `render_html.py` now imports no classification module at all. The
+   `Change` objects themselves deliberately stayed unformatted on the
+   render side — that part of `render_markdown.py`'s precedent does hold,
+   and only the derived lookups were hoisted.
+
+   The lesson generalises past this one fix: **the rendered output is
+   byte-identical either way**, so neither the golden suite nor any
+   assertion on a rendered string could have caught it, and none did. The
+   import list is the only thing that changes, which is why the guard added
+   for it (`test_render_html_imports_no_decision_making_module`) is an AST
+   scan of the module's own imports rather than another output assertion —
+   verified to report `checker_policy`/`report_classifications` against the
+   pre-fix module and nothing against the fixed one.
 2. *Items 4 and 5 — decisions and post-render mutation.* Item 4's **gate
    decision** half is now closed: `abicheck.policy.gate_decision.
    gate_decision_for_result(result, severity_config)` is the one call site

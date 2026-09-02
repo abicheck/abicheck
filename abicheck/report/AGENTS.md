@@ -51,6 +51,18 @@ sequence and returns a small frozen struct of plain values — never a
 pre-built string or markup fragment — and this package holds the matching
 `render_*` that formats it and decides nothing. A section that does not
 exist is a `None` from `compute_*`, which is not the same as an empty one.
+
+"Decides nothing" includes *registry lookups*, which is the part that is
+easy to get wrong because the rendered output is identical either way: a
+per-change `category()`/`severity()`/`impact_for()`/`kind_str()` call is a
+decision the compute half owes the renderer, not a formatting choice, and
+`html_report.py`'s `compute_change_rows` -> `ChangeRowFacts` is the shape to
+copy for it. `tests/unit/report/test_render_html.py`'s
+`test_render_html_imports_no_decision_making_module` is the structural
+guard: `render_html.py` must not import `report_classifications`,
+`checker_policy`, `severity`, `reclassify` or friends at all. An assertion
+on rendered strings cannot catch this class — the import list is what
+changes.
 Filtering that *looks* like formatting stays compute-side whenever it is
 really a report decision (which summary rows are non-empty; which reclassify
 rules are still active). Both modules keep every pre-split name as a thin

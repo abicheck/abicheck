@@ -30,11 +30,14 @@ owns for the other formats: ``compute_gate_card`` must *project* the shared
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import re
+from pathlib import Path
 
 import pytest
 
+import abicheck.report.render_html
 from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
 from abicheck.checker_policy import Confidence
 from abicheck.contract_relevance_types import (
@@ -43,6 +46,7 @@ from abicheck.contract_relevance_types import (
     ContractRelevance,
 )
 from abicheck.html_report import (
+    compute_change_rows,
     compute_confidence,
     compute_file_metadata,
     compute_gate_card,
@@ -179,6 +183,72 @@ def _string_fields(struct: object) -> list[tuple[str, str]]:
 
     walk(type(struct).__name__, struct)
     return out
+
+
+# ---------------------------------------------------------------------------
+# 0. The render half imports no decision-making module
+# ---------------------------------------------------------------------------
+
+_DECISION_MODULES = {
+    "checker_policy",
+    "reclassify",
+    "report_classifications",
+    "severity",
+    "policy",
+    "checker",
+    "contract_gating",
+    "checker_types",
+}
+
+
+def test_render_html_imports_no_decision_making_module() -> None:
+    """The structural half of "a renderer decides nothing".
+
+    Every property below checks the *output* of some function; this one checks
+    what the module is even able to reach. A Codex review on the split's own
+    PR found `render_changes_table` calling `report_classifications.category`
+    and `checker_policy.impact_for` mid-render, and
+    `render_compat_changes_table` calling `severity` -- registry lookups, so
+    each is a decision the compute half owes the renderer, not a formatting
+    choice. Those moved into `ChangeRowFacts`. Asserting on rendered strings
+    would not have caught it and would not catch the next one, because the
+    output is identical either way; the import list is what actually changes.
+    """
+    source = Path(abicheck.report.render_html.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    reached: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            reached.add(node.module.split(".")[-1])
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                reached.add(alias.name.split(".")[-1])
+    offenders = sorted(reached & _DECISION_MODULES)
+    assert offenders == [], (
+        f"report/render_html.py reaches {offenders} — a renderer must consume "
+        "already-decided facts (see ChangeRowFacts / the compute_* half in "
+        "html_report.py), not resolve them itself"
+    )
+
+
+def test_change_row_facts_carry_the_lookups_the_renderer_no_longer_makes() -> None:
+    """The other half of the same finding: hoisting the lookups is only a fix
+    if the values actually arrive. Checked against the registries directly,
+    not against the renderer's own former call — the oracle must not be the
+    implementation."""
+    from abicheck.checker_policy import impact_for
+    from abicheck.report_classifications import category, kind_str, severity
+
+    changes = list(_result().changes)
+    facts = compute_change_rows(changes)
+    assert len(facts) == len(changes)
+    for ch in changes:
+        row = facts[id(ch)]
+        ks = kind_str(ch)
+        assert row.kind == ks
+        assert row.category == category(ks)
+        assert row.severity == severity(ks)
+        assert row.impact == (impact_for(ch.kind) or "")
 
 
 # ---------------------------------------------------------------------------

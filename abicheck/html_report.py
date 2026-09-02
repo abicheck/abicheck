@@ -30,11 +30,11 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 from __future__ import annotations
 
 import html
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .checker_policy import HasKind
+from .checker_policy import HasKind, impact_for
 from .demangle import prewarm_demangle_batch
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
@@ -59,6 +59,8 @@ from .policy.gate_decision import gate_decision_for_result
 # import cycle) -- every existing caller and its direct test coverage
 # resolves through these aliases unchanged.
 from .report.render_html import (
+    ChangeRowFacts,
+    ChangeRowFactsById,
     ConfidenceData,
     FileMetadataTable,
     GateCardData,
@@ -109,9 +111,46 @@ if TYPE_CHECKING:
 # and mypy read them as deliberate re-exports rather than unused imports.
 _abbr_symbol_text = abbr_symbol_text
 _symbol_cell = symbol_cell
-_changes_table = render_changes_table
-_compat_changes_table = render_compat_changes_table
 _verdict_icon = verdict_icon
+
+
+def compute_change_rows(changes: Iterable[object]) -> ChangeRowFactsById:
+    """Resolve the per-change *decisions* a table cell needs -- kind string,
+    category, impact text, ABICC severity band -- one entry per change.
+
+    Every one is a registry lookup rather than a formatting choice, so it
+    belongs on this side of the split; hoisting them here is what lets
+    `report/render_html.py` import no report- or policy-classification
+    module at all (Codex review on the split's own PR). Keyed by
+    `id(change)` because `Change` is not hashable, the same shape
+    `report.finding.findings_by_change_id` uses, and equally never persisted
+    past the render that built it.
+    """
+    facts: ChangeRowFactsById = {}
+    for ch in changes:
+        ks = kind_str(ch)
+        kind = getattr(ch, "kind", None)
+        facts[id(ch)] = ChangeRowFacts(
+            kind=ks,
+            category=category(ks),
+            impact=(impact_for(kind) or "") if kind else "",
+            severity=severity(ks),
+        )
+    return facts
+
+
+def _changes_table(changes: list[object], demangle: bool = True) -> str:
+    """Native changes table. Kept at its original signature -- `appcompat_html.py`
+    imports it, and it has its own direct test coverage -- so the per-change
+    fact resolution happens here rather than being pushed onto every caller."""
+    return render_changes_table(changes, compute_change_rows(changes), demangle)
+
+
+def _compat_changes_table(items: list[object], show_severity: bool = False) -> str:
+    """ABICC-style changes table, same arrangement as `_changes_table` above."""
+    return render_compat_changes_table(
+        items, compute_change_rows(items), show_severity
+    )
 
 
 def _change_bucket(

@@ -49,10 +49,8 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
-from ..checker_policy import impact_for
 from ..demangle import demangle as _demangle_symbol, demangle_text
 from ..html_template import _VERDICT_STYLE
-from ..report_classifications import category, kind_str, severity
 
 
 def verdict_icon(verdict: str) -> str:
@@ -94,14 +92,52 @@ def symbol_cell(change: object, demangle: bool = True) -> str:
     return abbr_symbol_text(getattr(change, "symbol", "") or "", demangle)
 
 
-def render_changes_table(changes: list[object], demangle: bool = True) -> str:
+@dataclass(frozen=True)
+class ChangeRowFacts:
+    """The per-change facts a table cell needs that are *decisions*, not
+    formatting: which kind string the change carries, which category that
+    kind belongs to, its one-line impact text, and its ABICC severity band.
+
+    Each is a registry lookup (`report_classifications.kind_str`/`category`/
+    `severity`, `checker_policy.impact_for`), so resolving them here rather
+    than mid-render is what keeps this module free of any report- or
+    policy-classification import at all -- a Codex review on the split's own
+    PR correctly held that calling those lookups from inside a ``render_*``
+    left real decisions on the render side, against this package's stated
+    contract that a renderer "decides nothing".
+
+    The ``Change`` objects themselves still reach the renderer unformatted,
+    as ``render_markdown.py`` established: a section whose whole job is
+    "list some changes" holds the changes, not a pre-built string. Only the
+    derived lookups are hoisted.
+    """
+
+    kind: str
+    category: str
+    impact: str
+    severity: str
+
+
+#: ``{id(change): ChangeRowFacts}`` for one render. Keyed by identity rather
+#: than by the change itself because ``Change`` is not hashable -- the same
+#: reason ``report/finding.py``'s ``findings_by_change_id`` is, and like it,
+#: never persisted past the render that built it.
+ChangeRowFactsById = dict[int, ChangeRowFacts]
+
+
+def render_changes_table(
+    changes: list[object],
+    facts: ChangeRowFactsById,
+    demangle: bool = True,
+) -> str:
     if not changes:
         return "<p class='empty'>No changes in this category.</p>"
 
     rows = []
     for ch in changes:
-        ks = kind_str(ch)
-        cat = category(ks)
+        row = facts[id(ch)]
+        ks = row.kind
+        cat = row.category
         raw_desc = getattr(ch, "description", "") or ""
         desc = html.escape(demangle_text(raw_desc) if demangle else raw_desc)
         old_val = abbr_symbol_text(str(getattr(ch, "old_value", "") or ""), demangle)
@@ -112,14 +148,11 @@ def render_changes_table(changes: list[object], demangle: bool = True) -> str:
 
         # Build extended description with impact + affected + location
         desc_parts = [desc]
-        kind = getattr(ch, "kind", None)
-        if kind:
-            impact = impact_for(kind)
-            if impact:
-                desc_parts.append(
-                    f"<div style='font-size:0.85em; color:#666; margin-top:3px;'>"
-                    f"💡 {html.escape(impact)}</div>"
-                )
+        if row.impact:
+            desc_parts.append(
+                f"<div style='font-size:0.85em; color:#666; margin-top:3px;'>"
+                f"💡 {html.escape(row.impact)}</div>"
+            )
         if affected:
             names = ", ".join(abbr_symbol_text(s, demangle) for s in affected[:5])
             suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
@@ -198,7 +231,9 @@ def render_changes_table(changes: list[object], demangle: bool = True) -> str:
 
 
 def render_compat_changes_table(
-    items: list[object], show_severity: bool = False
+    items: list[object],
+    facts: ChangeRowFactsById,
+    show_severity: bool = False,
 ) -> str:
     """Render a changes table in ABICC style."""
     if not items:
@@ -206,12 +241,13 @@ def render_compat_changes_table(
     h = html.escape
     rows = []
     for ch in items:
-        ks = kind_str(ch)
+        row = facts[id(ch)]
+        ks = row.kind
         sym = h(getattr(ch, "symbol", "") or "")
         desc = h(getattr(ch, "description", "") or "")
         old_val = h(str(getattr(ch, "old_value", "") or ""))
         new_val = h(str(getattr(ch, "new_value", "") or ""))
-        sev_cell = f"<td>{severity(ks)}</td>" if show_severity else ""
+        sev_cell = f"<td>{row.severity}</td>" if show_severity else ""
         # Cross-detector correlation: this ABICC-compatible table has its own
         # separate rendering from render_changes_table above, needing the same
         # note (Codex review, fresh evidence).
