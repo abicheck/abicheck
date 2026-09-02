@@ -46,6 +46,7 @@ from .storage.package import InMemoryObjectStore, PackageManifest
 
 __all__ = [
     "is_project_snapshot_package_dir",
+    "package_declares_full_dependency_scope",
     "read_legacy_snapshot_document",
     "write_legacy_snapshot_package",
 ]
@@ -79,6 +80,28 @@ def is_project_snapshot_package_dir(path: str | Path) -> bool:
     except (SnapshotError, OSError, ValueError, TypeError):
         return False
     return True
+
+
+def package_declares_full_dependency_scope(path: str | Path) -> bool:
+    """Whether the `ProjectSnapshot` package directory at *path* was dumped
+    with `dependency_scope="full"` (`dump --include-system-declarations`).
+
+    A cheap, best-effort read of the already-persisted document -- used by
+    `scan_engine._scan_candidate_include_dependencies` so a `scan --against`
+    given a package directory (rather than a JSON file, which that function
+    handles by content-sniffing) matches the baseline's own scope instead of
+    silently defaulting to filtered and hitting the comparability gate's
+    `NOT_COMPARABLE` rejection (Codex review). Returns `False` -- never
+    raises -- for anything that isn't a readable, "full"-tagged package.
+    """
+    path = Path(path)
+    if not is_project_snapshot_package_dir(path):
+        return False
+    try:
+        document = read_legacy_snapshot_document(path)
+    except Exception:
+        return False
+    return bool(document.get("dependency_scope") == "full")
 
 
 def write_legacy_snapshot_package(

@@ -512,6 +512,59 @@ class TestScanCandidateIncludeDependencies:
         baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
         assert _scan_candidate_include_dependencies(baseline) is True
 
+    def test_project_snapshot_package_dir_tagged_full_matches_full(self, tmp_path):
+        """ADR-062/063 storage-v2 (Codex review): a `--against` operand can
+        also be a `ProjectSnapshot` package *directory* (`dump
+        --project-snapshot-dir --include-system-declarations`), not just a
+        JSON file. Every branch above this test opens `baseline` as a file,
+        so a directory used to fall through -- silently defaulting to
+        filtered -- instead of being read the same way a JSON baseline is."""
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0.0", dependency_scope="full"
+        )
+        root = tmp_path / "pkg"
+        write_legacy_snapshot_package(
+            snapshot_to_dict(snap),
+            root,
+            artifact_id=snap.library,
+            max_known_schema_version=SCHEMA_VERSION,
+        )
+        assert _scan_candidate_include_dependencies(root) is True
+
+    def test_project_snapshot_package_dir_tagged_filtered_stays_filtered(
+        self, tmp_path
+    ):
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0.0", dependency_scope="filtered"
+        )
+        root = tmp_path / "pkg"
+        write_legacy_snapshot_package(
+            snapshot_to_dict(snap),
+            root,
+            artifact_id=snap.library,
+            max_known_schema_version=SCHEMA_VERSION,
+        )
+        assert _scan_candidate_include_dependencies(root) is False
+
+    def test_plain_directory_stays_filtered(self, tmp_path):
+        """A directory that is not a real ProjectSnapshot package (no
+        manifest.json) must fall back to the filtered default, not raise."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        plain_dir = tmp_path / "not_a_package"
+        plain_dir.mkdir()
+        assert _scan_candidate_include_dependencies(plain_dir) is False
+
     def test_json_baseline_tagged_filtered_stays_filtered(self, tmp_path):
         from abicheck.scan_engine import _scan_candidate_include_dependencies
 

@@ -453,38 +453,38 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     -- correct for the single most common case: no baseline, a native-binary
     baseline (which now resolves filtered too), or a JSON baseline that is
     itself filtered/untagged. Only a JSON baseline explicitly dumped with
-    ``dump --include-system-declarations`` (tagged ``"full"``) needs the candidate
-    to go unfiltered too, else the comparability gate hard-fails that
-    legitimate, if less common, inverse workflow (Codex review, fresh
-    evidence) -- and ``scan`` has no ``--include-system-declarations`` flag of its
-    own to let a caller request it directly. A cheap, best-effort JSON peek
-    (not a full ``resolve_input``/dump) so this never triggers expensive
-    work merely to decide a default; any failure to read/parse falls back to
-    the filtered default.
+    ``dump --include-system-declarations`` (tagged ``"full"``) needs the
+    candidate to go unfiltered too, else the comparability gate hard-fails
+    that legitimate, if less common, inverse workflow (Codex review, fresh
+    evidence) -- and ``scan`` has no such flag of its own to let a caller
+    request it directly. A cheap, best-effort peek (not a full
+    ``resolve_input``/dump); any failure to read/parse falls back to the
+    filtered default.
 
     Deliberately does NOT pre-filter on :func:`cli_scan_baseline.
     _baseline_is_native_library` before attempting the JSON parse (Codex
-    review, fresh evidence): that helper's own filename-suffix fallback
-    (``".so" in name``, ...) only applies once magic-byte sniffing finds no
-    recognized binary format -- exactly the case for a real JSON snapshot
-    saved under a library-like name (e.g. a baseline written to
-    ``libfoo.so.json`` and then renamed, or just handed a ``libfoo.so``
-    path by a caller's own naming convention). Calling it first would skip
-    the peek entirely for that baseline, silently keeping the candidate
-    filtered against a "full"-tagged snapshot.
+    review, fresh evidence): that helper's filename-suffix fallback only
+    applies once magic-byte sniffing finds no recognized binary format --
+    exactly the case for a real JSON snapshot saved under a library-like
+    name (e.g. ``libfoo.so.json`` renamed). Calling it first would skip the
+    peek, silently keeping the candidate filtered against a "full" snapshot.
 
     Content-sniffs the first 4 bytes via :func:`binary_utils.
     detect_binary_format` first, though (a real magic-byte check, not the
-    filename-fallback heuristic above) -- a real native binary's raw bytes
-    would still fail to decode/parse as JSON either way, but only after
-    ``json.load`` reads and decodes the *entire* file first; for a large
-    native baseline that's a real, avoidable memory/I/O cost merely to
-    choose a default (Codex review, fresh evidence). A recognized magic
-    number short-circuits straight to the filtered default without ever
-    opening the file as text.
+    filename-fallback heuristic above) -- a real native binary would still
+    fail to parse as JSON either way, but only after ``json.load`` reads and
+    decodes the *entire* file first, a real avoidable cost for a large
+    native baseline (Codex review, fresh evidence). A recognized magic
+    number short-circuits straight to the filtered default without opening
+    the file as text.
     """
     if baseline is None:
         return False
+    if baseline.is_dir():
+        # A ProjectSnapshot package dir (Codex review: was silently `False`).
+        from .project_snapshot_legacy import package_declares_full_dependency_scope
+
+        return package_declares_full_dependency_scope(baseline)
     from .binary_utils import detect_binary_format
 
     if detect_binary_format(baseline) is not None:
