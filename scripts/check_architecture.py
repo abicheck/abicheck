@@ -53,9 +53,17 @@ DEBT_FIELDS = frozenset(
 # `policy -> compare` layer edge already permits (`finding_identity.py` is
 # classified into the `compare` layer, which `policy` may otherwise import),
 # so the general dependency-direction check below would not catch a
-# regression here on its own. Checked directly against this one file's own
+# regression here on its own. Checked directly against each leaf file's own
 # imports, not modeled as a layer.
-_SELECTOR_LEAF_PATH = "abicheck/policy/selectors.py"
+#
+# Covers `selectors_namespace_glob.py` too, not just `selectors.py` itself
+# (Codex review, PR #1002): `selectors.py` imports from that sibling, so a
+# denylisted import added there would taint `selectors.py` transitively
+# while passing a check scoped to `selectors.py`'s own source text alone.
+_SELECTOR_LEAF_PATHS: tuple[str, ...] = (
+    "abicheck/policy/selectors.py",
+    "abicheck/policy/selectors_namespace_glob.py",
+)
 _SELECTOR_LEAF_DENYLIST: tuple[str, ...] = (
     "abicheck.policy_file",
     "abicheck.checker_types",
@@ -406,30 +414,33 @@ def _imports(
 
 
 def _check_selector_leaf_purity(root: Path, findings: list[Finding]) -> None:
-    """ADR-063 D10: ``abicheck/policy/selectors.py`` must import nothing from
-    ``_SELECTOR_LEAF_DENYLIST`` -- see that constant's own comment for why.
+    """ADR-063 D10: every path in ``_SELECTOR_LEAF_PATHS`` must import
+    nothing from ``_SELECTOR_LEAF_DENYLIST`` -- see that constant's own
+    comment for why, and ``_SELECTOR_LEAF_PATHS``' own comment for why both
+    files are covered, not just ``selectors.py``.
 
-    A no-op when the file doesn't exist (e.g. a miniature test tree that
-    doesn't build one), so this check stays silent everywhere except this
-    one leaf module and any fixture that deliberately creates it.
+    A no-op for any path that doesn't exist (e.g. a miniature test tree that
+    only builds one of the two), so this check stays silent everywhere
+    except these leaf modules and any fixture that deliberately creates one.
     """
-    path = root / _SELECTOR_LEAF_PATH
-    if not path.is_file():
-        return
-    module = _module_name(root, path)
-    for lineno, target in _imports(path, module, findings):
-        if target in _SELECTOR_LEAF_DENYLIST or any(
-            target.startswith(name + ".") for name in _SELECTOR_LEAF_DENYLIST
-        ):
-            findings.append(
-                Finding(
-                    "selector-leaf-purity",
-                    f"{path.relative_to(root)}:{lineno}: must not import "
-                    f"{target!r} -- ADR-063 D10 leaf-module contract "
-                    f"({_SELECTOR_LEAF_PATH} may not depend on any of "
-                    f"{', '.join(_SELECTOR_LEAF_DENYLIST)})",
+    for leaf_path in _SELECTOR_LEAF_PATHS:
+        path = root / leaf_path
+        if not path.is_file():
+            continue
+        module = _module_name(root, path)
+        for lineno, target in _imports(path, module, findings):
+            if target in _SELECTOR_LEAF_DENYLIST or any(
+                target.startswith(name + ".") for name in _SELECTOR_LEAF_DENYLIST
+            ):
+                findings.append(
+                    Finding(
+                        "selector-leaf-purity",
+                        f"{path.relative_to(root)}:{lineno}: must not import "
+                        f"{target!r} -- ADR-063 D10 leaf-module contract "
+                        f"({leaf_path} may not depend on any of "
+                        f"{', '.join(_SELECTOR_LEAF_DENYLIST)})",
+                    )
                 )
-            )
 
 
 def _layer_for(

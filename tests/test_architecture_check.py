@@ -816,3 +816,29 @@ def test_selector_leaf_purity_is_a_noop_when_the_file_does_not_exist(
     root = _tree(tmp_path)
 
     assert "selector-leaf-purity" not in _rules(root)
+
+
+def test_selector_leaf_purity_covers_the_namespace_glob_sibling_too(
+    tmp_path: Path,
+) -> None:
+    """A denylisted import added to ``selectors_namespace_glob.py`` -- not
+    just ``selectors.py`` itself -- must fail this gate too (Codex review,
+    PR #1002): ``selectors.py`` imports from that sibling, so a regression
+    there taints ``selectors.py`` transitively while a check scoped to
+    ``selectors.py``'s own source text alone would miss it."""
+    root = _tree(tmp_path)
+    _add_package(root, "policy", "")
+    _write(root / "abicheck/policy/selectors.py", "")
+    _write(
+        root / "abicheck/policy/selectors_namespace_glob.py",
+        "from abicheck.reclassify import ReclassifyRule\n",
+    )
+
+    findings = check_repository(root)
+    selector_findings = [f for f in findings if f.rule == "selector-leaf-purity"]
+
+    assert selector_findings
+    assert any(
+        "selectors_namespace_glob.py" in f.message and "abicheck.reclassify" in f.message
+        for f in selector_findings
+    )
