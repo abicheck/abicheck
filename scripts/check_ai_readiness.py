@@ -2281,14 +2281,40 @@ _PROJECT_SNAPSHOT_DTO_FILES = (
 )
 
 
+def _imported_asdict_aliases(tree: ast.Module) -> set[str]:
+    """Every local bare name that resolves to `dataclasses.asdict`.
+
+    A plain `func.id == "asdict"` check only catches the literal spelling —
+    `from dataclasses import asdict as encode` binds the same function
+    under a name the check never looks for, so `encode(dto)` invoked the
+    forbidden helper without tripping it (Codex review). This resolves that
+    one hop: every `ImportFrom(module="dataclasses")` alias whose real name
+    is `asdict` contributes its bound local name (`asname` if given, else
+    `asdict` itself). Attribute-form calls (`dataclasses.asdict(...)`,
+    `dc.asdict(...)`) are unaffected by this function — the caller already
+    matches any `.asdict` attribute access regardless of which name the
+    module itself is bound to, so an aliased *module* import needs no
+    separate resolution here.
+    """
+    aliases: set[str] = {"asdict"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module != "dataclasses":
+            continue
+        for alias in node.names:
+            if alias.name == "asdict":
+                aliases.add(alias.asname or alias.name)
+    return aliases
+
+
 def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
     """ADR-063 Phase 8's D8 constraint, made mechanical: zero
-    `dataclasses.asdict`/`asdict` call sites in any `ProjectSnapshot`-DTO
-    file (see `_PROJECT_SNAPSHOT_DTO_FILES`). A first draft of one of these
-    files reaching for `asdict()` as a shortcut is exactly the "second,
-    unreviewed mirror deserializer" this phase's own text names as the
-    defect the whole DTO layer exists to avoid — this check exists so that
-    mistake fails CI instead of surviving review.
+    `dataclasses.asdict`/`asdict` call sites (including an aliased import,
+    e.g. `from dataclasses import asdict as encode`) in any
+    `ProjectSnapshot`-DTO file (see `_PROJECT_SNAPSHOT_DTO_FILES`). A first
+    draft of one of these files reaching for `asdict()` as a shortcut is
+    exactly the "second, unreviewed mirror deserializer" this phase's own
+    text names as the defect the whole DTO layer exists to avoid — this
+    check exists so that mistake fails CI instead of surviving review.
     """
     for rel in _PROJECT_SNAPSHOT_DTO_FILES:
         path = ROOT / rel
@@ -2298,6 +2324,7 @@ def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
             tree = ast.parse(_read(path), filename=rel)
         except SyntaxError:
             continue
+        asdict_aliases = _imported_asdict_aliases(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -2309,7 +2336,18 @@ def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
                 if isinstance(func, ast.Attribute)
                 else None
             )
-            if called_name == "asdict":
+            if called_name is None:
+                continue
+            # Attribute form (`x.asdict(...)`) matches the bare attribute
+            # name regardless of what `x` is bound to -- deliberately
+            # coarse, the same way the pre-existing check already was.
+            # Name form (`asdict(...)` or an aliased import) must resolve
+            # against the file's own imports, or `encode(dto)` after
+            # `from dataclasses import asdict as encode` passes silently.
+            is_violation = (
+                isinstance(func, ast.Attribute) and called_name == "asdict"
+            ) or (isinstance(func, ast.Name) and func.id in asdict_aliases)
+            if is_violation:
                 f.err(
                     "project-snapshot-dto-no-asdict",
                     f"{rel}:{node.lineno}: `asdict(...)` is not allowed in a "

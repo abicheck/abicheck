@@ -225,22 +225,18 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     `refs/artifacts/*.json` document per record. Does not touch `objects/` —
     a caller populates those separately (typically via `DirectoryObjectStore
     .put`, e.g. through `storage.import_v1.import_legacy_snapshot`) before
-    or after writing the manifest; nothing here depends on ordering, since
-    `ObjectStore.put` is idempotent and content-addressed.
+    or after writing the manifest; nothing here depends on `objects/`
+    ordering, since `ObjectStore.put` is idempotent and content-addressed.
+
+    **`manifest.json` is written last, as this function's own commit
+    point.** Every `refs/*.json` document is written first: an interruption
+    partway through would then leave, at worst, ref documents `manifest.json`
+    does not yet name (harmless — nothing reads a ref it wasn't told to load)
+    rather than a durable `manifest.json` naming refs that were never
+    written, which every subsequent reader would treat as a corrupted
+    package (Codex review).
     """
     root_path = Path(root)
-    summary = {
-        "versions": manifest.versions.to_dict(),
-        "variant_ids": [variant.variant_id for variant in manifest.variant_refs],
-        "artifact_ids": [artifact.artifact_id for artifact in manifest.artifact_refs],
-    }
-    manifest_path = root_path / MANIFEST_RELPATH
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    write_snapshot_text(
-        canonical_json(summary, indent=2),
-        manifest_path,
-        compression=SnapshotCompression.NONE,
-    )
     for variant in manifest.variant_refs:
         variant_path = root_path / variant_ref_relpath(variant.variant_id)
         variant_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +253,18 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             artifact_path,
             compression=SnapshotCompression.NONE,
         )
+    summary = {
+        "versions": manifest.versions.to_dict(),
+        "variant_ids": [variant.variant_id for variant in manifest.variant_refs],
+        "artifact_ids": [artifact.artifact_id for artifact in manifest.artifact_refs],
+    }
+    manifest_path = root_path / MANIFEST_RELPATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    write_snapshot_text(
+        canonical_json(summary, indent=2),
+        manifest_path,
+        compression=SnapshotCompression.NONE,
+    )
 
 
 class ManifestSummary:
@@ -334,23 +342,52 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
 
 
 def read_variant_ref(root: str | Path, variant_id: str) -> VariantRef:
-    """Load exactly one variant's own ref document."""
+    """Load exactly one variant's own ref document.
+
+    Refuses a document whose own embedded `variant_id` disagrees with the
+    one requested (and therefore with the filename it was loaded from): a
+    corrupted or hand-edited `refs/variants/<id>.json` could otherwise name
+    a *different* variant, and the caller — which asked for `variant_id` by
+    name — would silently receive that other variant's record instead
+    (Codex review). `object_relpath`-style validation is not enough here,
+    since the mismatch is between two otherwise well-formed values, not a
+    malformed one.
+    """
     root_path = Path(root)
     data = json.loads(read_snapshot_bytes(root_path / variant_ref_relpath(variant_id)))
     if not isinstance(data, dict):
         raise ValueError(f"variant ref for {variant_id!r} is not a JSON object")
-    return VariantRef.from_dict(data)
+    ref = VariantRef.from_dict(data)
+    if ref.variant_id != variant_id:
+        raise ValueError(
+            f"refs/variants/{variant_id}.json names variant_id "
+            f"{ref.variant_id!r}, not the requested {variant_id!r} -- the "
+            "package's membership cannot be trusted"
+        )
+    return ref
 
 
 def read_artifact_ref(root: str | Path, artifact_id: str) -> ArtifactRef:
-    """Load exactly one artifact's own ref document."""
+    """Load exactly one artifact's own ref document.
+
+    Refuses a document whose own embedded `artifact_id` disagrees with the
+    one requested, for the identical reason `read_variant_ref` does (Codex
+    review).
+    """
     root_path = Path(root)
     data = json.loads(
         read_snapshot_bytes(root_path / artifact_ref_relpath(artifact_id))
     )
     if not isinstance(data, dict):
         raise ValueError(f"artifact ref for {artifact_id!r} is not a JSON object")
-    return ArtifactRef.from_dict(data)
+    ref = ArtifactRef.from_dict(data)
+    if ref.artifact_id != artifact_id:
+        raise ValueError(
+            f"refs/artifacts/{artifact_id}.json names artifact_id "
+            f"{ref.artifact_id!r}, not the requested {artifact_id!r} -- the "
+            "package's membership cannot be trusted"
+        )
+    return ref
 
 
 def variant_and_artifact_ids(

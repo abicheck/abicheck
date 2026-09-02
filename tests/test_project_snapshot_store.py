@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,14 +27,22 @@ from abicheck.project_snapshot_store import (
     variant_and_artifact_ids,
     write_project_manifest,
 )
-from abicheck.serialization import snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.dto import (
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
     semantic_ir_from_dto,
 )
-from abicheck.storage.import_v1 import import_legacy_snapshot
+from abicheck.storage.import_v1 import import_legacy_snapshot as _import_legacy_snapshot
 from abicheck.storage.versioning import StorageVersions
+
+
+def import_legacy_snapshot(*args: Any, **kwargs: Any) -> Any:
+    """`import_legacy_snapshot`, defaulting `max_known_schema_version` to
+    this build's real `serialization.SCHEMA_VERSION` -- see the identical
+    helper in `tests/unit/storage/test_import_v1.py`."""
+    kwargs.setdefault("max_known_schema_version", SCHEMA_VERSION)
+    return _import_legacy_snapshot(*args, **kwargs)
 
 
 def _snapshot_with_ir() -> AbiSnapshot:

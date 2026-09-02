@@ -16,7 +16,7 @@ from abicheck.model.identity import Namespace, Record, entity_id_for_type
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.snapshot import AbiSnapshot
-from abicheck.serialization import snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.dto import (
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
@@ -24,9 +24,18 @@ from abicheck.storage.dto import (
 )
 from abicheck.storage.import_v1 import (
     LEGACY_DOCUMENT_SECTION_KIND,
-    import_legacy_snapshot,
+    import_legacy_snapshot as _import_legacy_snapshot,
 )
 from abicheck.storage.package import InMemoryObjectStore
+
+
+def import_legacy_snapshot(*args: Any, **kwargs: Any) -> Any:
+    """`import_legacy_snapshot`, defaulting `max_known_schema_version` to
+    this build's real `serialization.SCHEMA_VERSION` — every test below
+    exercises something other than that specific parameter, so this keeps
+    them from each having to restate the same current value."""
+    kwargs.setdefault("max_known_schema_version", SCHEMA_VERSION)
+    return _import_legacy_snapshot(*args, **kwargs)
 
 
 def _snapshot_with_ir() -> AbiSnapshot:
@@ -124,3 +133,42 @@ class TestImportLegacySnapshot:
             second.artifact_refs[0].sections[LEGACY_DOCUMENT_SECTION_KIND].digest
         )
         assert first_digest == second_digest
+
+
+class TestMaxKnownSchemaVersion:
+    """A document newer than this build knows how to interpret must be
+    refused, not silently imported with an unrecognized `schema_version`
+    stamped only on the informational `source_schema_version` axis."""
+
+    def test_a_newer_schema_version_is_refused(self) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = SCHEMA_VERSION + 1
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="newer than this build"):
+            import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+
+    def test_the_current_schema_version_is_accepted(self) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = SCHEMA_VERSION
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert manifest.versions.source_schema_version == SCHEMA_VERSION
+
+    def test_an_older_schema_version_is_accepted(self) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = 1
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert manifest.versions.source_schema_version == 1
+
+    def test_a_lower_explicit_ceiling_is_honored(self) -> None:
+        """The parameter is the caller's own stated ceiling, not always
+        `serialization.SCHEMA_VERSION` -- a caller asking for a stricter
+        bound gets it."""
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = 5
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="newer than this build"):
+            _import_legacy_snapshot(
+                doc, store=store, artifact_id="libfoo", max_known_schema_version=4
+            )

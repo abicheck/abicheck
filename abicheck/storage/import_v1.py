@@ -55,6 +55,23 @@ unchanged, so a migration or an audit can always answer "what producer
 epoch actually emitted this" without reverse-engineering it from which
 fields are present — the exact problem D2 exists to close.
 
+**A document newer than this build knows how to interpret is refused, not
+silently accepted.** `max_known_schema_version` is a required parameter
+(never a default this module invents) — `storage/` cannot import
+`serialization.SCHEMA_VERSION` itself (the same layering reason documented
+above), so the caller, who already knows what `serialization.py`'s own
+reader considers current, states it explicitly. Without this check, a
+document at a schema version this build has never seen would still import
+cleanly, recording that unknown version only on the informational
+`source_schema_version` axis while the *rest* of the package states this
+build's own current `comparison_contract_version` — exactly the "readable
+but produced under semantics this build never validated" gap D2's two
+fail-closed axes exist to prevent (Codex review). This mirrors, at the
+document-adapter boundary, the same refusal `serialization.snapshot_from_dict`
+already applies at its own boundary — not a second, independently-tuned
+threshold, since it uses whatever ceiling the caller passes rather than a
+value hard-coded here.
+
 **A known, deliberately deferred gap** (the same shape `package.py`'s own
 "known, deliberately deferred gap" note already documents for
 `ArtifactRef.sections`): `ArtifactRef.native_identity` is empty here. A
@@ -100,6 +117,7 @@ def import_legacy_snapshot(
     *,
     store: ObjectStore,
     artifact_id: str,
+    max_known_schema_version: int,
     variant_id: str = "default",
     artifact_kind: str = "elf",
 ) -> PackageManifest:
@@ -114,9 +132,22 @@ def import_legacy_snapshot(
     is deliberately self-contained and constructible independently, so nothing
     about this function needs to know whether it is the only library in the
     project or one of many).
+
+    `max_known_schema_version` is the caller's own `serialization.
+    SCHEMA_VERSION` (or an explicit lower ceiling) — see the module
+    docstring's "A document newer than this build knows how to interpret is
+    refused" section for why this module cannot default or derive it itself.
+    Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
     _mapping(legacy_document, "legacy_document")
     source_schema_version = int(legacy_document.get("schema_version", 1) or 0)
+    if source_schema_version > max_known_schema_version:
+        raise ValueError(
+            f"legacy_document schema_version {source_schema_version} is newer "
+            f"than this build knows how to interpret (max_known_schema_version="
+            f"{max_known_schema_version}); refusing to import a document whose "
+            "semantics this build has not validated"
+        )
 
     ir, conflicts = semantic_ir_from_document(legacy_document)
     remainder = {
