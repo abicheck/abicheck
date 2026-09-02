@@ -443,11 +443,12 @@ def _resolve_compile_db(
             return None
 
     if cfg.compile_db and sources is not None:
-        # Only an *operator-supplied* build.compile_db (a CLI --build-compile-db or
+        # Only an *operator-supplied* build.compile_db (a `build_compile_db`
+        # argument from a programmatic caller, or
         # an explicit --config path) counts as an explicit input whose miss should
         # suppress fallback — tracked by `compile_db_explicit`, which is distinct
-        # from query-execution trust (review): --build-compile-db makes the DB
-        # explicit without trusting a query, and --build-query trusts a query
+        # from query-execution trust (review): a `build_compile_db` makes the DB
+        # explicit without trusting a query, and a `build_query` trusts a query
         # without making a DB explicit. A build.compile_db from an auto-discovered
         # .abicheck.yml is not something the user chose, so a stale/cleaned path
         # there still falls through to the zero-config inferred query.
@@ -458,7 +459,7 @@ def _resolve_compile_db(
                 return match
 
     if explicit_input_missed:
-        # An explicit --build-info / --build-compile-db / --config compile-DB input
+        # An explicit --build-info / build_compile_db / --config compile-DB input
         # was given but resolved to nothing. Surface that miss rather than masking
         # it with a stale auto-discovered DB OR abicheck's default inferred query
         # under different flags — checked BEFORE auto-discovery so a stray

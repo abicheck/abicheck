@@ -476,8 +476,11 @@ def execute_dump_request(
     :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`,
     all defaulted to their existing no-op values so :func:`run_dump_request`
     and every other pre-existing caller is unaffected. These exist only for
-    the ELF ``dump`` CLI path's still-live ``--build-query``/
-    ``--build-compile-db``/``--config`` flags (until PR 3C removes them) to
+    the ELF ``dump`` CLI path's ``--config`` flag -- and, for a programmatic
+    caller, its own ``build_query``/``build_compile_db`` arguments (PR 3C
+    removed the CLI flags of those names; these parameters stay because a
+    Python API caller is the operator, exactly as an explicit ``--config``
+    is) -- to
     route through this one shared primitive instead of a second, independent
     call to the same underlying fold.
 

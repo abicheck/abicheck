@@ -251,7 +251,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              git_tag: str | None, build_id: str | None, no_git: bool,
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
-             build_query: str | None = None, build_compile_db: str | None = None,
              build_targets: tuple[str, ...] = (),
              depth: str | None = None,
              header_graph_deprecated: bool = False,
@@ -601,7 +600,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             sources=sources, headers=headers,
             collect_mode=collect_mode, build_info=build_info,
             build_config=build_config,
-            build_query=build_query, build_compile_db=build_compile_db,
         )
         emit_dry_run(_dry_result)
 
@@ -642,7 +640,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = compile_db_path
@@ -726,8 +724,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _exec_resolved,
         notify=_click_notify,
         build_config=build_config,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
         legacy_compile_db_tokens=tuple(build_context_flags),
         legacy_compile_db_matched=compile_db_matched,
         # Codex review, two real regressions on the original ELF migration:

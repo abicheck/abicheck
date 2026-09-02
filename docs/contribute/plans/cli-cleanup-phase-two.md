@@ -2148,6 +2148,62 @@ pipelines a fourth time.
   `scan --against` candidate needs one interpreter, not two, before the flags
   that configure it are removed.
 
+  > **LANDED (2026-09-02): `dump --build-query` and `dump --build-compile-db`
+  > are removed.** Both are now a hard usage error (`No such option`, exit
+  > 64) with no hidden alias; `--build-info`, `--build-target` and
+  > `--compile-db-filter` are untouched, being genuine per-run inputs rather
+  > than project build settings. The replacement is the config form this
+  > section already specified (`build.query` / `build.compile_db` in a file
+  > passed with `--config`), which worked before the removal and is unchanged
+  > by it.
+  >
+  > **The removal simplified the trust model rather than merely relocating
+  > it.** The real gate was `cfg_trusted_for_query = build_config is not None
+  > or build_query is not None` -- a bare `--build-query` on the command line
+  > was a second, independent authorizer for executing an arbitrary command.
+  > With the flag gone the gate has exactly one term, so prerequisites 1 and
+  > 2 ("only an explicitly-passed `--config` may authorize executing
+  > `build.query`"; "an auto-discovered `.abicheck.yml` never executes a
+  > query") are now structural rather than conventional: there is no
+  > command-line-only route to execution at all.
+  > `cli_dump_dry_run_build_query.py` lost its own CLI-override parameters
+  > for the same reason, so the mirrored decision cannot drift from the real
+  > one by a term the real one no longer has.
+  >
+  > Scope note: the *engine/typed-API* `build_query`/`build_compile_db`
+  > parameters (`service_dump_pipeline.run_dump_request`,
+  > `buildsource.embed_build_source`, `l2_seed`) are deliberately kept. They
+  > remain meaningful for a Python API caller -- who is the operator, exactly
+  > as an explicit `--config` is -- and removing them is a public-API change
+  > with its own compatibility question, not part of this CLI removal. What
+  > was removed is the whole CLI-layer thread: the two Click options, the
+  > `dump_cmd` parameters, and their forwarding through
+  > `frontends/cli/dump_execute.py`.
+  >
+  > Tests: `tests/test_dump_build_query_flags_removed.py` (new -- both
+  > spellings exit 64, and no surviving build-evidence flag re-opens the
+  > authorization, asserted over the whole surviving flag surface rather than
+  > one representative, with a `touch pwned` query proving non-execution).
+  > `tests/test_dry_run_build_query_contract.py` migrated: the two tests whose
+  > *subject* was the removed CLI override are deleted (the capability is
+  > gone, so they cannot be rewritten), and every other use of the flag was
+  > scaffolding that either drops out or moves to an explicit `--config` via a
+  > new `_explicit_config` helper. Verified end to end against a real
+  > g++-compiled library: an auto-discovered config reports "will NOT run ...
+  > pass --config to authorize it", an explicit `--config` reports the exact
+  > argv, cwd and resulting compile-DB path, and neither executes anything.
+  >
+  > **One ordering caveat, stated rather than glossed:** this entry's own
+  > "all three resolvers converge" rule is satisfied for item 1 (closed by PR
+  > C, ELF and PE/Mach-O alike) but only *partly* for item 2 -- a **named**
+  > L4 backend now resolves identically everywhere (PR #990), while `auto`
+  > still resolves to clang on `scan` and castxml on `dump`/`compare`. That
+  > residue is a frontend-selection divergence, not a `build.query`/
+  > `build.compile_db` interpretation one: the two flags removed here are
+  > interpreted by a single path either way, so the removal does not widen
+  > it. It is recorded here so a future reader does not infer from "3C
+  > landed" that item 2 closed.
+
   > **Status (2026-08-21): still blocked — but on a materially shorter list
   > than this note carried earlier the same day.** Blocker 5's three
   > sub-issues and blocker 6 are now closed (see the second 2026-08-21 note
@@ -4656,14 +4712,15 @@ PR E  Action machine-report           = PR 1b — uncapped persisted release
       └─ DELETE --annotate, --annotate-additions — DONE, verified against
          current abicheck/cli.py and action.yml
 PR F  trusted build config            = PR 3C — build.query executes only
-      (blocked on PE/Mach-O, below)     from an explicit --config (a data
+      (DONE)                            from an explicit --config (a data
                                        path like build.compile_db carries no
                                        such restriction), trust receipt in
-                                       --dry-run, fail closed. Blocked on
-                                       PR C's remaining half: handle_non_elf_
-                                       dump (PE/Mach-O) still resolves
-                                       independently of the shared pipeline
-      └─ then DELETE dump --build-query, dump --build-compile-db
+                                       --dry-run, fail closed. Both flags are
+                                       gone; an explicit --config is now the
+                                       only authorizer, so the trust gate has
+                                       one term instead of two
+      └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
+         now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
       (ADR-064 accepted; stage 1a done,   schema / report / Action parity
        stage 1b partially wired)

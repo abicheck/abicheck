@@ -23,7 +23,7 @@ Closes CLI cleanup phase two's PR 3C prerequisite 3
 (``docs/contribute/plans/cli-cleanup-phase-two.md``): "``dump --dry-run``
 prints the exact argv, the cwd, the resulting compile-DB path, and why the
 query will or will not run." Prerequisites 1 and 2 (only an explicit
-``--config``/``--build-query`` authorizes executing ``build.query``; an
+an explicit ``--config`` authorizes executing ``build.query``; an
 auto-discovered ``.abicheck.yml`` never does) were already implemented
 (ADR-032 D5) -- this module only adds the missing dry-run *visibility* into
 that already-enforced trust decision, mirroring it read-only rather than
@@ -31,8 +31,10 @@ re-deciding it. It never invokes the query -- resolution only, matching
 every other ``dump --dry-run`` section's contract.
 
 The trust rule mirrored here is ``cli_buildsource.embed_build_source``'s own
-(``cfg_trusted_for_query = build_config is not None or build_query is not
-None``) and the command/cwd construction is ``buildsource.inline.
+(``cfg_trusted_for_query = build_config is not None`` -- a single term since
+PR 3C removed ``--build-query``/``--build-compile-db``, so an explicit
+``--config`` is the only authorizer) and the command/cwd construction is
+``buildsource.inline.
 _run_build_query``'s own (``shlex.split(cfg.query)``, cwd = the ``--sources``
 tree when it is a directory) -- kept in sync by reading, not importing,
 since neither of those is a public, dry-run-safe entry point. The
@@ -67,7 +69,7 @@ both closed here: (1) both real call sites require ``sources``/``build_info``
 in the first place -- ``l2_seed``'s own guard is
 ``(sources is None and build_info is None) or not headers``, and
 ``_write_snapshot_output`` never calls ``embed_build_source`` at all without
-one of them -- so a bare ``--build-query`` with neither given can never
+one of them -- so a configured query with neither given can never
 reach the query regardless of collect mode/headers. (2) a ``--build-info``
 that is a ``BuildSourcePack`` directory (``is_pack_dir``) is folded into
 ``collect_inline_pack``'s ``base_build`` *before* ``_resolve_compile_db`` is
@@ -446,8 +448,6 @@ def add_build_query_dry_run_section(
     collect_mode: str,
     build_info: Path | None,
     build_config: Path | None,
-    build_query: str | None,
-    build_compile_db: str | None,
 ) -> None:
     """Append the ``build.query`` trust/execution report to *result*."""
     from .workflows.extraction import (
@@ -833,14 +833,14 @@ def add_build_query_dry_run_section(
     # config *discovery* differs between the two real call sites.
     discover_from = sources if l2_seed_reachable else effective_sources
     cfg_path = build_config or discover_build_config(discover_from)
-    trusted = build_config is not None or build_query is not None
+    # An explicit --config is now the *only* authorizer (CLI cleanup phase
+    # two, PR 3C): `--build-query`/`--build-compile-db` are removed, so the
+    # real gate in `cli_buildsource.embed_build_source` reduces to this same
+    # single term. There is no longer a second way to mark a query trusted.
+    trusted = build_config is not None
 
-    # The real path (`cli_buildsource.py`) always loads *cfg_path* when one is
-    # found, whether or not the CLI already supplied --build-query -- an
-    # explicit --build-query overrides only `cfg.query`, never `cfg.
-    # compile_db` (Codex review: an earlier version of this function skipped
-    # loading the config entirely once a CLI query was given, silently
-    # dropping the config's own build.compile_db hint).
+    # The real path (`cli_buildsource.py`) always loads *cfg_path* when one
+    # is found, for `cfg.compile_db` as well as `cfg.query`.
     cfg = None
     cfg_compile_db: str | None = None
     if cfg_path is not None and config_readable:
@@ -876,7 +876,7 @@ def add_build_query_dry_run_section(
             # read *this* `cfg_path` -- it is purely an L2-seed-only
             # discovery, and this load failure says nothing about whether
             # `embed_build_source`'s own, independent config resolution
-            # (which may still succeed from a bare CLI `--build-query`
+            # (which may still succeed from the explicit --config's own query
             # override with no file involved at all) would also fail --
             # BUT ONLY when `embed_build_source` is actually *reachable* at
             # all: its own dispatch guard is `raw_build_info is not None or
@@ -891,10 +891,10 @@ def add_build_query_dry_run_section(
             # a hypothetical: an earlier revision of this fix fell through
             # unconditionally whenever `effective_sources is None`, which
             # made a `--sources`-only pack (no `--build-info` at all) with a
-            # malformed config and an explicit `--build-query` report "will
-            # run" -- but with `raw_build_info` also `None` in that shape,
-            # `embed_build_source`'s own dispatch guard is never satisfied at
-            # all, so it never reaches the `build_query` override either;
+            # malformed config report "will run" -- but with `raw_build_info`
+            # also `None` in that shape, `embed_build_source`'s own dispatch
+            # guard is never satisfied at all, so it never reaches the
+            # query-resolution step either;
             # the *only* real call site (the L2 seed) already failed to
             # load this exact config, so the real run does NOT execute the
             # query here (Codex review, fresh evidence -- verified by
@@ -907,7 +907,7 @@ def add_build_query_dry_run_section(
             # `raw_operand_present` -- i.e. a raw `--build-info` genuinely
             # makes `embed_build_source` reachable -- rather than returning,
             # so the precedence chain below still answers correctly from
-            # `build_query` alone in that case. When `effective_sources is
+            # that operand alone in that case. When `effective_sources is
             # not None`, `discover_from` always agrees with what
             # `embed_build_source` would discover (see the
             # `raise_on_bad_config` comment above), so this load failure
@@ -928,10 +928,10 @@ def add_build_query_dry_run_section(
             # so it can't be the fallback call site either -- verified
             # end-to-end against a real gcc-compiled library, a malformed
             # pack-local .abicheck.yml, a raw --build-info directory, an
-            # explicit --build-query, and --depth headers: the real run
+            # explicit --config, and --depth headers: the real run
             # exits 0 with the marker never created, i.e. build.query never
             # runs, even though an earlier revision of this branch reported
-            # "will run (trusted -- explicit --build-query)" here.
+            # "will run (trusted -- explicit --config)" here.
             if not collect_active and effective_sources is None and raw_operand_present:
                 result.add(
                     _SECTION,
@@ -961,8 +961,8 @@ def add_build_query_dry_run_section(
                 "resolution never reads this same file (--sources is a pack, "
                 "so its discovery is nulled), and it is reachable at all "
                 f"only because a raw --build-info ({build_info}) was also "
-                "given, so it is evaluated separately below from "
-                "build_query/an auto-discovered config of its own, if any",
+                "given, so it is evaluated separately below from an "
+                "auto-discovered config of its own, if any",
             )
         else:
             cfg_compile_db = cfg.compile_db or None
@@ -1068,9 +1068,7 @@ def add_build_query_dry_run_section(
             )
             return
 
-    effective_query = (
-        build_query if build_query is not None else (cfg.query if cfg else None)
-    )
+    effective_query = cfg.query if cfg else None
     # `_run_build_query`'s own resolution of the compile-DB path it expects
     # the query to have (re)written is gated on `sources is not None`: with
     # no source tree (an absent --sources, or one that normalized to None
@@ -1079,9 +1077,7 @@ def add_build_query_dry_run_section(
     # regardless of whether a compile-DB hint is configured (Codex review,
     # fresh evidence). This module must not promise a specific path the real
     # run can never resolve to.
-    _configured_compile_db_hint = (
-        build_compile_db if build_compile_db is not None else cfg_compile_db
-    )
+    _configured_compile_db_hint = cfg_compile_db
     compile_db_hint = (
         _configured_compile_db_hint if effective_sources is not None else None
     )
@@ -1119,9 +1115,11 @@ def add_build_query_dry_run_section(
         )
         return
 
-    trust_source = (
-        "explicit --config" if build_config is not None else "explicit --build-query"
-    )
+    # Since PR 3C an explicit --config is the only authorizer, so reaching
+    # here at all means `build_config is not None` (see `trusted` above).
+    # Kept as a named constant rather than inlined so the rendered label
+    # stays greppable next to the trust decision it reports.
+    trust_source = "explicit --config"
     cwd = (
         effective_sources
         if effective_sources is not None and effective_sources.is_dir()

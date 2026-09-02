@@ -362,29 +362,9 @@ def build_source_dump_options(func: F) -> F:
         help="Path to the project `.abicheck.yml` (ADR-037 D4): build system, "
         "query command, compile-DB location, plus the stable severity/scope/"
         "suppression/source settings. Defaults to `.abicheck.yml` at the "
-        "--sources tree root for non-executing settings; build.query runs only "
-        "from an explicit --config.",
-    )(func)
-    func = click.option(
-        "--build-compile-db",
-        "build_compile_db",
-        default=None,
-        metavar="GLOB",
-        help="Where a build/query lands its compile_commands.json, relative to "
-        "--sources (e.g. 'build/compile_commands.json'). CLI equivalent of "
-        "`.abicheck.yml` build.compile_db; overrides it when both are given.",
-    )(func)
-    func = click.option(
-        "--build-query",
-        "build_query",
-        default=None,
-        metavar="CMD",
-        help="Override the inferred build-system query command that emits a "
-        "compile DB without a full build (e.g. 'cmake -S . -B build "
-        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'). CLI equivalent of `.abicheck.yml` "
-        "build.query — runs automatically as trusted operator input. Usually "
-        "unnecessary: with just --sources, abicheck infers and runs the query "
-        "itself.",
+        "--sources tree root for non-executing settings; build.query runs ONLY "
+        "from an explicit --config -- an auto-discovered one never executes "
+        "it, and no CLI flag can authorize it (ADR-032 D5).",
     )(func)
     func = click.option(
         "--build-target",

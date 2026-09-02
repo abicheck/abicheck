@@ -237,8 +237,11 @@ def _resolve_side_snapshot_impl(
     leaves them at their no-op defaults, so this is a strict superset of the
     prior behavior, not a new decision point. *build_config*/*build_query*/
     *build_compile_db* are the equivalent pass-through for ``dump``'s ELF
-    path, which still has live ``--build-query``/``--build-compile-db``/
-    ``--config`` CLI flags until PR 3C removes them.
+    path, which keeps a live ``--config`` flag plus these programmatic
+    ``build_query``/``build_compile_db`` arguments -- PR 3C removed the CLI
+    flags of those two names, not the parameters themselves, since a
+    programmatic caller is the operator exactly as an explicit ``--config``
+    is.
 
     ``allow_build_query=None`` keeps this Tier-2 primitive's existing
     "never execute a build system as a side effect" default (``False``,
