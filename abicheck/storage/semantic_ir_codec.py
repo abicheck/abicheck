@@ -56,7 +56,12 @@ from ..model.fact import Fact
 from ..model.occurrence import OccurrenceId, canonical_key
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
-from .guards import identity_text, mapping as _require_mapping, provenance_text
+from .guards import (
+    diagnostics_from,
+    identity_text,
+    mapping as _require_mapping,
+    provenance_text,
+)
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -95,7 +100,11 @@ def _fact_from_dict(raw: Any, *, as_tuple: bool) -> Fact[Any]:
     return Fact(
         status=FactStatus(data["status"]),
         value=value,
-        diagnostics=tuple(data.get("diagnostics") or ()),
+        # diagnostics_from, never bare tuple(): a string is a Sequence, so
+        # ``"diagnostics": "parse error"`` would decode to eleven
+        # single-character diagnostics and be written back that way, and a
+        # non-string member would be coerced into a manufactured one.
+        diagnostics=diagnostics_from(data.get("diagnostics") or ()),
     )
 
 
@@ -211,5 +220,16 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
             # (``storage/AGENTS.md`` invariant 6).
             disambiguator=_disambiguator(occurrence.get("disambiguator")),
         )
+        if occ_id in occurrences:
+            # The list encoding can spell a duplicate that the mapping cannot
+            # hold; assigning over it would report a successful load having
+            # discarded an occurrence, which is the one thing this package
+            # never does (``storage/AGENTS.md``: never resolve identity by
+            # discarding an occurrence).
+            raise ValueError(
+                f"semantic_ir names the same occurrence twice "
+                f"({canonical_key(occ_id)!r}); one of the two entities would "
+                "be discarded on load"
+            )
         occurrences[occ_id] = _entity_from_dict(entry.get("entity"))
     snap.semantic_ir = SemanticIR(occurrences=occurrences)

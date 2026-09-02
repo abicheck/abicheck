@@ -220,6 +220,61 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(TypeError, match="producer"):
             snapshot_from_dict(document)
 
+    def test_a_duplicate_occurrence_entry_is_rejected(self) -> None:
+        """The list encoding can spell a duplicate the mapping cannot hold —
+        a load that silently kept the last one would report success having
+        discarded occurrence evidence."""
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid, disambiguator="tu-a"): CanonicalEntity(
+                    canonical_spelling=Fact.present("first")
+                )
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        entries = document["semantic_ir"]["occurrences"]
+        duplicate = json.loads(json.dumps(entries[0]))
+        duplicate["entity"]["canonical_spelling"]["value"] = "second"
+        entries.append(duplicate)
+        with pytest.raises(ValueError, match="same occurrence twice"):
+            snapshot_from_dict(document)
+
+    @pytest.mark.parametrize(
+        "bad", ["parse error", [1], [None], ["ok", 2], {"a": "b"}]
+    )
+    def test_malformed_fact_diagnostics_are_rejected(self, bad: object) -> None:
+        """A bare `tuple()` would split a string into one diagnostic per
+        character and coerce a non-string member into a manufactured one —
+        both written back as if a producer had reported them."""
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.failed("real diagnostic")
+                )
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        entity = document["semantic_ir"]["occurrences"][0]["entity"]
+        entity["canonical_spelling"]["diagnostics"] = bad
+        with pytest.raises(TypeError):
+            snapshot_from_dict(document)
+
+    def test_well_formed_diagnostics_survive(self) -> None:
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.failed("castxml exited 1"),
+                    template_arguments=Fact.unsupported("no template evidence"),
+                )
+            }
+        )
+        reloaded = _round_trip(_snapshot(ir))
+        assert reloaded.semantic_ir is not None
+        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+
     def test_a_non_string_conflict_entry_is_rejected(self) -> None:
         document = snapshot_to_dict(_snapshot(None, semantic_ir_conflicts={"k": "v"}))
         document["semantic_ir_conflicts"] = {"k": 3}
