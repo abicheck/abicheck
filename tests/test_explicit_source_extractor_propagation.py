@@ -41,8 +41,8 @@ about the whole small, closed domain of frontend requests, so the request
 half is enumerated exhaustively rather than sampled: every accepted
 ``compile.frontend`` spelling (including case variants and the ``hybrid``
 value that has no L4 backend at all) crossed with every
-``ABICHECK_AST_FRONTEND`` value that can reach the resolution — 45
-combinations, checked against a hand-written expected table rather than
+``ABICHECK_AST_FRONTEND`` value that can reach the resolution (11 x 6 = 66
+combinations), checked against a hand-written expected table rather than
 against a formula. The table is the independent oracle the repository's
 bug-class contract requires: recomputing the expectation with
 ``effective_frontend`` would only assert that the implementation calls the
