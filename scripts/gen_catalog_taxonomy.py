@@ -143,8 +143,11 @@ def _languages(case_dir: Path, has_committed_fixtures: bool) -> list[str]:
     langs = []
     # C and C++ are detected independently -- a mixed-language case (e.g.
     # case66_language_linkage_changed, a C++ library exercised through a
-    # .c consumer) legitimately carries both.
-    if any(n.endswith((".c", ".h")) for n in names):
+    # .c consumer) legitimately carries both. `.h` is deliberately excluded
+    # from the C signal: it's a language-neutral extension a C++-only case
+    # (e.g. case09_cpp_vtable, .cpp implementation + .h headers, no .c file
+    # anywhere) uses too, so its presence alone doesn't mean C.
+    if any(n.endswith(".c") for n in names):
         langs.append("c")
     if any(n.endswith((".cpp", ".hpp", ".cc", ".hh", ".cxx")) for n in names):
         langs.append("cpp")

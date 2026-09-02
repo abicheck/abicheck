@@ -4049,7 +4049,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4068,7 +4067,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4086,7 +4084,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4104,7 +4101,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4157,7 +4153,6 @@
     "source"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4175,7 +4170,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4194,7 +4188,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4213,7 +4206,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4234,7 +4226,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4269,7 +4260,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4287,7 +4277,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4494,7 +4483,6 @@
     "source"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4512,7 +4500,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4530,7 +4517,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4548,7 +4534,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4566,7 +4551,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4841,7 +4825,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -4877,7 +4860,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5007,7 +4989,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5162,7 +5143,6 @@
     "build"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5257,7 +5237,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5275,7 +5254,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5293,7 +5271,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5311,7 +5288,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5329,7 +5305,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5397,7 +5372,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5415,7 +5389,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5433,7 +5406,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5498,7 +5470,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5669,7 +5640,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5688,7 +5658,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5707,7 +5676,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5741,7 +5709,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5810,7 +5777,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5828,7 +5794,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -5846,7 +5811,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6631,7 +6595,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6649,7 +6612,6 @@
     "platform"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6685,7 +6647,6 @@
     "platform"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6704,7 +6665,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6739,7 +6699,6 @@
     "source"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6757,7 +6716,6 @@
     "source"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6775,7 +6733,6 @@
     "source"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6793,7 +6750,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6812,7 +6768,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6830,7 +6785,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6848,7 +6802,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6866,7 +6819,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6884,7 +6836,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6902,7 +6853,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6938,7 +6888,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6956,7 +6905,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6974,7 +6922,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -6992,7 +6939,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7010,7 +6956,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7028,7 +6973,6 @@
     "build"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "multi-library",
@@ -7097,7 +7041,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7117,7 +7060,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7135,7 +7077,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7153,7 +7094,6 @@
     "symbols"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7171,7 +7111,6 @@
     "build"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
@@ -7190,7 +7129,6 @@
     "types"
    ],
    "languages": [
-    "c",
     "cpp"
    ],
    "scope": "single-library",
