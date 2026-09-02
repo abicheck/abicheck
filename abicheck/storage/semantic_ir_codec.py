@@ -61,6 +61,7 @@ from .guards import (
     identity_text,
     mapping as _require_mapping,
     provenance_text,
+    row_sequence,
 )
 
 if TYPE_CHECKING:
@@ -104,8 +105,27 @@ def _fact_from_dict(raw: Any, *, as_tuple: bool) -> Fact[Any]:
         # ``"diagnostics": "parse error"`` would decode to eleven
         # single-character diagnostics and be written back that way, and a
         # non-string member would be coerced into a manufactured one.
-        diagnostics=diagnostics_from(data.get("diagnostics") or ()),
+        # `_present_or` rather than `... or ()`: a FALSEY malformed value
+        # (`False`, `0`, `{}`) would otherwise skip the guard entirely and
+        # be rewritten as "no diagnostics" -- the same silent-discard this
+        # guard exists to refuse, reached by a different route.
+        diagnostics=diagnostics_from(_present_or(data, "diagnostics", ())),
     )
+
+
+def _present_or(document: Mapping[str, Any], key: str, default: Any) -> Any:
+    """*document*'s value for *key*, or *default* when the key is genuinely
+    absent.
+
+    Absence and a falsey-but-present value are different documents and this
+    codec must not conflate them: `document.get(key) or default` hands a
+    malformed `False`/`0`/`{}`/`[]` straight past whichever guard was meant
+    to inspect it, turning "this field is corrupt" into "this field says
+    nothing" with no error anywhere. Every guarded read below goes through
+    here, so the distinction cannot be forgotten at one site the way it was
+    at three (Codex review).
+    """
+    return document[key] if key in document else default
 
 
 def _disambiguator(raw: Any) -> str:
@@ -194,20 +214,26 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     two together would silently discard evidence in the one case the pairing
     is not guaranteed.
     """
-    conflicts = d.get("semantic_ir_conflicts")
-    if conflicts:
+    if "semantic_ir_conflicts" in d:
         snap.semantic_ir_conflicts = {
             identity_text(key, "semantic_ir_conflicts key"): identity_text(
                 value, "semantic_ir_conflicts value"
             )
-            for key, value in _mapping(conflicts, "semantic_ir_conflicts").items()
+            for key, value in _mapping(
+                d["semantic_ir_conflicts"], "semantic_ir_conflicts"
+            ).items()
         }
-    raw = d.get("semantic_ir")
-    if not raw:
+    if "semantic_ir" not in d:
+        # Key absent: this snapshot predates v38, or its backend produced no
+        # IR. A key that is PRESENT but malformed (`[]`, `""`, `0`) is a
+        # different document and is rejected below rather than read as
+        # "no backend produced one".
         return
-    document = _mapping(raw, "semantic_ir")
+    document = _mapping(d["semantic_ir"], "semantic_ir")
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
-    for entry_raw in document.get("occurrences") or ():
+    for entry_raw in row_sequence(
+        _present_or(document, "occurrences", ()), "semantic_ir occurrences"
+    ):
         entry = _mapping(entry_raw, "semantic_ir occurrence entry")
         occurrence = _mapping(entry.get("occurrence"), "semantic_ir occurrence")
         occ_id = OccurrenceId(

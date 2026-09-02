@@ -275,6 +275,58 @@ class TestMalformedDocumentsAreRefused:
         assert reloaded.semantic_ir is not None
         assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
 
+    @pytest.mark.parametrize("bad", [False, 0, {}, "", []])
+    def test_a_falsey_malformed_diagnostics_value_is_rejected(
+        self, bad: object
+    ) -> None:
+        """The class the earlier `or ()` fix left open: a *falsey* malformed
+        value skipped the guard entirely and was rewritten as "no
+        diagnostics". Absence and a present-but-corrupt value are different
+        documents."""
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.failed("real diagnostic")
+                )
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        entity = document["semantic_ir"]["occurrences"][0]["entity"]
+        entity["canonical_spelling"]["diagnostics"] = bad
+        if bad == []:
+            # The one falsey value that is genuinely well-formed: an empty
+            # list is a real, empty diagnostics collection.
+            assert snapshot_from_dict(document).semantic_ir is not None
+        else:
+            with pytest.raises(TypeError):
+                snapshot_from_dict(document)
+
+    @pytest.mark.parametrize("bad", [[], "", 0, False, ["occurrences"]])
+    def test_a_falsey_malformed_semantic_ir_container_is_rejected(
+        self, bad: object
+    ) -> None:
+        """Same class, one level up: a present-but-malformed `semantic_ir`
+        must not decode as "no backend produced one"."""
+        document = snapshot_to_dict(_snapshot(None))
+        document["semantic_ir"] = bad
+        with pytest.raises(TypeError, match="semantic_ir"):
+            snapshot_from_dict(document)
+
+    @pytest.mark.parametrize("bad", [{}, "", 0, False, "occurrences"])
+    def test_a_malformed_occurrences_list_is_rejected(self, bad: object) -> None:
+        document = snapshot_to_dict(_snapshot(SemanticIR()))
+        document["semantic_ir"]["occurrences"] = bad
+        with pytest.raises(TypeError):
+            snapshot_from_dict(document)
+
+    @pytest.mark.parametrize("bad", [[], "", 0, False])
+    def test_a_falsey_malformed_conflict_map_is_rejected(self, bad: object) -> None:
+        document = snapshot_to_dict(_snapshot(None))
+        document["semantic_ir_conflicts"] = bad
+        with pytest.raises(TypeError, match="semantic_ir_conflicts"):
+            snapshot_from_dict(document)
+
     def test_a_non_string_conflict_entry_is_rejected(self) -> None:
         document = snapshot_to_dict(_snapshot(None, semantic_ir_conflicts={"k": "v"}))
         document["semantic_ir_conflicts"] = {"k": 3}
