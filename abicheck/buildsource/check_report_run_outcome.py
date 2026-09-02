@@ -235,7 +235,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         release_verdict = (
             worst_member.value
             if worst_member is not None
-            else (str(raw_verdict) if raw_verdict is not None else "NO_CHANGE")
+            else (str(raw_verdict) if raw_verdict is not None else None)
         )
         # `exit`, when present, is only trusted for `compatibility_
         # contribution` if that specific key survived *and* holds a real,

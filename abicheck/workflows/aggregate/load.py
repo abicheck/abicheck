@@ -46,6 +46,7 @@ from .gate import (
     _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
+    _is_schema_valid_run_outcome,
     _is_valid_contribution,
     _MalformedGate,
     _run_outcome_blocking_categories,
@@ -166,11 +167,27 @@ def _run_outcome_compatibility_verdict(data: Mapping[str, Any]) -> Verdict | Non
     ``BUNDLE_INCOMPLETE``, a `compare-release` summary's lowercase
     ``"not_comparable"``), ``run_outcome.compatibility`` may still carry a
     real, already-established completed-comparison result the sentinel
-    string itself discards (Codex review, fresh evidence -- see the two call
+    string itself discards (Codex review, fresh evidence -- see the call
     sites below).
+
+    Requires the *whole* block to be schema-valid (:func:`_is_schema_valid_
+    run_outcome`), not merely that ``compatibility`` itself parses
+    (CodeRabbit review, fresh evidence): a forged/truncated
+    ``{"run_outcome": {"compatibility": "BREAKING"}}`` -- missing
+    ``gate``/``operational``/``schema_version``/``lifecycle`` -- previously
+    still earned this opportunistic recovery, letting a bare compatibility
+    string alone make a genuinely incomplete abort report read as analyzed
+    and preserve its findings/digest. A present-but-invalid block is
+    treated the same as an absent one here (returns ``None``, not a raised
+    ``_MalformedGate``): unlike the authoritative gate readers elsewhere in
+    this module, this function is purely an opportunistic verdict-recovery
+    helper, and every call site already has its own fully-validated,
+    fail-closed gate computed independently of this return value.
     """
     run_outcome = data.get("run_outcome")
-    if not isinstance(run_outcome, Mapping):
+    if not isinstance(run_outcome, Mapping) or not _is_schema_valid_run_outcome(
+        run_outcome
+    ):
         return None
     raw = run_outcome.get("compatibility")
     if not isinstance(raw, str):

@@ -480,6 +480,26 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
     operational-failure sentinel in this module. A report predating
     `run_outcome` (schema < 2.48) still gets the original forced
     exit-4/BREAKING fallback, unchanged.
+- **`_run_outcome_compatibility_verdict` now requires the whole
+  `run_outcome` block to be schema-valid before trusting
+  `compatibility`, not merely that `compatibility` itself parses**
+  (CodeRabbit review, fresh evidence): a forged/truncated
+  `{"run_outcome": {"compatibility": "BREAKING"}}` — missing
+  `gate`/`operational`/`schema_version`/`lifecycle` — previously still
+  earned the opportunistic verdict-recovery the fixes above added,
+  letting a bare compatibility string alone make a genuinely incomplete
+  abort report read as analyzed and preserve its findings/digest. A
+  present-but-invalid block is treated the same as an absent one (falls
+  back to the legacy synthetic behavior), since this helper is a pure
+  opportunistic enrichment and every call site already has its own
+  independently fail-closed gate.
+- **`check_report_run_outcome.py`'s legacy release backfill no longer
+  fabricates a `"NO_CHANGE"` compatibility floor when neither a
+  completed library nor the root verdict names a real result**
+  (CodeRabbit review, fresh evidence): `run_outcome_dict_for_release`'s
+  own docstring states the contract explicitly (`compatibility` stays
+  unknown, never the dishonest `"NO_CHANGE"` floor) — the backfill now
+  honors it by passing `None` instead.
 
 ### Changed
 

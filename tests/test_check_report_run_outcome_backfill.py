@@ -273,6 +273,27 @@ def test_legacy_output_dir_release_summary_recovers_a_completed_member_verdict()
     assert run_outcome["operational"] == "extraction_error"
 
 
+def test_legacy_release_report_with_no_real_verdict_anywhere_stays_unknown() -> None:
+    """CodeRabbit review, fresh evidence: when neither a completed library
+    nor the root `verdict` names a real `Verdict` (both `None`), the
+    fallback previously defaulted `release_verdict` to the string
+    `"NO_CHANGE"` -- a fabricated confirmed-clean result
+    `run_outcome_dict_for_release`'s own docstring explicitly rules out
+    ("compatibility stays unknown, never the dishonest floor NO_CHANGE").
+    `compatibility` must stay `None` (unknown), not a fabricated clean
+    verdict nobody actually observed."""
+    report = {
+        "libraries": [],
+        "unmatched_old": [],
+        "unmatched_new": [],
+        "verdict": None,
+        "exit": {},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] is None
+
+
 def test_legacy_release_report_with_no_exit_or_severity_block_gets_a_real_gate() -> (
     None
 ):
