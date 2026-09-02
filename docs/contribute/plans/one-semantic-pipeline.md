@@ -13145,6 +13145,58 @@ Pinned by `tests/test_dumper_clang_extern_c_identity.py` (a new, dedicated
 file rather than added to `test_dumper_clang.py`, which already sits at
 its `architecture/debt.yaml` `no_growth` baseline).
 
+**Two more real findings, sixteenth round, fresh evidence each: the
+Darwin de-prefixing fallback needs a target gate, and the opaque-
+`FunctionType` regex needs a sized-array suffix.**
+
+First: the fifteenth round's `name in symbol_candidates(raw_mangled)`
+fallback was target-agnostic -- it fired on every platform, not only
+Darwin. On a NON-Darwin target, a real, explicit `asm("_foo")` label
+genuinely produces `raw_mangled == "_foo"` while `name == "foo"` and
+`entry.extern_c` stays `False` -- that is a real, distinct mangled
+identity (an asm label), not a linker-decoration artifact, and castxml's
+own resolver keeps the identical declaration tagged `("mangled",
+"_foo")`. The ungated fallback misread this as C linkage too, discarding
+the genuine mangled identity clang correctly observed and producing the
+identical class of cross-backend `EntityId` mismatch the fifteenth
+round's own fix was meant to close -- just with the two backends'
+tags swapped. The fix adds `extract.headers.clang.context.
+is_darwin_target(target_triple)` (checking for `"apple"` in the lowercased
+triple, covering both the `...-apple-darwin...` and `...-apple-macosx...`
+spellings this codebase's own test fixtures already use) and requires it
+alongside the de-prefixed match -- but NOT alongside the pre-existing
+plain `raw_mangled == name` equality, which holds on every platform
+regardless of Darwin and must stay ungated (an early revision of this
+very fix wrapped the WHOLE `is_extern_c` expression in the Darwin gate,
+which broke the ordinary, non-underscored plain-C case,
+`test_parse_functions_extern_c_via_mangled_equals_name`, on every
+platform including Darwin itself -- caught immediately by that
+pre-existing regression test, not shipped). `symbol_candidates` itself
+stays target-agnostic, since it also backs `visibility()`'s pure
+export-table-membership check, where trying the de-prefixed form is
+always safe regardless of platform; only the *identity* decision built on
+top of it needed the gate. Pinned by two new sibling tests proving the
+non-Darwin asm-label case stays `("mangled", "_foo")` (function and
+variable), plus a `target_triple=None` case (a synthetic/unprobeable AST
+must default to the same conservative "not Darwin" answer, never assume
+Darwin from an absence of evidence) and a small parametrized unit test for
+`is_darwin_target` itself.
+
+Second: castxml's `ArrayType` renderer spells a fixed-size array of
+function pointers (`void (*callbacks[3])(int)`) as `"FunctionType*[3]"`
+-- a SIZED array suffix, not only the unsized `"[]"` the anchored regex
+already recognized (an unsized array, e.g. a function-pointer array
+PARAMETER, decays to a pointer with no bound). An earlier revision of
+`_CASTXML_OPAQUE_FUNCTION_TYPE_RE` matched only `"[]"`, so a sized
+function-pointer array's own opaque-tag fallback was wrongly published as
+`Fact.present`, conflicting in a hybrid dump against clang's real,
+complete declarator for an unchanged callback array -- the identical
+class of "the opaque fallback's own contribution is always exactly the
+bare tag text with nothing else glued onto it" reasoning the pointer/
+reference/cv-suffix branches above already apply, just for a bracket
+shape not yet covered. Fixed by widening `\[\]` to `\[\d*\]` in the regex.
+Pinned by a new regression test using a sized-array `Variable`.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

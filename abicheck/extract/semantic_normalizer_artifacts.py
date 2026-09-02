@@ -142,9 +142,22 @@ CLANG_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
 #: ``"const FunctionType*"``. The regex allows a cv-keyword run after
 #: EVERY sigil (not just the last), since castxml's recursive wrapping can
 #: in principle nest more than one (``"FunctionType** const volatile"``).
+#:
+#: **A SIZED array suffix wraps the opaque tag too, not only the unsized
+#: ``"[]"`` (Codex review, sixteenth round, fresh evidence).** castxml's
+#: ``ArrayType`` renderer spells a fixed-size array of function pointers
+#: (``void (*callbacks[3])(int)``) as ``"FunctionType*[3]"`` -- the digit
+#: count is part of the array-wrapper syntax, not the opaque tag's own
+#: text, the identical "outer wrapping node, not glued onto the tag"
+#: reasoning the pointer/reference/cv branches above already rely on. An
+#: earlier revision matched only ``"[]"`` (the unsized case, e.g. a
+#: function-pointer array PARAMETER, which decays to a pointer with no
+#: bound), so a sized array publishes the opaque tag as ``Fact.present``
+#: instead of ``Fact.unsupported()``, conflicting in a hybrid dump against
+#: clang's real, complete declarator for an unchanged callback array.
 _CASTXML_OPAQUE_FUNCTION_TYPE_RE = re.compile(
     r"^(?:(?:const|volatile)\s+)*FunctionType"
-    r"(?:\s*(?:[*&]|\[\])(?:\s+(?:const|volatile))*)*$"
+    r"(?:\s*(?:[*&]|\[\d*\])(?:\s+(?:const|volatile))*)*$"
 )
 
 

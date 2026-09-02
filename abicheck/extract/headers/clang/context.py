@@ -272,6 +272,30 @@ def symbol_candidates(mangled: str) -> tuple[str, ...]:
     return (mangled,)
 
 
+def is_darwin_target(target_triple: str | None) -> bool:
+    """Whether *target_triple* names a Darwin (macOS/iOS/...) target.
+
+    Used to gate a leading-underscore de-prefixing decision that changes
+    an *identity* determination (extern-"C" recognition), not merely an
+    export-table membership test the way :func:`symbol_candidates`'s own
+    unconditional tolerant match does (Codex review, sixteenth round,
+    fresh evidence): on a NON-Darwin target, ``raw_mangled ==
+    "_" + name`` is not a linker-decoration artifact at all -- it is
+    exactly what a real, explicit ``asm("_foo")`` label or a genuinely
+    underscore-prefixed real mangled name looks like, and reinterpreting
+    that as C linkage would discard a real, distinct identity (castxml
+    still carries a real ``("mangled", "_foo")`` for the same
+    declaration, so treating it as ``("extern_c",)`` on clang's side
+    would newly DISAGREE with castxml instead of agreeing with it). Only
+    Darwin's linker actually prepends this underscore as pure platform
+    decoration with no identity content of its own, so only there is
+    stripping it safe.
+    """
+    if not target_triple:
+        return False
+    return "apple" in target_triple.lower()
+
+
 def visibility(
     exported_dynamic: set[str],
     exported_static: set[str],

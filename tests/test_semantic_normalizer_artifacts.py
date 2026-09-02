@@ -237,6 +237,33 @@ def test_normalize_header_ast_castxml_suffix_qualified_opaque_function_type() ->
     assert entity.canonical_spelling.status.value == "unsupported"
 
 
+def test_normalize_header_ast_castxml_sized_array_opaque_function_type() -> None:
+    """castxml's ``ArrayType`` renderer spells a fixed-size array of
+    function pointers (``void (*callbacks[3])(int)``) as
+    ``"FunctionType*[3]"`` -- a SIZED array suffix, not only the unsized
+    ``"[]"`` (Codex review, sixteenth round, fresh evidence): an earlier
+    revision matched only ``"[]"``, so this sized-array shape was wrongly
+    published as present, conflicting with clang's real, complete
+    declarator in a hybrid dump of an unchanged callback array."""
+    var = Variable(
+        name="callbacks",
+        mangled="callbacks",
+        type="FunctionType*[3]",
+        entity_id=entity_id_for_variable((), "callbacks", mangled_name="callbacks"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"
+
+
 def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     """A real, fully-resolved type spelling can legally contain a literal
     ``"?"`` -- clang emits one verbatim for a dependent ternary expression

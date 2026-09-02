@@ -201,3 +201,19 @@
   file, `tests/test_dumper_clang_extern_c_identity.py` (added rather than
   growing `test_dumper_clang.py`, which already sits at its
   `architecture/debt.yaml` `no_growth` baseline).
+  That de-prefixing fallback is now gated on `extract.headers.clang.
+  context.is_darwin_target(target_triple)`: on a non-Darwin target, a
+  real, explicit `asm("_foo")` label genuinely produces
+  `raw_mangled == "_foo"` for a real function named `foo` with no
+  extern-"C" linkage at all — a real, distinct mangled identity castxml's
+  own resolver also keeps tagged `("mangled", "_foo")` — and an ungated
+  version of the fallback misread that as C linkage too, discarding the
+  genuine identity clang correctly observed. The gate applies only to the
+  de-prefixed match, not to the pre-existing plain `raw_mangled == name`
+  equality, which holds on every platform and must stay ungated.
+  The opaque castxml `FunctionType` regex now also accepts a SIZED array
+  suffix (`"FunctionType*[3]"` for a fixed-size array of function
+  pointers), not only the unsized `"[]"` — a sized function-pointer
+  array's own opaque-tag fallback was wrongly published as
+  `Fact.present(...)`, conflicting against clang's real, complete
+  declarator for an unchanged callback array in a hybrid dump.
