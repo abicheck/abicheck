@@ -139,15 +139,23 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     still possible; reading the constant here (matching how
     ``write_bundle_facts_archive`` already writes its own marker) means a
     mutated instance still round-trips correctly instead of silently
-    producing a document ``bundle_facts_from_dict`` would reject (Codex
-    review, fresh evidence)."""
-    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
+    producing a document ``bundle_facts_from_dict`` would reject.
+    ``schema_version`` is written the same way, for the same reason:
+    ``facts.schema_version`` records whatever version a *loaded* document
+    claimed (useful introspection -- "what version did this originate
+    from"), but this function always emits the *current* shape (it just
+    wrote the v2+-only ``artifact_type`` key unconditionally above), so a
+    round-tripped v1 document must not still declare ``schema_version: 1``
+    while carrying a v2 field -- that combination is exactly the malformed,
+    self-contradictory document schema_version 2's own introduction was
+    meant to make impossible (Codex review, fresh evidence)."""
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, BUNDLE_FACTS_SCHEMA_VERSION
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
 
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
-        "schema_version": facts.schema_version,
+        "schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": {
             name: snapshot_to_dict(snap)

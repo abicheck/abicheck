@@ -31,6 +31,7 @@ import pytest
 
 from abicheck.bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
+    BUNDLE_FACTS_SCHEMA_VERSION,
     BundleFacts,
     capture_bundle_facts,
 )
@@ -101,6 +102,25 @@ class TestBundleFactsArtifactTypeDiscriminator:
         d = bundle_facts_to_dict(facts)
         assert d["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
         assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
+    def test_rewriting_a_loaded_v1_document_stamps_the_current_schema_version(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: bundle_facts_to_dict() always writes
+        # the v2+-only artifact_type key, so a round-tripped v1 document
+        # must not still declare schema_version 1 while carrying it -- that
+        # combination is exactly the malformed, self-contradictory shape
+        # schema_version 2's own introduction was meant to make impossible.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        del d["artifact_type"]
+        d["schema_version"] = 1
+        loaded = bundle_facts_from_dict(d)
+        assert loaded.schema_version == 1  # preserved on the in-memory object
+
+        rewritten = bundle_facts_to_dict(loaded)
+        assert rewritten["schema_version"] == BUNDLE_FACTS_SCHEMA_VERSION
+        assert rewritten["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
 
     def test_missing_artifact_type_defaults_to_current_on_a_true_v1_document(
         self,
