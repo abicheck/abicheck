@@ -1,0 +1,174 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""``extract.semantic_normalizer.normalize_header_ast`` (ADR-063 Phase 6,
+second slice).
+
+Unit-level: exercises the normalizer directly against hand-built
+``RecordType``/``EnumType``/typedef inputs, independent of any real
+castxml/clang parse (that end-to-end wiring is covered by
+``test_dumper_castxml_integration.py::test_semantic_ir_populated_end_to_end``
+and its clang/hybrid counterparts, which need the real toolchains).
+"""
+
+from __future__ import annotations
+
+from abicheck.extract.semantic_normalizer import normalize_header_ast
+from abicheck.model.entities import EnumType, RecordType
+from abicheck.model.identity import (
+    Namespace,
+    entity_id_for_enum,
+    entity_id_for_type,
+    entity_id_for_typedef,
+)
+from abicheck.model.occurrence import OccurrenceId
+
+
+def _record(name: str, qualified_name: str | None, scope, leaf: str) -> RecordType:
+    return RecordType(
+        name=name,
+        kind="struct",
+        qualified_name=qualified_name,
+        entity_id=entity_id_for_type(scope, leaf),
+    )
+
+
+def test_normalize_header_ast_projects_types_enums_typedefs() -> None:
+    scope = (Namespace("outer"),)
+    rt = _record("Point", "outer::Point", scope, "Point")
+    et = EnumType(
+        name="Color",
+        qualified_name="outer::Color",
+        entity_id=entity_id_for_enum(scope, "Color"),
+    )
+    typedef_eid = entity_id_for_typedef(scope, "PointAlias")
+
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[et],
+        typedefs_qualified={"outer::PointAlias": "outer::Point"},
+        typedef_entity_ids={"outer::PointAlias": typedef_eid},
+        producer="castxml",
+    )
+
+    assert set(ir.occurrences) == {
+        OccurrenceId(rt.entity_id),
+        OccurrenceId(et.entity_id),
+        OccurrenceId(typedef_eid),
+    }
+    assert ir.occurrences[OccurrenceId(rt.entity_id)].canonical_spelling.value == (
+        "outer::Point"
+    )
+    assert ir.occurrences[OccurrenceId(et.entity_id)].canonical_spelling.value == (
+        "outer::Color"
+    )
+    assert ir.occurrences[OccurrenceId(typedef_eid)].canonical_spelling.value == (
+        "outer::Point"
+    )
+    assert all(e.producer == "castxml" for e in ir.occurrences.values())
+
+
+def test_normalize_header_ast_falls_back_to_bare_name_at_global_scope() -> None:
+    """A global-scope record/enum has ``qualified_name is None`` (see
+    ``RecordType.qualified_name``'s own docstring) -- the normalizer falls
+    back to the bare ``name``, not a ``None``/empty canonical_spelling."""
+    rt = _record("Widget", None, (), "Widget")
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget"
+
+
+def test_normalize_header_ast_skips_entities_without_entity_id() -> None:
+    """Older-snapshot-shaped input (no ``entity_id`` populated) contributes
+    no occurrence -- this normalizer reads identity, it never re-resolves
+    it."""
+    rt = RecordType(name="Widget", kind="struct")
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_skips_typedef_with_no_sidecar_match() -> None:
+    """A qualified name present in ``typedef_entity_ids`` but missing from
+    ``typedefs_qualified`` (or vice versa) is tolerated, not raised -- the
+    two maps are expected to share a key set, but this function's contract
+    with its caller is read-only/best-effort (see its own docstring)."""
+    eid = entity_id_for_typedef((), "OnlyInSidecar")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={"OnlyInSidecar": eid},
+        producer="castxml",
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_first_occurrence_wins_on_entity_id_collision() -> None:
+    """Two declarations sharing one ``EntityId`` within a single backend's
+    own output (e.g. a forward declaration alongside its definition) -- the
+    normalizer keeps the first rather than an arbitrary/overwritten pick,
+    per its own documented limitation (no per-occurrence disambiguator is
+    available from either header-AST backend today)."""
+    scope = (Namespace("outer"),)
+    eid = entity_id_for_type(scope, "Point")
+    rt_first = RecordType(name="Point", kind="struct", entity_id=eid)
+    rt_second = RecordType(
+        name="Point", kind="struct", qualified_name="outer::Point", entity_id=eid
+    )
+
+    ir = normalize_header_ast(
+        types=[rt_first, rt_second],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    (entity,) = ir.occurrences.values()
+    # rt_first's spelling ("Point", no qualified_name) survives -- rt_second
+    # ("outer::Point") is discarded, not merged.
+    assert entity.canonical_spelling.value == "Point"
+
+
+def test_normalize_header_ast_is_producer_agnostic() -> None:
+    """Both header-AST backends expose the identical
+    ``parse_types()``/``parse_enums()``/``parse_typedefs_qualified()``/
+    ``parse_typedef_entity_ids()`` shape -- this function is deliberately
+    not specialized to either, only stamping whatever *producer* its caller
+    passes onto every produced entity."""
+    et = EnumType(
+        name="Mode",
+        entity_id=entity_id_for_enum((), "Mode"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[et],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.producer == "clang"

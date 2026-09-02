@@ -713,12 +713,12 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1991,
+      "baseline_lines": 1992,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper. Raised by 1 for ADR-063 Phase 6's second slice: the ELF AbiSnapshot construction site gained the semantic_ir=ast_result.semantic_ir keyword (the ElfHeaderAstResult field a shared choke point in dumper_manifest.py now computes for both the legacy single-TU and manifest paths) -- the PE/Mach-O construction sites were deliberately left unwired in this slice rather than adding their own inline normalize_header_ast() calls here, precisely to avoid a second, larger growth of this already-capped file.",
       "review_by": "2026-11-30"
     },
     {

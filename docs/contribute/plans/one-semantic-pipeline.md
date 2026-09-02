@@ -12542,31 +12542,116 @@ its own stated reasoning:
    rather than papered over with a test that only looks like it covers the
    case.
 
-**Not landed, and therefore this phase is not complete:** no backend
-produces an IR (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/
-`pdb_metadata.py`/`btf_metadata.py`/`ctf_metadata.py`/`pdb_model.py` are
-untouched), `extract/semantic_normalizer.py` does not exist, and none of
-the five assembly call sites projects through it — so `semantic_ir` is
-`None` on every snapshot a real `dump` produces, a v38 document is
-identical to the v37 one it would have been apart from the version stamp
-itself -- both new keys are sparse, written only when there is something to
-say -- and the snapshot cache
-version is deliberately not bumped. The per-call-site end-to-end parity
-tests this section requires belong with that work, since there is no
-normalizer-mediated assembly path to prove behavior-preserving yet; the
-`--ast-frontend hybrid` half of that requirement is covered now, at the
-merge function itself. One further obligation is named here so the
-narrowing work does not rediscover it: `qualified_name_segments.
-_LAMBDA_IDENTITY_FIELDS` renumbers lambda/closure ordinals across the
-snapshot fields that carry them, and an `EntityId` inside a `SemanticIR`
-key can hold exactly such an ordinal (`Anonymous`/`LocalToFunction`), so
-the first slice that actually populates the IR must decide whether
-`semantic_ir` joins that walk — the same "a sidecar's keys must be
-renumbered exactly when its partner's are" rule the `typedef_entity_ids`
-sidecar already follows. It is not an open question *today* only because
-the map is always empty. The checklist row below ("each backend parser's own
-copy of anonymous-marker/closure-identity/namespace-join logic") is
-correspondingly still open.
+**LANDED (second slice): `extract/semantic_normalizer.py`, wired through the
+shared ELF header-AST assembly path -- `semantic_ir` is now real on an
+ordinary `dump`/`compare`.** A re-scoping this slice makes explicit rather
+than silently assuming: the plan's original Design section (below, kept
+verbatim) specified `normalize(raw: RawCastXmlFacts | RawClangFacts | ...)
+-> SemanticIR` operating on *pre-canonicalization* facts, from parsers
+narrowed to stop resolving identity themselves. That narrowing turned out to
+be unnecessary for identity specifically, because Phase 2's implementation
+PR chose **option (a)**: `EntityId` computed once, at parse time, and
+carried as a field on the parsed declaration itself. By the time this slice
+landed, both header-AST backends (`dumper_castxml.py`, `dumper_clang.py`)
+already attached a real, canonically-scoped `entity_id` to every
+`RecordType`/`EnumType` they produce, and an identically-keyed `EntityId`
+sidecar to every typedef -- confirmed directly (`entity_id_for_type`/
+`entity_id_for_enum`/`entity_id_for_typedef` calls exist in both backends'
+`records.py`/`enums.py` and `parse_typedef_entity_ids()`), not assumed from
+this section's own earlier text. What remained genuinely duplicated per
+backend -- this phase's actual "happens once, not once per backend" goal --
+is the *payload* canonicalization `CanonicalEntity` holds, not a second
+identity-resolution pass. `normalize_header_ast` is therefore a normalizer
+over each backend's own already-parsed, already-identified output, not a
+raw-fact interpreter: it computes nothing about identity, only reads the
+`entity_id` each backend already resolved and projects each declaration's
+already-canonical spelling (`RecordType.qualified_name or .name`,
+`EnumType.qualified_name or .name`, a typedef's own resolved underlying-type
+string) into a `CanonicalEntity`. Backend-agnostic by construction -- both
+backends expose the identical `parse_types()`/`parse_enums()`/
+`parse_typedefs_qualified()`/`parse_typedef_entity_ids()` shape, verified
+directly, so one function serves both.
+
+**Scope of this slice: records, enums, and typedefs only.** Functions and
+variables are deliberately **not** normalized yet: a function's canonical
+signature spelling and a variable's canonical type spelling are exactly the
+still-open "two backends, two readings of canonical" problem (return/
+parameter type rendering, not just identity) -- reusing either backend's own
+current spelling here would not unify anything, it would just carry each
+backend's pre-existing disagreement into `SemanticIR` under a name that
+claims otherwise. Constants are omitted for a different reason:
+`CanonicalEntity.canonical_spelling` is specified as a declaration's own
+*type* spelling, and `parse_constants()` captures only a constant's value
+expression, never a captured type string, to canonicalize. Both gaps are
+named here, not silently deferred, per this repository's own bug-class
+discipline (AGENTS.md's "Fix the cause, not the instance").
+
+**Wired at one shared choke point, not per format handler.**
+`dumper_manifest.ElfHeaderAstResult` gained a `semantic_ir` field, computed
+once inside `resolve_header_ast_result()` from the already-merged
+`types`/`enums`/`typedefs_qualified`/`typedef_entity_ids` (after
+`tu_merge`'s own cross-TU reconciliation, so this normalizer never has to
+re-implement cross-TU merge logic itself) -- this single function backs
+*both* the legacy single-header ELF dump and a real `--dump-manifest` dump,
+which turned out to already share this one result type and never construct
+`AbiSnapshot` from a second, independent call site the way the plan's
+original Design section (written before that consolidation) assumed. Only
+`dumper.py`'s `_dump_elf` (`ast_result.semantic_ir`) reads the new field
+today; `_dump_pe`/`_dump_macho` in the same module call
+`parser.parse_types()`/`parse_enums()`/... directly and are **not** wired in
+this slice, deliberately -- `dumper.py` sits exactly at its
+`architecture/debt.yaml` no-growth baseline (raised by 6 lines for Phase 2's
+own closing slice already), and adding a second, inline
+`normalize_header_ast()` call per PE/Mach-O construction site would grow it
+again for a slice whose whole point is staying small. BTF/CTF/PDB are
+untouched, as before -- those backends do not populate `entity_id` at all
+yet, so this normalizer has nothing to read from them.
+
+**Real, non-empty exercise of the first slice's hybrid-merge reconciliation,
+for the first time.** With both `castxml` and `clang` now populating
+`semantic_ir`, an `--ast-frontend hybrid` dump's `merge_snapshots()` step
+(landed inert in the first slice, since `semantic_ir` was always empty)
+runs its real reconciliation logic against real data. A concrete fixture
+(a namespaced record, a namespaced enum, and a typedef spelling a
+partially-qualified nested type) confirms the two backends resolve the
+record's/enum's `EntityId` identically (this phase's actual point: identity
+canonicalized once) while genuinely *disagreeing* on the typedef's
+underlying-type spelling (castxml resolves it to the bare `"Point"`; clang
+resolves it to the partially-qualified `"inner::Point"`) -- exactly the
+kind of cross-backend canonicalization gap this phase exists to make
+visible, which the hybrid merge now correctly keeps castxml's value as base
+and records under `semantic_ir_conflicts` rather than silently picking a
+winner. See `tests/test_semantic_ir_end_to_end.py`.
+
+**Cache/versioning.** No `serialization.SCHEMA_VERSION` bump: the v38 wire
+shape for `semantic_ir` (list-of-entries encoding, landed in the first
+slice) is unchanged -- only its *content* is now non-empty for a real dump.
+`snapshot_cache._SNAPSHOT_CACHE_VERSION` **is** bumped (23 -> 24): a
+snapshot cached by an older abicheck build would otherwise silently keep
+serving `semantic_ir=None` forever for identical cache-key inputs, per that
+constant's own documented purpose ("bumped whenever a change to the
+dumping/provenance pipeline could alter a snapshot's content without
+changing any of the caller-supplied cache-key inputs").
+`qualified_name_segments._LAMBDA_IDENTITY_FIELDS` is **not** extended to
+walk `semantic_ir` in this slice -- the first slice's own note already
+flagged this as an open question once occurrences are real; it stays open,
+named here again rather than silently resolved, since this slice's fixture
+scope (records/enums/typedefs, no lambda/closure-parameterized case) never
+exercises it. A future slice that populates functions (the entity kind
+`_LAMBDA_IDENTITY_FIELDS` actually renumbers today) must resolve this before
+that data can be trusted.
+
+**Still not landed, and therefore this phase is not complete:** functions,
+variables, and constants are not normalized (above); DWARF/PDB/BTF/CTF
+backends produce no IR at all; PE/Mach-O header-AST assembly is not wired;
+`extract/semantic_ir_merge.py`'s reconciliation has still only been proven
+against the records/enums/typedefs subset real data now exercises, not the
+full multi-occurrence/ODR-duplicate shape a function-populated IR would
+introduce; and the phase's own acceptance criteria (a closure-parameterized
+template fixture, requiring function/template-argument normalization) remain
+unmet. The original Design/Files/Tests/Acceptance-criteria sections below
+are kept verbatim as the phase's full target shape -- this slice is a step
+toward that target, not a redefinition of it.
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
 CV-qualification canonicalization happens once, not once per backend.
