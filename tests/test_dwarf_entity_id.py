@@ -25,6 +25,7 @@ class-scoped ones.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,16 @@ _GCC = "gcc"
 
 
 def _can_compile() -> bool:
+    """Check if GCC is available for ELF integration tests.
+
+    These tests compile .so with -shared -fPIC -g and parse the result as
+    ELF with pyelftools, so they require real GCC on Linux -- on macOS
+    ``gcc`` is a clang symlink that produces Mach-O, not ELF (matching
+    ``test_dwarf_snapshot.py``'s own ``_can_compile``, which this module's
+    docstring says it was split out from).
+    """
+    if sys.platform != "linux":
+        return False
     try:
         result = subprocess.run(
             [_GCC, "--version"], capture_output=True, text=True, timeout=10
