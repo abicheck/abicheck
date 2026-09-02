@@ -571,7 +571,15 @@
   separately-justified extension beyond the availability-bearing subset
   this phase (and D7's initial realization) actually covers.
 - **Phase 6** (one canonical `SemanticIR` between the backends and the
-  checker) has landed its **first slice — the IR itself, its persistence,
+  checker) has landed four slices — the IR itself and its persistence, the
+  header-AST normalizer for records/enums/typedefs, functions and
+  variables, and constants — across every header-AST-backed platform
+  (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included); it is
+  **not yet complete**: the DWARF/PDB/BTF/CTF backends produce no IR at all,
+  `CanonicalEntity.template_arguments` is never populated by any backend, and
+  a `--dump-manifest` multi-TU dump loses occurrence detail. See this
+  bullet's own "Still not landed" paragraph below for the exact account.
+  **First slice — the IR itself, its persistence,
   and the hybrid merge's reconciliation of it — and no parser narrowing.**
   That ordering is the plan's own: `SemanticIR` is defined and tested
   before any backend is narrowed onto it, so the per-backend migrations
@@ -642,11 +650,58 @@
   way. No `SCHEMA_VERSION` bump (the v38 wire shape is unchanged, only its
   content); `snapshot_cache._SNAPSHOT_CACHE_VERSION` **is** bumped (23→24),
   since a stale cache entry would otherwise silently keep serving
-  `semantic_ir=None` forever. Still not landed: functions, variables,
-  constants, DWARF/PDB/BTF/CTF backends, PE/Mach-O assembly, and the full
-  acceptance-criteria fixture (a closure-parameterized template, which
-  needs function/template-argument normalization) — see the plan's own
-  "Still not landed" list for this slice.
+  `semantic_ir=None` forever.
+  **Third slice landed: functions and variables.**
+  `_function_spelling_fact()` canonicalizes a function's return type via
+  `canonicalize_type_name` and each parameter via
+  `canonicalize_function_signature_param_type`
+  (`model.signature_normalization`, the same primitive Phase 2's
+  `resolve_function_identity` already applies at the compare layer), with
+  `cv_qualification` set from the parsed `is_const`/`is_volatile` facts.
+  `_variable_spelling_fact()` canonicalizes a variable's type the same way;
+  its `cv_qualification` comes from a dedicated, hand-rolled top-level
+  pointer/reference-aware text scanner
+  (`_variable_top_level_cv_qualification`) rather than `Variable.is_const`,
+  after four rounds of review surfaced pointer-to-const nuances a naive
+  per-declaration flag gets wrong (`const T*` vs `T* const` vs `T* const*`).
+  Wired through the same `dumper_manifest.resolve_header_ast_result()` choke
+  point, and — closing this slice's other named gap — through
+  `_dump_pe`/`_dump_macho` too, via a new shared choke point
+  (`extract/header_ast_fields.parse_header_ast_fields`), so every header-AST
+  platform now populates `semantic_ir`, including through `--ast-frontend
+  hybrid`'s reconciliation (`dumper_hybrid.py`'s own Mach-O mangled-name and
+  ctor/dtor synthetic-key identity rewrites are propagated into
+  `semantic_ir`, so a hybrid merge never leaves one representation keyed
+  under a retired identity another already moved past).
+  **Fourth slice landed: constants.** Both backends already attach a real
+  `entity_id` to every public constant (Phase 2's
+  `parse_constant_entity_ids()`), so the identity half was already done; the
+  normalizer projects the raw value text verbatim as `canonical_spelling`,
+  deliberately uncanonicalized (mirroring `diff_symbols._diff_constants`'s
+  own long-standing raw-string comparison — there is no *observed*
+  cross-backend value-spelling disagreement the way there is for a
+  function's/variable's type spelling), except clang's own
+  compound-initializer fingerprint and clang's `str(bool)`-derived
+  `"True"`/`"False"` literal, both marked `Fact.unsupported()` rather than a
+  raw-value `Fact.present(...)` since neither is a spelling of real source
+  text.
+  **Still not landed, and therefore this phase is not yet complete**: the
+  DWARF/PDB/BTF/CTF backends still produce no `entity_id` at all, so
+  extending the normalizer to them is gated on giving each the Phase 2
+  `EntityId` treatment first (the same scale of work Phase 2 did for
+  ELF/PE/Mach-O and the header-AST backends, redone per debug format);
+  `CanonicalEntity.template_arguments` is still never populated by any
+  backend — every real writer only ever constructs `canonical_spelling`/
+  `cv_qualification`, so the acceptance-criteria fixture (a
+  closure-parameterized template) remains unmet; and a `--dump-manifest`
+  multi-TU dump loses occurrence detail, because `tu_merge.merge_fragments()`
+  collapses same-identity declarations across TUs into one *before*
+  `normalize_header_ast` ever runs, so a real ODR-duplicate/
+  incomplete-declaration pair spread across two TUs never reaches
+  `SemanticIR.occurrences` as two occurrences the way one spread across two
+  header-AST parses of a single TU already does. See the plan's own "Still
+  not landed, and therefore this phase is not complete" list for the full,
+  current account.
 - **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
   is **implemented**: `abicheck/policy/outcome.py` (new) defines
   `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`
