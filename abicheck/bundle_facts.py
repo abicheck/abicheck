@@ -515,7 +515,9 @@ def write_bundle_facts_archive(
     container_manifest = {
         "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
         "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
-        "bundle_facts_schema_version": facts.schema_version,
+        # Unconditional, not facts.schema_version -- mirrors
+        # bundle_facts_to_dict()'s own schema_version field (Codex).
+        "bundle_facts_schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
         "variant_fingerprint": facts.variant_fingerprint,
         "library_blobs": library_blobs,
         "manifest_blob": manifest_blob,

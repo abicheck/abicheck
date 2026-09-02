@@ -832,3 +832,32 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
 
         with pytest.raises(IncompatibleSnapshotSchemaError, match="something-else"):
             load_bundle_facts(out, format="archive")
+
+    def test_save_stamps_the_current_facts_schema_version_not_a_preserved_one(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: the manifest/blob shape this writer
+        # produces is always the current BundleFacts representation --
+        # writing a *loaded* facts object's own preserved schema_version
+        # (e.g. 1, from a legacy v1 document) into
+        # bundle_facts_schema_version would claim v1 while the archive
+        # actually contains the current shape, mirroring the bug already
+        # fixed for bundle_facts_to_dict()'s own schema_version field.
+        import json as _json
+        import zipfile as _zipfile
+
+        from abicheck.bundle_facts import BUNDLE_FACTS_SCHEMA_VERSION
+
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        facts.schema_version = 1  # simulate a loaded legacy v1 document
+        out = tmp_path / "stamped.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        with _zipfile.ZipFile(out) as zf:
+            manifest = _json.loads(zf.read("manifest.json"))
+        assert manifest["bundle_facts_schema_version"] == BUNDLE_FACTS_SCHEMA_VERSION
+
+        # And the reloaded object reflects the stamped, current version --
+        # not the preserved 1 the in-memory facts object claimed.
+        reloaded = load_bundle_facts(out, format="archive")
+        assert reloaded.schema_version == BUNDLE_FACTS_SCHEMA_VERSION
