@@ -121,7 +121,7 @@ just with the header-only library itself never being one of the compiled
 artifacts under comparison. The single-consumer,
 everything-rebuilt-together case is what makes the concern
 [Part 4](abi-series/04-cpp-abi.md) and
-[the hub's L5-graph section](abi-api-handling.md#the-l5-graph-reachability-not-just-structure)
+[Unified Impact Assessment](impact-analysis.md)
 describe for a single *public inline function* apply to the **entire
 public API a consumer actually reaches**, not unconditionally to every
 declaration the header happens to contain — an unused `inline` function
@@ -179,7 +179,7 @@ subset of the header a given consumer's own code actually reaches:
   any inline/template declaration in a *dynamic* library's public headers
   (the same declarations that make a dynamic library's own public inline
   functions "public inline" in
-  [the hub's dispatcher scenario](abi-api-handling.md#the-l5-graph-reachability-not-just-structure))
+  [the dispatcher scenario on Unified Impact Assessment](impact-analysis.md))
   — this isn't unique to the header-only shape, just proportionally larger:
   a header-only library's *entire* public surface is inline/template
   declarations, so the exposure to "two translation units silently seeing
@@ -200,7 +200,7 @@ subset of the header a given consumer's own code actually reaches:
 - For a header-only library, be explicit that every function a consumer
   *actually uses or instantiates* is effectively "public inline" in the sense
   [the hub's dispatcher
-  scenario](abi-api-handling.md#the-l5-graph-reachability-not-just-structure)
+  scenario](impact-analysis.md)
   describes — a behavior change in such a function reaches that consumer on
   their next rebuild, with no version boundary to soften it. (An unused
   inline function or an uninstantiated template emits nothing into a consumer

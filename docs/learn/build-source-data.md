@@ -26,10 +26,10 @@ into a general static analyzer.
 
 ## The authority rule (the one rule that matters)
 
-> **Artifact-backed L0/L1/L2 evidence remains authoritative for shipped-ABI
-> verdicts.** Source/build evidence (L3/L4/L5) may *explain, localize, scope,
-> add confidence/provenance, or correlate* an artifact-proven break — but it
-> **never silently deletes** one.
+Artifact-backed L0/L1/L2 evidence decides shipped-ABI verdicts; source/build
+evidence (L3/L4/L5) explains, localizes, scopes or corroborates but never
+silently deletes an artifact-proven break — the *authority rule*, defined in
+[Evidence & Detectability](evidence-and-detectability.md#how-they-combine).
 
 Findings produced *only* by build/source evidence are ordinary
 [change kinds](../reference/change-kinds.md) that default to **`API_BREAK`**

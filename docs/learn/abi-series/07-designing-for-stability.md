@@ -3,6 +3,8 @@ doc_type: tutorial
 audience:
   - library-maintainer
 level: intermediate
+summarizes:
+  - verdicts
 depends_on:
   - abicheck/policy_file.py
 lifecycle: active
@@ -393,14 +395,11 @@ fails the build on regressions, see the
 and policy options, see [CLI Usage](../../use/cli-usage.md) and
 [Policy Profiles](../../use/policies.md).
 
-**Reading the verdict in CI:**
-
-| Verdict | Exit behavior | What to do |
-|---------|--------------|------------|
-| ✅ `NO_CHANGE` / 🟢 `COMPATIBLE` | pass | merge |
-| 🟡 `COMPATIBLE_WITH_RISK` | configurable | review the deployment risk (e.g. new GLIBC requirement, `noexcept` removal) |
-| 🟠 `API_BREAK` | non-zero | intended? bump minor and document; else revert |
-| 🔴 `BREAKING` | non-zero | bump SONAME major, or revert the change |
+**Reading the verdict in CI:** ✅ `NO_CHANGE` / 🟢 `COMPATIBLE` merge; 🟡
+`COMPATIBLE_WITH_RISK` is a deployment risk to review; 🟠 `API_BREAK` means
+bump the minor version and document (or revert); 🔴 `BREAKING` means bump the
+SONAME major or revert. The exit code each maps to, and how a severity
+preset changes that, is owned by [Verdicts](../verdicts.md).
 
 Ship your release builds **with debug info** (or feed abicheck the public
 headers) — the [transitive breaks](06-transitive-breaks.md) in Part 6 are

@@ -304,7 +304,7 @@ demoted to the audit ledger (`out_of_surface`, disclosed with reason
 `off-python-surface`) instead of driving the verdict. Three guarantees keep this
 safe:
 
-- **Authority rule** — `python_api_*` findings and the native **load-contract**
+- [Authority rule](../learn/evidence-and-detectability.md#how-they-combine) — `python_api_*` findings and the native **load-contract**
   findings (`python_stable_abi_violation`, `python_abi3_dropped`,
   `python_gil_abi_changed`, `python_abi3_floor_raised`) are *never* demoted, so
   a real Python-level or load break is never hidden.

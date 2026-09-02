@@ -39,7 +39,7 @@ Three things matter, and this page covers all three:
 1. **The general approaches** to ABI/API tracking — and the failure mode each one
    has when used alone.
 2. **What evidence each break family requires** — matching every family from the
-   [break-families table](../abi-api-handling.md#break-families-at-a-glance) to
+   [break-families table](../abi-cheat-sheet.md#break-families-and-where-each-is-explained) to
    the minimum input that makes it visible, with the example cases that prove it.
 3. **Why classic single-method checkers (libabigail's `abidiff`, ABICC) are not
    sufficient** — and, just as honestly, where *any* static tool stops, including
@@ -126,7 +126,7 @@ context it was handed.
 ## 2. What it takes to find each break family
 
 The table below extends the
-[break-families table](../abi-api-handling.md#break-families-at-a-glance) with the
+[break-families table](../abi-cheat-sheet.md#break-families-and-where-each-is-explained) with the
 detection dimension: the **minimum evidence** that makes the family visible
 (`L0` binary · `L1` +debug info · `L2` +headers · `L3` +build data · `L4`
 +sources), and whether a symbol-level or debug-info-level checker can see it at

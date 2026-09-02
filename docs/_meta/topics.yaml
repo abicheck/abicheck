@@ -78,6 +78,8 @@ topics:
     allowed_summaries:
       - start/first-report.md
       - skills-src/shared/compatibility-contracts.md
+      - learn/abi-cheat-sheet.md
+      - learn/abi-series/07-designing-for-stability.md
 
   baseline-lifecycle:
     canonical_page: use/baseline-management.md

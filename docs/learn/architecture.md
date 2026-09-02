@@ -288,13 +288,10 @@ Source of truth: `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `R
 
 ## Verdict system
 
-| Verdict | Exit code | Meaning |
-|---------|-----------|---------|
-| `NO_CHANGE` | 0 | Identical snapshots |
-| `COMPATIBLE` | 0 | Safe changes (new symbols, weak binding) |
-| `COMPATIBLE_WITH_RISK` | 0 | Binary-compatible but deployment risk present |
-| `API_BREAK` | 2 | Source-level break, binary-safe (rename, access change) |
-| `BREAKING` | 4 | Binary ABI break — old binaries will fail |
+The checker's five verdicts (`NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`,
+`API_BREAK`, `BREAKING`) and the exit code each maps to are owned by
+[Verdicts](verdicts.md) and [Exit Codes](../reference/exit-codes.md); this
+page does not restate the table.
 
 ---
 

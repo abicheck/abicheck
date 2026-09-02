@@ -138,7 +138,7 @@ flags applied) that can correctly overrule a lower layer's naive reading —
 but for the one fact a lower artifact layer directly observed (a symbol is
 present, a struct is this many bytes), a higher layer's absence of evidence
 is never grounds to override it. That asymmetry is the
-[*authority rule*](build-source-data.md) below in full, and it is why the
+[*authority rule*](#how-they-combine) below in full, and it is why the
 next section's own false-positive/false-negative table is not monotonic on
 both axes at every step (L1 alone *adds* false positives L0 was too blind to
 raise) even though the false-negative axis is. Read "staircase" as *more
@@ -260,7 +260,8 @@ every run, so each layer's contribution is a tracked number, not a claim.
 
 The layers are **independent and additive**, not a fallback chain — abicheck
 overlays every source you give it and lets the strongest evidence win, under
-one rule (the *authority rule*, see [Build & Source Packs](build-source-data.md)):
+one rule, the **authority rule** — this is its definition, and every other
+page links here rather than restating it:
 
 > **Artifact-backed evidence (L0/L1/L2) is authoritative for the shipped-ABI
 > verdict.** Build/source evidence (L3/L4) *explains, localizes, scopes, or

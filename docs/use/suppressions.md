@@ -134,7 +134,7 @@ ADR-044 P1) a public inline/template function's own *body* depends on. abicheck
 computes this reachability — both the type-layout walk `internal_leak.py`'s
 leak detector uses, and, when build/source evidence is present, the L5
 call-graph walk described in
-[the ABI guide § The L5 graph](../learn/abi-api-handling.md#the-l5-graph-reachability-not-just-structure)
+[Unified Impact Assessment](../learn/impact-analysis.md)
 — *before* suppression runs, and a rule's `reachability` setting decides
 whether it may still apply:
 
