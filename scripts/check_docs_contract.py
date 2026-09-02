@@ -95,6 +95,7 @@ EXTERNAL_PAGE_ROOTS = ("skills-src/shared",)
 
 TOPICS_FILE = DOCS / "_meta" / "topics.yaml"
 TERMINOLOGY_FILE = DOCS / "_meta" / "terminology.yaml"
+PIPELINE_STATUS_FILE = DOCS / "_meta" / "one-semantic-pipeline-status.yaml"
 
 _ALLOWED_DOC_TYPES = frozenset(
     {
@@ -1174,6 +1175,148 @@ def _check_duplicate_term_definitions(
 
 
 # ---------------------------------------------------------------------------
+# One-semantic-pipeline status ledger (docs/_meta/one-semantic-pipeline-
+# status.yaml, ADR-063's "PR 0" machine-readable authority matrix)
+# ---------------------------------------------------------------------------
+
+#: The three-state progress vocabulary every status-bearing field in the
+#: ledger uses (`primitive`/`producers`/`consumers`/`persistence`).
+_PIPELINE_STATUS_STATES = frozenset({"not_started", "partial", "complete"})
+#: `authority` names which representation actually decides behavior today --
+#: see the ledger file's own header comment for what each value means.
+_PIPELINE_AUTHORITY_VALUES = frozenset({"self", "legacy", "mixed"})
+#: Fields every concept entry must carry. `persistence` is deliberately not
+#: required -- only `facts` (the one concept with a genuine on-disk
+#: durability question distinct from "is it produced/consumed") has it.
+_PIPELINE_REQUIRED_CONCEPT_FIELDS = (
+    "primitive",
+    "producers",
+    "consumers",
+    "authority",
+    "removal_gate",
+)
+#: Fields whose value must be one of `_PIPELINE_STATUS_STATES`.
+_PIPELINE_STATUS_FIELDS = ("primitive", "producers", "consumers", "persistence")
+_PIPELINE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_PIPELINE_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def _load_pipeline_status(f: Findings) -> dict[str, object] | None:
+    """Parse and structurally validate the ledger. Absence is not reported
+    here -- this file was added in the same change that introduced this
+    check, so there is no pre-existing-repo state where "missing" should be
+    silently accepted the way `_load_terminology`'s does; a missing file is
+    caught by `_check_referenced_paths_exist`-style existence checks
+    elsewhere if something ever points at it, and by this function simply
+    returning None (no further ledger checks run, same degrade-gracefully
+    shape every other loader here uses)."""
+    if not PIPELINE_STATUS_FILE.is_file():
+        return None
+    try:
+        data = yaml.safe_load(PIPELINE_STATUS_FILE.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        f.err(
+            "pipeline-status-ledger",
+            f"{_rel(PIPELINE_STATUS_FILE)}: invalid YAML: {exc}",
+        )
+        return None
+    if not isinstance(data, dict):
+        f.err(
+            "pipeline-status-ledger",
+            f"{_rel(PIPELINE_STATUS_FILE)}: top level must be a mapping",
+        )
+        return None
+    return data
+
+
+def _check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
+    """Structural validation for the ADR-063 status ledger -- what makes it
+    a genuinely machine-consumed `docs/_meta/` registry (docs/AGENTS.md's
+    "Layout" section) rather than a third hand-maintained copy of the ADR/
+    plan's own status prose that nothing checks (a real review finding on
+    PR #1019). Deliberately does not attempt to verify a concept's status
+    *claim* against the actual codebase -- that would require this pure-
+    docs check to import `abicheck` itself, a much larger, separately-
+    justified project. What it does enforce: the file parses, every
+    concept has exactly the required fields with values from the declared
+    enums, and the header metadata is well-formed -- malformed structure
+    (a typo'd status value, a missing field) is caught immediately rather
+    than silently read as `None`/absent by a future generator."""
+    rel = _rel(PIPELINE_STATUS_FILE)
+    schema_version = data.get("schema_version")
+    if not isinstance(schema_version, int):
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: 'schema_version' must be an integer",
+        )
+    as_of_commit = data.get("as_of_commit")
+    if not isinstance(as_of_commit, str) or not _PIPELINE_COMMIT_RE.match(as_of_commit):
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: 'as_of_commit' must be a short/long git sha (hex), "
+            f"got {as_of_commit!r}",
+        )
+    as_of_date = data.get("as_of_date")
+    if not isinstance(as_of_date, str) or not _PIPELINE_DATE_RE.match(as_of_date):
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: 'as_of_date' must be 'YYYY-MM-DD', got {as_of_date!r}",
+        )
+    concepts = data.get("concepts")
+    if not isinstance(concepts, dict) or not concepts:
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: missing or empty top-level 'concepts' mapping",
+        )
+        return
+    for name, entry in concepts.items():
+        if not isinstance(entry, dict):
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: must be a mapping",
+            )
+            continue
+        for required in _PIPELINE_REQUIRED_CONCEPT_FIELDS:
+            if required not in entry:
+                f.err(
+                    "pipeline-status-ledger",
+                    f"{rel}: concepts.{name}: missing required field {required!r}",
+                )
+        for status_field in _PIPELINE_STATUS_FIELDS:
+            if status_field not in entry:
+                continue
+            value = entry[status_field]
+            if value not in _PIPELINE_STATUS_STATES:
+                f.err(
+                    "pipeline-status-ledger",
+                    f"{rel}: concepts.{name}.{status_field}: {value!r} is not "
+                    f"one of {sorted(_PIPELINE_STATUS_STATES)}",
+                )
+        authority = entry.get("authority")
+        if "authority" in entry and authority not in _PIPELINE_AUTHORITY_VALUES:
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}.authority: {authority!r} is not "
+                f"one of {sorted(_PIPELINE_AUTHORITY_VALUES)}",
+            )
+        removal_gate = entry.get("removal_gate")
+        if "removal_gate" in entry and (
+            not isinstance(removal_gate, str) or not removal_gate.strip()
+        ):
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}.removal_gate: must be a non-empty string",
+            )
+        extra = set(entry) - set(_PIPELINE_REQUIRED_CONCEPT_FIELDS) - {"persistence"}
+        if extra:
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: unknown field(s) {sorted(extra)} -- "
+                f"either a typo or the schema needs extending deliberately",
+            )
+
+
+# ---------------------------------------------------------------------------
 # Duplicate-paragraph scan (advisory)
 # ---------------------------------------------------------------------------
 
@@ -1806,6 +1949,9 @@ def main() -> int:
     if terms is not None:
         _check_terminology_entries(f, terms)
         _check_duplicate_term_definitions(f, terms)
+    pipeline_status = _load_pipeline_status(f)
+    if pipeline_status is not None:
+        _check_pipeline_status_ledger(f, pipeline_status)
     check_learning_ladder(f)
     _check_duplicate_paragraphs(f)
     _check_stale_process_language(f)

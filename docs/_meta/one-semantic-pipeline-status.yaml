@@ -1,11 +1,20 @@
 # Machine-readable authority ledger for ADR-063 ("One Semantic Pipeline").
 #
 # Not published as a site page (docs/_meta/ holds machine-only registries,
-# per docs/AGENTS.md's "Layout" section) and not currently read by any
-# generator or CI check — it exists so a concept's status is recorded once,
-# in one shape, instead of re-derived by hand into the ADR's prose status
-# block and the plan's own per-phase "Landed"/"Still not landed" notes each
-# time something changes. Hand-maintained until a generator reads it.
+# per docs/AGENTS.md's "Layout" section). Structurally validated by
+# scripts/check_docs_contract.py's `_check_pipeline_status_ledger` (parses,
+# required fields present, status/authority values from the declared enums,
+# no unknown fields) — a real, non-generated `docs/_meta/` registry has to
+# be at least checked, not merely formatted as YAML (a review finding on
+# PR #1019 caught the first version of this file claiming otherwise). It
+# exists so a concept's status is recorded once, in one shape, instead of
+# re-derived by hand into the ADR's prose and the plan's own per-phase
+# "Landed"/"Still not landed" notes each time something changes. The
+# *content* — which status/authority value is actually true for a concept
+# — is still hand-maintained: no generator derives it from the codebase,
+# so update it in the same PR that changes a concept's status, the same
+# discipline `topics.yaml`/`terminology.yaml` rely on for their own
+# hand-maintained content.
 #
 # Per concept:
 #   primitive   — is the type/module itself defined and tested?
@@ -123,9 +132,13 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Markdown renderer migrated onto ReportDocument (the one remaining
-      renderer not yet on it, per ADR-036's own item); not currently
-      assigned to a numbered ADR-063 phase.
+      Markdown's leaf/root-cause render modes converged onto
+      ReportDocument (per ADR-061's own item 1/Phase 2 accounting, not
+      ADR-036 Increment 3, which is the unrelated, already-optional
+      html_report.py/pr_comment.py-via-ReportModel cleanup) — Markdown's
+      full mode and review digest are already on it
+      (build_markdown_document/build_review_digest_document); not
+      currently assigned to a numbered ADR-063 phase.
 
   l5_source_graph_identity:
     primitive: complete
