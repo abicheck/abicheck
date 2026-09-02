@@ -532,3 +532,85 @@ class TestExtraArgsHasWriteFlag:
         # A flag merely containing "write" as a substring (not a real
         # standalone token) must not trip the detector.
         assert not self._predicate("--not-a-write-flag")
+
+
+def _run_value(call: str) -> str:
+    """Source the real helper functions and return a value-printing call's
+    stdout (e.g. an ``_effective_format`` invocation), stripped of the
+    trailing newline `echo`/`printf` conventions may or may not add."""
+    script = _helpers_region() + f"\n{call}\n"
+    with tempfile.NamedTemporaryFile(
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        result = subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    finally:
+        os.unlink(script_path)
+    return result.stdout
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestEffectiveFormat:
+    """ADR-064's "effective-format-override" gap: `extra-args: --format json`
+    under `format: text`/`markdown` makes the real `abicheck` invocation emit
+    JSON, since Click keeps only the *last* `--format` occurrence -- but every
+    JSON-detection site that checked the Action's own nominal `$FORMAT`
+    variable instead of what the command actually ran with silently missed
+    that override. `_effective_format` resolves the real value the same way
+    `_extra_args_has_write_flag`/`_extra_args_write_json_path` resolve their
+    own `extra-args` overrides: by splitting `INPUT_EXTRA_ARGS` the same way
+    the real command line is built and keeping the last match.
+    """
+
+    def _value(self, format_: str, extra_args: str) -> str:
+        return _run_value(
+            f"FORMAT={format_!r} INPUT_EXTRA_ARGS={extra_args!r} _effective_format"
+        )
+
+    def test_no_extra_args_falls_back_to_nominal_format(self) -> None:
+        assert self._value("text", "") == "text"
+        assert self._value("json", "") == "json"
+
+    def test_unrelated_extra_args_falls_back_to_nominal_format(self) -> None:
+        assert self._value("markdown", "--verbose --gate-api-break") == "markdown"
+
+    def test_extra_args_overrides_to_json_space_separated(self) -> None:
+        assert self._value("text", "--format json") == "json"
+
+    def test_extra_args_overrides_to_json_equals_form(self) -> None:
+        assert self._value("text", "--format=json") == "json"
+
+    def test_extra_args_overrides_away_from_json(self) -> None:
+        # The reverse direction matters too: a `format: json` step whose own
+        # extra-args forces text must not still be treated as JSON.
+        assert self._value("json", "--format text") == "text"
+
+    def test_last_format_occurrence_wins(self) -> None:
+        # Click keeps only the last repeated option -- this helper must
+        # agree, not the first.
+        assert self._value("text", "--format json --format markdown") == "markdown"
+
+    def test_format_after_a_newline(self) -> None:
+        # Same YAML-literal-block splitting concern as
+        # `_extra_args_has_write_flag`'s own newline test.
+        assert (
+            _run_value(
+                r"FORMAT=text INPUT_EXTRA_ARGS=$'--verbose\n--format json' "
+                r"_effective_format"
+            )
+            == "json"
+        )
+
+    def test_does_not_false_positive_on_a_substring(self) -> None:
+        assert self._value("text", "--not-a-format-flag") == "text"

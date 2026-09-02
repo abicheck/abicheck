@@ -410,6 +410,44 @@ _extra_args_write_json_path() {
   return 1
 }
 
+# The real `--format` value `abicheck` runs with, accounting for `extra-args`
+# overriding this script's own `--format "$FORMAT"` flag.
+#
+# Each mode's own command-assembly section puts `--format "$FORMAT"` (derived
+# from the Action's `format:` input) on `CMD` first and `$INPUT_EXTRA_ARGS`
+# last; Click resolves a repeated option by keeping only the *last*
+# occurrence. So `format: text` with `extra-args: --format json` really does
+# run with JSON output, even though this script's own `$FORMAT` variable
+# still reads "text" everywhere else. Every JSON-detection site gating on
+# `$FORMAT == json` (`_STDOUT_JSON_FILE`'s own stdout capture,
+# `_json_report_src`'s `OUTPUT_FILE` branch) needs this *effective* value,
+# not the nominal one, or it silently fails to recognize a report that is
+# genuinely JSON on disk/stdout (ADR-064's own "effective-format-override"
+# gap, previously left as a documented limitation rather than fixed).
+#
+# Falls back to the nominal `$FORMAT` when extra-args carries no `--format`
+# of its own -- the ordinary, unoverridden case.
+#
+# Same word-splitting/quoting caveat as `_extra_args_has_write_flag`: an
+# exotically quoted `--format` evades this, same as every other extra-args
+# scan in this file.
+_effective_format() {
+  local _arg _found="${FORMAT:-}" _prev_was_format=0
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ "$_prev_was_format" == "1" ]]; then
+      _found="$_arg"
+      _prev_was_format=0
+    elif [[ "$_arg" == "--format" ]]; then
+      _prev_was_format=1
+    elif [[ "$_arg" == --format=* ]]; then
+      _found="${_arg#--format=}"
+    fi
+  done
+  printf '%s' "$_found"
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1725,6 +1763,11 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   CMD+=($INPUT_EXTRA_ARGS)
 fi
 
+# Computed once, after extra-args are known, for every JSON-detection site
+# below that needs the real format this invocation runs with rather than the
+# nominal `$FORMAT` -- see `_effective_format`'s own docstring.
+_EFFECTIVE_FORMAT="$(_effective_format)"
+
 echo "::group::abicheck $MODE"
 echo "Command: ${CMD[*]}"
 echo ""
@@ -1831,6 +1874,11 @@ fi
 # report exists only in $ABICHECK_OUTPUT, so it is persisted once here for the
 # report queries below.
 #
+# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- an `extra-args`
+# `--format json` override (under `format: text`/`markdown`) really does
+# produce JSON on stdout, and this capture used to miss it entirely (ADR-064's
+# "effective-format-override" gap; see `_effective_format`'s own docstring).
+#
 # In the *parent* shell, deliberately. Every caller reads the path through
 # `_src=$(_json_report_src)`, and a command substitution runs in a subshell —
 # so creating the file lazily inside that function wrote the memo to a shell
@@ -1838,7 +1886,7 @@ fi
 # leaving the EXIT trap with an empty path to clean up. On a persistent
 # self-hosted runner that leaks a full report copy per lookup (Codex review).
 _STDOUT_JSON_FILE=""
-if [[ "${FORMAT:-}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
+if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
   _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
   printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
 fi
@@ -1885,7 +1933,15 @@ _json_report_src() {
   # never ran preserves this file's real, in-production freshness guarantee
   # unchanged, since the real script always assigns both variables (even to
   # "") before `_json_report_src` can ever be called.
-  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+  #
+  # `${_EFFECTIVE_FORMAT:-${FORMAT:-}}`, not a bare `${FORMAT:-}`, for the
+  # same reason as the freshness variables just above: the real script
+  # always sets `_EFFECTIVE_FORMAT` before this function can be called (see
+  # `_effective_format`'s own docstring for why the nominal `$FORMAT` alone
+  # misses an `extra-args --format json` override), while the isolated
+  # extraction tests above set only `$FORMAT` and rely on the fallback to
+  # keep behaving exactly as before this fix.
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
      && { [[ -z "${_output_file_pre_fp+x}" ]] \
           || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
     echo "${OUTPUT_FILE}"

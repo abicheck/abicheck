@@ -65,10 +65,16 @@ error gets, since both produce the identical `Error: ...` stderr shape; it
 now recognizes the native CLI's own `verdict: "EVIDENCE_CONTRACT_ERROR"`
 JSON envelope and publishes a matching, distinguishable verdict (see
 "Staged landing, additive first" below, item 1's own end-of-list "Update"
-for the full account). Still
+for the full account). **Update (2026-09-02):** the effective-format-override
+gap that same parity pass's review rounds found — `extra-args: --format
+json` overriding a `format: text`/`markdown` step's nominal format, which
+`action/run.sh`'s JSON-detection sites (`_STDOUT_JSON_FILE`,
+`_json_report_src`'s `OUTPUT_FILE` branch) previously missed — is fixed; see
+"Staged landing, additive first" below, item 1's own end-of-list note. Still
 open: the release fan-out's `GateOptions` unification; the rest of the
 cross-front-end parity pass (typed API; the `--format text` gap named
-above); and **stage 2**, the
+above; a real `--artifact-set` member-level evidence-contract signal); and
+**stage 2**, the
 `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
@@ -705,12 +711,26 @@ lands in two stages rather than one atomic change:
       `verdict` description's existing generic pointer at
       `action/run.sh`'s own JSON-detection logic, now naming
       `_STDOUT_JSON_FILE` alongside `_json_report_src` and updating the
-      combination count from three to four. Still open: the release
+      combination count from three to four. **Fixed (2026-09-02):** the
+      effective-format-override gap itself. A new `_effective_format` helper
+      scans `INPUT_EXTRA_ARGS` the same word-splitting way
+      `_extra_args_has_write_flag`/`_extra_args_write_json_path` already
+      scan it for their own flag, keeping the last `--format`/`--format=`
+      occurrence (Click's own last-wins precedence) and falling back to the
+      nominal `$FORMAT` when extra-args carries none; computed once, into
+      `$_EFFECTIVE_FORMAT`, right after extra-args are appended to `CMD`.
+      Both sites this section names now gate on that value instead of the
+      bare `$FORMAT`: the stdout-JSON capture (`_STDOUT_JSON_FILE`) and
+      `_json_report_src`'s `OUTPUT_FILE` branch, each falling back to
+      `${FORMAT:-}` when `$_EFFECTIVE_FORMAT` is unset so the several
+      isolated-snippet tests that extract `_json_report_src` without
+      running the real command-assembly section keep behaving exactly as
+      before (`tests/test_action_run_sh_helpers.py::TestEffectiveFormat`,
+      `tests/test_action_run_sh_pr_json.py`). Still open: the release
       fan-out's `GateOptions` unification, the typed-API half of this
-      parity pass, the `--format text` gap named above, a real
-      `--artifact-set` member-level evidence-contract signal for the
-      Action to consume, and this round's own effective-format-override
-      gap.
+      parity pass, the `--format text` gap named above, and a real
+      `--artifact-set` member-level evidence-contract signal for the Action
+      to consume.
 
       **A CI-infrastructure fix, not a review finding:** the new test
       file's own malicious-fixture test (and its siblings) passed their
