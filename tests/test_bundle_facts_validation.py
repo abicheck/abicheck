@@ -26,6 +26,8 @@ function directly to exercise that one defensive branch.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from abicheck.errors import SnapshotError
@@ -33,7 +35,7 @@ from abicheck.storage.bundle_facts_validation import load_bundle_facts_blob_json
 
 
 class TestLoadBundleFactsBlobJsonRecursionError:
-    def test_a_real_recursion_error_from_json_loads_translates_cleanly(
+    def test_a_recursion_error_from_json_loads_translates_cleanly(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # The pre-scan's own nesting-depth check always fires first through
@@ -43,16 +45,33 @@ class TestLoadBundleFactsBlobJsonRecursionError:
         # translates to this module's SnapshotError vocabulary rather than
         # leaking raw, matching the sibling ValueError/UnicodeDecodeError
         # branches immediately above it.
+        #
+        # A genuinely deeply-nested payload used to trigger this reliably,
+        # but tests/test_json_budget.py's own
+        # test_depth_regression_python_314_json_loads_no_longer_raises_recursionerror
+        # already recorded (confirmed empirically) that json.loads() itself
+        # stopped raising RecursionError at all on Python 3.14, for any
+        # nesting depth -- an earlier version of this test relied on a real
+        # RecursionError and was not portable across interpreter versions
+        # for exactly that reason (it silently passed nowhere on 3.14: the
+        # call raised nothing, so `pytest.raises` itself failed the test).
+        # Force the exception directly instead, so this test exercises the
+        # translation logic itself rather than depending on a specific
+        # interpreter's stack-depth behavior.
         import abicheck.storage.bundle_facts_validation as validation_module
 
         monkeypatch.setattr(
             validation_module, "check_bundle_facts_json_budget", lambda *a, **kw: None
         )
-        deeply_nested = ("[" * 100_000) + ("]" * 100_000)
+
+        def _raise_recursion_error(*_args: object, **_kwargs: object) -> None:
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(json, "loads", _raise_recursion_error)
 
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts_blob_json(
-                deeply_nested.encode("utf-8"),
+                b"[]",
                 max_json_object_nodes=1_000_000,
                 path="unused",
                 description="test blob",
