@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .checker_policy import HasKind, impact_for
-from .demangle import prewarm_demangle_batch
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_CSS`` is re-exported via
@@ -631,17 +630,12 @@ def build_html_document(
             }
         )
 
-    if demangle:
-        prewarm_demangle_batch(
-            [*all_changes, *suppressed, *not_evaluated],
-            attrs=(
-                "symbol",
-                "description",
-                "old_value",
-                "new_value",
-                "affected_symbols",
-            ),
-        )
+    # Demangle-cache prewarming is a rendering concern, not a document fact,
+    # so it happens once in `render_html_document` (the function that
+    # actually walks rows and calls `demangle`/`demangle_text`) rather than
+    # here -- see that function's own docstring. Prewarming here too, ahead
+    # of a render that always follows in the same process via
+    # `generate_html_report`, would just be redundant cache-hit work.
 
     sections = _build_sections_data(
         removed,

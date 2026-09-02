@@ -573,3 +573,76 @@ def test_generate_html_report_is_build_then_render() -> None:
     direct = generate_html_report(result, **kwargs)
     composed = render_html_document(build_html_document(result, **kwargs))
     assert direct == composed
+
+
+def test_render_html_document_batches_demangling_standalone_on_a_cold_cache() -> None:
+    """Codex review, fresh evidence: ``render_html_document`` can run
+    standalone -- on a document built in an earlier process, or simply
+    re-rendered after the demangle cache was never warmed in this one -- and
+    must still batch every symbol into one subprocess call rather than
+    paying a fresh ``c++filt`` fork per row. Reproduces the reported
+    scenario directly: build the document, force the cache cold, call only
+    ``render_html_document`` (never ``generate_html_report``, which would
+    render in the same call as the compute-side work), and count subprocess
+    invocations across several distinct symbols spread across different
+    rows and sections -- not just the one field a narrower repro would
+    cover.
+    """
+    import subprocess as _subprocess
+    from unittest.mock import patch
+
+    import abicheck.demangle as _demangle_mod
+
+    symbols = {
+        "_ZN3foo6removeEv": "foo::remove()",
+        "_ZN3bar3addEv": "bar::add()",
+        "_ZN3baz6changeEv": "baz::change()",
+        "_ZN3qux3newEv": "qux::new()",
+    }
+    removed = Change(
+        kind=ChangeKind.FUNC_REMOVED,
+        symbol="_ZN3foo6removeEv",
+        description="removed",
+    )
+    added = Change(
+        kind=ChangeKind.FUNC_ADDED, symbol="_ZN3bar3addEv", description="added"
+    )
+    changed = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED,
+        symbol="_ZN3baz6changeEv",
+        description="changed",
+        old_value="_ZN3qux3newEv",
+    )
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo.so",
+        changes=[removed, added, changed],
+        verdict=Verdict.BREAKING,
+    )
+    document = build_html_document(result, lib_name="libfoo.so")
+
+    # Simulate a cold cache in a fresh process: no compute-side prewarm ever
+    # ran against these symbols here.
+    _demangle_mod.demangle.cache_clear()
+    _demangle_mod._reset_demangle_batch_cache()
+
+    with patch.dict("sys.modules", {"cxxfilt": None}):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = _subprocess.CompletedProcess(
+                args=["c++filt"],
+                returncode=0,
+                stdout="\n".join(symbols[s] for s in sorted(symbols)) + "\n",
+                stderr="",
+            )
+            html_out = render_html_document(document)
+            assert mock_run.call_count == 1, (
+                "render_html_document paid a subprocess call per symbol "
+                f"instead of one batched call: {mock_run.call_count} calls"
+            )
+
+    for demangled in symbols.values():
+        assert demangled in html_out
+
+    _demangle_mod.demangle.cache_clear()
+    _demangle_mod._reset_demangle_batch_cache()

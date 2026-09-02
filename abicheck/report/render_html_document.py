@@ -32,6 +32,7 @@ import html
 from collections.abc import Mapping
 from typing import Any
 
+from ..demangle import prewarm_demangle_from_json_value
 from ..html_template import _VERDICT_STYLE, render_document, render_footer
 from .document import ReportDocument
 from .render_html import (
@@ -203,10 +204,23 @@ def render_html_document(document: ReportDocument) -> str:
     ``html_report.build_html_document``; this function and its two
     mode-specific halves below only format it. Neither reads a
     ``DiffResult``/``Change`` or imports a policy/classification module.
+
+    Demangling is a formatting choice (see ``abbr_symbol_text``'s own
+    contract in ``render_html.py``), so batch-prewarming the demangle cache
+    belongs here rather than in ``build_html_document``: this is the one
+    function that actually walks every row and calls into
+    ``demangle``/``demangle_text``, including when it runs standalone on a
+    document built (or deserialized) in an earlier process, with no warm
+    cache carried over. Skipped for the compat-mode layout, which never
+    demangles, and for a native document with ``demangle`` off, matching
+    ``abbr_symbol_text``'s own no-op in both cases -- prewarming would only
+    populate a cache nothing downstream reads.
     """
     d = document.to_mapping()
     if d["mode"] == "compat":
         return _render_compat_html_document(d)
+    if d["demangle"]:
+        prewarm_demangle_from_json_value(d)
     return _render_native_html_document(d)
 
 
