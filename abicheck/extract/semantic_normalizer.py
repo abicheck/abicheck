@@ -132,6 +132,7 @@ layer instead of a raw-fact layer.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 
 from ..model.declarations import Function, Variable
@@ -153,6 +154,20 @@ __all__ = ["normalize_header_ast"]
 #: its use in :func:`normalize_header_ast`, :func:`_function_spelling_fact`,
 #: and :func:`_variable_spelling_fact` below.
 _UNRESOLVED_TYPE_SENTINEL = "?"
+
+#: Whole-word ``const``/``volatile`` matcher for
+#: :func:`_variable_top_level_cv_qualification`'s own depth-aware scan --
+#: mirrors ``model.declarator_qualifiers._CV_WORD_RE`` (duplicated rather
+#: than imported, matching that module's own reasoning for not sharing it
+#: with its sibling ``signature_normalization.py``: leaf modules on two
+#: different sides of the `model`/`extract` boundary, per ADR-063 D10).
+_CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile)\b")
+
+#: castxml's own literal wrapper prefix for an ``_Atomic`` type
+#: (``extract/headers/castxml/type_resolution.py``'s ``AtomicType`` branch)
+#: -- see :func:`_has_unresolved_component`'s own docstring for why this
+#: is treated as transparent rather than a real, depth-increasing paren.
+_ATOMIC_WRAPPER_PREFIX = "_Atomic("
 
 
 def _has_unresolved_component(raw_type: str) -> bool:
@@ -189,15 +204,38 @@ def _has_unresolved_component(raw_type: str) -> bool:
     reached). So this function walks *raw_type* tracking depth over
     ``()``/``[]``/``<>``, and reports unresolved only for a ``"?"`` found
     at depth 0 -- never one already inside a bracketed grouping.
+
+    **One wrapper is a deliberate, named exception (Codex review, fourth
+    round, fresh evidence): castxml's own ``_Atomic(...)`` composition.**
+    ``type_name_uncached``'s ``AtomicType`` branch renders an unresolved
+    wrapped type as the literal ``"_Atomic(?)"`` -- genuine sentinel
+    output, using a REAL parenthesis pair as part of the resolver's own
+    grammar, not an expression context a real, resolved ``"?"`` could ever
+    be found inside instead. Depth-tracking alone would treat that
+    ``"("`` exactly like a `decltype(...)`'s, hiding the sentinel at depth
+    1 and wrongly reporting the composite as resolved. ``"_Atomic("`` is
+    therefore recognized as a transparent token -- skipped without
+    incrementing depth -- so a sentinel directly inside it is still caught
+    at its effective depth 0, the same treatment a bare `"?"` already gets.
+    ``_Atomic(...)`` is also real, valid C11 syntax for an otherwise
+    fully-resolved type (``"_Atomic(int)"``), which this special-casing
+    does not disturb: only a literal ``"?"`` inside it is ever flagged.
     """
     depth = 0
-    for ch in raw_type:
+    i = 0
+    n = len(raw_type)
+    while i < n:
+        if raw_type.startswith(_ATOMIC_WRAPPER_PREFIX, i):
+            i += len(_ATOMIC_WRAPPER_PREFIX)
+            continue
+        ch = raw_type[i]
         if ch in "([<":
             depth += 1
         elif ch in ")]>":
             depth = max(0, depth - 1)
         elif ch == _UNRESOLVED_TYPE_SENTINEL and depth == 0:
             return True
+        i += 1
     return False
 
 
@@ -239,6 +277,68 @@ def _variable_spelling_fact(var: Variable) -> Fact[str]:
     if _has_unresolved_component(var.type):
         return Fact.failed("type not resolved")
     return Fact.present(canonicalize_type_name(var.type))
+
+
+def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
+    """The declaration's OWN cv-qualification -- the one that applies to
+    *var* itself, e.g. ``"const"`` for ``const int g`` or a const pointer
+    ``int * const g``, but NOT for a mutable pointer to const data
+    (``const int *g`` — the pointee is const, the pointer/variable itself
+    is not) (Codex review, fresh evidence).
+
+    Deliberately does NOT read ``Variable.is_const``: both header-AST
+    backends compute that legacy field via a bare word-boundary search
+    over the WHOLE type spelling (``dumper_castxml.py``'s/``dumper_clang.
+    py``'s ``parse_variables()``), which is exactly the pointee-vs-value
+    conflation above -- correct enough for that field's own existing,
+    narrower "would writing through this pointer/reference SIGSEGV"
+    question, but the wrong shape for this IR's own top-level
+    ``cv_qualification``, which this codebase's other structural CV
+    primitives (``model.signature_normalization``'s "outermost vs. pointee
+    position" discipline; ``extract/headers/castxml/type_resolution.
+    cv_qualifies_pointer_value``) already treat as a load-bearing
+    distinction.
+
+    Finds the last top-level (nesting-depth-0) pointer/reference sigil
+    (``*``/``&``/``&&``) in *type_str*; the qualification is read only from
+    the text AFTER it (the sigil's own qualification -- ``int * const``),
+    or from the WHOLE string when there is no top-level sigil at all (a
+    plain by-value declaration -- ``const int``/``int const``). Both the
+    sigil search and the keyword search are depth-aware (outside any
+    ``<...>``/``(...)``/``[...]``), mirroring ``model.declarator_qualifiers.
+    _extract_top_level_cv``'s identical discipline, so a `const` inside a
+    template argument (``vector<const int> *g`` -- the vector's own element
+    type, not this pointer's qualification) is never mistaken for this
+    declaration's own.
+    """
+    depth = 0
+    last_sigil = -1
+    for i, ch in enumerate(type_str):
+        if ch in "([<":
+            depth += 1
+        elif ch in ")]>":
+            depth = max(0, depth - 1)
+        elif ch in "*&" and depth == 0:
+            last_sigil = i
+    region = type_str[last_sigil + 1 :] if last_sigil != -1 else type_str
+    depth = 0
+    found: list[str] = []
+    i = 0
+    n = len(region)
+    while i < n:
+        ch = region[i]
+        if ch in "([<":
+            depth += 1
+            i += 1
+        elif ch in ")]>":
+            depth = max(0, depth - 1)
+            i += 1
+        elif depth == 0 and (m := _CV_KEYWORD_RE.match(region, i)):
+            found.append(m.group())
+            i = m.end()
+        else:
+            i += 1
+    return canonical_cv_qualification(found)
 
 
 def _add_occurrence(
@@ -384,7 +484,7 @@ def normalize_header_ast(
             _variable_spelling_fact(var),
             producer=producer,
             cv_qualification=Fact.present(
-                canonical_cv_qualification(("const",) if var.is_const else ())
+                _variable_top_level_cv_qualification(var.type)
             ),
         )
     return SemanticIR(occurrences=occurrences)

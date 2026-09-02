@@ -12671,8 +12671,31 @@ excluded from this slice, named rather than silently dropped*: a function's
 compute identically (not a spelling problem), and `CanonicalEntity` has no
 dedicated slot for either -- adding one is a model-shape decision for a
 future slice. A variable's `canonical_spelling` is
-`canonicalize_type_name(variable.type)` with `is_const` carried via
-`cv_qualification`, mirroring the function treatment.
+`canonicalize_type_name(variable.type)`.
+
+**A variable's `cv_qualification` is NOT read from `Variable.is_const`
+(Codex review, PR #1012, fourth round, fresh evidence) -- an earlier
+revision did, mirroring the function treatment, and that mirroring was
+wrong.** Both header-AST backends compute `is_const` via a bare
+word-boundary search for `"const"` over the WHOLE type spelling
+(`dumper_castxml.py`'s/`dumper_clang.py`'s `parse_variables()`), which is
+correct for that field's own narrower, pre-existing question ("would
+writing through this pointer/reference SIGSEGV") but conflates a mutable
+pointer to const data (`const int *g` -- the pointee is const, the pointer
+itself is not) with a genuinely const declaration. `cv_qualification` is
+this IR's own STRUCTURAL top-level qualification, the same distinction
+`model.signature_normalization`'s "outermost vs. pointee position"
+discipline and `extract/headers/castxml/type_resolution.
+cv_qualifies_pointer_value` already treat as load-bearing elsewhere in this
+codebase -- so reusing the legacy boolean reintroduced exactly the
+conflation those primitives exist to avoid. `_variable_top_level_cv_
+qualification` derives it structurally instead: finds the last top-level
+(nesting-depth-0) pointer/reference sigil in the type string, then reads
+`const`/`volatile` keywords only from the text after it (or from the WHOLE
+string when there is no top-level sigil at all, the by-value case) --
+mirroring `model.declarator_qualifiers._extract_top_level_cv`'s identical
+depth-aware discipline, so a `const` inside a template argument
+(`vector<const int> *g`) is never mistaken for this declaration's own.
 
 **No function is excluded from normalization at all -- not gated on
 `Function.is_compiler_generated`, nor on a synthetic ctor/dtor mangled key
@@ -12745,6 +12768,22 @@ inside `decltype(...)`'s parens or a template argument list's angle
 brackets. So a `"?"` found at nesting depth zero is the sentinel; one found
 at depth > 0 is real, resolved evidence. Replaces the exact-equality check
 everywhere, typedef branch included.
+
+**One wrapper is a deliberate, named exception to plain depth-tracking
+(Codex review, PR #1012, fourth round, fresh evidence): castxml's own
+`_Atomic(...)` composition.** `type_name_uncached`'s `AtomicType` branch
+renders an unresolved wrapped type as the literal `"_Atomic(?)"` --
+genuine sentinel output, using a REAL parenthesis pair as part of the
+resolver's own grammar, not an expression context a real, resolved `"?"`
+could ever be found inside instead. Depth-tracking alone treats that `"("`
+exactly like a `decltype(...)`'s, hiding the sentinel at depth 1 and
+wrongly reporting the composite as resolved. `"_Atomic("` is recognized as
+a transparent token instead -- skipped without incrementing depth -- so a
+sentinel directly inside it is still caught at its effective depth 0, the
+same treatment a bare `"?"` already gets; `_Atomic(...)` is also real,
+valid C11 syntax for an otherwise fully-resolved type (`"_Atomic(int)"`),
+which this special-casing does not disturb.
+
 `dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
 the second slice deliberately left unwired, per that slice's own note) now
 populate `semantic_ir` too, via a new shared choke point,

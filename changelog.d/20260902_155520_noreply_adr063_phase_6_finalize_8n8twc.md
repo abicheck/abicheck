@@ -8,7 +8,13 @@
   `resolve_function_identity` already use
   (`canonicalize_function_signature_param_type` per parameter,
   `canonicalize_type_name` for the return/variable type), with
-  `is_const`/`is_volatile` carried via `CanonicalEntity.cv_qualification`.
+  a function's `is_const`/`is_volatile` carried via `CanonicalEntity.
+  cv_qualification`, and a variable's own top-level `const`/`volatile`
+  derived structurally from its type spelling (finding the last top-level
+  pointer/reference sigil and reading qualifiers only after it, or from
+  the whole string when there is none) rather than from the legacy
+  `Variable.is_const` boolean, which conflates a mutable pointer to const
+  data with a genuinely const declaration.
   Every function is normalized, including one whose mangled name is
   castxml's own synthetic constructor/destructor snapshot key: a later
   hybrid-merge step may rewrite such a key to a real clang-matched one, and
@@ -25,6 +31,10 @@
   spelling for a pointer/reference/array/cv-qualified pointee at nesting
   depth zero — not by exact-string or plain-substring match, and the same
   fix applies to the pre-existing typedef-underlying-type check.
+  castxml's own `_Atomic(...)` composition is a deliberate exception to
+  plain depth-tracking (treated as a transparent wrapper), since it uses a
+  real parenthesis pair as part of the resolver's own grammar to compose
+  an unresolved wrapped type (`"_Atomic(?)"`), not an expression context.
   `dumper.py`'s PE and Mach-O dumps now populate `AbiSnapshot.
   semantic_ir` too (previously ELF-only), via a new shared choke point,
   `extract/header_ast_fields.parse_header_ast_fields`. No detector,

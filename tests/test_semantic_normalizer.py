@@ -338,6 +338,42 @@ def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     assert entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_unresolved_atomic_wrapper_is_failed() -> None:
+    """castxml's own ``AtomicType`` branch renders an unresolved wrapped
+    type as the literal ``"_Atomic(?)"`` -- a REAL paren pair as part of
+    the resolver's own grammar, not an expression context (Codex review,
+    fourth round, fresh evidence: this reproduces against a version of
+    ``_has_unresolved_component`` that treated every ``(`` as
+    depth-increasing, hiding this sentinel at depth 1)."""
+    fn = _function("f", "void", ("_Atomic(?)",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+
+
+def test_normalize_header_ast_resolved_atomic_wrapper_stays_present() -> None:
+    """A real, resolved ``_Atomic(...)`` type (valid C11 syntax) must not
+    be disturbed by the sentinel-detection special-casing."""
+    fn = _function("f", "void", ("_Atomic(int)",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_function_cv_qualification() -> None:
     """A member function's ``is_const``/``is_volatile`` populate
     ``cv_qualification`` in canonical order, separately from the spelling
@@ -462,6 +498,11 @@ def test_normalize_header_ast_skips_function_without_entity_id() -> None:
 
 
 def test_normalize_header_ast_canonicalizes_variable_type_spelling() -> None:
+    """``"struct Widget const*"`` is a MUTABLE pointer to const data -- the
+    pointee is const, the pointer/variable itself is not, so
+    ``cv_qualification`` must be empty (Codex review, fourth round, fresh
+    evidence: this previously asserted ``("const",)``, reproducing the
+    exact pointee-vs-value conflation the finding named)."""
     var = Variable(
         name="g_widget",
         mangled="g_widget",
@@ -479,8 +520,75 @@ def test_normalize_header_ast_canonicalizes_variable_type_spelling() -> None:
     )
     (entity,) = ir.occurrences.values()
     assert entity.canonical_spelling.value == "Widget const *"
-    assert entity.cv_qualification.value == ("const",)
+    assert entity.cv_qualification.value == ()
     assert entity.producer == "clang"
+
+
+def test_normalize_header_ast_const_pointer_variable_is_top_level_const() -> None:
+    """A CONST pointer to mutable data (``"int * const"``) -- the pointer
+    itself is const -- IS the declaration's own top-level qualification,
+    unlike the mutable-pointer-to-const-data case above."""
+    var = Variable(
+        name="g_ptr",
+        mangled="g_ptr",
+        type="int * const",
+        entity_id=entity_id_for_variable((), "g_ptr", mangled_name="g_ptr"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_by_value_const_variable_is_top_level_const() -> None:
+    """A plain by-value const variable (no pointer at all) -- the whole
+    string IS the top-level qualification, matching the pre-existing
+    by-value behavior."""
+    var = Variable(
+        name="g_n",
+        mangled="g_n",
+        type="const int",
+        entity_id=entity_id_for_variable((), "g_n", mangled_name="g_n"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_const_template_argument_is_not_top_level() -> None:
+    """A ``const`` inside a template argument list belongs to that
+    argument's own type, not this pointer's qualification (mirrors
+    ``model.declarator_qualifiers._extract_top_level_cv``'s identical
+    discipline)."""
+    var = Variable(
+        name="g_vec",
+        mangled="g_vec",
+        type="vector<const int> *",
+        entity_id=entity_id_for_variable((), "g_vec", mangled_name="g_vec"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
 
 
 def test_normalize_header_ast_unresolved_variable_type_is_failed() -> None:
