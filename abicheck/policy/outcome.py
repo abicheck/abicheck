@@ -62,7 +62,7 @@ against a raw integer or literal -- see
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -351,6 +351,7 @@ def run_outcome_for_scan_fields(
     member_evidence_contract_error: bool = False,
     bundle_incomplete: bool = False,
     assurance: object | None = None,
+    member_compatibility_verdict: str | None = None,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
@@ -411,12 +412,16 @@ def run_outcome_for_scan_fields(
 
     *assurance*, when given, is the report's own already-serialized
     ``analysis_assurance`` block (``cli_scan_baseline.py``'s
-    ``diff_summary["analysis_assurance"]``) -- stored on the returned
-    :class:`RunOutcome` as-is; :func:`analysis_assurance_dict` accepts this
-    already-``dict`` shape directly (Codex review, fresh evidence: every
-    scan writer was passing no assurance at all, so the axis always read
-    ``None`` even for a report whose own ``diff.analysis_assurance`` block
-    was fully computed).
+    ``diff_summary["analysis_assurance"]``) -- stored as-is;
+    :func:`analysis_assurance_dict` accepts this ``dict`` shape directly
+    (Codex review: every scan writer previously passed no assurance).
+
+    *member_compatibility_verdict*, when given, is the worst REAL
+    per-member verdict a caller with no ``report=`` already computed
+    (:class:`~abicheck.service_scan.ScanSetResult`'s set-level abort case)
+    -- resolves *compatibility* precisely when *verdict* is a sentinel,
+    since exit code alone can't tell NO_CHANGE/COMPATIBLE/COMPATIBLE_
+    WITH_RISK apart (Codex review, fresh evidence).
     """
     operational = _SCAN_ABORT_VERDICT_OPERATIONAL.get(verdict, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE:
@@ -431,22 +436,24 @@ def run_outcome_for_scan_fields(
         compatibility = Verdict(verdict)
     except ValueError:
         compatibility = None
-        # *verdict* is one of the operational-only sentinels (e.g. a late
-        # BUDGET_OVERFLOW/EVIDENCE_CONTRACT_ERROR abort) -- but a persisted,
-        # validated *severity_exit_code* (the abort's own preserved
-        # `exit.compatibility_contribution`) can still say a real
-        # comparison completed and found a break before the abort fired
-        # (Codex review, fresh evidence: the earlier abort-gate fix restored
-        # `gate` from this same value but left `compatibility` at `None`
-        # regardless, contradicting `docs/use/output-formats.md`'s own
-        # "null means nothing was compared" rule for a report that clearly
-        # did compare something). Only 2/4 are unambiguous -- a `0`
-        # contribution cannot be told apart from NO_CHANGE/COMPATIBLE/
-        # COMPATIBLE_WITH_RISK, so it stays `None`, same as today.
-        if severity_exit_code == 2:
-            compatibility = Verdict.API_BREAK
-        elif severity_exit_code == 4:
-            compatibility = Verdict.BREAKING
+        # *verdict* is an operational-only sentinel (e.g. a late abort) --
+        # but a persisted *severity_exit_code* or a precise *member_
+        # compatibility_verdict* can still say a real comparison completed
+        # before the abort fired (Codex review, x2): `null` must not claim
+        # nothing was compared when something was. Only severity_exit_code
+        # 2/4 are unambiguous on their own (0 can't be told apart from
+        # NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK), hence the verdict-
+        # string fallback below.
+        if member_compatibility_verdict is not None:
+            try:
+                compatibility = Verdict(member_compatibility_verdict)
+            except ValueError:
+                compatibility = None
+        if compatibility is None:
+            if severity_exit_code == 2:
+                compatibility = Verdict.API_BREAK
+            elif severity_exit_code == 4:
+                compatibility = Verdict.BREAKING
 
     compat_exit_code = (
         severity_exit_code if severity_exit_code is not None else exit_code
@@ -609,6 +616,29 @@ def run_outcome_dict_for_scan_outcome(
     ).to_dict()
 
 
+def _worst_real_verdict(candidates: Iterable[object]) -> Verdict | None:
+    """Worst real :class:`Verdict` among *candidates* (declaration order),
+    skipping every non-parseable entry (``None``, an operational sentinel)
+    -- ``None`` if nothing parses. Scan-side sibling of ``cli_compare_
+    release_helpers._release_completed_compatibility_verdict``.
+    """
+    order = list(Verdict)
+    worst: Verdict | None = None
+    worst_rank = -1
+    for c in candidates:
+        if not isinstance(c, str):
+            continue
+        try:
+            v = Verdict(c)
+        except ValueError:
+            continue
+        rank = order.index(v)
+        if rank >= worst_rank:
+            worst_rank = rank
+            worst = v
+    return worst
+
+
 def run_outcome_dict_for_scan(
     verdict: str,
     exit_code: int,
@@ -616,7 +646,7 @@ def run_outcome_dict_for_scan(
     report: object = None,
     member_evidence_contract_error: bool = False,
     bundle_incomplete: bool = False,
-    member_compatibility_contribution: int | None = None,
+    member_verdicts: Iterable[object] | None = None,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> dict[str, Any]:
     """One-call convenience wrapping :func:`run_outcome_for_scan_fields` +
@@ -631,14 +661,17 @@ def run_outcome_dict_for_scan(
     ``exit.compatibility_contribution`` nesting is consulted next -- the two
     are mutually exclusive report shapes (Codex review), never both present
     at once, so there is no precedence question between them in practice.
-    *member_compatibility_contribution* is the last-resort fallback tier,
-    for a writer with no ``report=`` at all
-    (:class:`~abicheck.service_scan.ScanSetResult`'s own set-level
-    ``BUDGET_OVERFLOW`` abort, Codex review, fresh evidence): the worst
-    REAL per-member compatibility exit code it already computed itself,
-    so a completed member's break isn't lost just because a *different*,
-    later member aborted and the set-level sentinel dominates ``verdict``/
-    ``exit_code``.
+
+    *member_verdicts*, when given, is the raw per-member (+ bundle) verdict
+    strings a writer with no ``report=`` already has
+    (:class:`~abicheck.service_scan.ScanSetResult`'s set-level abort case,
+    Codex review, fresh evidence -- two rounds): the last-resort fallback,
+    via :func:`_worst_real_verdict`, deriving both the compat-exit
+    contribution and the precise ``compatibility`` verdict -- not reducible
+    to a bare int, since NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK all
+    share exit code ``0``. A completed member's real result is never lost
+    just because a *different*, later member aborted and the set-level
+    sentinel dominates ``verdict``/``exit_code``.
 
     *member_evidence_contract_error*/*bundle_incomplete* are forwarded to
     :func:`run_outcome_for_scan_fields` unchanged -- see that function's own
@@ -647,8 +680,13 @@ def run_outcome_dict_for_scan(
     compat_exit_code = scan_report_severity_exit_code(report)
     if compat_exit_code is None:
         compat_exit_code = scan_report_abort_compatibility_contribution(report)
-    if compat_exit_code is None:
-        compat_exit_code = member_compatibility_contribution
+    worst_member = (
+        _worst_real_verdict(member_verdicts) if member_verdicts is not None else None
+    )
+    if compat_exit_code is None and worst_member is not None:
+        from .severity import legacy_exit_code
+
+        compat_exit_code = legacy_exit_code(worst_member)
     return run_outcome_for_scan_fields(
         verdict,
         exit_code,
@@ -657,6 +695,7 @@ def run_outcome_dict_for_scan(
         member_evidence_contract_error=member_evidence_contract_error,
         bundle_incomplete=bundle_incomplete,
         assurance=scan_report_assurance_block(report),
+        member_compatibility_verdict=getattr(worst_member, "value", None),
         lifecycle=lifecycle,
     ).to_dict()
 
@@ -665,55 +704,40 @@ def run_outcome_dict_for_release(
     compatibility_verdict: str | None, exit_decision: object
 ) -> dict[str, Any]:
     """Build the ``run_outcome`` dict for a directory/package release
-    comparison's own summary JSON (:mod:`abicheck.cli_compare_release_
-    helpers`'s ``_format_release_json``, :mod:`abicheck.cli_compare_
-    release_matrix`'s ``_write_release_summary_file``) -- both claim
-    ``run_outcome`` per the documented "every JSON report" contract
-    (``docs/use/output-formats.md``) but never actually built one (Codex
-    review, fresh evidence).
+    comparison's own summary JSON (``cli_compare_release_helpers.
+    _format_release_json``, ``cli_compare_release_matrix.
+    _write_release_summary_file``) -- both claim ``run_outcome`` per the
+    "every JSON report" contract (``docs/use/output-formats.md``) but never
+    actually built one (Codex review).
 
     *compatibility_verdict* is deliberately **not** the release's own
     reported ``worst_verdict`` -- that string can legitimately be the
     ``"ERROR"``/``"not_comparable"`` operational sentinels
-    ``_RELEASE_VERDICT_ORDER`` ranks above every real compatibility
-    verdict, which is the right behavior for the release's *reported*
-    verdict but would silently erase a real, already-completed
-    compatibility result from this genuinely separate axis (Codex review,
-    fresh evidence: one ``BREAKING`` library plus a second, unrelated
-    library's ``ERROR`` must still read ``compatibility: "BREAKING"``
-    here). Callers pass ``cli_compare_release_helpers.
-    _release_completed_compatibility_verdict(...)`` instead -- the worst
-    *real* ``Verdict`` among the release's library/global results, with the
-    two sentinels excluded, or ``None`` when no real compatibility result
-    was observed at all (Codex review, fresh evidence: every library
-    ``ERROR``/``not_comparable`` and no bundle/matrix comparison ran --
-    ``compatibility`` must stay unknown, never fall back to the dishonest
-    floor ``"NO_CHANGE"``) -- so this function only ever has to try parsing
-    a value that is either a real ``Verdict`` or ``None``, both of which
-    ``Verdict(...)``'s own ``ValueError`` handles identically below.
+    ``_RELEASE_VERDICT_ORDER`` ranks above every real verdict, correct for
+    the release's *reported* verdict but would erase a real, already-
+    completed compatibility result from this separate axis. Callers pass
+    ``cli_compare_release_helpers._release_completed_compatibility_
+    verdict(...)`` instead -- the worst real ``Verdict`` among the
+    release's library/global results with the two sentinels excluded, or
+    ``None`` when no real result was observed at all (every library
+    ``ERROR``/``not_comparable``, no bundle/matrix ran -- ``compatibility``
+    stays unknown, never the dishonest floor ``"NO_CHANGE"``) -- so this
+    only ever parses a real ``Verdict`` or ``None``, both handled by
+    ``Verdict(...)``'s own ``ValueError`` below.
 
     *exit_decision* is the release's own already-computed ``exit`` block
     (``policy.exit_decision_precedence.resolve_release_exit_decision_for_
-    report(...).to_dict()``) -- read, never recomputed, the same
-    read-not-rederive principle every other reader in this module already
-    follows: this is a report-shape convenience *around* that decision, not
-    a second exit-code resolver.
+    report(...).to_dict()``) -- read, never recomputed.
 
-    ``gate`` is derived from ``compatibility_contribution`` -- the pure,
-    real-`Verdict`-based compatibility axis -- with one escalation:
-    ``removed_required_library_contribution`` (``--fail-on-removed-
-    library``'s own exit 8) folds in as :attr:`PolicyGateDecision.
-    ABI_BREAKING`, the same tier ``buildsource.check_report.
-    _escalate_removed_library_severity`` already uses for the equivalent
-    per-library escalation ("a whole library disappearing is unambiguously
-    an ABI break"). ``operational`` reads ``not_comparable_contribution``
-    (preferred) and ``operational_error_contribution`` -- the latter is
-    exactly :attr:`OperationalStatus.EXTRACTION_ERROR`'s own documented
-    grounding ("compare-release's own ``verdict: 'ERROR'`` sentinel -- a
-    library failed to dump/extract/compare"). ``evidence_contract_error_
-    contribution``/``budget_overflow_contribution``/``crosscheck_
-    promotion_contribution`` are always ``0`` for a release decision (see
-    ``ExitDecision``'s own field docstrings) and are not consulted.
+    ``gate`` is derived from ``compatibility_contribution``, with one
+    escalation: ``removed_required_library_contribution`` (exit 8) folds in
+    as :attr:`PolicyGateDecision.ABI_BREAKING`, mirroring ``buildsource.
+    check_report._escalate_removed_library_severity``. ``operational``
+    reads ``not_comparable_contribution`` (preferred) then ``operational_
+    error_contribution`` (:attr:`OperationalStatus.EXTRACTION_ERROR` --
+    ``verdict: 'ERROR'`` means a library failed to dump/extract/compare).
+    The remaining ``ExitDecision`` contributions are always ``0`` for a
+    release decision and are not consulted.
     """
     exit_block = exit_decision if isinstance(exit_decision, Mapping) else {}
 

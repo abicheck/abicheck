@@ -223,18 +223,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   gap where the two could silently drift from each other as either
   evolves.
 - **`--artifact-set`'s `run_outcome.compatibility` no longer goes `null`
-  when a completed member's break is followed by a different member's
+  when a completed member's result is followed by a different member's
   `BUDGET_OVERFLOW`.** `_aggregate_scan_set_verdict`'s own step 1 (any
   member `BUDGET_OVERFLOW` → the whole set is `BUDGET_OVERFLOW`) is
   correct for the set's own *reported* `verdict`/`exit_code`, but
   `ScanSetResult.to_dict()` derived `run_outcome` from that same
   sentinel-bearing rollup alone, silently erasing an already-completed
-  `BREAKING`/`API_BREAK` member's real result from the independent
-  compatibility axis. `run_outcome_dict_for_scan` gained a
-  `member_compatibility_contribution` fallback tier (the worst REAL
-  per-member compatibility exit code, used only when no `report=` supplies
-  one) so the completed break survives even though the set itself never
-  finished.
+  member's real result from the independent compatibility axis —
+  including a completed-but-*clean* member (`NO_CHANGE`/`COMPATIBLE`/
+  `COMPATIBLE_WITH_RISK`), which a bare exit-code contribution can't tell
+  apart (all `0`) from "nothing was compared." `run_outcome_dict_for_scan`
+  gained a `member_verdicts` fallback tier (the raw per-member + bundle
+  verdict strings, resolved via the new `_worst_real_verdict` to the
+  worst REAL one), used only when no `report=` supplies a compatibility
+  contribution, so a completed member's result survives even though the
+  set itself never finished.
 
 ### Changed
 
