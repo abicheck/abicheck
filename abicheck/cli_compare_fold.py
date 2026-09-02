@@ -482,7 +482,7 @@ class _ScopedFold:
         scoped_compat = getattr(self.result, "scoped_compatibility_contribution", None)
         if not isinstance(run_outcome, dict) or scoped_compat is None:
             return
-        from .policy.outcome import policy_gate_decision_for_exit_code
+        from .report.not_comparable import policy_gate_decision_for_exit_code
 
         payload["full_run_outcome"] = run_outcome
         payload["run_outcome"] = {

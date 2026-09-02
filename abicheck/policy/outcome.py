@@ -341,6 +341,7 @@ def run_outcome_for_scan_fields(
     *,
     severity_exit_code: int | None = None,
     contract_coverage_contribution: object = None,
+    member_evidence_contract_error: bool = False,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
@@ -373,10 +374,26 @@ def run_outcome_for_scan_fields(
     contribution, never guessed: an unconfirmed ``1`` stays a
     compatibility-gate contribution, fail-closed, exactly like the reader
     this mirrors (``workflows.aggregate.gate._contract_coverage_exit``).
+
+    *member_evidence_contract_error*, when ``True``, folds
+    :attr:`OperationalStatus.EVIDENCE_CONTRACT_ERROR` in even though *verdict*/
+    *exit_code* don't name it directly -- :class:`~abicheck.service_scan.
+    ScanSetResult`'s own ``_aggregate_scan_set_verdict`` deliberately lets a
+    *stronger* member's ``API_BREAK``/``BREAKING`` compatibility verdict win
+    the reported ``verdict``/``exit_code`` over a *different* member's
+    ``EVIDENCE_CONTRACT_ERROR`` (an incomplete analysis stays visible in
+    ``per_artifact``, but never becomes the set-level verdict once a real
+    break outranks it) -- without this, that member abort has no signal left
+    in ``run_outcome`` at all (Codex review). Never overrides an operational
+    status already derived from *verdict*/*exit_code* (e.g. a set-level
+    ``BUDGET_OVERFLOW``, which already dominates every member per that same
+    function's own step 1).
     """
     operational = _SCAN_ABORT_VERDICT_OPERATIONAL.get(verdict, OperationalStatus.NONE)
     if operational is OperationalStatus.NONE:
         operational = _SCAN_EXIT_CODE_OPERATIONAL.get(exit_code, OperationalStatus.NONE)
+    if operational is OperationalStatus.NONE and member_evidence_contract_error:
+        operational = OperationalStatus.EVIDENCE_CONTRACT_ERROR
 
     compatibility: Verdict | None
     try:
@@ -433,6 +450,38 @@ def scan_report_severity_exit_code(report: object) -> int | None:
     )
 
 
+def scan_report_abort_compatibility_contribution(report: object) -> int | None:
+    """A scan *abort* report's own persisted ``exit.compatibility_
+    contribution``, or ``None`` when absent/malformed.
+
+    ``workflows.scan_abort_result.scan_abort_result_fields`` shapes a
+    ``run_scan_core`` abort (budget overflow, evidence-contract error) as
+    ``report = {"scan_schema_version": ..., "exit": {...}}`` -- no ``diff``
+    key at all, so :func:`scan_report_severity_exit_code` never applies to
+    an abort report and this is a genuinely separate nesting, not a variant
+    of that lookup. ``exit.compatibility_contribution``
+    (``policy.exit_decision.ExitDecision.to_dict()``) is the pure, pre-
+    operational-fold compatibility contribution a *late* abort preserves
+    from whatever gate decision already ran before it fired
+    (``attach_prior_on_budget_overflow``/``audit_prior_decision``) -- reading
+    it here is what lets a late ``BUDGET_OVERFLOW`` that already found a real
+    ABI break keep reporting ``run_outcome.gate: abi_breaking`` instead of
+    the abort's own top-level exit code (5, outside the 0/1/2/4 scheme)
+    zeroing the compatibility axis entirely (Codex review).
+    """
+    exit_block = report.get("exit") if isinstance(report, dict) else None
+    contribution = (
+        exit_block.get("compatibility_contribution")
+        if isinstance(exit_block, dict)
+        else None
+    )
+    return (
+        contribution
+        if isinstance(contribution, int) and not isinstance(contribution, bool)
+        else None
+    )
+
+
 def scan_report_coverage_contribution(report: object) -> object:
     """A scan report dict's own nested ``diff.contract_coverage_exit_
     contribution`` (ADR-049 Phase 7's raw ``0``/``1`` axis value), or
@@ -484,6 +533,7 @@ def run_outcome_dict_for_scan(
     exit_code: int,
     *,
     report: object = None,
+    member_evidence_contract_error: bool = False,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> dict[str, Any]:
     """One-call convenience wrapping :func:`run_outcome_for_scan_fields` +
@@ -491,12 +541,27 @@ def run_outcome_dict_for_scan(
     scan-shaped writer's own ``to_dict()`` actually wants, so each keeps its
     ``run_outcome`` entry to a single line rather than repeating this same
     three-call sequence.
+
+    An ordinary (non-abort) report's nested ``diff.severity.exit_code`` is
+    preferred when present; a *abort* report has no ``diff`` key at all, so
+    :func:`scan_report_abort_compatibility_contribution`'s own separate
+    ``exit.compatibility_contribution`` nesting is consulted next -- the two
+    are mutually exclusive report shapes (Codex review), never both present
+    at once, so there is no precedence question between them in practice.
+
+    *member_evidence_contract_error* is forwarded to
+    :func:`run_outcome_for_scan_fields` unchanged -- see that function's own
+    docstring (:class:`~abicheck.service_scan.ScanSetResult`'s own use).
     """
+    compat_exit_code = scan_report_severity_exit_code(report)
+    if compat_exit_code is None:
+        compat_exit_code = scan_report_abort_compatibility_contribution(report)
     return run_outcome_for_scan_fields(
         verdict,
         exit_code,
-        severity_exit_code=scan_report_severity_exit_code(report),
+        severity_exit_code=compat_exit_code,
         contract_coverage_contribution=scan_report_coverage_contribution(report),
+        member_evidence_contract_error=member_evidence_contract_error,
         lifecycle=lifecycle,
     ).to_dict()
 

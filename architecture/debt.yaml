@@ -393,12 +393,12 @@
     },
     {
       "path": "abicheck/cli_compare_fold.py",
-      "baseline_lines": 1134,
+      "baseline_lines": 1173,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 39 lines (ADR-063 Phase 7 follow-up, Codex review): _ScopedFold gained _swap_in_scoped_run_outcome, mirroring the existing _swap_in_scoped_severity fix for the newer run_outcome structured axis -- a --used-by/--required-symbol run's scoped gate must replace the full-library run_outcome the same way it already replaces verdict/severity, or a scoped-compatible run's JSON body kept a stale, blocking run_outcome.gate. No smaller diff was found that keeps the fix next to the sibling swap it mirrors rather than duplicating the _ScopedFold dataclass's own fields into a second module.",
       "review_by": "2026-11-30"
     },
     {

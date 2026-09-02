@@ -15,6 +15,7 @@ from ..policy.outcome import (
     OperationalStatus as OperationalStatus,  # re-exported: frontends may not import `policy` directly
     PolicyGateDecision,
     RunOutcome,
+    policy_gate_decision_for_exit_code as policy_gate_decision_for_exit_code,  # re-exported, same reason
 )
 from .document import ReportDocument
 from .render_json import render_json

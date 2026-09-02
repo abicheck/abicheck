@@ -952,7 +952,7 @@ class ScanSetResult:
             ],
             "bundle_finding_count": len(self.bundle_findings),
             "bundle_verdict": self.bundle_verdict,
-            "bundle_incomplete": self.bundle_incomplete, "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code),
+            "bundle_incomplete": self.bundle_incomplete, "run_outcome": run_outcome_dict_for_scan(self.verdict, self.exit_code, member_evidence_contract_error=any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in self.per_artifact)),
         }
 
 

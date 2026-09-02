@@ -41,3 +41,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   report's own declared `contract_coverage_exit_contribution` (as
   `GateInfo.from_scan_report`'s raw-code fallback already does) and emits
   `gate: none` when confirmed, fail-closed to the prior behavior otherwise.
+- **A scan abort report's `run_outcome.gate` now preserves any real
+  compatibility break found before the abort fired.** A late
+  `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` persists its own prior
+  `exit.compatibility_contribution` (`scan_abort_result_fields`), but the
+  writer was still deriving `gate` from the abort's own unrelated top-level
+  exit code (5/1, outside the 0/1/2/4 compatibility scheme), zeroing a
+  real `abi_breaking` gate to `none`. The writer now reads the persisted
+  contribution for an abort report the same way it already prefers a
+  severity-scheme report's nested `diff.severity.exit_code`.
+- **`ScanSetResult`'s `run_outcome.operational` no longer silently drops a
+  member's `EVIDENCE_CONTRACT_ERROR` when a different member's stronger
+  `API_BREAK`/`BREAKING` wins the set-level verdict.** `per_artifact` still
+  recorded the aborted member, but `run_outcome` had no signal for it at
+  all; it now folds `operational: evidence_contract_error` in whenever any
+  member aborted that way, without touching `gate`.

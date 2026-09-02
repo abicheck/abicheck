@@ -1390,10 +1390,8 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
-
         assert data["full_verdict"] == "BREAKING"
         assert data["verdict"] == "COMPATIBLE"
-
         assert "run_outcome" in data
         assert "full_run_outcome" in data
         assert data["full_run_outcome"]["gate"] == "abi_breaking"

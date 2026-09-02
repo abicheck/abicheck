@@ -194,6 +194,59 @@ class TestRunOutcomeForScanFields:
         )
         assert outcome.gate is PolicyGateDecision.ADDITION_QUALITY
 
+    def test_member_evidence_contract_error_folds_in_when_operational_is_none(self):
+        """Codex review (P2): ScanSetResult's own _aggregate_scan_set_verdict
+        lets a stronger member's API_BREAK/BREAKING win the reported
+        verdict/exit_code over a *different* member's own
+        EVIDENCE_CONTRACT_ERROR -- without member_evidence_contract_error,
+        that member's abort has no signal left in run_outcome at all."""
+        outcome = run_outcome_for_scan_fields(
+            "API_BREAK", 2, member_evidence_contract_error=True,
+        )
+        assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
+        assert outcome.operational is OperationalStatus.EVIDENCE_CONTRACT_ERROR
+
+    def test_member_evidence_contract_error_never_overrides_a_derived_operational(self):
+        # A set-level BUDGET_OVERFLOW already dominates every member per
+        # _aggregate_scan_set_verdict's own step 1 -- the member flag must
+        # never override an operational status already derived from
+        # verdict/exit_code.
+        outcome = run_outcome_for_scan_fields(
+            "BUDGET_OVERFLOW", 5, member_evidence_contract_error=True,
+        )
+        assert outcome.operational is OperationalStatus.BUDGET_OVERFLOW
+
+    def test_abort_report_compatibility_contribution_preferred_over_top_level(self):
+        """Codex review (P1/P2): a late BUDGET_OVERFLOW that already found a
+        real ABI break must preserve that gate, not zero it out just
+        because the abort's own top-level exit code (5) falls outside the
+        0/1/2/4 compatibility scheme."""
+        from abicheck.policy.outcome import run_outcome_dict_for_scan
+
+        report = {
+            "scan_schema_version": "1.24",
+            "exit": {"code": 5, "compatibility_contribution": 4},
+        }
+        outcome = run_outcome_dict_for_scan("BUDGET_OVERFLOW", 5, report=report)
+        assert outcome["gate"] == "abi_breaking"
+        assert outcome["operational"] == "budget_overflow"
+
+    def test_evidence_contract_error_abort_reads_persisted_compatibility(self):
+        from abicheck.policy.outcome import run_outcome_dict_for_scan
+
+        report = {
+            "scan_schema_version": "1.24",
+            "exit": {"code": 1, "compatibility_contribution": 0},
+        }
+        outcome = run_outcome_dict_for_scan(
+            "EVIDENCE_CONTRACT_ERROR", 1, report=report,
+        )
+        # Not addition_quality: the abort report's own persisted
+        # compatibility_contribution (0) is authoritative, not the
+        # abort's unrelated top-level exit code.
+        assert outcome["gate"] == "none"
+        assert outcome["operational"] == "evidence_contract_error"
+
 
 # ---------------------------------------------------------------------------
 # GateInfo structured-first reading (workflows/aggregate/gate.py)
@@ -549,6 +602,34 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = result.to_dict()
         assert report["run_outcome"]["operational"] == "budget_overflow"
         self._assert_structured_path_taken(report)
+
+    def test_scan_set_result_preserves_member_evidence_error_alongside_stronger_break(
+        self,
+    ):
+        """Codex review (P2), end-to-end: one member finds a real API break,
+        a *different* member aborts with EVIDENCE_CONTRACT_ERROR --
+        _aggregate_scan_set_verdict correctly reports the stronger API_BREAK
+        as the set verdict, but run_outcome must still surface the member
+        abort via .operational, not silently drop it."""
+        from pathlib import Path
+
+        from abicheck.service_scan import ScanArtifactResult, ScanResult, ScanSetResult
+
+        per_artifact = [
+            ScanArtifactResult(
+                artifact=Path("a.so"), result=ScanResult(verdict="API_BREAK", exit_code=2),
+            ),
+            ScanArtifactResult(
+                artifact=Path("b.so"),
+                result=ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1),
+            ),
+        ]
+        result = ScanSetResult(
+            verdict="API_BREAK", exit_code=2, per_artifact=per_artifact,
+        )
+        report = result.to_dict()
+        assert report["run_outcome"]["gate"] == "potential_breaking"
+        assert report["run_outcome"]["operational"] == "evidence_contract_error"
 
     def test_scan_outcome_coverage_only_exit_1_reads_gate_none_end_to_end(self):
         """Codex review (P1), end-to-end through the real writer: a legacy-
