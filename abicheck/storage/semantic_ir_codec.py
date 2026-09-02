@@ -149,27 +149,15 @@ def _fact_from_dict(raw: Any, *, as_tuple: bool, field_name: str) -> Fact[Any]:
         # ``"diagnostics": "parse error"`` would decode to eleven
         # single-character diagnostics and be written back that way, and a
         # non-string member would be coerced into a manufactured one.
-        # `_present_or` rather than `... or ()`: a FALSEY malformed value
-        # (`False`, `0`, `{}`) would otherwise skip the guard entirely and
-        # be rewritten as "no diagnostics" -- the same silent-discard this
-        # guard exists to refuse, reached by a different route.
-        diagnostics=diagnostics_from(_present_or(data, "diagnostics", ())),
+        # Required, not defaulted: this writer emits the key for every fact
+        # (an empty list when there are none), so a missing one is a
+        # truncated document -- and defaulting it erases a FAILED fact's
+        # only explanation of why the producer could not establish the
+        # value, which is the whole reason diagnostics are persisted.
+        diagnostics=diagnostics_from(
+            required_field(data, "diagnostics", "semantic_ir fact")
+        ),
     )
-
-
-def _present_or(document: Mapping[str, Any], key: str, default: Any) -> Any:
-    """*document*'s value for *key*, or *default* when the key is genuinely
-    absent.
-
-    Absence and a falsey-but-present value are different documents and this
-    codec must not conflate them: `document.get(key) or default` hands a
-    malformed `False`/`0`/`{}`/`[]` straight past whichever guard was meant
-    to inspect it, turning "this field is corrupt" into "this field says
-    nothing" with no error anywhere. Every guarded read below goes through
-    here, so the distinction cannot be forgotten at one site the way it was
-    at three (Codex review).
-    """
-    return document[key] if key in document else default
 
 
 def _entity_to_dict(entity: CanonicalEntity) -> dict[str, Any]:

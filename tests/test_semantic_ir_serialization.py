@@ -443,6 +443,25 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(ValueError, match="carries no value"):
             snapshot_from_dict(document)
 
+    def test_a_fact_missing_its_diagnostics_is_rejected(self) -> None:
+        """Defaulting the key erases a FAILED fact's only explanation of why
+        the producer could not establish the value — the reason diagnostics
+        are persisted at all."""
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.failed("castxml exited 1")
+                )
+            }
+        )
+        document = snapshot_to_dict(_snapshot(ir))
+        del document["semantic_ir"]["occurrences"][0]["entity"]["canonical_spelling"][
+            "diagnostics"
+        ]
+        with pytest.raises(ValueError, match="missing required field"):
+            snapshot_from_dict(document)
+
     @pytest.mark.parametrize(
         "missing", ["canonical_spelling", "template_arguments", "cv_qualification"]
     )
