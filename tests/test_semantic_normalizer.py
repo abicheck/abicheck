@@ -318,6 +318,60 @@ def test_normalize_header_ast_unresolved_pointer_param_type_is_failed() -> None:
     assert not entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_castxml_opaque_function_type_param_is_unsupported() -> (
+    None
+):
+    """castxml's own resolver has no dedicated rendering for an anonymous
+    ``FunctionType`` (unlike ``Struct``/``Class``/``Typedef``/... which all
+    have one), so a direct function-pointer parameter resolves to the
+    literal opaque tag ``"FunctionType*"`` rather than a real declarator
+    spelling -- this is NOT an unresolved type (the resolver ran and
+    produced a real, final answer), so it must be ``Fact.unsupported()``,
+    a different status than the genuinely-unresolved ``"?"`` sentinel case
+    (Codex review, ninth round, fresh evidence: publishing the opaque tag
+    as `Fact.present` made a hybrid merge report a spurious conflict
+    against clang's real `"void (*)(int)"` spelling for an unchanged
+    callback parameter -- the identical shape `idioms._is_callback_type`
+    already has to work around elsewhere in this codebase)."""
+    fn = _function("f", "void", ("FunctionType*",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"
+
+
+def test_normalize_header_ast_castxml_opaque_function_type_variable_is_unsupported() -> (
+    None
+):
+    """The identical castxml opaque-tag limitation on a direct
+    function-pointer VARIABLE's own type, mirroring the parameter case
+    above."""
+    var = Variable(
+        name="g_cb",
+        mangled="g_cb",
+        type="FunctionType*",
+        entity_id=entity_id_for_variable((), "g_cb", mangled_name="g_cb"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"
+
+
 def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     """A real, fully-resolved type spelling can legally contain a literal
     ``"?"`` -- clang emits one verbatim for a dependent ternary expression

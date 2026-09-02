@@ -113,3 +113,13 @@
   future slice, the same conclusion already reached for `restrict`. Pinned
   by a dedicated regression test so a future fix has something that starts
   failing once it lands.
+  A direct function-pointer parameter/variable/return type that castxml's
+  resolver can only render as its own opaque `"FunctionType"` tag (no
+  dedicated rendering exists for an anonymous function type, unlike
+  `Struct`/`Class`/`Typedef`/... — the identical shape `idioms.
+  _is_callback_type` already checks for elsewhere) is now `Fact.
+  unsupported()` rather than `Fact.present(...)` — a different, more
+  accurate status than the unresolved-type sentinel case, since the
+  resolver ran and produced a real, final (if useless) answer. Publishing
+  it as present made a hybrid merge report a spurious conflict against
+  clang's real, useful spelling for an unchanged callback declaration.

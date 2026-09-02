@@ -12960,6 +12960,28 @@ that cannot see through the alias; pinned by a dedicated regression test
 (`test_normalize_header_ast_typedef_hidden_qualifier_is_a_known_limitation`)
 so a future fix has something that starts failing once it lands.
 
+**A castxml opaque `FunctionType` tag is `Fact.unsupported()`, not
+`Fact.present(...)` (Codex review, ninth round, fresh evidence).**
+castxml's resolver has no dedicated rendering for an anonymous
+`FunctionType` node (unlike `Struct`/`Class`/`Union`/`Typedef`/... which
+all have one), so a direct function-pointer parameter/variable/return type
+resolves to the literal opaque tag string `"FunctionType"` (wrapped in
+whatever sigil surrounds it, e.g. `"FunctionType*"`), never a real
+declarator spelling the way clang's own `"void (*)(int)"` is -- the
+identical shape `idioms._is_callback_type` already checks for elsewhere in
+this codebase (`"FunctionType" in type_str`). This is NOT
+`_has_unresolved_component`'s unresolved-type sentinel case: the resolver
+ran and produced a real, structurally-final answer, it just cannot express
+one for this shape -- exactly `FactStatus.UNSUPPORTED`'s own definition
+("this producer cannot express this family at all... a different producer
+might"), not `FAILED`. Publishing the opaque tag as `Fact.present` made a
+hybrid merge report a spurious conflict against clang's real, useful
+spelling for an unchanged callback declaration; `_function_spelling_fact`/
+`_variable_spelling_fact` now check for the marker (on the RAW components,
+same as the unresolved-sentinel check) and mark `Fact.unsupported()`
+instead, which `merge_semantic_ir`'s backfill treats as absent and
+correctly prefers clang's real evidence with no conflict recorded.
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

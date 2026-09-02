@@ -246,6 +246,29 @@ _ATOMIC_WRAPPER_PREFIX = "_Atomic("
 #: castxml's real initializer text for every unchanged compound constant.
 _CLANG_EXPR_FINGERPRINT_PREFIX = "expr:"
 
+#: castxml's own opaque-tag fallback (``extract/headers/castxml/
+#: type_resolution.py``'s ``type_name_uncached``, final ``return
+#: el.get("name", tag)`` line) for an anonymous ``FunctionType`` node --
+#: castxml's resolver has no dedicated branch for one (unlike
+#: ``Struct``/``Class``/``Union``/``Typedef``/... above it), so a direct
+#: function-pointer parameter/variable/return type resolves to the literal
+#: tag string ``"FunctionType"`` wrapped in whatever pointer/reference sigil
+#: surrounds it (``"FunctionType*"``), never a real declarator spelling like
+#: clang's own ``"void (*)(int)"``. The identical shape is already a named,
+#: worked-around castxml limitation elsewhere in this codebase --
+#: ``idioms._is_callback_type`` checks for this exact substring for the same
+#: reason. Used in :func:`_function_spelling_fact`/:func:`_variable_spelling_
+#: fact` (Codex review, ninth round, fresh evidence) to mark such a spelling
+#: ``Fact.unsupported()`` rather than ``Fact.present(...)``: castxml did not
+#: fail to resolve the type (this is not `_UNRESOLVED_TYPE_SENTINEL`'s "?"
+#: at all -- the resolver ran and produced a real, if useless, answer), it
+#: structurally cannot render a comparable spelling for it -- publishing the
+#: opaque tag as canonical made `merge_semantic_ir` report a spurious
+#: conflict against clang's real, useful spelling for an unchanged callback
+#: parameter, the same class of "state genuinely incomparable evidence
+#: honestly" fix as the clang expr-fingerprint constant case above.
+_CASTXML_OPAQUE_FUNCTION_TYPE_MARKER = "FunctionType"
+
 
 def _has_unresolved_component(raw_type: str) -> bool:
     """Whether *raw_type* embeds castxml's unresolved-type sentinel
@@ -368,10 +391,27 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
     Checked on the RAW components, before canonicalization -- mirrors the
     typedef branch's own sentinel check and avoids ever asking a
     canonicalizer to interpret a placeholder as a type.
+
+    ``Fact.unsupported(...)`` — a DIFFERENT non-present status, not
+    ``Fact.failed(...)`` -- whenever a raw component instead embeds
+    castxml's opaque ``FunctionType`` tag (:data:`_CASTXML_OPAQUE_FUNCTION_
+    TYPE_MARKER`; Codex review, ninth round, fresh evidence). This is not
+    an unresolved type at all -- castxml's resolver ran and produced a
+    real, structurally-final answer, it just has no dedicated rendering
+    for an anonymous function type, unlike the genuinely-unresolvable ``"?"``
+    sentinel case above. ``unsupported`` names that distinction correctly
+    (``FactStatus.UNSUPPORTED``: "this producer cannot express this family
+    at all... a different producer might" -- exactly castxml vs. clang
+    here), while still backfilling from clang's real spelling the same way
+    a failed/unresolved fact would.
     """
     raw_components = (fn.return_type, *(p.type for p in fn.params))
     if any(_has_unresolved_component(t) for t in raw_components):
         return Fact.failed("return or parameter type not resolved")
+    if any(_CASTXML_OPAQUE_FUNCTION_TYPE_MARKER in t for t in raw_components):
+        return Fact.unsupported(
+            "castxml's opaque FunctionType tag is not a comparable spelling"
+        )
     canonical_return = canonicalize_type_name(fn.return_type)
     canonical_params = ", ".join(
         canonicalize_function_signature_param_type(p.type) for p in fn.params
@@ -380,14 +420,19 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
 
 
 def _variable_spelling_fact(var: Variable) -> Fact[str]:
-    """``canonicalize_type_name(var.type)``, or ``Fact.failed(...)`` when the
-    raw type embeds the unresolved-type sentinel — see
+    """``canonicalize_type_name(var.type)``, or a non-present ``Fact``
+    when the raw type embeds either castxml artifact -- see
     :func:`_function_spelling_fact`'s own docstring for the identical
-    reasoning, applied to a variable's single type instead of a function's
+    reasoning (unresolved-type sentinel vs. opaque ``FunctionType`` tag),
+    applied to a variable's single type instead of a function's
     return/parameter types.
     """
     if _has_unresolved_component(var.type):
         return Fact.failed("type not resolved")
+    if _CASTXML_OPAQUE_FUNCTION_TYPE_MARKER in var.type:
+        return Fact.unsupported(
+            "castxml's opaque FunctionType tag is not a comparable spelling"
+        )
     return Fact.present(canonicalize_type_name(var.type))
 
 
