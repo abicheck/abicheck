@@ -307,10 +307,16 @@ class RunOutcome:
 #: ``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR``/``NOT_COMPARABLE``
 #: members (``scan_abort_result.py``, ``service_scan.ScanSetResult``'s own
 #: ``_SCAN_SET_COMPAT_ORDER`` gap for exactly these three strings).
+#: ``BUNDLE_INCOMPLETE`` (Codex review) is ``ScanSetResult.run_scan_set``'s
+#: own sentinel for "the cross-library bundle audit itself never ran because
+#: a discovered member dropped out of resolution" -- the same "something
+#: failed to be extracted/analyzed" shape :attr:`OperationalStatus.
+#: EXTRACTION_ERROR` already names, not a real compatibility verdict.
 _SCAN_ABORT_VERDICT_OPERATIONAL: dict[str, OperationalStatus] = {
     "BUDGET_OVERFLOW": OperationalStatus.BUDGET_OVERFLOW,
     "EVIDENCE_CONTRACT_ERROR": OperationalStatus.EVIDENCE_CONTRACT_ERROR,
     "NOT_COMPARABLE": OperationalStatus.NOT_COMPARABLE,
+    "BUNDLE_INCOMPLETE": OperationalStatus.EXTRACTION_ERROR,
 }
 
 #: ``scan``'s own legacy top-level exit codes that mean "the compatibility
@@ -404,6 +410,23 @@ def run_outcome_for_scan_fields(
     compat_exit_code = (
         severity_exit_code if severity_exit_code is not None else exit_code
     )
+    if severity_exit_code is None and verdict in _SCAN_ABORT_VERDICT_OPERATIONAL:
+        # *verdict* itself names an operational-only condition (Codex
+        # review) -- its own top-level exit_code is never a genuine
+        # compatibility contribution unless a validated one was explicitly
+        # given via *severity_exit_code* (the abort-report's own persisted
+        # `exit.compatibility_contribution`, above). Without this,
+        # BUNDLE_INCOMPLETE's own exit-code-1 floor (`run_scan_set`'s
+        # `max(exit_code, 1)`, with no `report=` to read a real
+        # contribution from) read as a real ADDITION_QUALITY compatibility
+        # gate despite `compatibility` already being `None` for the
+        # identical reason (the verdict string itself doesn't parse as a
+        # `Verdict`). Never fires for an *ordinary* verdict (e.g.
+        # `API_BREAK`) that merely also carries `member_evidence_contract_
+        # error=True` -- that flag folds into `operational` above without
+        # ever touching *verdict*, so this membership check alone cannot
+        # mistake a real break for an operational-only report.
+        compat_exit_code = 0
     if (
         severity_exit_code is None
         and compat_exit_code == 1

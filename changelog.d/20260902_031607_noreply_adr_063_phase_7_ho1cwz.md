@@ -56,3 +56,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   recorded the aborted member, but `run_outcome` had no signal for it at
   all; it now folds `operational: evidence_contract_error` in whenever any
   member aborted that way, without touching `gate`.
+- **`--artifact-set`'s `BUNDLE_INCOMPLETE` verdict no longer reads as a real
+  `addition_quality` compatibility gate.** `run_scan_set()` floors its own
+  exit code at `1` when the cross-library bundle audit itself never ran (a
+  discovered member silently dropped out of resolution) — with no
+  `report=` for the writer to read a real compatibility contribution from,
+  that floor is now recognized as `OperationalStatus.EXTRACTION_ERROR`,
+  matching `compatibility` already being `None` for the identical reason.
+- **`GateInfo.from_report_data`/`from_scan_report` now fail closed
+  (`_MalformedGate`) on a *present but unparseable* `run_outcome` block**,
+  instead of silently falling through to the legacy `severity`/raw
+  `exit_code` decode path — the same fail-closed handling the `severity`
+  block itself already had. A corrupt, policy-blocked report could
+  previously read as a clean legacy verdict once the structured-first
+  reader landed.

@@ -247,6 +247,27 @@ class TestRunOutcomeForScanFields:
         assert outcome["gate"] == "none"
         assert outcome["operational"] == "evidence_contract_error"
 
+    def test_bundle_incomplete_is_operational_not_a_compatibility_gate(self):
+        """Codex review (P2): ScanSetResult.run_scan_set's own
+        BUNDLE_INCOMPLETE verdict floors exit_code at 1 with no report= to
+        read a real compatibility contribution from -- that floor must never
+        read as a real ADDITION_QUALITY compatibility gate, mirroring
+        `compatibility` already being None for the identical reason (the
+        verdict string itself carries no real compatibility meaning)."""
+        outcome = run_outcome_for_scan_fields("BUNDLE_INCOMPLETE", 1)
+        assert outcome.compatibility is None
+        assert outcome.gate is PolicyGateDecision.NONE
+        assert outcome.operational is OperationalStatus.EXTRACTION_ERROR
+
+    def test_bundle_incomplete_membership_does_not_leak_to_ordinary_verdicts(self):
+        # The BUNDLE_INCOMPLETE zeroing keys off *verdict* membership, not
+        # operational's derived value -- it must never fire for an ordinary
+        # verdict that merely also carries member_evidence_contract_error.
+        outcome = run_outcome_for_scan_fields(
+            "API_BREAK", 2, member_evidence_contract_error=True,
+        )
+        assert outcome.gate is PolicyGateDecision.POTENTIAL_BREAKING
+
 
 # ---------------------------------------------------------------------------
 # GateInfo structured-first reading (workflows/aggregate/gate.py)
@@ -297,6 +318,19 @@ class TestGateInfoFromReportDataStructuredFirst:
 
     def test_no_severity_and_no_run_outcome_is_none(self):
         assert GateInfo.from_report_data({}) is None
+
+    def test_present_but_malformed_run_outcome_fails_closed(self):
+        """Codex review (P2): a present-but-unparseable run_outcome must not
+        be treated the same as an absent one -- that would let a corrupt,
+        policy-blocked report silently fall through to the (possibly
+        greener) legacy verdict path instead of failing the target
+        unavailable, exactly the defect the severity block's own
+        _MalformedGate handling already guards against."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {"run_outcome": {"gate": "not_a_real_value", "operational": "none"}}
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
 
     def test_operational_failure_folds_into_an_otherwise_clean_severity_block(self):
         """The orthogonal-axes fold: RunOutcome.operational raises an
@@ -393,6 +427,17 @@ class TestGateInfoFromScanReportStructuredFirst:
         assert gate is not None and gate.exit_code == 4
         # And confirm the *absence* really would have broken the legacy path.
         del report["run_outcome"]
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_scan_report(report)
+
+    def test_present_but_malformed_run_outcome_fails_closed(self):
+        """Codex review (P2), scan-report counterpart to the identical
+        compare-report test above."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        report = self._scan_report(
+            "COMPATIBLE", 0, {"gate": "bogus", "operational": "none"},
+        )
         with pytest.raises(_MalformedGate):
             GateInfo.from_scan_report(report)
 
@@ -630,6 +675,18 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = result.to_dict()
         assert report["run_outcome"]["gate"] == "potential_breaking"
         assert report["run_outcome"]["operational"] == "evidence_contract_error"
+
+    def test_scan_set_result_bundle_incomplete_end_to_end(self):
+        """Codex review (P2), end-to-end: run_scan_set's own BUNDLE_INCOMPLETE
+        verdict/exit_code=1 must not read as a real compatibility gate."""
+        from abicheck.service_scan import ScanSetResult
+
+        result = ScanSetResult(
+            verdict="BUNDLE_INCOMPLETE", exit_code=1, bundle_incomplete=True,
+        )
+        report = result.to_dict()
+        assert report["run_outcome"]["gate"] == "none"
+        assert report["run_outcome"]["operational"] == "extraction_error"
 
     def test_scan_outcome_coverage_only_exit_1_reads_gate_none_end_to_end(self):
         """Codex review (P1), end-to-end through the real writer: a legacy-

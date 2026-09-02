@@ -34,8 +34,19 @@ def _run_outcome_gate_and_operational(
     data: Mapping[str, Any],
 ) -> tuple[PolicyGateDecision, OperationalStatus] | None:
     """The report's own top-level ``run_outcome`` block (ADR-063 Phase 7),
-    parsed to its ``(gate, operational)`` axes, or ``None`` when absent or
-    unparseable.
+    parsed to its ``(gate, operational)`` axes, or ``None`` when the key is
+    genuinely absent (an old report predating this field, the caller's own
+    named legacy-fallback case).
+
+    A *present but unparseable* ``run_outcome`` is a different case entirely
+    and fails closed (:class:`_MalformedGate`) rather than returning
+    ``None`` too (Codex review) -- returning ``None`` for both made a
+    corrupt, policy-blocked report indistinguishable from an old one that
+    never carried this field at all, so both of this function's callers
+    would silently fall through to their own legacy decode (verdict
+    mapping / raw ``exit_code``) instead of failing the target unavailable,
+    exactly the class of defect ``GateInfo.from_report_data``'s own
+    ``severity``-block handling already guards against.
 
     This -- and :meth:`GateInfo.from_report_data`/`from_scan_report`, which
     call it -- is the one place a fresh report's ``RunOutcome`` axes are
@@ -45,9 +56,11 @@ def _run_outcome_gate_and_operational(
     """
     from abicheck.policy.outcome import RunOutcome
 
+    if "run_outcome" not in data:
+        return None
     outcome = RunOutcome.from_dict(data.get("run_outcome"))
     if outcome is None:
-        return None
+        raise _MalformedGate("'run_outcome' is present but not a valid RunOutcome block")
     return outcome.gate, outcome.operational
 
 
