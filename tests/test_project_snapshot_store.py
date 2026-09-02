@@ -23,6 +23,7 @@ from abicheck.project_snapshot_store import (
     read_artifact_ref,
     read_manifest_summary,
     read_project_manifest,
+    read_variant_artifact_pair,
     read_variant_ref,
     variant_and_artifact_ids,
     write_project_manifest,
@@ -172,6 +173,19 @@ class TestDirectoryObjectStore:
         path.write_bytes(other_path.read_bytes())
         with pytest.raises(ValueError, match="does not match its requested digest"):
             store.get(digest)
+
+    def test_a_lone_surrogate_round_trips_through_a_real_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """A real POSIX path decoded via `surrogateescape`
+        (`os.fsdecode(b"caf\\xe9")` == `"caf\\udce9"`) is content
+        `semantic_digest`/`InMemoryObjectStore` already accept -- this
+        store must persist and return it too, not raise
+        `UnicodeEncodeError` mid-write (Codex review)."""
+        store = DirectoryObjectStore(tmp_path)
+        content = {"path": "caf" + "\udce9"}
+        digest = store.put(content)
+        assert store.get(digest) == content
 
 
 class TestManifestRoundTrip:
@@ -423,3 +437,59 @@ class TestReadManifestSummaryValidation:
         # a normally-written manifest passes the same check.
         summary = read_manifest_summary(tmp_path)
         assert summary.artifact_ids == ("libfoo",)
+
+
+class TestReadVariantArtifactPair:
+    """`read_variant_ref`/`read_artifact_ref` alone each validate only
+    their own document's self-consistency -- neither knows the other
+    exists, so a malformed package can state a self-contradictory
+    membership graph (an artifact's own `variant_id` naming a real variant
+    that doesn't list it back, or the reverse) that neither lazy primitive
+    alone catches, even though `PackageManifest.__post_init__` already
+    rejects the identical graph on the eager path (Codex review).
+    `read_variant_artifact_pair` is the lazy-path primitive that closes
+    this for the one pair a caller actually selected."""
+
+    def _write_ref(self, path: Path, content: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content), encoding="utf-8")
+
+    def test_a_matched_pair_round_trips(self, tmp_path: Path) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        store = DirectoryObjectStore(tmp_path)
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        write_project_manifest(tmp_path, manifest)
+        variant, artifact = read_variant_artifact_pair(tmp_path, "default", "libfoo")
+        assert variant.variant_id == "default"
+        assert artifact.artifact_id == "libfoo"
+
+    def test_an_artifact_naming_a_variant_that_omits_it_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact repro: `v1.json` lists no artifacts, but `a.json`
+        claims `variant_id: "v1"`."""
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json", {"variant_id": "v1"}
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v1", "kind": "elf"},
+        )
+        with pytest.raises(ValueError, match="does not list artifact_id"):
+            read_variant_artifact_pair(tmp_path, "v1", "a")
+
+    def test_an_artifact_naming_a_different_variant_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json",
+            {"variant_id": "v1", "artifact_ids": ["a"]},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v2", "kind": "elf"},
+        )
+        with pytest.raises(
+            ValueError, match="does not belong to the requested variant"
+        ):
+            read_variant_artifact_pair(tmp_path, "v1", "a")

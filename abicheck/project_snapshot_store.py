@@ -68,7 +68,6 @@ from .snapshot_io import (
     SnapshotCompression,
     read_snapshot_bytes,
     write_snapshot_bytes,
-    write_snapshot_text,
 )
 from .storage.canonical import (
     canonical_form,
@@ -95,6 +94,7 @@ __all__ = [
     "read_artifact_ref",
     "read_manifest_summary",
     "read_project_manifest",
+    "read_variant_artifact_pair",
     "read_variant_ref",
     "variant_and_artifact_ids",
     "write_project_manifest",
@@ -122,6 +122,46 @@ def _object_raw_relpath(digest: str) -> str:
 
 def _is_binary_buffer(value: Any) -> bool:
     return isinstance(value, (bytes, bytearray, memoryview))
+
+
+def _write_canonical_json_text(
+    text: str,
+    path: Path,
+    *,
+    compression: SnapshotCompression,
+    zstd_level: int | None = None,
+) -> None:
+    """Write *text* -- already `canonical_json`'s output -- to *path*, safe
+    for content containing a lone surrogate.
+
+    `canonical_json` deliberately keeps `ensure_ascii=False` for
+    readability (its own docstring), so a value round-tripped through
+    `surrogateescape` -- a real POSIX path carrying a non-UTF-8 byte,
+    `os.fsdecode(b"caf\\xe9")` == `"caf\\udce9"` -- survives `canonical_json`
+    with the lone surrogate intact, even though `semantic_digest` already
+    accepts and addresses that same content (its own docstring names this
+    exact asymmetry and closes it for the *digest* path specifically).
+    `write_snapshot_text`'s plain `text.encode("utf-8")` is strict, so
+    writing that text as-is raises `UnicodeEncodeError` mid-write --
+    content this store's own digest accepted, and `InMemoryObjectStore`
+    already accepts, rejected only once persisted to a real directory
+    (Codex review).
+
+    `errors="backslashreplace"` replaces only the unencodable surrogate
+    scalar with its literal `\\udcXX` text — which, since the surrogate
+    sits inside an already-JSON-quoted string, is indistinguishable from a
+    real JSON `\\u` escape and round-trips through `json.loads` back to the
+    identical lone surrogate (verified by property test). Every other
+    character, including ordinary non-ASCII text, still encodes normally,
+    so this only changes the on-disk representation for the one case that
+    would otherwise fail outright.
+    """
+    write_snapshot_bytes(
+        text.encode("utf-8", errors="backslashreplace"),
+        path,
+        compression=compression,
+        zstd_level=zstd_level,
+    )
 
 
 class DirectoryObjectStore:
@@ -175,7 +215,7 @@ class DirectoryObjectStore:
         path = self._json_path(digest)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            write_snapshot_text(
+            _write_canonical_json_text(
                 canonical_json(stripped),
                 path,
                 compression=SnapshotCompression.ZSTD,
@@ -275,7 +315,7 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     for variant in manifest.variant_refs:
         variant_path = root_path / variant_ref_relpath(variant.variant_id)
         variant_path.parent.mkdir(parents=True, exist_ok=True)
-        write_snapshot_text(
+        _write_canonical_json_text(
             canonical_json(variant.to_dict(), indent=2),
             variant_path,
             compression=SnapshotCompression.NONE,
@@ -283,7 +323,7 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     for artifact in manifest.artifact_refs:
         artifact_path = root_path / artifact_ref_relpath(artifact.artifact_id)
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        write_snapshot_text(
+        _write_canonical_json_text(
             canonical_json(artifact.to_dict(), indent=2),
             artifact_path,
             compression=SnapshotCompression.NONE,
@@ -295,7 +335,7 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     }
     manifest_path = root_path / MANIFEST_RELPATH
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    write_snapshot_text(
+    _write_canonical_json_text(
         canonical_json(summary, indent=2),
         manifest_path,
         compression=SnapshotCompression.NONE,
@@ -473,6 +513,51 @@ def read_artifact_ref(root: str | Path, artifact_id: str) -> ArtifactRef:
             "package's membership cannot be trusted"
         )
     return ref
+
+
+def read_variant_artifact_pair(
+    root: str | Path, variant_id: str, artifact_id: str
+) -> tuple[VariantRef, ArtifactRef]:
+    """Load one (variant, artifact) pair together, cross-checking the
+    two-way membership `PackageManifest.__post_init__` already enforces
+    eagerly for the *whole* graph (a variant's `artifact_ids` must be
+    exactly the set of artifacts whose own `variant_id` names it) --
+    scoped here to the one pair a caller actually selected.
+
+    `read_variant_ref`/`read_artifact_ref` alone each validate only their
+    own document's self-consistency (its embedded id matches the id it was
+    requested by) -- neither knows the other exists, so a malformed
+    package where an artifact's own `variant_id` names a real, declared
+    variant that simply omits it from that variant's own `artifact_ids`
+    (or the reverse) passes through either lazy primitive alone, silently,
+    even though the eager `read_project_manifest` path already rejects
+    that exact graph (Codex review). Since these are documented as the
+    intended section-aware lazy read path -- the one a real two-sided
+    comparison is meant to build on once one exists -- a caller loading a
+    specific (variant, artifact) pair through them should get the same
+    guarantee `PackageManifest` already gives a caller that loads
+    everything.
+
+    Raises `ValueError` if the two documents disagree about whether this
+    pair belongs together, in either direction.
+    """
+    variant = read_variant_ref(root, variant_id)
+    artifact = read_artifact_ref(root, artifact_id)
+    if artifact.variant_id != variant_id:
+        raise ValueError(
+            f"refs/artifacts/{artifact_id}.json names variant_id "
+            f"{artifact.variant_id!r}, not the requested {variant_id!r} -- "
+            "this artifact does not belong to the requested variant"
+        )
+    if artifact_id not in variant.artifact_ids:
+        raise ValueError(
+            f"refs/variants/{variant_id}.json does not list artifact_id "
+            f"{artifact_id!r} in its own artifact_ids, even though "
+            f"refs/artifacts/{artifact_id}.json names variant_id "
+            f"{variant_id!r} -- the package's membership graph is "
+            "self-contradictory"
+        )
+    return variant, artifact
 
 
 def variant_and_artifact_ids(
