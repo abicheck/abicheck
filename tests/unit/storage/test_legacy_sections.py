@@ -38,12 +38,16 @@ _NEVER_IN_A_DOCUMENT = (
 )
 
 #: Keys `_SECTION_FIELDS` assigns that are *not* `AbiSnapshot` dataclass
-#: fields at all -- a real `dump` invocation's CLI write path
-#: (`cli_dump_helpers.fold_dump_provenance_into_dict`) adds these to the
+#: fields at all. `dump_provenance`: a real `dump` invocation's CLI write
+#: path (`cli_dump_helpers.fold_dump_provenance_into_dict`) adds this to the
 #: document dict after `snapshot_to_dict()` already ran, so a document a
-#: real `dump` produces carries them even though they never appear on
-#: `AbiSnapshot` itself.
-_DOCUMENT_ONLY_KEYS = ("dump_provenance",)
+#: real `dump` produces carries it even though it never appears on
+#: `AbiSnapshot` itself. `evidence_pack`: the pre-schema-v8 spelling of
+#: `build_source_pack` (ADR-028's evidence->buildsource rename) --
+#: `serialization.snapshot_from_dict` still falls back to it, so a real
+#: schema-v7-or-older document can carry it instead, even though this
+#: build's own `snapshot_to_dict()` never writes it.
+_DOCUMENT_ONLY_KEYS = ("dump_provenance", "evidence_pack")
 
 
 def _abi_snapshot_field_names() -> set[str]:

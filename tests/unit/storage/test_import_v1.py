@@ -227,6 +227,36 @@ class TestImportLegacySnapshot:
         )
         assert first_digest == second_digest
 
+    def test_a_pre_v8_document_with_the_legacy_evidence_pack_key_imports(
+        self,
+    ) -> None:
+        """`serialization.snapshot_from_dict` still falls back to the
+        pre-schema-v8 `evidence_pack` key when `build_source_pack` is
+        absent (ADR-028's evidence->buildsource rename) -- a real
+        schema-v7-or-older document can carry it instead, and
+        `import_legacy_snapshot` must not reject it as an unknown field
+        (Codex review)."""
+        doc = {
+            "library": "libfoo.so.1",
+            "version": "1.0.0",
+            "schema_version": 7,
+            "evidence_pack": {
+                "schema_version": 1,
+                "content_hash": "sha256:abc",
+                "path_hint": "libfoo.evidence/",
+                "coverage_summary": {},
+            },
+        }
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert "build" in manifest.artifact_refs[0].sections
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        assert rebuilt["evidence_pack"] == doc["evidence_pack"]
+
 
 class TestMaxKnownSchemaVersion:
     """A document newer than this build knows how to interpret must be

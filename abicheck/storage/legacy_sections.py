@@ -161,7 +161,19 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "parsed_with_build_context",
         "build_context_defines",
     ),
-    "build": ("build_source_pack", "build_source"),
+    "build": (
+        "build_source_pack",
+        "build_source",
+        # Not an `AbiSnapshot` dataclass field at all -- the pre-schema-v8
+        # spelling of `build_source_pack` (ADR-028's evidence->buildsource
+        # rename). `serialization.snapshot_from_dict` still explicitly falls
+        # back to this key when `build_source_pack` is absent, so a real
+        # schema-v7-or-older document handed to `import_legacy_snapshot`
+        # (any schema version this build can still read, per that
+        # function's own docstring) can carry it instead. A document this
+        # build itself writes never uses this spelling.
+        "evidence_pack",
+    ),
     "graph": ("surface_graph",),
     "provenance": (
         "library",
