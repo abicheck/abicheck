@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """End-to-end ``AbiSnapshot.semantic_ir`` population (ADR-063 Phase 6,
-second, third, and fourth slices) -- exercises the real production assembly
+second through sixth slices) -- exercises the real production assembly
 call sites this phase wired (``dumper.py``'s ``_dump_elf``, via
 ``dumper_manifest.resolve_header_ast_result``), not the normalizer in
 isolation (``test_semantic_normalizer.py`` covers that). Requires castxml,
@@ -38,6 +38,7 @@ for.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -75,10 +76,130 @@ int use_point(outer::inner::Point p) { return p.x; }
 """
 
 
+_TEMPLATE_HEADER = """
+#pragma once
+template <typename T, int N>
+struct Box {
+  T value;
+};
+Box<int, 3> g_box;
+
+template <typename F>
+struct Wrapper {
+  F callback;
+};
+inline auto make_wrapper() {
+  auto lam = [](int x) { return x + 1; };
+  return Wrapper<decltype(lam)>{lam};
+}
+"""
+
+_TEMPLATE_SOURCE = """
+#include "templates.h"
+auto force_instantiation = make_wrapper();
+"""
+
+
 def _require_tools() -> None:
     required = ("clang", "gcc", "g++", "castxml")
     if not all(shutil.which(t) for t in required):
         pytest.skip("clang, gcc, g++, and castxml are all required")
+
+
+@pytest.fixture(scope="module")
+def template_lib(tmp_path_factory: pytest.TempPathFactory):
+    """ADR-063 Phase 6's sixth-slice acceptance fixture: an ordinary
+    template instantiation (``Box<int, 3>``) plus the phase's own named
+    "closure-parameterized template" case (``Wrapper<(lambda ...)>``,
+    forced complete via a header-visible ``inline`` factory function so
+    both header-AST backends see the instantiation, not just a
+    declaration)."""
+    _require_tools()
+    tmp_path = tmp_path_factory.mktemp("semantic_ir_e2e_templates")
+    header = tmp_path / "templates.h"
+    header.write_text(_TEMPLATE_HEADER)
+    src = tmp_path / "templates.cpp"
+    src.write_text(_TEMPLATE_SOURCE)
+    so = tmp_path / "libtemplates.so"
+    subprocess.run(
+        [
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-std=c++17",
+            "-o",
+            str(so),
+            str(src),
+            f"-I{tmp_path}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return so, header
+
+
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_semantic_ir_template_arguments_end_to_end(template_lib, backend: str) -> None:
+    """``CanonicalEntity.template_arguments`` (sixth slice) on a real
+    compiled fixture. castxml surfaces a concrete specialization as its own
+    record (confirmed real castxml behaviour, see
+    ``extract/semantic_normalizer_template_args.py``'s own module
+    docstring) and decomposes its arguments; clang's ``parse_types()``
+    never surfaces one at all (a named, separate gap that module's
+    docstring also states), so ``"Box<int, 3>"`` is simply absent from
+    clang's own occurrences here -- this test asserts exactly that
+    asymmetry rather than assuming parity, matching this phase's own
+    acceptance criteria ("not... an identical SemanticIR regardless of
+    source backend")."""
+    so, header = template_lib
+    snap = dump(so, [header], header_backend=backend)
+    assert snap.semantic_ir is not None
+
+    box_entries = [
+        e
+        for occ, e in snap.semantic_ir.occurrences.items()
+        if occ.entity_id.leaf_name.startswith("Box<")
+    ]
+    if backend == "castxml":
+        assert len(box_entries) == 1
+        assert box_entries[0].template_arguments.value == ("int", "3")
+    else:
+        assert box_entries == []
+
+
+def test_semantic_ir_closure_parameterized_template_end_to_end(
+    template_lib,
+) -> None:
+    """The phase's own named acceptance case: a template instantiated with
+    a closure type. castxml's compiled-fixture spelling embeds the raw
+    ``(lambda at ...)`` marker in the record's own name -- verified here to
+    survive through ``template_arguments`` AND to be renumbered to the
+    identical stable ordinal ``qualified_name_segments.
+    renumber_anonymous_closure_identities`` (already wired into ``dump()``)
+    already applies to ``canonical_spelling``/the ``EntityId`` itself, so a
+    closure-typed argument's identity does not depend on its source
+    ``:line:col`` coordinates."""
+    so, header = template_lib
+    snap = dump(so, [header], header_backend="castxml")
+    assert snap.semantic_ir is not None
+
+    wrapper_entries = [
+        (occ, e)
+        for occ, e in snap.semantic_ir.occurrences.items()
+        if occ.entity_id.leaf_name.startswith("Wrapper<")
+    ]
+    assert len(wrapper_entries) == 1
+    occ_id, entity = wrapper_entries[0]
+    (arg,) = entity.template_arguments.value
+
+    # Renumbered to a stable "#<ordinal>" form -- never the raw, line/col-
+    # tainted source coordinates -- and identically so in BOTH the
+    # decomposed argument and the record's own identity key (the argument
+    # is a verbatim substring of the compound "Wrapper<...>" leaf_name),
+    # since both were built from the same underlying marker.
+    ordinal_re = re.compile(r"^\(lambda:[^)]*#\d+\)$")
+    assert ordinal_re.match(arg), arg
+    assert arg in occ_id.entity_id.leaf_name
 
 
 @pytest.fixture(scope="module")
