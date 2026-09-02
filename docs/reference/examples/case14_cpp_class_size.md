@@ -12,6 +12,12 @@
 
 **Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
+**Related rule:** same `embedded-type-size-increased` rule as
+`case07_struct_layout` (the canonical
+case for this rule) — the C++ variant of the same "directly-embedded type
+grows, breaking value-embedding consumers" mechanism case07 demonstrates in
+C. See `examples/CLAUDE.md`'s "Taxonomy" section.
+
 ## Verdict and consumer impact
 
 Old code allocates `Buffer` on the stack or via `new`, expecting 64 bytes.

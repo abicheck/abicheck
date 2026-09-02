@@ -12,6 +12,13 @@
 
 **Category:** Risk (Source Graph) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
+**Related rule:** same `public-api-gains-internal-dependency` rule as
+`case160_public_api_internal_dep_added`
+(the canonical case for this rule) — this variant narrows it to the
+inline-function case, where the new dependency is invisible to every
+artifact-level diff, not just source-graph-level. See
+`examples/CLAUDE.md`'s "Taxonomy" section.
+
 ## Verdict and consumer impact
 
 `demo::compute()` is a public, `inline` function — its compiled body is

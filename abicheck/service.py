@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Service layer — shared orchestration for CLI and MCP server.
+"""Service layer — the typed Python API shared orchestration point.
 
 Provides framework-agnostic functions for the core abicheck operations:
 
@@ -164,7 +164,7 @@ from .service_dump_native import (  # noqa: E402,F401
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:
 # ``from abicheck.service import run_dump_request`` is the typed entry point
-# every front end (CLI, Python, MCP ``abi_dump``) builds a request for. ───────
+# every front end (CLI, typed Python) builds a request for. ──────────────────
 from .service_dump_pipeline import run_dump_request  # noqa: E402,F401
 
 # ── Opportunistic per-ecosystem metadata attachment (leaf module

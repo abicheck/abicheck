@@ -46,3 +46,11 @@
   truncated or hand-authored document could therefore reach exactly the
   confirmed claim this mechanism exists to prevent. The skip now tests for a
   usable fact, the same falsy check the decoder applies.
+
+- An unrecognized `ast_producer` spelling no longer credits both header-AST
+  backends. That branch covered three different states at once — `"hybrid"`,
+  a document predating the field, and a producer this build has never heard
+  of — and treated all three as "both backends ran", so a header-only fact
+  stayed `PRESENT` on a document naming neither. `castxml`/`clang`/`hybrid`
+  and an absent value are honoured as before; anything else (a typo, a
+  future producer, an empty string) evidences no header backend.

@@ -174,6 +174,7 @@
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/buildsource/source_graph_compare.py",
+        "abicheck/comparability_profile.py",
         "abicheck/confidence.py",
         "abicheck/detector_registry.py",
         "abicheck/diff_abi_tags.py",
@@ -226,6 +227,7 @@
         "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
         "abicheck/type_reachability_spelling.py",
+        "abicheck/type_reachability_stdlib_spellings.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
     },
@@ -337,6 +339,7 @@
         "abicheck/junit_report.py",
         "abicheck/pr_comment.py",
         "abicheck/pr_comment_base.py",
+        "abicheck/pr_comment_render.py",
         "abicheck/pr_comment_scan.py",
         "abicheck/pr_comment_scan_abort.py",
         "abicheck/report_classifications.py",
@@ -667,6 +670,7 @@
     "comparability_fields.py",
     "comparability_json.py",
     "comparability_language_mode.py",
+    "comparability_profile.py",
     "comparability_sequences.py",
     "compatibility_evaluation_config.py",
     "compatibility_evaluation_frontend.py",
@@ -815,6 +819,7 @@
     "post_processing_reachability.py",
     "pr_comment.py",
     "pr_comment_base.py",
+    "pr_comment_render.py",
     "pr_comment_scan.py",
     "probe_harness.py",
     "process_resources.py",
@@ -875,6 +880,7 @@
     "type_metadata.py",
     "type_reachability.py",
     "type_reachability_spelling.py",
+    "type_reachability_stdlib_spellings.py",
     "versioned_symbol_scheme.py"
   ]
 }

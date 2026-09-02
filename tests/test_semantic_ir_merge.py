@@ -117,6 +117,24 @@ class TestOrdinaryOneSidedDisambiguator:
 
 
 class TestBasePrecedenceAndConflicts:
+    def test_failed_base_spelling_is_backfilled_not_conflicted(self) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001): an
+        unresolved typedef normalizes to ``Fact.failed(...)`` for
+        ``canonical_spelling`` specifically (both header-AST backends spell
+        it ``"?"``, and treating that as a confirmed value would have
+        permanently blocked exactly this backfill). A non-present base fact
+        of any status backfills from a present overlay -- this pins it for
+        the field Codex's finding named, not only the generic mechanism
+        already covered via ``template_arguments`` elsewhere in this file.
+        """
+        occ = OccurrenceId(FOO)
+        base = CanonicalEntity(canonical_spelling=Fact.failed("not resolved"))
+        overlay = _entity("clang::Foo", producer="clang")
+        merged, conflicts = merge_semantic_ir(_ir((occ, base)), _ir((occ, overlay)))
+        assert merged is not None
+        assert merged.occurrences[occ].canonical_spelling.value == "clang::Foo"
+        assert conflicts == {}
+
     def test_present_base_fact_is_never_overwritten(self) -> None:
         occ = OccurrenceId(FOO)
         merged, conflicts = merge_semantic_ir(

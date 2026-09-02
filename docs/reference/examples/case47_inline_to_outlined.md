@@ -12,6 +12,12 @@
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE
 
+**Related rule:** same `inline-function-outlined` rule as
+`case16_inline_to_non_inline` (the
+canonical case for this rule) — an inline method moved out-of-line gains a
+real exported symbol, same mechanism, different demo names. See
+`examples/CLAUDE.md`'s "Taxonomy" section.
+
 ## Verdict and consumer impact
 
 `Calculator::add()` is defined `inline` in v1's header, so it has no
