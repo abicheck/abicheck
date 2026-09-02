@@ -31,6 +31,7 @@ from ..dwarf_utils import (
     attr_bool as _attr_bool,
     attr_str as _attr_str,
     decode_member_location as _decode_member_location,
+    resolve_type_die as _resolve_type_die,
 )
 from ..model import AccessLevel
 
@@ -39,6 +40,7 @@ __all__ = [
     "default_member_access_for_tag",
     "local_vptr_member_offset_bits",
     "record_kind_from_tag",
+    "variable_is_const",
 ]
 
 
@@ -88,6 +90,39 @@ def local_vptr_member_offset_bits(child: Any) -> int | None:
         return None
     loc = child.attributes.get("DW_AT_data_member_location")
     return _decode_member_location(loc.value if loc is not None else None) * 8
+
+
+def variable_is_const(type_die: Any, CU: Any) -> bool:
+    """Whether a variable's own OUTERMOST declared type is const-qualified,
+    walking the LEADING run of pure cv-qualifier wrapper DIEs
+    (``DW_TAG_const_type``/``DW_TAG_volatile_type``) rather than checking
+    only the immediate one.
+
+    ``const volatile int cv`` and ``volatile const int cv`` are the
+    identical type in C++ (qualifier order in source is not semantically
+    meaningful), but GCC does not always encode them with the type the
+    variable's ``DW_AT_type`` points to being ``DW_TAG_const_type``
+    itself -- confirmed with a real compiled fixture: ``const volatile
+    int`` nests ``DW_TAG_volatile_type`` (outer) around
+    ``DW_TAG_const_type`` (inner), so checking only the immediate type
+    die's own tag (this function's own previous, inline form in
+    ``dwarf_snapshot.py``) silently reported ``is_const=False`` for a
+    genuinely const-qualified variable (Codex review, PR #1021, fresh
+    evidence). Bounded to 10 wrapper levels -- the same defensive limit
+    ``dwarf_snapshot._DwarfSnapshotBuilder._count_pointer_depth`` already
+    uses for an analogous DIE-chain walk -- so a malformed or (in
+    principle) cyclic DWARF chain can't loop forever; no real C++
+    declaration nests cv-qualifiers anywhere near that deep.
+    """
+    depth = 0
+    while type_die is not None and depth < 10:
+        if type_die.tag == "DW_TAG_const_type":
+            return True
+        if type_die.tag != "DW_TAG_volatile_type":
+            return False
+        type_die = _resolve_type_die(type_die, CU)
+        depth += 1
+    return False
 
 
 def access_from_dwarf(

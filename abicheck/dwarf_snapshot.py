@@ -54,6 +54,7 @@ from .extract.dwarf_records import (
     default_member_access_for_tag as _default_member_access_for_tag,
     local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
     record_kind_from_tag as _record_kind_from_tag,
+    variable_is_const as _variable_is_const,
 )
 from .extract.dwarf_scope import (
     function_entity_id as _dwarf_function_entity_id,
@@ -744,10 +745,8 @@ class _DwarfSnapshotBuilder:
         if "DW_AT_type" in die.attributes:
             type_name, _ = self._resolve_type(die, CU)
             self._referenced_type_names.add(type_name)
-            # Check for const qualifier
-            type_die = _resolve_type_die(die, CU)
-            if type_die is not None and type_die.tag == "DW_TAG_const_type":
-                is_const = True
+            type_die = _resolve_type_die(die, CU)  # see variable_is_const's docstring
+            is_const = _variable_is_const(type_die, CU)
 
         qualified_name = f"{scope}::{name}" if scope else name
 
