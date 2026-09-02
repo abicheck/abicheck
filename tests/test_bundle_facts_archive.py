@@ -220,7 +220,15 @@ class TestBundleFactsArchiveFormat:
         frame = zstandard.get_frame_parameters(raw_frame)
         assert frame.window_size >= 4 * 1024 * 1024  # nowhere near collapsed to 0
 
-        loaded = load_bundle_facts(out, format="archive")
+        # ADR-063 Phase 5 grew every Function's own serialized shape with a
+        # Fact[...] sibling per case-(b) field, so this fixture's real
+        # container-node count now exceeds DEFAULT_MAX_JSON_OBJECT_NODES --
+        # a known-large, trusted payload by construction (built above, not
+        # untrusted input), which is exactly the escape hatch the guard's
+        # own error message names.
+        loaded = load_bundle_facts(
+            out, format="archive", max_json_object_nodes=5_000_000
+        )
         loaded_snap = loaded.per_library_snapshots["libwidget.so"]
         assert loaded_snap.functions is not None
         assert len(loaded_snap.functions) == len(snap.functions)

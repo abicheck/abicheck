@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`30`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`37`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 30,
+  "schema_version": 37,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -105,8 +105,49 @@ unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
 fact/capability registry's (ADR-063 Phase 5 D7,
 `abicheck/model/fact_registry.py`) first registered `Fact[T]` conversion;
 needs no reliability flag, since `is_final`'s own `None` already
-unambiguously means "not captured".
-
+unambiguously means "not captured", (v31) `EntityId` sidecars for
+typedefs and constants (`AbiSnapshot.typedef_entity_ids`/
+`constant_entity_ids`, ADR-063 Phase 2's closing slice) — additive twins of
+`typedefs_qualified`/`constants` carrying the structural identity both
+header-AST backends already resolve while walking their own intermediate
+representation, keyed identically to their partner dict; empty on a
+DWARF-only snapshot or one predating this field, and (v32)
+`RecordType.is_abstract_fact`/
+`data_size_bits_fact`/`is_standard_layout_fact`/`is_trivially_copyable_fact`/
+`qualified_name_fact`/`source_header_fact` — the same registry's next batch
+of case-(b) conversions (fields already `X | None`-typed, so the existing
+"`None` already unambiguously means not captured" bridge applies directly);
+`qualified_name_fact` is the one field in this batch both header backends
+construct as an explicit `Fact.present(...)` rather than relying on the
+generic bridge, since a `None` qualified name at global scope is itself a
+confirmed determination, not missing evidence, and (v33)
+`EnumType.qualified_name_fact`/`source_header_fact` — the identical
+case-(b) pattern applied to `EnumType`'s own twin fields, and (v34)
+`Variable.source_header_fact`/`alignment_bits_fact`/`elf_binding_fact` —
+the same case-(b) pattern applied to `Variable`'s own three fields;
+`elf_binding_fact`'s decoded value is reconstructed as a real
+`SymbolBinding` enum member rather than left as the bare JSON string
+(`storage/fact_codec.py`'s `decode_variable_facts`), since existing
+readers unconditionally access `.value` on it, and (v35)
+`Function.contract_attributes_fact`/`is_explicit_fact`/
+`is_hidden_friend_fact`/`source_header_fact`/`is_variadic_fact`/
+`exception_spec_fact`/`is_override_fact`/`hidden_friend_owner_fact`/
+`elf_binding_fact`/`is_compiler_generated_fact` — the same case-(b)
+pattern applied to `Function`'s own ten remaining fields, closing out
+this dataclass's ADR-063 Phase 5 conversion; `elf_binding_fact` gets the
+identical `SymbolBinding` reconstruction as `Variable.elf_binding_fact`,
+and (v36) `AbiSnapshot.ast_resolved_standard_fact` — the same case-(b)
+pattern applied to the last remaining case-(b) field outside the four
+declaration dataclasses, and (v37) `ElfMetadata.dynamic_flags_fact`/
+`has_init_fact`/`has_fini_fact`, `PeMetadata.delay_imports_fact`,
+`MachoMetadata.rpaths_fact` — the same case-(b) pattern applied to the
+three binary-format metadata blocks, schema-version-driven rather than
+backend-driven since each block is parsed by exactly one backend;
+`dynamic_flags_fact`'s decoded value is reconstructed as a real
+`frozenset` rather than left as the bare JSON list
+(`snapshot_platform_blocks.elf_from_dict`), the identical reconstruction
+`Variable.elf_binding_fact`/`Function.elf_binding_fact` already need for
+their own non-JSON-native value type.
 ### Forward / backward compatibility
 
 abicheck loads a snapshot best-effort and never migrates it in place. The rule
@@ -116,7 +157,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 30`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 37`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -181,7 +222,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `30`). |
+| `schema_version` | int | Snapshot format version (currently `37`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -265,7 +306,9 @@ gets backfilled, only report on it.
 | `enums` | array | Enumerations with members and underlying type. |
 | `typedefs` | object | Typedef name → underlying type. Bare-name-keyed; two distinct member typedefs sharing a spelling in different classes/namespaces collide onto one key (see `typedefs_qualified`). |
 | `typedefs_qualified` | object | Fully-qualified-name-keyed twin of `typedefs` (schema v25) — collision-free. Empty for a pre-v25 snapshot or one produced without per-class qualified typedef scoping (e.g. DWARF-only). |
-| `constants` | object | Preprocessor/compile-time constants (name → value). |
+| `constants` | object | Preprocessor/compile-time constants (qualified name → value). |
+| `typedef_entity_ids` | object | `EntityId` sidecar for `typedefs_qualified` (schema v31), keyed identically — the typed `ScopePath`/kind/leaf-name identity a `dict[str, str]` cannot carry on a declaration object. Empty for a pre-v31 or DWARF-only snapshot. |
+| `constant_entity_ids` | object | `EntityId` sidecar for `constants` (schema v31), keyed identically. Empty for a pre-v31 or DWARF-only snapshot. |
 
 ### Evidence-tier and mode flags
 
@@ -313,7 +356,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `30`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `37`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

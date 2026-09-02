@@ -209,6 +209,70 @@ class Function:
     # rationale, including why this is keyword-only, excluded from
     # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-063 Phase 5 (fifth batch): Fact[...] siblings for this dataclass's
+    # own ten case-(b) fields, mirroring Variable's identical fields exactly
+    # -- each field's own None already unambiguously means "not captured",
+    # so the generic bridge applies directly with no explicit
+    # Fact.present(...) construction needed.
+    contract_attributes_fact: Fact[list[str] | None] | None = field(
+        default=None, kw_only=True
+    )
+    is_explicit_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    is_hidden_friend_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    is_variadic_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    exception_spec_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    is_override_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    hidden_friend_owner_fact: Fact[str | None] | None = field(
+        default=None, kw_only=True
+    )
+    elf_binding_fact: Fact[SymbolBinding | None] | None = field(
+        default=None, kw_only=True
+    )
+    is_compiler_generated_fact: Fact[bool | None] | None = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self) -> None:
+        self.contract_attributes, self.contract_attributes_fact = (
+            bridge_legacy_and_fact(
+                self.contract_attributes, self.contract_attributes_fact, None, None
+            )
+        )
+        self.is_explicit, self.is_explicit_fact = bridge_legacy_and_fact(
+            self.is_explicit, self.is_explicit_fact, None, None
+        )
+        self.is_hidden_friend, self.is_hidden_friend_fact = bridge_legacy_and_fact(
+            self.is_hidden_friend, self.is_hidden_friend_fact, None, None
+        )
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
+        )
+        self.is_variadic, self.is_variadic_fact = bridge_legacy_and_fact(
+            self.is_variadic, self.is_variadic_fact, None, None
+        )
+        self.exception_spec, self.exception_spec_fact = bridge_legacy_and_fact(
+            self.exception_spec, self.exception_spec_fact, None, None
+        )
+        self.is_override, self.is_override_fact = bridge_legacy_and_fact(
+            self.is_override, self.is_override_fact, None, None
+        )
+        self.hidden_friend_owner, self.hidden_friend_owner_fact = (
+            bridge_legacy_and_fact(
+                self.hidden_friend_owner, self.hidden_friend_owner_fact, None, None
+            )
+        )
+        self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
+            self.elf_binding, self.elf_binding_fact, None, None
+        )
+        self.is_compiler_generated, self.is_compiler_generated_fact = (
+            bridge_legacy_and_fact(
+                self.is_compiler_generated,
+                self.is_compiler_generated_fact,
+                None,
+                None,
+            )
+        )
 
 
 @dataclass
@@ -240,3 +304,25 @@ class Variable:
     # rationale, including why this is keyword-only, excluded from
     # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-063 Phase 5 (fourth batch): Fact[...] siblings for this dataclass's
+    # own case-(b) fields, mirroring RecordType.source_header_fact/
+    # EnumType.source_header_fact exactly — each field's own None already
+    # unambiguously means "not captured", so the generic bridge applies
+    # directly with no explicit Fact.present(...) construction needed
+    # (unlike qualified_name_fact on the other two dataclasses).
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    alignment_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
+    elf_binding_fact: Fact[SymbolBinding | None] | None = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self) -> None:
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
+        )
+        self.alignment_bits, self.alignment_bits_fact = bridge_legacy_and_fact(
+            self.alignment_bits, self.alignment_bits_fact, None, None
+        )
+        self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
+            self.elf_binding, self.elf_binding_fact, None, None
+        )

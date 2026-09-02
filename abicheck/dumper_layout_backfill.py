@@ -402,20 +402,47 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
             else dwarf.vptr_offset_bits_fact
         ),
         base_offsets=header.base_offsets or dwarf.base_offsets,
+        # ADR-063 Phase 5: same "surviving value's own Fact status" rule as
+        # vptr_offset_bits_fact above, now that these three also carry a
+        # Fact[...] sibling -- without an explicit *_fact kwarg here,
+        # replace_with_fact_sync would derive Fact.present(final_value)
+        # unconditionally, which is wrong whenever the surviving value is
+        # header's own not-yet-determined None (header.data_size_bits_fact
+        # already correctly reads not_collected() in that case; stamping
+        # present(None) over it would fabricate a confirmed determination
+        # that was never made). dwarf never populates these three fields
+        # (dwarf_snapshot.py's own comment), so dwarf.*_fact is always
+        # not_collected() too -- passing it through on that branch is
+        # exactly as inert as the plain-value ternary already is.
         data_size_bits=(
             header.data_size_bits
             if header.data_size_bits is not None
             else dwarf.data_size_bits
+        ),
+        data_size_bits_fact=(
+            header.data_size_bits_fact
+            if header.data_size_bits is not None
+            else dwarf.data_size_bits_fact
         ),
         is_standard_layout=(
             header.is_standard_layout
             if header.is_standard_layout is not None
             else dwarf.is_standard_layout
         ),
+        is_standard_layout_fact=(
+            header.is_standard_layout_fact
+            if header.is_standard_layout is not None
+            else dwarf.is_standard_layout_fact
+        ),
         is_trivially_copyable=(
             header.is_trivially_copyable
             if header.is_trivially_copyable is not None
             else dwarf.is_trivially_copyable
+        ),
+        is_trivially_copyable_fact=(
+            header.is_trivially_copyable_fact
+            if header.is_trivially_copyable is not None
+            else dwarf.is_trivially_copyable_fact
         ),
     )
 

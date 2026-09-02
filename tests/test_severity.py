@@ -497,3 +497,27 @@ class TestComputeGateDecision:
         assert decision.blocking is True
         assert decision.blocking_categories == ("addition",)
         assert "potential_breaking" not in decision.blocking_categories  # not error-level
+
+
+def test_classify_effective_change_verdict_shortcut_is_honored() -> None:
+    """`classify_effective_change`'s `verdict=` parameter, when given, must
+    be used as-is instead of re-derived (Codex review, abicheck/abicheck#984:
+    `report.finding.build_report_findings` resolves the verdict once and
+    was calling this function without it, so the same resolver silently ran
+    a second time for the same change). Pass a deliberately *wrong* verdict
+    to prove the shortcut is actually used, not merely accepted and
+    ignored."""
+    from abicheck.checker_policy import Verdict
+    from abicheck.checker_types import Change
+    from abicheck.severity import classify_effective_change
+
+    change = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    # The real (default-policy) resolution is COMPATIBLE/ADDITION.
+    assert classify_effective_change(change) == IssueCategory.ADDITION
+    # Forcing a BREAKING verdict must flip the category to match it, not
+    # the change's own true resolution -- proving the function trusts the
+    # supplied verdict instead of recomputing its own.
+    assert (
+        classify_effective_change(change, verdict=Verdict.BREAKING)
+        == IssueCategory.ABI_BREAKING
+    )

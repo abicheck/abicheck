@@ -30,6 +30,7 @@ import pefile  # type: ignore[import-untyped]
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.pe_metadata import PeExport`` spelling keeps resolving.
+from .model.fact import sync_present_facts
 from .model.pe_facts import (
     PeExport as PeExport,
     PeMetadata as PeMetadata,
@@ -213,6 +214,10 @@ def _parse(dll_path: Path) -> PeMetadata:
         _parse_pe_imports(pe, meta)
         _parse_pe_delay_imports(pe, meta)
         _parse_pe_version_resource(pe, meta)
+
+        # Plain attribute assignment never re-runs __post_init__ (ADR-063
+        # Phase 5 -- see elf_metadata.py's identical fix).
+        sync_present_facts(meta, "delay_imports")
 
         return meta
     finally:

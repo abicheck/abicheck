@@ -130,7 +130,6 @@ from .model import (
 # without a forbidden extract -> compare edge. Re-exported by value here
 # for back-compat.
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
-from .model.identity import entity_id_for_constant, scope_path_from_qualified_string
 from .name_classification import is_local_rtti_symbol
 
 # Visibility levels that constitute the public ABI surface.
@@ -1851,15 +1850,8 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_consts = old.constants
     new_consts = new.constants
 
-    # ADR-063 Phase 2: best-effort entity_id, additive only -- see
-    # scope_path_from_qualified_string's own docstring for why this is a
-    # lossy fallback (no structured ScopePath exists for constants today)
-    # rather than a real parse-time-resolved identity.
     for name, old_val in old_consts.items():
         new_val = new_consts.get(name)
-        const_entity_id = entity_id_for_constant(
-            *scope_path_from_qualified_string(name)
-        )
         if new_val is None:
             changes.append(
                 make_change(
@@ -1867,7 +1859,7 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     old_value=old_val,
-                    entity_id=const_entity_id,
+                    entity_id=old.constant_entity_ids.get(name),
                 )
             )
         elif new_val != old_val:
@@ -1884,7 +1876,8 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new=repr(new_val),
                     old_value=old_val,
                     new_value=new_val,
-                    entity_id=const_entity_id,
+                    entity_id=old.constant_entity_ids.get(name)
+                    or new.constant_entity_ids.get(name),
                 )
             )
 
@@ -1896,9 +1889,7 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     new_value=new_val,
-                    entity_id=entity_id_for_constant(
-                        *scope_path_from_qualified_string(name)
-                    ),
+                    entity_id=new.constant_entity_ids.get(name),
                 )
             )
     return changes

@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; **Phase 5 is fully done — all four items closed** — the `model` package, the `*_metadata.py` dataclass/parser split, and three of D9's four Phase 5 items (the CastXML/Clang parser split, the change-catalog taxonomy repartition, and the cycle-exception/legacy-facade cleanup) are fully done; item 2 (source-graph separation)'s values/construction/comparison split is done, and its internal-caller migration off the `buildsource/source_graph.py` facade — the residual a Codex review on #965 caught (D8: "[a facade] is used by external callers, not new internal code") — is now fully closed for every internal, first-party production caller — `poi.py`/`cli_buildsource_helpers.py`/`cli_buildsource_merge.py` closed via a physical relocation of the shared node/edge-classification predicates into `model/source_graph_query.py` plus the sanctioned `frontends -> workflows -> extract` indirection `pack_io.py` already uses; `template_graph.py` closed last, via a follow-up split into `template_graph_fold.py` once its own graph-folding half was found to be a self-contained, splittable cluster below the file's 2000-line hard cap — a second Codex review round had correctly held that item 2 was not yet literally D8-satisfied while this last caller remained; see item 2's own paragraph below for the full closure account; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); item 5 (post-render mutation) is now partially closed — `old_evidence_depth`/`new_evidence_depth`/`suppression_audit` are resolved once and attached to `DiffResult` before rendering, with `reporter.to_json`'s three JSON builders reading them directly instead of re-parsing already-rendered JSON (the scoped-gate JSON fold and the markdown/text/review appends remain open, for two different reasons — see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is fully closed on both backends, built on a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` closes out item 1 in full on both backends — castxml has no separate template-entity module at all (investigated and confirmed: castxml's XML resolves a class-template specialization down to an ordinary record node, so there is nothing `templates.py`-shaped to split out there), while clang's `extract/headers/clang/templates.py` now holds the whole template-parameter-kind/default/name reconstruction and specialization-spelling/indexing machinery moved out of `dumper_clang_vtable.py` (which, despite its name, always held two loosely related halves — record/vtable layout, which stayed, and this template half, which didn't), with `_SCOPE_NODE_KINDS`'s canonical definition also relocated there (out of `dumper_clang_expr.py`, which `extract` may not import) and `build_specialization_index` taking `is_record_definition` as an explicit parameter rather than importing it back from `dumper_clang_vtable.py`, avoiding a genuine two-way import edge between the two modules — **item 1 (the CastXML/Clang parser split) is now fully closed on both backends**; source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); the shared node/edge-classification predicates neither half owns exclusively (`is_public_dependency_node` and siblings) were first left in an unclassified `buildsource/source_graph_query.py`, then physically relocated into `abicheck/model/source_graph_query.py` once investigation showed they depend on nothing outside `model` -- the same shape `model/mangled_name.py` already established for `itanium_scope_components`/`msvc_scope_components` -- which is what let `poi.py` (`extract`) stop reaching them through the temporary facade; `build_source_graph`/`mark_source_edges_extractor_coverage` (`extract`) are now reached by the two `frontends`-classified `cli_buildsource_*.py` modules via `workflows/extraction.py`'s re-export block, the same sanctioned `frontends -> workflows -> extract`/`storage` indirection `pack_io.py` already uses -- closing three of `buildsource/source_graph.py`'s four remaining internal facade exceptions (`template_graph.py` remains, blocked by an unrelated 2000-line hard-cap constraint); `buildsource/source_graph.py` itself is now a 140-line re-export facade; the Phase 5 residual (`BuildSourcePack`'s persistence-vs-model split) is now closed too — `buildsource/pack.py` keeps only the dataclass and its pure methods, `buildsource/pack_io.py` (`storage`) holds `load`/`write`/`content_hash`/`verify_integrity`/`to_ref` as free functions, and `frontends`-layer callers reach `load`/`content_hash`/`to_ref` through `workflows/extraction.py`'s existing re-export facade rather than a new one (a first attempt used an unclassified `buildsource/pack_frontend.py` facade, which Codex review correctly flagged as a `frontends -> storage` layering bypass — an unclassified module's imports are never checked against `may_import`, so marking the bridge "unclassified" rather than routing it through the sanctioned `frontends -> workflows -> storage` path defeated the very gate this split exists to satisfy); item 4's `IMPORT_CYCLE_ALLOWLIST` audit (explicit maintainer sign-off) is also done — 12 of 15 entries were redundant subsets of the one big CLI-registration cluster and were pruned, no stale `legacy_paths` entries found. Items 1, 3, and 4 are therefore fully done; item 2 is now closed for every internal caller, `template_graph.py` included. **Phase 5 is fully closed** on a strict reading of D8; Phases 2-4 remain in progress).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; **Phase 5 is fully done — all four items closed** — the `model` package, the `*_metadata.py` dataclass/parser split, and three of D9's four Phase 5 items (the CastXML/Clang parser split, the change-catalog taxonomy repartition, and the cycle-exception/legacy-facade cleanup) are fully done; item 2 (source-graph separation)'s values/construction/comparison split is done, and its internal-caller migration off the `buildsource/source_graph.py` facade — the residual a Codex review on #965 caught (D8: "[a facade] is used by external callers, not new internal code") — is now fully closed for every internal, first-party production caller — `poi.py`/`cli_buildsource_helpers.py`/`cli_buildsource_merge.py` closed via a physical relocation of the shared node/edge-classification predicates into `model/source_graph_query.py` plus the sanctioned `frontends -> workflows -> extract` indirection `pack_io.py` already uses; `template_graph.py` closed last, via a follow-up split into `template_graph_fold.py` once its own graph-folding half was found to be a self-contained, splittable cluster below the file's 2000-line hard cap — a second Codex review round had correctly held that item 2 was not yet literally D8-satisfied while this last caller remained; see item 2's own paragraph below for the full closure account; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it, and its per-finding-verdict half is now closed too via `report/finding.py`'s `ReportFinding`/`build_report_findings` (Markdown's `to_markdown`/`to_review_digest`/leaf-mode/root-cause-mode prose rewrite is now fully closed via `report/render_markdown.py`; only HTML's prose rewrite remains open, see Phase 2's own section); item 5 (post-render mutation) is now partially closed — `old_evidence_depth`/`new_evidence_depth`/`suppression_audit` are resolved once and attached to `DiffResult` before rendering, with `reporter.to_json`'s three JSON builders reading them directly instead of re-parsing already-rendered JSON (the scoped-gate JSON fold and the markdown/text/review appends remain open, for two different reasons — see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is fully closed on both backends, built on a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` closes out item 1 in full on both backends — castxml has no separate template-entity module at all (investigated and confirmed: castxml's XML resolves a class-template specialization down to an ordinary record node, so there is nothing `templates.py`-shaped to split out there), while clang's `extract/headers/clang/templates.py` now holds the whole template-parameter-kind/default/name reconstruction and specialization-spelling/indexing machinery moved out of `dumper_clang_vtable.py` (which, despite its name, always held two loosely related halves — record/vtable layout, which stayed, and this template half, which didn't), with `_SCOPE_NODE_KINDS`'s canonical definition also relocated there (out of `dumper_clang_expr.py`, which `extract` may not import) and `build_specialization_index` taking `is_record_definition` as an explicit parameter rather than importing it back from `dumper_clang_vtable.py`, avoiding a genuine two-way import edge between the two modules — **item 1 (the CastXML/Clang parser split) is now fully closed on both backends**; source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); the shared node/edge-classification predicates neither half owns exclusively (`is_public_dependency_node` and siblings) were first left in an unclassified `buildsource/source_graph_query.py`, then physically relocated into `abicheck/model/source_graph_query.py` once investigation showed they depend on nothing outside `model` -- the same shape `model/mangled_name.py` already established for `itanium_scope_components`/`msvc_scope_components` -- which is what let `poi.py` (`extract`) stop reaching them through the temporary facade; `build_source_graph`/`mark_source_edges_extractor_coverage` (`extract`) are now reached by the two `frontends`-classified `cli_buildsource_*.py` modules via `workflows/extraction.py`'s re-export block, the same sanctioned `frontends -> workflows -> extract`/`storage` indirection `pack_io.py` already uses -- closing three of `buildsource/source_graph.py`'s four remaining internal facade exceptions (`template_graph.py` remains, blocked by an unrelated 2000-line hard-cap constraint); `buildsource/source_graph.py` itself is now a 140-line re-export facade; the Phase 5 residual (`BuildSourcePack`'s persistence-vs-model split) is now closed too — `buildsource/pack.py` keeps only the dataclass and its pure methods, `buildsource/pack_io.py` (`storage`) holds `load`/`write`/`content_hash`/`verify_integrity`/`to_ref` as free functions, and `frontends`-layer callers reach `load`/`content_hash`/`to_ref` through `workflows/extraction.py`'s existing re-export facade rather than a new one (a first attempt used an unclassified `buildsource/pack_frontend.py` facade, which Codex review correctly flagged as a `frontends -> storage` layering bypass — an unclassified module's imports are never checked against `may_import`, so marking the bridge "unclassified" rather than routing it through the sanctioned `frontends -> workflows -> storage` path defeated the very gate this split exists to satisfy); item 4's `IMPORT_CYCLE_ALLOWLIST` audit (explicit maintainer sign-off) is also done — 12 of 15 entries were redundant subsets of the one big CLI-registration cluster and were pruned, no stale `legacy_paths` entries found. Items 1, 3, and 4 are therefore fully done; item 2 is now closed for every internal caller, `template_graph.py` included. **Phase 5 is fully closed** on a strict reading of D8; Phases 2-4 remain in progress).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -661,8 +661,10 @@ now mutates the rebuilt tree rather than the caller's, which is the observable
 half of "a renderer cannot alter its input".
 
 **Not met yet, and this partial status must not be read as the acceptance
-criteria having been met.** Two distinct gaps remain, and they are different
-sizes:
+criteria having been met.** One gap remains — HTML (item 1 below); item 1's
+own Markdown half, item 4's per-finding-verdict half, and item 5's
+demangle-scope half have since closed — see their own paragraphs below
+rather than reading this summary as still current on those points:
 
 1. *Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML.*
    Unlike JSON/SARIF/JUnit, these do not build a structured value and then
@@ -677,6 +679,74 @@ sizes:
    phase's `ReportDocument`; that plan's Phase 4 items 2-4 are this list's
    Markdown/HTML rewrite plus the render-parse-patch-render deletion below)
    — implement it there rather than reinventing a second design here.
+
+   **Markdown's `to_markdown` (full mode), `to_review_digest`, and the
+   `--report-mode leaf` view's type-change sections are now closed** —
+   `abicheck/report/render_markdown.py` is the Markdown counterpart to
+   `render_json.py`/`render_xml.py`, applying this phase's same fact/
+   formatting split (see "Not met yet" preamble above) to prose instead of
+   JSON/XML: a small set of frozen dataclasses (`HeadlineTable`,
+   `SeveritySummary`, `SeveritySectionsData`, `ReviewDigest`,
+   `LeafTypeSectionsData`, and siblings) hold plain values plus, where a
+   section's whole job is "list some changes," unformatted `Change` objects
+   — never a pre-built string. Every former `_build_*`/`_append_*` helper on
+   these three paths split into a `compute_*` function in
+   `reporter_markdown.py` (reads `DiffResult`/`Change`, returns one of those
+   dataclasses — the business logic: which changes fall in which bucket,
+   whether a note applies, what a cell's value is) and a `render_*`
+   function in `render_markdown.py` (formats it into `list[str]` — headings,
+   table syntax, blank-line placement, nothing else). The three low-level
+   per-change formatters (`_format_change_md`, `_format_change_md_oneline`,
+   `_contract_decision_text`) moved into `render_markdown.py` too, since
+   they take a duck-typed `Change`/`object` and return a formatted string
+   with no `DiffResult` traversal of their own — squarely render-side — and
+   moving them (rather than leaving them in `reporter_markdown.py`, which
+   needs to call every `render_*` function) is what avoids a same-layer
+   import cycle between the two modules. Every renamed/relocated function
+   kept its original name and signature as a thin compatibility wrapper
+   (`_build_impact_table`, `_append_confidence_section`, and so on all still
+   exist, now one line each calling `compute_*()` then `render_*()`), so
+   `reporter.py`'s existing re-exports and their direct unit tests
+   (`_build_impact_table`, `_append_confidence_section`,
+   `_format_change_md`) are unaffected. Verified byte-for-byte: the existing
+   `tests/golden/*.md` suite passed unchanged after every migrated section,
+   and two new golden suites (created for this change, since neither path
+   had prior golden coverage) pin output that previously had nothing
+   pinning it at all — `tests/golden/review/*.md` for `to_review_digest`
+   and `tests/golden/root_cause/*.md` for `--report-mode root-cause` —
+   each captured only after confirming byte-for-byte identity against the
+   pre-refactor code path on its own dedicated script run, not assumed from
+   the refactor being behavior-preserving by construction.
+
+   **`--report-mode root-cause` is closed too.** Its own grouping logic —
+   the code that merges `Change`s and missing-contract labels into shared
+   root-cause buckets via a mutable `dict[str, list[str]]` built up across
+   two interleaved passes (one over already-grouped `Change`s, one merging
+   in labels that may join an existing bucket or start a new one) — is now
+   `compute_root_cause_section()` (the same two-pass bucket-building logic,
+   unchanged, now returning a `RootCauseSectionData | None` instead of
+   mutating `lines` directly) plus `render_markdown.render_root_cause_section()`
+   (just the `## Root Causes (N)` heading, the per-group `### \`root\` (n
+   finding(s))` heading, and blank-line placement). The `None` case matters:
+   a run with neither a real group nor a missing-contract label renders no
+   section at all, which is also what lets the caller's pre-existing
+   `not changes and not has_root_cause_entries` "No ABI changes detected"
+   branch keep working unchanged. Unlike the paths above, this one *did*
+   ship with no golden fixture, so `tests/golden/root_cause/*.md` was added
+   first (mirroring `tests/golden/review/`) — including a
+   `struct_size_change` case specifically to exercise the root-type-change
+   `caused_by_type` correlation path, not just the single-finding cases the
+   other three fixtures cover — and the byte-for-byte pre/post comparison
+   was run against it (plus the scoped-gate/missing-contract-label and
+   `--contract` branches, exercised indirectly via
+   `tests/test_cli_compare_contract_evaluation.py`/
+   `tests/test_contract_authoritative_pipeline.py`/
+   `tests/test_root_cause_correlator.py`, which stayed green) before this
+   grouping logic was touched, not after.
+
+   HTML (`html_report.py`) remains entirely out of scope for this ADR item
+   — it was never in Markdown's migration order, and is its own separate
+   follow-up per the "Not met yet" preamble above.
 2. *Items 4 and 5 — decisions and post-render mutation.* Item 4's **gate
    decision** half is now closed: `abicheck.policy.gate_decision.
    gate_decision_for_result(result, severity_config)` is the one call site
@@ -706,30 +776,58 @@ sizes:
    `gate_decision_for_result`'s unfiltered-changes contract would be the
    wrong abstraction rather than closing a gap.
 
-   The **per-finding verdict** half of item 4 remains open:
-   `junit_report`/`html_report`/`reporter_markdown` each still resolve a
-   per-change verdict through `effective_verdict_for_change`/
-   `DiffResult._effective_verdict_for_change` at their own call sites
-   (`junit_report.py` alone calls it independently from both `_is_failure`
-   and `_failure_type` for the same change). Unlike the gate decision, this
-   is not a single value with one shape: it is resolved once per `Change`,
-   already threads a caller-precomputed `kind_sets` through several of
-   these call sites specifically to avoid rebuilding *that* per finding, and
-   sits directly upstream of `DiffResult`'s own public `breaking`/
-   `source_breaks`/`compatible`/`risk` properties — which this ADR has
-   already ruled out moving, as a breaking change to the documented public
-   Python API (see above). Consolidating it correctly affects
-   heavily-reviewed, scar-tissue-dense logic in three format modules at
-   once; attempting it as a drive-by inside this gate-decision slice would
-   risk exactly the "wrong abstraction, forced through" failure mode this
-   ADR warns against elsewhere. It remains its own follow-up slice, and the
-   design for it is owned by, and stated in full only in,
-   `duplication-and-convergence-assessment.md`'s Phase 4 item 1 (hold the
-   resolved verdict on `ReportFinding`, built once per `Change` while
-   iterating `DiffResult.changes` during envelope construction — not a
-   separate cache keyed by `Change` identity, since `Change` is not
-   hashable) — see that plan's Phase 4 section rather than restating the
-   rationale here a second time.
+   **The per-finding verdict half of item 4 is now closed.**
+   `report/finding.py` is the `ReportFinding` the convergence-assessment
+   plan's Phase 4 item 1 asked for: a frozen `(change, verdict, category)`
+   triple built once per `Change` by `build_report_findings`, resolving
+   both `effective_verdict_for_change` and `classify_effective_change` in
+   the same pass — not a cache keyed by `Change` identity (`Change` is
+   still not hashable), a plain tuple plus an `id(change)`-keyed lookup
+   dict built fresh per render instead. Classified `report` (D1): every
+   symbol it needs — `Verdict`, `KindSets`, `IssueCategory`, both resolver
+   functions — is reached through `policy.severity` alone, since
+   `checker_policy.py`/`reclassify.py` are themselves unclassified
+   `legacy_root_modules` a migrated `report`-package module may not import
+   directly (`unclassified-import`). `DiffResult` itself cannot own this as
+   a method — it is `model`-classified, and `model`'s `may_import: []`
+   forbids reaching into `report`/`policy` — so the per-result convenience
+   (`report_findings_for`) lives in `report/finding.py` instead and is
+   called from outside `model`, not as a `DiffResult` method. It recomputes
+   on every call rather than caching on the (mutable) `DiffResult` instance
+   — a first revision cached there and a Codex review round on the PR
+   caught the resulting staleness hazard: a caller rendering the same
+   result twice with a mutation in between (`result.changes`, `policy_file`,
+   or a `Change.effective_verdict` demotion/promotion) would keep serving
+   the first render's now-stale verdicts. No current caller does this —
+   each already calls it at most once per render — so caching bought
+   nothing real; recomputing removes the hazard class outright rather than
+   trying to invalidate a cache correctly against every mutation surface.
+   `junit_report._is_failure`/`_failure_type` (deduplicated through two new
+   leaf helpers, `_resolved_verdict`/`_resolved_category`, so the two
+   stopped each independently re-deriving both values), `html_report`'s
+   `_change_bucket` callback (previously invoked up to three times per
+   change, once per candidate bucket — now a single pass), and
+   `reporter_markdown.to_review_digest`'s top-impacted-symbols section all
+   read from it. `DiffResult`'s own public `breaking`/`source_breaks`/
+   `compatible`/`risk` properties are untouched, as this ADR already
+   requires. `ShowOnlyFilter._check_severity` deliberately stays on its
+   direct `effective_verdict_for_change` call: investigation found it is
+   not an instance of this gap at all — it already calls the identical
+   canonical resolver (its own docstring says so), just at a call site that
+   filters arbitrary change subsets without a `DiffResult` in hand, so
+   forcing it through `ReportFinding` would add a dependency for no
+   correctness gain. Verified by `tests/unit/report/test_report_finding.py`
+   — a parametrized sweep (mirroring `test_gate_decision_shared.py`'s
+   pattern) asserting `ReportFinding.verdict`/`.category` against direct
+   resolver calls across several policy configurations, that
+   `report_findings_for` reflects a mutation applied to `result` between two
+   calls rather than replaying a stale answer, and that JUnit's
+   `_is_failure` (via `findings_by_id`) never disagrees with the JSON
+   report's own independently-derived `severity` field for the same
+   changes — plus the full existing golden-output suite
+   (`tests/test_golden_output.py`, `tests/test_html_template_golden.py`)
+   passing byte-for-byte unchanged, since this closure changes only *where*
+   each value is computed, never its value.
 
    Item 5 (post-render mutation) is **partially closed**, and the reasoning
    for what moved and what didn't is worth keeping precise, since it
@@ -764,32 +862,56 @@ sizes:
      pre-render path produces byte-identical text — including the
      combined case, since the two facts' relative order in the JSON
      object needed to match the old append order too.
-   - **Still open, for a materially different reason each**:
-     `_fold_scoped_compat_into_text` (JSON branch) re-derives already-built
-     document sections — `summary`/`severity`/`root_causes` — rather than
-     adding an independent key; closing it needs restructuring
-     `reporter.py`'s JSON-building internals themselves (`_build_json_base`/
-     `_to_json_root_cause`/`_add_changes_block`) to accept scoped-gate
-     awareness natively, a materially larger, separate slice with its own
-     parity risk against heavily-review-scarred logic — the same caution
-     item 4's "per-finding verdict" half above already states for a
-     different function. `_fold_suppression_audit_into_text`'s remaining
-     markdown/text/review branch and all of `_fold_use_case_impact_into_
-     text` are demangle-scope-sensitive: `reporter_markdown.to_markdown`
-     applies its one whole-report `_out()` demangle pass and returns before
-     any fold-in ever ran, so these appended sections are deliberately
-     *not* demangled the way the rest of a `--demangle` report is. Folding
-     them into `to_markdown`'s own pre-`_out()` line list would either
-     silently change that demangle scope (a real, undocumented behavior
-     change) or reproduce the identical post-render string-append pattern
-     one file over, which is not the fix this item asks for. Both remain
-     genuinely separate follow-up slices, not scoped down for effort
-     reasons — and both are the identical problem
-     `duplication-and-convergence-assessment.md`'s "P1 — Reporting composes
-     too late" finding names (independently, almost word-for-word) as the
-     motivation for that plan's `ReportEnvelope`/Phase 4; fold the two
-     still-open pieces into that migration rather than solving them a
-     second time in isolation.
+   - **The demangle-scope half is now closed.** `reporter_markdown.
+     to_markdown`'s single whole-report `_out()` demangle pass returns
+     before any fold-in ever runs, so `_fold_scoped_compat_into_text`'s
+     `into_text` append (missing symbol/entrypoint names, scoped-only
+     change descriptions), `_fold_suppression_audit_into_text`'s
+     markdown/text/review branch, and `_fold_use_case_impact_into_text` (a
+     use-case's attributed change symbols) all stayed mangled under
+     `--demangle` regardless of the flag. Rather than moving any fold-in
+     earlier — which would either change `_out()`'s scope for every other
+     section too, or reproduce the identical post-render string-append
+     pattern one file over — each of the three now accepts its own
+     `demangle` bool (threaded from `cli_compare_helpers.
+     _render_compare_report`, which already resolves the effective flag)
+     and demangles only the free-standing symbol prose it adds, via the
+     same `demangle_text` helper `_out()` itself calls; *text* — the
+     report already rendered above the fold-in — is never re-demangled.
+     `_fold_suppression_audit_into_text` deliberately demangles less than
+     the other two: a rule's own `suppression_rule_label` selector echo
+     (the `symbol=...` part of a label) is left raw always, even under
+     `--demangle` — a first revision demangled the whole appended block
+     including labels, and a Codex review round caught that this defeats
+     that label's entire purpose, since two distinct selectors (e.g.
+     Itanium C1/C2 constructor variants) can demangle to the identical
+     display string, making two different rules indistinguishable in the
+     report. Only `audit.summary()`'s own text and a high-risk match's
+     trailing `{kind}: {symbol}` free-text mention are demangled; the label
+     itself never is. `into_json`/`into_oneline` are unaffected, by design:
+     JSON and the one-line summary carry raw symbol data regardless of
+     `--demangle`. Verified end-to-end (real `compare --required-symbol`/
+     `--audit-suppressions` invocations, not the fold function in
+     isolation) by `tests/test_cli_compare_fold_demangle.py`, including a
+     dedicated two-rule C1/C2-collision case asserting both labels stay
+     distinguishable after demangling — plus the unchanged golden-output
+     suite, confirming `demangle=False`'s default path stays byte-for-byte
+     identical.
+   - **Still open**: `_fold_scoped_compat_into_text`'s JSON branch
+     (`into_json`) re-derives already-built document sections —
+     `summary`/`severity`/`root_causes` — rather than adding an independent
+     key; closing it needs restructuring `reporter.py`'s JSON-building
+     internals themselves (`_build_json_base`/`_to_json_root_cause`/
+     `_add_changes_block`) to accept scoped-gate awareness natively, a
+     materially larger, separate slice with its own parity risk against
+     heavily-review-scarred logic. Not attempted here for the same reason
+     the per-finding-verdict closure above was deliberately kept to a
+     dedicated, narrowly-scoped change rather than folded into a larger
+     slice touching this same review-scarred code — this is the identical
+     problem `duplication-and-convergence-assessment.md`'s "P1 — Reporting
+     composes too late" finding names as the motivation for that plan's
+     `ReportEnvelope`/Phase 4; fold this piece into that migration rather
+     than solving it a second time in isolation.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note

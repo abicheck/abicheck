@@ -236,12 +236,23 @@ def classify_effective_change(
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
     today: date | None = None,
+    verdict: Verdict | None = None,
 ) -> IssueCategory:
-    """Classify one change, preserving per-finding verdict guards."""
+    """Classify one change, preserving per-finding verdict guards.
+
+    *verdict*, when given, is used as-is instead of re-deriving it via
+    ``effective_verdict_for_change`` -- pass a value already resolved by an
+    identical call (same *change*/*policy*/*kind_sets*/*policy_file*/
+    *today*) to avoid computing it twice for the same change (Codex review:
+    ``report.finding.build_report_findings`` resolves both the verdict and
+    the category for one change and was calling this function without it,
+    so the verdict it had just computed was silently recomputed here too).
+    """
     sets = _resolve_kind_sets(policy, kind_sets)
-    verdict = effective_verdict_for_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
-    )
+    if verdict is None:
+        verdict = effective_verdict_for_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+        )
     if verdict == Verdict.BREAKING:
         return IssueCategory.ABI_BREAKING
     if verdict in (Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):

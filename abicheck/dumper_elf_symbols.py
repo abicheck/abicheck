@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError
-from .model import AbiSnapshot, ElfVisibility, is_cxx_runtime_library
+from .model import AbiSnapshot, ElfVisibility, Fact, is_cxx_runtime_library
 
 if TYPE_CHECKING:
     from .elf_metadata import ElfMetadata
@@ -59,11 +59,20 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
         if elf_sym is not None:
             func.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
             func.elf_binding = elf_sym.binding
+            # Plain attribute assignment never re-runs __post_init__, so the
+            # elf_binding_fact sibling must be kept in sync explicitly here
+            # (ADR-063 Phase 5) — see the identical Variable fix below.
+            func.elf_binding_fact = Fact.present(elf_sym.binding)
     for var in snap.variables:
         elf_sym = sym_map.get(var.mangled)
         if elf_sym is not None:
             var.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
             var.elf_binding = elf_sym.binding
+            # Plain attribute assignment never re-runs __post_init__, so the
+            # elf_binding_fact sibling must be kept in sync explicitly here
+            # (ADR-063 Phase 5) — see AGENTS.md's post-construction mutation
+            # trap entries for the identical tu_merge.py/provenance.py fix.
+            var.elf_binding_fact = Fact.present(elf_sym.binding)
 
 
 def _elf_classify_symbols(

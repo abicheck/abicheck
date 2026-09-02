@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
+from .fact import Fact, bridge_legacy_and_fact
 from .first_wins_index import build_first_wins_index, describe_dropped
 from .graph_facts import SurfaceGraphLike
 
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from .build_mode_facts import BuildMode
     from .dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
     from .elf_facts import ElfMetadata
+    from .identity import EntityId
     from .kabi_facts import KabiMetadata
     from .macho_facts import MachoMetadata
     from .pe_facts import PeMetadata
@@ -635,6 +637,42 @@ class AbiSnapshot:
     # _typedef_spelling_targets`` for the first consumer.
     typedefs_qualified: dict[str, str] = field(default_factory=dict, kw_only=True)
 
+    # ADR-063 Phase 2's closing slice: ``EntityId`` sidecars for typedefs and
+    # constants (schema v31). Unlike ``RecordType``/``EnumType``/``Function``/
+    # ``Variable``, ``typedefs``/``typedefs_qualified``/``constants`` are plain
+    # ``dict[str, str]`` with no parsed declaration object to carry an
+    # ``entity_id`` on, so the identity both header-AST backends already resolve
+    # while walking their own intermediate representation had nowhere to go and
+    # was discarded. These are additive twins keyed exactly like their partner
+    # dict — ``typedef_entity_ids`` by the same qualified name as
+    # ``typedefs_qualified``, ``constant_entity_ids`` by the same qualified name
+    # as ``constants`` — so a consumer joins one against the other without a
+    # second key convention. Empty on a DWARF-only snapshot (which resolves no
+    # scope for either kind) and on one predating this field, same as
+    # ``typedefs_qualified``; ``diff_types._diff_typedefs``/
+    # ``diff_symbols._diff_constants`` read them with ``.get``, so absence
+    # degrades to today's identity-less ``Change`` rather than misreporting.
+    # A sidecar's keys must be renumbered exactly when its partner dict's are,
+    # which is why ``qualified_name_segments._LAMBDA_IDENTITY_FIELDS`` lists
+    # ``typedef_entity_ids`` (``typedefs_qualified`` is rewritten there) and
+    # deliberately does not list ``constant_entity_ids`` (``constants`` is
+    # excluded from that walk, its values being payload literals). Rewriting
+    # only one half of either pair would break the join it exists to support.
+    typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict, kw_only=True)
+    constant_entity_ids: dict[str, EntityId] = field(default_factory=dict, kw_only=True)
+
+    # ADR-063 Phase 5: Fact[str | None] sibling of ast_resolved_standard --
+    # the one remaining case-(b) field outside the four declaration
+    # dataclasses. Same "None already unambiguously means not captured"
+    # shape as RecordType/EnumType/Variable/Function's own case-(b) fields;
+    # see __post_init__ below for the bridge. Appended at the tail rather
+    # than beside the legacy field it bridges, per this package's own
+    # "append new fields at the end" convention (model/AGENTS.md) -- Codex
+    # review, PR #982.
+    ast_resolved_standard_fact: Fact[str | None] | None = field(
+        default=None, kw_only=True
+    )
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set
@@ -654,6 +692,16 @@ class AbiSnapshot:
     _type_by_name: dict[str, RecordType] | None = field(
         default=None, repr=False, compare=False
     )
+
+    def __post_init__(self) -> None:
+        self.ast_resolved_standard, self.ast_resolved_standard_fact = (
+            bridge_legacy_and_fact(
+                self.ast_resolved_standard,
+                self.ast_resolved_standard_fact,
+                None,
+                None,
+            )
+        )
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names.

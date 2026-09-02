@@ -44,7 +44,12 @@ from typing import Generic, TypeVar
 
 from .availability import FactStatus
 
-__all__ = ["Fact", "replace_with_fact_sync", "resolved_fact_value"]
+__all__ = [
+    "Fact",
+    "replace_with_fact_sync",
+    "resolved_fact_value",
+    "sync_present_facts",
+]
 
 T = TypeVar("T")
 
@@ -203,6 +208,22 @@ def replace_with_fact_sync(obj: T, **updates: object) -> T:
             continue
         resolved[fact_name] = Fact.present(value)
     return replace(obj, **resolved)  # type: ignore[type-var]
+
+
+def sync_present_facts(obj: object, *field_names: str) -> None:
+    """In place: set ``<name>_fact = Fact.present(getattr(obj, name))`` for
+    each *field_names* on *obj* (a mutable, non-frozen dataclass).
+
+    For the shape ``replace_with_fact_sync`` doesn't cover: a parser that
+    mutates a legacy field via plain attribute assignment across several
+    statements (not one ``dataclasses.replace(...)`` call), where
+    ``__post_init__`` already ran and so cannot re-derive the ``Fact[...]``
+    sibling itself (ADR-063 Phase 5 -- see ``elf_metadata._parse_dynamic``/
+    ``pe_metadata._parse``/``macho_metadata.parse_macho_metadata`` for real
+    call sites, one per binary-format case-(b) batch).
+    """
+    for name in field_names:
+        setattr(obj, f"{name}_fact", Fact.present(getattr(obj, name)))
 
 
 @dataclass(frozen=True)

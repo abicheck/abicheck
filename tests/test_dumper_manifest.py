@@ -275,7 +275,13 @@ class _StubParser:
     def parse_typedefs_qualified(self):
         return {}
 
+    def parse_typedef_entity_ids(self):
+        return {}
+
     def parse_constants(self):
+        return {}
+
+    def parse_constant_entity_ids(self):
         return {}
 
 

@@ -53,6 +53,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
+from .guards import identity_text, mapping
 
 if TYPE_CHECKING:
     from ..model.declarations import Function, Variable
@@ -72,13 +73,20 @@ if TYPE_CHECKING:
         entity_id: EntityId | None
 
 
-__all__ = ["decode_entity_ids", "encode_entity_ids"]
+__all__ = [
+    "decode_entity_ids",
+    "decode_sidecar_entity_ids",
+    "encode_entity_ids",
+    "encode_sidecar_entity_ids",
+]
 
 #: Snapshot keys holding lists of declaration dicts/objects that carry the
 #: field, paired with the matching ``AbiSnapshot`` attribute name.
-#: ``typedefs``/``constants`` get no carrier (``AbiSnapshot``'s own
-#: `model/entities.py` docstring on `RecordType.entity_id` records why) so
-#: they are not listed here.
+#: ``typedefs``/``constants`` are plain ``dict[str, str]`` with no
+#: declaration object to carry the field on, so they are not listed here —
+#: their identity travels in the separate ``AbiSnapshot.typedef_entity_ids``/
+#: ``constant_entity_ids`` sidecars instead (schema v31), encoded by
+#: :func:`encode_sidecar_entity_ids` below.
 _DECLARATION_LIST_KEYS = (
     ("types", "types"),
     ("enums", "enums"),
@@ -126,6 +134,77 @@ def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
             else:
                 decl_dict["entity_id"] = domain_entity_id_to_dto(entity_id)
     return d
+
+
+#: The ``AbiSnapshot`` attributes (and identically-named wire keys) holding a
+#: ``dict[str, EntityId]`` sidecar rather than a declaration list.
+_SIDECAR_KEYS = ("typedef_entity_ids", "constant_entity_ids")
+
+
+def encode_sidecar_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
+    """In-place: replace each ``dict[str, EntityId]`` sidecar with a plain
+    ``{key: entity-id document}`` mapping. Returns *d*, for chaining alongside
+    :func:`encode_entity_ids`.
+
+    Needed for the same reason that function is given the still-typed *snap*:
+    ``dataclasses.asdict()`` flattens each ``EntityId``'s ``ScopePath``
+    segments into anonymous dicts with no record of which segment dataclass
+    produced them. An empty sidecar is written as an empty mapping rather than
+    dropped, matching how ``typedefs_qualified`` itself is written.
+
+    Each key is checked with ``identity_text`` before it reaches the wire —
+    a non-string key (reachable only via a direct, non-producer
+    ``AbiSnapshot`` construction, since both parsers only ever emit
+    ``str``) would otherwise encode as JSON's own coerced string form, and a
+    snapshot carrying both ``1`` and ``"1"`` would silently collide onto one
+    key, losing one entity's identity rather than refusing the document
+    (Codex review). Each sidecar itself is checked with ``mapping`` first,
+    for the identical reason ``decode_sidecar_entity_ids`` checks its own
+    raw input: a caller reaching this function with a non-mapping
+    (``AbiSnapshot(constant_entity_ids=[])``, still reachable outside the
+    dataclass's own type annotation) must not leak an ``AttributeError``
+    from a bare ``.items()`` call (Codex review).
+    """
+    for key in _SIDECAR_KEYS:
+        sidecar = getattr(snap, key)
+        mapping(sidecar, key)
+        d[key] = {
+            identity_text(name, f"{key} key"): domain_entity_id_to_dto(entity_id)
+            for name, entity_id in sidecar.items()
+        }
+    return d
+
+
+def decode_sidecar_entity_ids(d: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The inverse of :func:`encode_sidecar_entity_ids`: each sidecar's
+    reconstructed ``{key: EntityId}`` mapping, ready to hand straight to the
+    ``AbiSnapshot(...)`` reconstruction as keyword arguments.
+
+    Absent on every pre-v31 snapshot, which loads as ``{}`` — the same value a
+    v31 snapshot with no header-resolved typedef/constant identity carries, so
+    no migration adapter is needed (identical reasoning to the v25
+    ``typedefs_qualified`` addition).
+
+    ``raw is None`` is the only degrade-to-empty case, matching
+    :func:`_decode_one`'s own rule: a present-but-malformed sidecar (a list,
+    a string, a mapping with a non-string key) is refused via ``guards.
+    mapping``/``guards.identity_text`` rather than silently read as "this
+    snapshot predates the sidecar" (Codex review) — a falsy-but-present
+    value like ``[]`` is exactly the shape a truthiness check would have
+    let through as an empty mapping.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for key in _SIDECAR_KEYS:
+        raw = d.get(key)
+        if raw is None:
+            result[key] = {}
+            continue
+        mapping(raw, key)
+        result[key] = {
+            identity_text(name, f"{key} key"): domain_entity_id_from_dto(value)
+            for name, value in raw.items()
+        }
+    return result
 
 
 def _decode_one(raw: Any) -> Any:

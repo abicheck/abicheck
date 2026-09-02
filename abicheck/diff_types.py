@@ -96,11 +96,7 @@ from .model import (
     resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
-from .model.identity import (
-    EntityId,
-    entity_id_for_typedef,
-    scope_path_from_qualified_string,
-)
+from .model.identity import EntityId
 
 
 def _field_type_genuinely_changed(
@@ -1601,15 +1597,10 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # breaks); qualified_suffix disambiguates description so dedup can't collapse collisions.
         bare_alias = alias.rsplit("::", 1)[-1]
         qualified_suffix = f" ({alias})" if alias != bare_alias else ""
-        # ADR-063 Phase 2: best-effort entity_id, additive only -- see
-        # scope_path_from_qualified_string's own docstring for why this is
-        # a lossy fallback (no structured ScopePath exists for typedefs
-        # today) rather than a real parse-time-resolved identity.
-        _scope, _leaf = scope_path_from_qualified_string(alias)
-        typedef_entity_id = entity_id_for_typedef(_scope, _leaf)
         new_type = new_typedefs.get(alias)
         if new_type is None and suppress_removed:
             continue
+        eid = old.typedef_entity_ids.get(alias) or new.typedef_entity_ids.get(alias)
         if new_type is None:
             # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
             # compile-time sentinels that change every release by design and
@@ -1625,7 +1616,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         symbol=bare_alias,
                         name=bare_alias,
                         old_value=old_type,
-                        entity_id=typedef_entity_id,
+                        entity_id=eid,
                     )
                 )
                 continue
@@ -1636,8 +1627,8 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=bare_alias,
                     name=bare_alias,
                     old_value=old_type,
+                    entity_id=eid,
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
-                    entity_id=typedef_entity_id,
                 )
             )
         elif new_type != old_type:
@@ -1648,8 +1639,8 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
+                    entity_id=eid,
                     description=f"Typedef base type changed: {bare_alias}{qualified_suffix}",
-                    entity_id=typedef_entity_id,
                 )
             )
     return changes

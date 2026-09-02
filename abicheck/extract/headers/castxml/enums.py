@@ -25,7 +25,7 @@ owns opening the castxml document and driving ``build_id_map()``.
 
 from __future__ import annotations
 
-from ....model import EnumMember, EnumType
+from ....model import EnumMember, EnumType, Fact
 from ....model.identity import entity_id_for_enum
 from ....name_classification import strip_anonymous_type_location
 from .context import CastxmlParserContext
@@ -66,6 +66,13 @@ def parse_enums(ctx: CastxmlParserContext) -> list[EnumType]:
         underlying_type = (
             _underlying_type_name(ctx, enum_type_id) if enum_type_id else "int"
         )
+        # ADR-063 Phase 5 (third batch): captured for the explicit
+        # qualified_name_fact=Fact.present(...) construction below -- see
+        # RecordType's identical castxml construction site for why a None
+        # return here is treated as a confirmed determination, not omitted
+        # evidence (the qualified_type_name() cycle/depth-cap caveat is a
+        # pathological, essentially unobserved edge case).
+        qualified_name = qualified_type_name(ctx, el, leaf_name=name)
         enums.append(
             EnumType(
                 name=name,
@@ -78,7 +85,8 @@ def parse_enums(ctx: CastxmlParserContext) -> list[EnumType]:
                 deprecated=_deprecation_marker(el),
                 # See RecordType.qualified_name for the bare-vs-qualified
                 # name convention this mirrors.
-                qualified_name=qualified_type_name(ctx, el, leaf_name=name),
+                qualified_name=qualified_name,
+                qualified_name_fact=Fact.present(qualified_name),
                 # ADR-063 Phase 2 -- see build_record_type's own comment.
                 entity_id=entity_id_for_enum(scope_path(ctx, el), name),
             )

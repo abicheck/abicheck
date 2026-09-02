@@ -32,7 +32,12 @@ from abicheck.checker import ChangeKind, compare
 from abicheck.checker_types import Change
 from abicheck.finding_identity import IDENTITY_TIER_CANONICAL, resolve_change_identity
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
-from abicheck.model.identity import entity_id_for_function
+from abicheck.model.identity import (
+    Namespace,
+    entity_id_for_constant,
+    entity_id_for_function,
+    entity_id_for_typedef,
+)
 
 
 def _snap(functions: list[Function] | None = None, **kwargs: object) -> AbiSnapshot:
@@ -369,6 +374,67 @@ class TestChangeEntityIdCarrier:
         new_snap.types = [owner]
         r = compare(old_snap, new_snap, scope_to_public_surface=False)
         assert _change(r, ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK).entity_id == eid  # type: ignore[attr-defined]
+
+
+class TestTypedefAndConstantSidecarsReachTheChange:
+    """ADR-063 Phase 2's closing slice: the two detector families whose
+    entities have no declaration object, so their identity is read off
+    ``AbiSnapshot.typedef_entity_ids``/``constant_entity_ids`` instead."""
+
+    _TYPEDEF_EID = entity_id_for_typedef((Namespace("ns"),), "Alias")
+    _CONSTANT_EID = entity_id_for_constant((Namespace("ns"),), "kLimit")
+
+    def _typedef_snap(self, underlying: str | None) -> AbiSnapshot:
+        if underlying is None:
+            return _snap(from_headers=True)
+        return _snap(
+            from_headers=True,
+            typedefs={"Alias": underlying},
+            typedefs_qualified={"ns::Alias": underlying},
+            typedef_entity_ids={"ns::Alias": self._TYPEDEF_EID},
+        )
+
+    def _constant_snap(self, value: str | None) -> AbiSnapshot:
+        if value is None:
+            return _snap(from_headers=True)
+        return _snap(
+            from_headers=True,
+            constants={"ns::kLimit": value},
+            constant_entity_ids={"ns::kLimit": self._CONSTANT_EID},
+        )
+
+    def test_typedef_base_change_carries_the_sidecar_identity(self) -> None:
+        r = compare(self._typedef_snap("int"), self._typedef_snap("long"))
+        assert (
+            _change(r, ChangeKind.TYPEDEF_BASE_CHANGED).entity_id == self._TYPEDEF_EID
+        )  # type: ignore[attr-defined]
+
+    def test_typedef_removal_carries_the_old_side_identity(self) -> None:
+        r = compare(self._typedef_snap("int"), self._typedef_snap(None))
+        assert _change(r, ChangeKind.TYPEDEF_REMOVED).entity_id == self._TYPEDEF_EID  # type: ignore[attr-defined]
+
+    def test_constant_change_carries_the_sidecar_identity(self) -> None:
+        r = compare(self._constant_snap("7"), self._constant_snap("8"))
+        assert _change(r, ChangeKind.CONSTANT_CHANGED).entity_id == self._CONSTANT_EID  # type: ignore[attr-defined]
+
+    def test_constant_removal_carries_the_old_side_identity(self) -> None:
+        r = compare(self._constant_snap("7"), self._constant_snap(None))
+        assert _change(r, ChangeKind.CONSTANT_REMOVED).entity_id == self._CONSTANT_EID  # type: ignore[attr-defined]
+
+    def test_constant_addition_carries_the_new_side_identity(self) -> None:
+        r = compare(self._constant_snap(None), self._constant_snap("7"))
+        assert _change(r, ChangeKind.CONSTANT_ADDED).entity_id == self._CONSTANT_EID  # type: ignore[attr-defined]
+
+    def test_absent_sidecar_leaves_the_change_identity_none(self) -> None:
+        # A DWARF-only baseline resolves no typedef/constant scope, so the
+        # sidecar is empty -- the detector must report the change with no
+        # identity rather than fabricating one from the flat key.
+        old = _snap(from_headers=True, typedefs_qualified={"ns::Alias": "int"})
+        new = _snap(from_headers=True, typedefs_qualified={"ns::Alias": "long"})
+        assert (
+            _change(compare(old, new), ChangeKind.TYPEDEF_BASE_CHANGED).entity_id
+            is None
+        )  # type: ignore[attr-defined]
 
 
 class TestResolveChangeIdentityConsumesEntityId:

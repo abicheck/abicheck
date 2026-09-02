@@ -72,7 +72,6 @@ __all__ = [
     "entity_id_for_type",
     "entity_id_for_typedef",
     "entity_id_for_variable",
-    "scope_path_from_qualified_string",
     "with_mangled_name",
 ]
 
@@ -359,41 +358,6 @@ def entity_id_for_constant(scope: ScopePath, leaf_name: str) -> EntityId:
     return EntityId(
         scope=_scope_path(scope), kind=EntityKind.CONSTANT, leaf_name=leaf_name
     )
-
-
-def scope_path_from_qualified_string(qualified: str) -> tuple[ScopePath, str]:
-    """Best-effort ``(scope, leaf_name)`` split of a flat ``::``-qualified
-    name string, for a caller with no structured scope information at all.
-
-    ADR-063 Phase 2 scopes typedef/constant ``EntityId`` wiring to exactly
-    this: today ``AbiSnapshot.typedefs``/``.constants`` are flat ``dict[str,
-    str]`` maps (alias/name -> value string) with no parse-time ``ScopePath``
-    behind them -- unlike ``RecordType``/``EnumType``/``Function``/
-    ``Variable``, whose ``entity_id`` both header-AST backends build from a
-    typed scope stack tracked during parsing. Giving typedefs/constants that
-    same treatment needs new structured model types plus parser changes in
-    both backends (a real, separate migration -- see the ADR's own Phase 2
-    status text); this function is the interim, explicitly lossy fallback
-    that lets `_diff_typedefs`/`_diff_constants` populate `Change.entity_id`
-    today, additively, without waiting on that migration.
-
-    **Lossy, and knowingly so**: every ``::``-separated segment becomes a
-    plain :class:`Namespace`, because a bare string cannot say whether a
-    given segment was actually a namespace, a record, or an inline
-    namespace -- the exact ambiguity ``ScopePath`` exists to resolve when
-    real segment-kind information is available. Two qualified names that
-    differ only in segment *kind* (a namespace `ns::Foo` vs. a nested record
-    scope spelled identically) collide here into the same synthesized
-    identity. Callers that need real disambiguation must not use this
-    helper; it exists only for the two flat-string sources named above,
-    which have no better information to offer regardless.
-    """
-    if "::" in qualified:
-        *scope_names, leaf = qualified.split("::")
-    else:
-        scope_names, leaf = [], qualified
-    scope: ScopePath = tuple(Namespace(name=n) for n in scope_names if n)
-    return scope, leaf
 
 
 def entity_id_for_variable(

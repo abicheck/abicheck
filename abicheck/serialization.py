@@ -44,12 +44,33 @@ from .model import (
     Variable,
     Visibility,
 )
-from .storage.entity_id_codec import decode_entity_ids, encode_entity_ids
+from .snapshot_platform_blocks import (
+    dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
+    dwarf_from_dict as _dwarf_from_dict,
+    elf_from_dict as _elf_from_dict,
+    kabi_from_dict as _kabi_from_dict,
+    macho_from_dict as _macho_from_dict,
+    numpy_capi_from_dict as _numpy_capi_from_dict,
+    pe_from_dict as _pe_from_dict,
+    python_api_from_dict as _python_api_from_dict,
+    python_ext_from_dict as _python_ext_from_dict,
+    sycl_from_dict as _sycl_from_dict,
+)
+from .storage.entity_id_codec import (
+    decode_entity_ids,
+    decode_sidecar_entity_ids,
+    encode_entity_ids,
+    encode_sidecar_entity_ids,
+)
 from .storage.enum_codec import encode_platform_enums
 from .storage.fact_codec import (
     apply_legacy_fact_backfill,
+    decode_enum_facts,
     decode_fact,
+    decode_function_facts,
     decode_record_facts,
+    decode_snapshot_facts,
+    decode_variable_facts,
     encode_fact_fields,
 )
 from .storage.snapshot_load_normalization import (
@@ -320,7 +341,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 30  # v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 37  # v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -415,7 +436,9 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     encode_fact_fields(d)
 
     # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first encoded the ADR-063 Phase 2 (c1) `entity_id` carrier (storage/entity_id_codec.py).
-    converted: dict[str, Any] = _sets_to_lists(encode_entity_ids(d, snap))
+    converted: dict[str, Any] = _sets_to_lists(
+        encode_sidecar_entity_ids(encode_entity_ids(d, snap), snap)
+    )
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
     # them through as Enum instances rather than plain strings; normalize
@@ -454,7 +477,7 @@ def _scope_origin_or_unknown(raw: Any) -> ScopeOrigin:
         return ScopeOrigin.UNKNOWN
 
 
-def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
+def _enum_type_from_dict(e: dict[str, Any], schema_version: int) -> EnumType:
     return EnumType(
         name=e["name"],
         members=[
@@ -467,327 +490,12 @@ def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
         is_scoped=e.get("is_scoped"),
         deprecated=e.get("deprecated"),
         qualified_name=e.get("qualified_name"),
+        **decode_enum_facts(e, schema_version),
     )
 
 
 def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
     return json.dumps(snapshot_to_dict(snap), indent=indent)
-
-
-def _elf_from_dict(e: dict[str, Any]) -> Any:
-    from .elf_metadata import (
-        ElfImport,
-        ElfMetadata,
-        ElfSymbol,
-        SymbolBinding,
-        SymbolType,
-    )
-
-    syms = [
-        ElfSymbol(
-            name=s["name"],
-            binding=SymbolBinding(s.get("binding", "global")),
-            sym_type=SymbolType(s.get("sym_type", "func")),
-            size=s.get("size", 0),
-            version=s.get("version", ""),
-            is_default=s.get("is_default", True),
-            visibility=s.get("visibility", "default"),
-            value_alignment=s.get("value_alignment", 0),
-        )
-        for s in e.get("symbols", [])
-    ]
-    imports = [
-        ElfImport(
-            name=i["name"],
-            binding=SymbolBinding(i.get("binding", "global")),
-            sym_type=SymbolType(i.get("sym_type", "notype")),
-            version=i.get("version", ""),
-            is_default=i.get("is_default", True),
-            version_soname=i.get("version_soname", ""),
-        )
-        for i in e.get("imports", [])
-    ]
-    return ElfMetadata(
-        soname=e.get("soname", ""),
-        needed=e.get("needed", []),
-        rpath=e.get("rpath", ""),
-        runpath=e.get("runpath", ""),
-        versions_defined=e.get("versions_defined", []),
-        versions_required=e.get("versions_required", {}),
-        symbols=syms,
-        imports=imports,
-        interpreter=e.get("interpreter", ""),
-        has_executable_stack=e.get("has_executable_stack", False),
-        relro=e.get("relro", "none"),
-        bind_now=e.get("bind_now", False),
-        is_pie=e.get("is_pie", False),
-        has_stack_canary=e.get("has_stack_canary", False),
-        has_fortify_source=e.get("has_fortify_source", False),
-        has_writable_executable_segment=e.get("has_writable_executable_segment", False),
-        is_symbolic=e.get("is_symbolic", False),
-        has_textrel=e.get("has_textrel", False),
-        pointer_size=e.get("pointer_size", 8),
-        machine=e.get("machine", ""),
-        # Legacy snapshots (written before elf_class existed) carry no class
-        # field; derive it from pointer_size (4→32, 8→64) rather than hard-coding
-        # 64, so a saved 32-bit baseline does not false-positive elf_class_changed.
-        elf_class=e.get("elf_class", 32 if e.get("pointer_size", 8) == 4 else 64),
-        osabi=e.get("osabi", ""),
-        e_flags=e.get("e_flags", 0),
-        abi_flags=frozenset(e.get("abi_flags", [])),
-        has_static_tls=e.get("has_static_tls", False),
-        has_tls_symbols=e.get("has_tls_symbols", False),
-        gnu_properties=frozenset(e.get("gnu_properties", [])),
-        has_dt_relr=e.get("has_dt_relr", False),
-        hash_styles=frozenset(e.get("hash_styles", [])),
-        ei_data=e.get("ei_data", ""),
-        min_kernel_version=e.get("min_kernel_version", ""),
-        # Tri-state loader-contract fields: absent key (legacy snapshot) must
-        # stay None ("not captured"), not default to a comparable value.
-        dynamic_flags=(
-            frozenset(e["dynamic_flags"])
-            if e.get("dynamic_flags") is not None
-            else None
-        ),
-        has_init=e.get("has_init"),
-        has_fini=e.get("has_fini"),
-    )
-
-
-def _pe_from_dict(e: dict[str, Any]) -> Any:
-    from .pe_metadata import PeExport, PeMetadata, PeSymbolType
-
-    exports = [
-        PeExport(
-            name=x["name"],
-            ordinal=x.get("ordinal", 0),
-            sym_type=PeSymbolType(x.get("sym_type", "exported")),
-            forwarder=x.get("forwarder", ""),
-        )
-        for x in e.get("exports", [])
-    ]
-    return PeMetadata(
-        machine=e.get("machine", ""),
-        characteristics=e.get("characteristics", 0),
-        dll_characteristics=e.get("dll_characteristics", 0),
-        exports=exports,
-        imports=e.get("imports", {}),
-        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
-        delay_imports=e.get("delay_imports"),
-        file_version=e.get("file_version", ""),
-        product_version=e.get("product_version", ""),
-        subsystem_version=e.get("subsystem_version", ""),
-    )
-
-
-def _macho_from_dict(e: dict[str, Any]) -> Any:
-    from .macho_metadata import MachoExport, MachoMetadata, MachoSymbolType
-
-    exports = [
-        MachoExport(
-            name=x["name"],
-            sym_type=MachoSymbolType(x.get("sym_type", "exported")),
-            is_weak=x.get("is_weak", False),
-        )
-        for x in e.get("exports", [])
-    ]
-    return MachoMetadata(
-        cpu_type=e.get("cpu_type", ""),
-        cpu_types=e.get("cpu_types", []),
-        filetype=e.get("filetype", ""),
-        flags=e.get("flags", 0),
-        install_name=e.get("install_name", ""),
-        dependent_libs=e.get("dependent_libs", []),
-        reexported_libs=e.get("reexported_libs", []),
-        exports=exports,
-        imported_symbols=e.get("imported_symbols", []),
-        current_version=e.get("current_version", ""),
-        compat_version=e.get("compat_version", ""),
-        min_os_version=e.get("min_os_version", ""),
-        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
-        rpaths=e.get("rpaths"),
-    )
-
-
-def _dwarf_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-
-    structs = {
-        name: StructLayout(
-            name=s.get("name", name),
-            byte_size=s.get("byte_size", 0),
-            alignment=s.get("alignment", 0),
-            fields=[
-                FieldInfo(
-                    name=f.get("name", ""),
-                    type_name=f.get("type_name", "unknown"),
-                    byte_offset=f.get("byte_offset", 0),
-                    byte_size=f.get("byte_size", 0),
-                    bit_offset=f.get("bit_offset", 0),
-                    bit_size=f.get("bit_size", 0),
-                )
-                for f in s.get("fields", [])
-            ],
-            is_union=s.get("is_union", False),
-        )
-        for name, s in d.get("structs", {}).items()
-    }
-
-    enums = {
-        name: EnumInfo(
-            name=e.get("name", name),
-            underlying_byte_size=e.get("underlying_byte_size", 0),
-            members=e.get("members", {}),
-        )
-        for name, e in d.get("enums", {}).items()
-    }
-
-    return DwarfMetadata(
-        structs=structs,
-        enums=enums,
-        base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
-        has_dwarf=d.get("has_dwarf", False),
-    )
-
-
-def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
-
-    tc = d.get("toolchain", {})
-    toolchain = ToolchainInfo(
-        producer_string=tc.get("producer_string", ""),
-        compiler=tc.get("compiler", ""),
-        version=tc.get("version", ""),
-        abi_flags=set(tc.get("abi_flags", [])),
-        vector_abi_flags=set(tc.get("vector_abi_flags", [])),
-    )
-    return AdvancedDwarfMetadata(
-        has_dwarf=d.get("has_dwarf", False),
-        target_arch=d.get("target_arch", ""),
-        toolchain=toolchain,
-        calling_conventions=d.get("calling_conventions", {}),
-        value_abi_traits=d.get("value_abi_traits", {}),
-        return_value_sizes=d.get("return_value_sizes", {}),
-        return_memory_classified=set(d.get("return_memory_classified", [])),
-        packed_structs=set(d.get("packed_structs", [])),
-        all_struct_names=set(d.get("all_struct_names", [])),
-        frame_registers=d.get("frame_registers", {}),
-        callee_saved_regs={
-            k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()
-        },
-    )
-
-
-def _sycl_from_dict(d: dict[str, Any]) -> Any:
-    from .sycl_metadata import SyclMetadata, SyclPluginInfo
-
-    plugins = [
-        SyclPluginInfo(
-            name=p.get("name", ""),
-            library=p.get("library", ""),
-            interface_type=p.get("interface_type", "pi"),
-            pi_version=p.get("pi_version", ""),
-            entry_points=p.get("entry_points", []),
-            backend_type=p.get("backend_type", ""),
-            min_driver_version=p.get("min_driver_version"),
-        )
-        for p in d.get("plugins", [])
-    ]
-    return SyclMetadata(
-        implementation=d.get("implementation", ""),
-        runtime_version=d.get("runtime_version", ""),
-        pi_version=d.get("pi_version", ""),
-        plugins=plugins,
-        plugin_search_paths=d.get("plugin_search_paths", []),
-    )
-
-
-def _kabi_from_dict(d: dict[str, Any]) -> Any:
-    from .symvers_metadata import KabiEntry, KabiMetadata
-
-    entries = {
-        sym: KabiEntry(
-            crc=e.get("crc", ""),
-            symbol=e.get("symbol", sym),
-            module=e.get("module", ""),
-            export_type=e.get("export_type", ""),
-            namespace=e.get("namespace", ""),
-        )
-        for sym, e in (d.get("entries", {}) or {}).items()
-    }
-    return KabiMetadata(entries=entries)
-
-
-def _numpy_capi_from_dict(d: dict[str, Any]) -> Any:
-    from .numpy_capi import NumPyCapiSurface
-
-    return NumPyCapiSurface(
-        consumes_array_api=d.get("consumes_array_api", False),
-        consumes_ufunc_api=d.get("consumes_ufunc_api", False),
-        capi_target_version=d.get("capi_target_version"),
-    )
-
-
-def _python_ext_from_dict(d: dict[str, Any]) -> Any:
-    from .python_ext import PythonExtMetadata
-
-    declared = d.get("declared_abi3")
-    # JSON has no tuples: a persisted (major, minor) floor round-trips as a list.
-    declared_abi3 = (
-        (int(declared[0]), int(declared[1]))
-        if isinstance(declared, (list, tuple)) and len(declared) == 2
-        else None
-    )
-    return PythonExtMetadata(
-        module_name=d.get("module_name"),
-        init_symbol=d.get("init_symbol"),
-        python_major=d.get("python_major"),
-        soabi_tag=d.get("soabi_tag"),
-        limited_api=bool(d.get("limited_api", False)),
-        declared_abi3=declared_abi3,
-        free_threaded=bool(d.get("free_threaded", False)),
-        cpython_imports=list(d.get("cpython_imports", [])),
-        cpython_dlls=list(d.get("cpython_dlls", [])),
-    )
-
-
-def _python_api_from_dict(d: dict[str, Any]) -> Any:
-    from .python_api import PyClass, PyFunction, PyParameter, PythonApiSurface
-
-    def _param(p: dict[str, Any]) -> PyParameter:
-        return PyParameter(
-            name=p.get("name", ""),
-            kind=p.get("kind", "positional_or_keyword"),
-            has_default=bool(p.get("has_default", False)),
-            annotation=p.get("annotation"),
-        )
-
-    def _func(fn: dict[str, Any]) -> PyFunction:
-        return PyFunction(
-            name=fn.get("name", ""),
-            parameters=[_param(p) for p in fn.get("parameters", [])],
-            return_annotation=fn.get("return_annotation"),
-            is_async=bool(fn.get("is_async", False)),
-            descriptor=fn.get("descriptor", "function"),
-            overloads=[_func(v) for v in fn.get("overloads", [])],
-        )
-
-    functions = {name: _func(fn) for name, fn in (d.get("functions") or {}).items()}
-    classes = {
-        name: PyClass(
-            name=c.get("name", name),
-            methods={m: _func(fn) for m, fn in (c.get("methods") or {}).items()},
-        )
-        for name, c in (d.get("classes") or {}).items()
-    }
-    return PythonApiSurface(
-        module_name=d.get("module_name"),
-        source=d.get("source", "stub"),
-        source_path=d.get("source_path"),
-        functions=functions,
-        classes=classes,
-        parse_ok=bool(d.get("parse_ok", True)),
-    )
 
 
 _T = TypeVar("_T")
@@ -914,6 +622,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_override=f.get("is_override"),
             # Tri-state (v27) — missing on a pre-v27 snapshot loads as None.
             is_compiler_generated=f.get("is_compiler_generated"),
+            **decode_function_facts(f, _schema_version),
         )
         for f in d.get("functions", [])
     ]
@@ -937,6 +646,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_binding=SymbolBinding(v["elf_binding"])
             if v.get("elf_binding")
             else None,
+            **decode_variable_facts(v, _schema_version),
         )
         for v in d.get("variables", [])
     ]
@@ -989,8 +699,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         )
         for t in d.get("types", [])
     ]
-    enums = [_enum_type_from_dict(e) for e in d.get("enums", [])]
+    enums = [_enum_type_from_dict(e, _schema_version) for e in d.get("enums", [])]
     decode_entity_ids(d, functions=funcs, variables=variables, types=types, enums=enums)
+    sidecar_entity_ids = decode_sidecar_entity_ids(d)
     typedefs: dict[str, str] = d.get("typedefs", {})
     typedefs_qualified: dict[str, str] = d.get("typedefs_qualified", {})
     elf_data = d.get("elf")
@@ -999,9 +710,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     dwarf_data = d.get("dwarf")
     dwarf_adv_data = d.get("dwarf_advanced")
 
-    elf = _sub_block(_elf_from_dict, elf_data)
-    pe = _sub_block(_pe_from_dict, pe_data)
-    macho = _sub_block(_macho_from_dict, macho_data)
+    elf = _sub_block(lambda e: _elf_from_dict(e, _schema_version), elf_data)
+    pe = _sub_block(lambda e: _pe_from_dict(e, _schema_version), pe_data)
+    macho = _sub_block(lambda e: _macho_from_dict(e, _schema_version), macho_data)
     dwarf = _sub_block(_dwarf_from_dict, dwarf_data)
     dwarf_advanced = _sub_block(_dwarf_advanced_from_dict, dwarf_adv_data)
 
@@ -1364,6 +1075,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         enums=enums,
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
+        typedef_entity_ids=sidecar_entity_ids["typedef_entity_ids"],
+        constant_entity_ids=sidecar_entity_ids["constant_entity_ids"],
         elf=elf,
         pe=pe,
         macho=macho,
@@ -1391,6 +1104,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         frontend_context_kind=frontend_context_kind,
         dependency_scope=dependency_scope,
         ast_resolved_standard=ast_resolved_standard,
+        **decode_snapshot_facts(d, _schema_version),
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,
         ast_sysroot=ast_sysroot,

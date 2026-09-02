@@ -25,17 +25,22 @@ concern out of `serialization.py`'s neighbours.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..model import Fact, FactStatus
+from ..model import Fact, FactStatus, SymbolBinding
 
 if TYPE_CHECKING:
     from ..model import Function, RecordType
 
 __all__ = [
     "apply_legacy_fact_backfill",
+    "decode_enum_facts",
     "decode_fact",
+    "decode_function_facts",
     "decode_record_facts",
+    "decode_snapshot_facts",
+    "decode_variable_facts",
     "encode_fact_fields",
 ]
 
@@ -45,7 +50,60 @@ _TYPE_FACT_KEYS = (
     "vtable_fact",
     "vptr_offset_bits_fact",
     "is_final_fact",
+    "is_abstract_fact",
+    "data_size_bits_fact",
+    "is_standard_layout_fact",
+    "is_trivially_copyable_fact",
+    "qualified_name_fact",
+    "source_header_fact",
 )
+
+# ADR-063 Phase 5 (third batch): EnumType's own qualified_name_fact/
+# source_header_fact -- same shape as _TYPE_FACT_KEYS, a distinct tuple
+# since EnumType is a different owner/collection ("enums", not "types").
+_ENUM_FACT_KEYS = (
+    "qualified_name_fact",
+    "source_header_fact",
+)
+
+# ADR-063 Phase 5 (fourth batch): Variable's own case-(b) *_fact siblings --
+# a distinct tuple since Variable is a different owner/collection
+# ("variables", not "types"/"enums").
+_VARIABLE_FACT_KEYS = (
+    "source_header_fact",
+    "alignment_bits_fact",
+    "elf_binding_fact",
+)
+
+# ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
+# siblings -- a distinct tuple since Function is a different owner/
+# collection ("functions", not "variables"/"types"/"enums").
+_FUNCTION_FACT_KEYS = (
+    "contract_attributes_fact",
+    "is_explicit_fact",
+    "is_hidden_friend_fact",
+    "source_header_fact",
+    "is_variadic_fact",
+    "exception_spec_fact",
+    "is_override_fact",
+    "hidden_friend_owner_fact",
+    "elf_binding_fact",
+    "is_compiler_generated_fact",
+)
+
+# ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
+# own case-(b) *_fact siblings. Each is a single nested sub-dict under the
+# top-level "elf"/"pe"/"macho" key (ElfMetadata/PeMetadata/MachoMetadata are
+# not list-of-declaration collections like the four dataclasses above), so
+# `encode_fact_fields` handles them with one `_encode_one` call per key
+# rather than a per-item loop.
+_ELF_FACT_KEYS = (
+    "dynamic_flags_fact",
+    "has_init_fact",
+    "has_fini_fact",
+)
+_PE_FACT_KEYS = ("delay_imports_fact",)
+_MACHO_FACT_KEYS = ("rpaths_fact",)
 
 
 def encode_fact_fields(d: dict[str, Any]) -> None:
@@ -60,9 +118,32 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     for type_dict in d.get("types", []):
         for fact_key in _TYPE_FACT_KEYS:
             _encode_one(type_dict.get(fact_key))
+    for enum_dict in d.get("enums", []):
+        for fact_key in _ENUM_FACT_KEYS:
+            _encode_one(enum_dict.get(fact_key))
+    for var_dict in d.get("variables", []):
+        for fact_key in _VARIABLE_FACT_KEYS:
+            _encode_one(var_dict.get(fact_key))
     for func_dict in d.get("functions", []):
+        for fact_key in _FUNCTION_FACT_KEYS:
+            _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):
             _encode_one(param_dict.get("is_va_list_fact"))
+    # AbiSnapshot's own case-(b) field -- a single top-level key, not
+    # nested in a list like the four declaration dataclasses above.
+    _encode_one(d.get("ast_resolved_standard_fact"))
+    elf_dict = d.get("elf")
+    if elf_dict is not None:
+        for fact_key in _ELF_FACT_KEYS:
+            _encode_one(elf_dict.get(fact_key))
+    pe_dict = d.get("pe")
+    if pe_dict is not None:
+        for fact_key in _PE_FACT_KEYS:
+            _encode_one(pe_dict.get(fact_key))
+    macho_dict = d.get("macho")
+    if macho_dict is not None:
+        for fact_key in _MACHO_FACT_KEYS:
+            _encode_one(macho_dict.get(fact_key))
 
 
 def _encode_one(fact_dict: dict[str, Any] | None) -> None:
@@ -83,6 +164,32 @@ _FACT_FIELDS_SCHEMA_VERSION = 26
 # this key at all, the same way a pre-v26 document never carried any *_fact
 # key. See decode_fact's own docstring for why this threshold matters.
 _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT = 30
+
+# ADR-063 Phase 5 (second batch): the schema_version RecordType's remaining
+# case-(b) *_fact siblings (is_abstract/data_size_bits/is_standard_layout/
+# is_trivially_copyable/qualified_name/source_header) started being
+# persisted at — one shared threshold, since all six land together in the
+# same schema bump. Same reasoning as _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT
+# above: a document below this version never carried these keys at all.
+_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 32
+
+# ADR-063 Phase 5 (third batch): the schema_version EnumType's own
+# qualified_name_fact/source_header_fact siblings started being persisted
+# at.
+_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 33
+
+# ADR-063 Phase 5 (fourth batch): the schema_version Variable's own
+# source_header_fact/alignment_bits_fact/elf_binding_fact siblings started
+# being persisted at.
+_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 34
+
+# ADR-063 Phase 5 (fifth batch): the schema_version Function's own ten
+# case-(b) *_fact siblings started being persisted at.
+_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 35
+
+# ADR-063 Phase 5 (sixth batch): the schema_version AbiSnapshot's own
+# ast_resolved_standard_fact sibling started being persisted at.
+_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 36
 
 
 def decode_fact(
@@ -131,11 +238,189 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
         "bases_fact": decode_fact(t.get("bases_fact"), schema_version),
         "virtual_bases_fact": decode_fact(t.get("virtual_bases_fact"), schema_version),
         "vtable_fact": decode_fact(t.get("vtable_fact"), schema_version),
-        "vptr_offset_bits_fact": decode_fact(t.get("vptr_offset_bits_fact"), schema_version),
+        "vptr_offset_bits_fact": decode_fact(
+            t.get("vptr_offset_bits_fact"), schema_version
+        ),
         "is_final_fact": decode_fact(
             t.get("is_final_fact"),
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
+        ),
+        "is_abstract_fact": decode_fact(
+            t.get("is_abstract_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "data_size_bits_fact": decode_fact(
+            t.get("data_size_bits_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "is_standard_layout_fact": decode_fact(
+            t.get("is_standard_layout_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "is_trivially_copyable_fact": decode_fact(
+            t.get("is_trivially_copyable_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "qualified_name_fact": decode_fact(
+            t.get("qualified_name_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+        "source_header_fact": decode_fact(
+            t.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+    }
+
+
+def decode_enum_facts(e: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``EnumType`` ``Fact[...]`` sibling from one enum dict.
+
+    One call, spread into the ``EnumType(**decode_enum_facts(e), ...)``
+    constructor call, mirroring :func:`decode_record_facts`.
+    """
+    return {
+        "qualified_name_fact": decode_fact(
+            e.get("qualified_name_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+        ),
+        "source_header_fact": decode_fact(
+            e.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+        ),
+    }
+
+
+def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``Variable`` ``Fact[...]`` sibling from one variable dict.
+
+    One call, spread into the ``Variable(**decode_variable_facts(v), ...)``
+    constructor call, mirroring :func:`decode_record_facts`/
+    :func:`decode_enum_facts`. ``elf_binding_fact``'s ``value`` needs one
+    extra step the other two fields don't: JSON has no enum type, so the
+    raw decoded value is a plain string, and the legacy (non-Fact)
+    ``Variable.elf_binding``/``Function.elf_binding`` reader convention
+    (``diff_symbols.py``, ``diff_platform.py``) unconditionally accesses
+    ``.value`` on it, which only a real ``SymbolBinding`` member supports —
+    a bare ``str`` would raise ``AttributeError``. ``bridge_legacy_and_fact``
+    then carries this same converted value back into the legacy
+    ``elf_binding`` field too, so the two representations stay a real
+    ``SymbolBinding`` instance together, not a str/enum split.
+    """
+    elf_binding_fact = decode_fact(
+        v.get("elf_binding_fact"),
+        schema_version,
+        min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+    )
+    if elf_binding_fact is not None and elf_binding_fact.value is not None:
+        elf_binding_fact = replace(
+            elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
+        )
+    return {
+        "source_header_fact": decode_fact(
+            v.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+        ),
+        "alignment_bits_fact": decode_fact(
+            v.get("alignment_bits_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+        ),
+        "elf_binding_fact": elf_binding_fact,
+    }
+
+
+def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``Function`` ``Fact[...]`` sibling from one function dict.
+
+    One call, spread into the ``Function(**decode_function_facts(f), ...)``
+    constructor call, mirroring :func:`decode_record_facts`/
+    :func:`decode_variable_facts`. ``elf_binding_fact`` needs the same
+    ``SymbolBinding`` reconstruction :func:`decode_variable_facts` performs,
+    for the identical reason (``Function.elf_binding`` shares the same
+    ``.value``-accessing reader convention as ``Variable.elf_binding``).
+    """
+    elf_binding_fact = decode_fact(
+        f.get("elf_binding_fact"),
+        schema_version,
+        min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+    )
+    if elf_binding_fact is not None and elf_binding_fact.value is not None:
+        elf_binding_fact = replace(
+            elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
+        )
+    return {
+        "contract_attributes_fact": decode_fact(
+            f.get("contract_attributes_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_explicit_fact": decode_fact(
+            f.get("is_explicit_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_hidden_friend_fact": decode_fact(
+            f.get("is_hidden_friend_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "source_header_fact": decode_fact(
+            f.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_variadic_fact": decode_fact(
+            f.get("is_variadic_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "exception_spec_fact": decode_fact(
+            f.get("exception_spec_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_override_fact": decode_fact(
+            f.get("is_override_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "hidden_friend_owner_fact": decode_fact(
+            f.get("hidden_friend_owner_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "elf_binding_fact": elf_binding_fact,
+        "is_compiler_generated_fact": decode_fact(
+            f.get("is_compiler_generated_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+    }
+
+
+def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode ``AbiSnapshot``'s own ``Fact[...]`` sibling from the top-level
+    snapshot dict. One call, spread into the ``AbiSnapshot(**decode_
+    snapshot_facts(d, schema_version), ...)`` constructor call, mirroring
+    :func:`decode_record_facts` and siblings -- the receiver here is the
+    whole snapshot dict itself, not one item nested in a list, since
+    ``AbiSnapshot`` is the single top-level object.
+    """
+    return {
+        "ast_resolved_standard_fact": decode_fact(
+            d.get("ast_resolved_standard_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
         ),
     }
 

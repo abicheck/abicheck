@@ -52,6 +52,7 @@ from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.macho_metadata import MachoExport`` spelling keeps resolving.
+from .model.fact import sync_present_facts
 from .model.macho_facts import (
     MachoExport as MachoExport,
     MachoMetadata as MachoMetadata,
@@ -405,6 +406,9 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
             if path:
                 rpaths.append(path)
     meta.rpaths = rpaths
+    # Plain attribute assignment never re-runs __post_init__ (ADR-063
+    # Phase 5 -- see elf_metadata.py's/pe_metadata.py's identical fix).
+    sync_present_facts(meta, "rpaths")
 
 
 def _build_section_segment_map(header: Any) -> dict[int, str]:
