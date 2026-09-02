@@ -23,7 +23,10 @@
   resolved severity config, so `policy.base`/`policy.overrides`/
   `policy.reclassify` all read empty even though the identical policy
   demonstrably was applied to every library's own verdict — indistinguishable
-  from a run with no policy override at all.
+  from a run with no policy override at all. It also now reports the
+  policy document's own `base_policy:` (e.g. `sdk_vendor`) instead of the
+  CLI's default profile name, which `--policy <path>` always resolves its
+  own `policy` parameter back to regardless of the document's real base.
 - **A directory/package `compare` no longer double-prints every warning
   logged through the shared `"abicheck"` logger** (most visibly a policy
   override's "usually causes binary incompatibility" warning, once per

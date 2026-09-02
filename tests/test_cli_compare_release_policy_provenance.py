@@ -202,6 +202,59 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
         assert release_fields["policy.overrides"] == single_fields["policy.overrides"]
         assert release_fields["policy.reclassify"] == single_fields["policy.reclassify"]
 
+    def test_non_default_base_policy_is_reported_not_the_cli_default(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1016: `--policy <path>` resolves the CLI's own
+        `policy` parameter back to the *default* profile ('strict_abi') --
+        the document's own `base_policy:` travels separately, via
+        `policy_file_path`/the loaded `PolicyFile.base_policy`
+        (`cli_options._resolve_policy_operand`'s own docstring). The
+        previous fix's stand-in read the raw `policy` parameter instead of
+        `pf.base_policy`, so a document naming a non-default base
+        (`sdk_vendor`) still produced a release-summary digest reading
+        'strict_abi' -- silently wrong, and undetected by the sibling parity
+        test above only because that test's own fixture's `base_policy:`
+        happens to equal the CLI default, so both the buggy and correct
+        reads coincided."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair()
+        old_path = _write_snap(old_dir / "libfoo.json", old_foo)
+        new_path = _write_snap(new_dir / "libfoo.json", new_foo)
+        policy_path = tmp_path / "policy.yaml"
+        policy_path.write_text("base_policy: sdk_vendor\n", encoding="utf-8")
+
+        _, single_out = _invoke(
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--policy",
+            str(policy_path),
+            "--format",
+            "json",
+        )
+        single_fields = json.loads(single_out)["effective_config_fields"]
+        assert single_fields["policy.base"].startswith("sdk_vendor")
+
+        _, release_out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--policy",
+            str(policy_path),
+            "--jobs",
+            "1",
+            "--format",
+            "json",
+        )
+        release_fields = json.loads(release_out)["effective_config_fields"]
+
+        assert release_fields["policy.base"] == single_fields["policy.base"]
+        assert release_fields["policy.base"].startswith("sdk_vendor")
+
 
 class TestReleasePolicyOverrideWarningFiresOnce:
     """P3 (CLI-audit): a directory/package `compare` calls

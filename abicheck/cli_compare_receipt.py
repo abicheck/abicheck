@@ -840,8 +840,17 @@ def _release_summary_effective_config_block(
 
         pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
     suppression_config = suppression_config_for(suppression)
+    # `pf.base_policy`, not the raw `policy` argument, when a `--policy-file`
+    # resolved one (Codex review, PR #1016): `checker.compare`'s own
+    # `effective_policy = policy_file.base_policy if policy_file is not None
+    # else policy` is what a real per-library report's `policy.base` field
+    # reflects, so a policy document naming a non-default `base_policy:`
+    # (e.g. `sdk_vendor`) produced a release-summary digest still reading
+    # the CLI default (`strict_abi`) while every per-library report agreed
+    # on the real base -- this stand-in must resolve the identical way.
+    effective_policy = pf.base_policy if pf is not None else policy
     ec_result = SimpleNamespace(
-        policy=policy,
+        policy=effective_policy,
         policy_file=pf,
         suppression_source_sha256=(
             suppression_config.sha256 if suppression_config is not None else None
