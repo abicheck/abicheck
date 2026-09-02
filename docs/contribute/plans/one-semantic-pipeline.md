@@ -10098,6 +10098,160 @@ attempts at ordinal stability were each designed and reverted (see
 `buildsource/*.py`'s L5 source-graph sites remain out of ADR-063's scope by
 design, as before.
 
+**Landed (fourteenth slice, 2026-09-02): item (1)'s extraction-side half,
+for DWARF and the ELF-symbol-only fallback — the object each of them
+carries, not the detector wiring on top of it.** `dwarf_snapshot.py`'s DIE
+walk threads a typed `ScopePath` alongside the pre-existing flat `scope`
+string, built at the exact points a `DW_TAG_namespace`/`DW_TAG_structure_
+type`/`DW_TAG_class_type`/`DW_TAG_union_type` DIE is entered — the same
+"widen the walker's own scope representation, don't reconstruct it from a
+flattened spelling" fix this phase's own Design section required for the
+two header-AST backends. `RecordType`/`EnumType`/`Function`/`Variable`
+gain a populated `entity_id`, and a new `typedef_entity_ids` sidecar on the
+builder (wired into `AbiSnapshot.typedef_entity_ids`, keyed identically to
+`typedefs`) mirrors the two header-AST backends' own — `AbiSnapshot.
+constant_entity_ids` stays empty for a DWARF-only snapshot, since a
+constexpr initializer is a header-AST-only fact DWARF does not carry.
+`dumper_elf_fallback.py`'s header-less, export-table-only `Function`/
+`Variable` construction gets the same treatment with an empty `ScopePath`
+(a raw exported symbol carries no scope information at all) — the case
+`model/identity.py`'s own docstring already named as needing this
+`mangled_name`/`leaf_name` interaction (`entity_id_for_variable`'s
+`mangled=sym` reused for both fields, so the mangled branch drops
+`leaf_name` rather than let a header/DWARF observation of the identical
+symbol fail to merge with it). The DWARF-specific construction (the
+mangled-name-vs-extern-C gate, the two scope-segment builders) lives in a
+new leaf module, `abicheck/extract/dwarf_scope.py`, under `extract/` per
+ADR-061 D9's task routing even though its one caller, `dwarf_snapshot.py`,
+is itself still a legacy root module; `tests/test_entity_id_carrier.py`'s
+`_ALLOWED_RESOLVER_CALLERS` was extended to name it (and
+`dumper_elf_fallback.py`) as legitimate `entity_id_for_*` front doors,
+alongside the two header-AST backends. `abicheck/extract/dwarf_records.py`
+(four small, dependency-free DWARF record/access helpers, previously
+inline in `dwarf_snapshot.py`) was split out in the same slice purely to
+keep that file under its `architecture/debt.yaml` no-growth baseline —
+unrelated to identity, a byproduct of "move responsibility instead of
+raising the baseline."
+
+Anonymous DWARF scopes get no `Anonymous` segment in this slice: an
+anonymous namespace (`namespace { ... }`, no `DW_AT_name`) contributes no
+scope segment at all, matching this walker's own pre-existing flat-scope
+behavior (its members were already treated as declared directly in the
+parent scope); an anonymous struct/union/enum DIE is skipped by
+`dwarf_snapshot.py`'s own pre-existing logic unless reached through a
+typedef (`typedef struct { ... } Point;`), which borrows the typedef's own
+name — so no bare-unnamed record/enum ever reaches this slice's
+`entity_id_for_type`/`entity_id_for_enum` call sites at all. This is
+narrower than the two header-AST backends (which do construct `Anonymous`
+segments, ordinal-tracked per parent), a documented gap rather than a
+silent one: DWARF exposes no per-block merge signal for a reopened
+anonymous namespace the way clang's `originalNamespace`/`previousDecl`
+does, so extending this slice to attempt one was not pursued. A method's
+own cv-qualification, ref-qualifier, and variadic-ness are similarly not
+read from DWARF here (unlike the two header-AST backends' own AST-node
+reads) — inert in practice, since they only feed `entity_id_for_function`'s
+"sig" fallback branch, reached only by a non-`extern "C"` function with no
+real `DW_AT_linkage_name` at all; every ordinarily-mangled C++ overload
+takes the mangled branch instead and never touches them.
+
+**Update (2026-09-02, landed): PE/Mach-O extraction-side `entity_id`.**
+`dumper.py`'s own header-less `_dump_macho`/`_dump_pe` export-table-only
+branches now populate `entity_id` too, via a new shared leaf module,
+`abicheck/extract/export_symbol_identity.py`, that also absorbs
+`dumper_elf_fallback.py`'s own construction (one shared builder for all
+three export-table-only producers instead of three drifting copies). The
+with-headers path for both formats already ran through the same
+header-AST parser ELF uses and so already carried `entity_id` before this
+slice — undocumented until now, not new. `export_symbol_identity.py`'s PE
+helper recognizes both the MSVC `?` and Itanium `_Z` mangling prefixes (a
+MinGW/GCC-built PE DLL's C++ exports are Itanium-mangled, a real, distinct
+supported PE lane from MSVC's own), so a MinGW DLL's headerless and
+header-backed dumps agree on the mangled branch instead of the headerless
+path silently falling back to extern-"C" for every MinGW C++ export. This
+closes item (1)'s remaining extraction-side gap in full: every
+DWARF/PE/Mach-O/ELF-symbol-table-only producer now populates `entity_id`.
+
+**Still open after this slice, updated by a follow-up pass**: the diff-site
+wiring pass was carried out module by module, with a deliberately narrow
+scope — populate `Change.entity_id` only where a producer already resolves
+a real matched `Function`/`Variable`/`RecordType` object, never invent a
+lookup where the detector only ever sees a raw string or a DWARF-only
+layout struct. That landed three real sites: `diff_platform.py`'s
+ELF-fallback deleted-function finding, and
+`diff_platform_elf_symbols.py`'s exported-object size/alignment findings
+(both via `AbiSnapshot.var_by_mangled`). Every other call site across
+`diff_platform.py`, `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
+`diff_platform_elf_symbols.py`, `diff_versioning.py`, and `diff_sycl.py`
+was individually reviewed and left unwired for one of three structural
+reasons, not because the wiring pass stopped short of them: (a) the
+detector only has raw ELF/PE/Mach-O container facts in scope
+(`ElfMetadata`/`ElfSymbol`/PE export strings), which carry no `entity_id`
+field at all — the large majority of sites, including every one of
+`diff_platform_elf_dynamic.py`'s 40 and `diff_versioning.py`'s 7 and
+`diff_sycl.py`'s 9 (the latter two operating on `SyclMetadata`/
+`SyclPluginInfo`, equally plain); (b) the detector matches against
+DWARF-only `StructLayout`/`FieldInfo`/`EnumInfo` (`model/dwarf_facts.py`),
+which don't carry `entity_id` — only the header-layer `RecordType`/
+`EnumType` do, a genuinely separate, deeper extraction-side gap from
+"detector forgot to read `entity_id`"; this is `diff_platform.py`'s
+DWARF-tier layout functions and all of `diff_elf_layout.py` (pure L0/
+binary-only, matching `_ZTV<mangled>`/`_ZTI<mangled>` vtable/RTTI symbol
+strings with no `RecordType` ever in scope — its functions take only
+`old: AbiSnapshot, new: AbiSnapshot`); or (c) the finding is
+batch-shaped — aggregating multiple matched entities into one `Change`
+(e.g. `diff_platform_elf_dynamic.py`'s `VISIBILITY_LEAK`, which samples up
+to five leaked `Function` names into one summary finding) — where this
+codebase's own established convention (see `finding_identity.py`'s
+`resolve_change_identity` docstring) is that no producer sets `entity_id`
+on a batch-shaped `Change`, since a single id cannot represent several
+matched entities. `diff_filtering.py`/`type_reachability.py`'s bespoke
+string-suffix ambiguity trackers remain unmigrated, unattempted this slice
+given that module's own extensive, multiply-reviewed fragility (see its own
+module docstring) — a real rewrite risk this slice judged not worth taking
+on without the same adversarial review rigor that code's prior fixes
+received. Item (2), the `entity:` alias promotion, was investigated for a
+third time this slice. The suppression-facing hash side still has no
+accepted design and stays exactly as blocked as before: the same
+`Anonymous`/`LocalToFunction` within-one-parse-only ordinal limitation
+this phase's Design section already names blocks it identically for
+DWARF as for the two header-AST backends (DWARF's own DIE walk assigns no
+ordinals at all in this slice, so it inherits the identical gap rather
+than closing it), and changing what `report_canonical_finding_id` hashes
+for any already-shipped finding shape would silently invalidate a user's
+existing stored `finding_id:` suppression rules — a backward-compatibility
+call this phase's own discipline treats as needing explicit maintainer
+sign-off, the same bar `IMPORT_CYCLE_ALLOWLIST` extensions are held to,
+and deliberately not made unilaterally here.
+
+What did land, as a genuinely new (not a third attempt at either
+previously-reverted) design: `model/identity_stability.py`'s
+`entity_id_is_cross_snapshot_stable(entity_id)` — a gating predicate, not
+a stabilizer. It makes no claim about the `Anonymous`/`LocalToFunction`
+ordinal instability at all; it only lets a caller ask "does this
+`EntityId` avoid the unstable construct in the first place" and refuse to
+treat a match as authoritative when it doesn't (`False` whenever any
+`scope` segment is `Anonymous`/`LocalToFunction`, or `extra` is the
+anonymous-self marker). Split into its own leaf module purely to stay
+under `identity.py`'s 800-line production cap — see that module's own
+docstring for the full design writeup, and
+`tests/test_identity_stability.py` for the Hypothesis-driven
+primitive-level property tests (AGENTS.md's own doctrine for a new
+reusable predicate) stating its contract: true for every all-stable
+scope regardless of shape/position, false for any single unstable
+segment regardless of where it sits in the chain, false for the
+anonymous-self `extra` marker independent of `scope`, and a pure
+function of its input. This predicate is real, tested, safe-to-use
+infrastructure — but it is deliberately **not** wired into
+`diff_filtering.py`'s `_deduplicate_cross_detector` (or anywhere else)
+this slice: that file carries the identical "extensive, multiply-
+reviewed fragility" this section's item (1) paragraph already declined
+to touch for the same reason, and a promotion consumer belongs behind
+the same adversarial review rigor that code's prior fixes received, not
+bundled into the slice that first makes the primitive available. A
+`True` result from this predicate is a necessary, not sufficient,
+precondition for any future promotion — see the module's own docstring
+for what a real consumer still has to establish beyond it.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

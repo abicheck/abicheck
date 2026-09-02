@@ -1860,9 +1860,8 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
                 # binding-scoped suppression rule must see this too, or it
                 # can never match here even though f_old already carries the
                 # captured binding.
-                symbol_binding=(
-                    f_old.elf_binding.value if f_old.elf_binding else None
-                ),
+                symbol_binding=(f_old.elf_binding.value if f_old.elf_binding else None),
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
 

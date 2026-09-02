@@ -31,7 +31,11 @@ from typing import TYPE_CHECKING
 
 from .dumper_elf_symbols import _populate_elf_visibility
 from .dumper_toolchain import _safe_mtime, _safe_size
-from .model import AbiSnapshot, Function, RecordType, Variable, Visibility
+from .extract.export_symbol_identity import (
+    itanium_export_function as _elf_export_function,
+    itanium_export_variable as _elf_export_variable,
+)
+from .model import AbiSnapshot, RecordType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -157,24 +161,11 @@ def _build_symbol_only_snapshot(
         source_mtime=_so_mtime,
         source_mtime_epoch=_so_mtime_epoch,
         source_size=_safe_size(so_path),
-        functions=[
-            Function(
-                name=sym,
-                mangled=sym,
-                return_type="?",
-                visibility=Visibility.ELF_ONLY,
-                # Absence of Itanium _Z prefix is strong evidence of C linkage
-                is_extern_c=not sym.startswith("_Z"),
-            )
-            for sym in sorted(exported_dynamic_funcs)
-        ],
+        # ADR-063 Phase 2 -- see extract.export_symbol_identity's own module
+        # docstring for entity_id's mangled-vs-extern_c gate.
+        functions=[_elf_export_function(sym) for sym in sorted(exported_dynamic_funcs)],
         variables=[
-            Variable(
-                name=sym,
-                mangled=sym,
-                type="?",
-                visibility=Visibility.ELF_ONLY,
-            )
+            _elf_export_variable(sym)
             for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
         ],
         # Preserve DWARF-derived types (with bases / vtable) when the

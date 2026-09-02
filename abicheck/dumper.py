@@ -157,14 +157,13 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
-from .extract.header_ast_fields import parse_header_ast_fields
-from .model import (
-    AbiSnapshot,
-    Function,
-    RecordType,
-    Variable,
-    Visibility,
+from .extract.export_symbol_identity import (
+    itanium_export_function as _itanium_export_function,
+    itanium_export_variable as _itanium_export_variable,
+    msvc_export_function as _msvc_export_function,
 )
+from .extract.header_ast_fields import parse_header_ast_fields
+from .model import AbiSnapshot, RecordType
 
 log = logging.getLogger(__name__)
 
@@ -1711,12 +1710,12 @@ def _dump_macho(
             "type information will be missing."
         )
 
-        # Normalize Mach-O leading underscore: _foo → foo, __Z... → _Z...
-        def _normalize_macho_sym(s: str) -> str:
-            if s.startswith("_"):
-                return s[1:]
-            return s
-
+        # `macho_meta.exports` entries are already normalized -- see the
+        # "already normalized" comment a few lines below, at the
+        # `exported_dynamic` build above, for the full account of why a
+        # second leading-underscore strip here corrupts every Itanium-
+        # mangled C++ export (this branch had the identical double-strip
+        # bug the with-headers path below used to have).
         # Split exports into functions (__TEXT) and variables (__DATA)
         # using section classification from Mach-O nlist entries.
         _relevant = [
@@ -1728,6 +1727,7 @@ def _dump_macho(
         macho_vars = [exp for exp in _relevant if exp.is_data]
 
         _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
+        # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
         return AbiSnapshot(
             library=dylib_path.name,
             version=version,
@@ -1736,25 +1736,11 @@ def _dump_macho(
             source_mtime_epoch=_dylib_mtime_epoch,
             source_size=_safe_size(dylib_path),
             functions=[
-                Function(
-                    name=_normalize_macho_sym(exp.name),
-                    mangled=_normalize_macho_sym(exp.name),
-                    return_type="?",
-                    # ELF_ONLY: marks symbols as export-table-only (no header
-                    # confirmation). This lets the checker distinguish
-                    # binary-only removals as FUNC_REMOVED_ELF_ONLY.
-                    visibility=Visibility.ELF_ONLY,
-                    is_extern_c=not _normalize_macho_sym(exp.name).startswith("_Z"),
-                )
+                _itanium_export_function(exp.name)
                 for exp in sorted(macho_funcs, key=lambda e: e.name)
             ],
             variables=[
-                Variable(
-                    name=_normalize_macho_sym(exp.name),
-                    mangled=_normalize_macho_sym(exp.name),
-                    type="?",
-                    visibility=Visibility.ELF_ONLY,
-                )
+                _itanium_export_variable(exp.name)
                 for exp in sorted(macho_vars, key=lambda e: e.name)
             ],
             macho=macho_meta,
@@ -1879,6 +1865,11 @@ def _dump_pe(
             "type information will be missing."
         )
         _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
+        # 32-bit x86 is the only PE machine type with __stdcall/__fastcall/
+        # __cdecl export decoration -- see export_symbol_identity.py's own
+        # comment for why every other machine type must NOT strip a
+        # leading underscore.
+        _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
         return AbiSnapshot(
             library=dll_path.name,
             version=version,
@@ -1886,14 +1877,9 @@ def _dump_pe(
             source_mtime=_dll_mtime,
             source_mtime_epoch=_dll_mtime_epoch,
             source_size=_safe_size(dll_path),
+            # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
             functions=[
-                Function(
-                    name=sym,
-                    mangled=sym,
-                    return_type="?",
-                    visibility=Visibility.ELF_ONLY,
-                    is_extern_c=not sym.startswith("?"),
-                )
+                _msvc_export_function(sym, is_x86_32=_is_x86_32)
                 for sym in sorted(exported_dynamic)
             ],
             pe=pe_meta,

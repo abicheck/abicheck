@@ -673,12 +673,12 @@
     },
     {
       "path": "abicheck/diff_platform_elf_symbols.py",
-      "baseline_lines": 836,
+      "baseline_lines": 852,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline bumped 836->852 (2026-09-02, ADR-063 Phase 2): wired Change.entity_id into the two exported-object size/alignment findings via one shared _matched_var_entity_id helper.",
       "review_by": "2026-11-30"
     },
     {

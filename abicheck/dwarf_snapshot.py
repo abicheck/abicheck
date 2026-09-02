@@ -14,16 +14,15 @@
 
 """DwarfSnapshotBuilder — build a complete AbiSnapshot from DWARF alone.
 
-ADR-003: When no headers are provided but DWARF debug info is present,
+ADR-003: when no headers are provided but DWARF debug info is present,
 this module builds a full AbiSnapshot from DWARF .debug_info, enabling
-type-aware artifact checks that are unavailable in symbol-only mode.
+type-aware artifact checks unavailable in symbol-only mode.
 
 DWARF provides: function signatures, struct/class layouts, enum definitions,
-variables, typedefs, inheritance, vtable entries, templates.
-DWARF does NOT provide: #define constants, default parameter values.
-
-Visibility filtering: only types/functions reachable from ELF exported
-symbols are included (DWARF × ELF intersection).
+variables, typedefs, inheritance, vtable entries, templates. It does NOT
+provide #define constants or default parameter values. Visibility
+filtering: only types/functions reachable from ELF exported symbols are
+included (DWARF × ELF intersection).
 """
 
 from __future__ import annotations
@@ -50,6 +49,18 @@ from .dwarf_utils import (
     resolve_type_die as _resolve_type_die,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
+from .extract.dwarf_records import (
+    access_from_dwarf as _access_from_dwarf,
+    default_member_access_for_tag as _default_member_access_for_tag,
+    local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
+    record_kind_from_tag as _record_kind_from_tag,
+)
+from .extract.dwarf_scope import (
+    function_entity_id as _dwarf_function_entity_id,
+    namespace_scope_segment as _namespace_scope_segment,
+    record_scope_segment as _record_scope_segment,
+    variable_entity_id as _dwarf_variable_entity_id,
+)
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -67,6 +78,13 @@ from .model import (
     is_cxx_runtime_library,
     record_layout_facts,
     resolve_vptr_offset_bits,
+)
+from .model.identity import (
+    EntityId,
+    ScopePath,
+    entity_id_for_enum,
+    entity_id_for_type,
+    entity_id_for_typedef,
 )
 from .model.mangled_name import itanium_scope_components
 
@@ -125,6 +143,7 @@ def build_snapshot_from_dwarf(
         types=builder.types,
         enums=builder.enums,
         typedefs=builder.typedefs,
+        typedef_entity_ids=builder.typedef_entity_ids,
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
@@ -140,66 +159,19 @@ def build_snapshot_from_dwarf(
 # ---------------------------------------------------------------------------
 
 
-def _record_kind_from_tag(tag: str) -> str:
-    """Return the ABI kind string for a record-type DWARF tag.
-
-    Maps ``DW_TAG_union_type`` → ``"union"``, ``DW_TAG_class_type`` →
-    ``"class"``, and everything else (``DW_TAG_structure_type``) → ``"struct"``.
-    """
-    if tag == "DW_TAG_union_type":
-        return "union"
-    if tag == "DW_TAG_class_type":
-        return "class"
-    return "struct"
-
-
-def _default_member_access_for_tag(tag: str) -> AccessLevel:
-    """C++'s default member access for a record-type DWARF tag.
-
-    A compiler only emits ``DW_AT_accessibility`` on a member when it
-    *differs* from the enclosing record's language default — ``class``
-    defaults to private, ``struct``/``union`` to public (matching the C++
-    access-specifier rules) — so an absent attribute must resolve to this,
-    not unconditionally to public (Codex review: a `class`'s first,
-    unlabelled member, or an anonymous aggregate declared before any access
-    label, both carry no ``DW_AT_accessibility`` at all and were previously
-    misread as public).
-    """
-    return AccessLevel.PRIVATE if tag == "DW_TAG_class_type" else AccessLevel.PUBLIC
-
-
-def _local_vptr_member_offset_bits(child: Any) -> int | None:
-    """Bit offset of *child* if it is the compiler's artificial vptr member.
-
-    GCC names it ``_vptr.<Class>``, Clang ``_vptr$<Class>`` — both emit it as
-    an ``DW_TAG_member`` with ``DW_AT_artificial: true`` and a real
-    ``DW_AT_data_member_location`` (verified against real GCC 13/Clang 18
-    ``-g`` output). Returns ``None`` for any other member, including a
-    non-artificial member and an artificial member that isn't the vptr (e.g.
-    a compiler-synthesized default argument holder) — the ``_vptr`` name
-    prefix is the identifying signal, not artificiality alone.
-    """
-    if child.tag != "DW_TAG_member" or not _attr_bool(child, "DW_AT_artificial"):
-        return None
-    member_name = _attr_str(child, "DW_AT_name") or ""
-    if not member_name.startswith("_vptr"):
-        return None
-    loc = child.attributes.get("DW_AT_data_member_location")
-    return _decode_member_location(loc.value if loc is not None else None) * 8
-
-
 # DIE tags whose children can hold ABI-relevant *top-level* declarations the
 # main traversal dispatches on (nested types, member functions, namespace/CU
-# members). Only these are descended into: every other tag — variables,
-# typedefs, enums (their enumerators are consumed in place), members, base/
-# pointer/qualifier type-chain DIEs, parameters — has no such descendant, so
-# pushing its children onto the work stack is pure overhead. Restricting the
-# descent this way, plus reusing one materialized child list per container for
-# both field-collection and descent, makes the walk single-pass over the DIE
-# tree (previously records' children were iterated twice — once to build fields,
-# once by the generic descent — and every leaf DIE's empty child list was still
-# materialized). ``iter_children()`` is the dominant DWARF-parse cost, so halving
-# the calls is the primary saving.
+# members). Only these are descended into — every other tag has no such
+# descendant, so pushing its children is pure overhead. Reusing one
+# materialized child list per container for both field-collection and
+# descent makes the walk single-pass over the DIE tree instead of iterating
+# records' children twice; ``iter_children()`` is the dominant DWARF-parse
+# cost, so halving the calls is the primary saving.
+#: struct/class/union DIE tags, shared by every "is this a record?" branch.
+_RECORD_TYPE_TAGS: frozenset[str] = frozenset(
+    {"DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"}
+)
+
 _DESCEND_TAGS: frozenset[str] = frozenset(
     {
         # Compilation-unit roots (top DIE) — their children are the CU's decls.
@@ -208,9 +180,7 @@ _DESCEND_TAGS: frozenset[str] = frozenset(
         "DW_TAG_type_unit",
         # Namespaces and records nest further ABI-relevant declarations.
         "DW_TAG_namespace",
-        "DW_TAG_structure_type",
-        "DW_TAG_class_type",
-        "DW_TAG_union_type",
+        *_RECORD_TYPE_TAGS,
     }
 )
 
@@ -267,6 +237,10 @@ class _DwarfSnapshotBuilder:
         self.types: list[RecordType] = []
         self.enums: list[EnumType] = []
         self.typedefs: dict[str, str] = {}
+        # ADR-063 Phase 2 -- see AbiSnapshot.typedef_entity_ids. No DWARF
+        # counterpart to constant_entity_ids: constexpr constants are a
+        # header-AST-only concept DWARF doesn't carry.
+        self.typedef_entity_ids: dict[str, EntityId] = {}
 
         # Type resolution cache: (cu_offset, die_offset) -> (name, byte_size)
         self._type_cache: dict[tuple[int, int], tuple[str, int]] = {}
@@ -424,10 +398,12 @@ class _DwarfSnapshotBuilder:
     def _process_cu(self, CU: Any) -> None:
         """Walk all DIEs in one Compilation Unit."""
         top_die = CU.get_top_DIE()
-        stack: collections.deque[tuple[Any, str]] = collections.deque([(top_die, "")])
+        stack: collections.deque[tuple[Any, str, ScopePath, AccessLevel]] = (
+            collections.deque([(top_die, "", (), AccessLevel.PUBLIC)])
+        )
 
         while stack:
-            die, scope = stack.pop()
+            die, scope, scope_path, default_access = stack.pop()
             tag = die.tag
 
             # Skip function bodies / inlined frames — we handle
@@ -441,6 +417,13 @@ class _DwarfSnapshotBuilder:
 
             die_name = _attr_str(die, "DW_AT_name")
             next_scope = scope
+            next_scope_path = scope_path
+            # Absent DW_AT_accessibility matches the ENCLOSING default (PR #1015).
+            next_default_access = (
+                _default_member_access_for_tag(tag)
+                if tag in _RECORD_TYPE_TAGS
+                else default_access
+            )
             # Materialize a container's children at most once and reuse the list
             # for both field-collection (records/enums) and the descent push, so
             # ``iter_children()`` (the dominant DWARF-parse cost) runs once per DIE,
@@ -449,28 +432,37 @@ class _DwarfSnapshotBuilder:
 
             if tag == "DW_TAG_namespace" and die_name:
                 next_scope = f"{scope}::{die_name}" if scope else die_name
+                # Anonymous namespace: no segment (dwarf_scope.py docstring).
+                next_scope_path = (
+                    *scope_path,
+                    _namespace_scope_segment(die, die_name),
+                )
             elif tag == "DW_TAG_subprogram":
-                self._process_subprogram(die, CU, scope)
+                self._process_subprogram(die, CU, scope, scope_path, default_access)
                 continue  # don't descend into function body
             elif tag == "DW_TAG_variable":
-                self._process_variable(die, CU, scope)
-            elif tag in (
-                "DW_TAG_structure_type",
-                "DW_TAG_class_type",
-                "DW_TAG_union_type",
-            ):
+                self._process_variable(die, CU, scope, scope_path)
+            elif tag in _RECORD_TYPE_TAGS:
                 qualified = f"{scope}::{die_name}" if (scope and die_name) else die_name
                 children = list(die.iter_children())
-                self._process_record_type(die, CU, scope, children)
+                self._process_record_type(die, CU, scope, scope_path, children)
                 if die_name:
                     next_scope = qualified or scope
+                    access_val = _attr_int(die, "DW_AT_accessibility")
+                    next_scope_path = (
+                        *scope_path,
+                        _record_scope_segment(
+                            die_name,
+                            access=_access_from_dwarf(access_val, default_access).value,
+                        ),
+                    )
             elif tag == "DW_TAG_enumeration_type":
                 # Enumerators are consumed here; the enum itself is not descended
                 # (not in _DESCEND_TAGS), so this list is used exactly once.
                 children = list(die.iter_children())
-                self._process_enum(die, CU, scope, children)
+                self._process_enum(die, CU, scope, scope_path, children)
             elif tag == "DW_TAG_typedef":
-                self._process_typedef(die, CU, scope)
+                self._process_typedef(die, CU, scope, scope_path)
 
             # Only descend into containers that can hold ABI-relevant nested decls
             # (see _DESCEND_TAGS) — pushing leaf DIEs' (usually empty) child lists
@@ -479,13 +471,22 @@ class _DwarfSnapshotBuilder:
                 if children is None:
                     children = list(die.iter_children())
                 for child in reversed(children):
-                    stack.append((child, next_scope))
+                    stack.append(
+                        (child, next_scope, next_scope_path, next_default_access)
+                    )
 
     # -------------------------------------------------------------------
     # Subprogram (function) extraction
     # -------------------------------------------------------------------
 
-    def _process_subprogram(self, die: Any, CU: Any, scope: str) -> None:
+    def _process_subprogram(
+        self,
+        die: Any,
+        CU: Any,
+        scope: str,
+        scope_path: ScopePath = (),
+        default_access: AccessLevel = AccessLevel.PUBLIC,
+    ) -> None:
         """Extract a function from DW_TAG_subprogram."""
         name = _attr_str(die, "DW_AT_name")
         if not name:
@@ -550,6 +551,8 @@ class _DwarfSnapshotBuilder:
                 qualified_name,
                 is_deleted,
                 visibility=visibility,
+                scope_path=scope_path,
+                default_access=default_access,
             )
         )
 
@@ -563,15 +566,16 @@ class _DwarfSnapshotBuilder:
         qualified_name: str,
         is_deleted: bool,
         visibility: Visibility = Visibility.PUBLIC,
+        scope_path: ScopePath = (),
+        default_access: AccessLevel = AccessLevel.PUBLIC,
     ) -> Function:
         """Construct a :class:`Function` from a (already surface-admitted)
-        ``DW_TAG_subprogram`` DIE.
+        ``DW_TAG_subprogram`` DIE. *default_access*: see ``_process_cu``'s
+        identical record-scope-segment default (Codex review, PR #1015).
 
         Pure DWARF→model mapping (N-C): admission/dedup live in
-        ``_process_subprogram``; this only reads DIE attributes and builds the
-        model object, so the DWARF-to-``Function`` translation is testable
-        without the surface-filtering path. It still records referenced type
-        names on the builder so the second extraction pass can reach them.
+        ``_process_subprogram``. Also records referenced type names on the
+        builder so the second extraction pass can reach them.
         """
         # Return type
         ret_type = "void"
@@ -630,7 +634,7 @@ class _DwarfSnapshotBuilder:
 
         # Access level
         access_val = _attr_int(die, "DW_AT_accessibility")
-        access = self._access_from_dwarf(access_val)
+        access = _access_from_dwarf(access_val, default_access)
 
         # Vtable index
         vtable_index: int | None = None
@@ -653,6 +657,15 @@ class _DwarfSnapshotBuilder:
             is_deleted=is_deleted,
             deleted_from_dwarf=is_deleted,
             is_explicit=is_explicit,
+            # ADR-063 Phase 2 -- see dwarf_scope.function_entity_id.
+            entity_id=_dwarf_function_entity_id(
+                scope_path,
+                name,
+                die,
+                mangled,
+                is_extern_c,
+                tuple(p.type for p in params),
+            ),
             is_explicit_fact=(
                 Fact.present(is_explicit)
                 if _is_explicit_eligible
@@ -702,7 +715,9 @@ class _DwarfSnapshotBuilder:
     # Variable extraction
     # -------------------------------------------------------------------
 
-    def _process_variable(self, die: Any, CU: Any, scope: str) -> None:
+    def _process_variable(
+        self, die: Any, CU: Any, scope: str, scope_path: ScopePath = ()
+    ) -> None:
         """Extract a variable from DW_TAG_variable."""
         # Only externally visible variables
         if not _attr_bool(die, "DW_AT_external"):
@@ -743,6 +758,10 @@ class _DwarfSnapshotBuilder:
                 type=type_name,
                 visibility=Visibility.PUBLIC,
                 is_const=is_const,
+                # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
+                entity_id=_dwarf_variable_entity_id(
+                    scope_path, name, mangled, bool(linkage_name)
+                ),
             )
         )
 
@@ -751,7 +770,12 @@ class _DwarfSnapshotBuilder:
     # -------------------------------------------------------------------
 
     def _process_record_type(
-        self, die: Any, CU: Any, scope: str, children: list[Any] | None = None
+        self,
+        die: Any,
+        CU: Any,
+        scope: str,
+        scope_path: ScopePath = (),
+        children: list[Any] | None = None,
     ) -> None:
         """Extract a struct/class/union from DWARF.
 
@@ -765,16 +789,28 @@ class _DwarfSnapshotBuilder:
             return
 
         qualified = f"{scope}::{name}" if scope else name
-        self._process_record_type_named(die, CU, qualified, children)
+        self._process_record_type_named(die, CU, qualified, scope_path, name, children)
 
     def _process_record_type_named(
-        self, die: Any, CU: Any, qualified: str, children: list[Any] | None = None
+        self,
+        die: Any,
+        CU: Any,
+        qualified: str,
+        scope_path: ScopePath = (),
+        leaf_name: str = "",
+        children: list[Any] | None = None,
     ) -> None:
         """Extract a struct/class/union using a given qualified name.
 
         *children* is the pre-materialized child DIE list from the main traversal
         (reused to avoid a second ``iter_children()``); ``None`` on the anonymous-
         typedef path, where the target DIE's children are iterated on demand.
+
+        *scope_path*/*leaf_name* are this declaration's ``EntityId``
+        components (ADR-063 Phase 2): *scope_path* excludes this record's
+        own segment; *leaf_name* is its bare name -- on the anonymous-
+        typedef path (``typedef struct { ... } Point;``) the TYPEDEF's own
+        bare name, the same borrowing *qualified* already does.
         """
         byte_size = _attr_int(die, "DW_AT_byte_size")
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
@@ -835,6 +871,7 @@ class _DwarfSnapshotBuilder:
         rec = RecordType(
             name=qualified,
             kind=kind,
+            entity_id=entity_id_for_type(scope_path, leaf_name),
             size_bits=byte_size * 8 if byte_size > 0 else None,
             alignment_bits=alignment * 8 if alignment > 0 else None,
             fields=fields,
@@ -1395,7 +1432,7 @@ class _DwarfSnapshotBuilder:
 
         # Access level
         access_val = _attr_int(die, "DW_AT_accessibility")
-        access = self._access_from_dwarf(access_val, default_access)
+        access = _access_from_dwarf(access_val, default_access)
 
         # Const / volatile
         is_const = False
@@ -1487,7 +1524,7 @@ class _DwarfSnapshotBuilder:
                 )
                 * 8
             )
-        outer_access = self._access_from_dwarf(
+        outer_access = _access_from_dwarf(
             _attr_int(die, "DW_AT_accessibility"), default_access
         )
         flattened: list[TypeField] = []
@@ -1557,7 +1594,12 @@ class _DwarfSnapshotBuilder:
     # -------------------------------------------------------------------
 
     def _process_enum(
-        self, die: Any, CU: Any, scope: str, children: list[Any] | None = None
+        self,
+        die: Any,
+        CU: Any,
+        scope: str,
+        scope_path: ScopePath = (),
+        children: list[Any] | None = None,
     ) -> None:
         """Extract an enum from DWARF.
 
@@ -1571,15 +1613,23 @@ class _DwarfSnapshotBuilder:
             return
 
         qualified = f"{scope}::{name}" if scope else name
-        self._process_enum_named(die, CU, qualified, children)
+        self._process_enum_named(die, CU, qualified, scope_path, name, children)
 
     def _process_enum_named(
-        self, die: Any, CU: Any, qualified: str, children: list[Any] | None = None
+        self,
+        die: Any,
+        CU: Any,
+        qualified: str,
+        scope_path: ScopePath = (),
+        leaf_name: str = "",
+        children: list[Any] | None = None,
     ) -> None:
         """Extract an enum using a given qualified name.
 
         *children* is the pre-materialized child DIE list (reused when supplied);
         ``None`` on the anonymous-typedef path, which iterates on demand.
+        *scope_path*/*leaf_name* mirror ``_process_record_type_named``'s own
+        ``EntityId`` components -- see that method's docstring.
         """
         if qualified in self._seen_enum_names:
             if qualified not in self._logged_enum_dups:
@@ -1612,6 +1662,7 @@ class _DwarfSnapshotBuilder:
                 members=members,
                 underlying_type=underlying,
                 source_location=self._resolve_decl_file(die, CU),
+                entity_id=entity_id_for_enum(scope_path, leaf_name),
             )
         )
 
@@ -1619,7 +1670,9 @@ class _DwarfSnapshotBuilder:
     # Typedef extraction
     # -------------------------------------------------------------------
 
-    def _process_typedef(self, die: Any, CU: Any, scope: str = "") -> None:
+    def _process_typedef(
+        self, die: Any, CU: Any, scope: str = "", scope_path: ScopePath = ()
+    ) -> None:
         """Extract a typedef from DWARF.
 
         Also registers anonymous structs/enums under the typedef name
@@ -1644,22 +1697,26 @@ class _DwarfSnapshotBuilder:
                 target_name = _attr_str(target, "DW_AT_name")
                 target_tag = target.tag
 
-                if target_tag in (
-                    "DW_TAG_structure_type",
-                    "DW_TAG_class_type",
-                    "DW_TAG_union_type",
-                ):
+                if target_tag in _RECORD_TYPE_TAGS:
                     if not target_name and qualified not in self._seen_type_names:
                         # Anonymous struct/union — register under the qualified
                         # typedef name so same-named typedefs in different
                         # namespaces don't collide on the bare alias.
-                        self._process_record_type_named(target, CU, qualified)
+                        self._process_record_type_named(
+                            target, CU, qualified, scope_path, name
+                        )
                 elif target_tag == "DW_TAG_enumeration_type":
                     if not target_name and qualified not in self._seen_enum_names:
                         # Anonymous enum — register under the qualified typedef name
-                        self._process_enum_named(target, CU, qualified)
+                        self._process_enum_named(
+                            target, CU, qualified, scope_path, name
+                        )
             except Exception:  # noqa: BLE001
                 log.debug("Failed to process typedef target for %s", qualified)
+
+        # ADR-063 Phase 2. EntityId sidecar keyed like self.typedefs (mirrors
+        # dumper_castxml.py's/dumper_clang.py's parse_typedef_entity_ids).
+        self.typedef_entity_ids[qualified] = entity_id_for_typedef(scope_path, name)
 
         if qualified in self.typedefs:
             return  # first wins
@@ -1809,7 +1866,7 @@ class _DwarfSnapshotBuilder:
                 _attr_int(die, "DW_AT_byte_size"),
             )
 
-        if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+        if tag in _RECORD_TYPE_TAGS:
             name = _attr_str(die, "DW_AT_name") or "<anon>"
             return (name, _attr_int(die, "DW_AT_byte_size"))
 
@@ -1902,26 +1959,6 @@ class _DwarfSnapshotBuilder:
         ):
             return self._count_pointer_depth(type_die, CU, depth + 1)
         return 0
-
-    @staticmethod
-    def _access_from_dwarf(
-        val: int, default: AccessLevel = AccessLevel.PUBLIC
-    ) -> AccessLevel:
-        """Map DW_AT_accessibility value to AccessLevel.
-
-        *default* is returned for an absent attribute (``val == 0``) — the
-        caller passes the enclosing record's actual language default
-        (private for ``class``, public for ``struct``/``union``) where that
-        distinction matters (record fields); other call sites keep the
-        historical unconditional-public default.
-        """
-        if val == 2:  # DW_ACCESS_protected
-            return AccessLevel.PROTECTED
-        if val == 3:  # DW_ACCESS_private
-            return AccessLevel.PRIVATE
-        if val == 1:  # DW_ACCESS_public
-            return AccessLevel.PUBLIC
-        return default  # 0 (absent)
 
 
 # ---------------------------------------------------------------------------
