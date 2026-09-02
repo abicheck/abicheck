@@ -29,7 +29,7 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 
 from __future__ import annotations
 
-import html
+import dataclasses
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -38,29 +38,27 @@ from .checker_policy import HasKind, impact_for
 from .demangle import prewarm_demangle_batch
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
-# lives in one shared seam (``html_template``). ``_VERDICT_STYLE`` /
-# ``render_document`` / ``render_footer`` are used below; ``_CSS`` is re-exported
-# via redundant alias (it was previously defined in this module) so any code that
-# imported it from here keeps working.
-from .html_template import (
-    _CSS as _CSS,
-    _VERDICT_STYLE,
-    render_document,
-    render_footer,
-)
+# lives in one shared seam (``html_template``). ``_CSS`` is re-exported via
+# redundant alias (it was previously defined in this module) so any code that
+# imported it from here keeps working. ``generate_html_report`` itself no
+# longer touches ``_VERDICT_STYLE``/``render_document``/``render_footer``
+# directly -- those moved into ``report/render_html.py`` alongside the rest
+# of this module's formatting responsibility (ADR-061 Phase 2 item 1).
+from .html_template import _CSS as _CSS
 from .policy.gate_decision import gate_decision_for_result
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
-# Every ``compute_*`` below returns one of these frozen structs; the
-# matching ``render_*`` turns it into markup and makes no decision of its
-# own. The five formatters re-exported under their original private names
-# physically live there now (see ``render_html``'s own docstring for why
-# moving them, rather than leaving them here, is what avoids a same-layer
-# import cycle) -- every existing caller and its direct test coverage
-# resolves through these aliases unchanged.
+# Every ``compute_*`` below returns one of these frozen structs (or, for the
+# whole document, a plain JSON-shaped mapping); the matching ``render_*``
+# turns it into markup and makes no decision of its own. The low-level
+# formatters re-exported under their original private names physically live
+# there now (see ``render_html``'s own docstring for why moving them, rather
+# than leaving them here, is what avoids a same-layer import cycle) -- every
+# existing caller and its direct test coverage resolves through these
+# aliases unchanged.
+from .report.document import ReportDocument
 from .report.render_html import (
-    ChangeRowFacts,
-    ChangeRowFactsById,
+    ChangeRow,
     ConfidenceData,
     FileMetadataTable,
     GateCardData,
@@ -75,17 +73,8 @@ from .report.render_html import (
     abbr_symbol_text,
     render_changes_table,
     render_compat_changes_table,
-    render_confidence,
-    render_file_metadata,
-    render_gate_card,
-    render_impact,
-    render_nav_bar,
-    render_not_evaluated_section,
-    render_scoped_verdict,
-    render_summary_table,
-    symbol_cell,
-    verdict_icon,
 )
+from .report.render_html_document import render_html_document
 from .report_classifications import (
     ADDED_KINDS,
     BREAKING_KINDS,
@@ -103,54 +92,82 @@ if TYPE_CHECKING:
     from .checker import DiffResult
     from .severity import SeverityConfig
 
-# The five formatters this module used to define itself, kept under their
-# original private names so every existing caller resolves unchanged --
-# `appcompat_html.py` imports `_abbr_symbol_text`/`_changes_table` from
-# here, and `tests/test_html_report_demangle.py` exercises them by these
-# spellings. Plain assignments rather than renaming imports, so both ruff
-# and mypy read them as deliberate re-exports rather than unused imports.
+# Kept under its original private name so every existing caller resolves
+# unchanged -- `appcompat_html.py` imports `_abbr_symbol_text`/
+# `_changes_table` from here, and `tests/test_html_report_demangle.py`
+# exercises it by this spelling. A plain assignment rather than a renaming
+# import, so both ruff and mypy read it as a deliberate re-export rather
+# than an unused import.
 _abbr_symbol_text = abbr_symbol_text
-_symbol_cell = symbol_cell
-_verdict_icon = verdict_icon
 
 
-def compute_change_rows(changes: Iterable[object]) -> ChangeRowFactsById:
-    """Resolve the per-change *decisions* a table cell needs -- kind string,
-    category, impact text, ABICC severity band -- one entry per change.
+def compute_full_change_rows(changes: Iterable[object]) -> tuple[ChangeRow, ...]:
+    """Resolve every fact a changes-table row needs for one change: the four
+    registry-lookup decisions (kind string, category, impact text, ABICC
+    severity band) plus every raw display field `render_changes_table`/
+    `render_compat_changes_table` read directly off a live `Change` before
+    ADR-061 Phase 2 item 1 closed for HTML.
 
-    Every one is a registry lookup rather than a formatting choice, so it
-    belongs on this side of the split; hoisting them here is what lets
-    `report/render_html.py` import no report- or policy-classification
-    module at all (Codex review on the split's own PR). Keyed by
-    `id(change)` because `Change` is not hashable, the same shape
-    `report.finding.findings_by_change_id` uses, and equally never persisted
-    past the render that built it.
+    Building this once per render, rather than reading `Change` attributes
+    mid-render, is what lets those two functions -- and the whole-document
+    `render_html_document` -- become pure `ReportDocument` projections: a
+    `ChangeRow` is an ordinary, JSON-round-trippable value, so this replaces
+    the previous `id(change)`-keyed `ChangeRowFactsById` lookup table (needed
+    only because `Change` is not hashable) with a plain ordered tuple.
     """
-    facts: ChangeRowFactsById = {}
+    rows = []
     for ch in changes:
         ks = kind_str(ch)
         kind = getattr(ch, "kind", None)
-        facts[id(ch)] = ChangeRowFacts(
-            kind=ks,
-            category=category(ks),
-            impact=(impact_for(kind) or "") if kind else "",
-            severity=severity(ks),
+        relevance = getattr(ch, "contract_relevance", None)
+        assurance = getattr(ch, "contract_assurance", None)
+        decision = getattr(ch, "compatibility_decision", None)
+        rows.append(
+            ChangeRow(
+                kind=ks,
+                category=category(ks),
+                impact=(impact_for(kind) or "") if kind else "",
+                severity=severity(ks),
+                symbol=getattr(ch, "symbol", "") or "",
+                description=getattr(ch, "description", "") or "",
+                old_value=str(getattr(ch, "old_value", "") or ""),
+                new_value=str(getattr(ch, "new_value", "") or ""),
+                source_location=getattr(ch, "source_location", None) or None,
+                affected_symbols=tuple(getattr(ch, "affected_symbols", None) or ()),
+                caused_count=getattr(ch, "caused_count", 0) or 0,
+                contract_relevance=(
+                    str(relevance.value) if relevance is not None else None
+                ),
+                contract_reason_code=(
+                    getattr(ch, "contract_reason_code", None) or None
+                ),
+                contract_assurance=(
+                    str(assurance.value) if assurance is not None else None
+                ),
+                compatibility_decision=(
+                    str(decision.value) if decision is not None else None
+                ),
+                contract_evidence_refs=tuple(
+                    getattr(ch, "contract_evidence_refs", None) or ()
+                ),
+                correlated_change_kind=(
+                    getattr(ch, "correlated_change_kind", None) or None
+                ),
+            )
         )
-    return facts
+    return tuple(rows)
 
 
 def _changes_table(changes: list[object], demangle: bool = True) -> str:
     """Native changes table. Kept at its original signature -- `appcompat_html.py`
     imports it, and it has its own direct test coverage -- so the per-change
     fact resolution happens here rather than being pushed onto every caller."""
-    return render_changes_table(changes, compute_change_rows(changes), demangle)
+    return render_changes_table(compute_full_change_rows(changes), demangle)
 
 
 def _compat_changes_table(items: list[object], show_severity: bool = False) -> str:
     """ABICC-style changes table, same arrangement as `_changes_table` above."""
-    return render_compat_changes_table(
-        items, compute_change_rows(items), show_severity
-    )
+    return render_compat_changes_table(compute_full_change_rows(items), show_severity)
 
 
 def _change_bucket(
@@ -217,11 +234,6 @@ def compute_file_metadata(result: object) -> FileMetadataTable | None:
     )
 
 
-def _file_metadata_html(result: object) -> str:
-    """Render library file metadata (path, SHA-256, size) as an HTML table."""
-    return render_file_metadata(compute_file_metadata(result))
-
-
 def compute_summary_table(
     removed: list[object],
     changed: list[object],
@@ -269,18 +281,6 @@ def compute_summary_table(
     )
 
 
-def _summary_table(
-    removed: list[object],
-    changed: list[object],
-    added: list[object],
-    suppressed_count: int,
-) -> str:
-    """Build category-level summary table (mirrors ABICC's overview section)."""
-    return render_summary_table(
-        compute_summary_table(removed, changed, added, suppressed_count)
-    )
-
-
 def compute_nav_bar(
     removed: list[object],
     changed: list[object],
@@ -293,228 +293,6 @@ def compute_nav_bar(
         added=len(added),
         suppressed_count=suppressed_count,
     )
-
-
-def _nav_bar(
-    removed: list[object],
-    changed: list[object],
-    added: list[object],
-    suppressed_count: int,
-) -> str:
-    return render_nav_bar(compute_nav_bar(removed, changed, added, suppressed_count))
-
-
-# ---------------------------------------------------------------------------
-# ABICC-compatible HTML (compat_html mode)
-# ---------------------------------------------------------------------------
-
-_COMPAT_CSS = """\
-body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333; }
-h1 { font-size: 1.6em; }
-h2 { font-size: 1.2em; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 24px; }
-table.summary { border-collapse: collapse; margin: 8px 0; }
-table.summary td, table.summary th { padding: 4px 12px; border: 1px solid #ddd; }
-table.summary th { background: #f5f5f5; text-align: left; }
-td.compatible { color: #1b5e20; font-weight: bold; }
-td.incompatible { color: #b71c1c; font-weight: bold; }
-td.warning { color: #e65100; font-weight: bold; }
-table.problem { border-collapse: collapse; width: 100%; margin: 8px 0; }
-table.problem td, table.problem th { padding: 4px 8px; border: 1px solid #ddd; vertical-align: top; }
-table.problem th { background: #f5f5f5; text-align: left; }
-.sym { font-family: monospace; font-size: 0.9em; }
-"""
-
-
-def _generate_compat_html(
-    result: object,
-    changes: list[object],
-    removed: list[object],
-    changed: list[object],
-    added: list[object],
-    suppressed: list[object],
-    suppressed_count: int,
-    bc_pct: float,
-    affected_pct: float,
-    breaking_count: int,
-    verdict: str,
-    lib_display: str,
-    old_display: str,
-    new_display: str,
-    old_symbol_count: int | None,
-    title: str | None,
-    report_kind: str = "binary",
-) -> str:
-    """Generate ABICC-compatible HTML with matching element IDs and structure.
-
-    Produces HTML with the same DOM IDs and section structure that ABICC
-    report parsers expect: #Title, #Summary, #Added, #Removed,
-    #TypeProblems_High, etc.
-
-    Also embeds the META_DATA comment that ABICC includes for machine parsing.
-
-    Args:
-        report_kind: "binary" or "source" — controls title, META_DATA kind, and
-            section ID prefixes to match ABICC's per-kind report structure.
-    """
-    h = html.escape
-
-    # Classify type vs symbol vs other (ELF-layer: soname_/symbol_/needed_/
-    # rpath_, …) problems by severity.
-    type_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
-    symbol_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
-    other_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
-    for ch in changed:
-        ks = kind_str(ch)
-        sev = severity(ks)
-        if is_type_problem(ks):
-            type_problems[sev].append(ch)
-        elif is_symbol_problem(ks):
-            symbol_problems[sev].append(ch)
-        else:
-            other_problems[sev].append(ch)
-
-    # Counts for META_DATA
-    tp_high = len(type_problems["High"])
-    tp_med = len(type_problems["Medium"])
-    tp_low = len(type_problems["Low"])
-    sp_high = len(symbol_problems["High"])
-    sp_med = len(symbol_problems["Medium"])
-    sp_low = len(symbol_problems["Low"])
-
-    compat_verdict = (
-        "incompatible" if verdict in ("BREAKING", "API_BREAK") else "compatible"
-    )
-    bc_css = (
-        "incompatible" if bc_pct < 90 else ("warning" if bc_pct < 100 else "compatible")
-    )
-    affected_pct_label = f"{affected_pct:.1f}" if old_symbol_count else "0"
-
-    kind_label = report_kind.capitalize()  # "Binary" or "Source"
-
-    # META_DATA comment (semicolon-delimited, matches ABICC format)
-    meta_data = (
-        f"verdict:{compat_verdict};kind:{report_kind};"
-        f"affected:{affected_pct_label};"
-        f"added:{len(added)};removed:{len(removed)};"
-        f"type_problems_high:{tp_high};"
-        f"type_problems_medium:{tp_med};"
-        f"type_problems_low:{tp_low};"
-        f"interface_problems_high:{sp_high};"
-        f"interface_problems_medium:{sp_med};"
-        f"interface_problems_low:{sp_low};"
-        f"changed_constants:0;"
-        f"tool_version:abicheck"
-    )
-
-    # Build title matching ABICC convention
-    abicc_title = (
-        h(title)
-        if title
-        else f"{kind_label} compatibility report for the <b>{lib_display}</b> "
-        f"library between <b>{old_display}</b> and <b>{new_display}</b> versions"
-    )
-
-    # Build sections
-    sections_html = []
-
-    # Problem Summary
-    sections_html.append(f"""
-<div id='Summary'>
-<h2>Test Info</h2>
-<table class='summary'>
-<tr><th>Library Name</th><td>{lib_display}</td></tr>
-<tr><th>Version #1</th><td>{old_display}</td></tr>
-<tr><th>Version #2</th><td>{new_display}</td></tr>
-</table>
-{_file_metadata_html(result)}
-
-<h2>Test Results</h2>
-<table class='summary'>
-<tr><th>Total Symbols</th><td>{old_symbol_count or "N/A"}</td></tr>
-<tr><th>{kind_label} Compatibility</th><td class='{bc_css}'>{bc_pct:.1f}%</td></tr>
-<tr><th>Verdict</th><td class='{bc_css}'>{compat_verdict}</td></tr>
-</table>
-
-<h2>Problem Summary</h2>
-<table class='summary'>
-<tr><th></th><th>High</th><th>Medium</th><th>Low</th></tr>
-<tr><th>Type Problems</th><td>{tp_high}</td><td>{tp_med}</td><td>{tp_low}</td></tr>
-<tr><th>Interface Problems</th><td>{sp_high}</td><td>{sp_med}</td><td>{sp_low}</td></tr>
-<tr><th>Added Symbols</th><td colspan='3'>{len(added)}</td></tr>
-<tr><th>Removed Symbols</th><td colspan='3'>{len(removed)}</td></tr>
-</table>
-</div>""")
-
-    # Added symbols section
-    if added:
-        sections_html.append(f"""
-<div id='Added'>
-<h2>Added Symbols ({len(added)})</h2>
-{_compat_changes_table(added)}
-</div>""")
-
-    # Removed symbols section
-    if removed:
-        sections_html.append(f"""
-<div id='Removed'>
-<h2>Removed Symbols ({len(removed)})</h2>
-{_compat_changes_table(removed)}
-</div>""")
-
-    # Type problems by severity
-    for sev in ("High", "Medium", "Low"):
-        items = type_problems[sev]
-        if items:
-            sections_html.append(f"""
-<div id='TypeProblems_{sev}'>
-<h2>Problems with Data Types — {sev} Severity ({len(items)})</h2>
-{_compat_changes_table(items, show_severity=True)}
-</div>""")
-
-    # Interface (symbol) problems by severity
-    for sev in ("High", "Medium", "Low"):
-        items = symbol_problems[sev]
-        if items:
-            sections_html.append(f"""
-<div id='InterfaceProblems_{sev}'>
-<h2>Problems with Symbols — {sev} Severity ({len(items)})</h2>
-{_compat_changes_table(items, show_severity=True)}
-</div>""")
-
-    # Other problems (ELF-layer: soname, symbol versioning, calling convention)
-    other_all = (
-        other_problems["High"] + other_problems["Medium"] + other_problems["Low"]
-    )
-    if other_all:
-        sections_html.append(f"""
-<div id='OtherProblems'>
-<h2>Other Problems ({len(other_all)})</h2>
-{_compat_changes_table(other_all, show_severity=True)}
-</div>""")
-
-    body_html = "\n".join(sections_html)
-
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>{kind_label} compatibility report for {lib_display} between {old_display} and {new_display}</title>
-<style>{_COMPAT_CSS}</style>
-</head>
-<body>
-<!-- {meta_data} -->
-<div id='Title'>
-<h1>{abicc_title}</h1>
-</div>
-{body_html}
-<br/>
-<hr/>
-<p style="font-size:0.85em; color:#999;">
-Generated by <b>abicheck</b> (ABICC-compatible mode)
-</p>
-</body>
-</html>
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -559,11 +337,6 @@ def compute_confidence(result: object) -> ConfidenceData | None:
     )
 
 
-def _confidence_html(result: object) -> str:
-    """Render confidence, evidence tiers, and coverage warnings as HTML."""
-    return render_confidence(compute_confidence(result))
-
-
 def compute_impact(
     result: DiffResult,
     displayed_changes: list[object] | None = None,
@@ -601,20 +374,6 @@ def compute_impact(
     if not entries:
         return None
     return ImpactData(entries=tuple(entries))
-
-
-def _build_impact_html(
-    result: DiffResult,
-    displayed_changes: list[object] | None = None,
-    demangle: bool = True,
-) -> str:
-    """Build an HTML impact summary table.
-
-    ``demangle`` mirrors every other symbol-bearing cell in this module
-    (Codex review, fresh evidence: the Root Change column rendered
-    ``change.symbol`` raw, bypassing the demangling setting entirely).
-    """
-    return render_impact(compute_impact(result, displayed_changes), demangle)
 
 
 def compute_gate_card(result: DiffResult, severity_config: Any) -> GateCardData | None:
@@ -683,23 +442,51 @@ def compute_scoped_verdict(result: DiffResult) -> ScopedVerdictData | None:
     )
 
 
-def _gate_card_html(
-    result: DiffResult,
-    severity_config: Any,
-    *,
-    h: Any = None,
-) -> str:
-    """Render the CI-gate card, or ``""`` when no severity gate is configured.
+def _build_compat_problem_data(
+    changed: list[object], added: list[object], removed: list[object]
+) -> dict[str, object]:
+    """Bucket ``changed`` into ABICC's type/symbol/other severity bands.
 
-    *h* is accepted and ignored: it was this function's escaping callable
-    before the compute/render split moved every escape decision to the render
-    side, and is kept so an existing caller passing ``h=html.escape`` still
-    resolves.
+    This is the one business decision the pre-split ``_generate_compat_html``
+    made mid-render (a registry lookup via `is_type_problem`/
+    `is_symbol_problem`/`severity`); resolving it here, once, is what lets
+    the compat-mode renderer make none of its own.
     """
-    return render_gate_card(compute_gate_card(result, severity_config))
+    type_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
+    symbol_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
+    other_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
+    for ch in changed:
+        ks = kind_str(ch)
+        sev = severity(ks)
+        if is_type_problem(ks):
+            type_problems[sev].append(ch)
+        elif is_symbol_problem(ks):
+            symbol_problems[sev].append(ch)
+        else:
+            other_problems[sev].append(ch)
+
+    def _rows_by_severity(
+        bucket: dict[str, list[object]],
+    ) -> dict[str, list[dict[str, object]]]:
+        return {
+            sev: [dataclasses.asdict(row) for row in compute_full_change_rows(items)]
+            for sev, items in bucket.items()
+        }
+
+    return {
+        "added_rows": [
+            dataclasses.asdict(row) for row in compute_full_change_rows(added)
+        ],
+        "removed_rows": [
+            dataclasses.asdict(row) for row in compute_full_change_rows(removed)
+        ],
+        "type_problems": _rows_by_severity(type_problems),
+        "symbol_problems": _rows_by_severity(symbol_problems),
+        "other_problems": _rows_by_severity(other_problems),
+    }
 
 
-def generate_html_report(
+def build_html_document(
     result: DiffResult,
     lib_name: str = "",
     old_version: str = "",
@@ -713,32 +500,22 @@ def generate_html_report(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
-) -> str:
-    """Generate a standalone ABICC-compatible HTML ABI report.
+) -> ReportDocument:
+    """Resolve every fact the HTML report needs into one JSON-shaped
+    :class:`~abicheck.report.document.ReportDocument` -- the compute half of
+    ADR-061 Phase 2 item 1's HTML closure.
 
-    Args:
-        result: DiffResult from checker.compare().
-        lib_name: Library name for the report header.
-        old_version: Old library version string.
-        new_version: New library version string.
-        old_symbol_count: Total exported public symbol count in the old library.
-            Used to compute Binary Compatibility %. If None, approximated from
-            changes (legacy behaviour).
-        show_only: Optional --show-only filter string (display-only).
-        show_impact: If True, append an impact summary table.
-        demangle: Demangle C++ symbols in the native table (see ``_symbol_cell``).
-        severity_config: Optional severity configuration. When given (native
-            report only — the ABICC-compatible ``compat_html`` layout is left
-            unchanged), a separate "CI Gate" headline card is rendered
-            alongside "Compatibility" so a configured severity gate (e.g. an
-            addition promoted to ``error``) is visible even when the
-            Compatibility verdict itself reads COMPATIBLE.
-
-    Returns:
-        Complete self-contained HTML document as a string.
+    ``generate_html_report`` is now a two-line wrapper over this function and
+    ``report.render_html.render_html_document``: every business decision
+    this module makes (show_only filtering, bucketing, compatibility
+    metrics, which sections exist, ABICC severity-band classification for
+    the ``compat_html`` layout) lives here, never in the renderer.
     """
-    verdict = result.verdict.value if hasattr(result.verdict, "value") else str(result.verdict)
-    fg, bg = _VERDICT_STYLE.get(verdict, ("#212121", "#f5f5f5"))
+    verdict = (
+        result.verdict.value
+        if hasattr(result.verdict, "value")
+        else str(result.verdict)
+    )
 
     all_changes: list[object] = list(getattr(result, "changes", None) or [])
 
@@ -769,12 +546,17 @@ def generate_html_report(
     # ReportFinding resolved once per change; a stub falls back as before.
     # Also gate on _effective_kind_sets: report_findings_for needs policy/
     # policy_file too, absent from a verdict-only stub (Codex review).
-    _effective_verdict_fn: Callable[[object], object] | None = getattr(result, "_effective_verdict_for_change", None)
+    _effective_verdict_fn: Callable[[object], object] | None = getattr(
+        result, "_effective_verdict_for_change", None
+    )
     if _effective_verdict_fn is not None and hasattr(result, "_effective_kind_sets"):
         from .report.finding import findings_by_change_id, report_findings_for
+
         _findings_by_id = findings_by_change_id(report_findings_for(result))  # type: ignore[arg-type]
+
         def _lookup_verdict(change: object) -> object:
             return _findings_by_id[id(change)].verdict
+
         _effective_verdict_fn = _lookup_verdict
     # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
     # verdict buckets before they are built, the same way Markdown's own
@@ -809,8 +591,6 @@ def generate_html_report(
     # "0.0% binary compatibility") the policy/kind_sets note above already
     # guards against. Filtered via the shared predicate rather than
     # `result._evaluated_changes()` since a stub result need not expose it.
-    from .contract_gating import is_evaluated
-
     _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
     metrics = compatibility_metrics(
         [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)],
@@ -823,159 +603,159 @@ def generate_html_report(
     bc_pct = metrics.binary_compatibility_pct
     affected_pct = metrics.affected_pct
 
-    h = html.escape
-    lib_display = h(lib_name) if lib_name else "library"
-    old_display = h(old_version) if old_version else "old"
-    new_display = h(new_version) if new_version else "new"
+    file_metadata = compute_file_metadata(result)
+    shared: dict[str, object] = {
+        "verdict": verdict,
+        "lib_name": lib_name,
+        "old_version": old_version,
+        "new_version": new_version,
+        "title": title,
+        "old_symbol_count": old_symbol_count,
+        "bc_pct": bc_pct,
+        "affected_pct": affected_pct,
+        "breaking_count": breaking_count,
+        "file_metadata": (
+            dataclasses.asdict(file_metadata) if file_metadata is not None else None
+        ),
+    }
 
+    # compat_html (ABICC-clone layout) ignores severity_config entirely and
+    # never demangles -- matching the pre-split short-circuit exactly.
     if compat_html:
-        return _generate_compat_html(
-            result,
-            display_changes,
-            removed,
-            changed,
-            added,
-            suppressed,
-            suppressed_count,
-            bc_pct,
-            affected_pct,
-            breaking_count,
-            verdict,
-            lib_display,
-            old_display,
-            new_display,
-            old_symbol_count,
-            title,
-            report_kind=report_kind,
+        return ReportDocument.from_mapping(
+            {
+                **shared,
+                "mode": "compat",
+                "report_kind": report_kind,
+                "compat": _build_compat_problem_data(changed, added, removed),
+            }
         )
-
-    verdict_icon = _verdict_icon(verdict)
-
-    gate_html = _gate_card_html(result, severity_config, h=h)
-
-    scoped_html = render_scoped_verdict(compute_scoped_verdict(result))
 
     if demangle:
         prewarm_demangle_batch(
             [*all_changes, *suppressed, *not_evaluated],
-            attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
-        )
-    summary_html = _summary_table(removed, changed, added, suppressed_count)
-    nav_html = _nav_bar(removed, changed, added, suppressed_count)
-
-    def _section(title: str, anchor: str, css_class: str, items: list[object]) -> str:
-        count = len(items)
-        tbl = _changes_table(items, demangle)
-        return (
-            f"<div class='section {css_class}' id='{anchor}'>"
-            f"<h3>{title} ({count})</h3>"
-            f"{tbl}"
-            f"</div>"
+            attrs=(
+                "symbol",
+                "description",
+                "old_value",
+                "new_value",
+                "affected_symbols",
+            ),
         )
 
-    sections = _build_sections_html(
+    sections = _build_sections_data(
         removed,
         changed,
         added,
         suppressed,
         suppressed_count,
-        _section,
         not_evaluated=not_evaluated,
         relevance_of=contract_relevance_of,
-        demangle=demangle,
     )
 
+    empty_state: dict[str, object] | None = None
     if not sections:
         if show_only and all_changes:
-            sections.append(
-                "<div class='section'><p class='empty'>"
-                f"No changes match the current filter (<code>--show-only {h(show_only)}</code>). "
-                f"{len(all_changes)} change(s) exist but are excluded by the filter."
-                "</p></div>"
-            )
+            empty_state = {
+                "kind": "filtered",
+                "show_only": show_only,
+                "all_changes_count": len(all_changes),
+            }
         else:
-            sections.append(
-                "<div class='section'><p class='empty'>"
-                "No ABI changes detected between the two versions."
-                "</p></div>"
-            )
+            empty_state = {"kind": "no_changes"}
 
-    sections_html = "\n".join(sections)
+    confidence = compute_confidence(result)
+    gate_card = compute_gate_card(result, severity_config)
+    scoped_verdict = compute_scoped_verdict(result)
+    impact = compute_impact(result, display_changes) if show_impact else None
 
-    symbol_count_note = (
-        f" / {old_symbol_count} exported symbols" if old_symbol_count else ""
+    return ReportDocument.from_mapping(
+        {
+            **shared,
+            "mode": "native",
+            "demangle": demangle,
+            "show_only": show_only,
+            "show_impact": show_impact,
+            "all_changes_count": len(all_changes),
+            "display_changes_count": len(display_changes),
+            "redundant_count": getattr(result, "redundant_count", 0),
+            "nav_bar": dataclasses.asdict(
+                compute_nav_bar(removed, changed, added, suppressed_count)
+            ),
+            "summary_table": dataclasses.asdict(
+                compute_summary_table(removed, changed, added, suppressed_count)
+            ),
+            "confidence": (
+                dataclasses.asdict(confidence) if confidence is not None else None
+            ),
+            "gate_card": (
+                dataclasses.asdict(gate_card) if gate_card is not None else None
+            ),
+            "scoped_verdict": (
+                dataclasses.asdict(scoped_verdict)
+                if scoped_verdict is not None
+                else None
+            ),
+            "impact": dataclasses.asdict(impact) if impact is not None else None,
+            "sections": sections,
+            "empty_state": empty_state,
+        }
     )
 
-    redundant_count = getattr(result, "redundant_count", 0)
-    redundancy_note = ""
-    if redundant_count > 0:
-        redundancy_note = (
-            f"<div class='section' style='background:#fff3e0; padding:10px; border-left:4px solid #ff9800;'>"
-            f"<strong>ℹ️ {redundant_count} redundant change(s)</strong> hidden "
-            f"(derived from root type changes). Set <code>scope.show_redundant: true</code> "
-            f"in <code>.abicheck.yml</code> to show all."
-            f"</div>"
-        )
 
-    filter_note = ""
-    if show_only:
-        filter_note = (
-            f"<div class='section' style='background:#e3f2fd; padding:10px; border-left:4px solid #1976d2;'>"
-            f"<strong>🔍 Filtered by:</strong> <code>--show-only {h(show_only)}</code> "
-            f"({len(display_changes)} of {len(all_changes)} changes shown)"
-            f"</div>"
-        )
+def generate_html_report(
+    result: DiffResult,
+    lib_name: str = "",
+    old_version: str = "",
+    new_version: str = "",
+    old_symbol_count: int | None = None,
+    title: str | None = None,
+    compat_html: bool = False,
+    report_kind: str = "binary",
+    *,
+    show_only: str | None = None,
+    show_impact: bool = False,
+    severity_config: SeverityConfig | None = None,
+    demangle: bool = True,
+) -> str:
+    """Generate a standalone ABICC-compatible HTML ABI report.
 
-    impact_html = ""
-    if show_impact:
-        impact_html = _build_impact_html(
-            result, displayed_changes=display_changes, demangle=demangle
-        )
+    Args:
+        result: DiffResult from checker.compare().
+        lib_name: Library name for the report header.
+        old_version: Old library version string.
+        new_version: New library version string.
+        old_symbol_count: Total exported public symbol count in the old library.
+            Used to compute Binary Compatibility %. If None, approximated from
+            changes (legacy behaviour).
+        show_only: Optional --show-only filter string (display-only).
+        show_impact: If True, append an impact summary table.
+        demangle: Demangle C++ symbols in the native table (see ``abbr_symbol_text``).
+        severity_config: Optional severity configuration. When given (native
+            report only — the ABICC-compatible ``compat_html`` layout is left
+            unchanged), a separate "CI Gate" headline card is rendered
+            alongside "Compatibility" so a configured severity gate (e.g. an
+            addition promoted to ``error``) is visible even when the
+            Compatibility verdict itself reads COMPATIBLE.
 
-    body = f"""
-<div class="header">
-  <h1>{h(title) if title else f"ABI Compatibility Report — {lib_display}"}</h1>
-  <div class="meta">
-    {old_display} → {new_display} &nbsp;|&nbsp;
-    Generated by <strong>abicheck</strong> (ABICC-compatible)
-  </div>
-  {_file_metadata_html(result)}
-</div>
-
-<div class="verdict-box" style="background:{bg}; color:{fg}; border-left:6px solid {fg};">
-  <h2>{verdict_icon} Compatibility: {h(verdict)}</h2>
-  <div class="bc-metric">
-    Binary Compatibility: <strong>{bc_pct:.1f}%</strong>
-    <span style="font-size:0.82em; opacity:0.75">
-      ({breaking_count} breaking change(s){symbol_count_note})
-    </span>
-    &nbsp;&nbsp;
-    <span style="font-size:0.85em;">
-      Removed: <strong>{len(removed)}</strong>
-      &nbsp;|&nbsp; Changed: <strong>{len(changed)}</strong>
-      &nbsp;|&nbsp; Added: <strong>{len(added)}</strong>
-    </span>
-  </div>
-</div>
-
-{gate_html}
-{scoped_html}
-{_confidence_html(result)}
-{nav_html}
-{summary_html}
-{filter_note}
-{redundancy_note}
-{sections_html}
-{impact_html}
-
-{render_footer("ABICC-compatible report format")}
-"""
-    return render_document(
-        title=h(title)
-        if title
-        else f"ABI Report: {lib_display} {old_display} → {new_display}",
-        body=body,
+    Returns:
+        Complete self-contained HTML document as a string.
+    """
+    document = build_html_document(
+        result,
+        lib_name=lib_name,
+        old_version=old_version,
+        new_version=new_version,
+        old_symbol_count=old_symbol_count,
+        title=title,
+        compat_html=compat_html,
+        report_kind=report_kind,
+        show_only=show_only,
+        show_impact=show_impact,
+        severity_config=severity_config,
+        demangle=demangle,
     )
+    return render_html_document(document)
 
 
 def compute_not_evaluated_section(
@@ -1003,19 +783,21 @@ def compute_not_evaluated_section(
     return NotEvaluatedSectionData(rows=tuple(rows))
 
 
-def _build_sections_html(
+def _build_sections_data(
     removed: list[object],
     changed: list[object],
     added: list[object],
     suppressed: list[object],
     suppressed_count: int,
-    section_builder: Callable[[str, str, str, list[object]], str],
     *,
     not_evaluated: list[object] | None = None,
     relevance_of: Callable[[object], object] | None = None,
-    demangle: bool = True,
-) -> list[str]:
-    """Build ordered section blocks for HTML report body.
+) -> list[dict[str, object]]:
+    """Build the ordered list of section facts for the native HTML report
+    body -- the JSON-shaped counterpart of the pre-split
+    ``_build_sections_html``, which built markup directly. Each entry names
+    its own ``kind`` so ``report.render_html.render_html_document`` can
+    dispatch without making any decision of its own.
 
     *not_evaluated* (ADR-049 D1) renders last, in its own non-verdict
     section: those findings were never scored by compatibility policy, so
@@ -1023,7 +805,7 @@ def _build_sections_html(
     banner at the top of the same page. Defaults to nothing, so a run without
     `--contract` produces the identical document it always did.
     """
-    sections: list[str] = []
+    sections: list[dict[str, object]] = []
     for title, anchor, css_class, items in (
         ("⛔ Removed Symbols", "removed", "section-removed", removed),
         ("⚠️ Changed Symbols", "changed", "section-changed", changed),
@@ -1031,20 +813,28 @@ def _build_sections_html(
         ("🔕 Suppressed Changes", "suppressed", "section-suppressed", suppressed),
     ):
         if items:
-            sections.append(section_builder(title, anchor, css_class, items))
+            sections.append(
+                {
+                    "kind": "changes",
+                    "title": title,
+                    "anchor": anchor,
+                    "css_class": css_class,
+                    "rows": [
+                        dataclasses.asdict(row)
+                        for row in compute_full_change_rows(items)
+                    ],
+                }
+            )
     if suppressed_count and not suppressed:
-        sections.append(
-            f"<div class='section section-suppressed' id='suppressed'>"
-            f"<h3>🔕 Suppressed Changes ({suppressed_count})</h3>"
-            f"<p class='empty'>Details not available (suppressed_changes list is empty).</p>"
-            f"</div>"
-        )
+        sections.append({"kind": "suppressed_placeholder", "count": suppressed_count})
     if not_evaluated:
         sections.append(
-            render_not_evaluated_section(
-                compute_not_evaluated_section(not_evaluated, relevance_of),
-                demangle,
-            )
+            {
+                "kind": "not_evaluated",
+                "data": dataclasses.asdict(
+                    compute_not_evaluated_section(not_evaluated, relevance_of)
+                ),
+            }
         )
     return sections
 

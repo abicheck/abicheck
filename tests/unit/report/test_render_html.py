@@ -26,6 +26,14 @@ checked over a generated sweep of inputs rather than one fixed case:
 Property 4 is the gate-decision one ``test_gate_decision_shared.py`` already
 owns for the other formats: ``compute_gate_card`` must *project* the shared
 ``gate_decision_for_result`` answer, never re-derive one.
+
+Property 5 (added when ADR-061 Phase 2 item 1 closed for HTML) is the
+document boundary itself: ``html_report.build_html_document`` must produce a
+genuinely JSON-shaped :class:`~abicheck.report.document.ReportDocument` --
+one that survives its own ``from_mapping``/``to_mapping`` round trip -- and
+``report.render_html_document.render_html_document`` must be a pure,
+deterministic function of that document alone, for both the native and
+ABICC-compatible (``compat_html=True``) layouts.
 """
 
 from __future__ import annotations
@@ -38,6 +46,7 @@ from pathlib import Path
 import pytest
 
 import abicheck.report.render_html
+import abicheck.report.render_html_document
 from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
 from abicheck.checker_policy import Confidence
 from abicheck.contract_relevance_types import (
@@ -46,9 +55,10 @@ from abicheck.contract_relevance_types import (
     ContractRelevance,
 )
 from abicheck.html_report import (
-    compute_change_rows,
+    build_html_document,
     compute_confidence,
     compute_file_metadata,
+    compute_full_change_rows,
     compute_gate_card,
     compute_impact,
     compute_nav_bar,
@@ -60,6 +70,8 @@ from abicheck.html_report import (
 from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.policy_file import PolicyFile
 from abicheck.reclassify import ReclassifyRule
+from abicheck.report.document import ReportDocument
+from abicheck.report.render_html_document import render_html_document
 from abicheck.severity import SeverityConfig, SeverityLevel
 
 # One marker per injectable field, all distinct, each shaped like a real
@@ -201,7 +213,12 @@ _DECISION_MODULES = {
 }
 
 
-def test_render_html_imports_no_decision_making_module() -> None:
+@pytest.mark.parametrize(
+    "module",
+    [abicheck.report.render_html, abicheck.report.render_html_document],
+    ids=["render_html", "render_html_document"],
+)
+def test_render_html_imports_no_decision_making_module(module: object) -> None:
     """The structural half of "a renderer decides nothing".
 
     Every property below checks the *output* of some function; this one checks
@@ -210,11 +227,16 @@ def test_render_html_imports_no_decision_making_module() -> None:
     and `checker_policy.impact_for` mid-render, and
     `render_compat_changes_table` calling `severity` -- registry lookups, so
     each is a decision the compute half owes the renderer, not a formatting
-    choice. Those moved into `ChangeRowFacts`. Asserting on rendered strings
+    choice. Those moved into `ChangeRow`. Asserting on rendered strings
     would not have caught it and would not catch the next one, because the
     output is identical either way; the import list is what actually changes.
+
+    Covers both render modules: `render_html.py`'s reusable per-section
+    formatters and `render_html_document.py`'s whole-document projection --
+    the latter split out once the former grew past the architecture check's
+    size ceiling, and the guard must follow the responsibility, not the file.
     """
-    source = Path(abicheck.report.render_html.__file__).read_text(encoding="utf-8")
+    source = Path(module.__file__).read_text(encoding="utf-8")  # type: ignore[attr-defined]
     tree = ast.parse(source)
     reached: set[str] = set()
     for node in ast.walk(tree):
@@ -225,8 +247,8 @@ def test_render_html_imports_no_decision_making_module() -> None:
                 reached.add(alias.name.split(".")[-1])
     offenders = sorted(reached & _DECISION_MODULES)
     assert offenders == [], (
-        f"report/render_html.py reaches {offenders} — a renderer must consume "
-        "already-decided facts (see ChangeRowFacts / the compute_* half in "
+        f"{module.__name__} reaches {offenders} — a renderer must consume "  # type: ignore[attr-defined]
+        "already-decided facts (see ChangeRow / the compute_* half in "
         "html_report.py), not resolve them itself"
     )
 
@@ -240,10 +262,9 @@ def test_change_row_facts_carry_the_lookups_the_renderer_no_longer_makes() -> No
     from abicheck.report_classifications import category, kind_str, severity
 
     changes = list(_result().changes)
-    facts = compute_change_rows(changes)
-    assert len(facts) == len(changes)
-    for ch in changes:
-        row = facts[id(ch)]
+    rows = compute_full_change_rows(changes)
+    assert len(rows) == len(changes)
+    for ch, row in zip(changes, rows, strict=True):
         ks = kind_str(ch)
         assert row.kind == ks
         assert row.category == category(ks)
@@ -477,3 +498,78 @@ def test_every_rendered_section_reaches_the_document() -> None:
         assert marker in html_out, f"{marker!r} section missing from the report"
     # The nav bar is rendered from its own struct too.
     assert re.search(r"<div class='nav'>.*Removed \(1\)", html_out)
+
+
+# ---------------------------------------------------------------------------
+# 5. The document boundary: build_html_document -> ReportDocument -> render
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("compat_html", [False, True])
+def test_build_html_document_is_a_genuine_report_document(compat_html: bool) -> None:
+    """``build_html_document`` must return a :class:`ReportDocument` whose
+    content is entirely JSON-safe scalars/lists/objects -- not merely an
+    object that happens to render once. Round-tripping it through its own
+    ``to_mapping``/``from_mapping`` (what every real consumer -- JSON
+    serialization, a second render -- actually does) must reproduce an
+    identical document, for both the native and ABICC-compatible layouts.
+    """
+    result = _result()
+    document = build_html_document(
+        result,
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
+        old_symbol_count=120,
+        show_impact=True,
+        severity_config=SeverityConfig(),
+        compat_html=compat_html,
+    )
+    assert isinstance(document, ReportDocument)
+    mapping = document.to_mapping()
+    round_tripped = ReportDocument.from_mapping(mapping)
+    assert round_tripped.to_mapping() == mapping
+
+
+@pytest.mark.parametrize("compat_html", [False, True])
+def test_render_html_document_is_pure_and_deterministic(compat_html: bool) -> None:
+    """``render_html_document`` must be a pure function of the document
+    alone: rendering the same document twice -- including a document that
+    has been through a ``to_mapping``/``from_mapping`` round trip, i.e. a
+    fresh object carrying equal but non-identical data -- produces
+    byte-identical output, and rendering must not mutate the document (a
+    ``ReportDocument`` is frozen, so a mutation attempt would raise, but a
+    hidden side channel -- e.g. reading global state -- could still make two
+    renders disagree without ever touching the document itself)."""
+    result = _result()
+    document = build_html_document(
+        result,
+        lib_name="libfoo.so",
+        show_impact=True,
+        severity_config=SeverityConfig(),
+        compat_html=compat_html,
+    )
+    first = render_html_document(document)
+    second = render_html_document(document)
+    assert first == second
+
+    reconstructed = ReportDocument.from_mapping(document.to_mapping())
+    assert render_html_document(reconstructed) == first
+
+
+def test_generate_html_report_is_build_then_render() -> None:
+    """``generate_html_report`` must not do anything ``build_html_document``
+    + ``render_html_document`` don't already do -- it is a thin composition,
+    not a third code path that could silently drift from the two halves."""
+    result = _result()
+    kwargs = dict(
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
+        old_symbol_count=120,
+        show_impact=True,
+        severity_config=SeverityConfig(),
+    )
+    direct = generate_html_report(result, **kwargs)
+    composed = render_html_document(build_html_document(result, **kwargs))
+    assert direct == composed
