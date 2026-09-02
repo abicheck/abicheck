@@ -22,28 +22,25 @@ Phase 2 is establishing across every output format. Its projections are
 needs no serializer of its own), `render_text.py` (the one-line `--stat`
 summary, `render_stat_document`), `render_xml.py` (JUnit),
 `render_markdown.py` (Markdown prose), `render_html.py` (HTML's reusable
-per-section formatters/structs), and `render_html_document.py` (HTML's
-whole-document projection, `render_html_document`).
+per-section formatters), and `render_html_document.py` (HTML's whole-document
+projection, `render_html_document`).
 
 **HTML now crosses the single canonical `ReportDocument` boundary; Markdown
-does not yet, and that distinction matters when you reach for one as a
-model.** JSON, SARIF, JUnit, `--stat`, and now HTML construct a
-`ReportDocument` (or, for HTML, `html_report.build_html_document`'s
-JSON-shaped mapping wrapped in one) and project it purely; `render_markdown.py`
-alone still projects its own per-section frozen structs straight from a
-`DiffResult` without an intervening document. Converging Markdown is tracked
-in `docs/contribute/plans/duplication-and-convergence-assessment.md`'s
-Phase 4. HTML's own closure split the whole-document formatting out of
-`render_html.py` into the sibling `render_html_document.py` once the
-combined module passed the architecture check's new-file size ceiling —
-`render_html.py` keeps the reusable per-section renderers (`ChangeRow`,
-`render_changes_table`, `FileMetadataTable`/`render_file_metadata`, and
-siblings); `render_html_document.py` owns only "assemble the complete page
-from a finished document" (`render_html_document`, its native/compat-mode
-halves, and the `_*_from_mapping` reconstruction helpers a `ReportDocument`
-round trip requires, since it turns every dataclass into a plain mapping and
-every tuple into a list). Note `html_template.render_document` is unrelated
-despite the name — it wraps an assembled body in page chrome.
+does not yet.** JSON, SARIF, JUnit, `--stat`, and now HTML construct a
+`ReportDocument` (HTML's via `html_report.build_html_document`) and project
+it purely; `render_markdown.py` alone still projects its own per-section
+frozen structs straight from a `DiffResult`, no intervening document.
+Converging Markdown is tracked in `duplication-and-convergence-assessment.md`'s
+Phase 4. HTML's whole-document formatting split out of `render_html.py` into
+the sibling `render_html_document.py` once the combined module passed the
+architecture check's new-file size ceiling: `render_html.py` keeps the
+reusable per-section renderers (`ChangeRow`, `render_changes_table`,
+`FileMetadataTable`/`render_file_metadata`, siblings); `render_html_document.py`
+owns only "assemble the complete page from a finished document"
+(`render_html_document`, its native/compat-mode halves, and the
+`_*_from_mapping` reconstruction helpers a document round trip requires,
+since it turns every dataclass into a plain mapping and tuple into a list).
+`html_template.render_document` is unrelated despite the name — page chrome.
 
 `render_xml.py` exists because a `ReportDocument` holds JSON values only —
 so a renderer can never be handed a live object graph to mutate — and an
@@ -92,15 +89,25 @@ friends at all. An assertion on rendered strings cannot catch this class —
 the import list is what changes.
 Filtering that *looks* like formatting stays compute-side whenever it is
 really a report decision (which summary rows are non-empty; which reclassify
-rules are still active). All three modules keep every pre-split name as a
-thin wrapper or re-export, so no caller or existing test changed.
+rules are still active). Both modules keep every pre-split name that
+anything still resolves through — a re-export exists to avoid breaking a
+real caller, not to freeze a name forever (D8: "not retained solely because
+a test monkeypatches it... the test moves with the implementation"). HTML's
+whole-document closure retired several left with zero resolvers anywhere in
+the repo, tests included, once every caller moved onto
+`ChangeRow`/`build_html_document`: `compute_change_rows`/`ChangeRowFacts`/
+`ChangeRowFactsById` (superseded by `compute_full_change_rows`/`ChangeRow`),
+`_symbol_cell`/`_verdict_icon`, and the six single-section `*_html` wrappers
+`generate_html_report` called directly before `build_html_document` existed.
+`_abbr_symbol_text`/`_changes_table`/`_compat_changes_table` -- the three
+with a real caller (`appcompat_html.py`, plus their own direct tests) -- are
+unaffected.
 
 One piece of ADR-061 Phase 2 item 5 stays open: `cli_compare_fold.py`'s
 scoped-gate JSON fold, which needs this package's JSON builders to accept
 scoped-gate awareness natively rather than re-deriving already-built
-sections post-render. See ADR-061's Phase 2 status note for the closed
-halves of items 4 and 5 (per-finding verdict; the fold-ins' demangle
-scope).
+sections post-render. See ADR-061's Phase 2 status note for items 4 and 5's
+closed halves (per-finding verdict; the fold-ins' demangle scope).
 
 ## Tests
 
