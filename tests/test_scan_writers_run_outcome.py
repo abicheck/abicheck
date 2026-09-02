@@ -262,6 +262,49 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         assert report["run_outcome"]["gate"] == "none"
         assert report["run_outcome"]["operational"] == "none"
 
+    def test_scan_outcome_assurance_only_exit_1_reads_gate_none_end_to_end(self):
+        """Codex review (P2), end-to-end through the real writer: a legacy-
+        scheme `scan --against --require-complete-analysis` whose own
+        compatibility is clean but whose assurance is incomplete folds to a
+        top-level exit_code of 1 the identical way an incomplete contract
+        coverage does -- the writer must read the report's own declared
+        `analysis_assurance_exit_contribution` and emit gate: none, not
+        addition_quality."""
+        from abicheck.buildsource.risk import RiskScore
+        from abicheck.scan_engine import ScanOutcome
+
+        outcome = ScanOutcome(
+            mode="ci",
+            resolved_method="s3",
+            depth="headers",
+            collect_mode="target",
+            risk=RiskScore(total=0),
+            auto=False,
+            changed_path_count=0,
+            changed_path_source="none",
+            verdict="COMPATIBLE",
+            exit_code=1,
+            diff_summary={"analysis_assurance_exit_contribution": 1},
+        )
+        report = outcome.to_dict()
+        assert report["run_outcome"]["gate"] == "none"
+        assert report["run_outcome"]["operational"] == "none"
+
+    def test_scan_result_assurance_only_exit_1_reads_gate_none_end_to_end(self):
+        """Same finding, the `ScanResult`/`report={"diff": ...}` writer path
+        `_run_baseline_compare` actually produces (as opposed to `ScanOutcome`'s
+        own flat `diff_summary`)."""
+        from abicheck.service_scan import ScanResult
+
+        result = ScanResult(
+            verdict="COMPATIBLE",
+            exit_code=1,
+            report={"diff": {"analysis_assurance_exit_contribution": 1}},
+        )
+        report = result.to_dict()
+        assert report["run_outcome"]["gate"] == "none"
+        assert report["run_outcome"]["operational"] == "none"
+
     def test_abort_report_rejects_an_out_of_scheme_compatibility_contribution(self):
         """Codex review, fresh evidence: a legacy scan may carry a valid
         root `exit_code` (4) alongside an invalid, out-of-scheme nested

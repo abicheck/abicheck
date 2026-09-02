@@ -687,6 +687,27 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `EVIDENCE_CONTRACT_ERROR` there too, since "couldn't compare at all" is a
   stronger operational signal — but a real break from a *different* member
   is never masked.
+- **`run_outcome_for_scan_fields` now recognizes a legacy-scheme scan's
+  `analysis_assurance_exit_contribution`, not just its contract-coverage
+  sibling** (Codex review, P2, fresh evidence): a `scan --against
+  --require-complete-analysis` run with a clean compatibility verdict but
+  incomplete assurance folds to a bare top-level `exit_code` of `1`
+  (`_run_baseline_compare`'s own `max()` fold) — legacy scan's native codes
+  are 0/2/4/5/6, so that `1` is only ever this orthogonal axis, never a
+  real compatibility contribution, exactly the ambiguity the sibling
+  `contract_coverage_exit_contribution` special case already closed. Without
+  reading the assurance contribution too, this read as an `addition_quality`
+  compatibility gate and structured-first aggregation reported a spurious
+  compatibility blocker on top of the separate, correctly-reported assurance
+  failure. New `scan_report_assurance_contribution`/`_contributes` readers
+  mirror the coverage-contribution ones exactly (and are now shared via one
+  `_scan_report_diff_field` helper, which also de-duplicated the three
+  flat `diff.<key>` readers that had grown identical). Threaded through both
+  `run_outcome_dict_for_scan` (the `ScanResult`/`report=` path) and
+  `run_outcome_dict_for_scan_outcome` (the `ScanOutcome`/`diff_summary=`
+  path) — new end-to-end tests for each in
+  `tests/test_scan_writers_run_outcome.py`, verified via git-stash to fail
+  pre-fix, pass post-fix.
 
 ### Changed
 

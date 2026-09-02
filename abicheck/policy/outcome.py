@@ -341,12 +341,18 @@ def _is_valid_coverage_contribution(raw: object) -> bool:
     return not isinstance(raw, bool) and isinstance(raw, int) and raw in (0, 1)
 
 
+def _contributes(raw: object) -> bool:
+    """Whether *raw* is a confirmed ``1`` orthogonal-axis contribution."""
+    return _is_valid_coverage_contribution(raw) and raw == 1
+
+
 def run_outcome_for_scan_fields(
     verdict: str,
     exit_code: int,
     *,
     severity_exit_code: int | None = None,
     contract_coverage_contribution: object = None,
+    analysis_assurance_contribution: object = None,
     member_evidence_contract_error: bool = False,
     member_not_comparable: bool = False,
     bundle_incomplete: bool = False,
@@ -375,34 +381,35 @@ def run_outcome_for_scan_fields(
     native codes are 0/2/4/5/6, so a bare ``1`` can only be this orthogonal
     axis folded onto an otherwise-compatible ``0`` by ``max()``, never a
     real compatibility contribution (Codex review: without this, a scan
-    that only failed contract coverage was recorded as an
-    ``ADDITION_QUALITY``-level compatibility gate here, and
-    ``GateInfo.from_scan_report``'s own structured-first read -- which
-    trusts this field over re-deriving it -- then treated the target as a
-    compatibility blocker, bypassing its raw-code fallback's identical,
-    already-correct special case). Confirmed via the report's own declared
-    contribution, never guessed: an unconfirmed ``1`` stays a
-    compatibility-gate contribution, fail-closed, exactly like the reader
-    this mirrors (``workflows.aggregate.gate._contract_coverage_exit``).
+    that only failed contract coverage read as an ``ADDITION_QUALITY``
+    compatibility gate here, and ``GateInfo.from_scan_report``'s
+    structured-first read then treated the target as a compatibility
+    blocker). Confirmed via the report's own declared contribution, never
+    guessed: an unconfirmed ``1`` stays a compatibility-gate contribution,
+    fail-closed, like the reader this mirrors
+    (``workflows.aggregate.gate._contract_coverage_exit``).
+
+    *analysis_assurance_contribution*, when given, is the report's own P0.4
+    ``analysis_assurance_exit_contribution`` (``0``/``1``) -- the sibling
+    orthogonal axis a legacy-scheme ``--require-complete-analysis`` scan
+    folds onto a bare ``exit_code`` of ``1`` the same way
+    *contract_coverage_contribution* does (Codex review). Same fail-closed
+    validation, same "confirmed, never guessed" rule.
 
     *member_evidence_contract_error*/*member_not_comparable*, when ``True``,
     fold ``EVIDENCE_CONTRACT_ERROR``/``NOT_COMPARABLE`` in even though
     *verdict*/*exit_code* don't name either directly --
     ``_aggregate_scan_set_verdict`` deliberately lets a *stronger* member's
     ``API_BREAK``/``BREAKING`` win the reported verdict over a *different*
-    member's abort (visible in ``per_artifact``, but never the set-level
-    verdict once a real break outranks it), which otherwise left that
-    member's abort with no signal in ``run_outcome`` at all. Never overrides
-    an operational status already derived from *verdict*/*exit_code* (e.g. a
-    set-level ``BUDGET_OVERFLOW``, which already dominates every member per
-    that same function's own step 1).
+    member's abort, which otherwise left that member's abort with no signal
+    in ``run_outcome`` at all. Never overrides an operational status
+    already derived from *verdict*/*exit_code* (e.g. a set-level
+    ``BUDGET_OVERFLOW``, which already dominates every member).
 
     *bundle_incomplete*, when ``True``, folds ``EXTRACTION_ERROR`` in under
     the identical "only when otherwise ``NONE``" rule -- the sibling gap
     where a *stronger* member wins the reported ``verdict`` while the
-    cross-library bundle audit itself never ran: unlike the
-    ``BUNDLE_INCOMPLETE`` sentinel *verdict* already covered above, this is
-    the case where the audit went incomplete but *verdict* never says so.
+    cross-library bundle audit itself never ran.
 
     *assurance*, when given, is the report's own already-serialized
     ``analysis_assurance`` block (``cli_scan_baseline.py``'s
@@ -468,13 +475,11 @@ def run_outcome_for_scan_fields(
         # ever touching *verdict*, so this membership check alone cannot
         # mistake a real break for an operational-only report.
         compat_exit_code = 0
-    if (
-        severity_exit_code is None
-        and compat_exit_code == 1
-        and _is_valid_coverage_contribution(contract_coverage_contribution)
-        and contract_coverage_contribution == 1
-    ):
-        compat_exit_code = 0
+    if severity_exit_code is None and compat_exit_code == 1:
+        if _contributes(contract_coverage_contribution) or _contributes(
+            analysis_assurance_contribution
+        ):
+            compat_exit_code = 0
     if compat_exit_code not in _GATE_EXIT_CODE.values():
         # Operational-only code (5/6, etc.) -- compatibility contributed
         # nothing; `operational` carries the real signal.
@@ -495,14 +500,11 @@ def scan_report_severity_exit_code(report: object) -> int | None:
     severity-scheme ``scan --against``'s real, policy-aware compatibility
     exit code), or ``None`` when absent/malformed.
 
-    Shared by every scan-shaped writer that has a ``report``/``diff``
-    payload to read this out of (:class:`~abicheck.service_scan.
-    ScanResult`'s own ``report`` field) -- pulled into this leaf module
-    purely to keep each writer's own ``to_dict()`` to one call instead of
-    repeating this same nested-lookup dance.
+    Shared by every scan-shaped writer with a ``report``/``diff`` payload to
+    read this out of -- pulled into this leaf module to keep each writer's
+    own ``to_dict()`` to one call.
     """
-    diff = report.get("diff") if isinstance(report, dict) else None
-    severity = diff.get("severity") if isinstance(diff, dict) else None
+    severity = _scan_report_diff_field(report, "severity")
     if not isinstance(severity, dict):
         return None
     exit_code = severity.get("exit_code")
@@ -548,36 +550,38 @@ def scan_report_abort_compatibility_contribution(report: object) -> int | None:
     return contribution
 
 
-def scan_report_coverage_contribution(report: object) -> object:
-    """A scan report dict's own nested ``diff.contract_coverage_exit_
-    contribution`` (ADR-049 Phase 7's raw ``0``/``1`` axis value), or
-    ``None`` when absent -- the identical ``report.get("diff")`` traversal
-    :func:`scan_report_severity_exit_code` uses, for the sibling field.
-    Returned unvalidated (``object``, not ``int | None``):
-    :func:`run_outcome_for_scan_fields` validates it itself via
-    :func:`_is_valid_coverage_contribution`, the same fail-closed check
-    ``workflows.aggregate.gate._contract_coverage_exit`` applies on read.
+def _scan_report_diff_field(report: object, key: str) -> object:
+    """A scan report dict's own nested ``diff.<key>``, or ``None`` when
+    absent -- the identical ``report.get("diff")`` traversal
+    :func:`scan_report_severity_exit_code` uses, shared by every sibling
+    flat field reader below. Returned unvalidated: each field's own
+    consumer validates it (:func:`_is_valid_coverage_contribution` for the
+    two ``*_contribution`` fields, :func:`analysis_assurance_dict` for the
+    ``analysis_assurance`` block) -- fail-closed-on-read-not-write, like
+    every other reader in this module.
     """
     diff = report.get("diff") if isinstance(report, dict) else None
-    return (
-        diff.get("contract_coverage_exit_contribution")
-        if isinstance(diff, dict)
-        else None
-    )
+    return diff.get(key) if isinstance(diff, dict) else None
+
+
+def scan_report_coverage_contribution(report: object) -> object:
+    """The report's ``diff.contract_coverage_exit_contribution`` (ADR-049
+    Phase 7, raw ``0``/``1``); see :func:`run_outcome_for_scan_fields`."""
+    return _scan_report_diff_field(report, "contract_coverage_exit_contribution")
 
 
 def scan_report_assurance_block(report: object) -> object:
-    """A scan report dict's own nested ``diff.analysis_assurance`` (already
-    serialized by ``cli_scan_baseline.py``'s ``analysis_assurance_report_
-    dict(diff).to_dict()``), or ``None`` when absent -- the identical
-    ``report.get("diff")`` traversal :func:`scan_report_severity_exit_code`
-    uses, for the sibling field. Returned unvalidated (``object``, not
-    ``dict | None``): :func:`analysis_assurance_dict` narrows it on read,
-    the same fail-closed-on-read-not-write principle every other reader in
-    this module follows.
-    """
-    diff = report.get("diff") if isinstance(report, dict) else None
-    return diff.get("analysis_assurance") if isinstance(diff, dict) else None
+    """The report's already-serialized ``diff.analysis_assurance`` block
+    (``cli_scan_baseline.py``'s ``analysis_assurance_report_dict(diff).
+    to_dict()``)."""
+    return _scan_report_diff_field(report, "analysis_assurance")
+
+
+def scan_report_assurance_contribution(report: object) -> object:
+    """The report's P0.4 ``diff.analysis_assurance_exit_contribution`` --
+    the sibling reader to :func:`scan_report_coverage_contribution` for the
+    identical orthogonal-axis special case (Codex review)."""
+    return _scan_report_diff_field(report, "analysis_assurance_exit_contribution")
 
 
 def run_outcome_dict_for_scan_outcome(
@@ -589,25 +593,23 @@ def run_outcome_dict_for_scan_outcome(
     :func:`scan_report_severity_exit_code` reads), so this reads one level
     shallower rather than reusing that helper against the wrong nesting.
     """
-    severity = diff_summary.get("severity") if isinstance(diff_summary, dict) else None
+
+    def _field(key: str) -> object:
+        return diff_summary.get(key) if isinstance(diff_summary, dict) else None
+
+    severity = _field("severity")
     severity_exit_code = (
         severity.get("exit_code")
         if isinstance(severity, dict) and isinstance(severity.get("exit_code"), int)
-        else None
-    )
-    coverage_contribution = (
-        diff_summary.get("contract_coverage_exit_contribution")
-        if isinstance(diff_summary, dict)
         else None
     )
     return run_outcome_for_scan_fields(
         verdict,
         exit_code,
         severity_exit_code=severity_exit_code,
-        contract_coverage_contribution=coverage_contribution,
-        assurance=diff_summary.get("analysis_assurance")
-        if isinstance(diff_summary, dict)
-        else None,
+        contract_coverage_contribution=_field("contract_coverage_exit_contribution"),
+        analysis_assurance_contribution=_field("analysis_assurance_exit_contribution"),
+        assurance=_field("analysis_assurance"),
     ).to_dict()
 
 
@@ -655,7 +657,7 @@ def run_outcome_dict_for_scan(
     three-call sequence.
 
     An ordinary (non-abort) report's nested ``diff.severity.exit_code`` is
-    preferred when present; a *abort* report has no ``diff`` key at all, so
+    preferred when present; an *abort* report has no ``diff`` key at all, so
     :func:`scan_report_abort_compatibility_contribution`'s own separate
     ``exit.compatibility_contribution`` nesting is consulted next -- the two
     are mutually exclusive report shapes, never both present at once.
@@ -666,13 +668,10 @@ def run_outcome_dict_for_scan(
     the last-resort fallback, via :func:`worst_real_verdict`, deriving both
     the compat-exit contribution and the precise ``compatibility`` verdict
     -- not reducible to a bare int, since NO_CHANGE/COMPATIBLE/COMPATIBLE_
-    WITH_RISK all share exit code ``0``. A completed member's result is
-    never lost just because a later member aborted and dominates
-    ``verdict``/``exit_code``.
+    WITH_RISK all share exit code ``0``.
 
     *member_evidence_contract_error*/*member_not_comparable*/*bundle_
-    incomplete* forward unchanged to :func:`run_outcome_for_scan_fields` --
-    see that function's own docstring.
+    incomplete* forward unchanged -- see that function's own docstring.
     """
     compat_exit_code = scan_report_severity_exit_code(report)
     if compat_exit_code is None:
@@ -689,6 +688,7 @@ def run_outcome_dict_for_scan(
         exit_code,
         severity_exit_code=compat_exit_code,
         contract_coverage_contribution=scan_report_coverage_contribution(report),
+        analysis_assurance_contribution=scan_report_assurance_contribution(report),
         member_evidence_contract_error=member_evidence_contract_error,
         member_not_comparable=member_not_comparable,
         bundle_incomplete=bundle_incomplete,
