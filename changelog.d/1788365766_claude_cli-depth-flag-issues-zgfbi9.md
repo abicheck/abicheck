@@ -51,7 +51,10 @@
   for this operand shape, so identifying which symbol broke needed a
   separate single-pair `compare`, an `--output-dir` re-run, or JSON. Reuses
   the same capped per-library finding list JSON already carried, noting
-  when a library's list was truncated.
+  when a library's list was truncated -- that note no longer misdirects to
+  `--format json`, whose own `findings` field is the identical capped
+  projection; only `--output-dir` (or an individual re-run) has the
+  complete list.
 - **A `binding`-only suppression/reclassify selector now gets a dedicated,
   actionable error** naming the two supported workarounds
   (`symbol_pattern: '.*'` or a real narrowing selector) instead of the
