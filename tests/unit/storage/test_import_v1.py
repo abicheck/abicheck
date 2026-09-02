@@ -185,6 +185,50 @@ class TestImportLegacySnapshot:
                 source_schema_version=malformed,
             )
 
+    def test_export_refuses_a_section_payload_missing_a_required_field(
+        self,
+    ) -> None:
+        """A section whose *object* hashes and decodes fine can still have
+        lost a field within its own JSON content -- `join_legacy_document`
+        alone only checks that every *present* key belongs to the right
+        section, not that every field a real write always includes is
+        present. Left unchecked, dropping `functions` from the
+        "declarations" payload would silently read back as `[]` once
+        `snapshot_from_dict` parses the rebuilt document -- a false symbol
+        removal, not a loud failure (Codex review)."""
+        import dataclasses
+
+        from abicheck.storage.package import ObjectRef
+
+        # `snapshot_to_dict()` always emits `functions` (via `asdict()`, as
+        # `[]` when there are none) -- the "declarations" section carries
+        # the key regardless of whether any function is actually present,
+        # so an empty snapshot already exercises the key-presence gap.
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        artifact = manifest.artifact_refs[0]
+        old_ref = artifact.sections["declarations"]
+        tampered = dict(store.get(old_ref.digest))
+        payload = dict(tampered["payload"])
+        assert "functions" in payload
+        del payload["functions"]
+        tampered["payload"] = payload
+        new_digest = store.put(tampered)
+        tampered_artifact = dataclasses.replace(
+            artifact,
+            sections={
+                **artifact.sections,
+                "declarations": ObjectRef(kind="declarations", digest=new_digest),
+            },
+        )
+        with pytest.raises(ValueError, match="functions"):
+            export_legacy_snapshot(
+                tampered_artifact,
+                store=store,
+                source_schema_version=manifest.versions.source_schema_version,
+            )
+
     def test_export_refuses_a_non_int_source_schema_version(self) -> None:
         doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
         store = InMemoryObjectStore()
@@ -272,6 +316,15 @@ class TestImportLegacySnapshot:
             "library": "libfoo.so.1",
             "version": "1.0.0",
             "schema_version": 7,
+            # A real (even old) `snapshot_to_dict()` document always carries
+            # every `AbiSnapshot` field via `asdict()`, these included --
+            # `missing_required_section_fields` now enforces that the
+            # rebuilt "provenance" section isn't missing them.
+            "language_profile": None,
+            "dependency_info": None,
+            "git_commit": None,
+            "git_tag": None,
+            "created_at": None,
             "evidence_pack": {
                 "schema_version": 1,
                 "content_hash": "sha256:abc",

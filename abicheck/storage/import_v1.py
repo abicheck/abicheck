@@ -102,6 +102,7 @@ from .guards import mapping as _mapping
 from .legacy_sections import (
     SCHEMA_VERSION_KEY,
     join_legacy_document,
+    missing_required_section_fields,
     split_legacy_document,
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
@@ -302,9 +303,13 @@ def export_legacy_snapshot(
 
     Raises `ValueError` if *artifact* names a section kind this module does
     not recognize (`legacy_section_from_dto`/`join_legacy_document` refuse
-    it), if the store cannot produce a section's referenced object
-    (surfaces as whatever `store.get()` itself raises — `KeyError`/
-    `ValueError` for `DirectoryObjectStore`), or if *source_schema_version*
+    it), if a section's own payload is missing a field a real write always
+    includes (`missing_required_section_fields` -- a truncated/hand-edited
+    section that hashed and decoded fine but has lost content within its
+    own JSON, Codex review), if the store cannot produce a section's
+    referenced object (surfaces as whatever `store.get()` itself raises —
+    `KeyError`/`ValueError` for `DirectoryObjectStore`), or if
+    *source_schema_version*
     is not a positive int -- `StorageVersions.source_schema_version`
     normalizes a missing or malformed `manifest.json` value to `0`, its own
     "unstated" sentinel (the same convention `import_legacy_snapshot`'s own
@@ -344,7 +349,26 @@ def export_legacy_snapshot(
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))
         else:
-            legacy_sections[section_kind] = legacy_section_from_dto(dto)
+            payload = legacy_section_from_dto(dto)
+            # A section whose *object* hashes and decodes fine can still
+            # have lost a field within its own JSON content (a truncated or
+            # hand-edited payload) -- `join_legacy_document` below only
+            # checks that every *present* key belongs to this section, not
+            # that every field a real write always includes is present.
+            # Left unchecked, a missing field silently reads back as its
+            # empty/default value once `snapshot_from_dict` parses the
+            # rebuilt document, turning lost evidence into confirmed absence
+            # (Codex review).
+            missing = missing_required_section_fields(section_kind, payload)
+            if missing:
+                raise ValueError(
+                    f"artifact {artifact.artifact_id!r} section "
+                    f"{section_kind!r} -> {ref.digest!r} is missing "
+                    f"field(s) {sorted(missing)} a real write always "
+                    "includes -- the section's stored content is truncated "
+                    "or was hand-edited"
+                )
+            legacy_sections[section_kind] = payload
     document.update(join_legacy_document(legacy_sections))
     document[SCHEMA_VERSION_KEY] = source_schema_version
     return document

@@ -77,6 +77,7 @@ from .legacy_sections import (
     LEGACY_SECTION_KINDS,
     SCHEMA_VERSION_KEY,
     join_legacy_document,
+    missing_required_section_fields,
     split_legacy_document,
 )
 from .package import (
@@ -144,6 +145,7 @@ __all__ = [
     "legacy_section_from_dto",
     "legacy_section_to_dto",
     "migrate_section_dto",
+    "missing_required_section_fields",
     "object_relpath",
     "raw_digest",
     "semantic_digest",
