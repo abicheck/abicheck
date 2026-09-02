@@ -98,6 +98,67 @@ def test_old_scan_abort_report_reads_the_nested_diff_exit_shape() -> None:
     assert run_outcome["operational"] == "budget_overflow"
 
 
+def test_old_scan_set_report_recovers_a_completed_member_verdict_from_budget_overflow() -> (
+    None
+):
+    """Codex review, fresh evidence: a pre-1.24 `--artifact-set` scan report
+    (before ScanSetResult.to_dict() carried run_outcome itself) has no
+    diff/exit block for backfill_run_outcome's report= reader to find a
+    compatibility contribution in -- so a set-level BUDGET_OVERFLOW/
+    BUNDLE_INCOMPLETE erased a real, already-completed per_artifact member
+    result (compatibility: null) unless the member/bundle verdicts are
+    recovered from the legacy per_artifact/bundle_verdict envelope, the
+    same way ScanSetResult.to_dict()'s own member_verdicts= wiring already
+    does for a native writer."""
+    report = {
+        "scan_schema_version": "1.23",
+        "verdict": "BUDGET_OVERFLOW",
+        "exit_code": 5,
+        "per_artifact": [
+            {"artifact": "a.so", "verdict": "COMPATIBLE_WITH_RISK", "exit_code": 0},
+            {"artifact": "b.so", "verdict": "BUDGET_OVERFLOW", "exit_code": 5},
+        ],
+        "bundle_verdict": None,
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "COMPATIBLE_WITH_RISK"
+    assert run_outcome["operational"] == "budget_overflow"
+
+
+def test_old_operational_error_report_preserves_extraction_error() -> None:
+    """Codex review, fresh evidence: a pre-2.48 resolve-baseline-failure
+    report (build_operational_error_report's own shape) has no severity
+    block, so the ordinary-report fallback previously derived gate: none
+    from the legacy verdict mapping of "ERROR" (unrecognized -> compatibility
+    stays None, exit_code defaults to 0) and discarded the operational axis
+    the report actually recorded."""
+    report = {
+        "verdict": "ERROR",
+        "operational_errors": [{"kind": "no_credentials", "message": "boom"}],
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] is None
+    assert run_outcome["operational"] == "extraction_error"
+    assert run_outcome["gate"] == "none"
+
+
+def test_old_bootstrap_report_preserves_lifecycle() -> None:
+    report = {"verdict": "NO_BASELINE", "baseline_bootstrap": True}
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["lifecycle"] == "bootstrap"
+    assert run_outcome["operational"] == "none"
+
+
+def test_old_new_target_report_preserves_lifecycle() -> None:
+    report = {"verdict": "NEW_TARGET", "baseline_new_target": True}
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["lifecycle"] == "new_target"
+
+
 def test_old_release_report_gets_backfilled_run_outcome() -> None:
     report = {
         "libraries": [{"name": "a", "verdict": "BREAKING"}],

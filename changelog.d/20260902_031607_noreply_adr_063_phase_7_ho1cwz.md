@@ -275,6 +275,25 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   owner (`model.change_catalog.registry`) rather than through the
   `change_registry_types` back-compat shim, so this new module doesn't add
   a fresh caller onto the legacy re-export path (Codex review).
+- **A legacy `--artifact-set` scan report's backfilled `run_outcome.
+  compatibility` no longer goes `null` just because the set-level verdict
+  is `BUDGET_OVERFLOW`/`BUNDLE_INCOMPLETE`.** A pre-1.24 report (before
+  `ScanSetResult.to_dict()` carried `run_outcome` itself) has no `diff`/
+  `exit` block to read a compatibility contribution from; `backfill_run_
+  outcome` now recovers the member/bundle verdicts from the legacy
+  `per_artifact`/`bundle_verdict` envelope and passes them through as
+  `member_verdicts`, so an already-completed member result survives
+  upgrade the same way it already does for a native writer (Codex review).
+- **A pre-2.48 synthetic Action report (`build_operational_error_report`/
+  `build_bootstrap_report`/`build_new_target_report`'s own shape, from
+  before those builders carried `run_outcome` themselves) no longer loses
+  its one real axis on backfill.** The generic-report fallback previously
+  defaulted every such report to `operational: none`/`lifecycle:
+  existing`; `backfill_run_outcome` now recognizes the `operational_
+  errors`/`baseline_bootstrap`/`baseline_new_target` marker keys each
+  builder writes and reuses `synthetic_run_outcome` for them, so a
+  resolve-baseline failure keeps `operational: extraction_error` and a
+  bootstrap/new-target pass keeps its `lifecycle` (Codex review).
 
 ### Changed
 

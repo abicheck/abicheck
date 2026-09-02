@@ -91,10 +91,16 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     top-level ``verdict`` alone, so a legacy release whose top-level
     verdict is the ``"ERROR"``/``"not_comparable"`` sentinel does not lose
     a real completed ``BREAKING``/``API_BREAK`` library result on upgrade
-    (Codex review, fresh evidence). A native compare-shaped report (neither
-    of the above) derives ``gate`` from whichever exit code is available
-    (``severity.exit_code`` if present, else the legacy verdict mapping)
-    and ``compatibility`` from ``verdict`` directly.
+    (Codex review, fresh evidence). A pre-2.48 synthetic report (marked by
+    ``operational_errors``/``baseline_bootstrap``/``baseline_new_target`` --
+    ``check_report.py``'s own builders' sentinel keys, mirrored here since
+    this leaf may not import that module) reuses :func:`synthetic_run_
+    outcome` so its one real axis (``operational``/``lifecycle``) survives
+    upgrade instead of defaulting away (Codex review, fresh evidence). A
+    native compare-shaped report (none of the above) derives ``gate`` from
+    whichever exit code is available (``severity.exit_code`` if present,
+    else the legacy verdict mapping) and ``compatibility`` from ``verdict``
+    directly.
     """
     if "run_outcome" in out:
         return
@@ -117,12 +123,32 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             nested_exit = diff.get("exit") if isinstance(diff, dict) else None
             if isinstance(nested_exit, dict):
                 report = {**out, "exit": nested_exit}
+        # A pre-1.24 artifact-set (`--artifact-set`) report -- before
+        # `ScanSetResult.to_dict()` carried `run_outcome` itself -- has no
+        # `diff`/`exit` block at all for `report=` to read a compatibility
+        # contribution out of, so a set-level BUDGET_OVERFLOW/BUNDLE_
+        # INCOMPLETE would otherwise backfill to `compatibility: null` even
+        # though an earlier `per_artifact` member (or the bundle audit
+        # itself) already completed with a real result (Codex review, fresh
+        # evidence -- the legacy-backfill sibling of the fix `ScanSetResult.
+        # to_dict()`'s own `member_verdicts=` wiring already applies to a
+        # *native* writer's report).
+        member_verdicts: list[object] | None = None
+        per_artifact = out.get("per_artifact")
+        if isinstance(per_artifact, list):
+            member_verdicts = [
+                entry.get("verdict")
+                for entry in per_artifact
+                if isinstance(entry, dict)
+            ]
+            member_verdicts.append(out.get("bundle_verdict"))
         out["run_outcome"] = run_outcome_dict_for_scan(
             str(raw_verdict) if raw_verdict is not None else "",
             exit_code
             if isinstance(exit_code, int) and not isinstance(exit_code, bool)
             else 0,
             report=report,
+            member_verdicts=member_verdicts,
         )
         return
     from ..change_registry_types import Verdict
@@ -188,6 +214,34 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             release_verdict,
             exit_decision,
         )
+        return
+
+    # A pre-2.48 synthetic Action report -- before `build_operational_
+    # error_report`/`build_bootstrap_report`/`build_new_target_report`
+    # carried `run_outcome` themselves -- never ran a real comparison at
+    # all, so the ordinary-report fallback below (which derives `gate` from
+    # `verdict`/`severity.exit_code`) would misread each one: a resolve-
+    # baseline failure's `verdict: "ERROR"` collapses onto the identical
+    # generic-error handling `libraries`-shaped reports use, and neither
+    # bootstrap/new-target sentinel carries a `severity` block at all, so
+    # both silently defaulted to `gate: none`/`operational: none`/
+    # `lifecycle: existing` -- discarding the one axis (`operational`/
+    # `lifecycle`) each report actually recorded (Codex review, fresh
+    # evidence). Recognized by the same marker keys each builder writes
+    # (`operational_errors`/`baseline_bootstrap`/`baseline_new_target`),
+    # never by `verdict` alone, since `check_report_run_outcome.py` may not
+    # import `check_report.py`'s own sentinel constants (that direction
+    # would be circular -- `check_report.py` already imports this module).
+    if out.get("operational_errors"):
+        out["run_outcome"] = synthetic_run_outcome(
+            operational=OperationalStatus.EXTRACTION_ERROR
+        )
+        return
+    if out.get("baseline_bootstrap") is True:
+        out["run_outcome"] = synthetic_run_outcome(lifecycle=TargetLifecycle.BOOTSTRAP)
+        return
+    if out.get("baseline_new_target") is True:
+        out["run_outcome"] = synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET)
         return
 
     severity = out.get("severity")
