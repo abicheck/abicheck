@@ -157,7 +157,10 @@ import re
 from collections.abc import Iterable, Mapping
 
 from ..model.declarations import Function, Variable
-from ..model.declarator_qualifiers import _is_declarator_group
+from ..model.declarator_qualifiers import (
+    _is_declarator_group,
+    _split_at_trailing_param_list,
+)
 from ..model.entities import EnumType, RecordType
 from ..model.fact import Fact
 from ..model.identity import EntityId
@@ -177,25 +180,47 @@ __all__ = ["normalize_header_ast"]
 #: and :func:`_variable_spelling_fact` below.
 _UNRESOLVED_TYPE_SENTINEL = "?"
 
-#: Whole-word ``const``/``volatile``/``restrict`` matcher for
+#: Whole-word ``const``/``volatile`` matcher for
 #: :func:`_variable_top_level_cv_qualification`'s own depth-aware scan --
 #: mirrors ``model.declarator_qualifiers._CV_WORD_RE`` (duplicated rather
 #: than imported, matching that module's own reasoning for not sharing it
 #: with its sibling ``signature_normalization.py``: leaf modules on two
-#: different sides of the `model`/`extract` boundary, per ADR-063 D10),
-#: extended with ``restrict`` -- unlike that sibling's own word-matcher,
-#: this one feeds ``CanonicalEntity.cv_qualification`` directly (see
-#: :data:`~abicheck.model.semantic_ir.CV_QUALIFIER_ORDER`, which names all
-#: three), not a signature-identity spelling that deliberately excludes
-#: ``restrict`` as a non-discriminating qualifier (Codex review, fifth
-#: round, fresh evidence: clang's own variable qualType spells a
-#: restrict-qualified pointer verbatim, e.g. ``"int *restrict"`` for
-#: ``int * restrict gp`` -- unlike castxml's ``type_name_uncached``, which
-#: never emits the word at all, by the deliberate choice recorded in that
-#: function's own ``CvQualifiedType`` branch. Recognizing it here just
-#: means a clang-produced variable's real top-level qualification is
-#: recorded rather than silently read back as an empty tuple).
-_CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile|restrict)\b")
+#: different sides of the `model`/`extract` boundary, per ADR-063 D10).
+#:
+#: **Deliberately does NOT match ``restrict``, even though
+#: ``CanonicalEntity.cv_qualification``'s own vocabulary
+#: (:data:`~abicheck.model.semantic_ir.CV_QUALIFIER_ORDER`) names it
+#: alongside ``const``/``volatile`` (Codex review, sixth round, fresh
+#: evidence -- reverting a fifth-round addition).** clang's own variable
+#: qualType spells a restrict-qualified pointer verbatim (``"int
+#: *restrict"`` for ``int * restrict gp``); castxml's ``type_name_uncached``
+#: never emits the word at all, by deliberate choice (see that function's
+#: own ``CvQualifiedType`` branch: ``restrict`` has zero ABI/mangling effect
+#: and is tracked as its own fact for *parameters*, ``Param.is_restrict`` --
+#: no equivalent structural fact exists for a *variable* today). A plain
+#: text scan for the word therefore reports two different things depending
+#: on producer: for clang, a real, present qualifier; for castxml, an
+#: absence that isn't *confirmed* -- castxml is structurally blind to it,
+#: not evidence that the declaration lacks it. Recognizing it anyway (the
+#: fifth round's own fix) made every castxml-produced ``CanonicalEntity``
+#: silently claim a confirmed ``()`` for a qualifier its own backend cannot
+#: see, which `merge_semantic_ir`'s backfill treats identically to a
+#: genuine, deliberate absence: a hybrid dump then downgrades clang's real
+#: `("restrict",)` to a mere disagreement against castxml's structurally-
+#: unable-to-know-better ``()``, discarding it as the merged/authoritative
+#: value rather than backfilling. `Fact[tuple[str, ...]]` cannot express
+#: "confirmed for two of three qualifiers, blind to the third" within one
+#: fact -- fixing this properly needs a per-variable structural
+#: ``is_restrict`` fact populated by both backends the way ``Param.
+#: is_restrict`` already is (``resolve_cv_restrict``/
+#: ``clang_param_is_restrict``, both directly reusable for a variable's own
+#: type id/node), almost certainly with its own reliability-tracking
+#: ``AbiSnapshot`` flag mirroring ``clang_restrict_facts_reliable`` -- a
+#: model-shape decision for a future slice, not a normalizer-only change,
+#: the same reasoning the third slice already gave for leaving a function's
+#: ``ref_qualifier``/variadic status out of this IR. Left unset (never
+#: reported) here rather than reported unreliably.
+_CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile)\b")
 
 #: castxml's own literal wrapper prefix for an ``_Atomic`` type
 #: (``extract/headers/castxml/type_resolution.py``'s ``AtomicType`` branch)
@@ -359,6 +384,27 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
     lookahead, is what follows a bare/qualified sigil rather than a type"
     test) so a genuine parameter-list/template/`decltype` paren still counts
     normally, and only the declarator's own grouping paren is skipped.
+
+    **A pointer-to-member-function's own trailing parameter list ends the
+    region this function reads qualifiers from (Codex review, sixth round,
+    fresh evidence).** For ``void (C::*pmf)(int) const``, the ``const``
+    after the parameter list qualifies the POINTED-TO member function
+    itself, not the ``pmf`` pointer variable -- the identical "member
+    qualifier vs. pointer's own qualifier" distinction
+    ``model.declarator_qualifiers._canonicalize_member_qualifiers`` already
+    draws for a parameter's own type. An earlier revision scanned the
+    entire text after the sigil (correct for a bare pointer, e.g. ``int *
+    const``, which has no trailing parameter list at all) and wrongly
+    attributed the member function's own ``const`` to the pointer variable
+    too, reporting an identical ``("const",)`` for both a mutable and a
+    genuinely const member-function pointer. This reuses
+    ``_split_at_trailing_param_list`` (the same primitive
+    ``canonicalize_function_signature_param_type`` already uses for the
+    identical split) to find the declarator's own trailing parameter list,
+    if any, and reads qualifiers only from the text BEFORE it -- the
+    pointer's own by-value qualifier region (``void (C::* const)(int)``'s
+    `` const`` sits there, correctly attributed) -- never from the text
+    after the parameter list closes.
     """
     depth = 0
     last_sigil = -1
@@ -392,7 +438,16 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
         elif ch in "*&" and depth == 0:
             last_sigil = i
         i += 1
-    region = type_str[last_sigil + 1 :] if last_sigil != -1 else type_str
+    raw_suffix = type_str[last_sigil + 1 :] if last_sigil != -1 else type_str
+    split = _split_at_trailing_param_list(raw_suffix)
+    # A trailing parameter list means *raw_suffix* is a declarator (a
+    # callback or pointer-to-member-function): only the text BEFORE it is
+    # the pointer's own by-value qualifier -- text after belongs to the
+    # pointed-to function itself, never this variable's own qualification
+    # (see this function's own docstring, "A pointer-to-member-function's
+    # own trailing parameter list..."). No split at all (a bare pointer, or
+    # the by-value case with no sigil) reads the whole region, unchanged.
+    region = split[0] if split is not None else raw_suffix
     depth = 0
     found: list[str] = []
     i = 0

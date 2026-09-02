@@ -622,18 +622,25 @@ def test_normalize_header_ast_const_function_pointer_variable_is_top_level_const
     assert entity.cv_qualification.value == ("const",)
 
 
-def test_normalize_header_ast_restrict_variable_is_recognized() -> None:
-    """Clang's own variable qualType spells a restrict-qualified pointer
-    verbatim (``"int *restrict"`` for ``int * restrict gp``) -- unlike
-    castxml, which never emits the word at all (a deliberate choice, since
-    ``restrict`` has no ABI/mangling effect and is tracked as its own
-    ``Param.is_restrict`` fact for parameters). ``CanonicalEntity.
-    cv_qualification``'s vocabulary names ``restrict`` alongside ``const``/
-    ``volatile`` (``CV_QUALIFIER_ORDER``), so a variable's own top-level
-    ``restrict`` must be recognized the same way (Codex review, fifth
-    round, fresh evidence: an earlier revision only matched ``const``/
-    ``volatile`` and silently reported ``()`` for a real, present
-    qualifier)."""
+def test_normalize_header_ast_restrict_variable_is_deliberately_not_recognized() -> (
+    None
+):
+    """``restrict`` is deliberately NOT recognized for a variable, even
+    though clang's own qualType spells it verbatim (``"int *restrict"`` for
+    ``int * restrict gp``) and ``CanonicalEntity.cv_qualification``'s
+    vocabulary names it alongside ``const``/``volatile`` (Codex review,
+    sixth round, fresh evidence -- reverting a fifth-round addition):
+    castxml's ``type_name_uncached`` never emits the word at all (a
+    deliberate choice on castxml's own side, unlike a function *parameter*'s
+    ``Param.is_restrict``, which both backends populate structurally), so a
+    plain text scan reports a clang-only, backend-asymmetric answer -- a
+    castxml-produced entity would claim a CONFIRMED absence of a qualifier
+    its own backend structurally cannot see, which `merge_semantic_ir`'s
+    backfill then treats as a genuine two-sided disagreement against
+    clang's real ``("restrict",)`` instead of backfilling it. See this
+    module's own `_CV_KEYWORD_RE` comment for the full reasoning and what a
+    real fix needs (a structural, reliability-tracked ``Variable.
+    is_restrict`` fact, not a normalizer-only change)."""
     var = Variable(
         name="g_ptr",
         mangled="g_ptr",
@@ -649,7 +656,62 @@ def test_normalize_header_ast_restrict_variable_is_recognized() -> None:
         variables=[var],
     )
     (entity,) = ir.occurrences.values()
-    assert entity.cv_qualification.value == ("restrict",)
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_member_function_pointer_variable_excludes_pointee_qualifier() -> (
+    None
+):
+    """A mutable pointer to a cv-qualified member function (``void
+    (C::*pmf)(int) const``) reports NO top-level qualification of its own --
+    the ``const`` after the parameter list qualifies the POINTED-TO member
+    function, not the ``pmf`` pointer variable itself (Codex review, sixth
+    round, fresh evidence: an earlier revision scanned the whole text after
+    the sigil and wrongly attributed the member function's own ``const`` to
+    the pointer variable, so a mutable and a genuinely const member-function
+    pointer both reported ``("const",)``)."""
+    var = Variable(
+        name="g_pmf",
+        mangled="g_pmf",
+        type="void (C::*)(int) const",
+        entity_id=entity_id_for_variable((), "g_pmf", mangled_name="g_pmf"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_member_function_pointer_variable_keeps_own_qualifier() -> (
+    None
+):
+    """A genuinely CONST member-function-pointer variable (``void (C::*
+    const)(int)``) -- the qualifier sits BEFORE the trailing parameter list,
+    directly after the declarator's own sigil, so it is correctly attributed
+    to the pointer variable itself, unlike the pointed-to function's own
+    trailing qualifier in the sibling test above."""
+    var = Variable(
+        name="g_pmf",
+        mangled="g_pmf",
+        type="void (C::* const)(int)",
+        entity_id=entity_id_for_variable((), "g_pmf", mangled_name="g_pmf"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
 
 
 def test_normalize_header_ast_unresolved_variable_type_is_failed() -> None:

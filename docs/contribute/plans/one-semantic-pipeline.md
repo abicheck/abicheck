@@ -12784,6 +12784,55 @@ same treatment a bare `"?"` already gets; `_Atomic(...)` is also real,
 valid C11 syntax for an otherwise fully-resolved type (`"_Atomic(int)"`),
 which this special-casing does not disturb.
 
+**A declarator-grouping paren is transparent to `_variable_top_level_cv_
+qualification`'s own sigil search, not depth-increasing (Codex review, PR
+#1012, fifth round, fresh evidence).** A const function-pointer/
+pointer-to-array/pointer-to-member-function variable wraps its own sigil in
+a real, syntactic `(...)` group -- clang spells `"int (*const)(int)"` for
+`int (* const fp)(int)` -- which an ordinary opaque-paren depth count
+treats exactly like a parameter list, hiding the sigil at depth 1 and
+reporting no qualification at all. Reuses `model.declarator_qualifiers.
+_is_declarator_group`, the identical classifier `signature_normalization.
+canonicalize_function_signature_param_type` already applies for this exact
+shape. The same round also extended the cv-keyword matcher to recognize
+`restrict` -- **reverted the very next round** (see below).
+
+**Sixth round, two further fixes, one addition and one revert (fresh
+evidence each).** (1) A pointer-to-member-function's own trailing parameter
+list now ends the region `_variable_top_level_cv_qualification` reads
+qualifiers from, reusing `_split_at_trailing_param_list` (the identical
+primitive `canonicalize_function_signature_param_type` already uses for
+this split): for `"void (C::*)(int) const"`, the `const` after the
+parameter list qualifies the POINTED-TO member function, not the pointer
+variable itself, and the fifth round's naive whole-suffix scan wrongly
+attributed it to the variable, reporting an identical `("const",)` for both
+a mutable and a genuinely const member-function pointer. (2) The fifth
+round's `restrict` recognition is reverted: `CanonicalEntity.
+cv_qualification`'s vocabulary names `restrict` alongside `const`/
+`volatile`, but recognizing it via a plain text scan is backend-asymmetric
+-- clang's own qualType spells it verbatim (`"int *restrict"`), while
+castxml's `type_name_uncached` never emits the word at all, by castxml's
+own deliberate choice (unlike a function *parameter*'s `Param.is_restrict`,
+which both backends already populate structurally). A castxml-produced
+entity therefore claimed a CONFIRMED `()` for a qualifier its own backend
+structurally cannot see, and `merge_semantic_ir`'s backfill (which only
+ever backfills a *non*-present base fact) treated that false confirmation
+identically to a genuine, deliberate absence -- a hybrid dump then
+downgraded clang's real `("restrict",)` to a mere two-sided disagreement
+against castxml's structurally-blind `()`, discarding it as the merged/
+authoritative value instead of backfilling it. `Fact[tuple[str, ...]]`
+cannot express "confirmed for two of three qualifiers, blind to the third"
+within one fact; a real fix needs a structural, reliability-tracked
+`Variable.is_restrict` fact populated by both backends the way `Param.
+is_restrict` already is (`resolve_cv_restrict`/`clang_param_is_restrict`,
+both directly reusable for a variable's own type id/node), almost
+certainly with its own `AbiSnapshot` reliability flag mirroring
+`clang_restrict_facts_reliable` -- a model-shape decision for a future
+slice, not a normalizer-only change, the same reasoning already given for
+leaving a function's `ref_qualifier`/variadic status out of this IR.
+`restrict` is therefore left unrecognized (never reported) for a variable
+today, rather than reported unreliably.
+
 `dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
 the second slice deliberately left unwired, per that slice's own note) now
 populate `semantic_ir` too, via a new shared choke point,

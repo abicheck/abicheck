@@ -47,12 +47,22 @@
   pointer-to-array/pointer-to-member-function variable (clang's own spelling
   for `int (* const fp)(int)` is `"int (*const)(int)"`) reports its real
   top-level `const` instead of an empty tuple from a sigil hidden one
-  nesting level too deep, and now recognizes a top-level `restrict` the
-  same way — `CanonicalEntity.cv_qualification`'s vocabulary already names
-  `restrict` alongside `const`/`volatile`, and clang's own variable
-  qualType spells a restrict-qualified pointer verbatim (`"int *restrict"`
-  for `int * restrict gp`), unlike castxml, which never emits the word by
-  deliberate choice.
+  nesting level too deep, and restricts the trailing-qualifier scan to
+  before a pointer-to-member-function's own trailing parameter list
+  (reusing `_split_at_trailing_param_list`) so the pointed-to member
+  function's own qualifier (`void (C::*)(int) const`'s `const`) is never
+  wrongly attributed to the pointer variable itself. `restrict` is
+  deliberately NOT recognized for a variable, even though `CanonicalEntity.
+  cv_qualification`'s vocabulary names it alongside `const`/`volatile`:
+  recognizing it via a plain text scan is backend-asymmetric (clang's
+  qualType spells it verbatim; castxml's `type_name_uncached` never emits
+  the word at all, by castxml's own deliberate choice) and made a
+  castxml-produced entity claim a confirmed absence of a qualifier its own
+  backend cannot see, which a hybrid merge then treated as a genuine
+  disagreement against clang's real evidence instead of backfilling it. A
+  correct fix needs a structural, reliability-tracked `Variable.is_restrict`
+  fact populated by both backends the way `Param.is_restrict` already is —
+  a model-shape decision for a future slice, not a normalizer-only change.
 
 - **`SemanticIR` now also canonicalizes constants** (ADR-063 Phase 6's
   fourth slice). Both header-AST backends already attach a real `entity_id`
