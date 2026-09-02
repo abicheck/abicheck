@@ -607,10 +607,14 @@ def test_hub_must_sit_directly_under_the_first_sequences_tab(
     msgs = _run_with_nav(tmp_path, moved)
     assert any("Learn: the hub learn/hub.md must sit directly under" in m for m in msgs)
     assert any("Concepts / Concepts: the hub" in m for m in msgs)
+
+
+def test_hub_inside_a_step_group_is_an_error(tmp_path: Path) -> None:
     inside = NAV_OK.replace("    - Overview: learn/hub.md\n", "").replace(
         '    - "0. Start":\n', '    - "0. Start":\n      - Overview: learn/hub.md\n'
     )
     msgs = _run_with_nav(tmp_path, inside)
+    assert any("Learn: the hub learn/hub.md must sit directly under" in m for m in msgs)
     assert any("Learn / 0. Start: the hub" in m for m in msgs)
 
 
