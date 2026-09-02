@@ -237,7 +237,18 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         ):
             severity = out.get("severity")
             sev_exit = severity.get("exit_code") if isinstance(severity, dict) else None
-            if not isinstance(sev_exit, int) or isinstance(sev_exit, bool):
+            if (
+                not isinstance(sev_exit, int)
+                or isinstance(sev_exit, bool)
+                or sev_exit not in _VALID_COMPAT_CONTRIBUTION
+            ):
+                # `severity.exit_code` is just as untrustworthy as `exit.
+                # compatibility_contribution` above when it's out-of-scheme
+                # (Codex review, fresh evidence): forwarding e.g. `99`
+                # unchecked would let `run_outcome_dict_for_release`'s own
+                # scheme-membership check silently normalize it to `0`
+                # (gate: none) instead of falling through to the legacy
+                # verdict mapping.
                 sev_exit = (
                     legacy_exit_code(worst_member) if worst_member is not None else 0
                 )

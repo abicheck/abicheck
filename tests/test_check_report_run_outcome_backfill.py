@@ -357,6 +357,26 @@ def test_legacy_release_report_rejects_an_out_of_range_compatibility_contributio
     assert run_outcome["gate"] == "abi_breaking"
 
 
+def test_legacy_release_report_rejects_an_out_of_range_severity_fallback() -> None:
+    """Codex review, fresh evidence beyond the exit.compatibility_
+    contribution range fix above: the severity.exit_code fallback itself
+    was never range-checked -- a legacy BREAKING report missing exit.
+    compatibility_contribution but carrying a corrupted severity.exit_code
+    of 99 forwarded 99 unchecked, again letting run_outcome_dict_for_
+    release's own scheme-membership check silently normalize it to 0."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "BREAKING"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "BREAKING",
+        "exit": {},
+        "severity": {"exit_code": 99, "blocking": True, "blocking_categories": []},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["gate"] == "abi_breaking"
+
+
 def test_report_already_carrying_run_outcome_is_left_untouched() -> None:
     sentinel = {
         "schema_version": "1.0",
@@ -369,3 +389,35 @@ def test_report_already_carrying_run_outcome_is_left_untouched() -> None:
     report = {"verdict": "BREAKING", "run_outcome": dict(sentinel)}
     out = _augment(dict(report))
     assert out["run_outcome"] == sentinel
+
+
+def test_removed_library_escalation_updates_run_outcome_gate_with_no_severity_block() -> (
+    None
+):
+    """Codex review (P1), fresh evidence: a pre-severity legacy
+    compare-release report (no severity block at all) can still carry
+    run_outcome (backfill_run_outcome runs first, inside augment_report,
+    and always produces one) -- _escalate_removed_library_severity's own
+    severity-gated early return previously skipped the run_outcome.gate
+    escalation too, so a --fail-on-removed-library exit (8) left run_
+    outcome.gate at its unescalated value even though policy_gate_decision
+    itself correctly recorded "fail"."""
+    from abicheck.buildsource.check_report import augment_report
+
+    report = {
+        "libraries": [{"name": "a", "verdict": "COMPATIBLE"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "COMPATIBLE",
+        "exit": {"compatibility_contribution": 0},
+    }
+    out = augment_report(
+        report,
+        name="libfoo",
+        profile_id="p",
+        baseline_channel="c",
+        requested_depth="headers",
+        gate_mode="local",
+        analysis_exit_code=8,
+    )
+    assert out["run_outcome"]["gate"] == "abi_breaking"

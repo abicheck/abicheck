@@ -346,6 +346,33 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   an already-completed verdict, and a release/scan set can report one
   member's real result alongside a different member's independent
   operational failure (Codex review).
+- **`--fail-on-removed-library`'s exit-8 escalation now updates
+  `run_outcome.gate` even when the report carries no `severity` block at
+  all.** `_escalate_removed_library_severity`'s own `severity`-gated early
+  return previously skipped the `run_outcome.gate` escalation too on a
+  pre-severity legacy compare-release report -- deferred aggregation (which
+  reads structured-first) trusted the unescalated `gate: none` even though
+  `policy_gate_decision` itself correctly recorded `fail`. The two
+  escalations are now independent (Codex review).
+- **The `severity.exit_code` fallback for a legacy release's
+  `compatibility_contribution` is now also range-checked.** The out-of-
+  scheme-integer fix above closed the gap for `exit.compatibility_
+  contribution` itself, but its own fallback to `severity.exit_code` had
+  the identical, unchecked gap — a corrupted `severity.exit_code: 99`
+  forwarded unchanged instead of falling through to the legacy verdict
+  mapping (Codex review).
+- **`workflows/aggregate/gate.py`'s structured-first `run_outcome` reads —
+  both the ordinary top-level one and the scoped exemption's
+  `full_run_outcome` — now validate the complete schema shape, not merely
+  that `RunOutcome.from_dict` parses.** That reader is deliberately lenient
+  for its other callers (`compatibility`/`lifecycle` degrade silently
+  instead of failing, and `schema_version`/`assurance` aren't checked at
+  all), so a minimal, schema-incomplete `run_outcome` (e.g. `{"gate":
+  "none", "operational": "none"}`) previously read as authoritative — most
+  dangerously when no `severity` block exists at all to cross-check
+  against. Both reads now share one strict validator,
+  `_is_schema_valid_run_outcome`, checking every required key's declared
+  type/enum against `$defs.run_outcome` (Codex review, two rounds).
 
 ### Changed
 

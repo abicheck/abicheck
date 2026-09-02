@@ -452,6 +452,20 @@ class TestGateInfoFromReportDataStructuredFirst:
         with pytest.raises(_MalformedGate):
             GateInfo.from_report_data(data)
 
+    def test_incomplete_run_outcome_fails_closed_when_severity_is_absent(self):
+        """Codex review (P2), fresh evidence beyond the unparseable-value
+        fix above: RunOutcome.from_dict only requires gate/operational to
+        parse, so a minimal, schema-incomplete run_outcome (missing
+        schema_version/compatibility/assurance/lifecycle) previously passed
+        as authoritative -- most dangerously here, since with no severity
+        block at all there is no OTHER cross-check to catch it, and a
+        BREAKING report could read as gate: none."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {"run_outcome": {"gate": "none", "operational": "none"}}
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
     def test_gate_contradicting_severity_fails_closed(self):
         """Codex review (P2): both blocks individually parse, but disagree
         on the compatibility axis itself (severity says clean, run_outcome
@@ -604,6 +618,39 @@ class TestGateInfoFromReportDataStructuredFirst:
                 PolicyGateDecision.NONE, OperationalStatus.NONE
             ),
             "full_run_outcome": {"gate": "none", "operational": "none"},
+            "full_verdict": "BREAKING",
+            "used_by": ["app.so"],
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
+    def test_schema_invalid_full_run_outcome_values_do_not_bypass_the_check(self):
+        """Codex review (P2), fresh evidence beyond the required-key fix
+        above: requiring the six keys to be *present* still let schema-
+        invalid *values* through (schema_version: null, compatibility: {},
+        lifecycle: "bogus" all satisfy "key present" while RunOutcome.
+        from_dict silently ignores/defaults every one of them). The
+        exemption must validate the required fields' schema types/enums,
+        not only their names."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.NONE, OperationalStatus.NONE
+            ),
+            "full_run_outcome": {
+                "schema_version": None,
+                "compatibility": {},
+                "assurance": None,
+                "gate": "none",
+                "operational": "none",
+                "lifecycle": "bogus",
+            },
             "full_verdict": "BREAKING",
             "used_by": ["app.so"],
         }

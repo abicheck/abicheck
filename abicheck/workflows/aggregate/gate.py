@@ -15,6 +15,7 @@ from abicheck.change_registry_types import Verdict
 from abicheck.policy.outcome import (
     OperationalStatus,
     PolicyGateDecision,
+    TargetLifecycle,
     fold_gate_and_operational,
     operational_status_exit_code,
     policy_gate_decision_exit_code,
@@ -35,6 +36,46 @@ _LEGACY_SEVERITY: dict[Verdict, int] = {
     Verdict.API_BREAK: 2,
     Verdict.BREAKING: 4,
 }
+
+
+def _is_schema_valid_run_outcome(data: object) -> bool:
+    """Whether *data* is a complete, schema-valid ``$defs.run_outcome``
+    object (``compare_report.schema.json``) -- every required key present
+    *and* holding a value of the type/enum the schema declares, not merely
+    that :meth:`~abicheck.policy.outcome.RunOutcome.from_dict` parses it
+    (Codex review, fresh evidence, two rounds on two different callers):
+    that reader is deliberately lenient for its OTHER callers (which read
+    an already-genuine block back) -- ``compatibility``/``lifecycle``
+    degrade silently instead of failing, and it never looks at
+    ``schema_version``/``assurance`` at all. So ``schema_version: null``,
+    ``compatibility: {}``, and ``lifecycle: "bogus"`` all previously
+    survived undetected, at both the top-level ``run_outcome`` read
+    (:func:`_run_outcome_gate_and_operational`) and the scoped exemption's
+    ``full_run_outcome`` read (:func:`_has_valid_full_run_outcome`) --
+    shared here so neither can independently drift from the schema.
+    """
+    if not isinstance(data, Mapping):
+        return False
+    if not _RUN_OUTCOME_REQUIRED_KEYS.issubset(data.keys()):
+        return False
+    if not isinstance(data.get("schema_version"), str):
+        return False
+    compatibility = data.get("compatibility")
+    if compatibility is not None:
+        try:
+            Verdict(compatibility)
+        except ValueError:
+            return False
+    assurance = data.get("assurance")
+    if assurance is not None and not isinstance(assurance, Mapping):
+        return False
+    try:
+        PolicyGateDecision(data.get("gate"))
+        OperationalStatus(data.get("operational"))
+        TargetLifecycle(data.get("lifecycle"))
+    except ValueError:
+        return False
+    return True
 
 
 def _run_outcome_gate_and_operational(
@@ -60,13 +101,23 @@ def _run_outcome_gate_and_operational(
     read back structured-first; legacy ``severity``/``exit_code`` decoding
     is the named fallback for a report that predates this field, never the
     only path for one that carries it (ADR-063 D6).
+
+    A *schema-incomplete* ``run_outcome`` (missing one of ``schema_version``/
+    ``compatibility``/``assurance``/``lifecycle``, or holding a value outside
+    its declared enum/type) fails closed the same way an unparseable one does
+    (Codex review, fresh evidence) -- most dangerously when ``severity`` is
+    ALSO absent (a fresh-format report that predates ``severity``, or a
+    corrupted one), since :meth:`GateInfo.from_report_data` then has no
+    other cross-check at all and would otherwise trust a minimal, forged
+    ``{"gate": "none", "operational": "none"}`` as authoritative.
     """
     from abicheck.policy.outcome import RunOutcome
 
     if "run_outcome" not in data:
         return None
-    outcome = RunOutcome.from_dict(data.get("run_outcome"))
-    if outcome is None:
+    raw_run_outcome = data.get("run_outcome")
+    outcome = RunOutcome.from_dict(raw_run_outcome)
+    if outcome is None or not _is_schema_valid_run_outcome(raw_run_outcome):
         raise _MalformedGate(
             "'run_outcome' is present but not a valid RunOutcome block"
         )
@@ -109,24 +160,22 @@ def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
        already-genuine block back). A partially rewritten unscoped report
        could therefore forge a minimal two-key ``full_run_outcome: {"gate":
        ..., "operational": ...}`` alongside the other two markers and still
-       earn the exemption. This function additionally requires every key
-       ``$defs.run_outcome`` (``compare_report.schema.json``) declares
-       required -- ``schema_version``/``compatibility``/``assurance``/
-       ``gate``/``operational``/``lifecycle`` -- to actually be present, the
-       one property ``RunOutcome.from_dict`` deliberately doesn't enforce.
+       earn the exemption.
+    4. Requiring the six keys to be *present* (previous fix) still let
+       schema-invalid *values* through (Codex review, fresh evidence):
+       ``schema_version: null``, ``compatibility: {}``, ``lifecycle:
+       "bogus"`` all satisfy "key present" while being rejected by
+       ``$defs.run_outcome``'s own type/enum constraints. This function now
+       delegates to :func:`_is_schema_valid_run_outcome`, the same strict
+       validator :func:`_run_outcome_gate_and_operational` uses for the
+       ordinary top-level ``run_outcome`` read, so neither can
+       independently drift from the schema.
     """
-    from abicheck.policy.outcome import RunOutcome
-
     if "full_run_outcome" not in data or "full_verdict" not in data:
         return False
     if "used_by" not in data and "required_symbol_contract" not in data:
         return False
-    full_run_outcome = data.get("full_run_outcome")
-    if not isinstance(full_run_outcome, Mapping):
-        return False
-    if not _RUN_OUTCOME_REQUIRED_KEYS.issubset(full_run_outcome.keys()):
-        return False
-    return RunOutcome.from_dict(full_run_outcome) is not None
+    return _is_schema_valid_run_outcome(data.get("full_run_outcome"))
 
 
 def _run_outcome_blocking_categories(
