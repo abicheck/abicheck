@@ -38,7 +38,7 @@ spellings, per AGENTS.md's "fix the cause, not the instance".
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -270,7 +270,7 @@ class TestNoUnsyncedReplace:
         )
 
     def test_relative_paths_are_computed_platform_independently(self) -> None:
-        """`rel` must be built via `.as_posix()`, never bare `str(Path)`.
+        """`_rel` must be built via `.as_posix()`, never bare `str(Path)`.
 
         `Path.relative_to(...)` renders with the *host's native* separator
         — `str()` of a relative path is `abicheck\\dwarf_snapshot.py` on
@@ -282,19 +282,32 @@ class TestNoUnsyncedReplace:
         call sites read as unreviewed violations, and every genuinely-live
         allowlist entry read as stale, for every PR run on that lane.
 
-        Proven with `PureWindowsPath` so the difference is real even when
-        this test itself runs on POSIX, and pinned as a source-level
-        invariant (never the bare `str()` spelling anywhere in this
-        file) so a future edit re-adding the platform-dependent spelling at
-        a fourth call site fails immediately rather than silently reaching
-        the same Windows-only gap the first three did.
+        Exercises `_rel` itself, not just a source-text scan for one banned
+        spelling (Codex review): a scan checking only the literal bare-str
+        call, applied to `relative_to(...)`'s own result, stays green
+        through a refactor that assigns the relative path to a variable
+        before calling `str()`, renames `path`, or uses an f-string --
+        none of which change the underlying bug. A fake path object whose
+        `relative_to` returns a `PureWindowsPath` (rendered with a
+        backslash separator on *every* host, not just real Windows)
+        drives `_rel`'s real code end to end, so a regression in `_rel`'s
+        own implementation -- whatever its source spelling -- fails this
+        assertion directly, on any host.
         """
-        from pathlib import PureWindowsPath
 
-        windows_relative = PureWindowsPath("abicheck") / "dwarf_snapshot.py"
-        assert str(windows_relative) != windows_relative.as_posix()
-        assert windows_relative.as_posix() == "abicheck/dwarf_snapshot.py"
+        class _FakeWindowsPath:
+            def relative_to(self, _other: Path) -> PureWindowsPath:
+                return PureWindowsPath("abicheck") / "dwarf_snapshot.py"
 
+        result = _rel(_FakeWindowsPath())  # type: ignore[arg-type]
+        assert result == "abicheck/dwarf_snapshot.py"
+        assert "\\" not in result
+
+        # A source-level backstop for the same invariant, kept alongside
+        # the behavioral assertion above rather than in place of it: it
+        # catches a *reintroduction* immediately, by name, rather than only
+        # once some future edit's own behavior drifts enough to trip the
+        # assertion above.
         source = Path(__file__).read_text(encoding="utf-8")
         banned = "str" + "(path.relative_to("
         assert banned not in source, (

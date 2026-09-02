@@ -765,6 +765,47 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_str_enum_downcast_walk.py",
         ),
     ),
+    BugClass(
+        id="tooling.platform_dependent_path_key",
+        invariant=(
+            "A repo-relative path computed to serve as a lookup/comparison "
+            "key -- an allowlist entry, a cache key, anything compared "
+            "against a hand-written or previously-persisted forward-slash "
+            "string -- must render with `.as_posix()`, never bare "
+            "`str(Path)`. `str()` of a relative `Path` renders with the "
+            "*host's native* separator (backslash on Windows), so a key "
+            "computed that way silently fails to match every "
+            "forward-slash-spelled entry on Windows alone, in both "
+            "directions: an already-reviewed, allowlisted call site reads "
+            "as a fresh, unreviewed violation, and a genuinely live "
+            "allowlist entry reads as stale. Distinct from the "
+            "canonical-identity `environment_taint` shape this registry "
+            "otherwise tracks -- this is a path-*rendering* bug, not an "
+            "identity or environment-capture one, and it fails "
+            "deterministically on every Windows run rather than "
+            "intermittently."
+        ),
+        fixed_by=(997, 1004),
+        seed_tests=("tests/test_fact_bridged_replace_guard.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "This class's fix and seed test are scoped to the one "
+                    "file CI actually reported as broken "
+                    "(`tests/test_fact_bridged_replace_guard.py`). No "
+                    "repo-wide audit was run against the other AST-scan "
+                    "gates that compute a similar path-shaped lookup key "
+                    "(`scripts/check_ai_readiness.py`, "
+                    "`scripts/fact_detector_misuse.py`/`fact_field_"
+                    "readers.py` and their siblings) to confirm none of "
+                    "them share the identical `str(path.relative_to(...))` "
+                    "spelling -- a real, separate follow-up this class "
+                    "does not yet close."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1004",
+            ),
+        ),
+    ),
 )
 
 
