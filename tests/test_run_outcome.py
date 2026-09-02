@@ -903,6 +903,41 @@ class TestReleaseJsonRunOutcome:
         data = json.loads(out)
         assert data["run_outcome"]["operational"] == "extraction_error"
 
+    def test_removed_library_escalation_agrees_with_severity_block(self):
+        """Codex review (P2), fresh evidence: a severity-scheme release
+        using --fail-on-removed-library escalates run_outcome.gate to
+        abi_breaking even when ordinary findings contribute 0, but the
+        severity block emitted alongside it must escalate too (mirroring
+        buildsource/check_report.py's _escalate_removed_library_severity) --
+        otherwise GateInfo.from_report_data's own severity/run_outcome
+        contradiction check (this same PR) rejects this exact, legitimate
+        report as corrupt (verified failing before this fix: severity.
+        exit_code stayed 0 while run_outcome.gate read abi_breaking)."""
+        import json
+        from pathlib import Path
+
+        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.severity import resolve_severity_config
+        from abicheck.workflows.aggregate.gate import GateInfo
+
+        cfg = resolve_severity_config("default")
+        out = _format_release_json(
+            "COMPATIBLE", Path("/o"), Path("/n"),
+            [{"library": "libfoo.so", "verdict": "COMPATIBLE"}],
+            ["libfoo.so"], [], {"libfoo.so": Path("/o/libfoo.so")}, {}, [],
+            None, None,
+            severity_config=cfg,
+            severity_exit_code=0,
+            fail_on_removed=True,
+        )
+        data = json.loads(out)
+        assert data["severity"]["exit_code"] == 4
+        assert data["run_outcome"]["gate"] == "abi_breaking"
+        gate = GateInfo.from_report_data(data)  # must not raise _MalformedGate
+        assert gate is not None
+        assert gate.exit_code == 4
+        assert gate.blocking is True
+
     def test_write_release_summary_file_carries_run_outcome(self, tmp_path):
         """Codex review (P2): the --output-dir sibling of
         _format_release_json never built a run_outcome either -- the

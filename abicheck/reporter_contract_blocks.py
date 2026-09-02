@@ -416,7 +416,7 @@ def render_json_with_side_facts(
     (``severity``/legacy) ``d["severity"]`` itself was, without a fifth
     call needing to duplicate that resolution.
     """
-    from .report_run_outcome import run_outcome_dict_for_diff_result
+    from .report.run_outcome import run_outcome_dict_for_diff_result
 
     d["run_outcome"] = run_outcome_dict_for_diff_result(result, severity_config)
     add_suppression_audit(d, result)

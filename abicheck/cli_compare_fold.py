@@ -456,7 +456,7 @@ class _ScopedFold:
     def _swap_in_scoped_run_outcome(self, payload: dict[str, Any]) -> None:
         """Move the full-library ``run_outcome`` block aside for the scoped one.
 
-        ``run_outcome`` (ADR-063 Phase 7) is built by ``report_run_outcome.
+        ``run_outcome`` (ADR-063 Phase 7) is built by ``report.run_outcome.
         run_outcome_dict_for_diff_result`` before any ``--used-by``/
         ``--required-symbol`` scoping is applied, so it describes the
         full-library compatibility gate by construction -- the identical

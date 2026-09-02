@@ -1059,6 +1059,22 @@ def _format_release_json(
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
     # which categories are gated to error and bucket findings accordingly.
     if severity_config is not None:
+        # Escalate to 4 (the abi_breaking ceiling) when the removed-required-
+        # library axis is what's driving run_outcome.gate above, mirroring
+        # buildsource/check_report.py's _escalate_removed_library_severity
+        # exactly (Codex review, fresh evidence): without this, a severity-
+        # scheme release whose ordinary findings contribute 0 emits
+        # severity.exit_code: 0 alongside run_outcome.gate: abi_breaking --
+        # the exact disagreement GateInfo.from_report_data's own
+        # contradiction check (this same PR) fails closed on, turning a
+        # legitimate --fail-on-removed-library escalation into an
+        # unavailable target for aggregate rather than preserving it.
+        removed_lib_contribution = exit_dict.get("removed_required_library_contribution")
+        escalated_exit_code = (
+            max(severity_exit_code or 0, 4)
+            if isinstance(removed_lib_contribution, int) and removed_lib_contribution != 0
+            else severity_exit_code
+        )
         summary["severity"] = {
             "config": {
                 "abi_breaking": severity_config.abi_breaking.value,
@@ -1066,7 +1082,7 @@ def _format_release_json(
                 "quality_issues": severity_config.quality_issues.value,
                 "addition": severity_config.addition.value,
             },
-            "exit_code": severity_exit_code,
+            "exit_code": escalated_exit_code,
         }
     # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
     # release/package parity), max()-aggregated across every library. Only

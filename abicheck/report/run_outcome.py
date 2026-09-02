@@ -21,15 +21,20 @@ A leaf split out of ``reporter.py`` purely to keep that already-at-the-line
 module's only job is turning one ``DiffResult`` + the caller's own
 ``SeverityConfig`` into a :class:`~abicheck.policy.outcome.RunOutcome`
 dict, shared by ``reporter.py``'s four JSON entry points (full/leaf/
-root-cause/stat).
+root-cause/stat). Lives under ``abicheck/report/`` (not a flat
+``report_*.py`` module) per AGENTS.md's routing table: a new report field
+belongs to the ``report`` responsibility package, not a legacy flat root
+module (Codex review -- a first draft added this as
+``abicheck/report_run_outcome.py``, growing ``report``'s ``legacy_paths``
+migration debt instead of routing to its canonical owner).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .policy.gate_decision import gate_decision_for_result
-from .policy.outcome import (
+from ..policy.gate_decision import gate_decision_for_result
+from ..policy.outcome import (
     OperationalStatus,
     RunOutcome,
     TargetLifecycle,
@@ -37,8 +42,8 @@ from .policy.outcome import (
 )
 
 if TYPE_CHECKING:
-    from .checker_types import DiffResult
-    from .severity import SeverityConfig
+    from ..checker_types import DiffResult
+    from ..severity import SeverityConfig
 
 __all__ = ["run_outcome_dict_for_diff_result"]
 
@@ -63,7 +68,7 @@ def run_outcome_dict_for_diff_result(
     no ``aggregate`` target-lifecycle concept, so ``operational``/
     ``lifecycle`` stay at their fixed defaults here.
     """
-    from .severity import legacy_exit_code
+    from ..severity import legacy_exit_code
 
     gate = gate_decision_for_result(result, severity_config)
     exit_code = gate.exit_code if gate is not None else legacy_exit_code(result.verdict)

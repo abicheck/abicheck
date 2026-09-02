@@ -105,3 +105,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `severity.exit_code`/`run_outcome.gate` intentionally diverge whenever a
   contract-coverage/analysis-assurance floor applies), identified by the
   presence of `full_run_outcome`.
+- **`compare-release`'s severity-scheme `--fail-on-removed-library` escalation
+  now agrees with itself.** `run_outcome.gate` already escalated to
+  `abi_breaking` for exit 8, but the sibling `severity.exit_code` field
+  didn't — for a release whose ordinary findings otherwise contributed `0`,
+  this was exactly the contradiction the `GateInfo.from_report_data` fix
+  above now fails closed on, turning a legitimate escalation into an
+  unavailable target for `aggregate`. `severity.exit_code` now escalates to
+  `4` in the same case, mirroring `buildsource/check_report.py`'s
+  `_escalate_removed_library_severity`'s identical per-library escalation.
+
+### Changed
+
+- `abicheck/report_run_outcome.py` moved to `abicheck/report/run_outcome.py`
+  — new report-field code belongs to the `report` responsibility package
+  per this repo's own routing table, not a new flat `report_*.py` module.

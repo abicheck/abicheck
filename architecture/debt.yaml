@@ -423,12 +423,12 @@
     },
     {
       "path": "abicheck/cli_compare_release_helpers.py",
-      "baseline_lines": 1314,
+      "baseline_lines": 1330,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1311 -> 1314 (ADR-063 Phase 7 follow-up, Codex review): _format_release_json documented (docs/use/output-formats.md) that every JSON report carries run_outcome but never actually built one for the release fan-out's own summary document -- one import (re-exported through report/not_comparable.py, since frontends may not import policy directly), one local reused across both the exit and run_outcome keys instead of calling the exit-decision resolver twice, and one new dict entry.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1311 -> 1314 (ADR-063 Phase 7 follow-up, Codex review): _format_release_json documented (docs/use/output-formats.md) that every JSON report carries run_outcome but never actually built one for the release fan-out's own summary document -- one import (re-exported through report/not_comparable.py, since frontends may not import policy directly), one local reused across both the exit and run_outcome keys instead of calling the exit-decision resolver twice, and one new dict entry. Raised again 1314 -> 1330 (same follow-up, second Codex round, fresh evidence): the severity block built a few lines below the previous bump escalates run_outcome.gate to abi_breaking for --fail-on-removed-library but never escalated its own severity.exit_code to match, so a severity-scheme release whose ordinary findings contribute 0 emitted a severity/run_outcome pair GateInfo.from_report_data's own contradiction check (this same PR) rejects as corrupt -- mirroring buildsource/check_report.py's _escalate_removed_library_severity's identical escalation for the per-library severity JSON.",
       "review_by": "2026-11-30"
     },
     {
