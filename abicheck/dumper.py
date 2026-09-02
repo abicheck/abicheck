@@ -1709,12 +1709,12 @@ def _dump_macho(
             "type information will be missing."
         )
 
-        # Normalize Mach-O leading underscore: _foo → foo, __Z... → _Z...
-        def _normalize_macho_sym(s: str) -> str:
-            if s.startswith("_"):
-                return s[1:]
-            return s
-
+        # `macho_meta.exports` entries are already normalized -- see the
+        # "already normalized" comment a few lines below, at the
+        # `exported_dynamic` build above, for the full account of why a
+        # second leading-underscore strip here corrupts every Itanium-
+        # mangled C++ export (this branch had the identical double-strip
+        # bug the with-headers path below used to have).
         # Split exports into functions (__TEXT) and variables (__DATA)
         # using section classification from Mach-O nlist entries.
         _relevant = [
@@ -1735,11 +1735,11 @@ def _dump_macho(
             source_mtime_epoch=_dylib_mtime_epoch,
             source_size=_safe_size(dylib_path),
             functions=[
-                _itanium_export_function(_normalize_macho_sym(exp.name))
+                _itanium_export_function(exp.name)
                 for exp in sorted(macho_funcs, key=lambda e: e.name)
             ],
             variables=[
-                _itanium_export_variable(_normalize_macho_sym(exp.name))
+                _itanium_export_variable(exp.name)
                 for exp in sorted(macho_vars, key=lambda e: e.name)
             ],
             macho=macho_meta,

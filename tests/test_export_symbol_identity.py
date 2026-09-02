@@ -82,12 +82,18 @@ class TestMachoExportOnlyEntityId:
         dylib.write_bytes(b"\xcf\xfa\xed\xfe")
         meta = MachoMetadata(
             exports=[
-                # Mach-O's own leading-underscore ABI prefix, on top of the
-                # Itanium mangling's own "_Z" -- _normalize_macho_sym strips
-                # exactly one, per this file's own docstring reference.
-                MachoExport(name="__Z3addii", is_data=False),
-                MachoExport(name="_plain_c_fn", is_data=False),
-                MachoExport(name="_plain_c_var", is_data=True),
+                # macho_metadata.py already strips Mach-O's own
+                # leading-underscore ABI prefix while parsing the real
+                # export trie/symtab (see its own "Strip leading
+                # underscore" step) -- so a real MachoExport.name for a
+                # C++ export is already bare Itanium-mangled ("_Z..."),
+                # not double-underscored, and a plain C export has no
+                # leading underscore at all. This fixture must match that
+                # already-normalized spelling; dumper._dump_macho's
+                # no-headers branch must not strip again.
+                MachoExport(name="_Z3addii", is_data=False),
+                MachoExport(name="plain_c_fn", is_data=False),
+                MachoExport(name="plain_c_var", is_data=True),
             ]
         )
         with patch.object(_macho, "parse_macho_metadata", return_value=meta):
