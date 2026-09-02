@@ -60,7 +60,7 @@ unaffected. Each of the 197 entries carries:
 | `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for the four G20 audit rules |
 | `languages` | derived from which source-file extensions the case's own fixtures ship |
 | `scope` | `single-library` or `multi-library` (the five bundle cases) |
-| `artifact_shape` | `compiled-pair`, `snapshot-pair`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:` list when a case declares one (authoritative over any file-scan heuristic), else from what the case directory actually ships |
+| `artifact_shape` | `compiled-pair`, `snapshot-pair`, `snapshot-audit`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:`/`mode:` fields when a case declares them (authoritative over any file-scan heuristic; `snapshot-audit` is a single-release G20 scan, `snapshot-pair` an old/new comparison), else from what the case directory actually ships |
 | `validation_owner` | which runner family exercises the case (mirrors `examples/CLAUDE.md`'s "owner families" list) |
 | `related_rules` | rule slugs a scenario composes — populated only for the scenarios the design discussion named explicitly (see the module docstring's "Known gaps") |
 | `rule_slug` / `variant_of` | the Phase 2 worked example below |

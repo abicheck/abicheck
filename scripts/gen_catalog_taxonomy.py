@@ -33,8 +33,9 @@ are orthogonal to implementation language and independent of the physical
     languages       derived from which source-file extensions the case's own
                      fixtures ship
     scope           "single-library" | "multi-library"
-    artifact_shape  "compiled-pair" | "snapshot-pair" | "stub-pair" |
-                     "btf-pair" | "kabi-pair" | "fixture-pair" | "bundle"
+    artifact_shape  "compiled-pair" | "snapshot-pair" | "snapshot-audit" |
+                     "stub-pair" | "btf-pair" | "kabi-pair" | "fixture-pair"
+                     | "bundle"
     validation_owner the runner family that exercises this case (mirrors
                      examples/CLAUDE.md's "owner families" list)
     related_rules   rule slugs a scenario composes (only populated for the
@@ -68,7 +69,6 @@ GROUND_TRUTH = EXAMPLES / "ground_truth.json"
 # ---------------------------------------------------------------------------
 
 BUNDLE_SCENARIOS = {84, 90, 91, 92, 93}
-AUDIT_RULES = {143, 144, 145, 146}
 CAPABILITY_SCENARIOS = {147, 148, 149, 150, 151, 191, 192, 193, 194, 195, 196, 197}
 ONETBB_CASE_STUDIES = {78, 94, 107, 108, 109, 110, 111}
 SYCL_CASE_STUDIES = {82, 126}
@@ -141,9 +141,10 @@ def _languages(case_dir: Path, has_committed_fixtures: bool) -> list[str]:
     """
     names = {p.name.lower() for p in case_dir.rglob("*") if p.is_file()}
     langs = []
-    if any(n.endswith((".c", ".h")) for n in names) and not any(
-        n.endswith((".cpp", ".hpp", ".cc", ".hh", ".cxx")) for n in names
-    ):
+    # C and C++ are detected independently -- a mixed-language case (e.g.
+    # case66_language_linkage_changed, a C++ library exercised through a
+    # .c consumer) legitimately carries both.
+    if any(n.endswith((".c", ".h")) for n in names):
         langs.append("c")
     if any(n.endswith((".cpp", ".hpp", ".cc", ".hh", ".cxx")) for n in names):
         langs.append("cpp")
@@ -158,7 +159,9 @@ def _languages(case_dir: Path, has_committed_fixtures: bool) -> list[str]:
     return ["c"]  # a compiled-pair case with no recognized source extension
 
 
-def _artifact_shape(case_dir: Path, case_num: int, fixtures: list[str]) -> str:
+def _artifact_shape(
+    case_dir: Path, case_num: int, fixtures: list[str], mode: str | None
+) -> str:
     """Derive the fixture shape. `fixtures` (ground_truth.json's own
     `fixtures:` list, when the case declares one) is authoritative over any
     file-scan heuristic -- it's what the case's own owner already committed
@@ -172,6 +175,12 @@ def _artifact_shape(case_dir: Path, case_num: int, fixtures: list[str]) -> str:
         return "bundle"
     if fixtures:
         if any(f.endswith(".abi.json") for f in fixtures):
+            if mode == "audit":
+                # A single-release G20 audit scan (no `--against` baseline)
+                # -- one committed snapshot.abi.json, not an old/new pair.
+                # case151's second file (thin.abi.json) is a lower-evidence
+                # variant of the same single release, not a comparison peer.
+                return "snapshot-audit"
             return "snapshot-pair"
         if any(f.endswith(".symvers") for f in fixtures):
             return "kabi-pair"
@@ -189,21 +198,35 @@ def _artifact_shape(case_dir: Path, case_num: int, fixtures: list[str]) -> str:
     return "compiled-pair"
 
 
-def _validation_owner(case_num: int, artifact_shape: str, mode: str | None) -> str:
+def _validation_owner(artifact_shape: str, mode: str | None) -> str:
+    """The runner family that exercises this case (examples/CLAUDE.md's
+    "owner families"). Derived from `artifact_shape`/`mode` alone, never
+    from a case-number bucket: `CAPABILITY_SCENARIOS` groups cases by what
+    they *demonstrate* (a capability), which isn't the same split as which
+    runner *executes* them --
+    `validation/scripts/run_special_cli_examples.py`'s own
+    `COMPARE_CASES`/`SCAN_CASES`/`EVIDENCE_CASES` split case191 (a real
+    compiled pair, run through the live header-graph integration lane) and
+    cases192/193 (`COMPARE_CASES`) out of the G20 `SCAN_CASES` set that
+    cases143-151/181 alone belong to, even though all of them are
+    `CAPABILITY_SCENARIOS`.
+    """
     if artifact_shape == "bundle":
         return "bundle-runner"
     if mode == "reconcile":
         return "reconcile"
-    if mode == "audit" or case_num in AUDIT_RULES or case_num in CAPABILITY_SCENARIOS:
-        return "g20-audit"
+    if artifact_shape == "snapshot-audit":
+        return "g20-audit"  # SCAN_CASES
+    if artifact_shape == "snapshot-pair":
+        return "compare-cases"  # COMPARE_CASES
+    if artifact_shape == "fixture-pair":
+        return "evidence-cases"  # EVIDENCE_CASES
     if artifact_shape == "btf-pair":
         return "btf"
     if artifact_shape == "stub-pair":
         return "python-api"
     if artifact_shape == "kabi-pair":
         return "kabi"
-    if artifact_shape in ("snapshot-pair", "fixture-pair"):
-        return artifact_shape
     return "compiler-pair"
 
 
@@ -219,10 +242,11 @@ def _entity_and_scenario_kind(case_num: int) -> tuple[str, str | None]:
         or case_num in LINUX_KERNEL_CASE_STUDIES
     ):
         return "scenario", "case-study"
-    # AUDIT_RULES (143-146) stay entity == "rule": `scenario_kind` is only
-    # ever set for entity == "scenario" (contract asserted by
-    # build_taxonomy's own invariant check below); audit-ness is instead
-    # carried by the "audit" topics entry these cases already get.
+    # A mode=="audit" case (e.g. 143-146) stays entity == "rule":
+    # `scenario_kind` is only ever set for entity == "scenario" (contract
+    # asserted by build_taxonomy's own invariant check below); audit-ness
+    # is instead carried by the "audit" topics entry these cases already
+    # get.
     return "rule", None
 
 
@@ -268,7 +292,7 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             # "controls" is its own topic (design doc section 5/8).
             topics = ["controls"]
 
-        artifact_shape = _artifact_shape(case_dir, case_num, fixtures)
+        artifact_shape = _artifact_shape(case_dir, case_num, fixtures, mode)
         rule_slug, variant_of = RULE_FAMILIES.get(case_name, (None, None))
 
         assert scenario_kind is None or entity == "scenario", (
@@ -286,7 +310,7 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             else [],
             "scope": _scope(case_num),
             "artifact_shape": artifact_shape,
-            "validation_owner": _validation_owner(case_num, artifact_shape, mode),
+            "validation_owner": _validation_owner(artifact_shape, mode),
             "related_rules": RELATED_RULES.get(case_name, []),
             "rule_slug": rule_slug,
             "variant_of": variant_of,
