@@ -40,9 +40,12 @@ than silently trusting an ordinal that may have shifted for an unrelated
 reason.
 
 A ``True`` result is a necessary, not sufficient, precondition for treating
-an ``entity:``-keyed match as authoritative anywhere -- see this module's
-own call sites (``diff_filtering._deduplicate_cross_detector``, as of this
-slice) for what additional review each one still requires. In particular,
+an ``entity:``-keyed match as authoritative anywhere -- this predicate has
+no call site anywhere in the codebase yet (only its own definition and
+tests), deliberately: a real consumer (e.g. ``diff_filtering.
+_deduplicate_cross_detector``) needs the same adversarial review rigor
+that file's prior identity/dedup fixes required, not a drive-by wiring in
+the same slice that first makes the primitive available. In particular,
 this predicate says nothing about whether ``entity:`` is safe to promote
 into ``finding_identity.report_canonical_finding_id`` -- the hash source
 for a user's persisted ``--suppress`` ``finding_id:`` selector -- since
