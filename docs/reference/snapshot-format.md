@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`41`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`42`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 41,
+  "schema_version": 42,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -236,6 +236,20 @@ equivalent for writing. See [ADR-059](../contribute/adr/059-compressed-snapshot-
 for the full storage-envelope model (determinism, atomic writes,
 decompression limits, and what's still deferred).
 
+### Sectioned packaging (ADR-062/063 Phase 8)
+
+Orthogonal to compression, and likewise never changing anything below this
+line: the payload every `dump`/`write_snapshot` invocation actually writes
+today is this page's flat structure *packaged* into named, independently
+versioned sections (`binary`/`declarations`/`types`/`layout`/`debug`/
+`build`/`graph`/`provenance` — see
+[Project Snapshot Format](project-snapshot-format.md)), not the bare flat
+object shown below. `snapshot_from_dict`/`load_snapshot` unwrap this
+transparently before any of the fields below are read, and an older flat
+`.abi.json` a prior build wrote is still read exactly as it always was —
+this page's field-level contract is unaffected either way; only the
+outermost envelope differs.
+
 ---
 
 ## Top-level structure
@@ -249,7 +263,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `41`). |
+| `schema_version` | int | Snapshot format version (currently `42`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -383,7 +397,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `41`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `42`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

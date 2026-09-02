@@ -21,6 +21,8 @@ from abicheck.storage.dto import (
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
+    legacy_section_from_dto,
+    legacy_section_to_dto,
     migrate_section_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
@@ -227,6 +229,37 @@ class TestSemanticIRDTO:
         dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
         with pytest.raises(ValueError):
             semantic_ir_from_dto(dto)
+
+
+class TestLegacySectionDTO:
+    """`legacy_section_to_dto`/`legacy_section_from_dto` must agree with
+    each other about which section kinds are legacy ones -- a `semantic_ir`
+    DTO has its own decoder (`semantic_ir_from_dto`), so
+    `legacy_section_from_dto` accepting one and returning its raw payload
+    would silently bypass it (CodeRabbit review, symmetric with the
+    `legacy_section_to_dto` refusal that already existed)."""
+
+    def test_round_trips(self) -> None:
+        dto = legacy_section_to_dto("graph", {"a": 1})
+        assert legacy_section_from_dto(dto) == {"a": 1}
+
+    def test_encoding_a_semantic_ir_kind_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto(SEMANTIC_IR_SECTION_KIND, {})
+
+    def test_decoding_a_semantic_ir_kind_dto_is_refused(self) -> None:
+        dto = SectionDTO(
+            section_kind=SEMANTIC_IR_SECTION_KIND,
+            section_schema_version=SECTION_SCHEMA_VERSIONS[SEMANTIC_IR_SECTION_KIND],
+            payload={},
+        )
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_from_dto(dto)
+
+    def test_decoding_an_unknown_section_kind_is_refused(self) -> None:
+        dto = SectionDTO(section_kind="not_a_real_kind", section_schema_version=1, payload={})
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_from_dto(dto)
 
     def test_occurrence_insertion_order_does_not_change_the_persisted_bytes(
         self,

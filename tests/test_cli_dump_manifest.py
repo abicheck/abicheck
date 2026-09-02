@@ -20,7 +20,6 @@ see test_dump_manifest.py / test_dumper_manifest.py for those.
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import sys
@@ -154,7 +153,9 @@ def test_dump_manifest_end_to_end_merges_two_tus(tmp_path, runner):
         ],
     )
     assert result.exit_code == 0, result.output
-    snap = json.loads(out.read_text())
+    from abicheck.serialization import load_snapshot_document
+
+    snap = load_snapshot_document(out)
     names = {f["name"] for f in snap["functions"]}
     assert {"add_a", "add_b"} <= names
 
@@ -221,7 +222,9 @@ def test_dump_manifest_with_compiler_option_include_dir_still_works(tmp_path, ru
         ],
     )
     assert result.exit_code == 0, result.output
-    snap = json.loads(out.read_text())
+    from abicheck.serialization import load_snapshot_document
+
+    snap = load_snapshot_document(out)
     names = {f["name"] for f in snap["functions"]}
     assert {"add_a", "dep"} <= names
 

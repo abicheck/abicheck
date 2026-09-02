@@ -263,8 +263,9 @@ def _dump_via_cli(
         ],
     )
     assert result.exit_code == 0, result.output
-    data: dict = json.loads(baseline.read_text(encoding="utf-8"))
-    return data
+    from abicheck.serialization import load_snapshot_document
+
+    return load_snapshot_document(baseline)
 
 
 def _dump_via_typed_api(

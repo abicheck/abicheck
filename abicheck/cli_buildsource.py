@@ -376,6 +376,13 @@ def _write_snapshot_output(
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
+    ADR-062/ADR-063 Phase 8 (redesign): every snapshot this function writes
+    -- to `-o`/`--output` or stdout -- is the single-file, D8-sectioned
+    shape (`storage.sectioned_document`, wired in at `write_snapshot_payload`
+    below and at the stdout `json.dumps` call), not a separate opt-in
+    package. `snapshot_from_dict` transparently reads either the new
+    sectioned shape or an older flat `.abi.json` a prior build wrote.
+
     When *build_info* and/or *sources* are given, their normalized L3/L4/L5 facts
     are collected (inline from a source tree / build dir, or loaded from a pack
     directory) and embedded in the snapshot first (single-artifact UX) so a later
@@ -523,7 +530,13 @@ def _write_snapshot_output(
     else:
         import json
 
-        click.echo(json.dumps(payload, indent=2))
+        from .serialization import SCHEMA_VERSION
+        from .workflows.storage import to_sectioned_document
+
+        sectioned = to_sectioned_document(
+            payload, max_known_schema_version=SCHEMA_VERSION
+        )
+        click.echo(json.dumps(sectioned, indent=2))
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:

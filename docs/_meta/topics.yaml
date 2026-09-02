@@ -730,5 +730,8 @@ topics:
       - abicheck/storage/versioning.py
       - abicheck/storage/package.py
       - abicheck/storage/dto.py
+      - abicheck/storage/legacy_sections.py
       - abicheck/storage/import_v1.py
       - abicheck/project_snapshot_store.py
+      - abicheck/project_snapshot_legacy.py
+      - abicheck/storage/sectioned_document.py

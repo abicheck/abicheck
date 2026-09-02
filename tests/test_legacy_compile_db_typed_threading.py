@@ -167,7 +167,9 @@ class TestLegacyMatchReachesTheRealCliPath:
             ],
         )
         assert result.exit_code == 0, result.output
-        snapshot = json.loads(out.read_text(encoding="utf-8"))
+        from abicheck.serialization import load_snapshot_document
+
+        snapshot = load_snapshot_document(out)
         assert _wide_field_present(snapshot), (
             "the real dump CLI's own legacy -p/--compile-db union-fallback "
             "match stopped reaching the header parse -- this test's own "

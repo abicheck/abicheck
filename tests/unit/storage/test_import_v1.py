@@ -17,15 +17,17 @@ from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+from abicheck.storage.canonical import canonical_form
 from abicheck.storage.dto import (
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
     semantic_ir_from_dto,
 )
 from abicheck.storage.import_v1 import (
-    LEGACY_DOCUMENT_SECTION_KIND,
+    export_legacy_snapshot,
     import_legacy_snapshot as _import_legacy_snapshot,
 )
+from abicheck.storage.legacy_sections import LEGACY_SECTION_KINDS
 from abicheck.storage.package import InMemoryObjectStore
 
 
@@ -87,24 +89,156 @@ class TestImportLegacySnapshot:
         ir, _conflicts = semantic_ir_from_dto(dto)
         assert ir == snap.semantic_ir
 
-    def test_the_legacy_remainder_excludes_the_promoted_keys(self) -> None:
+    def test_the_legacy_sections_exclude_the_promoted_keys(self) -> None:
         doc = snapshot_to_dict(_snapshot_with_ir())
         store = InMemoryObjectStore()
         manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
         sections = manifest.artifact_refs[0].sections
-        remainder = store.get(sections[LEGACY_DOCUMENT_SECTION_KIND].digest)
-        assert "semantic_ir" not in remainder
-        assert "semantic_ir_conflicts" not in remainder
-        # Everything else survives untouched.
-        assert remainder["library"] == "libfoo.so.1"
+        for kind in LEGACY_SECTION_KINDS:
+            if kind not in sections:
+                continue
+            payload = store.get(sections[kind].digest)["payload"]
+            assert "semantic_ir" not in payload
+            assert "semantic_ir_conflicts" not in payload
+            assert "schema_version" not in payload
+        # `library` lands in the `provenance` section, untouched.
+        provenance = store.get(sections["provenance"].digest)["payload"]
+        assert provenance["library"] == "libfoo.so.1"
+
+    def test_every_present_legacy_field_lands_in_exactly_one_section(self) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        sections = manifest.artifact_refs[0].sections
+        seen: dict[str, str] = {}
+        for kind in LEGACY_SECTION_KINDS:
+            if kind not in sections:
+                continue
+            payload = store.get(sections[kind].digest)["payload"]
+            for key in payload:
+                assert key not in seen, (
+                    f"{key!r} appears in both {seen.get(key)!r} and {kind!r}"
+                )
+                seen[key] = kind
+        expected = set(doc) - {"semantic_ir", "semantic_ir_conflicts", "schema_version"}
+        assert set(seen) == expected
 
     def test_no_semantic_ir_section_when_the_snapshot_carries_none(self) -> None:
         doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
         store = InMemoryObjectStore()
         manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
         assert SEMANTIC_IR_SECTION_KIND not in manifest.artifact_refs[0].sections
-        assert LEGACY_DOCUMENT_SECTION_KIND in manifest.artifact_refs[0].sections
+        assert "provenance" in manifest.artifact_refs[0].sections
         assert "semantic_ir" not in manifest.versions.section_schema_versions
+
+    def test_export_round_trips_a_full_document(self) -> None:
+        snap = _snapshot_with_ir()
+        doc = snapshot_to_dict(snap)
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        # `canonical_form` normalizes tuples the round trip through JSON-
+        # shaped section storage already turns into lists (the DTO layer's
+        # own storage format, not a lossy conversion this test should
+        # penalize) -- the same normalization every section's own storage
+        # already applies before hashing/comparing it.
+        assert canonical_form(rebuilt) == canonical_form(doc)
+
+    def test_export_round_trips_a_document_with_no_semantic_ir(self) -> None:
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        # `canonical_form` normalizes tuples the round trip through JSON-
+        # shaped section storage already turns into lists (the DTO layer's
+        # own storage format, not a lossy conversion this test should
+        # penalize) -- the same normalization every section's own storage
+        # already applies before hashing/comparing it.
+        assert canonical_form(rebuilt) == canonical_form(doc)
+
+    @pytest.mark.parametrize("malformed", [0, -1, -38])
+    def test_export_refuses_an_unstated_source_schema_version(
+        self, malformed: int
+    ) -> None:
+        """`StorageVersions.source_schema_version` normalizes a missing or
+        malformed `manifest.json` value to `0`, its own 'unstated' sentinel
+        -- `export_legacy_snapshot` must not inject that sentinel as a real
+        legacy `schema_version` (it would silently change which reliability
+        backfills `serialization.snapshot_from_dict` applies), so it must
+        refuse a non-positive value outright rather than writing it into the
+        rebuilt document (Codex review)."""
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        with pytest.raises(ValueError, match="positive"):
+            export_legacy_snapshot(
+                manifest.artifact_refs[0],
+                store=store,
+                source_schema_version=malformed,
+            )
+
+    def test_export_refuses_a_section_payload_missing_a_required_field(
+        self,
+    ) -> None:
+        """A section whose *object* hashes and decodes fine can still have
+        lost a field within its own JSON content -- `join_legacy_document`
+        alone only checks that every *present* key belongs to the right
+        section, not that every field a real write always includes is
+        present. Left unchecked, dropping `functions` from the
+        "declarations" payload would silently read back as `[]` once
+        `snapshot_from_dict` parses the rebuilt document -- a false symbol
+        removal, not a loud failure (Codex review)."""
+        import dataclasses
+
+        from abicheck.storage.package import ObjectRef
+
+        # `snapshot_to_dict()` always emits `functions` (via `asdict()`, as
+        # `[]` when there are none) -- the "declarations" section carries
+        # the key regardless of whether any function is actually present,
+        # so an empty snapshot already exercises the key-presence gap.
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        artifact = manifest.artifact_refs[0]
+        old_ref = artifact.sections["declarations"]
+        tampered = dict(store.get(old_ref.digest))
+        payload = dict(tampered["payload"])
+        assert "functions" in payload
+        del payload["functions"]
+        tampered["payload"] = payload
+        new_digest = store.put(tampered)
+        tampered_artifact = dataclasses.replace(
+            artifact,
+            sections={
+                **artifact.sections,
+                "declarations": ObjectRef(kind="declarations", digest=new_digest),
+            },
+        )
+        with pytest.raises(ValueError, match="functions"):
+            export_legacy_snapshot(
+                tampered_artifact,
+                store=store,
+                source_schema_version=manifest.versions.source_schema_version,
+            )
+
+    def test_export_refuses_a_non_int_source_schema_version(self) -> None:
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        with pytest.raises(ValueError, match="must be an int"):
+            export_legacy_snapshot(
+                manifest.artifact_refs[0],
+                store=store,
+                source_schema_version="3",  # type: ignore[arg-type]
+            )
 
     def test_artifact_kind_defaults_to_elf_when_the_document_states_no_platform(
         self,
@@ -162,12 +296,84 @@ class TestImportLegacySnapshot:
         first = import_legacy_snapshot(doc, store=store, artifact_id="a")
         second = import_legacy_snapshot(doc, store=store, artifact_id="b")
         first_digest = (
-            first.artifact_refs[0].sections[LEGACY_DOCUMENT_SECTION_KIND].digest
+            first.artifact_refs[0].sections["provenance"].digest
         )
         second_digest = (
-            second.artifact_refs[0].sections[LEGACY_DOCUMENT_SECTION_KIND].digest
+            second.artifact_refs[0].sections["provenance"].digest
         )
         assert first_digest == second_digest
+
+    def test_a_pre_v8_document_with_the_legacy_evidence_pack_key_imports(
+        self,
+    ) -> None:
+        """`serialization.snapshot_from_dict` still falls back to the
+        pre-schema-v8 `evidence_pack` key when `build_source_pack` is
+        absent (ADR-028's evidence->buildsource rename) -- a real
+        schema-v7-or-older document can carry it instead, and
+        `import_legacy_snapshot` must not reject it as an unknown field
+        (Codex review)."""
+        doc = {
+            "library": "libfoo.so.1",
+            "version": "1.0.0",
+            "schema_version": 7,
+            # A real (even old) `snapshot_to_dict()` document always carries
+            # every `AbiSnapshot` field via `asdict()`, these included --
+            # `missing_required_section_fields` now enforces that the
+            # rebuilt "provenance" section isn't missing them.
+            "language_profile": None,
+            "dependency_info": None,
+            "git_commit": None,
+            "git_tag": None,
+            "created_at": None,
+            "evidence_pack": {
+                "schema_version": 1,
+                "content_hash": "sha256:abc",
+                "path_hint": "libfoo.evidence/",
+                "coverage_summary": {},
+            },
+        }
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        assert "build" in manifest.artifact_refs[0].sections
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        assert rebuilt["evidence_pack"] == doc["evidence_pack"]
+
+
+class TestRealLegacySchemaFixturesRoundTrip:
+    """`tests/fixtures/schema/v1.json` through `v5.json` are real, CI-golden
+    documents from `test_schema_compat.py`'s own backward-compatibility
+    contract -- a second Codex review round found the storage-v2 completeness
+    check (`missing_required_section_fields`) had regressed this exact
+    contract by requiring fields those genuinely older schema versions never
+    had at all (`platform`/`kabi`/`build_mode`/`source_mtime`/...). Every
+    fixture must import and export through the v1-v25 adapter cleanly."""
+
+    @pytest.mark.parametrize(
+        "fixture_name", ["v1.json", "v2.json", "v3.json", "v4.json", "v5.json"]
+    )
+    def test_a_real_schema_fixture_round_trips(self, fixture_name: str) -> None:
+        import json
+        from pathlib import Path
+
+        fixtures_dir = Path(__file__).resolve().parents[2] / "fixtures" / "schema"
+        doc = json.loads((fixtures_dir / fixture_name).read_text(encoding="utf-8"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        # v1.json predates `schema_version` entirely (the pre-versioning
+        # convention: an absent key reads as v1) -- the round trip correctly
+        # makes that implicit version explicit rather than reproducing the
+        # key's absence, so compare with it folded in on both sides.
+        expected = {**doc, "schema_version": doc.get("schema_version", 1)}
+        assert canonical_form(rebuilt) == canonical_form(expected)
 
 
 class TestMaxKnownSchemaVersion:

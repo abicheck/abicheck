@@ -480,13 +480,14 @@ def classify_compare_operand(path: Path) -> str:
     * ``"directory"`` — a plain directory of libraries; also a set input.
     * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
       ``compare`` cannot pair as a library (hint the user at ``appcompat``).
-    * ``"file"``      — a single ``.so`` / JSON snapshot / Perl dump: the default
-      single-pair path, unchanged.
+    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a ``--project-
+      snapshot-dir`` package dir (storage-v2, ADR-062/063).
     """
     from .workflows.extraction import is_package
+    from .workflows.storage import is_project_snapshot_package_dir
 
     if path.is_dir():
-        return "directory"
+        return "file" if is_project_snapshot_package_dir(path) else "directory"
     if is_package(path):
         return "package"
     norm, fmt = _normalize_binary_input(path)

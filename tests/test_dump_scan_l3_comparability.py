@@ -399,7 +399,9 @@ def test_dump_folds_real_l3_evidence_into_ast_compile_context(
     )
     assert result.exit_code == 0, result.output
 
-    snap = json.loads(baseline.read_text(encoding="utf-8"))
+    from abicheck.serialization import load_snapshot_document
+
+    snap = load_snapshot_document(baseline)
     assert snap.get("ast_resolved_standard") == "c++17", snap.get(
         "ast_resolved_standard"
     )

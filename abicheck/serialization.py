@@ -75,6 +75,11 @@ from .storage.fact_codec import (
     encode_fact_fields,
     evidenced_producers,
 )
+from .storage.sectioned_document import (
+    from_sectioned_document,
+    is_sectioned_document,
+    to_sectioned_document,
+)
 from .storage.semantic_ir_codec import decode_semantic_ir, encode_semantic_ir
 from .storage.snapshot_load_normalization import (
     backfill_missing_elf_binding,
@@ -344,7 +349,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 41  # v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 42  # v42: ADR-062/063 Phase 8 (redesign) -- the on-disk wire format itself changed (snapshot_to_json() now writes storage.sectioned_document's single-file sectioned envelope instead of a flat document), not just a field. Bumped specifically so a pre-Phase-8 reader (whose own SCHEMA_VERSION was already 41) hits the ">SCHEMA_VERSION and >=_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION" hard-rejection path below instead of silently reading every top-level field as absent/empty -- a same-numbered envelope change would have given that reader no signal at all (Codex review, fresh evidence). This build itself reads the envelope transparently regardless of version, per snapshot_from_dict's own is_sectioned_document check; v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -506,7 +511,20 @@ def _enum_type_from_dict(e: dict[str, Any], schema_version: int) -> EnumType:
 
 
 def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
-    return json.dumps(snapshot_to_dict(snap), indent=indent)
+    # ADR-062/063 Phase 8 (redesign): the file this function's own callers
+    # (`write_snapshot`/`save_snapshot`) actually write to disk is now the
+    # single-file sectioned shape (`storage.sectioned_document`) by
+    # default -- `snapshot_to_dict()` itself keeps returning the flat shape
+    # unchanged for every other caller (tests, `canonical_form` comparisons,
+    # programmatic manipulation); only the JSON-file boundary changes.
+    # `snapshot_from_dict` transparently unwraps either shape, so an older
+    # flat `.abi.json` a prior build wrote stays fully readable.
+    return json.dumps(
+        to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        ),
+        indent=indent,
+    )
 
 
 _T = TypeVar("_T")
@@ -524,6 +542,16 @@ def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
+    # ADR-062/063 Phase 8 (redesign): a document written as the single-file
+    # sectioned shape (`storage.sectioned_document`) is unwrapped into this
+    # function's own long-established flat shape *before* anything below
+    # runs -- every existing reliability-backfill/schema-version rule stays
+    # exactly as it was, now just fed a document `export_legacy_snapshot`
+    # reconstructed rather than one written flat. `is_sectioned_document`
+    # checks for a `"sections"` key, never a real `AbiSnapshot` field, so a
+    # flat document from any schema version cannot collide with it.
+    if is_sectioned_document(d):
+        d = from_sectioned_document(d)
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
@@ -1372,6 +1400,38 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
     from .snapshot_io import read_snapshot_text
 
     return snapshot_from_dict(json.loads(read_snapshot_text(path)))
+
+
+def load_snapshot_document(path: str | Path) -> dict[str, Any]:
+    """*path*'s flat, `snapshot_to_dict()`-shaped document — the raw dict,
+    not a typed `AbiSnapshot` (`load_snapshot`'s own return). For a
+    document-only key `AbiSnapshot` itself does not carry (e.g. a real
+    `dump`'s own `dump_provenance`, folded in by the CLI after
+    `snapshot_to_dict()` already ran) rather than any real snapshot field.
+
+    Transparently unwraps the single-file sectioned shape
+    (`storage.sectioned_document`, Phase 8 redesign) the same way
+    `snapshot_from_dict` does internally, so a caller never needs to know
+    which of the two on-disk shapes *path* actually is.
+    """
+    from .snapshot_io import read_snapshot_text
+
+    parsed: Any = json.loads(read_snapshot_text(path))
+    # json.loads() can return a list/str/number/bool/None for arbitrary
+    # JSON text -- this function's own dict[str, Any] contract (and
+    # is_sectioned_document's "sections" key lookup below) both assume a
+    # JSON object, so a non-dict root must fail loudly here rather than
+    # surface as a confusing downstream AttributeError/KeyError, or (for a
+    # list/str, where `in` is still syntactically valid but semantically
+    # wrong) silently misclassify as flat/sectioned (Codex review).
+    if not isinstance(parsed, dict):
+        raise SnapshotError(
+            f"{path}: expected a JSON object at the document root, got "
+            f"{type(parsed).__name__}"
+        )
+    if is_sectioned_document(parsed):
+        return from_sectioned_document(parsed)
+    return parsed
 
 
 def save_snapshot(

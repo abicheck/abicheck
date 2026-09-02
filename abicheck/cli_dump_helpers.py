@@ -351,17 +351,17 @@ def write_snapshot_payload(
     """One JSON encode + one canonical, atomic, possibly-compressed write
     (ADR-059) for the already-decoded ``dump`` payload dict — the write
     chokepoint the real (non-dry) `dump` write path routes through so a
-    100+ MB snapshot is serialized exactly once, straight from the dict
-    ``snapshot_to_dict``/``fold_dump_provenance_into_dict`` already built
-    (no second ``json.loads``/``json.dumps`` round trip).
-
-    *compression* is a :class:`~abicheck.snapshot_io.SnapshotCompression`.
-    Returns a :class:`~abicheck.snapshot_io.SnapshotWriteResult`.
+    100+ MB snapshot is serialized exactly once. Writes the single-file
+    sectioned shape (``storage.sectioned_document``). *compression* is a
+    :class:`~abicheck.snapshot_io.SnapshotCompression`; returns a
+    :class:`~abicheck.snapshot_io.SnapshotWriteResult`.
     """
     import json
 
-    from .workflows.storage import write_snapshot_text
+    from .serialization import SCHEMA_VERSION
+    from .workflows.storage import to_sectioned_document, write_snapshot_text
 
+    payload = to_sectioned_document(payload, max_known_schema_version=SCHEMA_VERSION)
     text = json.dumps(payload, indent=2)
     return write_snapshot_text(text, path, compression=compression)
 

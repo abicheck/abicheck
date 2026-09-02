@@ -260,6 +260,34 @@ class TestReserialization:
         with pytest.raises(IncompatibleSnapshotSchemaError):
             snapshot_from_dict(d)
 
+    def test_sectioned_envelope_bump_hard_rejects_a_pre_phase_8_reader(
+        self, monkeypatch
+    ):
+        """ADR-062/063 Phase 8 (redesign, Codex review, fresh evidence):
+        snapshot_to_json() now writes storage.sectioned_document's envelope
+        instead of a flat document -- a wire-format change, not just a new
+        field. SCHEMA_VERSION was bumped specifically so a reader whose own
+        SCHEMA_VERSION still names the pre-redesign value (41) hits this
+        module's existing hard-rejection path instead of silently reading
+        every top-level field of a real sectioned document as absent/empty
+        (the sections are nested under "sections", which such a reader has
+        no code to unwrap). Simulates that older reader by pinning this
+        module's own SCHEMA_VERSION back to 41 -- everything else about the
+        check (the >= _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION gate) is
+        unchanged."""
+        from abicheck import serialization
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.model import AbiSnapshot
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        doc = json.loads(serialization.snapshot_to_json(snap))
+        assert serialization.is_sectioned_document(doc)
+        assert doc["schema_version"] == serialization.SCHEMA_VERSION > 41
+
+        monkeypatch.setattr(serialization, "SCHEMA_VERSION", 41)
+        with pytest.raises(IncompatibleSnapshotSchemaError):
+            serialization.snapshot_from_dict(doc)
+
     def test_older_version_warns_when_a_fact_is_degraded(self):
         """A snapshot older than SCHEMA_VERSION used to load with no signal
         at all -- the *_facts_reliable flags degraded silently, and CI
@@ -500,3 +528,21 @@ def test_docs_snapshot_schema_version_matches_constant():
         if m.group(1) != str(SCHEMA_VERSION)
     ]
     assert not stale, f"stale schema-version literal(s) in docs: {stale}"
+
+
+class TestLoadSnapshotDocumentRejectsNonObjectRoot:
+    """CodeRabbit review: json.loads() can return a list/str/number/bool for
+    arbitrary JSON text -- load_snapshot_document()'s own dict[str, Any]
+    contract (and is_sectioned_document's "sections" key lookup) both
+    assume a JSON object. A non-dict root must fail loudly, not surface as
+    a confusing downstream error or a wrong is_sectioned_document verdict."""
+
+    @pytest.mark.parametrize("content", ["[1, 2, 3]", '"just a string"', "42", "null"])
+    def test_non_dict_root_raises_snapshot_error(self, tmp_path, content):
+        from abicheck.errors import SnapshotError
+        from abicheck.serialization import load_snapshot_document
+
+        p = tmp_path / "not_an_object.json"
+        p.write_text(content, encoding="utf-8")
+        with pytest.raises(SnapshotError):
+            load_snapshot_document(p)

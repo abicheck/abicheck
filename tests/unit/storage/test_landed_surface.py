@@ -51,7 +51,9 @@ _MODULES = (
     "abicheck.storage.versioning",
     "abicheck.storage.package",
     "abicheck.storage.dto",
+    "abicheck.storage.legacy_sections",
     "abicheck.storage.import_v1",
+    "abicheck.storage.sectioned_document",
 )
 
 #: Modules the package deliberately does not re-export. They are still

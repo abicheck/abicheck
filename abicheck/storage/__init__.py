@@ -20,16 +20,20 @@ locator: code inside this package imports its siblings' implementation
 modules directly (see ``AGENTS.md``).
 
 ADR-062 Phase 0's availability/identity/canonical-encoding/versioning
-primitives, plus Phase 1's ``package``/``dto``/``import_v1`` modules (the
-storage-format-v2 plan's A1.1-A1.3: the ``ProjectSnapshot`` manifest/ref/
-object-store model, its per-section DTO envelope, and the v1-v25 import
-adapter). The real, directory-backed writer/reader
-(``abicheck.project_snapshot_store``) lives outside this package, since it
-needs ``snapshot_io`` and this package may import only ``model``. Nothing
-here is wired into ``dump``/``compare``/``scan`` yet, so every existing
-snapshot, baseline set, and ``BundleFacts`` document produced or read by
-those commands is unchanged. ADR-059's physical envelope (compression,
-atomic writes, decompression-bomb limits) stays in
+primitives, plus Phase 1's ``package``/``dto``/``legacy_sections``/
+``import_v1`` modules (the storage-format-v2 plan's A1.1-A1.3: the
+``ProjectSnapshot`` manifest/ref/object-store model, its per-section DTO
+envelope, the full D8 legacy-document section split, and the v1-v25 import
+adapter/its exact inverse). ``sectioned_document`` (ADR-063 Phase 8,
+redesigned) packages that same D8 split as one JSON document instead of a
+directory -- the shape every real ``dump``/``compare``/``scan`` invocation
+now reads and writes by default, via ``serialization.snapshot_to_json``/
+``snapshot_from_dict`` (see that module's own docstring for why). The
+directory-backed writer/reader (``abicheck.project_snapshot_store``,
+``abicheck.project_snapshot_legacy``) still lives outside this package and
+still works as a typed-API primitive, but no CLI flag writes one today.
+ADR-059's physical envelope (compression, atomic writes, decompression-bomb
+limits) stays in
 ``abicheck/snapshot_io.py`` and is deliberately not reimplemented here.
 """
 
@@ -53,6 +57,8 @@ from .dto import (
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
+    legacy_section_from_dto,
+    legacy_section_to_dto,
     migrate_section_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
@@ -66,7 +72,14 @@ from .identity import (
     OccurrenceSet,
     elf_symbol_occurrence,
 )
-from .import_v1 import LEGACY_DOCUMENT_SECTION_KIND, import_legacy_snapshot
+from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
+from .legacy_sections import (
+    LEGACY_SECTION_KINDS,
+    SCHEMA_VERSION_KEY,
+    join_legacy_document,
+    missing_required_section_fields,
+    split_legacy_document,
+)
 from .package import (
     MANIFEST_RELPATH,
     SECTION_KINDS,
@@ -79,6 +92,13 @@ from .package import (
     artifact_ref_relpath,
     object_relpath,
     variant_ref_relpath,
+)
+from .sectioned_document import (
+    SECTION_SCHEMA_VERSIONS_KEY,
+    SECTIONS_KEY,
+    from_sectioned_document,
+    is_sectioned_document,
+    to_sectioned_document,
 )
 from .versioning import (
     COMPARISON_CONTRACT_VERSION,
@@ -102,7 +122,7 @@ __all__ = [
     "FactStatus",
     "IdentityConflict",
     "InMemoryObjectStore",
-    "LEGACY_DOCUMENT_SECTION_KIND",
+    "LEGACY_SECTION_KINDS",
     "MANIFEST_RELPATH",
     "ObjectRef",
     "ObjectStore",
@@ -113,8 +133,11 @@ __all__ = [
     "PackageManifest",
     "ProducerIdentity",
     "ReaderCompatibility",
+    "SCHEMA_VERSION_KEY",
+    "SECTIONS_KEY",
     "SECTION_KINDS",
     "SECTION_SCHEMA_VERSIONS",
+    "SECTION_SCHEMA_VERSIONS_KEY",
     "SEMANTIC_IR_SECTION_KIND",
     "SectionDTO",
     "StorageVersions",
@@ -125,13 +148,22 @@ __all__ = [
     "canonical_json",
     "check_reader_compatibility",
     "elf_symbol_occurrence",
+    "export_legacy_snapshot",
+    "from_sectioned_document",
     "import_legacy_snapshot",
+    "is_sectioned_document",
+    "join_legacy_document",
+    "legacy_section_from_dto",
+    "legacy_section_to_dto",
     "migrate_section_dto",
+    "missing_required_section_fields",
     "object_relpath",
     "raw_digest",
     "semantic_digest",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",
+    "split_legacy_document",
     "strip_capture_metadata",
+    "to_sectioned_document",
     "variant_ref_relpath",
 ]

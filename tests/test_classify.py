@@ -143,6 +143,77 @@ class TestAbiJsonClassifier:
         p.write_text("<root/>")
         assert self.clf.accepts(p) is None
 
+    def test_incidental_section_kind_property_rejected(self, tmp_path: Path) -> None:
+        """Codex/CodeRabbit review, fresh evidence: an ordinary JSON file
+        that happens to carry a "section_kind" property for an unrelated
+        reason (not a real abicheck sectioned document -- no top-level
+        "sections" object) must not be misclassified as an ABI snapshot.
+        An earlier version of this fingerprint matched the too-generic
+        nested "section_kind" key alone."""
+        p = tmp_path / "release-notes.json"
+        p.write_text('{"section_kind": "changelog", "entries": []}')
+        assert self.clf.accepts(p) is False
+
+    def test_incidental_top_level_sections_key_rejected(self, tmp_path: Path) -> None:
+        """Codex/CodeRabbit review, fresh evidence (second round): a
+        top-level "sections" key alone is still too generic -- an unrelated
+        document (an OpenAPI/docs-config-shaped file) can carry its own
+        top-level "sections" object with no "schema_version" immediately
+        before it. Must not be misclassified as an ABI snapshot."""
+        p = tmp_path / "openapi-like.json"
+        p.write_text('{"title": "API", "sections": {"intro": {"text": "hi"}}}')
+        assert self.clf.accepts(p) is False
+
+    def test_real_sectioned_snapshot_accepted(self, tmp_path: Path) -> None:
+        """ADR-063 Phase 8: a real sectioned document (the "sections" key
+        genuinely at the top level, `to_sectioned_document`'s own shape)
+        must still be recognized as an ABI snapshot."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json
+
+        p = tmp_path / "libfoo.json"
+        p.write_text(json.dumps(sectioned, indent=2))
+        assert self.clf.accepts(p) is True
+
+    def test_reordered_sectioned_snapshot_still_accepted(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence (third round): a valid sectioned
+        document reserialized with sorted (or otherwise reordered) keys --
+        e.g. `json.dumps(..., sort_keys=True)`, or any JSON formatter --
+        must still be recognized, since `from_sectioned_document()` itself
+        accepts it regardless of key order. An earlier version of this
+        fingerprint required "schema_version" immediately adjacent to and
+        before "sections", which this reordering breaks.
+
+        The probe window is shrunk to isolate the sectioned-v1 fingerprint
+        under test: a real document this small still carries "library"
+        (matching the pre-existing abicc-v1 fingerprint too) well inside
+        the default 4096-byte window, which would mask a regression here
+        -- a real, large snapshot buries "library" past that window
+        entirely (see the sectioned-v1 fingerprint's own comment)."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json
+
+        text = json.dumps(sectioned, indent=2, sort_keys=True)
+        assert '"library"' not in text[:250]  # stays out of the shrunk probe window
+        p = tmp_path / "libfoo-sorted.json"
+        p.write_text(text)
+        self.clf._JSON_PROBE_BYTES = 250
+        assert self.clf.accepts(p) is True
+
     def test_fingerprint_registry_extensible(self) -> None:
         """Ensure FINGERPRINTS is extensible and restored after mutation."""
         original_len = len(AbiJsonClassifier.FINGERPRINTS)

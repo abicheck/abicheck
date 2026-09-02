@@ -136,7 +136,9 @@ class TestDumpCmdStdout:
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so), "-H", str(hdr)])
         assert result.exit_code == 0
-        parsed = json.loads(result.output)
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
+        parsed = from_sectioned_document(json.loads(result.output))
         assert parsed["library"] == "libfoo.so"
 
 

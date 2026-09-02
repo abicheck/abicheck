@@ -14518,31 +14518,66 @@ see.
 
 ### Phase 8 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
 
-**Update (2026-09-02, landed — a bounded first slice, not the whole
-phase).** ADR-062 Phase 0's primitives are no longer inert: a real
-`ProjectSnapshot` can now be written to and read from a real directory.
-`abicheck/storage/dto.py` (new) is the D8-constrained `SectionDTO` envelope
-this phase's Files section asked for, built on `storage/semantic_ir_codec.py`'s
-existing explicit `SemanticIR` encoding (extracted into a pure
-`semantic_ir_to_document`/`semantic_ir_from_document` pair this DTO layer
-calls, rather than duplicating it) — `semantic_ir_to_dto`/`semantic_ir_from_dto`
-are the one concrete domain type actually promoted onto a typed,
-D8-constrained representation. `abicheck/storage/import_v1.py` (new) is the
-v1-v25 import adapter, and `abicheck/project_snapshot_store.py` (new,
-flat-root — this phase's directory-backed writer, kept outside `storage/`
+**Update (2026-09-02, landed — full D8 section split plus default CLI
+wiring as a single-file shape; not the whole phase).** ADR-062 Phase 0's
+primitives are no longer inert: every legacy document field is split
+across D8's section vocabulary, and `dump`/`compare`/`scan --against`
+now read/write that split by default — packaged as one JSON document
+(`storage.sectioned_document`), not the directory-backed package this
+phase originally targeted (see the CLI-wiring paragraph below for why).
+`abicheck/storage/dto.py` is the D8-constrained
+`SectionDTO` envelope this phase's Files section asked for, built on
+`storage/semantic_ir_codec.py`'s existing explicit `SemanticIR` encoding
+(extracted into a pure `semantic_ir_to_document`/`semantic_ir_from_document`
+pair this DTO layer calls, rather than duplicating it). `abicheck/storage/
+legacy_sections.py` (new) is what closes this slice's previously-open
+gap: `split_legacy_document`/`join_legacy_document` partition every
+remaining document field across D8's `binary`/`declarations`/`types`/
+`layout`/`debug`/`build`/`graph`/`provenance` sections via one explicit,
+per-section field allowlist (an unassigned or misfiled field is a hard
+error, never silently dropped into a catch-all) — a completeness test
+enumerates `AbiSnapshot`'s real dataclass fields and fails until each has a
+section. `abicheck/storage/import_v1.py`'s `import_legacy_snapshot`/
+`export_legacy_snapshot` (the second now new too — the exact inverse) write/
+read one `SectionDTO` per present section. `abicheck/project_snapshot_store.py`
+(flat-root — this phase's directory-backed writer, kept outside `storage/`
 for the same import-layering reason `package.py`'s own docstring already
 gives) is a real `DirectoryObjectStore` plus a manifest/ref writer and
 reader implementing D6's directory layout (everything except the `.tar.zst`
-transport form). `scripts/check_ai_readiness.py`'s new
-`project-snapshot-dto-no-asdict` check is this phase's own promised
-AI-readiness-style gate: zero `asdict()` call sites in any `ProjectSnapshot`
-DTO file. **What this slice does not attempt**: every legacy document field
-beyond `semantic_ir`/`semantic_ir_conflicts` still travels as one opaque,
-unmigrated `"legacy_document"` object rather than D8's full
-`binary`/`declarations`/`types`/`layout`/`debug`/... section split (real,
-separately-scoped future work — ADR-062's own A1.4/A1.5), and the `.tar.zst`
-transport form, `bundle_variants:`/CLI wiring (A1.6/A1.7), and non-ELF
-membership specifics (A1.8) remain open. See `docs/contribute/plans/
+transport form); the new legacy-document round-trip functions
+(`write_legacy_snapshot_package`/`read_legacy_snapshot_document`/
+`is_project_snapshot_package_dir`) live in a sibling,
+`abicheck/project_snapshot_legacy.py`, since `project_snapshot_store.py`
+itself had only two lines of headroom under the 800-line architecture cap.
+`scripts/check_ai_readiness.py`'s `project-snapshot-dto-no-asdict` check
+now also watches `legacy_sections.py`.
+
+**CLI wiring — redesigned (2026-09-02) as the default single-file shape,
+not a directory package.** The directory package's real value (content
+dedup, independent per-section objects) only pays off once a project shares
+content across multiple artifacts, which nothing produces yet; for the
+single-artifact case every `dump` performs today it was pure storage-UX
+cost. `storage.sectioned_document` packages the identical D8 split as one
+JSON document instead, wired into `serialization.snapshot_to_json`/
+`write_snapshot` (write) and `snapshot_from_dict`/`load_snapshot` (read,
+transparently unwrapping either shape) — every `dump`/`compare`/`scan`
+invocation gets it by default, no flag, and an older flat `.abi.json` a
+prior build wrote stays fully readable. The directory writer/reader
+(`project_snapshot_legacy.write_legacy_snapshot_package`/
+`read_legacy_snapshot_document`) remain available as typed-API primitives;
+`compare`/`scan --against` still accept a directory package as an input
+path (`workflows.input_resolution.resolve_input`'s directory branch,
+`cli_resolve.classify_compare_operand`/`frontends/cli/scan_against.py`'s
+validation distinguishing it from a plain directory-of-libraries operand
+and a `BuildSourcePack`'s identically-named `manifest.json`) — but no
+`dump` CLI flag writes one today. **What this slice does not attempt**:
+decoding a section's own *internal* shape into a typed domain object beyond
+`semantic_ir` (each section still carries the pre-existing JSON encoding
+for its fields); multi-artifact packages (a real multi-library
+`ProjectSnapshot`); folding baseline sets/`BundleFacts` into sections, the
+`.tar.zst` transport form, `bundle_variants:` config wiring (A1.4-A1.7),
+and non-ELF membership specifics beyond `ArtifactRef.kind` (A1.8) remain
+open. See `docs/contribute/plans/
 storage-format-v2.md`'s "Landed in Phase 1" section and
 `docs/contribute/adr/062-project-snapshot-storage-v2.md`'s Status for the
 authoritative, jointly-maintained account — this note exists so a reader of

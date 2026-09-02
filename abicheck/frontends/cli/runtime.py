@@ -164,6 +164,13 @@ def _stamp_provenance(
 
 def _collect_metadata(path: Path) -> LibraryMetadata | None:
     """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
+    if path.is_dir():
+        # A storage-v2 `ProjectSnapshot` package dir (the one directory
+        # `classify_compare_operand` still routes through the single-pair
+        # path) is not a single hashable file -- same "not a binary" no-op
+        # `_sniff_text_format`'s own text-format branches below already
+        # apply, without `read_bytes()` raising `IsADirectoryError` first.
+        return None
     text_fmt = _sniff_text_format(path)
     if text_fmt in ("json", "perl", "symvers"):
         return None
