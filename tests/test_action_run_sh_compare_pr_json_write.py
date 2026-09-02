@@ -133,6 +133,35 @@ class TestCompareDoesNotInjectALosingWrite:
         argv = _compare_argv(tmp_path, {"INPUT_FORMAT": "json"})
         assert "--write" not in argv, argv
 
+    def test_extra_args_overriding_json_away_still_injects_a_write(
+        self, tmp_path: Path
+    ) -> None:
+        # ADR-064's effective-format-override gap (Codex review, PR #998,
+        # fresh evidence): `format: json` nominally means "the primary is
+        # already JSON, no secondary needed" -- but `extra-args` overriding
+        # to `--format text` (Click keeps only the last occurrence) really
+        # does make the primary output text, so skipping the injection here
+        # left such a run with no JSON report anywhere. The injection must
+        # fire based on the *effective* format, not the nominal one.
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_FORMAT": "json", "INPUT_EXTRA_ARGS": "--format text"},
+        )
+        assert argv.count("--write") == 1, argv
+        assert "abicheck-pr-json" in argv, argv
+
+    def test_extra_args_overriding_to_json_still_injects_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        # The reverse direction: a nominal non-json primary whose own
+        # extra-args overrides *to* json needs no secondary either -- the
+        # primary already is one.
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_FORMAT": "markdown", "INPUT_EXTRA_ARGS": "--format json"},
+        )
+        assert "--write" not in argv, argv
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareInjectsWriteForReleaseStyleOperandToo:

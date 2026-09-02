@@ -1247,6 +1247,14 @@ elif [[ "$MODE" == "compare" ]]; then
   FORMAT="${INPUT_FORMAT:-markdown}"
   CMD+=(--format "$FORMAT")
 
+  # Computed here, not only after extra-args are appended to CMD below, so
+  # the PR_JSON sidecar-injection decision a few lines down (which runs
+  # before that later, general-purpose computation) can already see an
+  # `extra-args --format` override -- see `_effective_format`'s own
+  # docstring (Codex review, PR #998, fresh evidence: the general-purpose
+  # computation runs too late for this mode's own injection decision).
+  _EFFECTIVE_FORMAT="$(_effective_format)"
+
   # dry-run performs no analysis and writes nothing, so it is mutually
   # exclusive with -o/--output AND --write on
   # the CLI -- skip both entirely when set, rather than passing them and
@@ -1286,7 +1294,13 @@ elif [[ "$MODE" == "compare" ]]; then
     # point _maybe_post_pr_comment reruns the whole comparison just to obtain
     # JSON, doubling a potentially expensive analysis to produce a file this
     # very injection existed to avoid rerunning for.
-    if [[ "$FORMAT" != "json" ]] && ! _extra_args_has_write_flag; then
+    #
+    # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`: a `format:
+    # json` step whose own extra-args overrides to a non-json format really
+    # does run without JSON output, and skipping this injection because the
+    # *nominal* format looked already-JSON left such a run with no JSON
+    # report anywhere (Codex review, PR #998, fresh evidence).
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -1711,6 +1725,12 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
+  # Computed here, not only after extra-args are appended to CMD below --
+  # same reason as compare mode's own early computation above (Codex
+  # review, PR #998, fresh evidence): the PR_JSON sidecar-injection decision
+  # a few lines down needs to see an `extra-args --format` override too.
+  _EFFECTIVE_FORMAT="$(_effective_format)"
+
   # dry-run maps directly to --dry-run (the cost-projection formerly under
   # the separate --estimate flag is folded into the general dry-run report).
   # A dry run writes nothing, so skip -o/--output entirely when it's set
@@ -1738,7 +1758,10 @@ elif [[ "$MODE" == "scan" ]]; then
     # `--write` (Codex review, follow-up) -- see
     # `_extra_args_has_write_flag`'s own docstring for why injecting
     # ours anyway would be actively wrong, not merely redundant.
-    if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
+    #
+    # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`, for the same
+    # reason as compare mode's own injection above.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
        && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
@@ -1763,9 +1786,14 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   CMD+=($INPUT_EXTRA_ARGS)
 fi
 
-# Computed once, after extra-args are known, for every JSON-detection site
-# below that needs the real format this invocation runs with rather than the
-# nominal `$FORMAT` -- see `_effective_format`'s own docstring.
+# Recomputed here (idempotently -- compare/scan mode already computed it
+# above, right after their own `$FORMAT` was set, so their own PR_JSON
+# sidecar-injection decisions could see it too) for every JSON-detection
+# site below that needs the real format this invocation runs with rather
+# than the nominal `$FORMAT` -- see `_effective_format`'s own docstring.
+# Also the only assignment for modes with no earlier one of their own
+# (dump has no `$FORMAT` at all; deps-tree/deps-compare have one but no
+# sidecar-injection decision that needs it early).
 _EFFECTIVE_FORMAT="$(_effective_format)"
 
 echo "::group::abicheck $MODE"

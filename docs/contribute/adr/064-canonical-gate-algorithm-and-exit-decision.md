@@ -737,7 +737,26 @@ lands in two stages rather than one atomic change:
       generic `ERROR` instead of `SEVERITY_ERROR`. Fixed the same way --
       gated on `${_EFFECTIVE_FORMAT:-${FORMAT:-}}` (`tests/
       test_action_run_sh_helpers.py::TestTextReportContentEffectiveFormat`).
-      Still open: the release
+      **A fourth review round (Codex, fresh evidence) found the general-
+      purpose `$_EFFECTIVE_FORMAT` computation itself ran too late for two
+      of its own consumers**: it was computed once, after `extra-args` is
+      appended to `CMD` -- but compare and scan mode's own `PR_JSON`
+      sidecar-injection decisions (`--write json=$PR_JSON`, added when the
+      primary format isn't already JSON) run *earlier*, inside each mode's
+      own block, and still checked the bare `$FORMAT`. A `format: json`
+      step whose own `extra-args` overrode to a non-json format skipped the
+      injection (nominally "already JSON, no secondary needed") while the
+      real run produced no JSON at all -- the mirror image of the gap
+      `_STDOUT_JSON_FILE` had, one step earlier in the pipeline. Fixed by
+      computing `$_EFFECTIVE_FORMAT` a second time, right after each mode's
+      own `$FORMAT` is set (idempotent with the later, general-purpose
+      computation, which still covers every mode with no injection decision
+      of its own), and gating both injection sites on it
+      (`tests/test_action_run_sh_compare_pr_json_write.py::
+      TestCompareDoesNotInjectALosingWrite::
+      test_extra_args_overriding_json_away_still_injects_a_write`,
+      `tests/test_action_run_sh_scan_pr_json_write.py`, a new module mirroring
+      the compare-mode one). Still open: the release
       fan-out's `GateOptions` unification, the typed-API half of this
       parity pass, the `--format text` gap named above, and a real
       `--artifact-set` member-level evidence-contract signal for the Action
