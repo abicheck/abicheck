@@ -236,7 +236,13 @@ def apply_case_a_fact_backfill(
     *,
     schema_version: int,
     rules: tuple[CaseAFactRule, ...],
-    evidenced: frozenset[str] = _HEADER_AST_BACKENDS,
+    # Required, never defaulted: a default here would be a value standing in
+    # for missing evidence (storage/AGENTS.md rule 3), and the value it stood
+    # in for -- both header-AST backends -- is the most permissive one there
+    # is, so an omitted argument would keep a header-only fact PRESENT on a
+    # document with no header provenance at all (CodeRabbit review, PR #995).
+    # A caller with nothing to report passes `frozenset()`.
+    evidenced: frozenset[str],
     **decoded: list[Any],
 ) -> None:
     """Downgrade every case-(a) fact a legacy document cannot vouch for.
@@ -310,7 +316,13 @@ def apply_legacy_fact_backfill(
     clang_va_list_facts_reliable_value: bool,
     ast_producer_value: str | None,
     *,
-    evidenced: frozenset[str] = _HEADER_AST_BACKENDS,
+    # Required, never defaulted: a default here would be a value standing in
+    # for missing evidence (storage/AGENTS.md rule 3), and the value it stood
+    # in for -- both header-AST backends -- is the most permissive one there
+    # is, so an omitted argument would keep a header-only fact PRESENT on a
+    # document with no header provenance at all (CodeRabbit review, PR #995).
+    # A caller with nothing to report passes `frozenset()`.
+    evidenced: frozenset[str],
     variables: list[Any] | None = None,
     enums: list[Any] | None = None,
     header_cv_facts_reliable_value: bool = True,
