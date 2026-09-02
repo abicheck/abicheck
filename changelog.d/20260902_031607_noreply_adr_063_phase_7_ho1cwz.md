@@ -416,6 +416,27 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   run_outcome_dict_for_diff_result` (already used by `reporter.py`'s own
   JSON entry points) rather than a new `policy` import, since
   `frontends` may not import `policy` directly.
+- **`aggregate`'s `_load_report_file` now recognizes `scan`'s two
+  comparability-refusal sentinels, `NOT_COMPARABLE` and
+  `BUNDLE_INCOMPLETE`, as blocking aborts too** (`_scan_abort_categories`
+  previously only covered `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`).
+  Neither sentinel is a `Verdict` enum member, so without this a scan
+  that refused to compare, or whose cross-library bundle audit never
+  ran, previously read as an ordinary unavailable/verdictless report —
+  silently discarding a blocking `run_outcome.operational` and letting a
+  warn/optional/tolerated-unexpected target policy pass it (Codex
+  review, fresh evidence).
+- **`_load_report_file` now dispatches a scan-shaped document
+  (`scan_schema_version` present) to `GateInfo.from_scan_report` before
+  `GateInfo.from_report_data`, not after.** A native `scan` report
+  carries its own top-level `run_outcome` (ADR-063 Phase 7) but no
+  top-level `severity` block — `from_report_data`'s own "no `severity`
+  block, read `run_outcome` alone" branch previously returned straight
+  from the root `run_outcome` without ever reaching `from_scan_report`,
+  the only reader that validates/cross-checks a severity-scheme scan's
+  nested `diff.severity` gate against it. A nested severity exit 4 paired
+  with a root `run_outcome.gate: "none"` was accepted as a nonblocking
+  gate instead of failing closed (Codex review, fresh evidence).
 
 ### Changed
 

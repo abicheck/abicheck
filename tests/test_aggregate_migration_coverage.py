@@ -73,17 +73,22 @@ def test_not_comparable_report_preserves_declared_contract_coverage(
     [
         ("BUDGET_OVERFLOW", 5, "budget_overflow"),
         ("EVIDENCE_CONTRACT_ERROR", 1, "evidence_contract_error"),
+        ("NOT_COMPARABLE", 6, "not_comparable"),
+        ("BUNDLE_INCOMPLETE", 1, "extraction_error"),
     ],
 )
 def test_scan_abort_verdicts_force_a_blocking_gate(
     tmp_path: Path, verdict: str, report_exit_code: int, category: str
 ) -> None:
-    """`scan`'s own two abort verdicts aren't `Verdict` members, so without
+    """`scan`'s own four abort verdicts aren't `Verdict` members, so without
     dedicated handling `_load_report_file` never reaches `GateInfo.from_
     scan_report` for them (it only calls that after `parse_report_verdict`
     succeeds) -- the abort would read as an unavailable/verdictless report
     a required-target policy could silently tolerate, instead of the real
-    failure it is (Codex review, fresh evidence).
+    failure it is (Codex review, fresh evidence -- `NOT_COMPARABLE`/
+    `BUNDLE_INCOMPLETE` were the two of these four still missing from
+    `_scan_abort_categories`, silently discarding a blocking
+    `run_outcome.operational` for either one).
 
     The gate's own `exit_code` is always `1` (`COVERAGE_INCOMPLETE_EXIT`),
     never *report_exit_code* itself -- `GateInfo.from_scan_report` already
@@ -121,6 +126,55 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
     assert loaded.gate.blocking is True
     assert loaded.gate.exit_code == 1
     assert loaded.gate.blocking_categories == (category,)
+
+
+def test_scan_report_with_a_real_verdict_dispatches_to_the_scan_reader_first(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a native `scan` report carries its own
+    top-level `run_outcome` (ADR-063 Phase 7) but no top-level `severity`
+    block -- a severity-scheme `scan --against` nests its gate at
+    `diff.severity` instead. `_load_report_file` previously tried
+    `GateInfo.from_report_data` FIRST for every report: its own "no
+    `severity` -> read `run_outcome` alone" branch returned straight from
+    the (here, forged) root `run_outcome` without ever reaching
+    `GateInfo.from_scan_report`, the only reader that validates/cross-checks
+    the nested `diff.severity` gate against it. A forged root
+    `run_outcome.gate: "none"` alongside a real nested `diff.severity.
+    exit_code: 4` must fail closed (`_MalformedGate`), not silently read as
+    a nonblocking gate.
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.9",
+                "verdict": "BREAKING",
+                "diff": {
+                    "severity": {
+                        "exit_code": 4,
+                        "blocking": True,
+                        "blocking_categories": ["abi_breaking"],
+                    }
+                },
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "BREAKING",
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "none",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
 
 
 @pytest.mark.parametrize("prior_contribution", [2, 4])

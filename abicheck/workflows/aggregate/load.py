@@ -33,7 +33,9 @@ from .contracts import (
     _NEW_TARGET_VERDICT,
     _OPERATIONAL_ERROR_VERDICT,
     _SCAN_BUDGET_OVERFLOW_VERDICT,
+    _SCAN_BUNDLE_INCOMPLETE_VERDICT,
     _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT,
+    _SCAN_NOT_COMPARABLE_VERDICT,
     DEFAULT_REPORT_PREFIX,
     GateInfo,
 )
@@ -151,15 +153,27 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
     return None
 
 
-#: The two synthetic ``verdict`` strings a native `scan` abort report (single
+#: The four synthetic ``verdict`` strings a native `scan` abort report (single
 #: binary or set-level) can carry at its own root, mapped to the aggregate
 #: gate's blocking-category label -- shared between the root-level check
 #: below and :func:`_member_abort_categories`, which needs the same mapping
 #: for a `scan --artifact-set` *member* whose own abort verdict was folded
-#: away by `_aggregate_scan_set_verdict`'s stronger-verdict-wins rule.
+#: away by `_aggregate_scan_set_verdict`'s stronger-verdict-wins rule. The
+#: category strings match `OperationalStatus`'s own values (`policy/
+#: outcome.py`) on purpose -- this dict predates `RunOutcome` and reads the
+#: legacy sentinel string directly rather than importing `policy`, but the
+#: label it produces is exactly what `run_outcome.operational` would say for
+#: the same report, so a reader can't tell which path computed it (Codex
+#: review, fresh evidence: `NOT_COMPARABLE`/`BUNDLE_INCOMPLETE` were missing
+#: here, so `_load_report_file`'s `if verdict is not None:` guard -- neither
+#: is a `Verdict` member -- skipped `GateInfo.from_report_data`/
+#: `from_scan_report` entirely and silently discarded a blocking
+#: `run_outcome.operational` for both).
 _scan_abort_categories = {
     _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
     _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
+    _SCAN_NOT_COMPARABLE_VERDICT: "not_comparable",
+    _SCAN_BUNDLE_INCOMPLETE_VERDICT: "extraction_error",
 }
 
 
@@ -524,12 +538,36 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     gate: GateInfo | None = None
     if verdict is not None:
         try:
-            # A ``compare`` severity block wins; else a ``scan`` top-level gate;
-            # else the legacy verdict mapping. Only an *absent* gate block
-            # legacy-falls-back — a *malformed* one fails closed below.
-            gate = GateInfo.from_report_data(data)
-            if gate is None:
+            # A scan-shaped document (``scan_schema_version`` present) is
+            # dispatched to `GateInfo.from_scan_report` FIRST, not
+            # `from_report_data` -- a native `scan` report carries its own
+            # top-level `run_outcome` (ADR-063 Phase 7) but no top-level
+            # `severity` block (a severity-scheme `scan --against` nests its
+            # gate at `diff.severity` instead), so `from_report_data`'s own
+            # "no severity -> read run_outcome alone" branch previously
+            # returned a `GateInfo` straight from the root `run_outcome`
+            # without ever reaching `from_scan_report`, which is the only
+            # reader that validates/cross-checks the nested `diff.severity`
+            # gate against it (Codex review, fresh evidence: a nested
+            # severity exit 4 paired with a root `run_outcome.gate: "none"`
+            # was accepted as nonblocking instead of failing closed).
+            # `from_scan_report` itself already folds the root `run_outcome`
+            # into whichever nested/legacy gate it finds
+            # (`_fold_top_level_run_outcome`), so this reordering loses no
+            # coverage for either shape -- only a non-scan report still
+            # prefers its own `severity` block first.
+            if "scan_schema_version" in data:
                 gate = GateInfo.from_scan_report(data)
+                if gate is None:
+                    gate = GateInfo.from_report_data(data)
+            else:
+                # A ``compare`` severity block wins; else a legacy-scheme
+                # ``scan`` top-level gate; else the legacy verdict mapping.
+                # Only an *absent* gate block legacy-falls-back — a
+                # *malformed* one fails closed below.
+                gate = GateInfo.from_report_data(data)
+                if gate is None:
+                    gate = GateInfo.from_scan_report(data)
         except _MalformedGate as exc:
             # Fail closed: a present-but-corrupt gate makes the target
             # unavailable (unknown), never silently the greener legacy path.
