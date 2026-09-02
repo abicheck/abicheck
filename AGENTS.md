@@ -218,8 +218,18 @@ Core pipeline (in order of data flow):
    `!=` comparison — there is no *observed* cross-backend value-spelling
    disagreement the way there is for a function/variable's type spelling,
    so inventing a canonicalizer here would be a heuristic in search of a
-   bug, not a fix for one). BTF/CTF/PDB remain fully unmigrated: those
-   backends do not populate `entity_id` at all yet.
+   bug, not a fix for one) — **except** clang's own compound-initializer
+   value, which is a build-stable structural fingerprint
+   (`dumper_clang_expr._expr_fingerprint`'s `"expr:" + sha256(...)[:16]`),
+   not a spelling of the source text at all; that one case is `Fact.
+   unsupported()` rather than a raw-value `Fact.present(...)`, matched by
+   the exact fingerprint shape (not merely its `"expr:"` prefix, which
+   would also misfire on a real castxml `expr::`-namespaced qualified
+   name). A castxml-only value that resolves to its own opaque
+   `FunctionType` tag (a direct function-pointer parameter/variable/return
+   type castxml's resolver has no dedicated rendering for) gets the same
+   `Fact.unsupported()` treatment. BTF/CTF/PDB remain fully unmigrated:
+   those backends do not populate `entity_id` at all yet.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

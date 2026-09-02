@@ -244,7 +244,24 @@ _ATOMIC_WRAPPER_PREFIX = "_Atomic("
 #: Phase 0 established: publishing the fingerprint as a confirmed spelling
 #: would make `merge_semantic_ir` report a spurious conflict against
 #: castxml's real initializer text for every unchanged compound constant.
-_CLANG_EXPR_FINGERPRINT_PREFIX = "expr:"
+#:
+#: Matches the FULL fingerprint shape -- ``"expr:"`` plus exactly 16
+#: lowercase hex digits -- not merely the ``"expr:"`` prefix (Codex review,
+#: tenth round, fresh evidence: a plain prefix test also matches castxml's
+#: raw, verbatim source-text initializer whenever it happens to spell a
+#: qualified name whose next component is literally ``expr``, e.g.
+#: ``"expr::NAMESPACE_VALUE"`` for an expression-template library's
+#: ``expr::`` namespace -- no fingerprint involved at all, and misreading it
+#: as one would silently discard real castxml constant evidence). Mirrors
+#: ``diff_default_value_reliability._is_expr_fingerprint``'s identical
+#: shape check, duplicated rather than imported since that module is a
+#: `compare`-layer detector-reliability leaf, not one `extract/` depends on
+#: for anything else (same "two leaf modules, one shared shape, no new
+#: cross-boundary edge" reasoning already applied to `_CV_KEYWORD_RE`
+#: above) -- that module already fixed this identical prefix-vs-full-shape
+#: mistake once (PR #720); this is the second, independent site it applies
+#: to.
+_CLANG_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
 
 #: castxml's own opaque-tag fallback (``extract/headers/castxml/
 #: type_resolution.py``'s ``type_name_uncached``, final ``return
@@ -759,7 +776,7 @@ def normalize_header_ast(
                 "clang's compound-initializer fingerprint is not a "
                 "cross-backend-comparable value spelling"
             )
-            if value.startswith(_CLANG_EXPR_FINGERPRINT_PREFIX)
+            if _CLANG_EXPR_FINGERPRINT_RE.match(value)
             else Fact.present(value)
         )
         _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)

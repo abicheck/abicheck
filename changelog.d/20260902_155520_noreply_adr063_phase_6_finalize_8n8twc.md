@@ -123,3 +123,11 @@
   resolver ran and produced a real, final (if useless) answer. Publishing
   it as present made a hybrid merge report a spurious conflict against
   clang's real, useful spelling for an unchanged callback declaration.
+  The clang compound-initializer fingerprint check now matches the FULL
+  fingerprint shape (`"expr:"` plus exactly 16 lowercase hex digits, the
+  same regex `diff_default_value_reliability._is_expr_fingerprint`
+  already uses) rather than merely the `"expr:"` prefix — a plain prefix
+  test also matched castxml's own raw, verbatim source-text initializer
+  whenever it happened to spell a qualified name whose next component is
+  literally `expr` (e.g. `"expr::NAMESPACE_VALUE"`), silently discarding
+  real castxml constant evidence as if it were a clang fingerprint.

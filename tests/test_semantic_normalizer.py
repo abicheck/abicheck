@@ -1018,3 +1018,30 @@ def test_normalize_header_ast_clang_expr_fingerprint_constant_is_unsupported() -
     (entity,) = ir.occurrences.values()
     assert not entity.canonical_spelling.is_present
     assert entity.canonical_spelling.status.value == "unsupported"
+
+
+def test_normalize_header_ast_expr_prefixed_qualified_name_is_not_a_fingerprint() -> (
+    None
+):
+    """A plain ``"expr:"`` PREFIX test would also match castxml's raw,
+    verbatim source-text initializer whenever it happens to spell a
+    qualified name whose next component is literally ``expr`` (e.g. an
+    expression-template library's ``expr::`` namespace) -- no fingerprint
+    involved at all (Codex review, tenth round, fresh evidence: mirrors
+    `diff_default_value_reliability._is_expr_fingerprint`'s identical
+    prefix-vs-full-shape fix, PR #720). The real fingerprint shape is
+    ``"expr:"`` plus exactly 16 lowercase hex digits; this value has a
+    ``::`` after the prefix and letters/digits that don't fit that shape,
+    so it must be published as a real, present spelling."""
+    eid = entity_id_for_constant((), "kValue")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        constants={"kValue": "expr::NAMESPACE_VALUE"},
+        constant_entity_ids={"kValue": eid},
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "expr::NAMESPACE_VALUE"
