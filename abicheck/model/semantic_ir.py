@@ -48,6 +48,7 @@ Leaf module: depends only on ``model.fact``/``model.availability``/
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
@@ -279,7 +280,18 @@ def renumber_conflict_keys(
     plain free text with no packed-length encoding to corrupt, so it is
     safe to rewrite the ordinary way (the caller's own
     ``apply_anonymous_type_ordinals``-backed callable, matching how every
-    other reachable string in the snapshot is rewritten). Applied whether or
+    other reachable string in the snapshot is rewritten). *rewrite_value*
+    itself receives the **decoded** value, never the raw ``repr()`` text —
+    :func:`_rewrite_conflict_value` below un-reprs it first and re-reprs
+    the result (Codex review, PR #1001, fifth round): a value whose text
+    contains an apostrophe makes Python's own ``repr()`` switch to
+    double-quoting, and this walk's own marker-detection deliberately
+    ignores text inside a double-quoted literal (so a real C++ NTTP string
+    argument spelled like a marker is never corrupted) — rewriting the raw
+    ``repr()`` text directly would therefore have that same protection
+    silently swallow the *entire* value merely because ``repr()`` happened
+    to quote it that way, not because it was ever a real string literal in
+    the source. Applied whether or
     not the *key* itself changed — a third review round caught exactly the
     gap an earlier revision left: an occurrence whose own ``EntityId`` has
     no marker (so its key is unchanged) can still carry a conflicting
@@ -316,7 +328,7 @@ def renumber_conflict_keys(
             if old_value is None:
                 continue
             new_key = semantic_ir_conflict_key(new_occ_id, fact_name)
-            new_value = rewrite_value(old_value)
+            new_value = _rewrite_conflict_value(old_value, rewrite_value)
             if new_key == old_key and new_value == old_value:
                 continue
             stale_keys.append(old_key)
@@ -324,3 +336,39 @@ def renumber_conflict_keys(
     for key in stale_keys:
         del conflicts[key]
     conflicts.update(rewritten)
+
+
+def _rewrite_conflict_value(value: str, rewrite: Callable[[str], str]) -> str:
+    """Decode *value* (a ``semantic_ir_conflicts`` entry — ``repr()`` of the
+    discarded backend's own fact value: a ``str`` for ``canonical_spelling``,
+    a ``tuple[str, ...]`` for ``template_arguments``/``cv_qualification`` —
+    ``extract/semantic_ir_merge.py``'s ``_merge_entity`` is the only
+    writer), apply *rewrite* to each real string component, and re-encode.
+
+    Decoding first is necessary, not cosmetic (Codex review, PR #1001, fifth
+    round): *rewrite*'s own marker-detection deliberately skips text inside
+    a double-quoted string literal, so a real C++ NTTP string argument
+    spelled like a marker is never corrupted — but ``repr()`` itself
+    switches to double-quoting whenever the underlying text contains a
+    single quote, which has nothing to do with the source language at all.
+    Rewriting the raw ``repr()`` text directly would let that same
+    protection misfire on ``repr()``'s own quoting choice, silently leaving
+    a value with an apostrophe in it (a string template argument, a header
+    basename) permanently unrenumbered.
+
+    Falls back to leaving *value* untouched for anything that doesn't
+    literal-eval to one of the two shapes above — this dict's contract is
+    "some backend's own discarded fact value", not an arbitrary string, so
+    anything else means this function's own assumption about the writer no
+    longer holds, and guessing at a rewrite would risk corrupting a value
+    it doesn't actually understand.
+    """
+    try:
+        decoded = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return value
+    if isinstance(decoded, str):
+        return repr(rewrite(decoded))
+    if isinstance(decoded, tuple) and all(isinstance(item, str) for item in decoded):
+        return repr(tuple(rewrite(item) for item in decoded))
+    return value

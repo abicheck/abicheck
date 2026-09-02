@@ -127,6 +127,43 @@ def test_normalize_header_ast_skips_typedef_with_no_sidecar_match() -> None:
     assert ir.occurrences == {}
 
 
+def test_normalize_header_ast_marks_unresolved_typedef_as_failed_not_present() -> None:
+    """Both header-AST backends spell an unresolved underlying type as the
+    literal ``"?"`` placeholder -- treating that as a confirmed ``PRESENT``
+    spelling would permanently block a hybrid merge's backfill the moment
+    the *other* backend actually resolves it (Codex review, PR #1001:
+    ``extract/semantic_ir_merge.py`` only ever backfills a non-present base
+    fact)."""
+    eid = entity_id_for_typedef((), "Unresolved")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={"Unresolved": "?"},
+        typedef_entity_ids={"Unresolved": eid},
+        producer="castxml",
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.value is None
+
+
+def test_normalize_header_ast_a_resolved_underlying_type_stays_present() -> None:
+    """A real underlying type spelled literally ``"?"`` is not a realistic
+    case (never a valid C/C++ type name), so this doesn't need to special-
+    case it beyond the exact-sentinel match above."""
+    eid = entity_id_for_typedef((), "Resolved")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={"Resolved": "int"},
+        typedef_entity_ids={"Resolved": eid},
+        producer="castxml",
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.value == "int"
+
+
 def test_normalize_header_ast_first_occurrence_wins_on_entity_id_collision() -> None:
     """Two declarations sharing one ``EntityId`` within a single backend's
     own output (e.g. a forward declaration alongside its definition) -- the

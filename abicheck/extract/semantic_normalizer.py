@@ -57,6 +57,16 @@ rather than silently omitted. Constants are omitted for the same reason:
 (``parse_constants()``) carries only its value expression, not a captured
 type string, to canonicalize.
 
+A typedef whose underlying type neither backend could resolve is stamped
+``Fact.failed(...)``, not ``Fact.present("?")`` (Codex review, PR #1001):
+both backends spell an unresolved chain with the identical ``"?"``
+placeholder, and treating that as a confirmed spelling would permanently
+block a hybrid merge's backfill the moment the *other* backend genuinely
+resolves it (``extract/semantic_ir_merge.py`` only ever backfills a
+non-present base fact) — recording it as a real, present spelling instead
+of a failure would have also silently misrepresented the placeholder text
+itself as canonical.
+
 **Known, accepted limitation for a manifest (``--dump-manifest``) dump
 (Codex review, PR #1001).** ``dumper_manifest.resolve_header_ast_result``
 calls this function once, on ``merge_fragments()``'s *already-merged*
@@ -100,15 +110,32 @@ from ..model.semantic_ir import CanonicalEntity, SemanticIR
 
 __all__ = ["normalize_header_ast"]
 
+#: Both header-AST backends use this literal as their typedef-resolution
+#: placeholder when the underlying type couldn't be followed
+#: (``dumper_castxml.py``/``dumper_castxml_typedefs.py``/``dumper_clang.py``,
+#: verified directly) -- never a real, structurally-fixed type spelling. See
+#: its use in :func:`normalize_header_ast` below.
+_UNRESOLVED_TYPE_SENTINEL = "?"
+
 
 def _add_occurrence(
     occurrences: dict[OccurrenceId, CanonicalEntity],
     entity_id: EntityId | None,
-    canonical_spelling: str,
+    canonical_spelling: Fact[str],
     *,
     producer: str,
 ) -> None:
     """Record one occurrence, first-observation-wins on a key collision.
+
+    *canonical_spelling* is a caller-supplied :class:`~abicheck.model.fact.
+    Fact` rather than a bare string, so a caller can state "this backend
+    tried and could not resolve this" as a non-present status instead of
+    always claiming ``PRESENT`` (see the typedef branch in
+    :func:`normalize_header_ast` — Codex review, PR #1001: an earlier
+    revision always wrapped the raw string in ``Fact.present(...)``, which
+    made an unresolved castxml typedef permanently block a resolving
+    clang backfill during hybrid merge, since ``merge_semantic_ir`` only
+    backfills a *non*-present base fact).
 
     Neither header-AST backend supplies a per-occurrence disambiguator
     today (``model/occurrence.py``'s own docstring: an empty disambiguator
@@ -128,7 +155,7 @@ def _add_occurrence(
     if occ_id in occurrences:
         return
     occurrences[occ_id] = CanonicalEntity(
-        canonical_spelling=Fact.present(canonical_spelling),
+        canonical_spelling=canonical_spelling,
         producer=producer,
     )
 
@@ -166,15 +193,26 @@ def normalize_header_ast(
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for rt in types:
         _add_occurrence(
-            occurrences, rt.entity_id, rt.qualified_name or rt.name, producer=producer
+            occurrences,
+            rt.entity_id,
+            Fact.present(rt.qualified_name or rt.name),
+            producer=producer,
         )
     for et in enums:
         _add_occurrence(
-            occurrences, et.entity_id, et.qualified_name or et.name, producer=producer
+            occurrences,
+            et.entity_id,
+            Fact.present(et.qualified_name or et.name),
+            producer=producer,
         )
     for qualified_name, entity_id in typedef_entity_ids.items():
         underlying = typedefs_qualified.get(qualified_name)
         if underlying is None:
             continue
-        _add_occurrence(occurrences, entity_id, underlying, producer=producer)
+        spelling_fact = (
+            Fact.failed("underlying type not resolved")
+            if underlying == _UNRESOLVED_TYPE_SENTINEL
+            else Fact.present(underlying)
+        )
+        _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
     return SemanticIR(occurrences=occurrences)
