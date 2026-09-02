@@ -184,6 +184,35 @@ def _fold_top_level_run_outcome(
                 f"'run_outcome.gate' ({gate.value}, exit {gate_exit}) "
                 f"contradicts the severity-derived exit_code ({result.exit_code})"
             )
+    else:
+        # A scoped report's `severity.exit_code` is `scoped_exit_code`
+        # (`cli_compare_fold._swap_in_scoped_severity`) -- already folded
+        # with the orthogonal contract-coverage/analysis-assurance floors,
+        # unlike an unscoped report's `severity.exit_code`, which every
+        # other caller of this `GateInfo` treats as the pure compatibility-
+        # gate axis alone. Retaining that composite value here (Codex
+        # review, fresh evidence) meant a scoped report whose only
+        # contribution was coverage/assurance (compatibility clean,
+        # `run_outcome.gate: none`) still built a `GateInfo` with
+        # `exit_code=1`/`blocking=True`, so aggregation counted the target
+        # as a *compatibility* blocker even though that same coverage/
+        # assurance contribution is folded onto the aggregate's own
+        # orthogonal axis independently -- double-counting one contribution
+        # as two different kinds of blocker. Rebuilding from the pure
+        # `run_outcome.gate` here (then folding only `operational` below,
+        # same as the unscoped path) restores the invariant every other
+        # `GateInfo` already satisfies: this object's own `exit_code`/
+        # `blocking_categories` reflect the compatibility+operational axes
+        # only, never contract-coverage/analysis-assurance.
+        gate_exit = policy_gate_decision_exit_code(gate)
+        result = replace(
+            result,
+            exit_code=gate_exit,
+            blocking=gate_exit != 0,
+            blocking_categories=(gate.value,)
+            if gate is not PolicyGateDecision.NONE
+            else (),
+        )
     op_exit = operational_status_exit_code(operational)
     if op_exit > result.exit_code:
         result = replace(

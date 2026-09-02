@@ -132,6 +132,44 @@ class TestRunOutcomeDictRoundTrip:
         assert restored.lifecycle is TargetLifecycle.EXISTING
 
 
+class TestRunOutcomeDictForDiffResultReusesGate:
+    def test_uses_the_passed_gate_rather_than_recomputing(self):
+        """Codex review (P1), fresh evidence: run_outcome_dict_for_diff_
+        result used to call gate_decision_for_result itself -- a second,
+        independent policy evaluation during rendering that could drift
+        from the severity block's own gate. It must now read the caller's
+        already-computed GateDecision instead. A deliberately wrong
+        `gate.exit_code` (disagreeing with what the real severity config
+        would compute) proves the passed value is what's actually used."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.policy.severity import GateDecision
+        from abicheck.report.run_outcome import run_outcome_dict_for_diff_result
+
+        result = DiffResult(
+            library="libfoo", old_version="1.0", new_version="1.1",
+            verdict=Verdict.NO_CHANGE,
+        )
+        fake_gate = GateDecision(
+            scheme="severity", exit_code=4, blocking=True,
+            blocking_categories=("abi_breaking",),
+        )
+        out = run_outcome_dict_for_diff_result(result, None, fake_gate)
+        assert out["gate"] == "abi_breaking"
+
+    def test_none_gate_falls_back_to_the_legacy_verdict_mapping(self):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.report.run_outcome import run_outcome_dict_for_diff_result
+
+        result = DiffResult(
+            library="libfoo", old_version="1.0", new_version="1.1",
+            verdict=Verdict.BREAKING,
+        )
+        out = run_outcome_dict_for_diff_result(result, None, None)
+        assert out["gate"] == "abi_breaking"
+
+
 class TestRunOutcomeForScanFields:
     def test_ordinary_compatible_verdict(self):
         outcome = run_outcome_for_scan_fields("COMPATIBLE", 0)
@@ -408,7 +446,45 @@ class TestGateInfoFromReportDataStructuredFirst:
         separation) -- the two legitimately differ whenever a coverage/
         assurance floor applies. full_run_outcome's presence (only set by
         cli_compare_fold._swap_in_scoped_run_outcome) is what must exempt
-        this from the contradiction check, not silently coincide with it."""
+        this from the contradiction check, not silently coincide with it.
+
+        A genuine compatibility break on the scoped gate (run_outcome.gate
+        != none) still surfaces here -- unlike the coverage-only sibling
+        test below, which the exemption rebuilds down to a clean gate."""
+        data = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+            "full_run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+            "full_verdict": "BREAKING",
+            "used_by": ["app.so"],
+        }
+        gate = GateInfo.from_report_data(data)
+        assert gate is not None
+        assert gate.exit_code == 4
+        assert gate.blocking is True
+        assert gate.blocking_categories == ("abi_breaking",)
+
+    def test_scoped_coverage_only_severity_does_not_read_as_a_compatibility_break(
+        self,
+    ):
+        """Codex review (P1), fresh evidence: retaining the folded
+        `severity.exit_code` for a scoped report (rather than rebuilding
+        from the pure `run_outcome.gate`) meant a scoped report whose only
+        contribution was contract-coverage/analysis-assurance (compatibility
+        clean, run_outcome.gate: none) still built a GateInfo with
+        exit_code=1/blocking=True -- so aggregation counted the target as a
+        *compatibility* blocker even though that same coverage/assurance
+        contribution is folded onto the aggregate's own orthogonal axis
+        independently, double-counting one contribution as two kinds of
+        blocker. The exemption must rebuild purely from run_outcome.gate."""
         data = {
             "severity": {
                 "exit_code": 1,
@@ -426,8 +502,9 @@ class TestGateInfoFromReportDataStructuredFirst:
         }
         gate = GateInfo.from_report_data(data)
         assert gate is not None
-        assert gate.exit_code == 1
-        assert gate.blocking is True
+        assert gate.exit_code == 0
+        assert gate.blocking is False
+        assert gate.blocking_categories == ()
 
     def test_garbage_full_run_outcome_does_not_bypass_the_contradiction_check(self):
         """Codex review (P2), fresh evidence beyond the contradiction fix
@@ -879,6 +956,38 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = result.to_dict()
         assert report["run_outcome"]["gate"] == "potential_breaking"
         assert report["run_outcome"]["operational"] == "evidence_contract_error"
+
+    def test_scan_set_result_preserves_completed_break_across_set_level_budget_overflow(
+        self,
+    ):
+        """Codex review (P2), fresh evidence: when an artifact-set scan
+        completes a BREAKING member and a *later* member hits
+        BUDGET_OVERFLOW, _aggregate_scan_set_verdict's own step 1 correctly
+        reports BUDGET_OVERFLOW/exit 5 as the SET's own verdict (an
+        unfinished analysis dominates), but run_outcome must not lose the
+        completed member's real break from its independent compatibility
+        axis just because a different, later member never finished."""
+        from pathlib import Path
+
+        from abicheck.service_scan import ScanArtifactResult, ScanResult, ScanSetResult
+
+        per_artifact = [
+            ScanArtifactResult(
+                artifact=Path("a.so"), result=ScanResult(verdict="BREAKING", exit_code=4),
+            ),
+            ScanArtifactResult(
+                artifact=Path("b.so"),
+                result=ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5),
+            ),
+        ]
+        result = ScanSetResult(
+            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact,
+        )
+        report = result.to_dict()
+        assert report["verdict"] == "BUDGET_OVERFLOW"
+        assert report["run_outcome"]["compatibility"] == "BREAKING"
+        assert report["run_outcome"]["gate"] == "abi_breaking"
+        assert report["run_outcome"]["operational"] == "budget_overflow"
 
     def test_scan_set_result_preserves_bundle_incomplete_alongside_stronger_verdict(
         self,

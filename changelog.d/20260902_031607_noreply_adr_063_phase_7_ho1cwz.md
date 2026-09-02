@@ -199,6 +199,42 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `_release_global_verdict`'s own floor default is indistinguishable from a
   genuine no-change result by string value alone, so that flag has to be
   passed explicitly rather than inferred from the verdict string.
+- **A scoped report's `GateInfo` no longer double-counts a coverage/
+  assurance-only contribution as a compatibility break.** The scoped
+  exemption retained `severity.exit_code` (which folds in the orthogonal
+  contract-coverage/analysis-assurance floors for a scoped report,
+  unlike an unscoped report's `severity.exit_code`) unchanged, so a
+  scoped report whose only contribution was coverage/assurance
+  (`run_outcome.gate: none`) still built a `GateInfo` with
+  `exit_code=1`/`blocking=True` — aggregation then counted the target as
+  a compatibility blocker even though that same contribution is folded
+  onto the aggregate's own orthogonal axis independently. The exemption
+  now rebuilds `GateInfo` purely from `run_outcome.gate` (then folds only
+  `operational`, same as the unscoped path), restoring the invariant
+  every other `GateInfo` already satisfies.
+- **`run_outcome.gate` on a real `compare` report is no longer computed
+  twice.** `report/run_outcome.py`'s `run_outcome_dict_for_diff_result`
+  called `gate_decision_for_result` itself — a second, independent policy
+  evaluation during rendering, contrary to `report/AGENTS.md`'s
+  "a renderer... cannot calculate a new gate decision." It now takes the
+  caller's already-computed `GateDecision` (threaded through
+  `reporter.py`'s four JSON entry points and
+  `render_json_with_side_facts`) instead of recomputing it, closing the
+  gap where the two could silently drift from each other as either
+  evolves.
+- **`--artifact-set`'s `run_outcome.compatibility` no longer goes `null`
+  when a completed member's break is followed by a different member's
+  `BUDGET_OVERFLOW`.** `_aggregate_scan_set_verdict`'s own step 1 (any
+  member `BUDGET_OVERFLOW` → the whole set is `BUDGET_OVERFLOW`) is
+  correct for the set's own *reported* `verdict`/`exit_code`, but
+  `ScanSetResult.to_dict()` derived `run_outcome` from that same
+  sentinel-bearing rollup alone, silently erasing an already-completed
+  `BREAKING`/`API_BREAK` member's real result from the independent
+  compatibility axis. `run_outcome_dict_for_scan` gained a
+  `member_compatibility_contribution` fallback tier (the worst REAL
+  per-member compatibility exit code, used only when no `report=` supplies
+  one) so the completed break survives even though the set itself never
+  finished.
 
 ### Changed
 

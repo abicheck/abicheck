@@ -33,7 +33,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..policy.gate_decision import gate_decision_for_result
 from ..policy.outcome import (
     OperationalStatus,
     RunOutcome,
@@ -43,7 +42,7 @@ from ..policy.outcome import (
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
-    from ..severity import SeverityConfig
+    from ..severity import GateDecision, SeverityConfig
 
 __all__ = ["run_outcome_dict_for_diff_result"]
 
@@ -51,16 +50,24 @@ __all__ = ["run_outcome_dict_for_diff_result"]
 def run_outcome_dict_for_diff_result(
     result: DiffResult,
     severity_config: SeverityConfig | None,
+    gate: GateDecision | None,
 ) -> dict[str, Any]:
     """The ``run_outcome`` block (ADR-063 Phase 7 / D6) for *result*.
 
     Additive alongside the existing ``severity``/``verdict``/``exit_code``
     fields, never a replacement for them -- see ``policy/outcome.py``'s own
-    module docstring. Recomputes the gate decision via
-    :func:`gate_decision_for_result` (cheap, and it's already the one
-    canonical reconstruction site) rather than threading an
-    already-computed value through each of ``reporter.py``'s four JSON
-    entry points.
+    module docstring.
+
+    *gate* is the caller's own already-computed
+    :func:`~abicheck.policy.gate_decision.gate_decision_for_result` value
+    (``None`` exactly when *severity_config* is ``None``) -- a report-level
+    projection may not calculate a new gate decision of its own
+    (`report/AGENTS.md`'s "Prohibited responsibilities"), so this reads the
+    fact rather than recomputing it a second, independent time (Codex
+    review, fresh evidence: the original version called
+    :func:`~abicheck.policy.gate_decision.gate_decision_for_result` itself,
+    a second policy evaluation during rendering that could silently drift
+    from the ``severity`` block's own gate as either evolves).
 
     An ordinary ``compare``/``--report-mode`` render never carries an
     operational failure of its own (that axis is populated only by the
@@ -70,7 +77,6 @@ def run_outcome_dict_for_diff_result(
     """
     from ..severity import legacy_exit_code
 
-    gate = gate_decision_for_result(result, severity_config)
     exit_code = gate.exit_code if gate is not None else legacy_exit_code(result.verdict)
     outcome = RunOutcome(
         compatibility=result.verdict,

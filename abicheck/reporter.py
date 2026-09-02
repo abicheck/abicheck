@@ -190,9 +190,9 @@ def to_stat_json(
         },
     }
     _add_check_identity(d, result)
-    if severity_config is not None:
-        gate = gate_decision_for_result(result, severity_config)
-        assert gate is not None  # severity_config is not None here
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             result.changes,
             severity_config,
@@ -229,7 +229,7 @@ def to_stat_json(
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
@@ -526,9 +526,9 @@ def _to_json_leaf(
         "changes": leaf_changes_list + non_type_list,
     }
     _add_check_identity(d, result)
-    if severity_config is not None:
-        gate = gate_decision_for_result(result, severity_config)
-        assert gate is not None  # severity_config is not None here
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
@@ -562,7 +562,7 @@ def _to_json_leaf(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
 
 
 def _add_entries_to_root_causes(
@@ -731,9 +731,9 @@ def _to_json_root_cause(
     d["policy"] = effective_policy
     if show_only:
         _add_show_only_filter(d, result, changes, show_only)
-    if severity_config is not None:
-        gate = gate_decision_for_result(result, severity_config)
-        assert gate is not None  # severity_config is not None here
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
@@ -770,7 +770,7 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1184,9 +1184,9 @@ def to_json(
         _add_show_only_filter(d, result, changes, show_only)
 
     # Severity-categorized summary when severity config is provided
-    if severity_config is not None:
-        gate = gate_decision_for_result(result, severity_config)
-        assert gate is not None  # severity_config is not None here
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
@@ -1216,7 +1216,7 @@ def to_json(
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

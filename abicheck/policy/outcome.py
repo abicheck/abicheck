@@ -616,6 +616,7 @@ def run_outcome_dict_for_scan(
     report: object = None,
     member_evidence_contract_error: bool = False,
     bundle_incomplete: bool = False,
+    member_compatibility_contribution: int | None = None,
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> dict[str, Any]:
     """One-call convenience wrapping :func:`run_outcome_for_scan_fields` +
@@ -630,6 +631,14 @@ def run_outcome_dict_for_scan(
     ``exit.compatibility_contribution`` nesting is consulted next -- the two
     are mutually exclusive report shapes (Codex review), never both present
     at once, so there is no precedence question between them in practice.
+    *member_compatibility_contribution* is the last-resort fallback tier,
+    for a writer with no ``report=`` at all
+    (:class:`~abicheck.service_scan.ScanSetResult`'s own set-level
+    ``BUDGET_OVERFLOW`` abort, Codex review, fresh evidence): the worst
+    REAL per-member compatibility exit code it already computed itself,
+    so a completed member's break isn't lost just because a *different*,
+    later member aborted and the set-level sentinel dominates ``verdict``/
+    ``exit_code``.
 
     *member_evidence_contract_error*/*bundle_incomplete* are forwarded to
     :func:`run_outcome_for_scan_fields` unchanged -- see that function's own
@@ -638,6 +647,8 @@ def run_outcome_dict_for_scan(
     compat_exit_code = scan_report_severity_exit_code(report)
     if compat_exit_code is None:
         compat_exit_code = scan_report_abort_compatibility_contribution(report)
+    if compat_exit_code is None:
+        compat_exit_code = member_compatibility_contribution
     return run_outcome_for_scan_fields(
         verdict,
         exit_code,
