@@ -138,5 +138,6 @@ def test_allowed_paths_are_exempt_from_the_repo_wide_scan() -> None:
     """The four boundary encoders are real, existing files -- this check
     would be vacuous if the allowlist named nothing that exists."""
     pkg = _REPO_ROOT / "abicheck"
+    assert ALLOWED_RELATIVE_PATHS
     for rel in ALLOWED_RELATIVE_PATHS:
         assert (pkg / rel).is_file(), rel

@@ -257,6 +257,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `operational: "not_comparable"`, and clarifies that any non-`none`
   `operational` value (not just the four named ones) means no
   compatibility verdict was produced (CodeRabbit review).
+- `test_allowed_paths_are_exempt_from_the_repo_wide_scan` now asserts
+  `ALLOWED_RELATIVE_PATHS` is non-empty before looping over it, so the
+  four-boundary-encoder check it documents can't silently pass vacuously
+  if the allowlist were ever emptied (CodeRabbit review).
 
 ### Changed
 
