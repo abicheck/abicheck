@@ -287,8 +287,9 @@ satisfies for the one domain type it actually sections today
 | Module | Contract |
 |---|---|
 | `abicheck/storage/package.py` | `MANIFEST_RELPATH`, `SECTION_KINDS`, `ObjectRef`, `VariantRef`, `ArtifactRef`, `PackageManifest`, `ObjectStore`, `InMemoryObjectStore`, `object_relpath`, `variant_ref_relpath`, `artifact_ref_relpath` (A1.1) |
-| `abicheck/storage/dto.py` | `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `SectionDTO`, `migrate_section_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint) |
-| `abicheck/storage/import_v1.py` | `LEGACY_DOCUMENT_SECTION_KIND`, `import_legacy_snapshot` (A1.2) |
+| `abicheck/storage/dto.py` | `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `SectionDTO`, `legacy_section_from_dto`, `legacy_section_to_dto`, `migrate_section_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint) |
+| `abicheck/storage/legacy_sections.py` | `LEGACY_SECTION_KINDS`, `SCHEMA_VERSION_KEY`, `join_legacy_document`, `split_legacy_document` (D8's full legacy-document section partition) |
+| `abicheck/storage/import_v1.py` | `export_legacy_snapshot`, `import_legacy_snapshot` (A1.2) |
 
 `ObjectRef`/`VariantRef`/`ArtifactRef`/`PackageManifest` are the in-memory
 document model of D6's `manifest.json` plus the ref documents it names.
@@ -333,23 +334,34 @@ migrated onto a typed, D8-constrained representation today is
 `semantic_ir_from_document` — extracted from that module's existing
 snapshot-dict-mutating `encode_semantic_ir`/`decode_semantic_ir` into a pure
 object-in/document-out pair this DTO layer builds on rather than
-duplicates). Everything else the legacy document carries — symbols, types,
-layout, every DWARF/PE/Mach-O fact, the whole of what D8 eventually splits
-into `binary`/`declarations`/`types`/`layout`/`debug`/... sections — travels
-as one opaque `"legacy_document"` object (`import_v1.
-LEGACY_DOCUMENT_SECTION_KIND`): the exact remaining document content, not a
-placeholder. Splitting that remainder into real D8 sections is A1.4's own
-explicitly scheduled future work, not attempted here.
+duplicates). **Every other field the legacy document carries is now split
+across D8's own named `binary`/`declarations`/`types`/`layout`/`debug`/
+`build`/`graph`/`provenance` sections too** (`storage/legacy_sections.py`'s
+`split_legacy_document`/`join_legacy_document`): one explicit, reviewed
+allowlist per section (`_SECTION_FIELDS`) names exactly which top-level
+document keys belong to it, checked in both directions (an unassigned key
+on import, or a key outside its own section's allowlist on export, is a
+hard `ValueError`, never a silent drop into a catch-all). What this split
+does *not* do is decode a section's own internal shape into a typed domain
+object the way `semantic_ir` is — `elf`/`dwarf`/`build_source`/... still
+carry exactly the JSON `serialization.snapshot_to_dict()` already produced,
+just inside their own now-independently-versioned, content-addressed
+section rather than one shared blob. `import_v1.export_legacy_snapshot` is
+the exact inverse of the import side: given an `ArtifactRef` and the
+`ObjectStore` it was written into, it reads every section back, migrates
+each to its section kind's current version, and reassembles the original
+`snapshot_from_dict()`-shaped document, `schema_version` included.
 
 **Not yet implemented, and still open**: folding baseline sets and
 `BundleFacts` into sections (A1.4/A1.5), storing `BuildSourcePack`/project
 source graphs/toolchain profiles once per project and referencing them by
 digest, `bundle_variants:` CLI/config wiring (A1.6/A1.7), non-ELF artifact
-membership specifics (A1.8), and the `.tar.zst` transport form. Splitting
-D8's remaining section kinds out of `import_v1.py`'s one `"legacy_document"`
-object, and giving `ArtifactRef.sections` a per-section `FactAvailability`
-(the "known, deliberately deferred gap" below), are both real future work
-this landing does not attempt.
+membership specifics beyond `ArtifactRef.kind` (A1.8), and the `.tar.zst`
+transport form. Decoding a legacy section's *internal* shape into a typed
+domain object (rather than carrying the existing JSON as-is), and giving
+`ArtifactRef.sections` a per-section `FactAvailability` (the "known,
+deliberately deferred gap" below), are both real future work this landing
+does not attempt.
 
 **A known, deliberately deferred gap** (flagged in review, Codex): `ArtifactRef.sections`
 has no accompanying D3 `FactAvailability`/`AvailabilityLedger` per section, so an
@@ -431,6 +443,7 @@ human reads (never `contribute/`), which is why the trigger names a real
       - abicheck/storage/versioning.py
       - abicheck/storage/package.py
       - abicheck/storage/dto.py
+      - abicheck/storage/legacy_sections.py
       - abicheck/storage/import_v1.py
       - abicheck/project_snapshot_store.py
 ```

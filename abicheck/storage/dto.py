@@ -65,12 +65,15 @@ from .guards import (
     required_field as _required_field,
     strict_int as _strict_int,
 )
+from .legacy_sections import LEGACY_SECTION_KINDS
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
 
 __all__ = [
     "SECTION_SCHEMA_VERSIONS",
     "SEMANTIC_IR_SECTION_KIND",
     "SectionDTO",
+    "legacy_section_from_dto",
+    "legacy_section_to_dto",
     "migrate_section_dto",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",
@@ -91,21 +94,27 @@ SEMANTIC_IR_SECTION_KIND = "semantic_ir"
 #: section_schema_versions` (D2) is keyed by exactly this vocabulary, so a
 #: package's manifest states which version *this* module wrote each section
 #: under, independent of every other axis.
-SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {SEMANTIC_IR_SECTION_KIND: 1}
+SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
+    SEMANTIC_IR_SECTION_KIND: 1,
+    # ADR-063 Phase 8's full D8 split: every `storage.legacy_sections
+    # .LEGACY_SECTION_KINDS` entry starts at version 1, the same way
+    # `SEMANTIC_IR_SECTION_KIND` did before it shipped its own first real
+    # producer — each is its own independent axis from here on, so a future
+    # `"binary"` schema change never forces a bump on `"declarations"`.
+    **{kind: 1 for kind in LEGACY_SECTION_KINDS},
+}
 
 #: Per-section-kind migration chains, keyed by the DTO version a step reads
 #: *from* — `{1: step_from_1_to_2, 2: step_from_2_to_3, ...}`. Empty for
-#: every section kind today: `SEMANTIC_IR_SECTION_KIND` has shipped exactly
-#: one version, so there is nothing yet to migrate from. The registry exists
-#: now, ahead of a real version 2, so the *pattern* — one small, reviewed
-#: function per version bump, chained rather than replaced — is established
-#: before it is needed, the same way `StorageVersions`' own axes were
-#: reserved ahead of a producer that fills them.
+#: every section kind today: none has shipped a second version yet, so there
+#: is nothing yet to migrate from. The registry exists now, ahead of a real
+#: version 2, so the *pattern* — one small, reviewed function per version
+#: bump, chained rather than replaced — is established before it is needed,
+#: the same way `StorageVersions`' own axes were reserved ahead of a
+#: producer that fills them.
 _MIGRATIONS: Mapping[
     str, Mapping[int, Callable[[Mapping[str, Any]], Mapping[str, Any]]]
-] = {
-    SEMANTIC_IR_SECTION_KIND: {},
-}
+] = {kind: {} for kind in SECTION_SCHEMA_VERSIONS}
 
 
 def _freeze(value: Any) -> Any:
@@ -302,3 +311,42 @@ def semantic_ir_from_dto(dto: SectionDTO) -> tuple[SemanticIR | None, dict[str, 
         )
     current = migrate_section_dto(dto)
     return semantic_ir_from_document(current.payload)
+
+
+def legacy_section_to_dto(section_kind: str, payload: Mapping[str, Any]) -> SectionDTO:
+    """One `storage.legacy_sections.LEGACY_SECTION_KINDS` payload (already an
+    explicit, allowlisted subset of a legacy document — see that module's own
+    docstring), as a `SectionDTO`.
+
+    There is nothing to encode beyond the version stamp: each legacy section
+    is already the exact JSON shape `serialization.snapshot_to_dict()`
+    produced for those keys, and `storage/` may not import `serialization.py`
+    to re-derive it (`storage/AGENTS.md`, "Permitted imports") — the same
+    "reuse the existing, reviewed encoding, never a second one" reasoning
+    `semantic_ir_to_dto` already documents, applied to a section whose
+    payload is already flat JSON rather than a typed domain object.
+    """
+    if section_kind not in SECTION_SCHEMA_VERSIONS or section_kind == (
+        SEMANTIC_IR_SECTION_KIND
+    ):
+        raise ValueError(
+            f"{section_kind!r} is not a legacy section kind -- expected one "
+            f"of {sorted(set(SECTION_SCHEMA_VERSIONS) - {SEMANTIC_IR_SECTION_KIND})}"
+        )
+    return SectionDTO(
+        section_kind=section_kind,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[section_kind],
+        payload=payload,
+    )
+
+
+def legacy_section_from_dto(dto: SectionDTO) -> dict[str, Any]:
+    """The inverse of `legacy_section_to_dto` — migrates *dto* to its
+    section's current version first, then returns a fresh, mutable, fully
+    unfrozen `dict` of its payload (`to_dict()["payload"]`, never the DTO's
+    own frozen `MappingProxyType`/`tuple` storage — a shallow `dict(...)`
+    copy would leave every nested container still frozen)."""
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return payload

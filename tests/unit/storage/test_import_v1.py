@@ -17,15 +17,17 @@ from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+from abicheck.storage.canonical import canonical_form
 from abicheck.storage.dto import (
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
     semantic_ir_from_dto,
 )
 from abicheck.storage.import_v1 import (
-    LEGACY_DOCUMENT_SECTION_KIND,
+    export_legacy_snapshot,
     import_legacy_snapshot as _import_legacy_snapshot,
 )
+from abicheck.storage.legacy_sections import LEGACY_SECTION_KINDS
 from abicheck.storage.package import InMemoryObjectStore
 
 
@@ -87,24 +89,80 @@ class TestImportLegacySnapshot:
         ir, _conflicts = semantic_ir_from_dto(dto)
         assert ir == snap.semantic_ir
 
-    def test_the_legacy_remainder_excludes_the_promoted_keys(self) -> None:
+    def test_the_legacy_sections_exclude_the_promoted_keys(self) -> None:
         doc = snapshot_to_dict(_snapshot_with_ir())
         store = InMemoryObjectStore()
         manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
         sections = manifest.artifact_refs[0].sections
-        remainder = store.get(sections[LEGACY_DOCUMENT_SECTION_KIND].digest)
-        assert "semantic_ir" not in remainder
-        assert "semantic_ir_conflicts" not in remainder
-        # Everything else survives untouched.
-        assert remainder["library"] == "libfoo.so.1"
+        for kind in LEGACY_SECTION_KINDS:
+            if kind not in sections:
+                continue
+            payload = store.get(sections[kind].digest)["payload"]
+            assert "semantic_ir" not in payload
+            assert "semantic_ir_conflicts" not in payload
+            assert "schema_version" not in payload
+        # `library` lands in the `provenance` section, untouched.
+        provenance = store.get(sections["provenance"].digest)["payload"]
+        assert provenance["library"] == "libfoo.so.1"
+
+    def test_every_present_legacy_field_lands_in_exactly_one_section(self) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        sections = manifest.artifact_refs[0].sections
+        seen: dict[str, str] = {}
+        for kind in LEGACY_SECTION_KINDS:
+            if kind not in sections:
+                continue
+            payload = store.get(sections[kind].digest)["payload"]
+            for key in payload:
+                assert key not in seen, (
+                    f"{key!r} appears in both {seen.get(key)!r} and {kind!r}"
+                )
+                seen[key] = kind
+        expected = set(doc) - {"semantic_ir", "semantic_ir_conflicts", "schema_version"}
+        assert set(seen) == expected
 
     def test_no_semantic_ir_section_when_the_snapshot_carries_none(self) -> None:
         doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
         store = InMemoryObjectStore()
         manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
         assert SEMANTIC_IR_SECTION_KIND not in manifest.artifact_refs[0].sections
-        assert LEGACY_DOCUMENT_SECTION_KIND in manifest.artifact_refs[0].sections
+        assert "provenance" in manifest.artifact_refs[0].sections
         assert "semantic_ir" not in manifest.versions.section_schema_versions
+
+    def test_export_round_trips_a_full_document(self) -> None:
+        snap = _snapshot_with_ir()
+        doc = snapshot_to_dict(snap)
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        # `canonical_form` normalizes tuples the round trip through JSON-
+        # shaped section storage already turns into lists (the DTO layer's
+        # own storage format, not a lossy conversion this test should
+        # penalize) -- the same normalization every section's own storage
+        # already applies before hashing/comparing it.
+        assert canonical_form(rebuilt) == canonical_form(doc)
+
+    def test_export_round_trips_a_document_with_no_semantic_ir(self) -> None:
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        rebuilt = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        # `canonical_form` normalizes tuples the round trip through JSON-
+        # shaped section storage already turns into lists (the DTO layer's
+        # own storage format, not a lossy conversion this test should
+        # penalize) -- the same normalization every section's own storage
+        # already applies before hashing/comparing it.
+        assert canonical_form(rebuilt) == canonical_form(doc)
 
     def test_artifact_kind_defaults_to_elf_when_the_document_states_no_platform(
         self,
@@ -162,10 +220,10 @@ class TestImportLegacySnapshot:
         first = import_legacy_snapshot(doc, store=store, artifact_id="a")
         second = import_legacy_snapshot(doc, store=store, artifact_id="b")
         first_digest = (
-            first.artifact_refs[0].sections[LEGACY_DOCUMENT_SECTION_KIND].digest
+            first.artifact_refs[0].sections["provenance"].digest
         )
         second_digest = (
-            second.artifact_refs[0].sections[LEGACY_DOCUMENT_SECTION_KIND].digest
+            second.artifact_refs[0].sections["provenance"].digest
         )
         assert first_digest == second_digest
 

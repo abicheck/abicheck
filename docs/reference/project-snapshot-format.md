@@ -11,15 +11,17 @@ generated: false
 
 # Project Snapshot Format (`ProjectSnapshot`, v2)
 
-> **Not yet reachable from any CLI command, config key, or Action input.**
-> Everything on this page describes an internal, in-development storage
-> format ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)) —
-> today it has no producer or reader wired into `dump`/`compare`/`scan`, and
-> every snapshot those commands write or read is still the
-> [`.abi.json` format](snapshot-format.md) this page's format is meant to
-> eventually replace. This page exists because the format is now real code
-> a contributor can run, not because it is user-facing yet — see the ADR's
-> own Status for exactly what is and is not implemented.
+> **Experimental, opt-in only.** `dump --project-snapshot-dir PATH`
+> additionally writes a real, directory-backed `ProjectSnapshot` package
+> ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)) — it
+> never replaces `-o`/`--output`'s
+> [`.abi.json` output](snapshot-format.md), which stays the default and
+> only user-facing format. `compare`/`scan --against` accept a package
+> directory as an input path (in place of a `.abi.json` file), read back
+> into the same in-memory representation either way. This is the first
+> user-reachable slice of the format, not the whole design — see the ADR's
+> own Status for what is and is not implemented (in particular: single
+> artifact per package only, no `.tar.zst` transport form).
 
 `ProjectSnapshot` is ADR-062's replacement for four separate persistence
 shapes (per-library `.abi.json` snapshots, baseline sets, `BundleFacts`, and
@@ -93,14 +95,31 @@ An artifact's content is split into independently-addressable *sections*
 (D8) — `binary`, `declarations`, `types`, `layout`, `debug`, `build`,
 `source_abi`, `graph`, `provenance`, `diagnostics`, `raw_refs` are the named
 vocabulary, though `ArtifactRef.sections` accepts any section kind string.
-**Today, exactly one domain type is actually promoted onto a typed,
-versioned section**: `SemanticIR` (ADR-063 Phase 6's cross-backend
-declaration/type representation), under section kind `"semantic_ir"`, via
-`abicheck/storage/dto.py`'s `SectionDTO`. Every other field a legacy
-`.abi.json` document carries — symbols, types, layout, every DWARF/PE/
-Mach-O fact — currently travels as one opaque `"legacy_document"` section
-(the exact remaining document content, unsplit); splitting that into the
-rest of D8's named sections is scheduled, separate future work.
+
+`SemanticIR` (ADR-063 Phase 6's cross-backend declaration/type
+representation) is the one domain type actually promoted onto a typed,
+versioned section built from a real domain object, under section kind
+`"semantic_ir"`, via `abicheck/storage/dto.py`'s
+`semantic_ir_to_dto`/`semantic_ir_from_dto`. **Every other field a legacy
+`.abi.json` document carries is split across the rest of D8's named
+sections too** (`abicheck/storage/legacy_sections.py`'s
+`split_legacy_document`/`join_legacy_document`): `binary` (ELF/PE/Mach-O
+container facts, `build_id`, source path/size), `declarations` (functions,
+variables, enums, typedefs, constants, Python/SYCL extension surfaces),
+`types` (record/class/union types), `layout` (DWARF-vs-header coherence,
+conditional fields, extraction contract), `debug` (DWARF/AST toolchain
+facts and their reliability flags), `build` (embedded `BuildSourcePack`
+data), `graph` (the surface reachability graph), and `provenance` (library/
+version identity, git/build metadata, `dump`'s own `dump_provenance`
+block). Each section is independently versioned
+(`storage.dto.SECTION_SCHEMA_VERSIONS`) and carries an explicit, reviewed
+field allowlist — a document field with no assigned section is a hard
+error at import time, not a silent drop. What this split does *not* do yet
+is decode a section's own **internal** shape into a typed domain object the
+way `semantic_ir` is: `elf`/`dwarf`/`build_source`/... inside their own
+section still carry exactly the JSON `serialization.snapshot_to_dict()`
+already produced for them. That deeper per-field typing is real,
+separately-scoped future work.
 
 Every `SectionDTO` is a small, explicit envelope:
 
@@ -129,7 +148,35 @@ already-serialized `.abi.json`-shaped document (any schema version this
 build can still read) and produces a one-artifact, one-variant
 `PackageManifest` — a single-library dump represented as a minimal project.
 No existing baseline is rewritten: the adapter only ever reads a document
-and builds new, additional structures from it.
+and builds new, additional structures from it. `export_legacy_snapshot` is
+the exact inverse: given an `ArtifactRef` and the `ObjectStore` it was
+written into, it reads every section back, migrates each to its current
+version, and reassembles the original document.
+
+## CLI wiring
+
+`abicheck/project_snapshot_legacy.py`'s `write_legacy_snapshot_package`/
+`read_legacy_snapshot_document` are the real, directory-backed round trip
+built on the primitives above (`DirectoryObjectStore` + `import_legacy_
+snapshot`/`export_legacy_snapshot` + `write_project_manifest`), reached
+through `abicheck.workflows.storage`'s facade re-export
+(`frontends -> workflows -> storage`, ADR-061's layering):
+
+- **`dump --project-snapshot-dir PATH`** writes the dump's document as a
+  `ProjectSnapshot` package at `PATH`, in addition to whatever `-o`/
+  `--output`/stdout write it already performs — never instead of it.
+  Single-artifact only, at variant `"default"`, artifact id = the
+  library's own name.
+- **`compare`/`scan --against`** accept a `ProjectSnapshot` package
+  directory as an input path — detected by a real, validated
+  `manifest.json` read (`is_project_snapshot_package_dir`, which
+  distinguishes it from a `BuildSourcePack`'s own identically-named
+  `manifest.json`, and from a plain directory-of-libraries `compare`
+  operand, which stays routed to the release/bundle fan-out). Resolved by
+  `workflows.input_resolution.resolve_input`'s directory branch into the
+  identical in-memory `AbiSnapshot` a `.abi.json` file resolves to, so
+  every downstream detector, report, and exit code behaves the same either
+  way.
 
 ## Related
 

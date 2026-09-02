@@ -229,6 +229,13 @@ def _resolve_and_check_dump_debug_format(
               help="Opaque build identifier (CI run ID, build number, etc.).")
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
+@click.option("--project-snapshot-dir", "project_snapshot_dir",
+              type=click.Path(file_okay=False, path_type=Path), default=None,
+              help="ADR-062/ADR-063 storage-v2: in addition to -o/--output, also write "
+                   "this dump as a directory-backed ProjectSnapshot package at PATH "
+                   "(manifest.json + refs/ + objects/, ADR-062 D6). Experimental; "
+                   "readable by `compare`/`scan` as an input path. Written for the "
+                   "single artifact this dump produces, at variant \"default\".")
 @build_source_dump_options  # --build-info / --sources (embed inline)
 @header_graph_options  # hidden deprecated no-op shim (shared with `compare`)
 @compile_context_options()  # --ast-frontend + cross-toolchain (shared with `scan`)
@@ -249,6 +256,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              dump_manifest_path: Path | None,
              verbose: bool,
              git_tag: str | None, build_id: str | None, no_git: bool,
+             project_snapshot_dir: Path | None = None,
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_targets: tuple[str, ...] = (),
@@ -292,6 +300,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     )
 
     reject_dry_run_with_output(dry_run, output)
+    reject_dry_run_with_output(dry_run, project_snapshot_dir)
     if output is None and snapshot_compression not in ("auto", "none"):
         raise click.UsageError(
             f"--compression {snapshot_compression} requires -o/--output -- "
@@ -640,7 +649,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression, project_snapshot_dir=project_snapshot_dir)
         return
 
     effective_compile_db = compile_db_path
@@ -762,5 +771,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         # `_write_snapshot_output`'s own docstring).
         public_headers=tuple(_resolved.public_headers),
         public_header_dirs=tuple(_resolved.public_header_dirs),
+        project_snapshot_dir=project_snapshot_dir,
     )
 

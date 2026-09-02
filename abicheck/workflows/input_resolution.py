@@ -144,6 +144,43 @@ def sniff_text_format(path: Path) -> str:
     return "unknown"
 
 
+def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
+    """*path* as a directory-backed ADR-062/ADR-063 storage-v2
+    `ProjectSnapshot` package (`project_snapshot_legacy
+    .read_legacy_snapshot_document` — manifest.json + refs/ + objects/,
+    written by `dump --project-snapshot-dir`), decoded into an `AbiSnapshot`
+    exactly the way a legacy `.abi.json` file already is
+    (`serialization.snapshot_from_dict`).
+
+    Single-artifact packages only, matching what `dump --project-snapshot-
+    dir` ever writes (ADR-062 A1.3's "one-artifact project" shape) — a real
+    multi-library `ProjectSnapshot` is real, separately-scoped future work
+    this function does not guess at (see `read_legacy_snapshot_document`'s
+    own docstring for the same limit).
+
+    Raises `SnapshotError` for anything that goes wrong reading or decoding
+    the package -- a missing/malformed `manifest.json`, a multi-artifact
+    package with no artifact named explicitly, an unreadable section object
+    -- the identical translation every other `resolve_input` branch applies
+    at its own boundary.
+    """
+    from ..project_snapshot_legacy import read_legacy_snapshot_document
+    from ..serialization import snapshot_from_dict
+
+    try:
+        document = read_legacy_snapshot_document(path)
+    except (SnapshotError, OSError, KeyError, ValueError) as exc:
+        raise SnapshotError(
+            f"Failed to load ProjectSnapshot package '{path}': {exc}"
+        ) from exc
+    try:
+        return snapshot_from_dict(document)
+    except (TypeError, ValueError, KeyError, UnicodeDecodeError) as exc:
+        raise SnapshotError(
+            f"Failed to decode ProjectSnapshot package '{path}': {exc}"
+        ) from exc
+
+
 def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
     """Parse a Linux kernel ``Module.symvers`` manifest into a snapshot, or None.
 
@@ -360,6 +397,15 @@ def resolve_input(
     """
     _headers = headers or []
     _includes = includes or []
+
+    # ADR-062/ADR-063 storage-v2: a directory input is only ever a
+    # `dump --project-snapshot-dir`-written `ProjectSnapshot` package here
+    # -- every other branch below opens `path` as a file and would raise
+    # `IsADirectoryError`, so this must run first, unconditionally (a
+    # directory is never ELF/PE/Mach-O/BTF/CTF/symvers/JSON-file regardless
+    # of `is_elf`).
+    if path.is_dir():
+        return _resolve_project_snapshot_directory(path)
 
     # Fast path: caller already knows it's ELF
     if is_elf is True:

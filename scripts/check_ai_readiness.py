@@ -2280,6 +2280,12 @@ def check_banned_imports(f: Findings) -> None:
 _PROJECT_SNAPSHOT_DTO_FILES = (
     "abicheck/storage/dto.py",
     "abicheck/storage/import_v1.py",
+    # ADR-063 Phase 8's full D8 legacy-document section split -- the
+    # explicit per-section field allowlist (`split_legacy_document`/
+    # `join_legacy_document`) that keeps a legacy document's remaining
+    # fields out of one opaque blob is exactly the kind of hand-written,
+    # explicit encoding this gate exists to keep `asdict`-free.
+    "abicheck/storage/legacy_sections.py",
     "abicheck/project_snapshot_store.py",
     # `semantic_ir_codec.py` is the hand-written encoder `dto.py`'s own
     # `semantic_ir_to_dto`/`semantic_ir_from_dto` are built on

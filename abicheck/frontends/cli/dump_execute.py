@@ -231,6 +231,7 @@ def execute_and_write_dump_cli_run(
     snapshot_compression: str,
     public_headers: tuple[Path, ...],
     public_header_dirs: tuple[Path, ...],
+    project_snapshot_dir: Path | None = None,
 ) -> None:
     """Run :func:`execute_dump_cli_run`, then stamp and write its snapshot.
 
@@ -288,4 +289,5 @@ def execute_and_write_dump_cli_run(
         snapshot_compression=snapshot_compression,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+        project_snapshot_dir=project_snapshot_dir,
     )

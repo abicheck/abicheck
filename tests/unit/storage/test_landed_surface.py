@@ -51,6 +51,7 @@ _MODULES = (
     "abicheck.storage.versioning",
     "abicheck.storage.package",
     "abicheck.storage.dto",
+    "abicheck.storage.legacy_sections",
     "abicheck.storage.import_v1",
 )
 

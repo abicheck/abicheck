@@ -37,6 +37,11 @@ resolves.
 
 from __future__ import annotations
 
+from ..project_snapshot_legacy import (
+    is_project_snapshot_package_dir,
+    read_legacy_snapshot_document,
+    write_legacy_snapshot_package,
+)
 from ..snapshot_io import (
     _COMPRESSED_SUFFIXES,
     SnapshotCompression,
@@ -51,6 +56,9 @@ __all__ = [
     "SnapshotCompression",
     "bounded_decoded_prefix",
     "detect_snapshot_compression",
+    "is_project_snapshot_package_dir",
+    "read_legacy_snapshot_document",
     "resolve_write_compression",
+    "write_legacy_snapshot_package",
     "write_snapshot_text",
 ]

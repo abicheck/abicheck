@@ -157,6 +157,7 @@ def dump_source_only(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     snapshot_compression: str = "auto",
+    project_snapshot_dir: Path | None = None,
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -211,6 +212,7 @@ def dump_source_only(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
         snapshot_compression=snapshot_compression,
+        project_snapshot_dir=project_snapshot_dir,
     )
 
 
@@ -373,8 +375,16 @@ def _write_snapshot_output(
     snapshot_compression: str = "auto",
     public_headers: tuple[Path, ...] = (),
     public_header_dirs: tuple[Path, ...] = (),
+    project_snapshot_dir: Path | None = None,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
+
+    *project_snapshot_dir*, when given, additionally writes this dump as a
+    real, directory-backed `ProjectSnapshot` package there (ADR-062/
+    ADR-063 Phase 8's storage-v2 wiring) -- alongside, never instead of,
+    whatever `-o`/`--output`/stdout write this function already performs;
+    every existing invocation that omits it is completely unaffected. See
+    `project_snapshot_store.write_legacy_snapshot_package`.
 
     When *build_info* and/or *sources* are given, their normalized L3/L4/L5 facts
     are collected (inline from a source tree / build dir, or loaded from a pack
@@ -516,6 +526,8 @@ def _write_snapshot_output(
     # does the same augmentation on the already-decoded payload dict.
     payload = snapshot_to_dict(snap)
     payload, resolved_depth_label = fold_dump_provenance_into_dict(payload, depth, snap)
+    if project_snapshot_dir is not None:
+        _write_project_snapshot_package(payload, project_snapshot_dir, snap.library)
     if output:
         write_snapshot_and_report(
             payload, output, snapshot_compression, resolved_depth_label
@@ -524,6 +536,42 @@ def _write_snapshot_output(
         import json
 
         click.echo(json.dumps(payload, indent=2))
+
+
+def _write_project_snapshot_package(
+    payload: dict[str, Any], project_snapshot_dir: Path, library: str
+) -> None:
+    """The `--project-snapshot-dir` half of `_write_snapshot_output` --
+    split out purely to keep that function's own body from growing further
+    (it already sits well within this module's architecture-gate budget,
+    but a fourth, unrelated concern inline would not).
+
+    *library* becomes the package's single `ArtifactRef.artifact_id` --
+    matching `import_legacy_snapshot`'s own "one artifact per snapshot"
+    A1.3 shape a real `dump` invocation always produces. Any `SnapshotError`/
+    `OSError`/`ValueError` from the write (a bad path, a permission error, a
+    payload this build's own current schema version cannot re-import --
+    should never happen for a payload this same build just produced, but
+    checked exactly as strictly as the legacy `-o` write path already is)
+    is translated into the identical `click.ClickException` contract
+    `write_snapshot_and_report` already applies to the legacy write.
+    """
+    from .errors import SnapshotError
+    from .serialization import SCHEMA_VERSION
+    from .workflows.storage import write_legacy_snapshot_package
+
+    try:
+        write_legacy_snapshot_package(
+            payload,
+            project_snapshot_dir,
+            artifact_id=library,
+            max_known_schema_version=SCHEMA_VERSION,
+        )
+    except (SnapshotError, OSError, ValueError) as exc:
+        raise click.ClickException(
+            f"Cannot write project snapshot package to {project_snapshot_dir}: {exc}"
+        ) from exc
+    click.echo(f"Project snapshot package written to {project_snapshot_dir}", err=True)
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:

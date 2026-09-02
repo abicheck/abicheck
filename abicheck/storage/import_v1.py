@@ -29,24 +29,24 @@ this module answers "how is a v1-v25 document reshaped into a v2 package",
 never "how is an `AbiSnapshot` serialized" — that question already has one
 owner (`serialization.py`) and this module does not become a second one.
 
-**What is actually migrated onto the new, D8-constrained representation,
-and what is not — yet.** `semantic_ir`/`semantic_ir_conflicts` are the one
-part of a legacy document this adapter decodes into a typed domain object
-(`model.semantic_ir.SemanticIR`) and re-encodes through `storage/dto.py`'s
+**What is actually migrated onto the new, D8-constrained representation.**
+`semantic_ir`/`semantic_ir_conflicts` decode into a typed domain object
+(`model.semantic_ir.SemanticIR`) and re-encode through `storage/dto.py`'s
 `SectionDTO`, per ADR-063 Phase 8's own text: this phase *is* ADR-062 Phase 1
 "executed with this plan's D8 constraint already in force". Every other key
-in the document — symbols, types, layout, DWARF/PE/Mach-O facts, the whole
-of what D8 eventually splits into `binary`/`declarations`/`types`/`layout`/
-`debug`/... sections — has no typed, per-field domain representation to
-target yet outside the legacy dataclasses `serialization.py` already owns,
-so it travels as one opaque `"legacy_document"` object: the exact bytes
-`snapshot_to_dict()` produced, minus the two keys promoted above. This is
-not a placeholder bug; it is A1.4's own explicitly scheduled future work
-("fold baseline sets and `BundleFacts` into sections... coordinating with
-G38 Phase 2") and D8's full per-category split, neither of which this
-adapter attempts. **No existing baseline is rewritten by this module** — it
-only ever reads a document and builds new, additional structures from it,
-per ADR-062 D13.
+in the document — symbols, types, layout, DWARF/PE/Mach-O facts — is split
+across D8's named `binary`/`declarations`/`types`/`layout`/`debug`/`build`/
+`graph`/`provenance` sections by `storage.legacy_sections
+.split_legacy_document`: each section is its own independently-versioned,
+content-addressed object, not one opaque blob. What this module still does
+not attempt is decoding those sections' *internal* shape into typed domain
+objects the way `semantic_ir` is — `elf`/`dwarf`/`build_source`/... stay
+exactly the JSON `serialization.snapshot_to_dict()` already produced inside
+their own section; only the *partition* is new here. That deeper split
+(A1.4's own "fold baseline sets and `BundleFacts` into sections...
+coordinating with G38 Phase 2") remains real, separately-scoped future work.
+**No existing baseline is rewritten by this module** — it only ever reads a
+document and builds new, additional structures from it, per ADR-062 D13.
 
 `source_schema_version` is read from the document's own `schema_version`
 key (defaulting to 1, `serialization.snapshot_from_dict`'s own pre-
@@ -89,27 +89,37 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .dto import SECTION_SCHEMA_VERSIONS, SEMANTIC_IR_SECTION_KIND, semantic_ir_to_dto
+from .dto import (
+    SECTION_SCHEMA_VERSIONS,
+    SEMANTIC_IR_SECTION_KIND,
+    SectionDTO,
+    legacy_section_from_dto,
+    legacy_section_to_dto,
+    semantic_ir_from_dto,
+    semantic_ir_to_dto,
+)
 from .guards import mapping as _mapping
+from .legacy_sections import (
+    SCHEMA_VERSION_KEY,
+    join_legacy_document,
+    split_legacy_document,
+)
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
-from .semantic_ir_codec import semantic_ir_from_document
+from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
 from .versioning import StorageVersions
 
-__all__ = ["LEGACY_DOCUMENT_SECTION_KIND", "import_legacy_snapshot"]
+__all__ = [
+    "export_legacy_snapshot",
+    "import_legacy_snapshot",
+]
 
-#: The one opaque, not-yet-split section kind this adapter writes for
-#: everything the legacy document carries beyond `semantic_ir`/
-#: `semantic_ir_conflicts` — deliberately outside `package.SECTION_KINDS`'s
-#: D8 vocabulary (see the module docstring's "What is actually migrated"
-#: section): it names *provenance* ("this is an unmigrated v1-v25
-#: document"), not a D8 content category, and inventing a category for it
-#: would misrepresent it as more structured than it is.
-LEGACY_DOCUMENT_SECTION_KIND = "legacy_document"
-
-#: Keys promoted out of the legacy document onto their own, D8-constrained
-#: `SectionDTO` rather than left inside the `legacy_document` object —
-#: exactly the two keys `storage.semantic_ir_codec` owns.
-_PROMOTED_KEYS = ("semantic_ir", "semantic_ir_conflicts")
+#: The three keys never assigned to a legacy section — `semantic_ir`/
+#: `semantic_ir_conflicts` get their own `SEMANTIC_IR_SECTION_KIND` section,
+#: and `schema_version` (`SCHEMA_VERSION_KEY`) is carried on
+#: `StorageVersions.source_schema_version` instead. `storage.legacy_sections
+#: .split_legacy_document`/`.join_legacy_document` already enforce this
+#: exclusion internally (its own `_PROMOTED_KEYS`); this module never
+#: re-derives the exclusion itself, it only relies on the same three names.
 
 
 def import_legacy_snapshot(
@@ -237,18 +247,16 @@ def import_legacy_snapshot(
         )
 
     ir, conflicts = semantic_ir_from_document(legacy_document)
-    remainder = {
-        key: value
-        for key, value in legacy_document.items()
-        if key not in _PROMOTED_KEYS
-    }
+    legacy_sections = split_legacy_document(legacy_document)
 
-    sections: dict[str, ObjectRef] = {
-        LEGACY_DOCUMENT_SECTION_KIND: ObjectRef(
-            kind=LEGACY_DOCUMENT_SECTION_KIND, digest=store.put(remainder)
-        )
-    }
+    sections: dict[str, ObjectRef] = {}
     section_schema_versions: dict[str, int] = {}
+    for section_kind, payload in legacy_sections.items():
+        section_dto = legacy_section_to_dto(section_kind, payload)
+        sections[section_kind] = ObjectRef(
+            kind=section_kind, digest=store.put(section_dto.to_dict())
+        )
+        section_schema_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
     if ir is not None or conflicts:
         dto = semantic_ir_to_dto(ir, conflicts)
         sections[SEMANTIC_IR_SECTION_KIND] = ObjectRef(
@@ -272,3 +280,49 @@ def import_legacy_snapshot(
     return PackageManifest(
         versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)
     )
+
+
+def export_legacy_snapshot(
+    artifact: ArtifactRef, *, store: ObjectStore, source_schema_version: int
+) -> dict[str, Any]:
+    """The exact inverse of `import_legacy_snapshot`'s section-writing half:
+    every section in *artifact.sections* is read back from *store*, migrated
+    to its current version, and reassembled into one flat
+    `snapshot_from_dict()`-shaped document — the same shape
+    `import_legacy_snapshot` originally accepted.
+
+    *source_schema_version* is the artifact's own `StorageVersions
+    .source_schema_version` (the caller already has the owning
+    `PackageManifest`/`ManifestSummary` in hand, the same "caller states
+    what it already knows, this module does not reach for a different
+    object to re-derive it" pattern `max_known_schema_version` uses on the
+    import side) — written back onto the document's own `schema_version`
+    key so a round-tripped document is byte-for-byte indistinguishable, on
+    this axis, from the one that was originally imported.
+
+    Raises `ValueError` if *artifact* names a section kind this module does
+    not recognize (`legacy_section_from_dto`/`join_legacy_document` refuse
+    it), or if the store cannot produce a section's referenced object
+    (surfaces as whatever `store.get()` itself raises — `KeyError`/
+    `ValueError` for `DirectoryObjectStore`).
+    """
+    legacy_sections: dict[str, dict[str, Any]] = {}
+    document: dict[str, Any] = {}
+    for section_kind, ref in artifact.sections.items():
+        raw = store.get(ref.digest)
+        dto = SectionDTO.from_dict(raw)
+        if dto.section_kind != section_kind:
+            raise ValueError(
+                f"artifact {artifact.artifact_id!r} section {section_kind!r} "
+                f"-> {ref.digest!r} stores a SectionDTO for kind "
+                f"{dto.section_kind!r} instead -- the package is corrupted "
+                "or was hand-edited"
+            )
+        if section_kind == SEMANTIC_IR_SECTION_KIND:
+            ir, conflicts = semantic_ir_from_dto(dto)
+            document.update(semantic_ir_to_document(ir, conflicts))
+        else:
+            legacy_sections[section_kind] = legacy_section_from_dto(dto)
+    document.update(join_legacy_document(legacy_sections))
+    document[SCHEMA_VERSION_KEY] = source_schema_version
+    return document
