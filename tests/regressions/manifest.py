@@ -785,7 +785,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "deterministically on every Windows run rather than "
             "intermittently."
         ),
-        fixed_by=(997, 1004),
+        fixed_by=(995, 1004),
         seed_tests=("tests/test_fact_bridged_replace_guard.py",),
         known_gaps=(
             KnownGap(
