@@ -673,6 +673,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   pinned `test_bundle_incomplete_with_a_truncated_run_outcome_does_not_
   recover_a_verdict` test (renamed `..._fails_closed`) is updated to match
   this corrected, safer contract.
+- **`_aggregate_scan_set_verdict` now folds a `NOT_COMPARABLE` member into
+  the `--artifact-set` scan's own verdict/exit code** (Codex review, P1,
+  fresh evidence): a set with one `NOT_COMPARABLE` member and otherwise
+  compatible members previously exited 0 — the function had no
+  `NOT_COMPARABLE` handling at all, even though `ScanSetResult.to_dict()`'s
+  `run_outcome.operational` already named the refusal via
+  `member_not_comparable`. Since the artifact-set CLI exits solely off
+  `result.exit_code`, this silently reported success on a set CI should
+  have treated as blocked. A `NOT_COMPARABLE` member now becomes the
+  reported verdict/exit 6 (ADR-050 D2's convention) whenever no stronger
+  API_BREAK/BREAKING already won step 2 — outranking a sibling
+  `EVIDENCE_CONTRACT_ERROR` there too, since "couldn't compare at all" is a
+  stronger operational signal — but a real break from a *different* member
+  is never masked.
 
 ### Changed
 

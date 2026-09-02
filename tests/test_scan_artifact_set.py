@@ -1205,6 +1205,34 @@ class TestAggregateScanSetVerdict:
         assert verdict == "BREAKING"
         assert exit_code == 4
 
+    def test_not_comparable_member_folds_into_the_set_exit_when_otherwise_clean(
+        self,
+    ) -> None:
+        """Codex review (P1), fresh evidence: a set with one NOT_COMPARABLE
+        member and otherwise-compatible members previously exited 0 --
+        _aggregate_scan_set_verdict had no NOT_COMPARABLE handling at all,
+        so the CLI (which exits solely off `result.exit_code`) reported
+        success despite `run_outcome.operational` already naming the
+        refusal. Must fold to the ADR-050 D2 not-comparable exit (6)."""
+        from abicheck.service_scan import _aggregate_scan_set_verdict
+
+        per_artifact = [self._member("COMPATIBLE"), self._member("NOT_COMPARABLE")]
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, "NO_CHANGE")
+        assert verdict == "NOT_COMPARABLE"
+        assert exit_code == 6
+
+    def test_a_real_break_still_outranks_a_sibling_not_comparable_member(
+        self,
+    ) -> None:
+        """A member that could not be compared must never mask a *different*
+        member's proven break -- BREAKING/exit 4 stays the set's verdict."""
+        from abicheck.service_scan import _aggregate_scan_set_verdict
+
+        per_artifact = [self._member("BREAKING"), self._member("NOT_COMPARABLE")]
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, "NO_CHANGE")
+        assert verdict == "BREAKING"
+        assert exit_code == 4
+
 
 class TestArtifactSetComparisonOnlyFlagsRejected:
     """P2 regression (Codex review): --artifact-set is always audit-only
