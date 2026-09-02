@@ -479,9 +479,8 @@ def run_outcome_for_scan_fields(
     ):
         compat_exit_code = 0
     if compat_exit_code not in _GATE_EXIT_CODE.values():
-        # An operational-only code (5/6, or anything else this scheme
-        # doesn't natively produce) -- the compatibility axis itself
-        # contributed nothing; :attr:`operational` carries the real signal.
+        # Operational-only code (5/6, etc.) -- compatibility contributed
+        # nothing; `operational` carries the real signal.
         compat_exit_code = 0
     gate = policy_gate_decision_for_exit_code(compat_exit_code)
 
@@ -519,22 +518,23 @@ def scan_report_severity_exit_code(report: object) -> int | None:
 
 def scan_report_abort_compatibility_contribution(report: object) -> int | None:
     """A scan *abort* report's own persisted ``exit.compatibility_
-    contribution``, or ``None`` when absent/malformed.
+    contribution``, or ``None`` when absent/malformed/out-of-scheme.
 
     ``workflows.scan_abort_result.scan_abort_result_fields`` shapes a
     ``run_scan_core`` abort (budget overflow, evidence-contract error) as
     ``report = {"scan_schema_version": ..., "exit": {...}}`` -- no ``diff``
-    key at all, so :func:`scan_report_severity_exit_code` never applies to
-    an abort report and this is a genuinely separate nesting, not a variant
-    of that lookup. ``exit.compatibility_contribution``
-    (``policy.exit_decision.ExitDecision.to_dict()``) is the pure, pre-
-    operational-fold compatibility contribution a *late* abort preserves
-    from whatever gate decision already ran before it fired
-    (``attach_prior_on_budget_overflow``/``audit_prior_decision``) -- reading
-    it here is what lets a late ``BUDGET_OVERFLOW`` that already found a real
-    ABI break keep reporting ``run_outcome.gate: abi_breaking`` instead of
-    the abort's own top-level exit code (5, outside the 0/1/2/4 scheme)
-    zeroing the compatibility axis entirely (Codex review).
+    key, so :func:`scan_report_severity_exit_code` never applies here.
+    ``exit.compatibility_contribution`` is the pure, pre-operational-fold
+    contribution a *late* abort preserves from whatever gate decision
+    already ran (``attach_prior_on_budget_overflow``/``audit_prior_
+    decision``) -- reading it lets a late ``BUDGET_OVERFLOW`` that already
+    found a real ABI break keep reporting ``gate: abi_breaking`` instead of
+    the abort's own out-of-scheme top-level exit code (5) zeroing the axis.
+
+    Rejects a present-but-out-of-scheme value (e.g. ``99``) too, not just a
+    missing/non-int one: accepted unchecked, it normalized straight to
+    ``gate: none``, silently turning a real ``BREAKING`` scan nonblocking.
+    ``None`` falls back to the root verdict/exit code, as a missing value does.
     """
     exit_block = report.get("exit") if isinstance(report, dict) else None
     contribution = (
@@ -542,11 +542,13 @@ def scan_report_abort_compatibility_contribution(report: object) -> int | None:
         if isinstance(exit_block, dict)
         else None
     )
-    return (
-        contribution
-        if isinstance(contribution, int) and not isinstance(contribution, bool)
-        else None
-    )
+    if (
+        not isinstance(contribution, int)
+        or isinstance(contribution, bool)
+        or contribution not in _GATE_EXIT_CODE.values()
+    ):
+        return None
+    return contribution
 
 
 def scan_report_coverage_contribution(report: object) -> object:
@@ -658,22 +660,20 @@ def run_outcome_dict_for_scan(
     preferred when present; a *abort* report has no ``diff`` key at all, so
     :func:`scan_report_abort_compatibility_contribution`'s own separate
     ``exit.compatibility_contribution`` nesting is consulted next -- the two
-    are mutually exclusive report shapes (Codex review), never both present
-    at once, so there is no precedence question between them in practice.
+    are mutually exclusive report shapes, never both present at once.
 
     *member_verdicts*, when given, is the raw per-member (+ bundle) verdict
     strings a writer with no ``report=`` already has
-    (:class:`~abicheck.service_scan.ScanSetResult`'s set-level abort case,
-    Codex review, fresh evidence -- two rounds): the last-resort fallback,
-    via :func:`worst_real_verdict`, deriving both the compat-exit
-    contribution and the precise ``compatibility`` verdict -- not reducible
-    to a bare int, since NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK all share
-    exit code ``0``. A completed member's result is never lost just because
-    a later member aborted and dominates ``verdict``/``exit_code``.
+    (:class:`~abicheck.service_scan.ScanSetResult`'s set-level abort case):
+    the last-resort fallback, via :func:`worst_real_verdict`, deriving both
+    the compat-exit contribution and the precise ``compatibility`` verdict
+    -- not reducible to a bare int, since NO_CHANGE/COMPATIBLE/COMPATIBLE_
+    WITH_RISK all share exit code ``0``. A completed member's result is
+    never lost just because a later member aborted and dominates
+    ``verdict``/``exit_code``.
 
-    *member_evidence_contract_error*/*bundle_incomplete* are forwarded to
-    :func:`run_outcome_for_scan_fields` unchanged -- see that function's own
-    docstring (:class:`~abicheck.service_scan.ScanSetResult`'s own use).
+    *member_evidence_contract_error*/*bundle_incomplete* forward unchanged to
+    :func:`run_outcome_for_scan_fields` -- see that function's own docstring.
     """
     compat_exit_code = scan_report_severity_exit_code(report)
     if compat_exit_code is None:

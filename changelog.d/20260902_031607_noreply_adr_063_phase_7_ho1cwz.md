@@ -566,6 +566,29 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   a report that in fact had a genuine, completed comparison to preserve,
   denying the release-refusal findings-preservation fix above any non-null
   verdict to key off.
+- **A `compare-release` ERROR report carrying a *present-but-schema-invalid*
+  `run_outcome` no longer fabricates `Verdict.BREAKING`** (Codex review,
+  fresh evidence): the operational-ERROR branch's malformed-vs-absent
+  distinction only covered "valid block, null compatibility" — a present
+  but schema-invalid block (missing required keys/enum values) still read
+  `False` from `_has_valid_run_outcome_block` the same as a genuinely
+  absent one, silently falling through to the legacy fabricated-`BREAKING`
+  path instead of failing the target unavailable/malformed the way every
+  other structured-`run_outcome` reader in this module already does. The
+  branch now calls `_run_outcome_gate_and_operational` first (raising
+  `_MalformedGate`, caught and turned into the same fail-closed
+  unavailable/malformed `_LoadedReport` shape the null-verdict and release
+  refusal branches already return) before recovering a real verdict.
+- **A legacy scan's nested `exit.compatibility_contribution` is now
+  rejected when out-of-scheme, not just when missing/non-int** (Codex
+  review, fresh evidence): `scan_report_abort_compatibility_contribution`
+  previously accepted any int, so a legacy scan carrying a valid root
+  `exit_code: 4` alongside a corrupted nested `compatibility_contribution:
+  99` had that bogus value normalized straight to `gate: none` by
+  `run_outcome_for_scan_fields`, silently turning a real `BREAKING` scan
+  nonblocking. Now restricted to the shared 0/1/2/4 scheme
+  (`_GATE_EXIT_CODE.values()`); an out-of-scheme value falls back to the
+  root verdict/exit code the same way a missing value already does.
 
 ### Changed
 

@@ -1092,3 +1092,36 @@ def test_legacy_error_release_with_no_run_outcome_still_forces_breaking(
     assert loaded.verdict is Verdict.BREAKING
     assert loaded.gate is not None
     assert loaded.gate.exit_code == 4
+
+
+def test_operational_error_with_a_malformed_run_outcome_fails_closed_not_breaking(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a *present but schema-invalid*
+    `run_outcome` (missing required keys here) is a third case, distinct
+    from both "absent" and "valid" -- `_has_valid_run_outcome_block` reads
+    `False` for it the same as a genuinely absent block, so without an
+    explicit malformed-check this silently fell through to the legacy
+    fabricated-`Verdict.BREAKING` path instead of failing the target
+    unavailable/malformed like every other structured-`run_outcome` reader
+    in this module (the null-verdict/`reason.kind` refusal branch and the
+    release lowercase not_comparable branch both already do this)."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": "ERROR",
+                "old_dir": "/old",
+                "new_dir": "/new",
+                "libraries": [],
+                "run_outcome": {"compatibility": "BREAKING"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason

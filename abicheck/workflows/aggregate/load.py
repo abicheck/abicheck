@@ -407,6 +407,25 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         # must NOT be treated the same as an absent block -- that fabricated
         # an ABI-break verdict for a comparison that never ran. The gate's
         # own `exit_code`/`blocking_categories` stay unconditional either way.
+        # A *present but schema-invalid* `run_outcome` is a third case,
+        # distinct from both "absent" and "valid" (Codex review, fresh
+        # evidence): `_has_valid_run_outcome_block` reads `False` for it the
+        # same as a genuinely absent block, so without this check it
+        # silently fell through to the legacy fabricated-`BREAKING` path
+        # instead of failing the target unavailable/malformed like every
+        # other structured-`run_outcome` reader in this module.
+        try:
+            _run_outcome_gate_and_operational(data)
+        except _MalformedGate as exc:
+            return _LoadedReport(
+                target_id=target_id,
+                verdict=None,
+                gate=None,
+                library=data.get("library"),
+                head_sha=head_sha,
+                reason=f"report gate decision is malformed: {exc}",
+                path=path,
+            )
         error_compat_verdict = _run_outcome_compatibility_verdict(data)
         error_has_valid_run_outcome = _has_valid_run_outcome_block(data)
         return _LoadedReport(

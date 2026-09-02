@@ -261,3 +261,19 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
         report = outcome.to_dict()
         assert report["run_outcome"]["gate"] == "none"
         assert report["run_outcome"]["operational"] == "none"
+
+    def test_abort_report_rejects_an_out_of_scheme_compatibility_contribution(self):
+        """Codex review, fresh evidence: a legacy scan may carry a valid
+        root `exit_code` (4) alongside an invalid, out-of-scheme nested
+        `exit.compatibility_contribution` (99, outside {0, 1, 2, 4}) --
+        accepting it unchecked normalized straight to `gate: none`,
+        silently turning a real BREAKING scan nonblocking. It must instead
+        fall back to the root verdict/exit code, same as a missing value."""
+        from abicheck.policy.outcome import run_outcome_dict_for_scan
+
+        report = {
+            "scan_schema_version": "1.24",
+            "exit": {"code": 4, "compatibility_contribution": 99},
+        }
+        outcome = run_outcome_dict_for_scan("BREAKING", 4, report=report)
+        assert outcome["gate"] == "abi_breaking"
