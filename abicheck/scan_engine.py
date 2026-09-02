@@ -451,32 +451,24 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
 
     Defaults to ``False`` (filtered, matching `dump`/`compare`'s own default)
     -- correct for the single most common case: no baseline, a native-binary
-    baseline (which now resolves filtered too), or a JSON baseline that is
-    itself filtered/untagged. Only a JSON baseline explicitly dumped with
-    ``dump --include-system-declarations`` (tagged ``"full"``) needs the
-    candidate to go unfiltered too, else the comparability gate hard-fails
-    that legitimate, if less common, inverse workflow (Codex review, fresh
-    evidence) -- and ``scan`` has no such flag of its own to let a caller
-    request it directly. A cheap, best-effort peek (not a full
-    ``resolve_input``/dump); any failure to read/parse falls back to the
-    filtered default.
+    baseline, or a JSON baseline that is itself filtered/untagged. Only a
+    JSON baseline explicitly dumped with ``dump --include-system-declarations``
+    (tagged ``"full"``) needs the candidate to go unfiltered too, else the
+    comparability gate hard-fails that legitimate, if less common, inverse
+    workflow (Codex review) -- ``scan`` has no such flag of its own. A cheap,
+    best-effort peek (not a full ``resolve_input``/dump); any failure to
+    read/parse falls back to the filtered default.
 
     Deliberately does NOT pre-filter on :func:`cli_scan_baseline.
     _baseline_is_native_library` before attempting the JSON parse (Codex
-    review, fresh evidence): that helper's filename-suffix fallback only
-    applies once magic-byte sniffing finds no recognized binary format --
-    exactly the case for a real JSON snapshot saved under a library-like
-    name (e.g. ``libfoo.so.json`` renamed). Calling it first would skip the
-    peek, silently keeping the candidate filtered against a "full" snapshot.
-
-    Content-sniffs the first 4 bytes via :func:`binary_utils.
-    detect_binary_format` first, though (a real magic-byte check, not the
-    filename-fallback heuristic above) -- a real native binary would still
-    fail to parse as JSON either way, but only after ``json.load`` reads and
-    decodes the *entire* file first, a real avoidable cost for a large
-    native baseline (Codex review, fresh evidence). A recognized magic
-    number short-circuits straight to the filtered default without opening
-    the file as text.
+    review): that helper's filename-suffix fallback only applies once
+    magic-byte sniffing finds no recognized binary format -- exactly the
+    case for a real JSON snapshot saved under a library-like name. Calling
+    it first would skip the peek, silently keeping the candidate filtered.
+    Content-sniffs via :func:`binary_utils.detect_binary_format` first
+    instead -- a native binary still fails to parse as JSON either way, but
+    only after ``json.load`` reads the entire file; a recognized magic
+    number short-circuits to filtered without opening it as text.
     """
     if baseline is None:
         return False
@@ -489,21 +481,14 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
 
     if detect_binary_format(baseline) is not None:
         return False
-    # ADR-059 (Codex review, fresh evidence): a gzip/zstd-compressed baseline
-    # (`dump --compression gzip|zstd`) fails `detect_binary_format` the same
-    # way plain JSON does (neither magic is ELF/PE/Mach-O), so it reaches
-    # this point same as before -- but its raw *stored* bytes are compressed,
-    # not JSON text, so both the tail-byte-scan trick below and a plain-text
-    # `json.load` would silently fail to find `dependency_scope` regardless
-    # of its real value, always falling through to the `False` (filtered)
-    # default even for a baseline explicitly dumped `--include-system-declarations`
-    # (tagged `"full"`). Decode through the canonical snapshot I/O path
-    # first for a compressed file -- skipping the tail-scan heuristic
-    # entirely (it has no equivalent for compressed content: the *decoded*
-    # tail isn't at any fixed offset in the *stored* bytes), going straight
-    # to a full decode + parse. This is still cheap relative to a real dump:
-    # decompression is fast, and a "full"-tagged snapshot with the largest
-    # dependency surface is exactly the case that compresses best.
+    # ADR-059 (Codex review): a gzip/zstd-compressed baseline fails
+    # `detect_binary_format` the same way plain JSON does, so it reaches
+    # this point -- but its raw *stored* bytes are compressed, not JSON
+    # text, so neither the tail-byte-scan below nor a plain-text `json.load`
+    # would ever find `dependency_scope`. Decode through the canonical
+    # snapshot I/O path first, skipping the tail-scan heuristic entirely (no
+    # fixed offset exists in the compressed stream), straight to a full
+    # decode + parse -- still cheap relative to a real dump.
     from .snapshot_io import SnapshotCompression, detect_snapshot_compression
 
     try:
@@ -519,21 +504,16 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
             return False
         if not isinstance(data, dict):
             return False
-        return bool(data.get("dependency_scope") == "full")
-    # `dependency_scope` (model.py) is declared as one of `AbiSnapshot`'s very
-    # last fields -- serialized (via dataclasses.asdict field order) as one
-    # of the last keys in the JSON object, right before `schema_version` is
-    # appended, well after the (potentially huge) functions/types/DWARF
-    # payload. A real `dump`-produced snapshot is `json.dumps(..., indent=2)`
-    # (never minified), so the tag is reliably within the file's last ~4KB
-    # regardless of how large the payload before it is. Try a cheap tail
-    # regex scan first -- avoiding a full json.load for exactly the case
-    # Codex flagged as most expensive (an explicitly unfiltered "full"
-    # snapshot, which by definition can carry the largest transitive
-    # dependency surface) -- and only fall back to the full parse when the
-    # tail scan doesn't confidently resolve it (non-standard formatting, a
-    # tiny file, the key genuinely absent, ...), so correctness never
-    # actually depends on the heuristic.
+        return _dependency_scope_is_full(data)
+    # `dependency_scope` (model.py) is one of `AbiSnapshot`'s last fields,
+    # so on a flat legacy document it's reliably within the file's last
+    # ~4KB regardless of payload size (a real `dump` never minifies).
+    # ADR-062/063 Phase 8's sectioned document has no such guarantee (it
+    # nests under `sections["layout"]`, not necessarily near the end -- see
+    # `_dependency_scope_is_full`'s own docstring), so this tail-scan is a
+    # best-effort fast path only: try a cheap regex scan first, and only
+    # fall back to the full parse (below, shape-aware) when it doesn't
+    # confidently resolve -- correctness never depends on the heuristic.
     try:
         size = baseline.stat().st_size
         with open(baseline, "rb") as f:
@@ -553,6 +533,26 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
         return False
     if not isinstance(data, dict):
         return False
+    return _dependency_scope_is_full(data)
+
+
+def _dependency_scope_is_full(data: dict[str, Any]) -> bool:
+    """Whether a parsed snapshot document tags itself ``"full"`` on the
+    ``dependency_scope`` axis, regardless of on-disk shape. ADR-062/063
+    Phase 8's sectioned document nests it under `sections["layout"]
+    ["payload"]`, not the top level (Codex review, fresh evidence: a plain
+    `data.get(...)` always read `None` there) -- unwrap the same way
+    `serialization.snapshot_from_dict` does before reading it."""
+    from .storage.sectioned_document import (
+        from_sectioned_document,
+        is_sectioned_document,
+    )
+
+    if is_sectioned_document(data):
+        try:
+            data = from_sectioned_document(data)
+        except ValueError:
+            return False
     return bool(data.get("dependency_scope") == "full")
 
 

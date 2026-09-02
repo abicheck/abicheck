@@ -18,6 +18,7 @@ from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.canonical import canonical_form
 from abicheck.storage.sectioned_document import (
+    SECTION_SCHEMA_VERSIONS_KEY,
     SECTIONS_KEY,
     from_sectioned_document,
     is_sectioned_document,
@@ -105,4 +106,26 @@ class TestFromSectionedDocumentRejectsMalformedInput:
         del payload["functions"]
         sectioned[SECTIONS_KEY]["declarations"]["payload"] = payload
         with pytest.raises(ValueError, match="functions"):
+            from_sectioned_document(sectioned)
+
+    def test_a_whole_section_dropped_from_sections_is_refused(self) -> None:
+        """A `declarations` section dropped entirely (not just a field
+        within it) must be refused too -- `export_legacy_snapshot` only
+        iterates the sections it is handed, so an entirely missing section
+        is otherwise invisible to it and reads back as an empty/confirmed-
+        absent `functions`/`variables`/`types` list rather than failing
+        loudly (Codex review, fresh evidence beyond the directory package's
+        equivalent `manifest.json` cross-check)."""
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        sectioned = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        assert "declarations" in sectioned[SECTION_SCHEMA_VERSIONS_KEY]
+        del sectioned[SECTIONS_KEY]["declarations"]
+        with pytest.raises(ValueError, match="declarations"):
+            from_sectioned_document(sectioned)
+
+    def test_a_missing_section_schema_versions_key_is_refused(self) -> None:
+        doc = snapshot_to_dict(AbiSnapshot(library="libfoo.so.1", version="1.0.0"))
+        sectioned = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        del sectioned[SECTION_SCHEMA_VERSIONS_KEY]
+        with pytest.raises(ValueError, match="section_schema_versions"):
             from_sectioned_document(sectioned)

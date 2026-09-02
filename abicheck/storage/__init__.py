@@ -94,6 +94,7 @@ from .package import (
     variant_ref_relpath,
 )
 from .sectioned_document import (
+    SECTION_SCHEMA_VERSIONS_KEY,
     SECTIONS_KEY,
     from_sectioned_document,
     is_sectioned_document,
@@ -136,6 +137,7 @@ __all__ = [
     "SECTIONS_KEY",
     "SECTION_KINDS",
     "SECTION_SCHEMA_VERSIONS",
+    "SECTION_SCHEMA_VERSIONS_KEY",
     "SEMANTIC_IR_SECTION_KIND",
     "SectionDTO",
     "StorageVersions",

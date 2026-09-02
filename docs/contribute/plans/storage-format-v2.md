@@ -292,7 +292,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/dto.py` | `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `SectionDTO`, `legacy_section_from_dto`, `legacy_section_to_dto`, `migrate_section_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint) |
 | `abicheck/storage/legacy_sections.py` | `LEGACY_SECTION_KINDS`, `SCHEMA_VERSION_KEY`, `join_legacy_document`, `missing_required_section_fields`, `split_legacy_document` (D8's full legacy-document section partition) |
 | `abicheck/storage/import_v1.py` | `export_legacy_snapshot`, `import_legacy_snapshot` (A1.2) |
-| `abicheck/storage/sectioned_document.py` | `SECTIONS_KEY`, `from_sectioned_document`, `is_sectioned_document`, `to_sectioned_document` (Phase 8 redesign: the D8 section split packaged as one JSON document instead of a directory-backed package -- see the module's own docstring) |
+| `abicheck/storage/sectioned_document.py` | `SECTION_SCHEMA_VERSIONS_KEY`, `SECTIONS_KEY`, `from_sectioned_document`, `is_sectioned_document`, `to_sectioned_document` (Phase 8 redesign: the D8 section split packaged as one JSON document instead of a directory-backed package -- see the module's own docstring) |
 
 `ObjectRef`/`VariantRef`/`ArtifactRef`/`PackageManifest` are the in-memory
 document model of D6's `manifest.json` plus the ref documents it names.

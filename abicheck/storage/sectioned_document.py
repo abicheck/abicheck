@@ -35,7 +35,8 @@ independently versioned sections, structural completeness checking
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {...}},
     "types": {...},
     ...
-  }
+  },
+  "section_schema_versions": {"declarations": 1, "types": 1, ...}
 }
 ```
 
@@ -59,6 +60,7 @@ from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .package import ArtifactRef, InMemoryObjectStore, ObjectRef
 
 __all__ = [
+    "SECTION_SCHEMA_VERSIONS_KEY",
     "SECTIONS_KEY",
     "from_sectioned_document",
     "is_sectioned_document",
@@ -72,6 +74,23 @@ __all__ = [
 #: completeness test does for `_SECTION_FIELDS`), so a flat document from
 #: any schema version 1-41 can never collide with it.
 SECTIONS_KEY = "sections"
+
+#: The top-level key recording which sections this document was *written*
+#: with (`PackageManifest.versions.section_schema_versions`, D2) -- the
+#: single-file counterpart of a directory package's `manifest.json`. Without
+#: it, `from_sectioned_document` would only ever see the sections *present*
+#: in a possibly-truncated/hand-edited `sections` map: `export_legacy_snapshot`
+#: only iterates the sections it is handed, so an entire section silently
+#: dropped from `sections` (as opposed to a field dropped from within one) is
+#: invisible to it, and `snapshot_from_dict` then defaults that section's
+#: fields to empty -- lost evidence read back as confirmed absence, a real
+#: false removal/addition downstream (Codex review). `project_snapshot_legacy
+#: .read_legacy_snapshot_document` closed the identical gap for the
+#: directory format by cross-checking `manifest.json`'s own
+#: `section_schema_versions` before export; this key is that same ground
+#: truth, carried inline since a single-file document has no separate
+#: manifest to check against.
+SECTION_SCHEMA_VERSIONS_KEY = "section_schema_versions"
 
 #: A fixed, meaningless artifact/variant id -- this module's documents are
 #: always single-artifact and never expose `ArtifactRef`/`PackageManifest`
@@ -115,6 +134,7 @@ def to_sectioned_document(
     return {
         "schema_version": manifest.versions.source_schema_version,
         SECTIONS_KEY: sections,
+        SECTION_SCHEMA_VERSIONS_KEY: dict(manifest.versions.section_schema_versions),
     }
 
 
@@ -124,11 +144,17 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
     `serialization.snapshot_from_dict` already knows how to read.
 
     Raises `ValueError` for a malformed `sections` map, an unrecognized
-    section kind, or a section missing a field every schema version has
-    always carried (`missing_required_section_fields`, via
-    `export_legacy_snapshot`) -- the same corruption checks a directory
-    package's `read_legacy_snapshot_document` already applies, since both
-    ultimately share `export_legacy_snapshot`.
+    section kind, a section missing a field every schema version has always
+    carried (`missing_required_section_fields`, via `export_legacy_snapshot`)
+    -- the same corruption checks a directory package's
+    `read_legacy_snapshot_document` already applies, since both ultimately
+    share `export_legacy_snapshot` -- or a section entirely absent from
+    `sections` that `SECTION_SCHEMA_VERSIONS_KEY` records this document was
+    actually written with (Codex review: `export_legacy_snapshot` only
+    iterates the sections it is handed, so a whole section dropped from
+    `sections` -- as opposed to a field dropped from within one -- is
+    otherwise invisible to it, and reads back as empty/confirmed-absent
+    rather than failing loudly).
     """
     sections_raw = document.get(SECTIONS_KEY)
     if not isinstance(sections_raw, Mapping):
@@ -140,6 +166,20 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(schema_version, int) or isinstance(schema_version, bool):
         raise ValueError(
             f"sectioned document schema_version must be an int, got {schema_version!r}"
+        )
+    stated_sections = document.get(SECTION_SCHEMA_VERSIONS_KEY)
+    if not isinstance(stated_sections, Mapping):
+        raise ValueError(
+            f"sectioned document {SECTION_SCHEMA_VERSIONS_KEY!r} must be an "
+            f"object, got {type(stated_sections).__name__}"
+        )
+    missing_sections = set(stated_sections) - set(sections_raw)
+    if missing_sections:
+        raise ValueError(
+            f"sectioned document is missing section(s) {sorted(missing_sections)} "
+            f"that its own {SECTION_SCHEMA_VERSIONS_KEY!r} advertises -- the "
+            "document is truncated or was hand-edited; refusing to silently "
+            "synthesize empty defaults for lost evidence"
         )
     store = InMemoryObjectStore()
     sections: dict[str, ObjectRef] = {}

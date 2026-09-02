@@ -12,4 +12,8 @@
   package as an input path (produced via the typed
   `project_snapshot_legacy.write_legacy_snapshot_package` API), resolved
   into the identical in-memory snapshot every other input shape resolves
-  to.
+  to. The sectioned document also records which sections it was written
+  with, so a document missing an entire section (not just a field within
+  one) is rejected loudly on read instead of silently reading back as
+  empty/removed content; `scan --against`'s `dependency_scope` peek now
+  reads the sectioned shape correctly too.
