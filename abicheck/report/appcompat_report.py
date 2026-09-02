@@ -19,6 +19,21 @@ static re-export would close a real import cycle between the two. That is the
 same shim pattern ``cli_buildsource.py`` already uses for its own relocated
 helpers (root ``AGENTS.md``, "Moving helpers out of a module that re-exports
 them?").
+
+**Known gap, inherited rather than introduced (Codex review, PR #994).**
+``appcompat_to_json`` passes ``policy``/``kind_sets``/``policy_file`` into
+``reporter._change_to_dict``, so each finding's severity and category are
+resolved *while* the document is being built rather than read off already-
+computed facts -- which is not what this package's "a renderer decides
+nothing" contract wants. The call is byte-identical to the one that stood in
+``reporter.py`` before this module existed, and both sit in the same
+``report`` layer, so the move neither created nor widened it. Closing it
+means changing ``_change_to_dict``'s contract for its four other call sites
+(the full, leaf and root-cause JSON paths), which is ADR-061 Phase 2 item 4's
+remaining per-finding-verdict work -- the same consolidation
+``report/finding.py``'s ``ReportFinding`` did for JUnit/HTML/Markdown -- and
+not something to attempt inside a file-size slice. Recorded here so it is
+found from the code rather than only from a review thread.
 """
 
 from __future__ import annotations
