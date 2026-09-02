@@ -261,6 +261,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `ALLOWED_RELATIVE_PATHS` is non-empty before looping over it, so the
   four-boundary-encoder check it documents can't silently pass vacuously
   if the allowlist were ever emptied (CodeRabbit review).
+- **A legacy release report's backfilled `run_outcome.compatibility` no
+  longer goes `null` just because the top-level `verdict` is the
+  `"ERROR"`/`"not_comparable"` operational sentinel.** `check_report_
+  run_outcome.backfill_run_outcome`'s release branch now recovers the
+  worst REAL per-library verdict from `out["libraries"]` (via the new,
+  shared `policy.outcome.worst_real_verdict` helper) for both the
+  `compatibility` axis and the `compatibility_contribution` exit-code
+  fallback, mirroring the sentinel-excluding precision a native release
+  writer already gets from `cli_compare_release_helpers._release_
+  completed_compatibility_verdict` (Codex review).
+- `policy/outcome.py` now imports `Verdict` directly from its canonical
+  owner (`model.change_catalog.registry`) rather than through the
+  `change_registry_types` back-compat shim, so this new module doesn't add
+  a fresh caller onto the legacy re-export path (Codex review).
 
 ### Changed
 

@@ -41,6 +41,7 @@ from ..policy.outcome import (
     policy_gate_decision_for_exit_code,
     run_outcome_dict_for_release,
     run_outcome_dict_for_scan,
+    worst_real_verdict,
 )
 
 __all__ = ["backfill_run_outcome", "synthetic_run_outcome"]
@@ -80,16 +81,20 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     carried that key (this function must run *before* ``check_report.
     augment_report``'s own call to ``backfill_exit_block_fields``, which
     would otherwise default it to 0 -- indistinguishable from a real
-    confirmed-clean report -- before this function ever sees it). Neither
-    call site can reach ``cli_compare_release_helpers._release_completed_
-    compatibility_verdict``'s own ERROR/not_comparable-excluding precision
-    (that helper lives in a `frontends`-classified module this leaf may not
-    import) -- an older release report's raw top-level ``verdict`` is used
-    directly, same fail-open imprecision `Verdict.__call__` already handles
-    by falling back to ``compatibility=None``. A native compare-shaped
-    report (neither of the above) derives ``gate`` from whichever exit code
-    is available (``severity.exit_code`` if present, else the legacy
-    verdict mapping) and ``compatibility`` from ``verdict`` directly.
+    confirmed-clean report -- before this function ever sees it). Its
+    ``compatibility`` verdict is recovered from the worst REAL per-library
+    result via :func:`~abicheck.policy.outcome.worst_real_verdict` -- the
+    same sentinel-excluding precision ``cli_compare_release_helpers.
+    _release_completed_compatibility_verdict`` gives a native release
+    writer, reimplemented here since that helper lives in a `frontends`-
+    classified module this leaf may not import -- rather than the raw
+    top-level ``verdict`` alone, so a legacy release whose top-level
+    verdict is the ``"ERROR"``/``"not_comparable"`` sentinel does not lose
+    a real completed ``BREAKING``/``API_BREAK`` library result on upgrade
+    (Codex review, fresh evidence). A native compare-shaped report (neither
+    of the above) derives ``gate`` from whichever exit code is available
+    (``severity.exit_code`` if present, else the legacy verdict mapping)
+    and ``compatibility`` from ``verdict`` directly.
     """
     if "run_outcome" in out:
         return
@@ -130,6 +135,29 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         compatibility = None
 
     if "libraries" in out and "old_dir" in out:
+        # Recover the worst REAL per-library verdict (Codex review, fresh
+        # evidence) rather than trusting the raw top-level `verdict` alone:
+        # a legacy release whose top-level verdict is the "ERROR"/
+        # "not_comparable" operational sentinel can still have a library
+        # entry that completed with a real BREAKING/API_BREAK result --
+        # `worst_real_verdict` silently drops any non-`Verdict` candidate
+        # (the two sentinels included), so it never needs to know their
+        # exact spellings. Used for both `compatibility` (below) and the
+        # `compatibility_contribution` fallback (next), so the two axes
+        # can't independently disagree about whether a completed result
+        # exists.
+        libraries = out.get("libraries")
+        member_candidates: list[object] = [raw_verdict]
+        if isinstance(libraries, list):
+            member_candidates.extend(
+                entry.get("verdict") for entry in libraries if isinstance(entry, dict)
+            )
+        worst_member = worst_real_verdict(member_candidates)
+        release_verdict = (
+            worst_member.value
+            if worst_member is not None
+            else (str(raw_verdict) if raw_verdict is not None else "NO_CHANGE")
+        )
         # `exit`, when present, is only trusted for `compatibility_
         # contribution` if that specific key survived -- this runs before
         # `backfill_exit_block_fields` (Codex review, fresh evidence: that
@@ -137,9 +165,10 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         # key, including this one, to 0, indistinguishable from a real
         # confirmed-clean report; calling this first sees the true original
         # shape). Falls back to `severity.exit_code`, then the legacy
-        # verdict mapping -- never the backfilled 0 -- so a legacy BREAKING
-        # release report with no exit/severity block still gets gate:
-        # abi_breaking instead of silently passing aggregation as clean.
+        # verdict mapping over the recovered `worst_member` -- never the
+        # backfilled 0 -- so a legacy BREAKING release report with no
+        # exit/severity block still gets gate: abi_breaking instead of
+        # silently passing aggregation as clean.
         exit_decision = out.get("exit")
         if (
             not isinstance(exit_decision, dict)
@@ -149,14 +178,14 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             sev_exit = severity.get("exit_code") if isinstance(severity, dict) else None
             if not isinstance(sev_exit, int) or isinstance(sev_exit, bool):
                 sev_exit = (
-                    legacy_exit_code(compatibility) if compatibility is not None else 0
+                    legacy_exit_code(worst_member) if worst_member is not None else 0
                 )
             exit_decision = {
                 **(exit_decision if isinstance(exit_decision, dict) else {}),
                 "compatibility_contribution": sev_exit,
             }
         out["run_outcome"] = run_outcome_dict_for_release(
-            str(raw_verdict) if raw_verdict is not None else "NO_CHANGE",
+            release_verdict,
             exit_decision,
         )
         return

@@ -111,7 +111,9 @@ def test_old_release_report_gets_backfilled_run_outcome() -> None:
     assert run_outcome["compatibility"] == "BREAKING"
 
 
-def test_legacy_release_report_with_no_exit_or_severity_block_gets_a_real_gate() -> None:
+def test_legacy_release_report_with_no_exit_or_severity_block_gets_a_real_gate() -> (
+    None
+):
     """CodeRabbit review, fresh evidence: augment_report previously ran
     backfill_exit_block_fields before backfill_run_outcome, so a legacy
     release report with no exit block at all (pre-2.41) had one
@@ -132,13 +134,64 @@ def test_legacy_release_report_with_no_exit_or_severity_block_gets_a_real_gate()
     assert run_outcome["gate"] == "abi_breaking"
 
 
+def test_legacy_release_report_recovers_a_completed_library_verdict_from_an_error_sentinel() -> (
+    None
+):
+    """Codex review, fresh evidence: a legacy release whose top-level
+    verdict is the "ERROR" operational sentinel (one library failed to
+    dump/extract/compare) can still have a DIFFERENT library that
+    completed with a real BREAKING result. Passing the sentinel straight
+    to run_outcome_dict_for_release would erase that completed result
+    (compatibility: null) even though it actually ran -- the backfill must
+    recover it from out["libraries"] the same way a native release writer
+    does via cli_compare_release_helpers._release_completed_compatibility_
+    verdict."""
+    report = {
+        "libraries": [
+            {"name": "a", "verdict": "ERROR"},
+            {"name": "b", "verdict": "BREAKING"},
+        ],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "ERROR",
+        "exit": {"operational_error_contribution": 1},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["gate"] == "abi_breaking"
+    assert run_outcome["operational"] == "extraction_error"
+
+
+def test_legacy_release_report_with_only_sentinel_libraries_stays_unknown() -> None:
+    """The sibling case: every library is an operational sentinel and no
+    bundle/matrix result exists either -- compatibility must stay
+    unknown (null), never fall back to the top-level "ERROR" string nor
+    a false "NO_CHANGE" floor."""
+    report = {
+        "libraries": [{"name": "a", "verdict": "ERROR"}],
+        "old_dir": "/old",
+        "new_dir": "/new",
+        "verdict": "ERROR",
+        "exit": {"operational_error_contribution": 1},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] is None
+    assert run_outcome["operational"] == "extraction_error"
+
+
 def test_legacy_release_report_prefers_a_real_severity_exit_code() -> None:
     report = {
         "libraries": [{"name": "a", "verdict": "COMPATIBLE_WITH_RISK"}],
         "old_dir": "/old",
         "new_dir": "/new",
         "verdict": "COMPATIBLE_WITH_RISK",
-        "severity": {"exit_code": 1, "blocking": True, "blocking_categories": ["quality_issues"]},
+        "severity": {
+            "exit_code": 1,
+            "blocking": True,
+            "blocking_categories": ["quality_issues"],
+        },
     }
     out = _augment(dict(report))
     run_outcome = out["run_outcome"]
