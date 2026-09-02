@@ -17,6 +17,7 @@ already has, so no new install requirement).
 
 from __future__ import annotations
 
+import datetime
 import re
 from pathlib import Path
 from typing import Protocol
@@ -178,11 +179,25 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
             f"got {as_of_commit!r}",
         )
     as_of_date = data.get("as_of_date")
+    # The regex alone only checks the YYYY-MM-DD *shape* -- it accepts a
+    # calendar-invalid value like "2026-02-30" (a real review finding on
+    # PR #1019). `date.fromisoformat` is the actual calendar check, run
+    # only once the shape is already confirmed (it accepts a wider set of
+    # ISO 8601 forms on its own -- e.g. no dashes at all -- that the regex
+    # exists specifically to keep out).
     if not isinstance(as_of_date, str) or not _PIPELINE_DATE_RE.match(as_of_date):
         f.err(
             "pipeline-status-ledger",
             f"{rel}: 'as_of_date' must be 'YYYY-MM-DD', got {as_of_date!r}",
         )
+    else:
+        try:
+            datetime.date.fromisoformat(as_of_date)
+        except ValueError:
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: 'as_of_date' is not a real calendar date: {as_of_date!r}",
+            )
     concepts = data.get("concepts")
     if not isinstance(concepts, dict) or not concepts:
         f.err(
