@@ -264,12 +264,19 @@ class TestScanEngineCallSitePropagation:
     def _captured_source_extractor(
         monkeypatch: pytest.MonkeyPatch, frontend: str
     ) -> object:
+        """The ``source_extractor`` a real ``_build_new_snapshot`` passes on.
+
+        Spies on the shared resolver and aborts as soon as the argument is
+        captured, so this stays a fast-lane test with no compiler, no binary
+        and no snapshot work behind it.
+        """
         import abicheck.scan_engine as scan_engine
         import abicheck.workflows.artifact.execute as execute
 
         captured: dict[str, object] = {}
 
         def _spy(*_args: object, **kwargs: object) -> object:
+            """Capture the kwarg under test, then abort the resolution."""
             captured["source_extractor"] = kwargs.get("source_extractor")
             raise _StopResolution
 
