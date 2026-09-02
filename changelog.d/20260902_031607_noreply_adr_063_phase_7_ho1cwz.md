@@ -646,6 +646,33 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   member carrying `NOT_COMPARABLE` still stamped the current schema
   with `run_outcome.operational: "none"` on upgrade, losing the same
   signal the native writer fix above restores.
+- **A schema-valid `run_outcome` whose `operational` contradicts a
+  comparison refusal now fails the target closed, instead of trusting a
+  nonblocking gate** (CodeRabbit review, fresh evidence): the release
+  lowercase `"not_comparable"` and native `verdict: null` + `reason.kind`
+  refusal branches recovered a `GateInfo`/verdict straight from
+  `run_outcome` — but a self-inconsistent block (e.g. `gate: "none"`/
+  `operational: "none"` on a report whose own root sentinel says the
+  comparison was refused) previously produced a *nonblocking* result,
+  letting a real refusal read as safe. New `_not_comparable_contradiction_
+  reason` rejects any recovered `run_outcome` whose `operational` isn't
+  `NOT_COMPARABLE` in this shape, failing the target unavailable/malformed
+  instead. New `_malformed_gate_report` helper also de-duplicates the six
+  (now eight) identical "gate decision is malformed" `_LoadedReport`
+  construction sites this and prior rounds' fail-closed branches share.
+- **The scan-abort branch now fails closed on a present-but-invalid
+  `run_outcome` too, instead of silently discarding it** (Codex review,
+  fresh evidence): unlike the ERROR/refusal branches, this branch's own
+  gate is unconditional either way (the `COVERAGE_INCOMPLETE_EXIT` floor),
+  so an earlier round of this fragment deliberately let a malformed block
+  degrade to "nothing to add" rather than failing the target unavailable —
+  but that let a real recorded ABI-break `gate` (e.g. `gate: "abi_
+  breaking"` alongside a merely-incomplete `lifecycle` field) be silently
+  reduced to a bare coverage-incomplete floor. Now fails closed uniformly
+  with every other structured-`run_outcome` reader in this module; the
+  pinned `test_bundle_incomplete_with_a_truncated_run_outcome_does_not_
+  recover_a_verdict` test (renamed `..._fails_closed`) is updated to match
+  this corrected, safer contract.
 
 ### Changed
 

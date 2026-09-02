@@ -27,7 +27,11 @@ from pathlib import Path
 from typing import Any
 
 from abicheck.change_registry_types import Verdict
-from abicheck.policy.outcome import fold_gate_and_operational
+from abicheck.policy.outcome import (
+    OperationalStatus,
+    PolicyGateDecision,
+    fold_gate_and_operational,
+)
 
 from .contracts import (
     _BOOTSTRAP_VERDICT,
@@ -120,6 +124,43 @@ class _LoadedReport:
     effective_config_digest: str | None = None
 
 
+def _malformed_gate_report(
+    target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
+) -> _LoadedReport:
+    """The shared "gate decision is malformed" unavailable shape every
+    fail-closed branch here returns, apart from *reason*."""
+    return _LoadedReport(
+        target_id=target_id,
+        verdict=None,
+        gate=None,
+        library=library,
+        head_sha=head_sha,
+        reason=reason,
+        path=path,
+    )
+
+
+def _not_comparable_contradiction_reason(
+    run_outcome_pair: tuple[PolicyGateDecision, OperationalStatus] | None,
+) -> str | None:
+    """``None`` unless *run_outcome_pair* is a schema-valid ``run_outcome``
+    whose ``operational`` contradicts a not-comparable refusal (e.g. `gate:
+    none`/`operational: none`) -- trusting it would let a real refusal read
+    as safe. Shared by the release lowercase ``"not_comparable"`` and
+    native null-verdict/``reason.kind`` branches.
+    """
+    if (
+        run_outcome_pair is None
+        or run_outcome_pair[1] is OperationalStatus.NOT_COMPARABLE
+    ):
+        return None
+    return (
+        "report gate decision is malformed: run_outcome.operational "
+        f"({run_outcome_pair[1].value!r}) contradicts the report's own "
+        "not-comparable refusal"
+    )
+
+
 def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
     """The report's own P0.4 analysis-assurance contribution (``0``/``1``).
 
@@ -165,16 +206,10 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
 #: below and :func:`_member_abort_categories`, which needs the same mapping
 #: for a `scan --artifact-set` *member* whose own abort verdict was folded
 #: away by `_aggregate_scan_set_verdict`'s stronger-verdict-wins rule. The
-#: category strings match `OperationalStatus`'s own values (`policy/
-#: outcome.py`) on purpose -- this dict predates `RunOutcome` and reads the
-#: legacy sentinel string directly rather than importing `policy`, but the
-#: label it produces is exactly what `run_outcome.operational` would say for
-#: the same report, so a reader can't tell which path computed it (Codex
-#: review, fresh evidence: `NOT_COMPARABLE`/`BUNDLE_INCOMPLETE` were missing
-#: here, so `_load_report_file`'s `if verdict is not None:` guard -- neither
-#: is a `Verdict` member -- skipped `GateInfo.from_report_data`/
-#: `from_scan_report` entirely and silently discarded a blocking
-#: `run_outcome.operational` for both).
+#: category strings match `OperationalStatus`'s own values on purpose --
+#: this dict predates `RunOutcome` and reads the legacy sentinel string
+#: directly rather than importing `policy`, but the label it produces is
+#: exactly what `run_outcome.operational` would say for the same report.
 _scan_abort_categories = {
     _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
     _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
@@ -188,22 +223,16 @@ def _member_abort_categories(data: Mapping[str, Any]) -> frozenset[str]:
     which single category the set-level ``verdict`` string names.
 
     ``_aggregate_scan_set_verdict`` (ADR-056 D3) collapses a whole set's
-    outcome into exactly one root ``verdict`` string, picking one of: any
-    member's ``BUDGET_OVERFLOW`` (dominates unconditionally), else the
-    worst real compatibility verdict, else a member's own
-    ``EVIDENCE_CONTRACT_ERROR``. Two members can abort for *different*
-    reasons at once (one budget-starved, another evidence-incomplete), or
-    one member can abort while another's real break wins the root string --
-    either way the root alone cannot name every category, so both callers
-    below (the root-abort branch, whose own ``scan_abort_category`` is only
-    ever the *one* string that won, and the normal-verdict branch, where a
-    real break at the root hides an aborted member entirely) union this
-    function's result into their gate rather than trusting the root alone
-    (Codex review, fresh evidence for both). Reads each member's own bare
-    ``verdict`` field directly -- ``ScanArtifactResult.to_dict()`` flattens
-    it to the member dict's own top level, not nested under ``report`` --
-    rather than :func:`_scan_abort_exit_blocks`'s ``exit`` blocks, which a
-    member that aborted before producing a decision may not carry at all.
+    outcome into exactly one root ``verdict`` string. Two members can abort
+    for *different* reasons at once, or one member can abort while another's
+    real break wins the root string -- either way the root alone cannot name
+    every category, so both callers below union this function's result into
+    their gate rather than trusting the root alone. Reads each member's own
+    bare ``verdict`` field directly -- ``ScanArtifactResult.to_dict()``
+    flattens it to the member dict's own top level, not nested under
+    ``report`` -- rather than :func:`_scan_abort_exit_blocks`'s ``exit``
+    blocks, which a member that aborted before producing a decision may not
+    carry at all.
     """
     per_artifact = data.get("per_artifact")
     if not isinstance(per_artifact, list):
@@ -233,32 +262,20 @@ def _scan_abort_exit_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     minimal stand-in carrying just ``compatibility_contribution``).
 
     Three shapes of *already-computed* decision this codebase's own report
-    producers can leave behind, all recognized here:
+    producers can leave behind, all recognized here: ``diff.exit`` (the
+    single-binary native CLI's abort envelope), ``report.exit`` (the typed
+    API's own ``ScanResult.to_dict()`` root shape), and
+    ``per_artifact[i].report.exit`` (a ``scan --artifact-set`` abort
+    report's per-member decision).
 
-    * ``diff.exit`` -- the single-binary native CLI's ``scan``/
-      ``ScanOutcome`` abort envelope.
-    * ``report.exit`` -- the typed API's own ``ScanResult.to_dict()`` root
-      shape (a caller that dumps that dict directly, rather than going
-      through the CLI, never gets ``diff`` at all) (Codex review, fresh
-      evidence).
-    * ``per_artifact[i].report.exit`` -- a ``scan --artifact-set``/
-      ``ScanSetResult`` abort report's per-member decision
-      (``ScanArtifactResult.to_dict()`` wrapping a *member's own*
-      typed-API envelope).
-
-    A fourth case has no ``exit`` block to read at all: when a set-level
-    abort fires *after* every member already finished normally (no member
-    itself aborted, e.g. the shared budget expires during the bundle
-    audit that runs after all members), each completed member's real
-    compatibility result lives only in its own top-level ``exit_code``
-    (``0``/``1``/``2``/``4``, the exact scheme :data:`_VALID_GATE_EXIT`
-    validates) -- there is no nested decision to find, only that bare
-    scalar (Codex review, fresh evidence). Reading only the three real
-    blocks above silently dropped this case's real member results,
-    downgrading e.g. a completed member's exit `2` to the generic abort
-    floor. Synthesized here as a minimal block (just
-    ``compatibility_contribution``) so it folds through the exact same
-    ``max()`` machinery as a real one, rather than a separate code path.
+    A fourth case has no ``exit`` block at all: when a set-level abort fires
+    *after* every member already finished normally, each completed member's
+    real compatibility result lives only in its own top-level ``exit_code``
+    (``0``/``1``/``2``/``4``, :data:`_VALID_GATE_EXIT`'s scheme) -- reading
+    only the three real blocks above silently dropped this case's real
+    member results. Synthesized here as a minimal block (just
+    ``compatibility_contribution``) so it folds through the same ``max()``
+    machinery as a real one.
 
     Shared lookup for :func:`_scan_abort_prior_exit` and
     :func:`_scan_abort_exit_axis` below, both of which fold ``max()``
@@ -303,13 +320,10 @@ def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
     (``attach_prior_on_budget_overflow``) carries the ordinary
     compatibility/contract-coverage/analysis-assurance/crosscheck-promotion
     contributions through into an ``exit`` block's own ``*_contribution``
-    fields even though none of them decided ``code`` there (``code`` is
-    always the dominant budget/evidence-contract-error code, chosen large
-    enough to exceed them -- see ``ExitDecision``'s own docstring). Reading
-    them here is what lets this target's forced gate still reflect a real
+    fields even though none of them decided ``code`` there. Reading them
+    here is what lets this target's forced gate still reflect a real
     ABI/API break already found before the abort fired, instead of
-    downgrading it to a bare coverage-incomplete ``1`` (Codex review, fresh
-    evidence).
+    downgrading it to a bare coverage-incomplete ``1``.
     """
     best = 0
     for exit_block in _scan_abort_exit_blocks(data):
@@ -337,14 +351,10 @@ def _scan_abort_exit_axis(data: Mapping[str, Any], key: str) -> tuple[int, bool]
     Sibling of :func:`_scan_abort_prior_exit`, which folds every preserved
     axis into one gate-exit ceiling -- these two are reported separately
     instead (as :attr:`_LoadedReport.contract_coverage_exit`/
-    :attr:`_LoadedReport.analysis_assurance_exit`, ADR-049 Phase 7/P0.4's
-    own orthogonal axes), so folding them into the gate alone left
-    :func:`_contract_coverage_exit`/:func:`_analysis_assurance_exit` reading
-    ``0`` with an empty target list for a late abort that preserved a real
-    ``1`` here -- those two only read the older, differently-named
-    ``contract_coverage_exit_contribution``/``analysis_assurance_exit_
-    contribution`` fields a scan-abort payload never carries at all (Codex
-    review, fresh evidence).
+    :attr:`_LoadedReport.analysis_assurance_exit`), since folding them into
+    the gate alone left those two readers seeing ``0`` for a late abort that
+    preserved a real ``1`` here (they only read the older, differently-named
+    fields a scan-abort payload never carries).
     """
     best = 0
     declared = False
@@ -399,27 +409,22 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         # library's real, completed verdict (`ERROR` names only the
         # OPERATIONALLY failed one) -- read it rather than always
         # fabricating `Verdict.BREAKING`. Falls back to that synthetic
-        # verdict only when no *valid* run_outcome block is present at all
-        # (a pre-2.48 report). A valid block whose `compatibility` is
-        # legitimately `null` must NOT read as absent -- that fabricated a
-        # break for a comparison that never ran. A *present
-        # but schema-invalid* block is a third case: it must fail closed
-        # (unavailable/malformed), not fall through to the fabricated-
-        # `BREAKING` path either. The gate's own `exit_code` floors at 4
-        # unconditionally; a recovered `gate` (e.g. a sibling's `abi_
-        # breaking`) folds into `blocking_categories` too, so the real
-        # blocker isn't hidden behind only `operational_error`.
+        # verdict only when no *valid* run_outcome block is present (a
+        # pre-2.48 report); a legitimately `null` compatibility must NOT
+        # read as absent, and a present-but-schema-invalid block fails
+        # closed instead. The gate's own `exit_code` floors at 4
+        # unconditionally; a recovered `gate` folds into `blocking_
+        # categories` too, so the real blocker isn't hidden behind only
+        # `operational_error`.
         try:
             _, error_gate_category = _run_outcome_gate_exit_and_category(data)
         except _MalformedGate as exc:
-            return _LoadedReport(
-                target_id=target_id,
-                verdict=None,
-                gate=None,
-                library=data.get("library"),
-                head_sha=head_sha,
-                reason=f"report gate decision is malformed: {exc}",
-                path=path,
+            return _malformed_gate_report(
+                target_id,
+                data.get("library"),
+                head_sha,
+                path,
+                f"report gate decision is malformed: {exc}",
             )
         error_compat_verdict = _run_outcome_compatibility_verdict(data)
         error_has_valid_run_outcome = _has_valid_run_outcome_block(data)
@@ -468,21 +473,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     #
     # `verdict` stays `None` here rather than a synthetic `Verdict.
     # BREAKING`: a scan that aborted before comparing never produced an
-    # ABI-break finding, so forcing one invents both a compatibility
-    # verdict and an "analyzed" target count for a comparison that never
-    # ran. The gate is still attached and still counts toward
-    # `AggregateResult.exit_code()`/`blocking_targets` regardless of the
-    # target's own required/optional declaration --
-    # `AggregateResult._forced_gate_targets` folds in exactly this shape.
-    # The gate's own `exit_code` is `max(COVERAGE_INCOMPLETE_EXIT, prior
-    # contribution, run_outcome contribution)`, never scan's raw private
-    # code (5 for budget overflow) -- `GateInfo.from_scan_report` already
-    # normalizes every scan exit outside {0, 2, 4} to `COVERAGE_INCOMPLETE_
-    # EXIT`, but a *late* `_BudgetOverflow` (`attach_prior_on_budget_
-    # overflow`) preserves whatever gate/coverage/assurance/crosscheck
-    # decision already existed, and downgrading a real ABI/API break
-    # already found before the abort to a bare coverage-incomplete `1`
-    # would hide it from a severity-aware consumer.
+    # ABI-break finding, so forcing one invents an "analyzed" target count
+    # for a comparison that never ran. The gate is still attached and still
+    # counts toward `AggregateResult.exit_code()`/`blocking_targets`
+    # (`_forced_gate_targets`). The gate's own `exit_code` is
+    # `max(COVERAGE_INCOMPLETE_EXIT, prior contribution, run_outcome
+    # contribution)`, never scan's raw private code -- `GateInfo.from_
+    # scan_report` already normalizes every scan exit outside {0, 2, 4} to
+    # `COVERAGE_INCOMPLETE_EXIT`, but a *late* `_BudgetOverflow` preserves
+    # whatever gate/coverage/assurance decision already existed, so a real
+    # break found before the abort isn't hidden.
     raw_scan_verdict = data.get("verdict")
     scan_abort_category = (
         _scan_abort_categories.get(raw_scan_verdict)
@@ -498,28 +498,28 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         )
         # A valid `run_outcome.gate` can preserve a completed break the
         # legacy `diff.exit`/member blocks are absent/stale for -- fold it
-        # in too. This branch's own gate is unconditional either way (the
-        # `COVERAGE_INCOMPLETE_EXIT` floor below), unlike the ERROR/release
-        # refusal branches whose *entire* gate comes from `run_outcome` --
-        # so a present-but-invalid block here degrades to "nothing to add"
-        # (0, None) rather than failing the whole target unavailable,
-        # mirroring `_run_outcome_compatibility_verdict`'s own opportunistic,
-        # never-raising design for this exact report shape.
+        # in too. A present-but-invalid block fails closed like every other
+        # structured reader here: silently discarding it could hide a real
+        # ABI break behind a bare coverage-incomplete floor.
         try:
             run_outcome_gate_exit, run_outcome_gate_category = (
                 _run_outcome_gate_exit_and_category(data)
             )
-        except _MalformedGate:
-            run_outcome_gate_exit, run_outcome_gate_category = 0, None
+        except _MalformedGate as exc:
+            return _malformed_gate_report(
+                target_id,
+                data.get("library"),
+                head_sha,
+                path,
+                f"report gate decision is malformed: {exc}",
+            )
         blocking_categories = frozenset(
             {scan_abort_category}
         ) | _member_abort_categories(data)
         if run_outcome_gate_category is not None:
             blocking_categories = blocking_categories | {run_outcome_gate_category}
-        # `BUNDLE_INCOMPLETE` typically has a real completed comparison
-        # (members scanned cleanly, only the bundle audit never ran); a
-        # *late* `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` abort can carry
-        # one too -- read unconditionally for all four sentinels.
+        # `BUNDLE_INCOMPLETE` typically has a real completed comparison; a
+        # *late* abort can too -- read unconditionally for all four sentinels.
         compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
@@ -560,33 +560,32 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 effective_config_digest if compat_verdict is not None else None
             ),
         )
-    # ADR-050 D2 (Codex review, fresh evidence): a `compare-release` summary's
-    # own lowercase `"not_comparable"` sentinel is a REAL string (not JSON
-    # `null`) -- distinct from `scan`'s uppercase `NOT_COMPARABLE` handled
-    # above, and from a native `compare`'s `verdict: null` + `reason.kind`
-    # shape handled below -- so it is neither a `Verdict` member nor caught
-    # by either of those two branches. It previously fell through to the
-    # generic "report carried no ABI verdict" unavailable reading further
-    # below, silently discarding `run_outcome.operational: "not_comparable"`
-    # and letting a warn/optional/tolerated-unexpected target policy pass a
-    # refused release comparison. `_format_release_json`/`resolve_release_
-    # exit_decision_for_report` already compute a correct top-level
-    # `run_outcome` for this sentinel, and this shape carries no root
-    # `severity` key unless a severity scheme was active -- either way
-    # `GateInfo.from_report_data` already reads both correctly, so it is
-    # reused here rather than hand-rolling a second run_outcome reader.
+    # ADR-050 D2: a `compare-release` summary's own lowercase
+    # `"not_comparable"` sentinel is a REAL string (not JSON `null`) --
+    # distinct from `scan`'s uppercase `NOT_COMPARABLE` handled above, and
+    # from a native `compare`'s `verdict: null` + `reason.kind` shape
+    # handled below -- so it is neither a `Verdict` member nor caught by
+    # either of those two branches; it must not fall through to the generic
+    # "report carried no ABI verdict" unavailable reading further below.
+    # `GateInfo.from_report_data` already reads this shape's `run_outcome`/
+    # `severity` correctly, so it is reused rather than hand-rolling a
+    # second reader.
     if data.get("verdict") == "not_comparable":
         try:
             release_gate = GateInfo.from_report_data(data)
+            run_outcome_pair = _run_outcome_gate_and_operational(data)
         except _MalformedGate as exc:
-            return _LoadedReport(
-                target_id=target_id,
-                verdict=None,
-                gate=None,
-                library=data.get("library"),
-                head_sha=head_sha,
-                reason=f"report gate decision is malformed: {exc}",
-                path=path,
+            return _malformed_gate_report(
+                target_id,
+                data.get("library"),
+                head_sha,
+                path,
+                f"report gate decision is malformed: {exc}",
+            )
+        contradiction = _not_comparable_contradiction_reason(run_outcome_pair)
+        if contradiction is not None:
+            return _malformed_gate_report(
+                target_id, data.get("library"), head_sha, path, contradiction
             )
         if release_gate is None:
             # Pre-2.48 legacy report (no `severity`/`run_outcome`) that still
@@ -663,14 +662,17 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             try:
                 run_outcome = _run_outcome_gate_and_operational(data)
             except _MalformedGate as exc:
-                return _LoadedReport(
-                    target_id=target_id,
-                    verdict=None,
-                    gate=None,
-                    library=data.get("library"),
-                    head_sha=head_sha,
-                    reason=f"report gate decision is malformed: {exc}",
-                    path=path,
+                return _malformed_gate_report(
+                    target_id,
+                    data.get("library"),
+                    head_sha,
+                    path,
+                    f"report gate decision is malformed: {exc}",
+                )
+            contradiction = _not_comparable_contradiction_reason(run_outcome)
+            if contradiction is not None:
+                return _malformed_gate_report(
+                    target_id, data.get("library"), head_sha, path, contradiction
                 )
             if run_outcome is not None:
                 refusal_gate_dec, refusal_operational = run_outcome
@@ -745,14 +747,12 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         except _MalformedGate as exc:
             # Fail closed: a present-but-corrupt gate makes the target
             # unavailable (unknown), never silently the greener legacy path.
-            return _LoadedReport(
-                target_id=target_id,
-                verdict=None,
-                gate=None,
-                library=data.get("library"),
-                head_sha=head_sha,
-                reason=f"report gate decision is malformed: {exc}",
-                path=path,
+            return _malformed_gate_report(
+                target_id,
+                data.get("library"),
+                head_sha,
+                path,
+                f"report gate decision is malformed: {exc}",
             )
         if gate is None:
             gate = GateInfo.legacy_from_verdict(verdict)

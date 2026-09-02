@@ -261,3 +261,44 @@ class TestAggregateLoaderPreservesReleaseGateCategory:
         assert loaded.gate.exit_code == 4
         assert "abi_breaking" in loaded.gate.blocking_categories
         assert "operational_error" in loaded.gate.blocking_categories
+
+    def test_release_not_comparable_with_contradicting_run_outcome_fails_closed(
+        self, tmp_path
+    ):
+        """CodeRabbit review, fresh evidence: a schema-valid `run_outcome`
+        block whose `operational` contradicts the report's own root
+        `"not_comparable"` sentinel (here `gate: none`/`operational: none`,
+        as if the comparison were clean) previously produced a nonblocking
+        `GateInfo` via `GateInfo.from_report_data` -- trusting a
+        self-inconsistent block would let a real comparison refusal read as
+        safe. Must fail closed (unavailable/malformed) instead."""
+        import json
+
+        from abicheck.workflows.aggregate.load import _load_report_file
+
+        report = tmp_path / "abi-report-linux.json"
+        report.write_text(
+            json.dumps(
+                {
+                    "verdict": "not_comparable",
+                    "old_dir": "/old",
+                    "new_dir": "/new",
+                    "libraries": [],
+                    "run_outcome": {
+                        "schema_version": "1",
+                        "compatibility": None,
+                        "assurance": None,
+                        "gate": "none",
+                        "operational": "none",
+                        "lifecycle": "existing",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = _load_report_file(report, prefix="abi-report-")
+
+        assert loaded.gate is None
+        assert loaded.verdict is None
+        assert loaded.reason is not None and "malformed" in loaded.reason

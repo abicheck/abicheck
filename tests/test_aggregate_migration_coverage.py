@@ -333,6 +333,40 @@ def test_not_comparable_refusal_with_a_malformed_run_outcome_fails_closed_not_cr
     assert loaded.reason is not None and "malformed" in loaded.reason
 
 
+def test_null_verdict_refusal_with_contradicting_run_outcome_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit review, fresh evidence: a schema-valid `run_outcome`
+    whose `operational` contradicts a `verdict: null` + `reason.kind`
+    refusal (here `gate: none`/`operational: none`, as if clean) previously
+    produced a nonblocking `GateInfo` -- trusting a self-inconsistent block
+    would let a real refusal read as safe. Must fail closed instead."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "none",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
+
+
 def test_bundle_incomplete_preserves_the_completed_members_compatibility_verdict(
     tmp_path: Path,
 ) -> None:
@@ -383,17 +417,19 @@ def test_bundle_incomplete_preserves_the_completed_members_compatibility_verdict
     assert loaded.gate.blocking_categories == ("extraction_error",)
 
 
-def test_bundle_incomplete_with_a_truncated_run_outcome_does_not_recover_a_verdict(
+def test_bundle_incomplete_with_a_truncated_run_outcome_fails_closed(
     tmp_path: Path,
 ) -> None:
-    """CodeRabbit review, fresh evidence: a bare
+    """Codex review, fresh evidence: a bare
     `{"run_outcome": {"compatibility": "BREAKING"}}` -- missing `gate`/
     `operational`/`schema_version`/`lifecycle` -- must not earn the
-    opportunistic verdict-recovery this window's other fix added. Only a
-    schema-COMPLETE `run_outcome` may make a `BUNDLE_INCOMPLETE` report
-    read as analyzed and preserve its findings/digest; a truncated one
-    falls back to the same `verdict=None`/`findings=None` shape a true
-    abort gets."""
+    opportunistic verdict-recovery a sibling fix added, NOR be silently
+    discarded as if the block were absent: a present-but-invalid
+    `run_outcome` could carry a real recorded ABI-break `gate` this module
+    would otherwise hide behind a bare coverage-incomplete floor. The
+    scan-abort branch now fails closed on it uniformly with every other
+    structured-`run_outcome` reader here, same as the ERROR/refusal
+    branches."""
     report = tmp_path / "abi-report-linux.json"
     report.write_text(
         json.dumps(
@@ -410,12 +446,8 @@ def test_bundle_incomplete_with_a_truncated_run_outcome_does_not_recover_a_verdi
     loaded = _load_report_file(report, prefix="abi-report-")
 
     assert loaded.verdict is None
-    assert loaded.findings is None
-    assert loaded.effective_config_digest is None
-    assert (
-        loaded.reason
-        == "scan aborted before completing a comparison (extraction_error)"
-    )
+    assert loaded.gate is None
+    assert loaded.reason is not None and "malformed" in loaded.reason
 
 
 def test_release_lowercase_not_comparable_is_recognized_as_a_blocking_refusal(
