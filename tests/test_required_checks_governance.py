@@ -34,7 +34,6 @@ to `test-action.yml` escaping its own aggregate's `needs:` list.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -43,30 +42,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
-
-# The 14 unconditional required-check names, kept in one place here so
-# TestBranchRulesetArtifact and TestVerifyMergeChecksWorkflow (below) check
-# both of the other two sources of truth against the *same* list rather than
-# each hand-copying it independently -- which is exactly how this list has
-# drifted wrong three times before (see .github/AGENTS.md's own "Required-
-# status-check configuration" section and its "hand-copying a fourth one is
-# the wrong fix" note).
-REQUIRED_CHECK_NAMES = (
-    "ai-readiness",
-    "FAIR metadata and packaging",
-    "lint-and-types",
-    "unit-tests (ubuntu-latest, 3.13, false)",
-    "packaging (ubuntu-latest)",
-    "packaging (windows-latest)",
-    "changelog-fragment",
-    "cli-interface-diff",
-    "test-contract",
-    "Dependency Review",
-    "Security Scan",
-    "CodeQL Analysis (python)",
-    "docs-pr (required)",
-    "test-action (required)",
-)
 
 
 def _load_workflow(name: str) -> dict[str, Any]:
@@ -164,7 +139,7 @@ class TestGateJobPollingLogic:
         assert "'success', 'neutral'" in script
         assert "'skipped'" not in script
 
-    @pytest.mark.parametrize("workflow_name", ["ci.yml", "verify-merge-checks.yml"])
+    @pytest.mark.parametrize("workflow_name", ["ci.yml"])
     def test_github_script_is_pinned_by_sha(self, workflow_name: str) -> None:
         wf = _load_workflow(workflow_name)
         for job in _jobs(wf).values():
@@ -253,88 +228,13 @@ class TestTestActionSummaryCoversEveryJob:
         assert "contains(needs.*.result, 'skipped')" in run_step["run"]
 
 
-class TestVerifyMergeChecksWorkflow:
-    def test_triggers_only_on_push_to_main(self) -> None:
-        wf = _load_workflow("verify-merge-checks.yml")
-        on_block = wf.get("on", wf.get(True))
-        assert set(on_block) == {"push"}
-        assert on_block["push"]["branches"] == ["main"]
-
-    def test_required_checks_list_present_in_script(self) -> None:
-        """Parses the actual `const REQUIRED_CHECKS = [...]` array literal
-        and compares its string-literal entries against `REQUIRED_CHECK_NAMES`
-        as two sets -- not a substring search over the whole file. A loose
-        substring check would pass even if the array gained an entry
-        `REQUIRED_CHECK_NAMES` doesn't have, or dropped one whose name still
-        lingers in a nearby comment (Codex review on #887, round 3: the same
-        one-way/whole-file gap already fixed for the AGENTS.md paragraph
-        above, found again here)."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "REQUIRED_CHECKS" in raw
-        match = re.search(r"const REQUIRED_CHECKS = \[(.*?)\];", raw, re.S)
-        assert match is not None, (
-            "verify-merge-checks.yml's `const REQUIRED_CHECKS = [...]` array "
-            "literal was not found with this test's regex -- reword the "
-            "regex here if the script's own wording/formatting changed"
-        )
-        array_body = match.group(1)
-        script_checks = frozenset(re.findall(r"'([^']*)'", array_body))
-        assert script_checks == set(REQUIRED_CHECK_NAMES), (
-            "verify-merge-checks.yml's REQUIRED_CHECKS array and "
-            "REQUIRED_CHECK_NAMES disagree.\n"
-            f"  only in the workflow's array: {script_checks - set(REQUIRED_CHECK_NAMES)}\n"
-            f"  only in REQUIRED_CHECK_NAMES:  {set(REQUIRED_CHECK_NAMES) - script_checks}"
-        )
-
-    def test_does_not_require_the_path_filtered_aggregate_checks(self) -> None:
-        """`build-docs`/`test-action summary` are deliberately excluded --
-        whether they exist at all for a given PR head SHA depends on the
-        same path filter the `ci.yml` gate jobs already re-evaluate, so
-        requiring them here too would either duplicate that logic or, if it
-        drifted, produce a false failure on a PR that never touched those
-        paths."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "'build-docs'" not in raw
-        assert "'test-action summary'" not in raw
-
-    def test_check_run_listing_is_paginated(self) -> None:
-        """A hand-added `per_page: 100` ceiling silently drops any check run
-        past the 100th once the repo's check-run count grows past it -- use
-        `github.paginate` instead so there's no ceiling to outgrow."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "github.paginate(github.rest.checks.listForRef" in raw
-
-    def test_target_pr_selection_is_restricted_to_merged_prs_targeting_main(
-        self,
-    ) -> None:
-        """`listPullRequestsAssociatedWithCommit` can return an unrelated
-        open PR that happens to contain the same commit -- selection must be
-        restricted to merged PRs based against `main` before falling back to
-        anything, or an unrelated PR's head SHA could be verified instead."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "pr.merged_at" in raw
-        assert "pr.base.ref === 'main'" in raw
-
-    def test_empty_candidates_does_not_fall_back_to_an_unfiltered_pr(self) -> None:
-        """If every commit<->PR association GitHub returns is ineligible (not
-        merged, or not based against `main`), the workflow must treat that
-        the same as "no PR associated" rather than silently falling back to
-        `prs[0]` -- an unfiltered fallback can validate a completely
-        unrelated PR's head SHA and read as green or red for reasons that
-        have nothing to do with the actual merge being verified."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "candidates.length === 0" in raw
-        assert "|| prs[0]" not in raw
-
-
 class TestBranchRulesetArtifact:
-    """`.github/branch-protection-ruleset.json` is the API payload an admin
-    applies by hand to actually enforce the required-check list (see
-    `.github/branch-protection-ruleset.md`'s runbook) -- the one manual step
-    PR 0B/P0 cannot automate. It is a *third* place this same 14-name list is
-    spelled out, alongside `AGENTS.md`'s prose and `verify-merge-checks.yml`'s
-    `REQUIRED_CHECKS` array; these tests keep it from becoming a fourth
-    hand-copied list that drifts out of sync unnoticed."""
+    """`.github/branch-protection-ruleset.json` records the *non-fast-forward*
+    protection this repo actually wants on `main`. It deliberately carries no
+    `required_status_checks` rule -- see `.github/AGENTS.md`'s
+    "Required-status-check configuration" section: this repo made a conscious
+    choice not to block a merge on CI completion, so there is no
+    required-check list left for this artifact to keep in sync with."""
 
     @staticmethod
     def _ruleset() -> dict[str, Any]:
@@ -345,13 +245,6 @@ class TestBranchRulesetArtifact:
         assert isinstance(data, dict)
         return data
 
-    @staticmethod
-    def _status_checks_rule(ruleset: dict[str, Any]) -> dict[str, Any]:
-        rules = ruleset.get("rules")
-        assert isinstance(rules, list) and rules
-        (status_rule,) = [r for r in rules if r.get("type") == "required_status_checks"]
-        return status_rule
-
     def test_targets_main_and_is_active(self) -> None:
         ruleset = self._ruleset()
         assert ruleset.get("target") == "branch"
@@ -359,24 +252,14 @@ class TestBranchRulesetArtifact:
         include = ruleset.get("conditions", {}).get("ref_name", {}).get("include", [])
         assert "refs/heads/main" in include
 
-    def test_required_status_checks_matches_the_shared_list_exactly(self) -> None:
-        rule = self._status_checks_rule(self._ruleset())
-        contexts = tuple(
-            c["context"] for c in rule["parameters"]["required_status_checks"]
-        )
-        # Order-insensitive: what matters for enforcement is the set, and
-        # accidental reordering during a hand-edit shouldn't fail this test.
-        assert set(contexts) == set(REQUIRED_CHECK_NAMES)
-        assert len(contexts) == len(REQUIRED_CHECK_NAMES), (
-            "duplicate context entry in branch-protection-ruleset.json"
-        )
-
-    def test_strict_status_checks_policy_is_enabled(self) -> None:
-        """Without `strict_required_status_checks_policy`, a required check
-        that passed against a stale base branch can still count -- matching
-        the same up-to-date-branch expectation `non_fast_forward` implies."""
-        rule = self._status_checks_rule(self._ruleset())
-        assert rule["parameters"]["strict_required_status_checks_policy"] is True
+    def test_carries_no_required_status_checks_rule(self) -> None:
+        """The one thing this test suite must keep true: no rule of type
+        `required_status_checks` sneaks back into the applied ruleset without
+        a deliberate decision to re-enable merge-blocking on CI -- see
+        `.github/AGENTS.md`'s "Required-status-check configuration" section."""
+        rules = self._ruleset().get("rules")
+        assert isinstance(rules, list) and rules
+        assert not [r for r in rules if r.get("type") == "required_status_checks"]
 
     def test_runbook_references_the_json_file_and_gh_command(self) -> None:
         runbook = (ROOT / ".github" / "branch-protection-ruleset.md").read_text(
@@ -385,93 +268,3 @@ class TestBranchRulesetArtifact:
         assert "branch-protection-ruleset.json" in runbook
         assert "gh api" in runbook
         assert "/repos/abicheck/abicheck/rulesets" in runbook
-
-    # Backtick-quoted tokens inside AGENTS.md's authoritative paragraph
-    # (below) that are asides, not check names -- the branch name it was
-    # written against, a workflow filename, an internal cross-reference
-    # word, and the two gate jobs' *job ids* (immediately followed by their
-    # emitted check names, which ARE real entries). Listed explicitly so a
-    # real check name silently landing in this set (instead of being
-    # compared) fails loudly rather than being quietly excluded.
-    _AGENTS_MD_PARAGRAPH_ASIDES = frozenset(
-        {
-            "main",
-            "fair-metadata",
-            "name:",
-            "ci.yml",
-            "docs-pr-required",
-            "test-action-required",
-        }
-    )
-
-    def test_shared_list_is_actually_documented_in_agents_md(self) -> None:
-        """The two tests above only prove the JSON agrees with
-        `REQUIRED_CHECK_NAMES` -- a hard-coded tuple in *this* file, which
-        could itself drift from `AGENTS.md`'s prose without anything
-        failing. A first fix (Codex review on #887, round 1) closed that by
-        substring-searching the *whole file* -- but a first-round-fixed
-        follow-up finding (round 2) pointed out that's still one-way and
-        file-wide: a name removed from the authoritative list but still
-        mentioned elsewhere in the file (the workflow table, explanatory
-        prose) passes the substring check regardless, and a name newly
-        added to the authoritative list but missing from
-        `REQUIRED_CHECK_NAMES` is never caught either, since nothing was
-        parsed as *the* list.
-
-        This version parses the actual authoritative paragraph -- the one
-        `.github/AGENTS.md`'s own "Required-status-check configuration"
-        section calls out by that name -- and compares its backtick-quoted
-        tokens against `REQUIRED_CHECK_NAMES` as two sets (modulo the small,
-        explicit list of non-check-name asides in that same paragraph:
-        `main`/`fair-metadata`/etc., itself pinned by
-        `test_paragraph_asides_are_still_accurate` below), not a
-        file-wide one-directional substring scan. A name dropped from the
-        paragraph, or a new one added there without a matching
-        `REQUIRED_CHECK_NAMES` update, now fails this test even if that
-        name still appears somewhere else in the file."""
-        agents_md = (ROOT / ".github" / "AGENTS.md").read_text(encoding="utf-8")
-        match = re.search(
-            r"\*\*The required-check list, applying this rule to the table "
-            r"above.*?actually requires\)\.",
-            agents_md,
-            re.S,
-        )
-        assert match is not None, (
-            "AGENTS.md's authoritative required-check-list paragraph "
-            "(opening 'The required-check list, applying this rule to the "
-            "table above') was not found -- reword the anchor phrase here "
-            "if that paragraph's own wording changed"
-        )
-        paragraph = match.group(0)
-        tokens = frozenset(re.findall(r"`([^`]+)`", paragraph))
-        documented_checks = tokens - self._AGENTS_MD_PARAGRAPH_ASIDES
-        assert documented_checks == set(REQUIRED_CHECK_NAMES), (
-            "AGENTS.md's authoritative required-check-list paragraph and "
-            "REQUIRED_CHECK_NAMES disagree.\n"
-            f"  only in AGENTS.md's paragraph: {documented_checks - set(REQUIRED_CHECK_NAMES)}\n"
-            f"  only in REQUIRED_CHECK_NAMES:  {set(REQUIRED_CHECK_NAMES) - documented_checks}\n"
-            "(if a genuinely new aside token was added to that paragraph's "
-            "own prose, add it to _AGENTS_MD_PARAGRAPH_ASIDES above instead)"
-        )
-
-    def test_paragraph_asides_are_still_accurate(self) -> None:
-        """Guards the guard: every token in `_AGENTS_MD_PARAGRAPH_ASIDES`
-        must actually still appear, backtick-quoted, in the authoritative
-        paragraph -- an aside that no longer appears there (the prose was
-        reworded) would otherwise sit unused and silently widen what the
-        test above tolerates without anyone noticing."""
-        agents_md = (ROOT / ".github" / "AGENTS.md").read_text(encoding="utf-8")
-        match = re.search(
-            r"\*\*The required-check list, applying this rule to the table "
-            r"above.*?actually requires\)\.",
-            agents_md,
-            re.S,
-        )
-        assert match is not None
-        tokens = frozenset(re.findall(r"`([^`]+)`", match.group(0)))
-        for aside in self._AGENTS_MD_PARAGRAPH_ASIDES:
-            assert aside in tokens, (
-                f"{aside!r} is listed as an aside but no longer appears, "
-                f"backtick-quoted, in AGENTS.md's authoritative paragraph -- "
-                f"remove it from _AGENTS_MD_PARAGRAPH_ASIDES"
-            )

@@ -66,6 +66,29 @@ if TYPE_CHECKING:
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
+
+def _release_job_mem_budget_gib() -> float:
+    """Per-worker RAM budget (GiB) for the release-fan-out memory cap (R3,
+    CLI-audit) -- see :mod:`abicheck.workflows.release_jobs`'s own docstring
+    for the full "why". A thin wrapper (not a direct call site) purely so a
+    test can monkeypatch this module's own name, matching the established
+    ``_l4_*`` wrapper pattern in :mod:`abicheck.buildsource.source_replay`.
+    """
+    from .workflows.release_jobs import release_job_mem_budget_gib
+
+    return release_job_mem_budget_gib()
+
+
+def _release_jobs_mem_cap() -> int | None:
+    """Max release-fan-out workers that fit in available RAM, or ``None``
+    when RAM can't be read -- see :func:`_release_job_mem_budget_gib`'s
+    docstring for why this is a thin wrapper.
+    """
+    from .workflows.release_jobs import release_jobs_mem_cap
+
+    return release_jobs_mem_cap()
+
+
 _CompareReleaseCommonArgs = tuple[
     dict[str, Path],
     dict[str, Path],
@@ -92,6 +115,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     "CompileContext | None",
+    "str | None",
 ]
 
 
@@ -117,6 +141,7 @@ def _run_compare_pair(
     contract_mode: str | None = None,
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -157,6 +182,11 @@ def _run_compare_pair(
     thread the L2 compile context" -- see AGENTS.md's whole-product-bundle
     known-gap entry). ``None`` (the default) is a true no-op, matching every
     pre-existing caller.
+
+    *depth* (D1) is the one ``--depth`` value the release fan-out can
+    actually honour end to end -- ``"binary"`` -- forwarded unchanged to
+    ``service.run_compare`` so this pair clears header/build/source evidence
+    the same way a single-pair ``compare --depth binary`` would.
     """
     from . import service
 
@@ -192,6 +222,7 @@ def _run_compare_pair(
             pack_application.internal_namespaces if pack_application else None
         ),
         compile_context=compile_context,
+        depth=depth,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -226,6 +257,7 @@ def _compare_one_library(
     collect_diff_results: bool = False,
     need_full_snapshots: bool = False,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -269,6 +301,7 @@ def _compare_one_library(
             contract_mode=contract_mode,
             pack_application=pack_application,
             compile_context=compile_context,
+            depth=depth,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -478,6 +511,7 @@ def _compare_release_libraries(
     contract_mode: str | None = None,
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -490,10 +524,33 @@ def _compare_release_libraries(
     a ``ProcessPoolExecutor``, as this docstring wrongly claimed before
     (Codex review, fresh evidence; see :func:`_compare_release_parallel`'s
     own docstring for why the distinction matters).
+
+    R3 (CLI-audit): the auto default (*jobs* ``<= 0``) additionally clamps
+    to available RAM via :func:`_release_jobs_mem_cap` -- see that
+    function's own docstring for why a bare ``os.cpu_count()`` default can
+    wildly oversubscribe memory on a very-high-core-count host or a
+    cpu-count-vs-memory-mismatched container. An *explicit* ``--jobs N``
+    is never clamped -- that is a deliberate user choice, unlike the
+    ``ABICHECK_L4_JOBS`` env-var override this pattern is mirrored from
+    (:mod:`abicheck.buildsource.source_replay`), which clamps even an
+    explicit override since it has no equivalent "the user typed this on
+    the command line" signal to respect.
     """
     import os as _os
 
     effective_jobs = jobs if jobs > 0 else (_os.cpu_count() or 1)
+    if jobs <= 0:
+        mem_cap = _release_jobs_mem_cap()
+        if mem_cap is not None and mem_cap < effective_jobs:
+            click.echo(
+                f"Note: parallel release workers reduced {effective_jobs} -> "
+                f"{mem_cap} to fit available memory (~{_release_job_mem_budget_gib():.1f} "
+                "GiB/worker budget, each holding up to two full snapshots resident); "
+                "pass --jobs to override, or set ABICHECK_RELEASE_JOB_MEM_GIB to "
+                "tune the per-worker budget.",
+                err=True,
+            )
+            effective_jobs = mem_cap
     library_results: list[dict[str, object]] = []
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
     worst_verdict = "NO_CHANGE"
@@ -524,6 +581,7 @@ def _compare_release_libraries(
         collect_diff_results,
         need_full_snapshots,
         compile_context,
+        depth,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

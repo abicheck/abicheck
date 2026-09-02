@@ -340,6 +340,53 @@ def test_run_scan_set_depth_binary_exempts_the_early_bazel_scoping_check(
     assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")
 
 
+def test_run_scan_set_config_sourced_target_scope_raises_planning_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """ADR-063 Phase 4's residual, closed: the sibling of
+    ``test_run_scan_depth_headers_config_sourced_target_scope_raises_
+    planning_error`` for the plural entry point. ``run_scan_set``'s own
+    pre-flight ``scan_bazel_scoping_failure`` call previously forwarded only
+    the request-level ``build_targets`` flag, not ``sources``/
+    ``build_config`` -- so a scope declared only via an `.abicheck.yml` at
+    `sources` (no explicit ``ScanRequest.build_targets``) was invisible to
+    it, unlike ``run_scan``'s identical check (``scan_engine.run_scan_core``)
+    and both of ``cli_scan.py``'s own pre-flight call sites, which the
+    phase's second slice already widened. Discovery must never even start,
+    the same way an explicit-``build_targets`` mismatch already doesn't (see
+    ``test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery``
+    above)."""
+    import abicheck.bundle as bundle_mod
+    from abicheck.errors import PlanningError
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "discover_artifact_set() ran before the config-sourced "
+            "Bazel-scoping pre-flight check rejected the request"
+        )
+
+    monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    src = tmp_path / "src"
+    src.mkdir()
+    header = src / "api.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:math\n", encoding="utf-8"
+    )
+
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path, "a"), _artifact(tmp_path, "b")],
+        headers=[header],
+        sources=src,
+        build_info=aquery,
+        depth="headers",
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan_set(req)
+
+
 def test_scan_request_default_build_targets_is_empty_tuple():
     """Additive default -- an existing ScanRequest() caller is unaffected."""
     assert ScanRequest().build_targets == ()

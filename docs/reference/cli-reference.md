@@ -50,7 +50,7 @@ Compare two ABI surfaces and report changes.
 |---|:--:|---|---|
 | `--help` | no | `False` | Show common options and exit. Use --help-all to see the remaining advanced options. |
 | `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
-| `--jobs`, `-j` | no | `0` | Parallel library comparisons for directory/package inputs (0 = auto-detect CPU count, the default). |
+| `--jobs`, `-j` | no | `0` | Parallel library comparisons for directory/package inputs (0 = auto-detect CPU count, clamped to fit available memory -- see ABICHECK\_RELEASE\_JOB\_MEM\_GIB -- the default). An explicit positive value is never memory-clamped. |
 | `--dso-only` | no | `False` | Only compare shared objects, skip executables (directory/package inputs only). |
 | `--output-dir` | no | — | Directory to write per-library reports (directory/package inputs only). |
 | `--fail-on-removed-library`, `--no-fail-on-removed-library` | no | `False` | Exit 8 when a library present in old\_dir is absent in new\_dir. (directory/package inputs only) |

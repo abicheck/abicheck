@@ -165,37 +165,52 @@ looked like the obvious fix and wasn't.
   already running ahead of both their real-run and `--dry-run` branches)
   were each updated to forward their own already-in-scope
   `sources`/`build_config` locals. **The fourth, `service_scan.
-  run_scan_set`, was deliberately left unwidened**: `service_scan.py` sits
-  exactly at the AI-readiness 2000-line hard cap, and the widened call
-  doesn't fit `ruff format`'s column budget on one line — the resulting
-  explosion would have pushed the file over. Adding it to
+  run_scan_set`, was deliberately left unwidened for one session**:
+  `service_scan.py` sat exactly at the AI-readiness 2000-line hard cap, and
+  the widened call didn't fit `ruff format`'s column budget on one line —
+  the resulting explosion would have pushed the file over. Adding it to
   `LARGE_FILE_ALLOWLIST` was rejected (that allowlist is reserved for
   pre-existing `scripts:`/`tests/` debt, not a fresh production-file
   exemption for an unrelated fix); trimming unrelated content in that
   already-densely-reviewed file to buy back the budget was rejected too. So
-  this one call site keeps its pre-fix behavior: a direct
+  this one call site kept its pre-fix behavior for a while: a direct
   `run_scan_set(ScanRequest(...))` typed-API call with no CLI in front of
-  it still won't see the `.abicheck.yml`-only scope pre-flight (it still
-  fails, just later and less cleanly, inside real embedding) — `scan
-  --artifact-set`'s own CLI path is unaffected, since
-  `cli_scan._run_artifact_set`'s pre-flight (now widened) already runs
-  ahead of `run_scan_set` and catches the mismatch first. A future pass
-  splitting `service_scan.py` under its own file-size budget would remove
-  this constraint; not attempted reactively here. See
+  it wouldn't see the `.abicheck.yml`-only scope pre-flight (it still
+  failed, just later and less cleanly, inside real embedding) — `scan
+  --artifact-set`'s own CLI path was unaffected throughout, since
+  `cli_scan._run_artifact_set`'s pre-flight (already widened) already ran
+  ahead of `run_scan_set` and caught the mismatch first.
+  **Closed in a later session, by splitting `service_scan.py` rather than
+  raising its baseline.** `_descendant_pgids`/`_kill_process_tree` — the
+  process-group kill machinery behind `run_scan_subprocess`/
+  `run_scan_set_subprocess`, with zero dependency on anything scan-specific
+  — moved to the new `abicheck/workflows/scan_subprocess.py`, re-exported
+  from `service_scan.py` for backward compatibility (mirroring
+  `cxx20_pair_dialect.py`'s own precedent: a genuine one-directional edge,
+  since the worker/harness functions that actually call back into
+  `run_scan`/`run_scan_set` stayed put, avoiding the mutual-dependency
+  shape a full move of the subprocess harness would have created). That
+  bought back the room `run_scan_set`'s own `scan_bazel_scoping_failure`
+  call needed to forward `sources=`/`build_config=` too, landing at a new,
+  lowered `architecture/debt.yaml` baseline (2000 → 1933) rather than
+  exactly at the hard cap. See
   `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
-  ("Second slice") and `docs/contribute/plans/one-semantic-pipeline.md`'s
+  ("Second slice" / "Third slice") and `docs/contribute/plans/one-semantic-pipeline.md`'s
   matching Phase 4 update for the full accounting, and
   `tests/test_analysis_plan.py::TestBazelBuildTargetScoping`/`tests/
   test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`/
   `tests/test_bazel_root_targets_scan.py::
-  test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`
-  for the regression coverage (the last of these also replaces this
+  test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`/
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_set_config_sourced_target_scope_raises_planning_error`
+  for the regression coverage (the third-to-last of these also replaces this
   paragraph's earlier pinning of the *pre-fix* `click.ClickException` leak
   from the typed `run_scan()` API with the now-clean `PlanningError`,
   raised earlier too, from `run_scan_core`'s own pre-flight check rather
   than leaking out of `_build_new_snapshot`'s pre-existing `except
   AbicheckError` wart — that wart itself is unrelated and stays open, see
-  this entry's earlier notes on it).
+  this entry's earlier notes on it). **Phase 4 is now complete: all four
+  pre-flight call sites forward `sources=`/`build_config=`.**
   **A later Codex/CodeRabbit review round found the `.abicheck.yml` fix
   itself had a second, distinct gap — not deferrable the way the dry-run
   parity gap above was, since this one had a direct, bounded fix.** At
@@ -6002,6 +6017,63 @@ looked like the obvious fix and wasn't.
   chain, each fix closing the previous round's hazard while (in round 2's
   case) introducing this one.
 
+- **`action/run.sh`'s `extra-args` parsing performs pathname expansion
+  (globbing), not just word-splitting, and no site disables it — investigated,
+  deliberately not fixed (CodeRabbit review, PR #998, ADR-064's
+  effective-format-override fix).** `_effective_format()` (added by that PR),
+  `_extra_args_has_write_flag()`, `_extra_args_write_json_path()`, and the
+  real command assembly (`CMD+=($INPUT_EXTRA_ARGS)`) all read
+  `$INPUT_EXTRA_ARGS` via an unquoted `set --`/array-append expansion, which
+  bash expands for both word-splitting AND filesystem globs. A crafted
+  `extra-args: '*'` (or any value containing a bare `*`/`?`/`[...]`) run in a
+  workspace that happens to contain a file whose name looks like a CLI flag
+  (e.g. `--format=json`) would have that filename silently substituted in as
+  a real argument -- an unintended, workspace-content-dependent flag
+  injection. `add_flag`'s sibling `_split_legacy_value` already hardens
+  against exactly this class (`set -f`, Codex/report finding P2.2), so the
+  precedent for fixing it exists.
+  **Not fixed here**, for a reason specific to this PR: `_effective_format()`
+  exists only to predict, from `$INPUT_EXTRA_ARGS`, what `--format` value the
+  real `CMD+=($INPUT_EXTRA_ARGS)` expansion will actually produce -- so it
+  reads that variable the *same* (unsafe) way on purpose. Disabling globbing
+  in `_effective_format()` alone while leaving `CMD` assembly unprotected
+  would not close the vulnerability (the real invocation would still glob)
+  and would *introduce* a new divergence between what this detection
+  function predicts and what Click actually receives -- worse than today's
+  status quo of "both glob identically, so they can't disagree." Closing
+  this properly means hardening all four sites together in one coordinated
+  change (`CMD` assembly, `_effective_format`, `_extra_args_has_write_flag`,
+  `_extra_args_write_json_path`), verified against a hostile-glob test
+  corpus the way `test_action_run_sh_helpers.py`'s
+  `TestAddFlagHostileScalarCorpus` already exists for `add_flag`/
+  `add_sided_flag` -- a scoped, standalone follow-up, not a drive-by change
+  bundled into a PR whose actual objective was the effective-format fix
+  itself.
+
+- **`action/run.sh` has no "effective output path" counterpart to
+  `_effective_format` — investigated, deliberately not fixed (Codex review,
+  PR #998, fresh evidence).** `extra-args` supplying its own `-o`/`--output`
+  (`abicheck/cli_options.py`'s `-o/--output`) is a different flag than
+  `--format`, and Click's last-flag-wins rule applies to it exactly the same
+  way: an `extra-args: -o report.json` on top of an Action run with no
+  `output-file:` input configured really does write the primary report to
+  `report.json` on disk instead of stdout — but `$OUTPUT_FILE` (this
+  script's own tracking variable, sourced only from `INPUT_OUTPUT_FILE`)
+  never learns about it, so `_json_report_src` finds nothing: not
+  `$OUTPUT_FILE` (empty), not `$_STDOUT_JSON_FILE` (nothing on stdout, since
+  `-o` redirected it), not `$PR_JSON` (only populated when this script's own
+  injection fires). A scan or compare that exits non-zero this way (e.g.
+  `EVIDENCE_CONTRACT_ERROR`) publishes the generic `ERROR` instead of the
+  real, more specific verdict its own report on disk could have named.
+  **Not fixed here**, for the same "coordinated primitive, not a narrow
+  patch" reason as the pathname-expansion gap above: `--write` already has
+  its own effective-value recovery (`_extra_args_write_json_path`), but
+  `-o`/`--output` has none, and building one properly means giving it the
+  same freshness/fingerprint discipline `_json_report_src` already applies
+  to `$OUTPUT_FILE` (a pre-existing file at the extra-args path must not be
+  trusted as this run's own output) — a new `_effective_output_file` helper
+  and its own test suite, not a one-line change to a single call site.
+
 - **`BundleFacts` (and its G40 archive container) has no published JSON
   Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`** —
   investigated, not fixed (Codex review, CLI cleanup phase two's PR I
@@ -6074,3 +6146,112 @@ looked like the obvious fix and wasn't.
   own "generalize, or record the gap" convention — this was a direct
   timeout-value bump for an observed cancellation, not a verified capacity
   fix.
+
+- **`--depth` is a floor for live extraction, not a ceiling for a pre-built
+  snapshot — real, cross-cutting, and previously undocumented outside one
+  function's own docstring.** `enforce_requested_depth`
+  (`workflows/artifact/execute.py`) already fails a run when the *resolved*
+  evidence falls short of an explicit `--depth`, and its own docstring has
+  long carried this note: "this is a floor, not a ceiling. An input that is
+  an already-serialized JSON snapshot with richer embedded evidence than
+  `depth` requested still carries all of it — `resolve_input`'s `fmt ==
+  "json"` branch returns `load_snapshot(path)` verbatim... which `--depth`
+  has never projected down for a pre-built snapshot either." A Codex review
+  round on PR #1016 (D1: accepting `--depth binary` for a directory/package
+  compare) reproduced this concretely and flagged it as if newly
+  introduced: `compare old_dir new_dir --depth binary` over a directory of
+  saved JSON snapshots (rather than live binaries) still emits real
+  header-derived findings and can still publish `BREAKING`, because nothing
+  strips a snapshot's already-embedded evidence down to what was requested.
+  Checked and confirmed **not** a regression from that PR — a *single-pair*
+  `compare old.json new.json --depth binary` over two plain snapshots
+  reproduces the identical behavior today, unrelated to any directory/
+  package handling; PR #1016 only extended `--depth binary`'s
+  *acceptance* to a second operand shape that inherits a limitation the
+  single-pair path has always had. `cli_compare_options.
+  _reject_depth_for_set_inputs`'s docstring now cross-references this
+  entry so the directory/package path states the same acknowledged
+  limitation explicitly rather than silently inheriting an undocumented
+  one.
+  **Not fixed here, and the two obvious-looking fixes are each wrong for a
+  reason worth recording so they aren't re-attempted as the "obvious"
+  patch:** stripping a resolved snapshot's higher-level facts down to the
+  requested depth *before* comparing would work for this one call site, but
+  would also discard evidence a caller legitimately wants to keep on a
+  snapshot that gets reused for a *later* comparison at a higher depth —
+  `--depth` is meant to gate what a comparison *uses*, not to mutate a
+  snapshot's own persisted content. Rejecting `--depth binary` outright for
+  any operand backed by a pre-built snapshot (matching the pre-#1016
+  directory/package behavior) would reintroduce exactly the asymmetry D1
+  closed, since the single-pair path already accepts and silently
+  under-enforces the same combination. The real fix needs a
+  comparison-time projection — resolve the snapshot as today, then filter
+  what `checker.compare()` is allowed to see down to the requested rung,
+  keeping the resolved `AbiSnapshot` itself untouched — which is a real,
+  separate design question (which facts a given depth "sees" needs the
+  same explicit mapping `evidence_depth.py`'s own rank table already gives
+  requested-vs-resolved comparison, just applied the other direction), not
+  a one-line patch to either `resolve_input` or the two call sites that
+  triggered this entry.
+
+### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
+
+A Codex review round on PR #1016 (R1: teaching `action/run.sh`'s verdict
+readers about `COMPATIBLE_WITH_RISK`) found a sibling gap one level up:
+`_json_report_src`/`_report_compat_verdict` (and every other reader built
+on them — `_severity_gate_categories`, the coverage/annotation queries)
+have exactly two sources to fall back through when the automatic JSON
+sidecar isn't available — a JSON report (`_report_query`, schema-aware) or
+rendered markdown/text (`_text_report_content`, one shared regex). Both
+assume the *primary* report, when there's no JSON at all, is text-shaped.
+`format: sarif`/`format: html` break that assumption, and the automatic
+JSON sidecar is suppressed whenever the step's own `extra-args` already
+supplies a `--write` (any format) — the CLI's `--write` option is
+single-valued (`secondary_output.py`'s `--write FORMAT=PATH`, not
+`multiple=True`), so a step can't ask for both its own secondary format
+*and* the Action's internal JSON sidecar in the same invocation; something
+has to lose, and today the sidecar does.
+
+**SARIF is fixed** (this same PR, same review round): SARIF is itself
+well-formed JSON, and abicheck's SARIF renderer already stamps the native
+verdict string as `runs[0].properties.abiVerdict` (`sarif.py`'s
+`_result_for`) — so `_report_compat_verdict` gained its own, narrowly
+scoped last-resort branch that hands `format: sarif`'s own `OUTPUT_FILE`
+to `_report_query` when `_json_report_src` came back with nothing, and
+`compat_verdict`'s query gained a fallback reading that same property.
+Deliberately **not** a `_json_report_src` branch, even though a first
+version of this fix put it there: a Codex follow-up review caught that
+shape treating the bare SARIF document as a faithful abicheck-native JSON
+report for every other reader sharing that function too —
+`_can_reuse_primary_json` would `cp` it straight into `PR_JSON` for
+`cli_pr_comment` to misparse as an empty compare report, silently
+posting/overwriting the sticky PR comment with none of the real findings.
+`_json_report_src`'s contract stays exactly what it always was ("a
+faithful, unfiltered abicheck-native JSON report"); SARIF is consulted
+only from inside `_report_compat_verdict` itself, for `compat_verdict`
+alone. Every *other* query (annotations, severity_exit, coverage_where,
+blocking_categories, assurance_*) never sees the SARIF document at all —
+this extension is additive, not a behavior change for the common case
+where a full JSON sidecar already exists, and cannot regress a reader
+that never receives the SARIF path in the first place.
+
+**HTML is not fixed, and is a materially different problem, not the same
+one degree further:** HTML is not JSON. Recovering a verdict from
+abicheck's rendered HTML report needs real markup parsing (locating a
+`<th>Verdict</th>` cell and reading its sibling, per Codex's own finding —
+`html_report.py` owns that exact shape and could change it without notice)
+rather than a `json.load` call, which is a different, larger class of work
+than the SARIF fix above — not a "one more elif" the SARIF pattern
+generalizes into. It also compounds with the "single `--write` slot"
+constraint noted above: even a correct HTML parser only closes this one
+combination (`format: html` + a conflicting `extra-args --write`), while
+the root constraint (`--write` cannot name two formats in one invocation)
+is itself unaddressed and would need to be fixed first for a *general*
+solution rather than one more per-format special case bolted onto a
+single reader function. Not attempted here. If this combination becomes a real reported problem
+rather than a review-found edge case, the honest fix is one of: (a) make
+`--write` accept multiple `FORMAT=PATH` operands (a real CLI capability
+change touching `secondary_output.py` and every command that declares the
+option, not just this Action script), or (b) give `action/run.sh` a real,
+tested HTML-verdict extractor rather than reusing the markdown/text regex
+against markup it was never meant to parse.

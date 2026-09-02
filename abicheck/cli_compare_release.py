@@ -198,7 +198,9 @@ if TYPE_CHECKING:
     type=int,
     default=0,
     show_default=True,
-    help="Number of parallel library comparisons (0 = auto-detect CPU count, the default).",
+    help="Number of parallel library comparisons (0 = auto-detect CPU count, "
+    "clamped to fit available memory -- see ABICHECK_RELEASE_JOB_MEM_GIB -- "
+    "the default). An explicit positive value is never memory-clamped.",
 )
 @click.option(
     "--manifest",
@@ -353,6 +355,14 @@ def compare_release_cmd(
     # (`_prepare_compare_release_inputs`). `()` (the default) is a true
     # no-op.
     config_includes: tuple[Path, ...] = (),
+    # D1: `compare`'s directory/package fan-out forwards the one `--depth`
+    # value it can actually honour on this path -- `"binary"` (an explicit
+    # assertion that clears header/build/source evidence, matching a
+    # single-pair `compare --depth binary`) -- resolved ahead of dispatch by
+    # `cli_resolve._reject_depth_for_set_inputs`, which rejects every other
+    # rung outright. `None` (the default) is a true no-op, matching every
+    # pre-existing caller.
+    depth: str | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -612,6 +622,7 @@ def compare_release_cmd(
                 contract_mode=contract_mode,
                 pack_application=pack_application,
                 compile_context=compile_context,
+                depth=depth,
             )
 
             if bundle_facts_out is not None and not no_bundle_analysis:
@@ -625,14 +636,27 @@ def compare_release_cmd(
                         if old_debug_dir
                         else None
                     )
+                    # `depth=binary` clears header inputs for every matched
+                    # pair (`_split_public_header_inputs_for_request`'s own
+                    # docstring); a stranded (removed-in-new) library must
+                    # get the same headerless resolution, else its BundleFacts
+                    # entry carries L2 header evidence a matched pair's
+                    # snapshot never would, silently reintroducing header/API
+                    # findings `--depth binary` was asked to exclude (Codex
+                    # review, P2).
+                    is_binary_depth = depth is not None and depth.lower() == "binary"
+                    stranded_h = [] if is_binary_depth else old_h
+                    stranded_inc = [] if is_binary_depth else old_inc
                     # old_h doubles as the public-header set, matching the
                     # normal compare path (else origin=UNKNOWN; Codex review).
-                    pub_headers, pub_dirs = extraction.split_public_header_inputs(old_h)
+                    pub_headers, pub_dirs = extraction.split_public_header_inputs(
+                        stranded_h
+                    )
                     try:
                         return _resolve_input(
                             old_path,
-                            old_h,
-                            old_inc,
+                            stranded_h,
+                            stranded_inc,
                             old_version,
                             lang,
                             pdb_path=old_dbg,
@@ -791,6 +815,11 @@ def compare_release_cmd(
                     contract_coverage_exit_contribution=contract_coverage_exit_contribution,
                     contract_coverage_failure_count=contract_coverage_failure_count,
                     fail_on_removed=fail_on_removed,
+                    policy=policy,
+                    policy_file_path=policy_file_path,
+                    suppress=suppress,
+                    pack_application=pack_application,
+                    scope_public_headers=scope_public_headers,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -815,6 +844,11 @@ def compare_release_cmd(
                 severity_config=severity_config,
                 contract_coverage_exit_contribution=contract_coverage_exit_contribution,
                 contract_coverage_failure_count=contract_coverage_failure_count,
+                policy=policy,
+                policy_file_path=policy_file_path,
+                suppress=suppress,
+                pack_application=pack_application,
+                scope_public_headers=scope_public_headers,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

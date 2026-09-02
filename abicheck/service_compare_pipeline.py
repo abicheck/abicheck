@@ -505,11 +505,21 @@ def classify_compare_pair(
     # `cli_scan_baseline._run_baseline_compare`).
     from .binary_utils import resolve_linker_script_chain
 
-    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
-        return p if service.sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+    def _hashable_path(
+        p: Path,
+    ) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
+        return (
+            p
+            if service.sniff_text_format(p) in ("json", "perl", "symvers")
+            else resolve_linker_script_chain(p)
+        )
 
-    result.old_metadata = service.collect_metadata(_hashable_path(required_path(request.old, "old")))
-    result.new_metadata = service.collect_metadata(_hashable_path(required_path(request.new, "new")))
+    result.old_metadata = service.collect_metadata(
+        _hashable_path(required_path(request.old, "old"))
+    )
+    result.new_metadata = service.collect_metadata(
+        _hashable_path(required_path(request.new, "new"))
+    )
     note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
@@ -637,6 +647,7 @@ def run_compare(
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -666,6 +677,12 @@ def run_compare(
     this shim; a caller needing a genuine per-side override should build a
     :class:`CompareRequest` directly instead. ``None`` (the default) is a
     no-op, matching every pre-existing caller.
+
+    ``depth`` forwards straight onto :class:`CompareRequest.depth` -- the
+    same evidence-depth dial the native ``compare`` CLI resolves (D1: the
+    release fan-out's ``_run_compare_pair`` is this shim's other caller, and
+    needed a way to forward its own resolved ``--depth binary`` per pair;
+    every other pre-existing caller keeps passing ``None``, a true no-op).
 
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
@@ -720,5 +737,6 @@ def run_compare(
             tuple(pack_policy_overrides.items()) if pack_policy_overrides else None
         ),
         pack_internal_namespaces=pack_internal_namespaces,
+        depth=depth,
     )
     return run_compare_request(request)

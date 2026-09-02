@@ -140,8 +140,23 @@ def _validate_selectors(
     has_source_location: bool,
     has_namespace: bool,
     has_finding_id: bool = False,
+    has_binding: bool = False,
 ) -> None:
-    """Raise :class:`ValueError` if the selector combination is invalid."""
+    """Raise :class:`ValueError` if the selector combination is invalid.
+
+    ``has_binding`` does **not** join the "at least one selector" set below
+    -- ``binding`` is conjunctive-only by design (see ``Suppression.binding``'s
+    own docstring for the safety reasoning: a bare ``binding: weak`` rule
+    would suppress every change carrying that ELF linkage across the entire
+    comparison, with nothing else scoping it, which is exactly the
+    "provider-side evidence alone is not sufficient justification" mistake
+    AGENTS.md's "Linkage-blind removal" entry documents). It is threaded
+    through purely so a rule that supplied *only* ``binding`` gets a message
+    naming that specific, common mistake and its two intentional workarounds
+    (P2, CLI-audit) instead of the generic "must have at least one of"
+    list, which doesn't even mention ``binding`` and reads as though the
+    field were unrecognized rather than deliberately excluded.
+    """
     selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
     if (
         selector_count == 0
@@ -150,6 +165,20 @@ def _validate_selectors(
         and not has_namespace
         and not has_finding_id
     ):
+        if has_binding:
+            raise ValueError(
+                "'binding' is conjunctive-only (it narrows another "
+                "selector's match; AND semantics) and can never stand "
+                "alone -- a binding-only rule would suppress every change "
+                "with that ELF linkage across the whole comparison, with "
+                "nothing else scoping it (see Suppression.binding's own "
+                "docstring for why that is unsafe by itself). Pair it with "
+                "a narrowing selector: \"symbol_pattern: '.*'\" (or "
+                "\"namespace: '**'\") if this rule really is meant to match "
+                "every symbol with that binding, or a real 'symbol'/"
+                "'symbol_pattern'/'namespace' to scope it to the entities "
+                "you actually mean."
+            )
         raise ValueError(
             "Suppression must have at least one of: "
             "'symbol', 'symbol_pattern', 'type_pattern', "
@@ -394,6 +423,7 @@ class SelectorSet:
             has_source_location=self.source_location is not None,
             has_namespace=effective_entity_ns is not None or self.cause_namespace is not None,
             has_finding_id=self.finding_id is not None,
+            has_binding=self.binding is not None,
         )
         # Compile regex eagerly — malformed patterns fail at construction
         # time, not match time. Fullmatch semantics throughout.

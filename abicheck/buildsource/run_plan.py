@@ -405,6 +405,21 @@ class RunPlanCheck:
     #: Whether the profile declares a non-empty ``consumer_compile:``
     #: overlay -- gates the fallback for the three fields above.
     consumer_compile_active: bool = False
+    #: G42 "Explicit check identifiers": this cell's ``checks[].id``
+    #: (``CheckSpec.id``), if the project author declared one -- already
+    #: folded into :attr:`check_id`'s ``~<explicit_id>`` tail by
+    #: :func:`~abicheck.buildsource.check_report.build_check_id`; carried
+    #: here as its own field too so a caller can read the *unqualified*
+    #: logical id without re-parsing :attr:`check_id`. Empty when no
+    #: explicit ``id:`` was declared.
+    explicit_id: str = ""
+    #: G42 "Explicit check identifiers": this cell's ``checks[].analysis.
+    #: evidence``/``.policy``/``.assurance`` (``CheckSpec.analysis_*``),
+    #: forwarded verbatim. Empty when the check declares no ``analysis:``
+    #: block, or omits that particular key.
+    analysis_evidence: str = ""
+    analysis_policy: str = ""
+    analysis_assurance: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -454,6 +469,14 @@ class RunPlanCheck:
             d["allow_new_target"] = True
         if self.consumer_compile_active:
             d["consumer_compile_active"] = True
+        if self.explicit_id:
+            d["explicit_id"] = self.explicit_id
+        if self.analysis_evidence:
+            d["analysis_evidence"] = self.analysis_evidence
+        if self.analysis_policy:
+            d["analysis_policy"] = self.analysis_policy
+        if self.analysis_assurance:
+            d["analysis_assurance"] = self.analysis_assurance
         return d
 
     @classmethod
@@ -497,6 +520,10 @@ class RunPlanCheck:
             dependency_source=_opt_str(d.get("dependency_source")),
             allow_new_target=bool(d.get("allow_new_target", False)),
             consumer_compile_active=bool(d.get("consumer_compile_active", False)),
+            explicit_id=_opt_str(d.get("explicit_id")),
+            analysis_evidence=_opt_str(d.get("analysis_evidence")),
+            analysis_policy=_opt_str(d.get("analysis_policy")),
+            analysis_assurance=_opt_str(d.get("analysis_assurance")),
         )
 
 
@@ -757,7 +784,13 @@ def _generate_target_checks(
                 # Implicit sweep: this profile simply doesn't build the
                 # target -- not an error, that's the point of the sweep.
                 continue
-            check_id = build_check_id(target.id, profile_id, check.channel, check.depth)
+            check_id = build_check_id(
+                target.id,
+                profile_id,
+                check.channel,
+                check.depth,
+                explicit_id=check.id or None,
+            )
             compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
                 config, profile_id, resolved_bindings
             )
@@ -809,6 +842,10 @@ def _generate_target_checks(
                     runs_on=runs_on,
                     dependency_source=dependency_source,
                     allow_new_target=check.allow_new_target,
+                    explicit_id=check.id,
+                    analysis_evidence=check.analysis_evidence,
+                    analysis_policy=check.analysis_policy,
+                    analysis_assurance=check.analysis_assurance,
                 )
             )
     return out
@@ -868,7 +905,13 @@ def _generate_bundle_checks(
                         "(named explicitly in this check's profiles:)"
                     )
                 continue
-            check_id = build_check_id(bundle.id, profile_id, check.channel, check.depth)
+            check_id = build_check_id(
+                bundle.id,
+                profile_id,
+                check.channel,
+                check.depth,
+                explicit_id=check.id or None,
+            )
             member_patterns = {
                 member: config.targets[member].binary_pattern
                 for member in bundle.targets
@@ -913,6 +956,10 @@ def _generate_bundle_checks(
                     ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
+                    explicit_id=check.id,
+                    analysis_evidence=check.analysis_evidence,
+                    analysis_policy=check.analysis_policy,
+                    analysis_assurance=check.analysis_assurance,
                 )
             )
     return out
@@ -979,20 +1026,48 @@ def generate_run_plan(
     # gate_mode:, neither of which is part of check_id -- would otherwise
     # only surface as that late aggregate-projection failure, after every
     # matrix cell already ran (Codex review). Catch it here instead.
-    seen_ids: dict[str, int] = {}
+    seen_ids: dict[str, list[RunPlanCheck]] = {}
     for check in checks:
-        seen_ids[check.check_id] = seen_ids.get(check.check_id, 0) + 1
-    duplicate_ids = sorted(cid for cid, count in seen_ids.items() if count > 1)
+        seen_ids.setdefault(check.check_id, []).append(check)
+    duplicate_ids = sorted(cid for cid, group in seen_ids.items() if len(group) > 1)
     for check_id in duplicate_ids:
-        report.errors.append(
-            f"check_id {check_id!r} is generated by more than one checks[] "
-            "entry -- two checks[] entries (on the same target/bundle, or "
-            "an explicit profiles: selector repeating a profile) resolved "
-            "to the same (profile, baseline_channel, requested_depth), "
-            "which aggregate's own manifest requires to be unique. Remove "
-            "the duplicate checks[] entry, or give it a distinct channel/"
-            "depth/profile."
+        group = seen_ids[check_id]
+        # G42 "Explicit check identifiers": two checks[] entries can share
+        # every field build_check_id() folds into the generated string
+        # (target/bundle, profile, channel, depth) while still genuinely
+        # differing in analysis_evidence/analysis_policy/analysis_assurance
+        # -- none of which are part of the generated id. That combination
+        # needs an actionable "give it an id:" message, not the generic
+        # channel/depth/profile advice, which is wrong here (those three are
+        # deliberately identical).
+        analysis_differs = (
+            len(
+                {
+                    (c.analysis_evidence, c.analysis_policy, c.analysis_assurance)
+                    for c in group
+                }
+            )
+            > 1
         )
+        if analysis_differs:
+            report.errors.append(
+                f"check_id {check_id!r} is generated by more than one "
+                "checks[] entry that share the same target/bundle, profile, "
+                "channel, and depth but declare different analysis: "
+                "(evidence/policy/assurance) -- give each colliding "
+                "checks[] entry a distinct, explicit id: so they no longer "
+                "generate the same check_id."
+            )
+        else:
+            report.errors.append(
+                f"check_id {check_id!r} is generated by more than one "
+                "checks[] entry -- two checks[] entries (on the same "
+                "target/bundle, or an explicit profiles: selector repeating "
+                "a profile) resolved to the same (profile, baseline_channel, "
+                "requested_depth), which aggregate's own manifest requires "
+                "to be unique. Remove the duplicate checks[] entry, or give "
+                "it a distinct channel/depth/profile/id."
+            )
     if not checks and report.ok:
         report.warnings.append(
             "run-plan is empty -- no targets:/bundles: checks[] resolved to any "

@@ -12276,25 +12276,47 @@ pre-flight, which already ran ahead of both its real-run and `--dry-run`
 branches, and `_run_artifact_set`'s own pre-flight ahead of `--artifact-set`
 discovery) — closing both the explicit-`--config` and auto-discovered
 halves for the CLI-reachable `scan` shapes. **The fourth,
-`service_scan.run_scan_set`, was left unwidened**: `service_scan.py` sits
-exactly at the AI-readiness 2000-line hard cap, and the widened call (5
-positional args + 2 new keyword args) doesn't fit `ruff format`'s
-column budget on one line — the resulting explosion would have pushed the
-file 8+ lines over. Trimming unrelated content elsewhere in that file to
-buy back the budget was rejected as its own kind of risk (that file's
-existing content is all load-bearing review-history documentation, not
-slack); adding it to `LARGE_FILE_ALLOWLIST` was rejected too, since that
-allowlist's own comment reserves it for pre-existing `scripts/`/`tests/`
-debt discovered when scanning was widened to those trees, not a fresh
-production-file exemption for an unrelated fix. So the change was reverted
-at that one call site and named here instead: `run_scan_set`'s own
-`.abicheck.yml`-only gap stays open for a **direct typed-API call with no
-CLI in front of it** (`from abicheck.service_scan import run_scan_set;
-run_scan_set(ScanRequest(...))`) — `scan --artifact-set`'s own CLI path is
-unaffected, since `cli_scan._run_artifact_set`'s pre-flight (now widened)
-already runs ahead of `run_scan_set` and catches the mismatch first. A
-future pass splitting `service_scan.py` under its own file-size budget
-would remove this constraint; not attempted reactively here.
+`service_scan.run_scan_set`, was left unwidened for one session**:
+`service_scan.py` sat exactly at the AI-readiness 2000-line hard cap, and
+the widened call (5 positional args + 2 new keyword args) didn't fit
+`ruff format`'s column budget on one line — the resulting explosion would
+have pushed the file 8+ lines over. Trimming unrelated content elsewhere
+in that file to buy back the budget was rejected as its own kind of risk
+(that file's existing content is all load-bearing review-history
+documentation, not slack); adding it to `LARGE_FILE_ALLOWLIST` was
+rejected too, since that allowlist's own comment reserves it for
+pre-existing `scripts/`/`tests/` debt discovered when scanning was
+widened to those trees, not a fresh production-file exemption for an
+unrelated fix. So the change was reverted at that one call site and named
+here instead: `run_scan_set`'s own `.abicheck.yml`-only gap stayed open
+for a **direct typed-API call with no CLI in front of it** (`from
+abicheck.service_scan import run_scan_set; run_scan_set(ScanRequest(...))`)
+— `scan --artifact-set`'s own CLI path was unaffected, since
+`cli_scan._run_artifact_set`'s pre-flight (already widened) already ran
+ahead of `run_scan_set` and caught the mismatch first.
+
+**Closed in a later session, by splitting `service_scan.py` rather than
+raising its baseline.** `_descendant_pgids`/`_kill_process_tree` — the
+process-group kill machinery behind `run_scan_subprocess`/
+`run_scan_set_subprocess`, with zero dependency on anything scan-specific
+— moved to the new `abicheck/workflows/scan_subprocess.py`, re-exported
+from `service_scan.py` for backward compatibility (mirroring
+`cxx20_pair_dialect.py`'s own precedent: a genuine one-directional edge,
+since the worker/harness functions that actually call back into
+`run_scan`/`run_scan_set` stayed in `service_scan.py`, avoiding the
+mutual-dependency shape a full move of the subprocess harness would have
+created). It lives under `workflows/` rather than as a new flat
+`service_`-prefixed root sibling, since ADR-061's `frozen_root_families`
+closes that family to new members and `service_scan.py` is itself already
+classified into the `workflows` layer via that layer's own `legacy_paths`.
+That freed enough room for `run_scan_set`'s own `scan_bazel_scoping_failure`
+call to forward `sources=`/`build_config=` too, landing at a new, lowered
+`architecture/debt.yaml` baseline (2000 → 1933) with real room left below
+the hard cap. `tests/test_bazel_root_targets_scan.py::
+test_run_scan_set_config_sourced_target_scope_raises_planning_error` pins
+it, the `run_scan_set` sibling of `test_run_scan_depth_headers_config_
+sourced_target_scope_raises_planning_error`. Phase 4 is now complete: all
+four pre-flight call sites forward `sources=`/`build_config=`.
 `tests/test_analysis_plan.py::TestBazelBuildTargetScoping` gained six new
 cases (config-sourced scope raises for `dump`/`compare`; an explicit
 `build_targets` still wins over a present config, with the failure message
@@ -12801,29 +12823,678 @@ declarations), assigned an ordinal as a pure continuation that never
 disturbs an already-assigned real ordinal. See
 `tests/test_lambda_identity_semantic_ir.py`.
 
-**Still not landed, and therefore this phase is not complete:** functions,
-variables, and constants are not normalized (above); DWARF/PDB/BTF/CTF
-backends produce no IR at all; PE/Mach-O header-AST assembly is not wired;
-`extract/semantic_ir_merge.py`'s reconciliation has still only been proven
-against the records/enums/typedefs subset real data now exercises, not the
-full multi-occurrence/ODR-duplicate shape a function-populated IR would
-introduce; and the phase's own acceptance criteria (a closure-parameterized
-template fixture, requiring function/template-argument normalization) remain
-unmet. A manifest (`--dump-manifest`) dump is a further, real gap (Codex
-review, PR #1001): `tu_merge.merge_fragments` already collapses same-identity
-declarations across translation units into one representative entry before
-`normalize_header_ast` ever runs, so a real ODR-duplicate/incomplete-vs-
-complete pair spread across two TUs never reaches `SemanticIR.occurrences`
-as two occurrences there -- no *more* loss than the legacy `types`/`enums`
-fields already have for a manifest dump (both read the identical merged
-list), but not yet the IR's fuller multi-occurrence potential either. Closing
-this needs per-TU-fragment normalization before the merge collapses
-identities, with a real TU-context disambiguator threaded through --
-materially more than this slice's scope; a single-header dump is unaffected
-(nothing for the merge to collapse ahead of it). See
-`extract/semantic_normalizer.py`'s own docstring for the same note. The
-original Design/Files/Tests/Acceptance-criteria sections below
-are kept verbatim as the phase's full target shape -- this slice is a step
+**LANDED (third slice): functions and variables are normalized, and
+`_dump_pe`/`_dump_macho` are wired.** `extract/semantic_normalizer.
+normalize_header_ast` gained `functions`/`variables` parameters (default
+`()`, so a caller that has not migrated needs no change). Unlike
+records/enums/typedefs, a function's return/parameter types and a
+variable's own type are not already canonical the way a resolved qualified
+name is -- castxml and clang genuinely spell an identical type differently.
+This slice does not invent a new canonicalization for that gap: it reuses
+the two primitives `entity_id_for_function`/`resolve_function_identity`
+already apply for the identical cross-backend problem --
+`model.signature_normalization.canonicalize_function_signature_param_type`
+for each parameter type (also dropping a top-level by-value cv-qualifier,
+matching the mangling rule that such a qualifier is not a discriminator) and
+`name_classification.canonicalize_type_name` for the return type (matching
+`entity_id_for_function`'s own choice for that position). A function's
+`canonical_spelling` is `"<return>(<param>, ...)"` built from those two
+canonicalizations; `is_const`/`is_volatile` (member-function
+cv-qualification) is carried via `CanonicalEntity.cv_qualification`, the
+field this IR already reserves for exactly that purpose. *Deliberately
+excluded from this slice, named rather than silently dropped*: a function's
+`ref_qualifier`/variadic status are structural facts both backends already
+compute identically (not a spelling problem), and `CanonicalEntity` has no
+dedicated slot for either -- adding one is a model-shape decision for a
+future slice. A variable's `canonical_spelling` is
+`canonicalize_type_name(variable.type)`.
+
+**A variable's `cv_qualification` is NOT read from `Variable.is_const`
+(Codex review, PR #1012, fourth round, fresh evidence) -- an earlier
+revision did, mirroring the function treatment, and that mirroring was
+wrong.** Both header-AST backends compute `is_const` via a bare
+word-boundary search for `"const"` over the WHOLE type spelling
+(`dumper_castxml.py`'s/`dumper_clang.py`'s `parse_variables()`), which is
+correct for that field's own narrower, pre-existing question ("would
+writing through this pointer/reference SIGSEGV") but conflates a mutable
+pointer to const data (`const int *g` -- the pointee is const, the pointer
+itself is not) with a genuinely const declaration. `cv_qualification` is
+this IR's own STRUCTURAL top-level qualification, the same distinction
+`model.signature_normalization`'s "outermost vs. pointee position"
+discipline and `extract/headers/castxml/type_resolution.
+cv_qualifies_pointer_value` already treat as load-bearing elsewhere in this
+codebase -- so reusing the legacy boolean reintroduced exactly the
+conflation those primitives exist to avoid. `_variable_top_level_cv_
+qualification` derives it structurally instead: finds the last top-level
+(nesting-depth-0) pointer/reference sigil in the type string, then reads
+`const`/`volatile` keywords only from the text after it (or from the WHOLE
+string when there is no top-level sigil at all, the by-value case) --
+mirroring `model.declarator_qualifiers._extract_top_level_cv`'s identical
+depth-aware discipline, so a `const` inside a template argument
+(`vector<const int> *g`) is never mistaken for this declaration's own.
+
+**No function is excluded from normalization at all -- not gated on
+`Function.is_compiler_generated`, nor on a synthetic ctor/dtor mangled key
+(Codex review, PR #1012, three rounds, fresh evidence each time).** The
+first revision of this slice skipped every compiler-generated function --
+too broad (a compiler-generated function with a real mangled name, e.g. a
+synthesized `operator=`, has no cross-backend hazard at all: `AbiSnapshot.
+functions` already includes it, so excluding it from `semantic_ir` was
+itself the representation-disagreement this IR exists to avoid) and it also
+missed the real hazard. The second revision re-gated on the actual hazard --
+a function whose `mangled` is castxml's own synthetic ctor/dtor snapshot key
+(`model.synthetic_key.is_synthetic_ctor_key`/`is_synthetic_dtor_key` --
+assigned whenever castxml "may omit a constructor/destructor's real mangled
+name even for a public user-declared" one, per `extract/headers/castxml/
+functions.py`'s own `function_mangled_name` docstring, so this can hit a
+genuinely hand-written, non-implicit constructor too, not only an implicit
+one) is NOT a stable cross-backend identity, since `dumper_hybrid.
+_merge_functions` can rewrite it to a real clang-matched one during a hybrid
+merge, a rewrite this per-backend normalizer (which runs before that merge
+step) cannot see -- but that revision still unconditionally excluded such a
+function even from a plain, non-hybrid dump, where no rewrite step exists
+at all and the occurrence is exactly as real as any other function's.
+**The third round closes the hazard at its actual source instead of
+dodging it in the normalizer**: `_merge_functions` now returns (via an
+output-param dict) every `old_entity_id -> new_entity_id` substitution its
+own ctor/dtor structural match makes, and `dumper_hybrid.merge_snapshots()`
+applies the identical substitution to `castxml_snap.semantic_ir` (through
+`_rewrite_semantic_ir_entity_ids`, the same primitive the Mach-O
+mangled-name fix below introduces) *before* reconciling it with clang's --
+so a matched declaration is never left keyed under its retired synthetic
+identity in one representation while `merged_functions` already carries the
+real one. With the hazard closed at the merge step, the normalizer excludes
+nothing: every function is normalized unconditionally, synthetic-keyed and
+compiler-generated ones included. Confirmed as a real, not merely
+theoretical, gap at every round by the real castxml/clang end-to-end
+fixture in `tests/test_semantic_ir_end_to_end.py` (first round: `Point`'s
+implicit constructors/destructor, genuinely synthetic-keyed, surfaced with
+an empty `leaf_name`; its real-mangled copy/move assignment operators were
+then wrongly excluded too until the second round) and by a new unit test in
+`tests/test_dumper_hybrid_semantic_ir.py` pinning the third round's fix
+directly (a matched synthetic ctor's `semantic_ir` occurrence ends up under
+the real, rewritten key, not duplicated or left stale under the synthetic
+one).
+
+**The unresolved-type-sentinel check tracks nesting depth, not a plain
+substring test, and definitely not exact equality (Codex review, PR #1012,
+second and third rounds, fresh evidence each time).** castxml's own type
+resolver (`extract/headers/castxml/type_resolution.py`'s
+`type_name_uncached`) composes an unresolved nested type into the enclosing
+spelling -- a pointer/reference/array wrapping an unresolvable pointee
+renders as `"?*"`/`"?&"`/`"?[]"`, a cv-qualified one as `"const ?"` -- so an
+exact-equality check (correct only for the typedef branch's `underlying`
+value, always the outermost `type_name()` result with nothing further
+wrapped around it) misses every composite shape for a function/parameter/
+variable type, and shares the identical gap for a typedef whose underlying
+type is itself one of these composite shapes (second round: fixed with a
+plain substring test). **The third round found a plain substring test is
+itself unsafe**: a real, fully-resolved type spelling can legally contain a
+literal `"?"` -- clang emits one verbatim for a dependent, unevaluated
+ternary expression inside a `decltype(...)` (e.g. a non-type template
+argument's own spelling, `"S<decltype(flag ? A{} : B{})>"`), which a
+substring test wrongly marks `Fact.failed(...)`, discarding real canonical
+evidence. `_has_unresolved_component` now tracks nesting depth over
+`()`/`[]`/`<>` instead: castxml's own sentinel-composing recursion never
+emits a `"?"` inside such a grouping -- it only ever prepends/appends a
+bare pointer/reference sigil, array brackets, or a cv keyword directly
+beside it -- while a ternary's `"?"` is, by C++ grammar, only reachable
+inside an expression context that for a type spelling means already being
+inside `decltype(...)`'s parens or a template argument list's angle
+brackets. So a `"?"` found at nesting depth zero is the sentinel; one found
+at depth > 0 is real, resolved evidence. Replaces the exact-equality check
+everywhere, typedef branch included.
+
+**One wrapper is a deliberate, named exception to plain depth-tracking
+(Codex review, PR #1012, fourth round, fresh evidence): castxml's own
+`_Atomic(...)` composition.** `type_name_uncached`'s `AtomicType` branch
+renders an unresolved wrapped type as the literal `"_Atomic(?)"` --
+genuine sentinel output, using a REAL parenthesis pair as part of the
+resolver's own grammar, not an expression context a real, resolved `"?"`
+could ever be found inside instead. Depth-tracking alone treats that `"("`
+exactly like a `decltype(...)`'s, hiding the sentinel at depth 1 and
+wrongly reporting the composite as resolved. `"_Atomic("` is recognized as
+a transparent token instead -- skipped without incrementing depth -- so a
+sentinel directly inside it is still caught at its effective depth 0, the
+same treatment a bare `"?"` already gets; `_Atomic(...)` is also real,
+valid C11 syntax for an otherwise fully-resolved type (`"_Atomic(int)"`),
+which this special-casing does not disturb.
+
+**A declarator-grouping paren is transparent to `_variable_top_level_cv_
+qualification`'s own sigil search, not depth-increasing (Codex review, PR
+#1012, fifth round, fresh evidence).** A const function-pointer/
+pointer-to-array/pointer-to-member-function variable wraps its own sigil in
+a real, syntactic `(...)` group -- clang spells `"int (*const)(int)"` for
+`int (* const fp)(int)` -- which an ordinary opaque-paren depth count
+treats exactly like a parameter list, hiding the sigil at depth 1 and
+reporting no qualification at all. Reuses `model.declarator_qualifiers.
+_is_declarator_group`, the identical classifier `signature_normalization.
+canonicalize_function_signature_param_type` already applies for this exact
+shape. The same round also extended the cv-keyword matcher to recognize
+`restrict` -- **reverted the very next round** (see below).
+
+**Sixth round, two further fixes, one addition and one revert (fresh
+evidence each).** (1) A pointer-to-member-function's own trailing parameter
+list now ends the region `_variable_top_level_cv_qualification` reads
+qualifiers from, reusing `_split_at_trailing_param_list` (the identical
+primitive `canonicalize_function_signature_param_type` already uses for
+this split): for `"void (C::*)(int) const"`, the `const` after the
+parameter list qualifies the POINTED-TO member function, not the pointer
+variable itself, and the fifth round's naive whole-suffix scan wrongly
+attributed it to the variable, reporting an identical `("const",)` for both
+a mutable and a genuinely const member-function pointer. (2) The fifth
+round's `restrict` recognition is reverted: `CanonicalEntity.
+cv_qualification`'s vocabulary names `restrict` alongside `const`/
+`volatile`, but recognizing it via a plain text scan is backend-asymmetric
+-- clang's own qualType spells it verbatim (`"int *restrict"`), while
+castxml's `type_name_uncached` never emits the word at all, by castxml's
+own deliberate choice (unlike a function *parameter*'s `Param.is_restrict`,
+which both backends already populate structurally). A castxml-produced
+entity therefore claimed a CONFIRMED `()` for a qualifier its own backend
+structurally cannot see, and `merge_semantic_ir`'s backfill (which only
+ever backfills a *non*-present base fact) treated that false confirmation
+identically to a genuine, deliberate absence -- a hybrid dump then
+downgraded clang's real `("restrict",)` to a mere two-sided disagreement
+against castxml's structurally-blind `()`, discarding it as the merged/
+authoritative value instead of backfilling it. `Fact[tuple[str, ...]]`
+cannot express "confirmed for two of three qualifiers, blind to the third"
+within one fact; a real fix needs a structural, reliability-tracked
+`Variable.is_restrict` fact populated by both backends the way `Param.
+is_restrict` already is (`resolve_cv_restrict`/`clang_param_is_restrict`,
+both directly reusable for a variable's own type id/node), almost
+certainly with its own `AbiSnapshot` reliability flag mirroring
+`clang_restrict_facts_reliable` -- a model-shape decision for a future
+slice, not a normalizer-only change, the same reasoning already given for
+leaving a function's `ref_qualifier`/variadic status out of this IR.
+`restrict` is therefore left unrecognized (never reported) for a variable
+today, rather than reported unreliably.
+
+`dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
+the second slice deliberately left unwired, per that slice's own note) now
+populate `semantic_ir` too, via a new shared choke point,
+`extract/header_ast_fields.parse_header_ast_fields` -- a new leaf module
+(not inlined in either already-capped `dumper.py`/`dumper_manifest.py`)
+that runs a single-parser's own `parse_*()` methods once each and projects
+the result through `normalize_header_ast`, structurally typed
+(`_HeaderAstParser`, a `Protocol`) rather than importing
+`dumper_castxml._CastxmlParser`/`dumper_clang._ClangAstParser` directly,
+which would be an `extract ->` (unclassified flat root module) edge the
+architecture gate forbids for a migrated package. `dumper.py`'s
+`architecture/debt.yaml` no-growth baseline is raised by 7 for this (see
+that entry's own rationale for the exact accounting). `extract/
+semantic_ir_merge.py`'s reconciliation needed no code change to handle a
+function-populated IR -- it is generic over `CanonicalEntity`'s `Fact`
+fields, not specialized to any entity kind -- and this slice's own real
+castxml/clang/hybrid fixture (a function taking a record by const reference)
+is the first non-synthetic proof of that: the hybrid merge matches the
+function's shared, real-mangled-name `EntityId` one-to-one and records the
+identical kind of namespace-qualification-spelling conflict the typedef
+case already has, not a new failure mode.
+
+**LANDED (fourth slice): constants.** `extract/semantic_normalizer.
+normalize_header_ast` gained `constants`/`constant_entity_ids` parameters
+(default `{}`, so a caller that has not migrated needs no change), mirroring
+`typedefs_qualified`/`typedef_entity_ids`'s own pairing. Both header-AST
+backends already attach a real `EntityId` to every public constant
+(`parse_constant_entity_ids()`, Phase 2) -- the identity half of this
+slice's work was already done before it landed; what remained was wiring
+the existing maps into this normalizer at all, plus the two call sites
+(`dumper_manifest.resolve_header_ast_result`, `extract/header_ast_fields.
+parse_header_ast_fields`) that already compute both maps for the legacy
+`AbiSnapshot.constants`/`constant_entity_ids` fields. **Deliberately no
+canonicalization is applied to the value text.** Every prior slice's
+`canonical_spelling` closes a real, *observed* cross-backend type-spelling
+disagreement (`"char const*"` vs. `"char const *"`, a bare `"Point"` vs.
+`"inner::Point"`); a constant's parsed representation carries only its value
+expression, never a captured type string, and no comparable disagreement in
+*value* spelling has been observed between the two backends. `canonical_
+spelling` is therefore the raw `parse_constants()` string, unchanged --
+mirroring `diff_symbols._diff_constants`'s own `CONSTANT_CHANGED` detector,
+which has always compared the two backends' raw value strings with a plain
+`!=` and never canonicalized either side. Inventing a value-spelling
+canonicalizer with no known target divergence to fix would be exactly the
+kind of speculative heuristic this codebase's own bug-class discipline warns
+against elsewhere (see `_type_index_items`'s/`_diff_constants`'s own
+docstrings on an identity heuristic falsified twice, and the "attempted
+twice, reverted twice" discipline that follows from it) -- a canonicalizer
+in search of a bug to fix, not a fix for an observed one. A constant carries
+no `cv_qualification`/`template_arguments`: it has no captured type for
+either fact to describe. `snapshot_cache._SNAPSHOT_CACHE_VERSION` is bumped
+(25 -> 26) for the same reason every prior slice bumped it: a snapshot
+cached by an older abicheck build would otherwise silently keep serving a
+`semantic_ir` with no constant occurrences forever for identical
+cache-key inputs. `dumper_scoping._scoped_semantic_ir` needed no change:
+both backends already scope `parse_constants()`/`parse_constant_entity_ids()`
+to the public-header surface at parse time (the same `_have_public_set`
+filtering pass Phase 2 already applies), so there is no dependency-header
+constant occurrence for that function to additionally exclude, unlike
+functions/variables/types/enums which are scoped post-hoc.
+
+**Fourth slice, three fixes (Codex review, seventh round, fresh evidence
+each).** (1) `merged.constants` deliberately stays `castxml_snap.constants`
+verbatim (a pre-existing exception, unrelated to this slice -- see that
+field's own comment), but `merge_semantic_ir` is generic over every
+`EntityKind` and appends an unmatched clang-only `CONSTANT` occurrence into
+the merged IR unconditionally, the same as it correctly does for a
+clang-only function/variable/type/enum (all of which genuinely ARE unioned
+into their own flat fields, unlike constants). Left unfiltered, a
+clang-only constant would surface through `semantic_ir` with no
+corresponding entry in `merged.constants`/`constant_entity_ids` at all --
+`dumper_hybrid._drop_unmatched_constant_occurrences` closes the gap,
+filtering the merged IR's `CONSTANT` occurrences (and their conflict-key
+entries) to the identical kept-entity-id set `constant_entity_ids`'s own
+union-then-filter already computes. (2) `dumper_clang_expr._expr_
+fingerprint` stamps a compound constant initializer (anything beyond a
+lone literal) with a build-stable STRUCTURAL fingerprint
+(`"expr:" + sha256(...)[:16]`), not a spelling of the source text -- that
+module's own docstring is explicit that cross-backend constant *values*
+are not expected to match for this case. Publishing the fingerprint as
+`Fact.present(...)` made `merge_semantic_ir` report a spurious conflict
+against castxml's real initializer text for every unchanged compound
+constant; `normalize_header_ast` now recognizes the fingerprint's own
+literal prefix structurally (by the value's own shape, not by branching on
+`producer == "clang"`) and marks it `Fact.unsupported()` instead -- the
+same "state genuinely incomparable evidence honestly" discipline ADR-063
+Phase 0 established. (3) `_has_unresolved_component`'s depth tracker is now
+a bracket-KIND-aware stack, not a flat counter: for a resolved dependent
+type like `"S<(N >> 1 ? 1 : 2)>"`, a flat counter decrements once per `>`
+character, so the real right-shift operator's `">>"` wrongly drops the
+running depth to zero WHILE STILL inside the `(...)` grouping, misreading
+the ternary's own `"?"` as the sentinel at real depth > 0 (confirmed
+against a real `clang++ -Xclang -ast-dump=json` repro for exactly this
+`qualType` shape on a dependent function return/variable type). A `">"`
+now only legitimately closes a template level when the innermost
+still-open bracket is itself a `"<"` (`vector<vector<int>>`'s own `">>"`
+still correctly closes two); when the innermost open bracket is a
+`"("`/`"["` instead, a `">"` is a real, resolved operator character
+belonging to that expression and is left untouched. A genuinely ambiguous
+bare `"<"` (a real less-than operator, not a template open) remains an
+accepted, pre-existing residual this fix does not attempt to solve -- doing
+so needs real expression parsing, and no concrete evidence of that
+specific shape has been found the way this `">>"` shape was.
+
+**Known, accepted limitation, documented rather than fixed (Codex review,
+eighth round, fresh evidence): a top-level qualifier hidden behind a
+typedef is not detected.** For `typedef int * const ConstPtr; extern
+ConstPtr p;`, both backends pass `_variable_top_level_cv_qualification`
+the ALIAS spelling (`"ConstPtr"`) -- neither castxml's `type_name()` nor
+clang's plain (sugared) `qualType` resolves through the typedef the way
+this function's text scan would need to see the real `int * const`
+underneath, so it finds no sigil/keyword and reports a confirmed `()`
+even though the variable's real top-level qualification is `("const",)`.
+A real fix needs new structural evidence this function has no access to
+today: clang's separate `desugaredQualType` string (already used
+elsewhere for the identical problem on a field), and castxml's own
+structured, typedef-following resolver (`resolve_cv_restrict`, which
+already walks `Typedef`/`ElaboratedType` nodes) -- neither is currently
+threaded onto `Variable` for this function to read. Adding either is a
+new, per-backend model field (mirroring `Param.is_restrict`'s own
+structural-fact treatment), not a normalizer-only change -- the identical
+"model-shape decision for a future slice" conclusion this section already
+reached for `restrict`. Left undetected rather than guessed at from text
+that cannot see through the alias; pinned by a dedicated regression test
+(`test_normalize_header_ast_typedef_hidden_qualifier_is_a_known_limitation`)
+so a future fix has something that starts failing once it lands.
+
+**A castxml opaque `FunctionType` tag is `Fact.unsupported()`, not
+`Fact.present(...)` (Codex review, ninth round, fresh evidence).**
+castxml's resolver has no dedicated rendering for an anonymous
+`FunctionType` node (unlike `Struct`/`Class`/`Union`/`Typedef`/... which
+all have one), so a direct function-pointer parameter/variable/return type
+resolves to the literal opaque tag string `"FunctionType"` (wrapped in
+whatever sigil surrounds it, e.g. `"FunctionType*"`), never a real
+declarator spelling the way clang's own `"void (*)(int)"` is -- the
+identical shape `idioms._is_callback_type` already checks for elsewhere in
+this codebase (`"FunctionType" in type_str`). This is NOT
+`_has_unresolved_component`'s unresolved-type sentinel case: the resolver
+ran and produced a real, structurally-final answer, it just cannot express
+one for this shape -- exactly `FactStatus.UNSUPPORTED`'s own definition
+("this producer cannot express this family at all... a different producer
+might"), not `FAILED`. Publishing the opaque tag as `Fact.present` made a
+hybrid merge report a spurious conflict against clang's real, useful
+spelling for an unchanged callback declaration; `_function_spelling_fact`/
+`_variable_spelling_fact` now check for the marker (on the RAW components,
+same as the unresolved-sentinel check) and mark `Fact.unsupported()`
+instead, which `merge_semantic_ir`'s backfill treats as absent and
+correctly prefers clang's real evidence with no conflict recorded.
+
+**Two follow-up fixes to the `FunctionType`/`expr:` artifact checks, plus a
+file split (Codex review, tenth/eleventh rounds, fresh evidence each).**
+(1) The clang expr-fingerprint check now matches the FULL shape
+(`^expr:[0-9a-f]{16}$`) rather than merely the `"expr:"` prefix -- a plain
+prefix test also matched castxml's own raw, verbatim source-text
+initializer whenever it happened to spell a qualified name whose next
+component is literally `expr` (`"expr::NAMESPACE_VALUE"`), mirroring
+`diff_default_value_reliability._is_expr_fingerprint`'s identical fix for
+the identical mistake (PR #720). (2) The `FunctionType` check is anchored
+to the WHOLE (cv/sigil-stripped) string and gated on `producer ==
+"castxml"`, not a bare substring test: a naive `"FunctionType" in
+raw_type` also matched a real, legitimately-named type
+(`"MyFunctionTypeWrapper*"`) and fired for clang too, even though clang
+never emits this literal tag text at all. Neither fix fully eliminates
+every theoretical collision (a real type named EXACTLY `"FunctionType"`
+still collides, the same accepted residual `idioms._is_callback_type`
+already carries) -- closing that needs real structural evidence from the
+parser, not a normalizer-only text fix. These three artifact-recognition
+functions (`has_unresolved_component`, `is_castxml_opaque_function_type`,
+`CLANG_EXPR_FINGERPRINT_RE`) were split out into a new sibling leaf module,
+`extract/semantic_normalizer_artifacts.py`, once their accumulated
+docstrings pushed `semantic_normalizer.py` itself past the AI-readiness
+gate's 800-line cap for a new file -- mirroring `model.declarator_
+qualifiers.py`'s own split from `model.signature_normalization.py` for the
+identical reason.
+
+**The sigil-finding scan in `_variable_top_level_cv_qualification` gets
+the identical bracket-KIND-aware stack fix (Codex review, twelfth round,
+fresh evidence), for the same underlying primitive bug found in a
+different function.** For clang's own spelling of `template<int N> extern
+S<(N < 0)> * const gp` (`"S<(N < 0)> *const"`), a flat depth counter
+treats the comparison `<` as another template opener; after the real
+`)`/`>` closers the running depth never returns to zero, so the sigil
+search never finds the real top-level `*` at all, silently reporting no
+qualification for a genuinely const pointer. Fixed symmetrically with the
+existing `">"` rule: a `"<"` only pushes a new bracket level when the
+innermost still-open entry is NOT itself a `"("`/`"["` -- a real
+comparison `<` sitting inside an already-open paren/bracket expression is
+left untouched the same way its own closing `>` already is, so the two
+never spuriously push a level a later real `)` would then incorrectly pop
+instead of the paren it actually closes. Applied proactively to
+`has_unresolved_component` too (same file split, `extract/semantic_
+normalizer_artifacts.py`), since it carries the identical latent bug for
+the identical shape even though no concrete failure was reported there --
+"fix the cause, not the instance" applied to a shared primitive weakness
+rather than only the one call site that happened to be caught.
+
+**The opaque-`FunctionType` regex gets one more shape (Codex review,
+thirteenth round, fresh evidence): a cv-qualifier can also appear AFTER a
+pointer/reference sigil, not only before the tag.** `type_resolution.py`'s
+own `CvQualifiedType` branch renders a cv-qualified POINTER VALUE (not a
+cv-qualified pointee) as a SUFFIX, matching this codebase's own "T *
+const" convention elsewhere -- so a const function-pointer's opaque
+fallback resolves to `"FunctionType* const"`, not `"const FunctionType*"`.
+An earlier revision of the anchored regex only recognized a LEADING
+cv-keyword, so this suffix-qualified shape was wrongly published as
+present, conflicting with clang's real spelling in a hybrid dump of an
+unchanged const callback. The regex now allows a cv-keyword run after
+EVERY sigil, since castxml's recursive wrapping can in principle nest more
+than one (`"FunctionType** const volatile"`).
+
+**A clang Python-`bool`-derived literal constant is also `Fact.unsupported()`,
+not `Fact.present(...)` (Codex review, fourteenth round, fresh evidence).**
+clang's compound-initializer-expression parser stringifies a captured
+Python `bool` constant value with plain `str(...)`, which spells `True`/
+`False` with a capital first letter -- not the C/C++ source spelling
+(`true`/`false`) either backend's *own* literal text would show, and not a
+spelling castxml ever produces for the same declaration. Left as
+`Fact.present("True")`, an unchanged boolean constant read identically by
+both backends' real evidence still reported a spurious hybrid conflict the
+moment clang's own producer-specific stringification diverged from
+castxml's genuine source-text capture -- the identical class of bug the
+`expr:` fingerprint and opaque-`FunctionType` fixes above already closed
+for their own producer-specific artifacts, just for a third one this
+normalizer had not yet recognized. The fix checks for the exact two-value
+set `{"True", "False"}` rather than a case-insensitive comparison or a
+substring test, since a real declared string/identifier constant that
+happens to spell exactly `True` or `False` as its own source text is
+legitimate, comparable evidence, not an artifact to discard. The
+decimal-integer/character/float-literal residual this normalizer still
+cannot distinguish from a genuinely spelled literal (e.g. castxml
+composing `0x10` and clang composing `16` for an unchanged constant) is
+a known, accepted, documented limitation, not attempted here: unlike the
+boolean case, there is no structural signal in the value text alone that
+marks a normalized-but-equivalent numeric spelling as producer-specific
+rather than a real value difference worth reporting, and closing it
+correctly needs either a shared literal-grammar normalizer both backends
+route through or a new structural fact recording each backend's original,
+un-normalized token -- a model-shape decision for a future slice, the
+same conclusion already reached for `restrict` and the typedef-hidden
+top-level qualifier above. Pinned by a dedicated regression test (a
+decimal integer constant continues to report `Fact.present(...)`
+unchanged) so a future fix has something that starts failing once it
+lands.
+
+**`tests/test_semantic_normalizer.py` split a second time, mirroring the
+production-code split (Codex review round, same principle as the
+eleventh-round production split above).** Adding the two regression tests
+for the boolean-literal fix pushed the test file to 1217 lines, past the
+AI-readiness gate's 1200-line cap for a new test file. The 21 tests
+exercising `semantic_normalizer_artifacts.py`'s own primitives (the
+unresolved-type sentinel, the opaque `FunctionType` tag, the clang
+expression fingerprint, and the two boolean-literal tests just added) moved
+to a new sibling file, `tests/test_semantic_normalizer_artifacts.py`,
+leaving the general projection/canonicalization tests in the original file.
+
+**The bool-literal exception is gated on `producer == "clang"` (Codex
+review, fifteenth round, fresh evidence): `"True"`/`"False"` are legal
+C++ identifier spellings, not exclusively a clang artifact.** The
+fourteenth-round fix above discarded any constant value spelling exactly
+`"True"`/`"False"` regardless of which backend produced it, but
+`constexpr bool True = true; constexpr bool k = True;` is real,
+case-sensitive, compilable C++ -- castxml's verbatim `init` text for `k`
+genuinely reads `"True"` too, and the producer-agnostic check discarded
+that real castxml evidence outright (in a castxml-only snapshot) or left
+no way for a hybrid merge to backfill it (clang's own value for the same
+identifier reference is itself an unsupported expression fingerprint, not
+a bare `"True"`/`"False"` the old check could match). Restricting the
+exception to `producer == "clang"` closes the gap: the capitalization
+signal is safe once scoped to clang's own `str(bool)`-derived
+stringification specifically, since no *clang-parsed* boolean literal is
+ever spelled this way -- only a clang-parsed identifier REFERENCE could
+theoretically collide, and that case already routes through the
+expression-fingerprint branch instead (`dumper_clang_expr._initializer_value`
+only stringifies a bare `bool` for a literal, not an identifier
+reference). Pinned by `test_normalize_header_ast_castxml_true_named_identifier_stays_present`.
+
+**A Mach-O plain-C hybrid dump's `entity_id` mismatched castxml's own
+`extern "C"` tag with clang's mangled-name tag (Codex review, fifteenth
+round, fresh evidence) -- fixed at the identity source, not by patching
+the Mach-O `semantic_ir` rewrite.** A genuinely plain-C compilation unit
+has no `LinkageSpecDecl` at all (that AST node exists only in C++'s
+grammar), so `dumper_clang.py`'s `entry.extern_c` -- set only by walking
+into one -- never becomes `True` for a plain-C declaration. The existing
+`raw_mangled == name` fallback still recovers this on most platforms
+(clang's `mangledName` for a plain-C declaration is otherwise the bare
+source name), but Mach-O is the one platform where it doesn't: Darwin's
+linker prepends a leading underscore to every global symbol (`"_foo"` for
+source-level `"foo"`), so clang's own `mangledName` for the identical
+plain-C declaration is `"_foo"`, and the bare-equality check never
+matches. Left unfixed, such a declaration's `entity_id` stayed tagged
+`("mangled", "_foo")` while castxml -- which observes no `mangledName`
+XML attribute at all for a plain-C `Function`/global `Variable` -- tags
+the identical declaration `("extern_c",)`, so `merge_semantic_ir`'s
+bare-`EntityId` matching never recognized the two as one declaration and
+retained it TWICE in the merged `semantic_ir`, even though the flat
+`functions`/`variables` lists (matched on the bare mangled string, not
+`EntityId`, via `dumper_hybrid._merge_functions`'s own `clang_by_mangled`
+lookup) already unified it. `dumper_hybrid.py`'s own Mach-O
+underscore-stripping rewrite (`_macho_normalize_semantic_ir`) could not
+have closed this even in principle: it only re-spells the `"mangled"`
+tag's VALUE, never its KIND, so a `("mangled", "_foo")` identity stays
+tagged `"mangled"` no matter how the trailing string is normalized. The
+real fix is upstream, in both `extract.headers.clang.functions.
+parse_functions` and `dumper_clang._ClangAstParser.parse_variables`:
+`raw_mangled == name` becomes `name in symbol_candidates(raw_mangled)`,
+reusing `extract.headers.clang.context.symbol_candidates` -- the identical
+tolerant-match helper `visibility()` already uses for this exact Mach-O
+underscore quirk -- instead of a second, independently-spelled check.
+Pinned by `tests/test_dumper_clang_extern_c_identity.py` (a new, dedicated
+file rather than added to `test_dumper_clang.py`, which already sits at
+its `architecture/debt.yaml` `no_growth` baseline).
+
+**Two more real findings, sixteenth round, fresh evidence each: the
+Darwin de-prefixing fallback needs a target gate, and the opaque-
+`FunctionType` regex needs a sized-array suffix.**
+
+First: the fifteenth round's `name in symbol_candidates(raw_mangled)`
+fallback was target-agnostic -- it fired on every platform, not only
+Darwin. On a NON-Darwin target, a real, explicit `asm("_foo")` label
+genuinely produces `raw_mangled == "_foo"` while `name == "foo"` and
+`entry.extern_c` stays `False` -- that is a real, distinct mangled
+identity (an asm label), not a linker-decoration artifact, and castxml's
+own resolver keeps the identical declaration tagged `("mangled",
+"_foo")`. The ungated fallback misread this as C linkage too, discarding
+the genuine mangled identity clang correctly observed and producing the
+identical class of cross-backend `EntityId` mismatch the fifteenth
+round's own fix was meant to close -- just with the two backends'
+tags swapped. The fix adds `extract.headers.clang.context.
+is_darwin_target(target_triple)` (checking for `"apple"` in the lowercased
+triple, covering both the `...-apple-darwin...` and `...-apple-macosx...`
+spellings this codebase's own test fixtures already use) and requires it
+alongside the de-prefixed match -- but NOT alongside the pre-existing
+plain `raw_mangled == name` equality, which holds on every platform
+regardless of Darwin and must stay ungated (an early revision of this
+very fix wrapped the WHOLE `is_extern_c` expression in the Darwin gate,
+which broke the ordinary, non-underscored plain-C case,
+`test_parse_functions_extern_c_via_mangled_equals_name`, on every
+platform including Darwin itself -- caught immediately by that
+pre-existing regression test, not shipped). `symbol_candidates` itself
+stays target-agnostic, since it also backs `visibility()`'s pure
+export-table-membership check, where trying the de-prefixed form is
+always safe regardless of platform; only the *identity* decision built on
+top of it needed the gate. Pinned by two new sibling tests proving the
+non-Darwin asm-label case stays `("mangled", "_foo")` (function and
+variable), plus a `target_triple=None` case (a synthetic/unprobeable AST
+must default to the same conservative "not Darwin" answer, never assume
+Darwin from an absence of evidence) and a small parametrized unit test for
+`is_darwin_target` itself.
+
+Second: castxml's `ArrayType` renderer spells a fixed-size array of
+function pointers (`void (*callbacks[3])(int)`) as `"FunctionType*[3]"`
+-- a SIZED array suffix, not only the unsized `"[]"` the anchored regex
+already recognized (an unsized array, e.g. a function-pointer array
+PARAMETER, decays to a pointer with no bound). An earlier revision of
+`_CASTXML_OPAQUE_FUNCTION_TYPE_RE` matched only `"[]"`, so a sized
+function-pointer array's own opaque-tag fallback was wrongly published as
+`Fact.present`, conflicting in a hybrid dump against clang's real,
+complete declarator for an unchanged callback array -- the identical
+class of "the opaque fallback's own contribution is always exactly the
+bare tag text with nothing else glued onto it" reasoning the pointer/
+reference/cv-suffix branches above already apply, just for a bracket
+shape not yet covered. Fixed by widening `\[\]` to `\[\d*\]` in the regex.
+Pinned by a new regression test using a sized-array `Variable`.
+
+**A third wrapper shape, seventeenth round, fresh evidence: `_Atomic(...)`
+can enclose the whole opaque spelling too.** castxml's resolver composes
+`_Atomic(void (*)(int)) callback` into `"_Atomic(FunctionType*)"` -- the
+identical "outer wrapping node, not glued onto the tag" shape the
+pointer/cv/array branches above already accept, just realized as a real
+paren pair instead of a sigil or keyword (mirroring
+`has_unresolved_component`'s own pre-existing `_ATOMIC_WRAPPER_PREFIX`
+transparent-wrapper treatment for the identical `_Atomic(...)`
+composition on the unresolved-sentinel side). An earlier revision of
+`_CASTXML_OPAQUE_FUNCTION_TYPE_RE` had no `_Atomic(...)` branch at all,
+so this shape fell through as a real, present spelling, conflicting in a
+hybrid dump against clang's complete `_Atomic(void (*)(int))` spelling
+while keeping the opaque, useless base value. Fixed by splitting the
+regex into a reusable inner pattern
+(`_CASTXML_OPAQUE_FUNCTION_TYPE_INNER`) and matching it either bare or
+wrapped in `_Atomic(...)`, rather than trying to fold the wrapper into
+one already-dense pattern. Pinned by a new regression test using an
+`_Atomic`-wrapped `Variable`.
+
+**The `_Atomic(...)`-wrapped form can itself be wrapped again, eighteenth
+round, fresh evidence -- fixed by factoring the wrapping pattern out and
+applying it uniformly around both atoms, not by chasing each new shape
+with another alternative.** `const _Atomic(void (*)(int)) callback`,
+`_Atomic(void (*)(int)) *callback`, and an array of atomic callbacks
+render as `"const _Atomic(FunctionType*)"`, `"_Atomic(FunctionType*)*"`,
+and `"_Atomic(FunctionType*)[3]"` respectively -- a cv-prefix/sigil/array
+wrapper OUTSIDE the `_Atomic(...)` parens, on top of the wrapper already
+recognized INSIDE them. The seventeenth round's fix treated `_Atomic(...)`
+as only ever the WHOLE string (its own two-alternative regex had no
+wrapping outside either branch), so none of these further-wrapped shapes
+matched, and the normalizer published castxml's opaque fallback as
+present -- the same false-conflict-in-a-hybrid-dump failure mode every
+prior round in this thread has fixed, just for another wrapping position.
+Rather than adding a THIRD alternative (and inevitably a fourth once a
+combination of wrapper positions surfaces next), the fix restructures the
+regex around two reusable fragments -- `_CASTXML_OPAQUE_FUNCTION_TYPE_
+CV_PREFIX` (the leading `const`/`volatile` run) and `_CASTXML_OPAQUE_
+FUNCTION_TYPE_WRAPPING` (the repeating sigil/array-with-trailing-cv
+suffix) -- and an `_CASTXML_OPAQUE_FUNCTION_TYPE_ATOM` alternation
+(`FunctionType` bare, or `_Atomic(FunctionType` + the SAME wrapping
+pattern + `)`) that the cv-prefix and wrapping are then applied around
+UNIFORMLY, once, regardless of which atom matched. A nested SECOND
+`_Atomic(...)` is deliberately not modeled -- this normalizer has no
+observed evidence castxml ever emits one -- so the wrapping pattern used
+inside the parens is the same one used outside them, just not applied
+recursively. Pinned by a parametrized regression test covering all three
+newly-reported shapes.
+
+**Nineteenth round, fresh evidence, two independent findings on the SAME
+commit -- both narrowing the Darwin-gated extern-"C" de-prefix fallback
+further.**
+
+First: `is_darwin_target` checked only for an `"apple"` VENDOR substring
+in the whole triple, missing a valid triple like
+`"x86_64-unknown-darwin"` -- clang genuinely accepts this triple and
+mangles for it exactly like a real Mach-O target, since the Darwin
+underscore-decoration behavior this whole gate exists to recognize is an
+OS-level linker behavior, not anything vendor-specific. Fixed by
+splitting the triple on `"-"` and checking each COMPONENT against a set
+of known Darwin OS names (`darwin`/`macos`/`ios`/`tvos`/`watchos`) via
+`startswith` (tolerating a trailing version suffix like
+`"darwin20.6.0"`), in addition to the pre-existing `"apple"` vendor
+check -- rather than a bare substring test over the whole string, which
+would also risk a false match from an unrelated component that merely
+CONTAINS one of these tokens.
+
+Second, a materially different and more subtle gap: the Darwin gate
+ALONE is not sufficient, because a real, explicit `asm("_foo")` label is
+just as possible ON Darwin as off it -- the sixteenth round's own fix
+already established this for the non-Darwin case, and this round is the
+identical failure mode surfacing on Darwin itself. This fallback's whole
+justification is "a genuinely plain-C compilation unit has no
+`LinkageSpecDecl`", and that justification only holds for a declaration
+with NO enclosing scope at all: C has no namespaces, so a plain-C
+declaration is always global-scope. A NAMESPACED Darwin C++ declaration
+(`namespace n { void foo() asm("_foo"); }`) is never plain C regardless
+of platform, so the fallback needs `entry.scope` as a THIRD, independent
+gate alongside the target check -- mirroring how `entry.extern_c` itself
+is only ever set by walking into a real `LinkageSpecDecl`, which (per
+this same normalizer's own commentary elsewhere) always resets scope
+too. Both `extract.headers.clang.functions.parse_functions` and
+`dumper_clang._ClangAstParser.parse_variables` now also require `not
+entry.scope`. Retagging such a declaration `("extern_c",)` would have
+been a double loss, not merely a wrong tag: `entity_id_for_function`/
+`entity_id_for_variable`'s `is_extern_c` branch always resolves
+`scope=()`, so the fix also protects the namespace itself from being
+silently discarded, not only the genuine asm-label mangled identity.
+Pinned by two new regression tests (`is_darwin_target`'s own parametrize
+list gains the `"x86_64-unknown-darwin"` case, plus `ios`/`tvos`/
+`watchos` OS-component cases; a new namespaced-Darwin-declaration test
+proves the scope gate for both functions and variables), all in
+`tests/test_dumper_clang_extern_c_identity.py`.
+
+**Still not landed, and therefore this phase is not complete:**
+DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
+`entity_id` yet -- this normalizer canonicalizes evidence a backend already
+resolved identity for, it does not resolve identity itself, so extending it
+to these backends is gated on giving each of them the Phase 2 `EntityId`
+treatment first); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
+fifth production assembler this phase's own Files list names) remain
+unwired for the same reason; and the phase's own acceptance criteria (a
+closure-parameterized template fixture, requiring function/template-argument
+normalization) remain unmet -- `CanonicalEntity.template_arguments` is still
+never populated by any backend, header-AST functions/variables included (a
+function *template*'s own template-argument list is a separate, still-open
+piece of this slice's own stated scope, not silently assumed done by the
+ordinary-function work above). A manifest (`--dump-manifest`) dump is a
+further, real gap (Codex review, PR #1001), unchanged by the third and
+fourth slices' additions: `tu_merge.merge_fragments` already collapses
+same-identity declarations across translation units into one representative
+entry before `normalize_header_ast` ever runs, so a real ODR-duplicate/
+incomplete-vs-complete pair spread across two TUs never reaches
+`SemanticIR.occurrences` as two occurrences there -- no *more* loss than the
+legacy `functions`/`variables`/`types`/`enums` fields already have for a
+manifest dump (all read the identical merged lists), but not yet the IR's
+fuller multi-occurrence potential either. Closing this needs per-TU-fragment
+normalization before the merge collapses identities, with a real TU-context
+disambiguator threaded through -- materially more than either slice's scope;
+a single-header dump is unaffected (nothing for the merge to collapse ahead
+of it). See `extract/semantic_normalizer.py`'s own docstring for the same
+note. The original Design/Files/Tests/Acceptance-criteria sections below
+are kept verbatim as the phase's full target shape -- each slice is a step
 toward that target, not a redefinition of it.
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and

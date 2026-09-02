@@ -162,6 +162,7 @@ from .extract.export_symbol_identity import (
     itanium_export_variable as _itanium_export_variable,
     msvc_export_function as _msvc_export_function,
 )
+from .extract.header_ast_fields import parse_header_ast_fields
 from .model import AbiSnapshot, RecordType
 
 log = logging.getLogger(__name__)
@@ -1781,6 +1782,8 @@ def _dump_macho(
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
+    _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return qualified_name_segments.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dylib_path.name,
         version=version,
@@ -1788,20 +1791,21 @@ def _dump_macho(
         source_mtime=_dylib_mtime,
         source_mtime_epoch=_dylib_mtime_epoch,
         source_size=_safe_size(dylib_path),
-        functions=parser.parse_functions(),
-        variables=parser.parse_variables(),
-        types=parser.parse_types(),
-        enums=parser.parse_enums(),
-        typedefs=parser.parse_typedefs(),
-        typedefs_qualified=parser.parse_typedefs_qualified(),
-        constants=parser.parse_constants(),
-        typedef_entity_ids=parser.parse_typedef_entity_ids(),
-        constant_entity_ids=parser.parse_constant_entity_ids(),
+        functions=list(_ast.functions),
+        variables=list(_ast.variables),
+        types=list(_ast.types),
+        enums=list(_ast.enums),
+        typedefs=_ast.typedefs,
+        typedefs_qualified=_ast.typedefs_qualified,
+        constants=_ast.constants,
+        typedef_entity_ids=_ast.typedef_entity_ids,
+        constant_entity_ids=_ast.constant_entity_ids,
+        semantic_ir=_ast.semantic_ir,
         macho=macho_meta,
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
-        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
+        ast_producer=_ast_producer,
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
         ast_toolchain_supported=_parser_ast_supported(parser),
@@ -1906,6 +1910,8 @@ def _dump_pe(
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
+    _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return qualified_name_segments.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dll_path.name,
         version=version,
@@ -1913,20 +1919,21 @@ def _dump_pe(
         source_mtime=_dll_mtime,
         source_mtime_epoch=_dll_mtime_epoch,
         source_size=_safe_size(dll_path),
-        functions=parser.parse_functions(),
-        variables=parser.parse_variables(),
-        types=parser.parse_types(),
-        enums=parser.parse_enums(),
-        typedefs=parser.parse_typedefs(),
-        typedefs_qualified=parser.parse_typedefs_qualified(),
-        constants=parser.parse_constants(),
-        typedef_entity_ids=parser.parse_typedef_entity_ids(),
-        constant_entity_ids=parser.parse_constant_entity_ids(),
+        functions=list(_ast.functions),
+        variables=list(_ast.variables),
+        types=list(_ast.types),
+        enums=list(_ast.enums),
+        typedefs=_ast.typedefs,
+        typedefs_qualified=_ast.typedefs_qualified,
+        constants=_ast.constants,
+        typedef_entity_ids=_ast.typedef_entity_ids,
+        constant_entity_ids=_ast.constant_entity_ids,
+        semantic_ir=_ast.semantic_ir,
         pe=pe_meta,
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
-        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
+        ast_producer=_ast_producer,
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
         ast_toolchain_supported=_parser_ast_supported(parser),

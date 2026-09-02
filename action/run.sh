@@ -410,6 +410,44 @@ _extra_args_write_json_path() {
   return 1
 }
 
+# The real `--format` value `abicheck` runs with, accounting for `extra-args`
+# overriding this script's own `--format "$FORMAT"` flag.
+#
+# Each mode's own command-assembly section puts `--format "$FORMAT"` (derived
+# from the Action's `format:` input) on `CMD` first and `$INPUT_EXTRA_ARGS`
+# last; Click resolves a repeated option by keeping only the *last*
+# occurrence. So `format: text` with `extra-args: --format json` really does
+# run with JSON output, even though this script's own `$FORMAT` variable
+# still reads "text" everywhere else. Every JSON-detection site gating on
+# `$FORMAT == json` (`_STDOUT_JSON_FILE`'s own stdout capture,
+# `_json_report_src`'s `OUTPUT_FILE` branch) needs this *effective* value,
+# not the nominal one, or it silently fails to recognize a report that is
+# genuinely JSON on disk/stdout (ADR-064's own "effective-format-override"
+# gap, previously left as a documented limitation rather than fixed).
+#
+# Falls back to the nominal `$FORMAT` when extra-args carries no `--format`
+# of its own -- the ordinary, unoverridden case.
+#
+# Same word-splitting/quoting caveat as `_extra_args_has_write_flag`: an
+# exotically quoted `--format` evades this, same as every other extra-args
+# scan in this file.
+_effective_format() {
+  local _arg _found="${FORMAT:-}" _prev_was_format=0
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ "$_prev_was_format" == "1" ]]; then
+      _found="$_arg"
+      _prev_was_format=0
+    elif [[ "$_arg" == "--format" ]]; then
+      _prev_was_format=1
+    elif [[ "$_arg" == --format=* ]]; then
+      _found="${_arg#--format=}"
+    fi
+  done
+  printf '%s' "$_found"
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1182,6 +1220,15 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
+    # review): INPUT_DEPTH is a raw, unvalidated Action input string, so a
+    # workflow spelling `depth: BUILD`/`BINARY`/etc. previously matched none
+    # of the case-sensitive comparisons below -- silently skipping the
+    # fail-loud guard for build/source (defeating its entire purpose) and
+    # silently dropping `binary` with no forwarding and no ::notice:: either.
+    # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
+    # Not `local` -- this runs in the top-level script body, not a function.
+    _depth_lc=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
     # A caller that explicitly asked for build/source-depth evidence (via
     # --depth build/source, or by supplying --sources/--build-info/
     # --compile-db directly) against a directory/package operand would
@@ -1189,12 +1236,26 @@ elif [[ "$MODE" == "compare" ]]; then
     # skipped rather than forwarded, so the comparison would quietly run
     # without the requested evidence and could miss a source-only break
     # while still reporting a clean/normal result -- fail loud instead
-    # (Codex review; --depth binary/headers is fine to drop silently, since
-    # nothing was actually requested that this shape can't provide).
-    if [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" \
+    # (Codex review).
+    if [[ "$_depth_lc" == "build" || "$_depth_lc" == "source" \
        || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
       echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
       exit 1
+    fi
+    # --depth binary requests *less* evidence than the fan-out already
+    # collects by default, and the CLI now accepts and honours it per
+    # library on this path (D1) -- forward it, same as the single-pair
+    # branch below. --depth headers is still rejected by the CLI here (the
+    # per-library fan-out has no per-library evidence-floor enforcement
+    # yet), so it is dropped rather than forwarded -- but with a visible
+    # ::notice:: instead of the previous silent drop (D2: that silent drop
+    # was asymmetric with the compile-context guard above, which fails loud
+    # for everything it can't honour rather than swallowing part of the
+    # request unannounced).
+    if [[ "$_depth_lc" == "binary" ]]; then
+      add_single_flag "--depth" "$_depth_lc"
+    elif [[ "$_depth_lc" == "headers" ]]; then
+      echo "::notice::mode: compare with a directory/package operand (a release/bundle comparison) does not honour --depth headers yet -- the per-library fan-out has no per-library evidence-floor enforcement, so the request is dropped rather than forwarded (the comparison still runs, using whatever headers -H/--include-dir/.abicheck.yml already resolve for each library). Compare the libraries individually (mode: compare with single-file operands) to require header-level evidence."
     fi
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
@@ -1209,6 +1270,14 @@ elif [[ "$MODE" == "compare" ]]; then
   FORMAT="${INPUT_FORMAT:-markdown}"
   CMD+=(--format "$FORMAT")
 
+  # Computed here, not only after extra-args are appended to CMD below, so
+  # the PR_JSON sidecar-injection decision a few lines down (which runs
+  # before that later, general-purpose computation) can already see an
+  # `extra-args --format` override -- see `_effective_format`'s own
+  # docstring (Codex review, PR #998, fresh evidence: the general-purpose
+  # computation runs too late for this mode's own injection decision).
+  _EFFECTIVE_FORMAT="$(_effective_format)"
+
   # dry-run performs no analysis and writes nothing, so it is mutually
   # exclusive with -o/--output AND --write on
   # the CLI -- skip both entirely when set, rather than passing them and
@@ -1218,7 +1287,17 @@ elif [[ "$MODE" == "compare" ]]; then
     CMD+=(--dry-run)
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
+    # Gated on the effective format, not the nominal one (Codex review, PR
+    # #998, fresh evidence): `format: sarif` overridden by `extra-args
+    # --format json` (or any other non-sarif format) really does write
+    # non-SARIF content, and naming that file `abicheck-results.sarif` by
+    # default -- the exact path a workflow's own upload-sarif step (gated
+    # on the Action's nominal `format: sarif` input, which this shell
+    # variable cannot change) looks for -- would have silently fed
+    # mismatched content to CodeQL. Leaving `OUTPUT_FILE` unset here when
+    # the effective format isn't sarif means the upload step instead finds
+    # no file at all, a loud failure rather than a silent one.
+    if [[ "${_EFFECTIVE_FORMAT:-$FORMAT}" == "sarif" && -z "$OUTPUT_FILE" ]]; then
       OUTPUT_FILE="abicheck-results.sarif"
     fi
     if [[ -n "$OUTPUT_FILE" ]]; then
@@ -1248,7 +1327,13 @@ elif [[ "$MODE" == "compare" ]]; then
     # point _maybe_post_pr_comment reruns the whole comparison just to obtain
     # JSON, doubling a potentially expensive analysis to produce a file this
     # very injection existed to avoid rerunning for.
-    if [[ "$FORMAT" != "json" ]] && ! _extra_args_has_write_flag; then
+    #
+    # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`: a `format:
+    # json` step whose own extra-args overrides to a non-json format really
+    # does run without JSON output, and skipping this injection because the
+    # *nominal* format looked already-JSON left such a run with no JSON
+    # report anywhere (Codex review, PR #998, fresh evidence).
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -1673,6 +1758,12 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
+  # Computed here, not only after extra-args are appended to CMD below --
+  # same reason as compare mode's own early computation above (Codex
+  # review, PR #998, fresh evidence): the PR_JSON sidecar-injection decision
+  # a few lines down needs to see an `extra-args --format` override too.
+  _EFFECTIVE_FORMAT="$(_effective_format)"
+
   # dry-run maps directly to --dry-run (the cost-projection formerly under
   # the separate --estimate flag is folded into the general dry-run report).
   # A dry run writes nothing, so skip -o/--output entirely when it's set
@@ -1700,7 +1791,10 @@ elif [[ "$MODE" == "scan" ]]; then
     # `--write` (Codex review, follow-up) -- see
     # `_extra_args_has_write_flag`'s own docstring for why injecting
     # ours anyway would be actively wrong, not merely redundant.
-    if [[ "$FORMAT" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
+    #
+    # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`, for the same
+    # reason as compare mode's own injection above.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
        && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
@@ -1724,6 +1818,16 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   # shellcheck disable=SC2206
   CMD+=($INPUT_EXTRA_ARGS)
 fi
+
+# Recomputed here (idempotently -- compare/scan mode already computed it
+# above, right after their own `$FORMAT` was set, so their own PR_JSON
+# sidecar-injection decisions could see it too) for every JSON-detection
+# site below that needs the real format this invocation runs with rather
+# than the nominal `$FORMAT` -- see `_effective_format`'s own docstring.
+# Also the only assignment for modes with no earlier one of their own
+# (dump has no `$FORMAT` at all; deps-tree/deps-compare have one but no
+# sidecar-injection decision that needs it early).
+_EFFECTIVE_FORMAT="$(_effective_format)"
 
 echo "::group::abicheck $MODE"
 echo "Command: ${CMD[*]}"
@@ -1831,6 +1935,11 @@ fi
 # report exists only in $ABICHECK_OUTPUT, so it is persisted once here for the
 # report queries below.
 #
+# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- an `extra-args`
+# `--format json` override (under `format: text`/`markdown`) really does
+# produce JSON on stdout, and this capture used to miss it entirely (ADR-064's
+# "effective-format-override" gap; see `_effective_format`'s own docstring).
+#
 # In the *parent* shell, deliberately. Every caller reads the path through
 # `_src=$(_json_report_src)`, and a command substitution runs in a subshell —
 # so creating the file lazily inside that function wrote the memo to a shell
@@ -1838,7 +1947,7 @@ fi
 # leaving the EXIT trap with an empty path to clean up. On a persistent
 # self-hosted runner that leaks a full report copy per lookup (Codex review).
 _STDOUT_JSON_FILE=""
-if [[ "${FORMAT:-}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
+if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
   _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
   printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
 fi
@@ -1885,7 +1994,15 @@ _json_report_src() {
   # never ran preserves this file's real, in-production freshness guarantee
   # unchanged, since the real script always assigns both variables (even to
   # "") before `_json_report_src` can ever be called.
-  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+  #
+  # `${_EFFECTIVE_FORMAT:-${FORMAT:-}}`, not a bare `${FORMAT:-}`, for the
+  # same reason as the freshness variables just above: the real script
+  # always sets `_EFFECTIVE_FORMAT` before this function can be called (see
+  # `_effective_format`'s own docstring for why the nominal `$FORMAT` alone
+  # misses an `extra-args --format json` override), while the isolated
+  # extraction tests above set only `$FORMAT` and rely on the fallback to
+  # keep behaving exactly as before this fix.
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
      && { [[ -z "${_output_file_pre_fp+x}" ]] \
           || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
     echo "${OUTPUT_FILE}"
@@ -1901,6 +2018,19 @@ _json_report_src() {
     # rather than falling through to "no report").
     echo "$_extra_write_json_path"
   fi
+  # Deliberately NOT a further fallback to a `format: sarif` OUTPUT_FILE
+  # here, even though SARIF is well-formed JSON (Codex review, fresh
+  # evidence, PR #1016): this function's contract is "a faithful,
+  # unfiltered abicheck-native JSON report" -- `_can_reuse_primary_json`
+  # trusts a non-empty answer here enough to `cp` it straight into
+  # `PR_JSON` for `cli_pr_comment` to parse as one, and several `_report_
+  # query` callers (severity_exit, coverage_where, annotations,
+  # blocking_categories) would silently misread SARIF's absence of their
+  # expected keys as "definitely no severity gate/no coverage gap/no
+  # annotations" rather than "cannot tell". A SARIF document answers
+  # `compat_verdict` alone; see `_report_compat_verdict`'s own SARIF
+  # fallback below, which reads `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly
+  # rather than routing through this shared function.
 }
 
 # Read one derived value out of the JSON report, whatever shape produced it.
@@ -2002,7 +2132,25 @@ elif query == "compat_verdict":
     # alone when the gate demotes the exit code, and `compare` reports
     # `result.verdict` unconditionally. It is therefore the only signal that
     # tells a genuinely clean run from a break the user chose not to gate on.
-    print(_either("verdict", "") or "")
+    verdict = _either("verdict", "") or ""
+    if not verdict:
+        # SARIF has no top-level/nested "verdict" key -- abicheck's SARIF
+        # renderer instead stamps the identical value at
+        # runs[0].properties.abiVerdict (sarif.py's own `_result_for`).
+        # Reached here only as the true last resort: `_json_report_src`
+        # hands this function a SARIF file at all solely when no PR_JSON,
+        # stdout-JSON, or extra_write_json_path source exists for this run
+        # -- which happens when `format: sarif` is paired with an
+        # `extra-args --write <non-json>=...` that both suppresses the
+        # automatic JSON sidecar and occupies the one `--write` slot the
+        # CLI accepts per invocation (Codex review, PR #1016, fresh
+        # evidence -- see `_json_report_src`'s own SARIF branch).
+        runs = report.get("runs")
+        if isinstance(runs, list) and runs and isinstance(runs[0], dict):
+            props = runs[0].get("properties")
+            if isinstance(props, dict):
+                verdict = props.get("abiVerdict") or ""
+    print(verdict)
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
 elif query == "coverage_where":
@@ -2142,7 +2290,14 @@ _emit_annotations() {
     # `_extra_args_write_json_path` recovers, there is nothing to discover
     # here, so say so rather than silently emitting nothing (Codex review,
     # fresh evidence).
-    if [[ "${FORMAT:-}" != "json" ]] && _extra_args_has_write_flag \
+    #
+    # Gated on the effective format, not the nominal one (Codex review, PR
+    # #998, fresh evidence): `format: json` overridden by `extra-args
+    # --format text` (say, alongside its own `--write markdown=...`) really
+    # does leave no JSON report anywhere -- `_src` above is correctly
+    # empty -- but the nominal check here suppressed this very diagnostic
+    # explaining why, since it still believed the primary was JSON.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && _extra_args_has_write_flag \
        && [[ -z "$(_extra_args_write_json_path)" ]]; then
       echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own --write targets a non-json format -- no JSON report is available to render annotations from. Use format: json, or point --write at json=PATH instead."
     fi
@@ -2361,8 +2516,19 @@ _severity_gate_exit() {
 # stdout-only search still published ERROR for a severity-policy result
 # (Codex review) -- the same defect as the JSON-only search before it, one
 # level down.
+#
+# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- same
+# effective-format-override class as `_STDOUT_JSON_FILE`/`_json_report_src`
+# (see `_effective_format`'s own docstring): a `format: json` step whose own
+# `extra-args` overrides to `--format text` really does write text to
+# `$OUTPUT_FILE`, and this check used to still read `$ABICHECK_OUTPUT`
+# instead (empty, since `-o` was used), losing the severity-gate line
+# entirely (Codex review, fresh evidence, PR #998). Falls back to
+# `${FORMAT:-}` when `$_EFFECTIVE_FORMAT` is unset, same as the other two
+# sites, so any isolated-snippet test exercising this function alone keeps
+# behaving exactly as before this fix.
 _text_report_content() {
-  if [[ "${FORMAT:-}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
     cat "${OUTPUT_FILE}"
   else
     printf '%s' "${ABICHECK_OUTPUT:-}"
@@ -2409,6 +2575,35 @@ _report_compat_verdict() {
     echo "$_answer"
     return
   fi
+  # `format: sarif` fallback, deliberately scoped to THIS function alone
+  # rather than a `_json_report_src` branch every other reader shares
+  # (Codex review, fresh evidence, PR #1016): a first version of this fix
+  # did widen `_json_report_src` itself, which made `_can_reuse_primary_
+  # json` treat a bare SARIF document as a faithful abicheck-native JSON
+  # report and `cp` it straight into `PR_JSON` for `cli_pr_comment` to
+  # parse -- silently posting/overwriting the sticky PR comment with an
+  # empty-looking report instead of the real findings, and letting
+  # `_severity_gate_categories`/coverage/annotation readers misread SARIF's
+  # missing keys as "definitely none" rather than "cannot tell". SARIF is
+  # only ever consulted here, for `compat_verdict` specifically, and only
+  # once `_json_report_src` already came back with nothing to read (no
+  # PR_JSON/stdout-JSON/extra_write_json_path -- see that function's own
+  # docstring for why: `format: sarif` paired with an `extra-args --write
+  # <non-json>=...` occupies the CLI's one `--write` slot and suppresses
+  # the automatic JSON sidecar, leaving no other JSON anywhere in this
+  # run's output). SARIF's own `runs[0].properties.abiVerdict` (`sarif.py`)
+  # carries the identical native verdict string `_report_query`'s
+  # `compat_verdict` case reads from ordinary abicheck JSON.
+  if [[ -z "$_src" && "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" \
+        && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+     && { [[ -z "${_output_file_pre_fp+x}" ]] \
+          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
+    _answer=$(_report_query "$OUTPUT_FILE" compat_verdict)
+    if [[ -n "$_answer" ]]; then
+      echo "$_answer"
+      return
+    fi
+  fi
   # `sed -E`, not the basic-regex `\(a\|b\)` the other readers here get away
   # with not needing: BSD sed (macOS runners, which this Action supports and
   # CI covers) has no alternation in BRE at all, so the pattern silently
@@ -2425,7 +2620,15 @@ _report_compat_verdict() {
   # the whole thing this reconciliation exists to prevent (Codex review). The
   # delimiter is still required rather than dropped -- a bare `Verdict`
   # followed by uppercase-free filler would match prose.
-  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING).*/\2/p' \
+  #
+  # COMPATIBLE_WITH_RISK is a third alternative for the same reason R1
+  # (CLI-audit) added it to `_resolve_clean_exit_verdict`'s JSON-sourced
+  # branch: `extra-args: --write markdown=...` suppresses the JSON sidecar
+  # (per action/AGENTS.md), so a run whose *only* report is rendered
+  # markdown/text reaches this fallback for that tier too -- without it, a
+  # report the CLI classified COMPATIBLE_WITH_RISK still fell through to
+  # `sed` matching nothing and silently reported COMPATIBLE (Codex review).
+  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING|COMPATIBLE_WITH_RISK).*/\2/p' \
     <<<"$(_text_report_content)" | head -1
 }
 
@@ -2457,16 +2660,31 @@ _resolve_clean_exit_verdict() {
     VERDICT="$_v"
     ADVISORY_BREAK=true
     echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+  elif [[ "$_v" == "COMPATIBLE_WITH_RISK" ]]; then
+    # R1 (CLI-audit): exit 0 was previously hard-mapped to VERDICT=COMPATIBLE
+    # unconditionally, only escalating when the report said BREAKING/
+    # API_BREAK -- so a report the CLI itself classified
+    # COMPATIBLE_WITH_RISK (a real, gate-worthy tier the CLI's own exit-code
+    # doc names alongside COMPATIBLE/NO_CHANGE as "0 = compatible") still
+    # published `verdict: COMPATIBLE` and a "No binary ABI break detected"
+    # summary, silently dropping every risk finding from the Action's own
+    # output even though the JSON report carried them in full. This is not
+    # an advisory *break* the severity policy demoted (ADVISORY_BREAK stays
+    # false: nothing here is gated by fail-on-breaking/fail-on-api-break,
+    # which never match this tier), just a verdict the exit-0 branch must
+    # not silently launder into a plain COMPATIBLE.
+    VERDICT="$_v"
   fi
 }
 
-# Compatibility tiers, most severe last. Only these three are ranked: every
+# Compatibility tiers, most severe last. Only these four are ranked: every
 # other verdict (ERROR, BUDGET_OVERFLOW, SEVERITY_ERROR, ...) is a different
 # axis and must never be escalated away by this comparison.
 _verdict_rank() {
   case "$1" in
-    BREAKING) echo 3 ;;
-    API_BREAK) echo 2 ;;
+    BREAKING) echo 4 ;;
+    API_BREAK) echo 3 ;;
+    COMPATIBLE_WITH_RISK) echo 2 ;;
     COMPATIBLE) echo 1 ;;
     *) echo 0 ;;
   esac
@@ -2810,14 +3028,42 @@ fi
 
 echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"
 
+# Whether `format: sarif` + `upload-sarif: true` was requested but the
+# *effective* format (an `extra-args --format` override) isn't sarif -- see
+# the `report-path` output block below for the full rationale. Computed
+# once, outside the `{ ... } >> "$GITHUB_OUTPUT"` redirect: a workflow-command
+# annotation (`::warning::`) echoed *inside* that block would be silently
+# swallowed into the environment file as a bogus, undeclared record instead
+# of reaching the Actions log -- exactly the fate this diagnostic exists to
+# avoid for the upload it explains (Codex review, PR #998, fresh evidence).
+_SARIF_UPLOAD_FORMAT_MISMATCH=0
+if [[ "${FORMAT:-}" == "sarif" && "${INPUT_UPLOAD_SARIF:-false}" == "true" \
+   && "${_EFFECTIVE_FORMAT:-$FORMAT}" != "sarif" ]]; then
+  _SARIF_UPLOAD_FORMAT_MISMATCH=1
+  echo "::warning title=abicheck upload-sarif::format: sarif and upload-sarif: true were requested, but extra-args overrode --format away from sarif, so the real output is not SARIF. Skipping the SARIF upload (report-path withheld) rather than uploading mismatched content."
+fi
+
 # ---------------------------------------------------------------------------
 # Set outputs
 # ---------------------------------------------------------------------------
 {
   echo "verdict=$VERDICT"
   echo "exit-code=$ABICHECK_EXIT"
-  # Only emit report-path when a real report file was produced
-  if [[ -n "${OUTPUT_FILE:-}" && -f "${OUTPUT_FILE}" ]]; then
+  # Only emit report-path when a real report file was produced.
+  #
+  # Withheld even when one exists whenever the sarif/upload-sarif mismatch
+  # above was detected -- this is action.yml's own upload-sarif step's
+  # entire gate (`if: ... && steps.run-abicheck.outputs.report-path != ''`),
+  # and that step's `if:` reads the Action's nominal `format` input, which a
+  # shell-local `$_EFFECTIVE_FORMAT` cannot change: this closes both the
+  # default-output-path case and an explicit `output-file:` case alike,
+  # since either way `$OUTPUT_FILE` would hold real, non-SARIF content that
+  # must never reach that step. No other output/behavior changes --
+  # `report-path` for any other purpose than gating that one step is
+  # unaffected.
+  if [[ "$_SARIF_UPLOAD_FORMAT_MISMATCH" == "1" ]]; then
+    echo "report-path="
+  elif [[ -n "${OUTPUT_FILE:-}" && -f "${OUTPUT_FILE}" ]]; then
     echo "report-path=${OUTPUT_FILE}"
   else
     echo "report-path="
@@ -2839,6 +3085,15 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     case $VERDICT in
       COMPATIBLE)
         echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
+        ;;
+      COMPATIBLE_WITH_RISK)
+        # R1 follow-up (Codex review, PR #1016): VERDICT can carry this tier
+        # since _resolve_clean_exit_verdict stopped laundering it into plain
+        # COMPATIBLE, but this dispatch had no matching arm -- a bash `case`
+        # with no match and no `*)` default silently omits the whole banner,
+        # so `add-job-summary: true` published a summary with every finding
+        # table but no verdict line at all for this tier.
+        echo "> **Verdict: COMPATIBLE_WITH_RISK** ⚠️ — Binary-compatible, but carries deployment risk; review advised (see findings below)."
         ;;
       SEVERITY_ERROR)
         # SEVERITY_ERROR (exit code 1) means a severity-config category is
@@ -2985,7 +3240,12 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
     fi
     echo "| Mode | $MODE |"
-    echo "| Format | ${FORMAT:-markdown} |"
+    # The *effective* format (see `_effective_format`'s own docstring): an
+    # `extra-args --format` override changes what the run actually produced,
+    # and showing the nominal `format:` input here would mislabel the very
+    # report rendered a few lines below (Codex review, PR #998, fresh
+    # evidence).
+    echo "| Format | ${_EFFECTIVE_FORMAT:-${FORMAT:-markdown}} |"
     if [[ -n "${OUTPUT_FILE:-}" ]]; then
       echo "| Report | \`${OUTPUT_FILE}\` |"
     fi
@@ -2997,11 +3257,16 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     # code fence (which would make it display as literal ``` text). Every
     # other format (json/sarif/text/review/etc.) is genuinely verbatim
     # output, so it keeps the fence.
+    #
+    # Gated on the effective format too, for the same reason as the "Format"
+    # row above: a `format: json` step overridden to `--format markdown` (or
+    # the reverse) would otherwise embed the real output under the wrong
+    # rendering rule.
     if [[ -n "$ABICHECK_OUTPUT" ]]; then
       echo "<details>"
       echo "<summary>Full report</summary>"
       echo ""
-      if [[ "${FORMAT:-markdown}" == "markdown" ]]; then
+      if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-markdown}}" == "markdown" ]]; then
         echo "$ABICHECK_OUTPUT"
       else
         echo '```'

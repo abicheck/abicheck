@@ -31,7 +31,11 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.fact import Fact
-from abicheck.model.identity import entity_id_for_type
+from abicheck.model.identity import (
+    entity_id_for_function,
+    entity_id_for_type,
+    entity_id_for_variable,
+)
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import (
     CanonicalEntity,
@@ -144,6 +148,67 @@ class TestExcludesDependencies:
         assert [t.name for t in scoped.types] == ["Own"]
         assert scoped.semantic_ir is not None
         assert list(scoped.semantic_ir.occurrences) == [OccurrenceId(own.entity_id)]
+
+    def test_semantic_ir_occurrence_is_dropped_alongside_its_flat_function(self):
+        """ADR-063 Phase 6 (third slice, Codex review): once functions/
+        variables are normalized too, ``_scoped_semantic_ir`` must filter
+        their occurrences the same way it already filters TYPE/ENUM ones --
+        an earlier revision of the third slice checked only
+        ``EntityKind.TYPE``/``EntityKind.ENUM``, so a dependency-header
+        function's occurrence stayed reachable through ``semantic_ir`` even
+        though ``functions`` correctly dropped it.
+        """
+        own = _fn("run", mangled="_Z3runv")
+        dep = _fn("std_helper", mangled="_Z10std_helper", source_header=_SYSTEM_HEADER)
+        own.entity_id = entity_id_for_function((), "run", mangled_name=own.mangled)
+        dep.entity_id = entity_id_for_function(
+            (), "std_helper", mangled_name=dep.mangled
+        )
+        var_own = Variable(
+            name="own_var", mangled="own_var", type="int", source_header=_OWN_HEADER
+        )
+        var_dep = Variable(
+            name="sys_var", mangled="sys_var", type="int", source_header=_SYSTEM_HEADER
+        )
+        var_own.entity_id = entity_id_for_variable(
+            (), "own_var", mangled_name="own_var"
+        )
+        var_dep.entity_id = entity_id_for_variable(
+            (), "sys_var", mangled_name="sys_var"
+        )
+        semantic_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(own.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("void(void)")
+                ),
+                OccurrenceId(dep.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("void(void)")
+                ),
+                OccurrenceId(var_own.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("int")
+                ),
+                OccurrenceId(var_dep.entity_id): CanonicalEntity(
+                    canonical_spelling=Fact.present("int")
+                ),
+            }
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[own, dep],
+            variables=[var_own, var_dep],
+            semantic_ir=semantic_ir,
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+
+        assert [f.name for f in scoped.functions] == ["run"]
+        assert [v.name for v in scoped.variables] == ["own_var"]
+        assert scoped.semantic_ir is not None
+        assert set(scoped.semantic_ir.occurrences) == {
+            OccurrenceId(own.entity_id),
+            OccurrenceId(var_own.entity_id),
+        }
 
     def test_semantic_ir_is_untouched_when_nothing_is_excluded(self):
         """No excluded type/enum -> the same SemanticIR object, not a

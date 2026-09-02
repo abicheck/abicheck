@@ -103,12 +103,12 @@
     },
     {
       "path": "abicheck/buildsource/check_report.py",
-      "baseline_lines": 813,
+      "baseline_lines": 814,
       "target": "workflows",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "New entry, ADR-063 Phase 7: augment_report()'s two mutators (_neutralize_gate/_escalate_removed_library_severity) and the three synthetic report builders (build_operational_error_report/build_bootstrap_report/build_new_target_report) each gained the identical structured `run_outcome` treatment their legacy `severity`/`verdict` fields already had, across five call sites this module owns and no other module can substitute for -- the run_outcome-building helper itself was split out to the new sibling check_report_run_outcome.py to keep the added footprint to the minimum per-site glue (one import, one conditional 2-line write, or one dict-literal line). No smaller diff was found that still lands the required behavior at every one of the five sites this phase's plan names. Raised 812 -> 813 (same phase, Codex review, fresh evidence): a pre-existing report re-stamped to the current schema never carried `run_outcome` at all -- `augment_report` now calls the new `backfill_run_outcome` (in check_report_run_outcome.py, the same sibling module) alongside the pre-existing `backfill_exit_block_fields` call it already mirrors, one import name and one function call.",
+      "rationale": "New entry, ADR-063 Phase 7: augment_report()'s two mutators (_neutralize_gate/_escalate_removed_library_severity) and the three synthetic report builders (build_operational_error_report/build_bootstrap_report/build_new_target_report) each gained the identical structured `run_outcome` treatment their legacy `severity`/`verdict` fields already had, across five call sites this module owns and no other module can substitute for -- the run_outcome-building helper itself was split out to the new sibling check_report_run_outcome.py to keep the added footprint to the minimum per-site glue (one import, one conditional 2-line write, or one dict-literal line). No smaller diff was found that still lands the required behavior at every one of the five sites this phase's plan names. Raised 812 -> 813 (same phase, Codex review, fresh evidence): a pre-existing report re-stamped to the current schema never carried `run_outcome` at all -- `augment_report` now calls the new `backfill_run_outcome` (in check_report_run_outcome.py, the same sibling module) alongside the pre-existing `backfill_exit_block_fields` call it already mirrors, one import name and one function call. Raised 813 -> 814 merging G42 phase 1 (PR #1008, `explicit_id`/`environment_id` params on `build_check_id()` and the four report builders) onto this already-landed ADR-063 baseline -- both branches touch this module independently and neither can substitute for the other's lines; the merge itself adds no new behavior beyond what each PR already carried on its own.",
       "review_by": "2026-11-30"
     },
     {
@@ -233,22 +233,22 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1698,
+      "baseline_lines": 1812,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (CheckSpec.id/CheckSpec.analysis_*, the checks[].id/checks[].analysis: parsing this module is the canonical owner of per its own docstring) -- reviewed growth, not a routine edit; no other module owns this project-schema surface to move it to. Raised a second time (1810 -> 1812) for a Codex-review fix: _IDENTIFIER_RE anchored with a trailing $, which (without re.MULTILINE) also matches just before a trailing newline -- a YAML block-scalar checks[].id/analysis.* value could carry one through and corrupt a downstream GITHUB_OUTPUT write; documented and fixed as \\Z.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/buildsource/run_plan.py",
-      "baseline_lines": 1118,
+      "baseline_lines": 1130,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (RunPlanCheck.explicit_id/analysis_* projection and the duplicate-check_id guard's analysis-aware error path) -- reviewed growth, not a routine edit; RunPlanCheck's own module is this data's canonical owner.",
       "review_by": "2026-11-30"
     },
     {
@@ -373,12 +373,12 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 803,
+      "baseline_lines": 815,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit. Raised 810 -> 815 (same phase, Codex review, fresh evidence): fixed the environment_id group's charset to require an initial alphanumeric character (matching build_check_id's own validate_identifier(), which already enforced it -- the public CHECK_ID_PATTERN validator had drifted more permissive than the canonical constructor), and expanded the header comment explaining why this module's pattern is no longer byte-identical to the published JSON Schema's own ECMAScript-compatible pattern (Python-only \\\\Z vs. portable $(?!\\\\n)).",
       "review_by": "2026-11-30"
     },
     {
@@ -409,6 +409,16 @@
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_compare_receipt.py",
+      "baseline_lines": 948,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Crossed the 800-line production cap for a new-to-the-ledger file (D1/P1/R2, CLI-audit): two functions moved here from cli_compare_release_helpers.py/cli_compare_release_matrix.py, both of which sat at their own no_growth baseline (below) with zero headroom left. _release_summary_effective_config_block (the release-level compare summary's policy.base/policy.overrides/policy.reclassify computation, previously wrong -- it read a bare, policy-less SimpleNamespace) and _release_md_library_findings (the release Markdown report's per-library finding list, previously entirely absent -- the report carried counts only, no symbol names) needed a shared home neither original owner had room for. Also ruled out cli_compare_release_matrix.py as that home: cli_compare_release_helpers.py is a deliberate import leaf (its own module docstring: 'must not import from abicheck.cli or abicheck.cli_compare_release'), and cli_compare_release_matrix.py already imports it at module load -- routing either function back through cli_compare_release_matrix.py would have closed a fresh two-module cycle absorbing cli_compare_release_helpers.py into the big CLI-registration SCC (scripts/check_ai_readiness.py's IMPORT_CYCLE_ALLOWLIST), which that module was deliberately kept out of. This module was the only reachable, cycle-free home with room: it already owns the analogous single-pair record_resolved_config/record_release_resolved_config receipt functions the digest one is a release-summary sibling of, and imports nothing from either original owner.",
       "review_by": "2026-11-30"
     },
     {
@@ -723,12 +733,12 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1992,
+      "baseline_lines": 1999,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper. Raised by 1 for ADR-063 Phase 6's second slice: the ELF AbiSnapshot construction site gained the semantic_ir=ast_result.semantic_ir keyword (the ElfHeaderAstResult field a shared choke point in dumper_manifest.py now computes for both the legacy single-TU and manifest paths) -- the PE/Mach-O construction sites were deliberately left unwired in this slice rather than adding their own inline normalize_header_ast() calls here, precisely to avoid a second, larger growth of this already-capped file.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper. Raised by 1 for ADR-063 Phase 6's second slice: the ELF AbiSnapshot construction site gained the semantic_ir=ast_result.semantic_ir keyword (the ElfHeaderAstResult field a shared choke point in dumper_manifest.py now computes for both the legacy single-TU and manifest paths) -- the PE/Mach-O construction sites were deliberately left unwired in this slice rather than adding their own inline normalize_header_ast() calls here, precisely to avoid a second, larger growth of this already-capped file. Raised by 7 for ADR-063 Phase 6's third slice: _dump_pe/_dump_macho now wire semantic_ir too, via a new shared choke point (extract/header_ast_fields.parse_header_ast_fields, a new leaf module under the responsibility-package extract/ owner and its own 800-line cap, that absorbed the actual parse-and-normalize logic) rather than an inline normalize_header_ast() call at either site -- the net growth is one new top-level import plus, per site, one producer local, one parse_header_ast_fields() call, and one semantic_ir= keyword replacing the prior nine parser.parse_*() calls with nine equivalent _ast.* attribute reads (net neutral) plus that one new field.",
       "review_by": "2026-11-30"
     },
     {
@@ -773,22 +783,22 @@
     },
     {
       "path": "abicheck/dumper_hybrid.py",
-      "baseline_lines": 1018,
+      "baseline_lines": 1210,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate. Raised by a further 16 in the same slice's follow-up (Codex review): constants itself is NOT merged the same way typedefs_qualified is, so constant_entity_ids needed an explicit filter to the keys castxml_snap.constants actually retains, or a clang-only constant would leave a phantom sidecar key with no matching entry. Raised by a further 13 for ADR-063 Phase 6's first slice: merge_snapshots() must reconcile the two sub-snapshots' semantic_ir the same way it already reconciles every legacy field, or the merged snapshot's two representations disagree on every clang-only/clang-backfilled declaration. The matching/backfill algorithm itself lives in the new extract/semantic_ir_merge.py, so only the call-site plumbing lands here.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate. Raised by a further 16 in the same slice's follow-up (Codex review): constants itself is NOT merged the same way typedefs_qualified is, so constant_entity_ids needed an explicit filter to the keys castxml_snap.constants actually retains, or a clang-only constant would leave a phantom sidecar key with no matching entry. Raised by a further 13 for ADR-063 Phase 6's first slice: merge_snapshots() must reconcile the two sub-snapshots' semantic_ir the same way it already reconciles every legacy field, or the merged snapshot's two representations disagree on every clang-only/clang-backfilled declaration. The matching/backfill algorithm itself lives in the new extract/semantic_ir_merge.py, so only the call-site plumbing lands here. Raised by a further 66 for ADR-063 Phase 6's third slice (Codex review, fresh evidence): once semantic_ir carries FUNCTION/VARIABLE occurrences too, the existing Mach-O mangled-name normalization (_macho_normalize_mangled, already applied to clang_functions/clang_variables before merging) must reach clang_snap.semantic_ir the same way, or a Mach-O hybrid dump's merged semantic_ir retains every affected function/variable twice (once under clang's Darwin-decorated mangled key, once under castxml's prefix-free one) while the flat merged_functions/merged_variables have it once, normalized. _macho_normalize_semantic_ir() closes the gap the identical way the existing flat-field rewrite already does. Raised by a further 55 in the same slice's third review round: extract/semantic_normalizer.py stopped excluding castxml's synthetic-ctor/dtor-keyed functions from semantic_ir (they are real evidence for a single-backend dump, which has no rewrite step to desync), which pushed the identity-rewrite-consistency problem back onto this module -- _merge_functions() now also returns (via an output-param dict) every old-to-new EntityId substitution its own ctor/dtor structural match makes, and merge_snapshots() applies the identical substitution to castxml_snap.semantic_ir (through the same _rewrite_semantic_ir_entity_ids() primitive the Mach-O fix above introduced) before reconciling it with clang's, so a matched declaration is never left keyed under its retired synthetic identity in one representation while the flat functions list already carries the real one. Raised by a further 71 for ADR-063 Phase 6's fourth slice (Codex review, fresh evidence): once semantic_ir carries CONSTANT occurrences too, merged.constants stays castxml_snap's own verbatim (a pre-existing, deliberate exception -- see that field's own comment), but merge_semantic_ir is generic over every EntityKind and appends an unmatched clang-only constant occurrence into the merged IR unconditionally, the same as it correctly does for a clang-only function/variable/type/enum (all of which genuinely ARE unioned into their own flat fields, unlike constants). Left unfiltered, a clang-only constant would surface through semantic_ir with no corresponding entry in merged.constants/constant_entity_ids at all. _drop_unmatched_constant_occurrences() closes the gap by filtering merged_ir's CONSTANT occurrences (and their conflict-key entries) to the identical kept-entity-id set constant_entity_ids's own union-then-filter already computes, so the two cannot drift; the constant_entity_ids computation itself moved out of the inline replace() call into a local variable purely so both consumers read the same value.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/dumper_scoping.py",
-      "baseline_lines": 1381,
+      "baseline_lines": 1398,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 61 for ADR-063 Phase 6's second slice (Codex review, PR #1001): scope_snapshot_excluding_dependencies()'s dataclasses.replace() carried snap.semantic_ir over unfiltered, so an excluded dependency type/enum stayed reachable through the filtered snapshot's own canonical IR even though the flat types/enums lists correctly dropped it. _scoped_semantic_ir() closes the gap the same header-origin-filter way the existing flat-field filtering already does. Raised by 31 more in the same PR (second Codex review round): the same function's own semantic_ir_conflicts dict was still left unfiltered for an excluded occurrence -- _scoped_semantic_ir() now returns both the scoped IR and a semantic_ir_conflicts filtered by exact key membership (never a text rewrite, so no risk of the packed-key corruption model.semantic_ir.renumber_conflict_keys was built to avoid for the unrelated renumbering case).",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 61 for ADR-063 Phase 6's second slice (Codex review, PR #1001): scope_snapshot_excluding_dependencies()'s dataclasses.replace() carried snap.semantic_ir over unfiltered, so an excluded dependency type/enum stayed reachable through the filtered snapshot's own canonical IR even though the flat types/enums lists correctly dropped it. _scoped_semantic_ir() closes the gap the same header-origin-filter way the existing flat-field filtering already does. Raised by 31 more in the same PR (second Codex review round): the same function's own semantic_ir_conflicts dict was still left unfiltered for an excluded occurrence -- _scoped_semantic_ir() now returns both the scoped IR and a semantic_ir_conflicts filtered by exact key membership (never a text rewrite, so no risk of the packed-key corruption model.semantic_ir.renumber_conflict_keys was built to avoid for the unrelated renumbering case). Raised by 17 for ADR-063 Phase 6's third slice (Codex review, PR #1012): _scoped_semantic_ir() only ever checked EntityKind.TYPE/EntityKind.ENUM, so once the third slice populated FUNCTION/VARIABLE occurrences too, a dependency-header function/variable's occurrence stayed reachable through semantic_ir even though its flat functions/variables counterpart was already excluded -- two new kept_functions/kept_variables parameters and their entity-id sets close the identical gap for the two new kinds.",
       "review_by": "2026-11-30"
     },
     {
@@ -1033,12 +1043,12 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1111,
+      "baseline_lines": 1117,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1111 -> 1116 merging G42 phase 1 (PR #1008) onto ADR-063 Phase 7's already-landed REPORT_SCHEMA_VERSION bump to 2.48 (run_outcome): both PRs independently bumped REPORT_SCHEMA_VERSION on the same base version, a genuine same-line collision the file's own documented \"renumber, don't reuse\" convention (see the 2.32/2.36/2.38 history entries) resolves by renumbering G42's bump to 2.49 and adding its own five-line history entry rather than discarding either PR's change. Raised 1116 -> 1117 (same phase, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.24 -> 1.25 in lockstep with REPORT_SCHEMA_VERSION's 2.49 bump -- a scan-shaped check-target report shares build_check_id() with a compare-shaped one, so the widened check_id lexical contract reaches it too and needs its own feature-detectable version marker.",
       "review_by": "2026-11-30"
     },
     {
@@ -1053,12 +1063,12 @@
     },
     {
       "path": "abicheck/service_scan.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1933,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines, to the file-size hard cap exactly (ADR-063 Phase 4, Codex review): run_scan_set() -- the typed API's own --artifact-set entry point -- had no Bazel target-scoping pre-flight of its own, so an unsupported request only failed after discover_artifact_set()/check_artifact_set_soname_collisions()/artifact_set_member_exports() had already run for every member. The actual guard logic lives in the new shared workflows.plan.scan_bazel_scoping_failure() (used by scan_engine.run_scan_core too, replacing each call site's own inlined copy and shrinking scan_engine.py in the process) -- this file's own footprint is the minimum call-site glue: one import (its own explanatory comment trimmed onto the import line itself), one resolve call, one guarded raise. No smaller diff was found that still calls the shared guard before the real discovery work below, while landing exactly at (not over) the file-size hard cap.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines, to the file-size hard cap exactly (ADR-063 Phase 4, Codex review): run_scan_set() -- the typed API's own --artifact-set entry point -- had no Bazel target-scoping pre-flight of its own, so an unsupported request only failed after discover_artifact_set()/check_artifact_set_soname_collisions()/artifact_set_member_exports() had already run for every member. The actual guard logic lives in the new shared workflows.plan.scan_bazel_scoping_failure() (used by scan_engine.run_scan_core too, replacing each call site's own inlined copy and shrinking scan_engine.py in the process) -- this file's own footprint is the minimum call-site glue: one import (its own explanatory comment trimmed onto the import line itself), one resolve call, one guarded raise. No smaller diff was found that still calls the shared guard before the real discovery work below, while landing exactly at (not over) the file-size hard cap. Baseline lowered 2000 -> 1933, closing ADR-063 Phase 4's residual: run_scan_set()'s own scan_bazel_scoping_failure() call still hadn't forwarded sources=/build_config= (the config-sourced, no-explicit---build-target root-target-scope case this same phase's second slice already closed for run_scan_core() and both of cli_scan.py's own pre-flight sites), because the widened call plus its own comment didn't fit this file's line budget at the prior baseline and neither a LARGE_FILE_ALLOWLIST entry nor trimming unrelated content was accepted (see the known-gaps.md entry this baseline bump replaces). Closed instead by moving responsibility, not by raising the baseline: _descendant_pgids()/_kill_process_tree() -- the process-group kill machinery behind run_scan_subprocess()/run_scan_set_subprocess(), with zero dependency on anything scan-specific -- moved to the new abicheck/workflows/scan_subprocess.py (a genuine one-directional edge, mirroring cxx20_pair_dialect.py's own precedent; the worker/harness functions that call back into run_scan()/run_scan_set() stayed here, avoiding the mutual-dependency shape a full move would have created), re-exported for backward compatibility. That bought back ~90 lines of room, used to add the sources=/build_config= forwarding (plus its own explanatory comment) and land at the new, lowered baseline (1933) with real room left below the file-size hard cap (2000), rather than exactly at the cap the way the prior baseline did.",
       "review_by": "2026-11-30"
     },
     {
@@ -2033,12 +2043,12 @@
     },
     {
       "path": "tests/test_reusable_workflows.py",
-      "baseline_lines": 1942,
+      "baseline_lines": 1943,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised by one line for G42 phase 1: TestPreCheckOperationalErrorReport's end-to-end test extracts and directly executes the real check-project.yml precheck script (set -euo pipefail), which now references MATRIX_EXPLICIT_ID -- the existing test's hand-built env needed that one added key to keep passing, not new test coverage (new G42 coverage for this script lives in the new sibling tests/test_reusable_workflows_explicit_id.py instead).",
       "review_by": "2026-11-30"
     },
     {

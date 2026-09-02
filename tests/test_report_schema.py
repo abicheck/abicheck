@@ -850,6 +850,105 @@ class TestReportIdentityEnvelope:
         with pytest.raises(ValueError, match="check_id"):
             reporter.to_json(result)
 
+    def test_check_id_with_a_trailing_newline_is_rejected(self):
+        """Codex review: CHECK_ID_PATTERN was anchored with a trailing
+        '$', which (without re.MULTILINE) also matches just before a
+        trailing '\\n' -- a check_id carrying one would otherwise pass
+        validate_check_id() and corrupt GITHUB_OUTPUT downstream."""
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@source\n"
+        with pytest.raises(ValueError, match="check_id"):
+            reporter.to_json(result)
+
+    def test_schema_pattern_itself_rejects_a_trailing_newline_check_id(self):
+        """Codex review, fresh evidence: the previous test only proves
+        checker_types.validate_check_id() (the Python-side eager check
+        to_json() runs) rejects a trailing newline -- it never reaches the
+        packaged/published JSON Schema's own ``check_id`` ``pattern``,
+        which independently anchored with a trailing ``$``. Python's
+        ``jsonschema`` library validates a ``pattern`` with ``re.search()``,
+        which has the identical Python-``re``-specific quirk this whole bug
+        class is about (``$`` matches immediately before a single trailing
+        ``\\n``, unlike real ECMA-262 ``$`` semantics) -- so an external
+        producer that only validates against the schema, bypassing this
+        package's own ``to_json()``, could still emit a schema-valid report
+        carrying a corrupting trailing newline. Builds the payload dict
+        directly (not through ``reporter.to_json()``) so the Python-side
+        eager check can't mask a schema regression."""
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        payload = json.loads(reporter.to_json(result))
+        schema = load_compare_report_schema()
+
+        payload["check_id"] = "libfoo@profile#channel@source"
+        jsonschema.validate(instance=payload, schema=schema)
+
+        payload["check_id"] = "libfoo@profile#channel@source\n"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=schema)
+
+    def test_environment_id_starting_with_punctuation_is_rejected(self):
+        """Codex review, fresh evidence: build_check_id's own
+        validate_identifier() already required an initial alphanumeric
+        character for environment_id, but CHECK_ID_PATTERN (this Python-
+        side validator) and the published JSON Schema's ``pattern``
+        independently spelled the ``!<environment_id>`` segment's charset
+        as the more permissive ``[A-Za-z0-9._-]+`` -- so a check_id an
+        external producer constructed by hand (e.g. ``...!_prod``, never
+        producible by build_check_id itself) validated cleanly through
+        both public validators. Checks the Python-side eager validator
+        (via to_json's ValueError) and the schema pattern itself, the same
+        two-boundary shape as the trailing-newline test above."""
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@source!_prod"
+        with pytest.raises(ValueError, match="check_id"):
+            reporter.to_json(result)
+
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        schema = load_compare_report_schema()
+        payload["check_id"] = "libfoo@profile#channel@source!_prod"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=schema)
+
+        payload["check_id"] = "libfoo@profile#channel@source!prod"
+        jsonschema.validate(instance=payload, schema=schema)
+
+    def test_explicit_id_qualified_check_id_round_trips_and_validates(self):
+        """G42 'Explicit check identifiers': the full construct
+        (build_check_id) -> validate-against-schema -> parse
+        (contracts.parse_check_id) chain for a ~<explicit_id>-qualified
+        check_id -- not just the parser in isolation, since either half of
+        the three-layer extension (checker_types/check_report vs. the
+        schema vs. contracts.py) being missed fails at a different point."""
+        from abicheck.buildsource.check_report import build_check_id
+        from abicheck.workflows.aggregate.contracts import parse_check_id
+
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = build_check_id(
+            "libfoo",
+            "linux-x86_64-gcc13",
+            "accepted-main",
+            "source",
+            explicit_id="l4-plugin-rhel8",
+        )
+        payload = json.loads(reporter.to_json(result))
+        jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        assert (
+            payload["check_id"]
+            == "libfoo@linux-x86_64-gcc13#accepted-main@source~l4-plugin-rhel8"
+        )
+        parsed = parse_check_id(payload["check_id"])
+        assert parsed is not None
+        assert parsed.target == "libfoo"
+        assert parsed.profile == "linux-x86_64-gcc13"
+        assert parsed.baseline_channel == "accepted-main"
+        assert parsed.requested_depth == "source"
+        assert parsed.explicit_id == "l4-plugin-rhel8"
+        assert parsed.environment_id is None
+
     def test_stat_mode_carries_identity_fields_too(self):
         old, new = _breaking_pair()
         result = compare(old, new)
