@@ -6002,6 +6002,63 @@ looked like the obvious fix and wasn't.
   chain, each fix closing the previous round's hazard while (in round 2's
   case) introducing this one.
 
+- **`action/run.sh`'s `extra-args` parsing performs pathname expansion
+  (globbing), not just word-splitting, and no site disables it — investigated,
+  deliberately not fixed (CodeRabbit review, PR #998, ADR-064's
+  effective-format-override fix).** `_effective_format()` (added by that PR),
+  `_extra_args_has_write_flag()`, `_extra_args_write_json_path()`, and the
+  real command assembly (`CMD+=($INPUT_EXTRA_ARGS)`) all read
+  `$INPUT_EXTRA_ARGS` via an unquoted `set --`/array-append expansion, which
+  bash expands for both word-splitting AND filesystem globs. A crafted
+  `extra-args: '*'` (or any value containing a bare `*`/`?`/`[...]`) run in a
+  workspace that happens to contain a file whose name looks like a CLI flag
+  (e.g. `--format=json`) would have that filename silently substituted in as
+  a real argument -- an unintended, workspace-content-dependent flag
+  injection. `add_flag`'s sibling `_split_legacy_value` already hardens
+  against exactly this class (`set -f`, Codex/report finding P2.2), so the
+  precedent for fixing it exists.
+  **Not fixed here**, for a reason specific to this PR: `_effective_format()`
+  exists only to predict, from `$INPUT_EXTRA_ARGS`, what `--format` value the
+  real `CMD+=($INPUT_EXTRA_ARGS)` expansion will actually produce -- so it
+  reads that variable the *same* (unsafe) way on purpose. Disabling globbing
+  in `_effective_format()` alone while leaving `CMD` assembly unprotected
+  would not close the vulnerability (the real invocation would still glob)
+  and would *introduce* a new divergence between what this detection
+  function predicts and what Click actually receives -- worse than today's
+  status quo of "both glob identically, so they can't disagree." Closing
+  this properly means hardening all four sites together in one coordinated
+  change (`CMD` assembly, `_effective_format`, `_extra_args_has_write_flag`,
+  `_extra_args_write_json_path`), verified against a hostile-glob test
+  corpus the way `test_action_run_sh_helpers.py`'s
+  `TestAddFlagHostileScalarCorpus` already exists for `add_flag`/
+  `add_sided_flag` -- a scoped, standalone follow-up, not a drive-by change
+  bundled into a PR whose actual objective was the effective-format fix
+  itself.
+
+- **`action/run.sh` has no "effective output path" counterpart to
+  `_effective_format` — investigated, deliberately not fixed (Codex review,
+  PR #998, fresh evidence).** `extra-args` supplying its own `-o`/`--output`
+  (`abicheck/cli_options.py`'s `-o/--output`) is a different flag than
+  `--format`, and Click's last-flag-wins rule applies to it exactly the same
+  way: an `extra-args: -o report.json` on top of an Action run with no
+  `output-file:` input configured really does write the primary report to
+  `report.json` on disk instead of stdout — but `$OUTPUT_FILE` (this
+  script's own tracking variable, sourced only from `INPUT_OUTPUT_FILE`)
+  never learns about it, so `_json_report_src` finds nothing: not
+  `$OUTPUT_FILE` (empty), not `$_STDOUT_JSON_FILE` (nothing on stdout, since
+  `-o` redirected it), not `$PR_JSON` (only populated when this script's own
+  injection fires). A scan or compare that exits non-zero this way (e.g.
+  `EVIDENCE_CONTRACT_ERROR`) publishes the generic `ERROR` instead of the
+  real, more specific verdict its own report on disk could have named.
+  **Not fixed here**, for the same "coordinated primitive, not a narrow
+  patch" reason as the pathname-expansion gap above: `--write` already has
+  its own effective-value recovery (`_extra_args_write_json_path`), but
+  `-o`/`--output` has none, and building one properly means giving it the
+  same freshness/fingerprint discipline `_json_report_src` already applies
+  to `$OUTPUT_FILE` (a pre-existing file at the extra-args path must not be
+  trusted as this run's own output) — a new `_effective_output_file` helper
+  and its own test suite, not a one-line change to a single call site.
+
 - **`BundleFacts` (and its G40 archive container) has no published JSON
   Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`** —
   investigated, not fixed (Codex review, CLI cleanup phase two's PR I

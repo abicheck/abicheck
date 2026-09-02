@@ -778,10 +778,12 @@ outputs:
       run's own extra-args already naming one via `--write`, this
       Action's own `format: json` input, or extra-args overriding
       `--format` in either direction (`--format json` under `format:
-      text`, or `--format text` under `format: json` -- neither override
-      is detected specially, so `format: json` alone is not a reliable
-      guarantee any more than `format: text` alone is a reliable
-      disqualifier). This description does not attempt to enumerate
+      text`, or `--format text` under `format: json` -- both directions
+      ARE detected, via `_effective_format`, so `format: json` alone is
+      not a reliable guarantee any more than `format: text` alone is a
+      reliable disqualifier, but the override itself is not a gap: this
+      Action's JSON-detection sites gate on the effective value, not the
+      nominal one). This description does not attempt to enumerate
       every format/pr-comment/extra-args combination that does or
       doesn't produce one, since five successive review rounds each
       found the previous claim incomplete (pr-comment: false; an
@@ -789,13 +791,16 @@ outputs:
       non-JSON format; extra-args overriding a text primary format to
       JSON; extra-args overriding a JSON primary format back to text --
       the last two are mirror images of the same "the effective
-      invocation, not the configured input, decides" root cause);
+      invocation, not the configured input, decides" root cause, and are
+      the ones the override detection above now closes);
       action/run.sh's own JSON-detection logic (`_json_report_src` and
       the `_STDOUT_JSON_FILE` capture immediately above it -- search that
-      file for either name) is the one authoritative source, with no
-      shortcut claim in this description standing in for it. Whenever no
-      JSON report exists, this still reads as the generic ERROR, a
-      documented, unclosed gap.
+      file for either name, plus `_effective_format`) is the one
+      authoritative source, with no shortcut claim in this description
+      standing in for it. Whenever no JSON report exists at all (no
+      sidecar, no `--write`, no JSON-format primary output, effective or
+      otherwise), this still reads as the generic ERROR, a documented,
+      unclosed gap.
       new-library-set (--artifact-set) scans are a stricter case of the
       same gap: the JSON sidecar is never auto-requested for that mode
       regardless of pr-comment, so a JSON report requires either
@@ -873,6 +878,11 @@ outputs:
     description: >
       Path to the generated report file. Set when output-file is provided,
       or auto-populated for SARIF format (defaults to abicheck-results.sarif).
+      Withheld (empty) when format: sarif and upload-sarif: true were both
+      requested but extra-args overrode --format away from sarif -- the
+      real file exists but its content isn't SARIF, and this is the exact
+      value the upload-sarif step below gates on, so withholding it skips
+      that upload rather than feeding mismatched content to CodeQL.
     value: ${{ steps.run-abicheck.outputs.report-path }}
 
 runs:

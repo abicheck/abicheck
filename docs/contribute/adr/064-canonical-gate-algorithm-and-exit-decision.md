@@ -65,10 +65,16 @@ error gets, since both produce the identical `Error: ...` stderr shape; it
 now recognizes the native CLI's own `verdict: "EVIDENCE_CONTRACT_ERROR"`
 JSON envelope and publishes a matching, distinguishable verdict (see
 "Staged landing, additive first" below, item 1's own end-of-list "Update"
-for the full account). Still
+for the full account). **Update (2026-09-02):** the effective-format-override
+gap that same parity pass's review rounds found — `extra-args: --format
+json` overriding a `format: text`/`markdown` step's nominal format, which
+`action/run.sh`'s JSON-detection sites (`_STDOUT_JSON_FILE`,
+`_json_report_src`'s `OUTPUT_FILE` branch) previously missed — is fixed; see
+"Staged landing, additive first" below, item 1's own end-of-list note. Still
 open: the release fan-out's `GateOptions` unification; the rest of the
 cross-front-end parity pass (typed API; the `--format text` gap named
-above); and **stage 2**, the
+above; a real `--artifact-set` member-level evidence-contract signal); and
+**stage 2**, the
 `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
@@ -705,12 +711,145 @@ lands in two stages rather than one atomic change:
       `verdict` description's existing generic pointer at
       `action/run.sh`'s own JSON-detection logic, now naming
       `_STDOUT_JSON_FILE` alongside `_json_report_src` and updating the
-      combination count from three to four. Still open: the release
-      fan-out's `GateOptions` unification, the typed-API half of this
-      parity pass, the `--format text` gap named above, a real
-      `--artifact-set` member-level evidence-contract signal for the
-      Action to consume, and this round's own effective-format-override
-      gap.
+      combination count from three to four. **Fixed (2026-09-02):** the
+      effective-format-override gap itself. A new `_effective_format` helper
+      scans `INPUT_EXTRA_ARGS` the same word-splitting way
+      `_extra_args_has_write_flag`/`_extra_args_write_json_path` already
+      scan it for their own flag, keeping the last `--format`/`--format=`
+      occurrence (Click's own last-wins precedence) and falling back to the
+      nominal `$FORMAT` when extra-args carries none; computed once, into
+      `$_EFFECTIVE_FORMAT`, right after extra-args are appended to `CMD`.
+      Both sites this section names now gate on that value instead of the
+      bare `$FORMAT`: the stdout-JSON capture (`_STDOUT_JSON_FILE`) and
+      `_json_report_src`'s `OUTPUT_FILE` branch, each falling back to
+      `${FORMAT:-}` when `$_EFFECTIVE_FORMAT` is unset so the several
+      isolated-snippet tests that extract `_json_report_src` without
+      running the real command-assembly section keep behaving exactly as
+      before (`tests/test_action_run_sh_helpers.py::TestEffectiveFormat`,
+      `tests/test_action_run_sh_pr_json.py`). **A same-PR review round
+      (Codex, fresh evidence) found a third site of the identical class**:
+      `_text_report_content` -- the text-report counterpart
+      `_severity_gate_exit`/`_severity_gate_categories` both read through --
+      gated on the bare `$FORMAT` too, so a `format: json` step whose own
+      `extra-args` overrode to `--format text` (with `output-file` set)
+      wrote real text to `$OUTPUT_FILE` that this function still refused to
+      read, silently losing the severity-gate line and publishing the
+      generic `ERROR` instead of `SEVERITY_ERROR`. Fixed the same way --
+      gated on `${_EFFECTIVE_FORMAT:-${FORMAT:-}}` (`tests/
+      test_action_run_sh_helpers.py::TestTextReportContentEffectiveFormat`).
+      **A fourth review round (Codex, fresh evidence) found the general-
+      purpose `$_EFFECTIVE_FORMAT` computation itself ran too late for two
+      of its own consumers**: it was computed once, after `extra-args` is
+      appended to `CMD` -- but compare and scan mode's own `PR_JSON`
+      sidecar-injection decisions (`--write json=$PR_JSON`, added when the
+      primary format isn't already JSON) run *earlier*, inside each mode's
+      own block, and still checked the bare `$FORMAT`. A `format: json`
+      step whose own `extra-args` overrode to a non-json format skipped the
+      injection (nominally "already JSON, no secondary needed") while the
+      real run produced no JSON at all -- the mirror image of the gap
+      `_STDOUT_JSON_FILE` had, one step earlier in the pipeline. Fixed by
+      computing `$_EFFECTIVE_FORMAT` a second time, right after each mode's
+      own `$FORMAT` is set (idempotent with the later, general-purpose
+      computation, which still covers every mode with no injection decision
+      of its own), and gating both injection sites on it
+      (`tests/test_action_run_sh_compare_pr_json_write.py::
+      TestCompareDoesNotInjectALosingWrite::
+      test_extra_args_overriding_json_away_still_injects_a_write`,
+      `tests/test_action_run_sh_scan_pr_json_write.py`, a new module mirroring
+      the compare-mode one). **A fifth review round (Codex, fresh evidence)
+      found the fix had stopped one layer short: report *detection* was
+      covered, report *rendering* was not.** The step-summary "Format" row
+      and its "Full report" markdown-vs-code-fence decision (whether the raw
+      output embeds as rendered Markdown or inside a ` ``` ` fence) still
+      read the nominal `$FORMAT`, so a `format: json` step overridden to
+      `--format markdown` mislabeled the summary row and embedded real
+      Markdown output inside a code fence, and the reverse override embedded
+      raw JSON as if it were Markdown. Fixed by gating both on
+      `${_EFFECTIVE_FORMAT:-${FORMAT:-markdown}}` too (`tests/
+      test_action_run_sh_summary.py::
+      TestStepSummaryFullReportFencingUsesEffectiveFormat`). **Also
+      identified, and deliberately deferred rather than fixed in this PR**
+      (recorded in `docs/contribute/known-gaps.md`): (1) CodeRabbit review,
+      fresh evidence — none of `_effective_format`'s three siblings
+      (`_extra_args_has_write_flag`, `_extra_args_write_json_path`) or the
+      real `CMD` assembly (`CMD+=($INPUT_EXTRA_ARGS)`) disable pathname
+      expansion when splitting `INPUT_EXTRA_ARGS`, so a crafted `extra-args:
+      '*'` in a workspace containing a flag-shaped filename could inject an
+      unintended argument — real, but `_effective_format` deliberately
+      matches its siblings' and the real command's own (equally unsafe)
+      splitting on purpose, so hardening only the newest of the four sites
+      would introduce a detection/execution divergence rather than close
+      one; the fix needs all four sites (plus a hostile-glob test corpus)
+      changed together. (2) Codex review, fresh evidence — extra-args
+      supplying its own `-o`/`--output` (a different flag than `--format`,
+      with no existing "effective value" helper the way `--write` has
+      `_extra_args_write_json_path`) can point the real primary report at a
+      path this script's `$OUTPUT_FILE` tracking never learns about,
+      leaving `_json_report_src` with nothing to find; closing this
+      properly needs a new `_effective_output_file` helper with the same
+      freshness/fingerprint discipline `_json_report_src` already applies
+      to `$OUTPUT_FILE`, not a narrow patch to one call site. **A sixth
+      review round (Codex, fresh evidence) found two more sites of the same
+      class, both fixed in this PR since each was a narrow, in-scope
+      correction (unlike the two deferred above, neither needed a new
+      primitive):** (1) `format: sarif` with no `output-file:` input
+      defaults `$OUTPUT_FILE` to `abicheck-results.sarif` — the exact
+      filename a workflow's own `upload-sarif: true` step looks for — but
+      that default was keyed on the nominal `$FORMAT`, so `extra-args
+      --format json` (or any other override away from sarif) still wrote
+      real JSON into a file named as if it were SARIF, ready to be silently
+      fed to a `continue-on-error` CodeQL upload step (`action.yml`'s own
+      `if: inputs.format == 'sarif'` gate on that step reads the *nominal*
+      Action input and cannot see a shell-local override, so this could not
+      be closed by keying that step's own condition on the effective value
+      either — the fix instead makes the mismatch fail loudly: no default
+      `-o` is set when the effective format isn't sarif, so the upload step
+      finds no file rather than the wrong one). (2) `_emit_annotations`'s
+      own "no JSON report is available" diagnostic — printed when
+      `_json_report_src` correctly finds nothing — was itself gated on the
+      nominal `$FORMAT` inside that same `if`, so a `format: json` step
+      overridden to `--format text` (with its own `--write markdown=...`)
+      correctly rendered no annotations but suppressed the very message
+      explaining why. Both gated on `${_EFFECTIVE_FORMAT:-${FORMAT:-...}}`
+      like every other site (`tests/
+      test_action_run_sh_compare_pr_json_write.py::
+      TestSarifDefaultOutputFileUsesEffectiveFormat`, `tests/
+      test_action_run_sh_annotate_renderer.py::
+      test_effective_format_override_still_emits_the_diagnostic`).
+      **A seventh review round (Codex, fresh evidence) found the SARIF fix
+      above was itself incomplete**: it only closed the no-explicit-
+      `output-file` default-path case. An *explicit* `output-file:` +
+      `format: sarif` + `upload-sarif: true` + an `extra-args --format`
+      override still wrote real, non-SARIF content to that explicit path,
+      and `report-path` (the run's own output) was published unconditionally
+      whenever the file existed, regardless of whether its content actually
+      matched the format the upload step assumes. Fixed at the one point
+      that actually gates the danger rather than at the two places content
+      can land: `report-path` — precisely the value `action.yml`'s
+      upload-sarif step's own `if:` condition requires be non-empty — is now
+      withheld whenever `format: sarif` and `upload-sarif: true` were both
+      requested but the effective format isn't sarif, covering the default
+      and explicit-path cases identically and needing no new Action output
+      or `action.yml` change (`tests/
+      test_action_run_sh_compare_pr_json_write.py::
+      TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch`).
+      **An eighth review round (Codex, fresh evidence) caught a real bug in
+      that very fix, not a new instance of the class**: the `::warning::`
+      diagnostic explaining the skipped upload was echoed *inside* the
+      `{ ... } >> "$GITHUB_OUTPUT"` redirected block, so it never reached the
+      Actions log at all — instead it was silently swallowed into the
+      environment file as a bogus, undeclared record (its own embedded `=`,
+      inside `title=abicheck`, makes it look like a key/value pair to the
+      runner). Fixed by hoisting the mismatch check and its warning out of
+      that block entirely, computed once into `$_SARIF_UPLOAD_FORMAT_MISMATCH`
+      before the output-setting block reads it. The existing tests only
+      inspected the raw `$GITHUB_OUTPUT` file's contents and could not have
+      caught this; extended to also assert the warning reaches run.sh's own
+      stdout/stderr and never appears inside `$GITHUB_OUTPUT`. Still
+      open: the release fan-out's `GateOptions` unification, the typed-API half of
+      this parity pass, the `--format text` gap named above, and a real
+      `--artifact-set` member-level evidence-contract signal for the Action
+      to consume.
 
       **A CI-infrastructure fix, not a review finding:** the new test
       file's own malicious-fixture test (and its siblings) passed their
