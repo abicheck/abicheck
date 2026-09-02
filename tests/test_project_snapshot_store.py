@@ -28,6 +28,8 @@ from abicheck.project_snapshot_store import (
     write_project_manifest,
 )
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import (
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
@@ -129,6 +131,31 @@ class TestDirectoryObjectStore:
         path.write_bytes(other_path.read_bytes())
         with pytest.raises(ValueError, match="does not match its requested digest"):
             store.get(digest)
+
+    def test_a_hand_added_capture_metadata_subtree_is_never_returned(
+        self, tmp_path: Path
+    ) -> None:
+        """`semantic_digest` (and so `put()`'s own digest) strips the
+        reserved root `capture` block before hashing (D3) -- so a stored
+        object file hand-edited to add an arbitrary `capture` subtree back
+        in still matches its own digest, since that subtree was never in
+        the hash domain. `get()` must not hand that subtree back merely
+        because the digest still checks out: it must return the same
+        normalized (capture-stripped) form `InMemoryObjectStore.get()` and
+        `ObjectStore.get()`'s own documented contract already promise
+        (Codex review)."""
+        store = DirectoryObjectStore(tmp_path)
+        digest = store.put({"a": 1})
+        _algorithm, _sep, hexdigest = digest.partition(":")
+        path = tmp_path / "objects" / "sha256" / hexdigest[:2] / f"{hexdigest}.json.zst"
+        tampered = {"a": 1, "capture": {"injected": "surprise"}}
+        write_snapshot_text(
+            canonical_json(tampered), path, compression=SnapshotCompression.ZSTD
+        )
+        # Still verifies -- `capture` is outside the hash domain by design.
+        result = store.get(digest)
+        assert result == {"a": 1}
+        assert "capture" not in result
 
     def test_a_corrupted_raw_object_is_refused_rather_than_silently_returned(
         self, tmp_path: Path

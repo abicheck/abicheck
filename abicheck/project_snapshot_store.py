@@ -200,7 +200,18 @@ class DirectoryObjectStore:
                     f"(recomputed {actual!r}) -- the object may be corrupted or "
                     "was hand-edited"
                 )
-            return content
+            # `semantic_digest` strips the reserved root `capture` block
+            # before hashing (D3), so a hand-edited object file that adds an
+            # arbitrary `capture` subtree back in still matches `digest` --
+            # the subtree isn't in the hash domain. Returning `content`
+            # as-is would then hand back data the requested digest does not
+            # actually address, disagreeing with both this store's own
+            # `put()` (which never persists that subtree in the first place)
+            # and `ObjectStore.get()`'s documented contract ("with the
+            # reserved root `capture` block removed, matching what
+            # `semantic_digest` hashed") that `InMemoryObjectStore` already
+            # satisfies (Codex review).
+            return strip_capture_metadata(content)
         raw_path = self._raw_path(digest)
         if raw_path.exists():
             payload = read_snapshot_bytes(raw_path)
