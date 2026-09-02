@@ -102,15 +102,23 @@ removal under 15% done. Concretely, the review found:
   exists to forbid, even though each individual phase that produced this
   state met its own stated acceptance criteria.
 - Phase 0/5 converted `Fact[T]` representation and populated the registry
-  (45 facts, `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` empty), but every migrated
-  reader still resolves through `resolved_fact_value(fact, legacy_default)`
-  — collapsing `NotCollected`/`Unsupported`/`Failed` back onto the same
-  `False`/`None`/`[]` default the legacy field always held. This was
-  Phase 0's own explicit, correct acceptance bar ("representation, not
-  detector logic"), but it means no fact anywhere has reached
-  `FactLifecycle.CONSUMED` — a detector branching on `FactStatus` at all
-  remains unscheduled work, named as out of scope by every phase that
-  touches facts rather than owned by any of them.
+  (see `abicheck/model/fact_registry.py`'s `FACT_REGISTRY` for the current
+  count — this document doesn't freeze it; `KNOWN_UNCONVERTED_ELIGIBLE_FACTS`
+  is empty), but every migrated reader still resolves through
+  `resolved_fact_value(fact, legacy_default)` or an equivalent local
+  helper doing the identical present-or-default collapse — a review
+  finding on this PR named three: `diff_param_qualifiers._fact_bool`,
+  `diff_cxx_rules._fact_str_list`, `compare.surface_graph.fact_list`.
+  Each reads `.is_present`/`.value` directly rather than calling the
+  shared primitive, but all collapse `NotCollected`/`Unsupported`/`Failed`
+  back onto the same `False`/`None`/`[]` default the legacy field always
+  held, so 5B's inventory of what to migrate is every such
+  default-collapsing unwrap, not only literal `resolved_fact_value` call
+  sites. This was Phase 0's own explicit, correct acceptance bar
+  ("representation, not detector logic"), but it means no fact anywhere
+  has reached `FactLifecycle.CONSUMED` — a detector branching on
+  `FactStatus` at all remains unscheduled work, named as out of scope by
+  every phase that touches facts rather than owned by any of them.
 - `AnalysisPlan` (Phase 4) is deliberately a narrow, side-effect-free
   preflight object by design (so `--dry-run` stays free of ambiguous
   resolution) — but that means no single resolved runtime object exists
@@ -137,8 +145,14 @@ removal under 15% done. Concretely, the review found:
   or reclassification neither this plan nor ADR-063 currently schedules.
 
 **None of this contradicts any individual phase's own "Landed"/"Still not
-landed" accounting above or in ADR-063** — every phase's own acceptance
-criteria were met as stated. The review's point is that the plan's phase
+landed" accounting above or in ADR-063** — every *landed slice* met its own
+stated acceptance criteria at the time it landed. That is narrower than
+"every phase is complete": Phase 3's own D5 text remains unfulfilled for
+the reason recorded in its "Amendment" note, Phase 6's acceptance-criteria
+fixture (a closure-parameterized template) is still unmet, and several
+later phases are explicitly still in progress — each says so plainly in
+its own status paragraph above, and this review does not dispute any of
+those self-reports. The review's point is that the plan's phase
 list, read end to end, did not until this update contain a phase whose job
 is "make the new representation the *only* one a consumer can reach" for
 `SemanticIR`, `Fact` semantics, or a single resolved runtime context — only
@@ -156,7 +170,7 @@ against it:
 |---|---|---|---|
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
 | **4B — Resolved execution context** | not started | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme |
-| **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of `resolved_fact_value`'s uniform legacy-default collapse; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
+| **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
 | **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |

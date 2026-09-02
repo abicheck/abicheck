@@ -723,9 +723,21 @@ changes, but treat this block as the one most likely to lag.*
   ctor/dtor identity, later rewritten during hybrid merge, could be left
   orphaned in `semantic_ir` under its retired key (`_merge_functions` now
   reports its own entity-id substitutions, applied to `semantic_ir` before
-  reconciliation). `_dump_pe`/`_dump_macho` now call the normalizer too
-  (the with-headers path for both formats already did, undocumented until
-  this slice). **Still not landed, unchanged by this update:**
+  reconciliation). `dumper.py`'s `_dump_pe`/`_dump_macho` — the two PE/Mach-O
+  construction sites the second slice's own note left deliberately unwired
+  — now populate `semantic_ir` too, via a new shared leaf module,
+  `extract/header_ast_fields.parse_header_ast_fields`, structurally typed
+  against a `_HeaderAstParser` `Protocol` rather than importing either
+  backend's parser class directly (an unclassified-module edge the
+  architecture gate forbids for a migrated package). **Correction: this is
+  not "the with-headers path already did this, undocumented" — that
+  description belongs to Phase 2's *identity* wiring (PE/Mach-O's
+  with-headers path already carried `entity_id` before Phase 2's
+  fourteenth slice, since it reuses ELF's own header-AST parser), a
+  different fact from *this* phase's `semantic_ir` wiring, which the PE/Mach-O
+  construction sites genuinely lacked until this third slice** (a review
+  finding on this PR caught the conflation). **Still not landed, unchanged
+  by this update:**
   DWARF/PDB/BTF/CTF backends produce no `SemanticIR` at all — this
   normalizer canonicalizes identity a backend already resolved, it does
   not resolve identity itself, so it needs each backend's own Phase 2
