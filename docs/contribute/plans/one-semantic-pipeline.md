@@ -10171,27 +10171,63 @@ path silently falling back to extern-"C" for every MinGW C++ export. This
 closes item (1)'s remaining extraction-side gap in full: every
 DWARF/PE/Mach-O/ELF-symbol-table-only producer now populates `entity_id`.
 
-**Still open after this slice**: the flat detector modules named above
-(`diff_platform.py`'s DWARF-tier functions, `diff_elf_layout.py`,
-`diff_platform_elf_dynamic.py`, `diff_platform_elf_symbols.py`,
-`diff_versioning.py`, `diff_sycl.py`) still key on their own string-based
-matching rather than reading the now-real `entity_id` this slice
-populates — wiring them is the diff-site pass item (1)'s own text already
-distinguished from the extraction-side work this slice closes.
-`diff_filtering.py`/`type_reachability.py`'s bespoke
+**Still open after this slice, updated by a follow-up pass**: the diff-site
+wiring pass was carried out module by module, with a deliberately narrow
+scope — populate `Change.entity_id` only where a producer already resolves
+a real matched `Function`/`Variable`/`RecordType` object, never invent a
+lookup where the detector only ever sees a raw string or a DWARF-only
+layout struct. That landed three real sites: `diff_platform.py`'s
+ELF-fallback deleted-function finding, and
+`diff_platform_elf_symbols.py`'s exported-object size/alignment findings
+(both via `AbiSnapshot.var_by_mangled`). Every other call site across
+`diff_platform.py`, `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
+`diff_platform_elf_symbols.py`, `diff_versioning.py`, and `diff_sycl.py`
+was individually reviewed and left unwired for one of three structural
+reasons, not because the wiring pass stopped short of them: (a) the
+detector only has raw ELF/PE/Mach-O container facts in scope
+(`ElfMetadata`/`ElfSymbol`/PE export strings), which carry no `entity_id`
+field at all — the large majority of sites, including every one of
+`diff_platform_elf_dynamic.py`'s 40 and `diff_versioning.py`'s 7 and
+`diff_sycl.py`'s 9 (the latter two operating on `SyclMetadata`/
+`SyclPluginInfo`, equally plain); (b) the detector matches against
+DWARF-only `StructLayout`/`FieldInfo`/`EnumInfo` (`model/dwarf_facts.py`),
+which don't carry `entity_id` — only the header-layer `RecordType`/
+`EnumType` do, a genuinely separate, deeper extraction-side gap from
+"detector forgot to read `entity_id`"; this is `diff_platform.py`'s
+DWARF-tier layout functions and all of `diff_elf_layout.py` (pure L0/
+binary-only, matching `_ZTV<mangled>`/`_ZTI<mangled>` vtable/RTTI symbol
+strings with no `RecordType` ever in scope — its functions take only
+`old: AbiSnapshot, new: AbiSnapshot`); or (c) the finding is
+batch-shaped — aggregating multiple matched entities into one `Change`
+(e.g. `diff_platform_elf_dynamic.py`'s `VISIBILITY_LEAK`, which samples up
+to five leaked `Function` names into one summary finding) — where this
+codebase's own established convention (see `finding_identity.py`'s
+`resolve_change_identity` docstring) is that no producer sets `entity_id`
+on a batch-shaped `Change`, since a single id cannot represent several
+matched entities. `diff_filtering.py`/`type_reachability.py`'s bespoke
 string-suffix ambiguity trackers remain unmigrated, unattempted this slice
 given that module's own extensive, multiply-reviewed fragility (see its own
 module docstring) — a real rewrite risk this slice judged not worth taking
 on without the same adversarial review rigor that code's prior fixes
 received. Item (2), the `entity:` alias promotion, was investigated for a
-third time this slice and still has no accepted design: the same
-`Anonymous`/`LocalToFunction` within-one-parse-only ordinal limitation this
-phase's Design section already names blocks it identically for DWARF as
-for the two header-AST backends (DWARF's own DIE walk assigns no ordinals
-at all in this slice, so it inherits the identical gap rather than closing
-it) — left as the accepted, documented limitation this phase's own
-discipline calls for after two prior reverted attempts, not attempted a
-third time under review pressure.
+third time this slice and still has no accepted design for the
+suppression-facing hash: the same `Anonymous`/`LocalToFunction`
+within-one-parse-only ordinal limitation this phase's Design section
+already names blocks it identically for DWARF as for the two header-AST
+backends (DWARF's own DIE walk assigns no ordinals at all in this slice, so
+it inherits the identical gap rather than closing it). A gating primitive
+that gets real, safe use out of `entity:` without repeating either
+previously-reverted approach — restricting promotion to entities whose
+`EntityId.scope` contains no `Anonymous`/`LocalToFunction` segment, and
+wiring that restricted promotion only into `diff_filtering.py`'s
+internal-only, non-persisted `_deduplicate_cross_detector` rather than into
+`report_canonical_finding_id`'s suppression-facing hash — is a separate,
+deliberate follow-up documented rather than attempted under review
+pressure, since changing what `report_canonical_finding_id` hashes for any
+already-shipped finding shape would silently invalidate a user's existing
+stored `finding_id:` suppression rules, a backward-compatibility call this
+phase's own discipline treats as needing explicit maintainer sign-off, the
+same bar `IMPORT_CYCLE_ALLOWLIST` extensions are held to.
 
 ---
 
