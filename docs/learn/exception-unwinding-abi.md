@@ -128,7 +128,14 @@ likely on its own. Building half a call chain `-fno-exceptions` and half
 the risk is silently-skipped cleanup along the mixed boundary, exact
 behavior target/toolchain-dependent, not a guaranteed hard stop — and
 flipping a shipped library between the two changes what every caller can
-assume.
+assume. The flip is a build fact, so it needs build evidence on both sides:
+
+```bash
+abicheck compare old.so new.so --build-info old=build-old/ --build-info new=build-new/
+```
+
+[case130](../reference/examples/case130_exceptions_mode_flip.md) is the
+exceptions-mode flip that comparison reports.
 
 Changing a function's **exception specification** is the same hazard
 [Part 4 §5](abi-series/04-cpp-abi.md#5-noexcept-why-this-is-risk-not-a-hard-break)

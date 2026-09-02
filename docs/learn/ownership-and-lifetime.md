@@ -155,6 +155,14 @@ enough to treat as proof:
   reviewer changing that boundary will actually see it, not to have it
   automatically enforced.
 
+As one shell line, the check is the consumer's lifecycle test run under
+AddressSanitizer against the new library, which is where a double free or
+a cross-allocator free surfaces:
+
+```bash
+ASAN_OPTIONS=detect_leaks=1 LD_LIBRARY_PATH=new/lib ./consumer-asan --lifecycle-test
+```
+
 See also: [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
 for the broader category this belongs to, and
 [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md)

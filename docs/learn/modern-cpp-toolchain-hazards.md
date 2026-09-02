@@ -38,7 +38,8 @@ Several more live only in the **build flags**, not the source, and abicheck
 surfaces them as toolchain/deployment risk when build context is captured:
 `-fno-exceptions` / `-fno-rtti` (drop EH/RTTI machinery callers may rely
 on — see [Exception Unwinding](exception-unwinding-abi.md) for what
-`-fno-rtti` actually strips), `-fshort-enums` (changes enum underlying size
+`-fno-rtti` actually strips; [case131](../reference/examples/case131_rtti_mode_flip.md)
+is the RTTI-mode flip), `-fshort-enums` (changes enum underlying size
 — see [Part 3](abi-series/03-type-layout.md)), packing/alignment flags,
 vector-ABI flags, and CPU-dispatch/IFUNC selection
 ([case83](../reference/examples/case83_cpu_dispatch_isa_dropped.md),

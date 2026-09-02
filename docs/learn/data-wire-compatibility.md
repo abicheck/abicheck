@@ -134,6 +134,13 @@ about the C/C++ declarations themselves moved.
   the same underlying reason: no static analyzer proves this, execution
   evidence does.
 
+As one shell line, the check is a file written by the old version and read
+back by the new one, then the reverse:
+
+```bash
+./tool-old --write sample.dat && ./tool-new --read sample.dat && ./tool-new --write sample2.dat && ./tool-old --read sample2.dat
+```
+
 See also: [Type Layout](abi-series/03-type-layout.md) for the ABI-layout
 mechanics this dimension frequently piggybacks on, and
 [Behavioral & Semantic Compatibility](behavioral-compatibility.md) for the

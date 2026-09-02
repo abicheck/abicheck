@@ -68,6 +68,16 @@ way:
 
 ## 1. Removing or renaming symbols
 
+The cheapest comparison there is already sees this family — two binaries,
+no headers, no debug information:
+
+```bash
+abicheck compare libfoo.so.1.old libfoo.so.1.new
+```
+
+[case01](../../reference/examples/case01_symbol_removal.md) is the removal
+that comparison reports as `BREAKING`.
+
 ### The mechanism
 
 When an executable is linked against `libfoo.so.1`, every reference to a library

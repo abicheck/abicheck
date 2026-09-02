@@ -99,6 +99,13 @@ recommends generally, aimed specifically at concurrency:
   and treat a change to it as release-note-worthy even when nothing else
   about the release touches ABI or API at all.
 
+As one shell line, the check is the consumer run under ThreadSanitizer with
+a workload that actually contends:
+
+```bash
+TSAN_OPTIONS=halt_on_error=1 LD_LIBRARY_PATH=new/lib ./consumer-tsan --threads 16 --stress
+```
+
 See also: [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
 for the broader category and why static analysis structurally cannot decide
 it, and [Ownership & Lifetime Contracts](ownership-and-lifetime.md) for the

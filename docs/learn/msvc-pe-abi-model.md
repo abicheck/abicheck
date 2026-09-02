@@ -164,6 +164,44 @@ checker) can verify.
   `free`d/`delete`d by another; route allocation/deallocation through a
   single owning module (or a matched pair of exported functions) instead.
 
+## A worked example on Windows
+
+The MSVC lane of abicheck's own test suite builds this header twice with
+`cl.exe /Zi`, the second time with `WIDGET_V2` defined, so the by-value
+`Widget` struct grows and a legacy export disappears:
+
+```c
+struct Widget {
+    int x;
+    int y;
+#ifdef WIDGET_V2
+    int z;        /* v2 adds a field -> sizeof(Widget) changes */
+#endif
+};
+
+extern "C" FOO_API int widget_area(struct Widget w);
+#ifndef WIDGET_V2
+extern "C" FOO_API int legacy_fn(void);  /* dropped in v2 */
+#endif
+```
+
+```bat
+cl /nologo /LD /Zi /EHsc /DBUILD_FOO foo.cpp /Fe:v1\foo.dll
+cl /nologo /LD /Zi /EHsc /DBUILD_FOO /DWIDGET_V2 foo.cpp /Fe:v2\foo.dll
+abicheck compare v1\foo.dll v2\foo.dll
+```
+
+With each `foo.pdb` next to its DLL the comparison reports `BREAKING`
+twice over: `legacy_fn` is gone from the export directory, and `Widget`
+grew — the PDB supplies the struct layout, which lands in the same
+debug-information evidence tier a DWARF build would fill, so the report
+states the tier and never says "PDB". Delete the two `.pdb` files and run
+the same comparison: `legacy_fn`'s removal is still `BREAKING`, because an
+export removal is visible from the export table alone, but the struct
+growth vanishes — a stripped Windows build looks clean on exactly the kind
+of change that corrupts a caller's stack. The tiers are defined in
+[Evidence & Detectability](evidence-and-detectability.md).
+
 ---
 
 _See also: [Platform Support](../reference/platforms.md) · [Part 4 — C++ ABI](abi-series/04-cpp-abi.md) ·

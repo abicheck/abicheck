@@ -216,6 +216,18 @@ subset of the header a given consumer's own code actually reaches:
   compiled path (hidden behind a stable ABI boundary) can still be a
   behavior change for any consumer using the header-only path.
 
+The header-only comparison is a header-to-header one, since there is no
+binary to derive a side from; the clang frontend is the one that records
+the uninstantiated patterns:
+
+```bash
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+```
+
+[case191](../reference/examples/case191_header_only_graph_field_type.md) is
+the header-graph break that comparison reports — a public struct gaining a
+field of a private type.
+
 See also: [Dependency & Runtime Floors](dependency-floors.md) for the
 toolchain/runtime side of static linking, and
 [Behavioral & Semantic Compatibility](behavioral-compatibility.md) for why

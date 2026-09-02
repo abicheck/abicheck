@@ -81,6 +81,14 @@ the complement, not a competitor. A clean binary-compatibility verdict is a
 statement about the *shape* of the contract; it says nothing about whether
 the *behavior* behind that shape changed on purpose or by accident.
 
+As one shell line, the check is the consumer's own suite, rebuilt and run
+against the new version — there is no catalog case for what a static
+comparison cannot see:
+
+```bash
+cmake --build consumer-build && ctest --test-dir consumer-build --output-on-failure
+```
+
 ## How to reason about it in a release
 
 When evaluating whether a release preserves behavioral compatibility, ask:
