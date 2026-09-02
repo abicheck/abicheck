@@ -14,8 +14,10 @@
   list of entries rather than a string-keyed map so the typed `ScopePath`
   inside each key round-trips losslessly. The field is additive and
   currently `None` on every snapshot a real `dump` produces — no backend is
-  narrowed onto the shared normalizer yet, so no detector, verdict, exit
-  code or existing snapshot document changes.
+  narrowed onto the shared normalizer yet, so no detector, verdict or exit
+  code changes, and such a snapshot's document differs from the one this
+  release's predecessor wrote only in its `schema_version` stamp (both new
+  keys are written only when there is something to record).
 - **`--ast-frontend hybrid` reconciles `semantic_ir` across both backends**
   the same way `merge_snapshots()` already reconciles every legacy field:
   castxml is the base, clang backfills only the facts castxml left

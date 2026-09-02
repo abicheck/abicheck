@@ -156,7 +156,8 @@ key as a string would lose the typed `ScopePath` inside it exactly as v28's
 own `entity_id` encoding would have. Absent (the key is dropped, not
 written as `null`) for a snapshot whose extraction produced no IR, which is
 every snapshot written by a backend not yet narrowed onto the shared
-normalizer — so a v38 document is byte-identical to a v37 one for those.
+normalizer. `semantic_ir_conflicts` is sparse the same way, so for such a
+snapshot a v38 document differs from the v37 one only in the version stamp.
 ### Forward / backward compatibility
 
 abicheck loads a snapshot best-effort and never migrates it in place. The rule

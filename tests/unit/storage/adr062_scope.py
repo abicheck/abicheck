@@ -43,8 +43,9 @@ import pathlib
 #: ADR-063's own snapshot encode/decode/legacy-backfill helpers (Phase 0's
 #: Fact[T] pair `fact_codec`/`enum_codec`, Phase 2's `entity_id_codec`,
 #: which keeps the parse-time `EntityId` carrier out of the wire format, and
-#: Phase 3's `surface_graph_codec`, the identical shape for
-#: `AbiSnapshot.surface_graph`) — a third, independent body of work in this
+#: Phase 3's `surface_graph_codec` and Phase 6's `semantic_ir_codec`, the
+#: identical shape for `AbiSnapshot.surface_graph`/`semantic_ir`) — a third,
+#: independent body of work in this
 #: package, unrelated to either ADR-062's Phase 0 primitives or G40's
 #: container. `snapshot_load_normalization` is a fourth, equally unrelated
 #: body of work: `serialization.snapshot_from_dict`'s on-load legacy-format
@@ -62,6 +63,7 @@ NON_ADR062_MODULES = frozenset(
         "enum_codec",
         "entity_id_codec",
         "surface_graph_codec",
+        "semantic_ir_codec",
         "snapshot_load_normalization",
     }
 )

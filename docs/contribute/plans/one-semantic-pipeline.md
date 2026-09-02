@@ -12524,7 +12524,9 @@ produces an IR (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/
 untouched), `extract/semantic_normalizer.py` does not exist, and none of
 the five assembly call sites projects through it — so `semantic_ir` is
 `None` on every snapshot a real `dump` produces, a v38 document is
-byte-identical to the v37 one it would have been, and the snapshot cache
+identical to the v37 one it would have been apart from the version stamp
+itself -- both new keys are sparse, written only when there is something to
+say -- and the snapshot cache
 version is deliberately not bumped. The per-call-site end-to-end parity
 tests this section requires belong with that work, since there is no
 normalizer-mediated assembly path to prove behavior-preserving yet; the

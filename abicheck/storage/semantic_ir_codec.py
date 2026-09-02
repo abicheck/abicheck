@@ -141,6 +141,13 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     uses, so a snapshot from a backend not yet narrowed onto the normalizer
     serializes exactly as it did before this field existed.
     """
+    # Same sparse convention for the conflict map: written only when a merge
+    # actually recorded one, so a snapshot with nothing to say carries no key
+    # rather than an empty object. Without this, every v38 document would
+    # differ from the v37 one it would otherwise have been -- for a field
+    # only the hybrid path can ever populate.
+    if not snap.semantic_ir_conflicts:
+        d.pop("semantic_ir_conflicts", None)
     ir = snap.semantic_ir
     if ir is None:
         d.pop("semantic_ir", None)

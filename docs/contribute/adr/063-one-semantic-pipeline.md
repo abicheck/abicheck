@@ -549,7 +549,9 @@
   `extract/semantic_normalizer.py` does not exist, and none of the five
   assembly call sites projects through it — so `semantic_ir` is `None` on
   every snapshot a real `dump` produces, every v38 document is
-  byte-identical to the v37 one it would have been, and the snapshot cache
+  identical to the v37 one it would have been apart from the version stamp
+  itself (the `semantic_ir_conflicts` map is written only when a hybrid merge
+  recorded one, never as an empty object), and the snapshot cache
   version is deliberately *not* bumped (no dumping-pipeline output
   changed). The parser narrowing, the normalizer, and the per-call-site
   parity tests are the remainder of this phase.

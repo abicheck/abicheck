@@ -229,7 +229,12 @@ class TestMalformedDocumentsAreRefused:
 
 class TestAbsence:
     def test_a_snapshot_without_an_ir_writes_no_key(self) -> None:
-        assert "semantic_ir" not in snapshot_to_dict(_snapshot(None))
+        document = snapshot_to_dict(_snapshot(None))
+        assert "semantic_ir" not in document
+        # Nor an empty conflict map: a snapshot no hybrid merge touched must
+        # serialize exactly as it did before this field existed, or every
+        # document written by every backend grows a key that says nothing.
+        assert "semantic_ir_conflicts" not in document
 
     def test_a_document_without_the_key_loads_as_none(self) -> None:
         document = snapshot_to_dict(_snapshot(None))
