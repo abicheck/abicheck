@@ -38,9 +38,10 @@ Rules the file encodes (each is an ERROR):
   front matter only; every member and branch must be >= its tier's `floor:`.
 - **Links must be members elsewhere** (or an existing tool-track page).
 - **Paths are walks up the ladder.** Every `paths:` page resolves to its full
-  ladder index (sequence, tier, member position, branch flag; a branch
-  sorts right after its parent and before the parent's next member) and
-  that index is strictly increasing along the entry.
+  ladder index (sequence, tier, member position, branch ordinal; a branch
+  sorts right after its parent and before the parent's next member, and
+  sibling branches keep their YAML order) and that index is strictly
+  increasing along the entry.
 - **Footers match the ladder.** Every member/branch page carries one
   `**Ladder:**` footer line whose two links are its ladder neighbours.
 
@@ -87,6 +88,7 @@ class Entry:
     tier_index: int
     member_index: int
     parent: str | None = None  # set for a branch
+    branch_index: int = 0  # 1-based position among the parent's branches
 
     @property
     def is_branch(self) -> bool:
@@ -95,12 +97,14 @@ class Entry:
     @property
     def order_key(self) -> tuple[int, int, int, int]:
         # A branch sorts right after the page it hangs from and before that
-        # page's next member, which is where a reader who took it rejoins.
+        # page's next member, which is where a reader who took it rejoins;
+        # sibling branches keep their YAML order, so a path may walk two of
+        # them in that order and is rejected for walking them reversed.
         return (
             self.sequence_index,
             self.tier_index,
             self.member_index,
-            1 if self.parent is not None else 0,
+            self.branch_index,
         )
 
 
@@ -243,7 +247,7 @@ def load_ladder(path: Path = LADDER_PATH) -> Ladder:
                 tier.members.append(page)
                 if branches:
                     tier.branches[page] = branches
-                for branch in branches:
+                for branch_index, branch in enumerate(branches, 1):
                     _place(
                         ladder,
                         Entry(
@@ -254,6 +258,7 @@ def load_ladder(path: Path = LADDER_PATH) -> Ladder:
                             tier_index,
                             member_index,
                             parent=page,
+                            branch_index=branch_index,
                         ),
                     )
             seq.tiers.append(tier)

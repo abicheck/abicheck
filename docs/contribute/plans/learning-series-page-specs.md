@@ -269,10 +269,11 @@ generator only renders):
   two levels, as tier 1 does.
 - **Paths are walks up the ladder.** Every `paths:` entry names only
   members or branches. Each page resolves to its full ladder index
-  (sequence, tier, member position, branch flag — a branch sorts right
-  after the page it hangs from and before that page's next member, so a
-  parent-to-own-branch step is an increase), and walking `pages` that
-  index is *strictly* increasing: no
+  (sequence, tier, member position, branch ordinal — a branch sorts right
+  after the page it hangs from and before that page's next member, and
+  sibling branches keep their YAML order, so a parent-to-own-branch step
+  and a first-to-second-branch step are both increases), and walking
+  `pages` that index is *strictly* increasing: no
   same-tier reversal, no repeated page, and `concepts` only after the
   entry's `educational` pages. Comparing tier positions alone would let
   two pages of one tier appear in reverse order, which is exactly the

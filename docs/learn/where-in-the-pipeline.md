@@ -57,11 +57,13 @@ produced, stored, fetched and rotated; this page only places them.
 
 ## The PR gate
 
-Run the cheap tiers always — the binary and the public headers are enough
-to see every symbol, layout and source-level break — and add source depth
-*seeded* by the translation units the change touched, so the L4 facts that
-never reach a binary are checked where they changed without replaying the
-whole tree. The report must show breaks *and* additions: "0 breaks" is not
+Run the cheap tiers always — the binary and the public headers see every
+symbol, layout and header-AST break — and add source depth *seeded* by the
+translation units the change touched, so the facts that reach neither a
+binary nor a header AST (a removed public macro, inline function or
+typedef, a changed template body) are checked where they changed without
+replaying the whole tree. Without that seeded step those breaks are not
+covered at all in the PR gate. The report must show breaks *and* additions: "0 breaks" is not
 "nothing to review" ([Report the Surface, Not Only the Breaks](surface-growth.md)).
 
 ```bash

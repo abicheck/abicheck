@@ -333,6 +333,49 @@ def test_branch_sorts_after_its_parent_and_before_the_next_member(
     assert keys == sorted(keys) and len(set(keys)) == 3
 
 
+_TWO_BRANCHES = BASE_LADDER.replace(
+    "            branches:\n              - learn/c-branch.md\n",
+    "            branches:\n              - learn/c-branch.md\n              - learn/c-branch2.md\n",
+)
+_TWO_BRANCH_LEVELS = dict(LEVELS, **{"learn/c-branch2.md": "advanced"})
+
+
+def test_sibling_branches_have_distinct_increasing_keys(tmp_path: Path) -> None:
+    """Two branches of one parent are two side reads in YAML order, not one
+    position: a path may walk both in that order and is rejected for
+    walking them reversed."""
+    docs, ladder_path = _build(
+        tmp_path, ladder_text=_TWO_BRANCHES, levels=_TWO_BRANCH_LEVELS
+    )
+    ladder = ll.load_ladder(ladder_path)
+    keys = [
+        ladder.index[p].order_key
+        for p in ("learn/c.md", "learn/c-branch.md", "learn/c-branch2.md", "learn/d.md")
+    ]
+    assert keys == sorted(keys) and len(set(keys)) == 4
+    assert _run(docs, ladder_path) == []
+    forward = _TWO_BRANCHES.replace(
+        "      - learn/c-branch.md\n      - learn/d.md\n",
+        "      - learn/c-branch.md\n      - learn/c-branch2.md\n      - learn/d.md\n",
+    )
+    assert forward != _TWO_BRANCHES
+    docs, ladder_path = _build(
+        tmp_path / "fwd", ladder_text=forward, levels=_TWO_BRANCH_LEVELS
+    )
+    assert _run(docs, ladder_path) == []
+    reversed_ = _TWO_BRANCHES.replace(
+        "      - learn/c-branch.md\n      - learn/d.md\n",
+        "      - learn/c-branch2.md\n      - learn/c-branch.md\n      - learn/d.md\n",
+    )
+    docs, ladder_path = _build(
+        tmp_path / "rev", ladder_text=reversed_, levels=_TWO_BRANCH_LEVELS
+    )
+    msgs = _run(docs, ladder_path)
+    assert any(
+        "learn/c-branch.md does not come after learn/c-branch2.md" in m for m in msgs
+    )
+
+
 def test_after_must_be_a_tool_track_page(tmp_path: Path) -> None:
     text = BASE_LADDER.replace("    after: use/tool.md\n", "    after: learn/x.md\n")
     docs, ladder = _build(tmp_path, ladder_text=text)
