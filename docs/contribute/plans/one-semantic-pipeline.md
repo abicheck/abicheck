@@ -12647,29 +12647,95 @@ declarations), assigned an ordinal as a pure continuation that never
 disturbs an already-assigned real ordinal. See
 `tests/test_lambda_identity_semantic_ir.py`.
 
-**Still not landed, and therefore this phase is not complete:** functions,
-variables, and constants are not normalized (above); DWARF/PDB/BTF/CTF
-backends produce no IR at all; PE/Mach-O header-AST assembly is not wired;
-`extract/semantic_ir_merge.py`'s reconciliation has still only been proven
-against the records/enums/typedefs subset real data now exercises, not the
-full multi-occurrence/ODR-duplicate shape a function-populated IR would
-introduce; and the phase's own acceptance criteria (a closure-parameterized
-template fixture, requiring function/template-argument normalization) remain
-unmet. A manifest (`--dump-manifest`) dump is a further, real gap (Codex
-review, PR #1001): `tu_merge.merge_fragments` already collapses same-identity
-declarations across translation units into one representative entry before
-`normalize_header_ast` ever runs, so a real ODR-duplicate/incomplete-vs-
-complete pair spread across two TUs never reaches `SemanticIR.occurrences`
-as two occurrences there -- no *more* loss than the legacy `types`/`enums`
-fields already have for a manifest dump (both read the identical merged
-list), but not yet the IR's fuller multi-occurrence potential either. Closing
-this needs per-TU-fragment normalization before the merge collapses
-identities, with a real TU-context disambiguator threaded through --
-materially more than this slice's scope; a single-header dump is unaffected
-(nothing for the merge to collapse ahead of it). See
-`extract/semantic_normalizer.py`'s own docstring for the same note. The
-original Design/Files/Tests/Acceptance-criteria sections below
-are kept verbatim as the phase's full target shape -- this slice is a step
+**LANDED (third slice): functions and variables are normalized, and
+`_dump_pe`/`_dump_macho` are wired.** `extract/semantic_normalizer.
+normalize_header_ast` gained `functions`/`variables` parameters (default
+`()`, so a caller that has not migrated needs no change). Unlike
+records/enums/typedefs, a function's return/parameter types and a
+variable's own type are not already canonical the way a resolved qualified
+name is -- castxml and clang genuinely spell an identical type differently.
+This slice does not invent a new canonicalization for that gap: it reuses
+the two primitives `entity_id_for_function`/`resolve_function_identity`
+already apply for the identical cross-backend problem --
+`model.signature_normalization.canonicalize_function_signature_param_type`
+for each parameter type (also dropping a top-level by-value cv-qualifier,
+matching the mangling rule that such a qualifier is not a discriminator) and
+`name_classification.canonicalize_type_name` for the return type (matching
+`entity_id_for_function`'s own choice for that position). A function's
+`canonical_spelling` is `"<return>(<param>, ...)"` built from those two
+canonicalizations; `is_const`/`is_volatile` (member-function
+cv-qualification) is carried via `CanonicalEntity.cv_qualification`, the
+field this IR already reserves for exactly that purpose. *Deliberately
+excluded from this slice, named rather than silently dropped*: a function's
+`ref_qualifier`/variadic status are structural facts both backends already
+compute identically (not a spelling problem), and `CanonicalEntity` has no
+dedicated slot for either -- adding one is a model-shape decision for a
+future slice. A variable's `canonical_spelling` is
+`canonicalize_type_name(variable.type)` with `is_const` carried via
+`cv_qualification`, mirroring the function treatment. A compiler-synthesized
+implicit special member (castxml's own `artificial="1"` -- a default/copy/
+move constructor, copy/move assignment, or destructor never written in the
+header) is skipped entirely (`Function.is_compiler_generated`): clang's own
+AST walk never emits such a node at all, so normalizing castxml's side would
+add a phantom occurrence with no clang counterpart -- confirmed as a real,
+not merely theoretical, gap by the real castxml/clang end-to-end fixture in
+`tests/test_semantic_ir_end_to_end.py`, which failed against an earlier
+revision of this slice that did not skip them (`Point`'s implicit
+constructors/assignment/destructor all surfaced with an empty `leaf_name`).
+`dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
+the second slice deliberately left unwired, per that slice's own note) now
+populate `semantic_ir` too, via a new shared choke point,
+`extract/header_ast_fields.parse_header_ast_fields` -- a new leaf module
+(not inlined in either already-capped `dumper.py`/`dumper_manifest.py`)
+that runs a single-parser's own `parse_*()` methods once each and projects
+the result through `normalize_header_ast`, structurally typed
+(`_HeaderAstParser`, a `Protocol`) rather than importing
+`dumper_castxml._CastxmlParser`/`dumper_clang._ClangAstParser` directly,
+which would be an `extract ->` (unclassified flat root module) edge the
+architecture gate forbids for a migrated package. `dumper.py`'s
+`architecture/debt.yaml` no-growth baseline is raised by 7 for this (see
+that entry's own rationale for the exact accounting). `extract/
+semantic_ir_merge.py`'s reconciliation needed no code change to handle a
+function-populated IR -- it is generic over `CanonicalEntity`'s `Fact`
+fields, not specialized to any entity kind -- and this slice's own real
+castxml/clang/hybrid fixture (a function taking a record by const reference)
+is the first non-synthetic proof of that: the hybrid merge matches the
+function's shared, real-mangled-name `EntityId` one-to-one and records the
+identical kind of namespace-qualification-spelling conflict the typedef
+case already has, not a new failure mode.
+
+**Still not landed, and therefore this phase is not complete:** constants
+are still not normalized (`CanonicalEntity.canonical_spelling` is specified
+as a declaration's own *type* spelling, and `parse_constants()` captures
+only a value expression, never a captured type string, to canonicalize);
+DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
+`entity_id` yet -- this normalizer canonicalizes evidence a backend already
+resolved identity for, it does not resolve identity itself, so extending it
+to these backends is gated on giving each of them the Phase 2 `EntityId`
+treatment first); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
+fifth production assembler this phase's own Files list names) remain
+unwired for the same reason; and the phase's own acceptance criteria (a
+closure-parameterized template fixture, requiring function/template-argument
+normalization) remain unmet -- `CanonicalEntity.template_arguments` is still
+never populated by any backend, header-AST functions/variables included (a
+function *template*'s own template-argument list is a separate, still-open
+piece of this slice's own stated scope, not silently assumed done by the
+ordinary-function work above). A manifest (`--dump-manifest`) dump is a
+further, real gap (Codex review, PR #1001), unchanged by this slice's
+functions/variables addition: `tu_merge.merge_fragments` already collapses
+same-identity declarations across translation units into one representative
+entry before `normalize_header_ast` ever runs, so a real ODR-duplicate/
+incomplete-vs-complete pair spread across two TUs never reaches
+`SemanticIR.occurrences` as two occurrences there -- no *more* loss than the
+legacy `functions`/`variables`/`types`/`enums` fields already have for a
+manifest dump (all read the identical merged lists), but not yet the IR's
+fuller multi-occurrence potential either. Closing this needs per-TU-fragment
+normalization before the merge collapses identities, with a real TU-context
+disambiguator threaded through -- materially more than either slice's scope;
+a single-header dump is unaffected (nothing for the merge to collapse ahead
+of it). See `extract/semantic_normalizer.py`'s own docstring for the same
+note. The original Design/Files/Tests/Acceptance-criteria sections below
+are kept verbatim as the phase's full target shape -- each slice is a step
 toward that target, not a redefinition of it.
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and

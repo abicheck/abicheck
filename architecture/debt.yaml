@@ -723,12 +723,12 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1992,
+      "baseline_lines": 1999,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper. Raised by 1 for ADR-063 Phase 6's second slice: the ELF AbiSnapshot construction site gained the semantic_ir=ast_result.semantic_ir keyword (the ElfHeaderAstResult field a shared choke point in dumper_manifest.py now computes for both the legacy single-TU and manifest paths) -- the PE/Mach-O construction sites were deliberately left unwired in this slice rather than adding their own inline normalize_header_ast() calls here, precisely to avoid a second, larger growth of this already-capped file.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper. Raised by 1 for ADR-063 Phase 6's second slice: the ELF AbiSnapshot construction site gained the semantic_ir=ast_result.semantic_ir keyword (the ElfHeaderAstResult field a shared choke point in dumper_manifest.py now computes for both the legacy single-TU and manifest paths) -- the PE/Mach-O construction sites were deliberately left unwired in this slice rather than adding their own inline normalize_header_ast() calls here, precisely to avoid a second, larger growth of this already-capped file. Raised by 7 for ADR-063 Phase 6's third slice: _dump_pe/_dump_macho now wire semantic_ir too, via a new shared choke point (extract/header_ast_fields.parse_header_ast_fields, a new leaf module under the responsibility-package extract/ owner and its own 800-line cap, that absorbed the actual parse-and-normalize logic) rather than an inline normalize_header_ast() call at either site -- the net growth is one new top-level import plus, per site, one producer local, one parse_header_ast_fields() call, and one semantic_ir= keyword replacing the prior nine parser.parse_*() calls with nine equivalent _ast.* attribute reads (net neutral) plus that one new field.",
       "review_by": "2026-11-30"
     },
     {

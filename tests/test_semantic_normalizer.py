@@ -14,24 +14,27 @@
 # limitations under the License.
 
 """``extract.semantic_normalizer.normalize_header_ast`` (ADR-063 Phase 6,
-second slice).
+second and third slices).
 
 Unit-level: exercises the normalizer directly against hand-built
-``RecordType``/``EnumType``/typedef inputs, independent of any real
-castxml/clang parse (that end-to-end wiring is covered by
-``test_dumper_castxml_integration.py::test_semantic_ir_populated_end_to_end``
-and its clang/hybrid counterparts, which need the real toolchains).
+``RecordType``/``EnumType``/typedef/``Function``/``Variable`` inputs,
+independent of any real castxml/clang parse (that end-to-end wiring is
+covered by ``test_semantic_ir_end_to_end.py``, which needs the real
+toolchains).
 """
 
 from __future__ import annotations
 
 from abicheck.extract.semantic_normalizer import normalize_header_ast
+from abicheck.model.declarations import Function, Param, Variable
 from abicheck.model.entities import EnumType, RecordType
 from abicheck.model.identity import (
     Namespace,
     entity_id_for_enum,
+    entity_id_for_function,
     entity_id_for_type,
     entity_id_for_typedef,
+    entity_id_for_variable,
 )
 from abicheck.model.occurrence import OccurrenceId
 
@@ -209,3 +212,168 @@ def test_normalize_header_ast_is_producer_agnostic() -> None:
     )
     (entity,) = ir.occurrences.values()
     assert entity.producer == "clang"
+
+
+# --- Third slice: functions and variables -----------------------------------
+
+
+def _function(
+    name: str,
+    return_type: str,
+    param_types: tuple[str, ...] = (),
+    *,
+    is_const: bool = False,
+    is_volatile: bool = False,
+    is_compiler_generated: bool | None = False,
+    mangled: str | None = None,
+) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled or f"_Z{len(name)}{name}v",
+        return_type=return_type,
+        params=[Param(name="", type=t) for t in param_types],
+        is_const=is_const,
+        is_volatile=is_volatile,
+        is_compiler_generated=is_compiler_generated,
+        entity_id=entity_id_for_function(
+            (), name, mangled_name=mangled, param_types=param_types
+        ),
+    )
+
+
+def test_normalize_header_ast_canonicalizes_function_signature_spelling() -> None:
+    """A function's ``canonical_spelling`` is built from the same
+    canonicalizers ``entity_id_for_function`` itself uses -- cross-backend
+    spelling differences (elaborated-type-specifiers, pointer/reference
+    sigil spacing) collapse to one canonical string, and a top-level
+    by-value parameter cv-qualifier is dropped (it is not a real overload
+    discriminator)."""
+    fn = _function("f", "struct Widget *", ("const int", "char const*"))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget *(int, char const *)"
+    assert entity.producer == "castxml"
+
+
+def test_normalize_header_ast_function_cv_qualification() -> None:
+    """A member function's ``is_const``/``is_volatile`` populate
+    ``cv_qualification`` in canonical order, separately from the spelling
+    text."""
+    fn = _function("m", "void", is_const=True, is_volatile=True)
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const", "volatile")
+
+
+def test_normalize_header_ast_non_cv_function_has_empty_cv_qualification() -> None:
+    fn = _function("f", "void")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+    assert entity.cv_qualification.is_present
+
+
+def test_normalize_header_ast_skips_compiler_generated_functions() -> None:
+    """A compiler-synthesized implicit special member (castxml's own
+    ``artificial="1"``) is never emitted by clang's AST walk at all -- see
+    this module's own skip for the full rationale (Codex review, real
+    castxml/clang parity failure)."""
+    fn = _function("Widget", "void", is_compiler_generated=True)
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_skips_function_without_entity_id() -> None:
+    fn = Function(name="f", mangled="_Z1fv", return_type="void")
+    assert fn.entity_id is None
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_canonicalizes_variable_type_spelling() -> None:
+    var = Variable(
+        name="g_widget",
+        mangled="g_widget",
+        type="struct Widget const*",
+        is_const=True,
+        entity_id=entity_id_for_variable((), "g_widget", mangled_name="g_widget"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget const *"
+    assert entity.cv_qualification.value == ("const",)
+    assert entity.producer == "clang"
+
+
+def test_normalize_header_ast_non_const_variable_has_empty_cv_qualification() -> None:
+    var = Variable(
+        name="g_widget",
+        mangled="g_widget",
+        type="int",
+        entity_id=entity_id_for_variable((), "g_widget", mangled_name="g_widget"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_functions_and_variables_default_to_empty() -> None:
+    """*functions*/*variables* default to ``()`` -- a caller that has not
+    migrated to this slice's scope yet needs no change."""
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    assert ir.occurrences == {}
