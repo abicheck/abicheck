@@ -773,12 +773,12 @@
     },
     {
       "path": "abicheck/dumper_scoping.py",
-      "baseline_lines": 1289,
+      "baseline_lines": 1350,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 61 for ADR-063 Phase 6's second slice (Codex review, PR #1001): scope_snapshot_excluding_dependencies()'s dataclasses.replace() carried snap.semantic_ir over unfiltered, so an excluded dependency type/enum stayed reachable through the filtered snapshot's own canonical IR even though the flat types/enums lists correctly dropped it. _scoped_semantic_ir() closes the gap the same header-origin-filter way the existing flat-field filtering already does.",
       "review_by": "2026-11-30"
     },
     {

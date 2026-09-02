@@ -12649,7 +12649,20 @@ against the records/enums/typedefs subset real data now exercises, not the
 full multi-occurrence/ODR-duplicate shape a function-populated IR would
 introduce; and the phase's own acceptance criteria (a closure-parameterized
 template fixture, requiring function/template-argument normalization) remain
-unmet. The original Design/Files/Tests/Acceptance-criteria sections below
+unmet. A manifest (`--dump-manifest`) dump is a further, real gap (Codex
+review, PR #1001): `tu_merge.merge_fragments` already collapses same-identity
+declarations across translation units into one representative entry before
+`normalize_header_ast` ever runs, so a real ODR-duplicate/incomplete-vs-
+complete pair spread across two TUs never reaches `SemanticIR.occurrences`
+as two occurrences there -- no *more* loss than the legacy `types`/`enums`
+fields already have for a manifest dump (both read the identical merged
+list), but not yet the IR's fuller multi-occurrence potential either. Closing
+this needs per-TU-fragment normalization before the merge collapses
+identities, with a real TU-context disambiguator threaded through --
+materially more than this slice's scope; a single-header dump is unaffected
+(nothing for the merge to collapse ahead of it). See
+`extract/semantic_normalizer.py`'s own docstring for the same note. The
+original Design/Files/Tests/Acceptance-criteria sections below
 are kept verbatim as the phase's full target shape -- this slice is a step
 toward that target, not a redefinition of it.
 

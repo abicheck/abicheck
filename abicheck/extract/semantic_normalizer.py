@@ -57,6 +57,28 @@ rather than silently omitted. Constants are omitted for the same reason:
 (``parse_constants()``) carries only its value expression, not a captured
 type string, to canonicalize.
 
+**Known, accepted limitation for a manifest (``--dump-manifest``) dump
+(Codex review, PR #1001).** ``dumper_manifest.resolve_header_ast_result``
+calls this function once, on ``merge_fragments()``'s *already-merged*
+``types``/``enums``/``typedefs_qualified``/``typedef_entity_ids`` — and
+``tu_merge.merge_fragments`` itself already collapses same-identity
+declarations across translation units into one representative entry
+before this normalizer ever sees them ("a merged entity carries exactly
+one ``source_location``", that function's own docstring). So a real
+ODR-duplicate/incomplete-vs-complete-declaration pair spread across two
+TUs never reaches ``SemanticIR.occurrences`` as two occurrences, even
+though that is exactly the shape ``OccurrenceId``-keying exists to
+preserve (see ``model/semantic_ir.py``'s own docstring) — this normalizer
+produces no *more* loss than the legacy ``types``/``enums`` fields already
+have for a manifest dump (both read from the identical, already-merged
+list), but it also does not yet realize the IR's fuller multi-occurrence
+potential for that case. Closing this needs per-TU-fragment normalization
+*before* ``merge_fragments`` collapses identities, threading a real
+TU-context disambiguator through — materially more than this slice's
+"project already-parsed output" scope. A single-header (non-manifest) dump
+is unaffected: there is only one translation unit, so there is nothing for
+``merge_fragments`` to collapse ahead of this function in the first place.
+
 Backend-agnostic by construction: ``dumper_castxml.py`` and
 ``dumper_clang.py`` already expose the identical
 ``parse_types()``/``parse_enums()``/``parse_typedefs_qualified()``/

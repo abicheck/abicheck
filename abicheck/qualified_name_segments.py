@@ -573,6 +573,18 @@ _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "typedefs_qualified",
     "typedef_entity_ids",  # ...and NOT constant_entity_ids: see both fields' own comment.
     "fact_provenance",
+    # ADR-063 Phase 6 (second slice): SemanticIR.occurrences is keyed by
+    # OccurrenceId, which wraps an EntityId whose leaf_name/extra can embed
+    # the identical closure/anonymous-marker spelling `types`/`enums` carry
+    # as a plain field value (both are built from the same
+    # strip_anonymous_type_location() output) -- this walk's own dict
+    # branch now recurses into a dataclass-typed key
+    # (qualified_name_segments_walk.py), which is what makes adding this
+    # field here actually renumber the key, not only CanonicalEntity's own
+    # canonical_spelling value. The first slice's own "not an open question
+    # today only because the map is always empty" note is closed here, now
+    # that a real dump populates it (Codex review, PR #1001).
+    "semantic_ir",
 )
 
 
