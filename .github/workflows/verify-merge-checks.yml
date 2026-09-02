@@ -261,10 +261,18 @@ jobs:
             let attempt = 0;
             for (;;) {
               attempt += 1;
+              // `filter: 'all'` is required, not optional: the API defaults
+              // to `filter: 'latest'`, which returns only the most recent
+              // check run per check suite -- if a rerun (which can create a
+              // new check suite) started after this workflow's own history
+              // predates it, the earlier pre-merge run would never be
+              // present in the response at all, no matter how `evaluate()`
+              // filters client-side (Codex review).
               const checkRuns = await github.paginate(github.rest.checks.listForRef, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: headSha,
+                filter: 'all',
                 per_page: 100,
               });
               ({ pending, failed } = evaluate(checkRuns));
