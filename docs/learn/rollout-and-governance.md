@@ -207,4 +207,4 @@ severity categories mean is owned by [Severity](../use/severity.md).
 
 ---
 
-**Ladder:** ← [Report the Surface, Not Only the Breaks](surface-growth.md) · Tier 5 · Practice · [Triage a Suspicious Finding](triage-a-finding.md) →
+**Ladder:** ← [Report the Surface, Not Only the Breaks](surface-growth.md) · Step 7 · In Practice · [Triage a Suspicious Finding](triage-a-finding.md) →

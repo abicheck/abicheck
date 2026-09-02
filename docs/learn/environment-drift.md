@@ -170,4 +170,4 @@ out to `readelf` or link against elfutils.
 
 ---
 
-**Ladder:** ← [Dependency & Runtime Floors](dependency-floors.md) · Tier 7 · At scale · [Packages and Consumers](packages-and-consumers.md) →
+**Ladder:** ← [Dependency & Runtime Floors](dependency-floors.md) · Step 8 · At Scale · [Packages and Consumers](packages-and-consumers.md) →

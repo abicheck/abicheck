@@ -483,6 +483,24 @@ registered owner.
 
 ## 5. Proposed target shape
 
+> **2026-09-02 amendment — the sidebar became the ladder.** The shape
+> below was implemented, but keeping the nav's by-question groups *beside*
+> the ladder reproduced F1 one level up: the sidebar, the hub's ladder
+> table and the page footers each told a different order (Define-the-
+> contract pages ahead of Mechanics in the sidebar but Tier 3 on the hub;
+> Part 7 three groups away from Part 6; the glossary last in the sidebar
+> and Tier 0 on the hub). The nav is now one numbered group per ladder
+> step, in step order, with the Part 4/5 branches as a nested "Go Deeper"
+> group — enforced by `scripts/learning_ladder.py`'s sidebar rule — and
+> "tier" was renamed "step" for readers, since "tier" already means an
+> evidence level everywhere else in these docs. One ordering change from
+> the table below: Part 7 (Design) moved from Tier 6 to Step 4, directly
+> after Parts 2-6, so the numbered spine reads straight through Steps 2-4
+> before the series turns to the reader's own contract, detection and
+> practice. The hub was cut to the step list, the role shortcuts and the
+> two term definitions it owns; see `docs/AGENTS.md` "Layout" for the
+> current contract.
+
 One ladder, levelled, with the numbered spine kept intact. The tiers are a
 **reading order**, rendered on the hub and carried by each page's `level:`
 badge — not a replacement for the nav's by-question groups, which are a

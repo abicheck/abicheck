@@ -44,6 +44,13 @@ Rules the file encodes (each is an ERROR):
   increasing along the entry.
 - **Footers match the ladder.** Every member/branch page carries one
   `**Ladder:**` footer line whose two links are its ladder neighbours.
+- **The sidebar is the ladder.** In `mkdocs.yml`, a sequence's tab either
+  carries one nav group per step — titled `<id>. <title>`, in step order,
+  holding exactly that step's members in ladder order with each branch
+  somewhere after its parent — or lists the whole sequence flat in the
+  same order (the Concepts tab). The hub may sit directly under its tab.
+  This is what keeps the sidebar, the hub's step list, and every page's
+  footer telling one reading order instead of three.
 
 Pure Python + PyYAML, importable; no repository side effects.
 """
@@ -56,9 +63,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from learning_nav_order import nav_groups
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 DOCS = REPO_DIR / "docs"
+MKDOCS = REPO_DIR / "mkdocs.yml"
 LADDER_PATH = DOCS / "_meta" / "learning-ladder.yaml"
 CHECK = "learning-ladder"
 
@@ -322,6 +331,27 @@ def page_title(text: str) -> str:
     return h1.group(1).strip() if h1 else ""
 
 
+_PART_TITLE_RE = re.compile(r"^(Part \d+ — [^:]+?)\s*(?::.*)?$")
+_SUBTITLE_SPLIT_RE = re.compile(r"\s*(?::|—)\s+")
+
+
+def short_title(title: str) -> str:
+    """A page title without its subtitle, for the hub's step list and the
+    page footers: `Part 1 — Foundations: From Source Code to …` → `Part 1 —
+    Foundations`, `What Each Level Sees — a level-by-level …` → `What Each
+    Level Sees`. A title with no `: ` or ` — ` subtitle is returned as is."""
+    m = _PART_TITLE_RE.match(title)
+    if m:
+        return m.group(1).strip()
+    return _SUBTITLE_SPLIT_RE.split(title, 1)[0].strip()
+
+
+def step_label(seq: Sequence, tier: Tier) -> str:
+    """How a step is named to readers: `Step 3` on the educational sequence
+    (whose ids are the step numbers), `Concepts c2` elsewhere."""
+    return f"Step {tier.id}" if tier.id.isdigit() else f"{seq.tab} {tier.id}"
+
+
 def footer_links(page: str, text: str) -> list[str] | None:
     """The docs-relative targets of the page's `**Ladder:**` footer links, in
     order, or None when the page carries no footer. Hrefs are resolved
@@ -349,14 +379,110 @@ def learn_pages(docs: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# The sidebar rule
+# ---------------------------------------------------------------------------
+
+
+def nav_group_title(tier: Tier) -> str:
+    """The nav group title a step must carry: `3. How Breaks Happen`."""
+    return f"{tier.id}. {tier.title}"
+
+
+def _order_findings(
+    label: str, pages: list[str], members: list[str], branches: dict[str, list[str]]
+) -> list[str]:
+    """`pages` (one nav group, or a flat tab) must hold exactly `members`
+    plus every branch, with members in ladder order and each branch after
+    the page it hangs from."""
+    out: list[str] = []
+    all_branches = [b for bs in branches.values() for b in bs]
+    expected = members + all_branches
+    for page in expected:
+        if page not in pages:
+            out.append(f"{label}: {page} is missing from the sidebar")
+    for page in pages:
+        if page not in expected:
+            out.append(
+                f"{label}: {page} is in this nav group but the ladder places it elsewhere"
+            )
+    position = {p: i for i, p in enumerate(pages)}
+    placed_members = [m for m in members if m in position]
+    if [p for p in pages if p in placed_members] != placed_members:
+        out.append(
+            f"{label}: members are not in ladder order (expected "
+            f"{' → '.join(placed_members)})"
+        )
+    for parent, bs in branches.items():
+        for branch in bs:
+            if (
+                parent in position
+                and branch in position
+                and position[branch] < position[parent]
+            ):
+                out.append(
+                    f"{label}: {branch} sits before {parent}, the page it hangs from"
+                )
+    return out
+
+
+def nav_findings(ladder: Ladder, mkdocs_text: str) -> list[str]:
+    """Every way `mkdocs.yml`'s learning tabs disagree with the ladder."""
+    groups = nav_groups(mkdocs_text, tabs=tuple(s.tab for s in ladder.sequences))
+    out: list[str] = []
+    for seq in ladder.sequences:
+        prefix = f"{seq.tab} / "
+        flat_key = f"{seq.tab} / {seq.tab}"  # pages directly under the tab
+        flat = [p for p in groups.get(flat_key, []) if p != ladder.hub]
+        grouped = [
+            (key[len(prefix) :], pages)
+            for key, pages in groups.items()
+            if key.startswith(prefix) and key != flat_key
+        ]
+        if not grouped and not flat and flat_key not in groups:
+            out.append(f"{seq.tab}: tab not found in mkdocs.yml nav")
+            continue
+        if not grouped:
+            members = seq.ordered_members()
+            branches = {p: bs for t in seq.tiers for p, bs in t.branches.items()}
+            out.extend(_order_findings(seq.tab, flat, members, branches))
+            continue
+        for page in flat:
+            out.append(
+                f"{seq.tab}: {page} sits directly under the tab; only the hub may, "
+                "every other page belongs inside its step's group"
+            )
+        expected_titles = [nav_group_title(t) for t in seq.tiers]
+        actual_titles = [title for title, _ in grouped]
+        if actual_titles != expected_titles:
+            out.append(
+                f"{seq.tab}: nav groups {actual_titles} are not the ladder's steps "
+                f"{expected_titles}, one group per step in step order"
+            )
+        for (title, pages), tier in zip(grouped, seq.tiers):
+            out.extend(
+                _order_findings(
+                    f"{seq.tab} / {title}", pages, tier.members, tier.branches
+                )
+            )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # The rules
 # ---------------------------------------------------------------------------
 
 
 def check_learning_ladder(
-    f, docs: Path = DOCS, ladder_path: Path = LADDER_PATH
+    f,
+    docs: Path = DOCS,
+    ladder_path: Path = LADDER_PATH,
+    mkdocs_path: Path | None = None,
 ) -> None:
-    """Report every ladder-rule violation on `f` (a Findings with `.err`)."""
+    """Report every ladder-rule violation on `f` (a Findings with `.err`).
+
+    `mkdocs_path` defaults to the repository's `mkdocs.yml` for the real
+    docs tree and to `<docs>/../mkdocs.yml` for a fixture tree; the sidebar
+    rule is skipped when that file does not exist."""
     if not ladder_path.is_file():
         f.err(CHECK, f"{ladder_path.name}: missing")
         return
@@ -365,6 +491,12 @@ def check_learning_ladder(
     except LadderError as exc:
         f.err(CHECK, str(exc))
         return
+
+    if mkdocs_path is None:
+        mkdocs_path = MKDOCS if docs == DOCS else docs.parent / "mkdocs.yml"
+    if mkdocs_path.is_file():
+        for msg in nav_findings(ladder, mkdocs_path.read_text(encoding="utf-8")):
+            f.err(CHECK, msg)
 
     texts: dict[str, str] = {}
 

@@ -48,11 +48,14 @@ from learning_ladder import (  # noqa: E402
     DOCS,
     LADDER_PATH,
     Ladder,
+    Sequence,
     Tier,
     load_ladder,
     page_level,
     page_title,
     relative_href,
+    short_title,
+    step_label,
 )
 
 LADDER_MARKER = "learning-ladder"
@@ -67,7 +70,7 @@ GENERATED_NOTE = (
 
 def _title(docs: Path, page: str) -> str:
     text = (docs / page).read_text(encoding="utf-8")
-    return page_title(text) or Path(page).stem
+    return short_title(page_title(text) or Path(page).stem)
 
 
 def _level(docs: Path, page: str) -> str:
@@ -77,10 +80,6 @@ def _level(docs: Path, page: str) -> str:
 
 def _link(docs: Path, hub: str, page: str) -> str:
     return f"[{_title(docs, page)}]({relative_href(hub, page)})"
-
-
-def _tier_label(seq_key: str, tier: Tier) -> str:
-    return f"Tier {tier.id}" if seq_key == "educational" else f"{tier.id}"
 
 
 def _level_badge(docs: Path, tier: Tier) -> str:
@@ -96,37 +95,50 @@ def _link_note(ladder: Ladder, page: str) -> str:
     entry = ladder.index.get(page)
     if entry is None:
         return "tool guide"
-    return f"on the {ladder.sequences[entry.sequence_index].tab} tab"
+    return f"{ladder.sequences[entry.sequence_index].tab} tab"
+
+
+def _pages_line(ladder: Ladder, docs: Path, tier: Tier) -> str:
+    """`a → b (go deeper: c, d) → e — also: f (Concepts tab)`."""
+    hub = ladder.hub
+    cells: list[str] = []
+    for member in tier.members:
+        cell = _link(docs, hub, member)
+        branches = tier.branches.get(member, [])
+        if branches:
+            deeper = ", ".join(_link(docs, hub, b) for b in branches)
+            cell += f" (go deeper: {deeper})"
+        cells.append(cell)
+    pages = " → ".join(cells) if cells else "*(pages land as the plan's PRs merge)*"
+    if tier.links:
+        also = "; ".join(
+            f"{_link(docs, hub, link)} ({_link_note(ladder, link)})"
+            for link in tier.links
+        )
+        pages += f" — also: {also}"
+    return pages
+
+
+def _is_numbered(seq: Sequence) -> bool:
+    return all(t.id.isdigit() for t in seq.tiers)
 
 
 def render_ladder(ladder: Ladder, docs: Path) -> str:
-    hub = ladder.hub
+    """The educational sequence as a numbered list (one item per step, its
+    number being the step's id), then every other sequence as a bulleted
+    list under a bold caption naming its tab."""
     out: list[str] = [GENERATED_NOTE, ""]
     for seq in ladder.sequences:
-        out.append(f"**{seq.tab}**")
-        out.append("")
-        out.append("| Tier | Level | Pages |")
-        out.append("|---|---|---|")
+        numbered = _is_numbered(seq)
+        if not numbered:
+            out.append(f"**{seq.tab} tab — the tool's own sequence**")
+            out.append("")
         for tier in seq.tiers:
-            cells: list[str] = []
-            for member in tier.members:
-                cell = _link(docs, hub, member)
-                branches = tier.branches.get(member, [])
-                if branches:
-                    deeper = ", ".join(_link(docs, hub, b) for b in branches)
-                    cell += f" (go deeper: {deeper})"
-                cells.append(cell)
-            pages = (
-                " → ".join(cells) if cells else "*(pages land as the plan's PRs merge)*"
-            )
-            if tier.links:
-                also = "; ".join(
-                    f"{_link(docs, hub, link)} ({_link_note(ladder, link)})"
-                    for link in tier.links
-                )
-                pages += f"<br>also: {also}"
+            marker = f"{tier.id}." if numbered else "-"
+            name = tier.title if numbered else f"{step_label(seq, tier)} · {tier.title}"
             out.append(
-                f"| {_tier_label(seq.key, tier)} · {tier.title} | {_level_badge(docs, tier)} | {pages} |"
+                f"{marker} **{name}** *({_level_badge(docs, tier)})* — "
+                f"{_pages_line(ladder, docs, tier)}"
             )
         out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
@@ -135,7 +147,7 @@ def render_ladder(ladder: Ladder, docs: Path) -> str:
 def render_paths(ladder: Ladder, docs: Path) -> str:
     hub = ladder.hub
     out: list[str] = [GENERATED_NOTE, ""]
-    out.append("| Role | Path (tier · page) | Then |")
+    out.append("| Role | Read, in order (step · page) | Then |")
     out.append("|---|---|---|")
     for rp in ladder.paths:
         steps = []

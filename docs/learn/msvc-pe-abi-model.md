@@ -105,7 +105,7 @@ layout, field offsets, and enum values the same way an ELF DWARF scan does,
 but does **not** reconstruct free-function signatures or vtable slots at
 all — those need the header-AST path (`castxml` + `cl.exe`, or `clang-cl`).
 Concretely, on Windows the "debug info alone recovers most layout breaks"
-shortcut that [Part 8](abi-series/08-detection.md) documents as generally
+shortcut that [Detecting Breaks](abi-series/08-detection.md) documents as generally
 true for a `-g` ELF build is **narrower**: it holds for struct/enum layout
 and method calling convention, not for parameter/return types or vtables.
 
@@ -210,4 +210,4 @@ _See also: [Platform Support](../reference/platforms.md) · [Part 4 — C++ ABI]
 
 ---
 
-**Ladder:** ← [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) · Tier 2 · Mechanics · [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) →
+**Ladder:** ← [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) · Step 3 · How Breaks Happen · [Part 6 — Subtle & Transitive Breaks](abi-series/06-transitive-breaks.md) →

@@ -20,12 +20,15 @@ For each nav group under the two learning tabs in `mkdocs.yml` (the
 "ABI/API Compatibility" tab's groups and the "Concepts" tab itself) the
 pages' front-matter `level:` values must be non-decreasing in nav order,
 skipping only the series hub. This is the learning-series plan's Goal
-criterion "each nav group is non-decreasing in level", made executable
-without touching the recorded by-question grouping — a *within-group*
-reorder is the fix, never a regrouping.
+criterion "each nav group is non-decreasing in level", made executable.
 
-Branch pages (the ladder's "go deeper" side reads) are included: the ladder
-exempts them from the spine's monotonicity, not from the sidebar's.
+Since the sidebar became the ladder itself (one nav group per step of
+`docs/_meta/learning-ladder.yaml`, enforced by `learning_ladder.py`'s
+sidebar rule), a regression here means the ladder's own order regressed or
+a "go deeper" branch was placed ahead of a lower-level member; the fix is
+in the ladder file and `mkdocs.yml` together. Branch pages are included:
+the ladder exempts them from the spine's monotonicity, not from the
+sidebar's. `nav_groups` is also the nav reader that sidebar rule builds on.
 
 Split out of `check_ai_readiness.py` the same way `adr_status_sync.py` was
 (that script is past the 2000-line hard cap). Pure stdlib — it reads the

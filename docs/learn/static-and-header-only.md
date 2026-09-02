@@ -236,4 +236,4 @@ in the header-only case.
 
 ---
 
-**Ladder:** ← [Build Profile Comparability](build-profile-comparability.md) · Tier 3 · Define the contract · [Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough](abi-series/08-detection.md) →
+**Ladder:** ← [Build Profile Comparability](build-profile-comparability.md) · Step 5 · Define Your Contract · [Detecting Breaks](abi-series/08-detection.md) →

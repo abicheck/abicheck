@@ -59,24 +59,36 @@ path, not the nav position.
   tab level):
   - The **educational track** — general ABI/API compatibility knowledge that
     holds regardless of which tool you use — is navigated under the
-    **ABI/API Compatibility** tab, grouped by the question a page answers
-    rather than by page *kind* (a numbered Learning-Series Part, a
-    framing page, and a split-out deep-dive page covering the same question
-    sit in the same group): **Start** (the hub, five-minute overview, how a break
-    shows up, cheat sheet) → **Define Your Contract** (Part 0, direction, consumer models,
-    build-profile comparability, public surface) → **ABI Mechanics** (Parts
-    1-2-3-4-5-6, plus `class-layout-abi.md`) → **Beyond ABI** (behavioral,
-    data/wire, ownership, static/header-only, concurrency) → **Platforms &
-    Toolchains** (exception unwinding, modern-toolchain hazards, runtime
-    floors, environment drift, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
-    7) → **Verification & Assurance** (`abi-series/08-detection.md` +
-    `assurance-methods.md`) → **Practice** (where in the pipeline, surface
-    growth, rollout and governance, triage) → **At Scale** (products, template-heavy
-    libraries, system-library discipline, packages and consumers) → **Quick Reference** (glossary). This is a
-    nav-only regroup of what was once a flat "Deep Dives" list plus a
-    separately-numbered "Learning Series" — a Part's own numbered "Series
-    navigation" breadcrumb (top of each `abi-series/0N-*.md` page) still
-    carries the sequential 0-7 reading order.
+    **ABI/API Compatibility** tab as **nine numbered steps, and the sidebar
+    is the reading order**: one nav group per step of
+    `docs/_meta/learning-ladder.yaml`, titled `<n>. <title>`, in step
+    order, holding that step's pages in ladder order (the hub sits alone
+    directly under the tab). `scripts/learning_ladder.py`'s sidebar rule,
+    run by `scripts/check_docs_contract.py`, fails when the two drift, so
+    the sidebar, the hub's step list, and every page's `**Ladder:**` footer
+    tell one order. The steps: **1. Start Here** (five-minute on-ramp, how
+    a break shows up, cheat sheet, glossary) → **2. Foundations** (Parts
+    0-1, your ABI surface) → **3. How Breaks Happen** (Parts 2-6, with the
+    advanced "go deeper" branches — `class-layout-abi.md`,
+    `exception-unwinding-abi.md`, `modern-cpp-toolchain-hazards.md`,
+    `msvc-pe-abi-model.md` — as a nested *Go Deeper (optional)* group at
+    the end of the step) → **4. Designing for Stability** (Part 7, so the
+    numbered Parts read straight through Steps 2-4) → **5. Define Your
+    Contract** (direction, consumer models, build-profile comparability,
+    static/header-only) → **6. Detect Breaks** (`abi-series/08-detection.md`
+    + `assurance-methods.md`; the tool enters here) → **7. In Practice**
+    (where in the pipeline, surface growth, rollout and governance, triage)
+    → **8. At Scale** (products, template-heavy libraries, system-library
+    discipline, runtime floors, environment drift, packages and consumers)
+    → **9. Beyond Static ABI** (behavioral, data/wire, ownership,
+    concurrency). A Part's own "Series navigation" breadcrumb (top of each
+    `abi-series/0N-*.md` page) lists exactly Parts 0-7, the numbered spine
+    inside those steps. To move a page or a step, edit the ladder file and
+    `mkdocs.yml` together, then regenerate the hub
+    (`python scripts/gen_learning_ladder.py`) and rewrite the affected
+    footers. An earlier layout grouped this tab by *question asked*
+    independently of the ladder, which left the sidebar, the hub and the
+    footers each telling a different order; that is what the rule retires.
   - The **tool track** — how abicheck itself models and reports compatibility
     — is navigated under the **Concepts** tab: verdicts,
     `evidence-and-detectability.md`, `architecture.md`, build/source data,

@@ -164,6 +164,34 @@ def _run(docs: Path, ladder_path: Path) -> list[str]:
     return f.messages()
 
 
+# A sidebar that is the BASE_LADDER: one group per step, titled
+# "<id>. <title>", members in ladder order, the branch grouped at the end
+# of its step, the hub alone directly under the tab, Concepts flat.
+NAV_OK = """
+site_name: x
+nav:
+  - Home: index.md
+  - Learn:
+    - Overview: learn/hub.md
+    - "0. Start":
+      - A: learn/a.md
+      - B: learn/b.md
+    - "1. Deeper":
+      - C: learn/c.md
+      - D: learn/d.md
+      - Go Deeper (optional):
+        - CB: learn/c-branch.md
+  - Concepts:
+    - X: learn/x.md
+"""
+
+
+def _run_with_nav(tmp_path: Path, nav: str) -> list[str]:
+    docs, ladder = _build(tmp_path)
+    (docs.parent / "mkdocs.yml").write_text(nav, encoding="utf-8")
+    return _run(docs, ladder)
+
+
 # --- the baseline fixture is clean --------------------------------------
 
 
@@ -434,6 +462,170 @@ def test_page_title_prefers_front_matter_then_h1(text: str, title: str) -> None:
 
 
 # --- the real repository -------------------------------------------------
+
+
+# --- the sidebar rule -----------------------------------------------------
+
+
+def test_sidebar_that_is_the_ladder_is_clean(tmp_path: Path) -> None:
+    assert _run_with_nav(tmp_path, NAV_OK) == []
+
+
+def test_no_mkdocs_file_skips_the_sidebar_rule(tmp_path: Path) -> None:
+    """A fixture tree without a mkdocs.yml is checked for everything else;
+    an explicit path that does not exist is the same skip."""
+    docs, ladder = _build(tmp_path)
+    f = _Findings()
+    ll.check_learning_ladder(
+        f, docs=docs, ladder_path=ladder, mkdocs_path=tmp_path / "nope.yml"
+    )
+    assert f.messages() == []
+
+
+def test_sidebar_group_titles_must_be_the_numbered_steps(tmp_path: Path) -> None:
+    nav = NAV_OK.replace('"1. Deeper"', "Deeper")
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("not the ladder's steps" in m and "'1. Deeper'" in m for m in msgs)
+
+
+def test_sidebar_groups_must_be_in_step_order(tmp_path: Path) -> None:
+    nav = """
+nav:
+  - Learn:
+    - Overview: learn/hub.md
+    - "1. Deeper":
+      - C: learn/c.md
+      - D: learn/d.md
+      - CB: learn/c-branch.md
+    - "0. Start":
+      - A: learn/a.md
+      - B: learn/b.md
+  - Concepts:
+    - X: learn/x.md
+"""
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("one group per step in step order" in m for m in msgs)
+
+
+def test_page_in_another_steps_group_is_reported_from_both_sides(
+    tmp_path: Path,
+) -> None:
+    nav = NAV_OK.replace("      - D: learn/d.md\n", "").replace(
+        "      - B: learn/b.md\n", "      - B: learn/b.md\n      - D: learn/d.md\n"
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("1. Deeper" in m and "learn/d.md is missing" in m for m in msgs)
+    assert any(
+        "0. Start" in m and "learn/d.md" in m and "places it elsewhere" in m
+        for m in msgs
+    )
+
+
+def test_members_out_of_ladder_order_inside_a_group_is_an_error(
+    tmp_path: Path,
+) -> None:
+    nav = NAV_OK.replace(
+        "      - A: learn/a.md\n      - B: learn/b.md\n",
+        "      - B: learn/b.md\n      - A: learn/a.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("0. Start" in m and "not in ladder order" in m for m in msgs)
+
+
+def test_branch_before_its_parent_in_the_sidebar_is_an_error(tmp_path: Path) -> None:
+    nav = """
+nav:
+  - Learn:
+    - Overview: learn/hub.md
+    - "0. Start":
+      - A: learn/a.md
+      - B: learn/b.md
+    - "1. Deeper":
+      - CB: learn/c-branch.md
+      - C: learn/c.md
+      - D: learn/d.md
+  - Concepts:
+    - X: learn/x.md
+"""
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("learn/c-branch.md sits before learn/c.md" in m for m in msgs)
+
+
+def test_branch_right_after_its_parent_is_also_accepted(tmp_path: Path) -> None:
+    """The branch may follow its parent directly instead of closing the step."""
+    nav = NAV_OK.replace(
+        "      - C: learn/c.md\n      - D: learn/d.md\n      - Go Deeper (optional):\n        - CB: learn/c-branch.md\n",
+        "      - C: learn/c.md\n      - CB: learn/c-branch.md\n      - D: learn/d.md\n",
+    )
+    assert _run_with_nav(tmp_path, nav) == []
+
+
+def test_page_directly_under_the_tab_other_than_the_hub_is_an_error(
+    tmp_path: Path,
+) -> None:
+    nav = NAV_OK.replace("      - B: learn/b.md\n", "").replace(
+        "    - Overview: learn/hub.md\n",
+        "    - Overview: learn/hub.md\n    - B: learn/b.md\n",
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("learn/b.md sits directly under the tab" in m for m in msgs)
+
+
+def test_flat_tab_must_list_its_sequence_in_order(tmp_path: Path) -> None:
+    nav = NAV_OK.replace(
+        "    - X: learn/x.md\n", "    - A: learn/a.md\n    - X: learn/x.md\n"
+    )
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("Concepts" in m and "learn/a.md" in m and "elsewhere" in m for m in msgs)
+
+
+def test_missing_tab_is_an_error(tmp_path: Path) -> None:
+    nav = "nav:\n  - Home: index.md\n"
+    msgs = _run_with_nav(tmp_path, nav)
+    assert any("Learn: tab not found" in m for m in msgs)
+    assert any("Concepts: tab not found" in m for m in msgs)
+
+
+# --- reader-facing spellings -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "short"),
+    [
+        (
+            "Part 1 — Foundations: From Source Code to a Running Process",
+            "Part 1 — Foundations",
+        ),
+        (
+            "Part 0 — Compatibility as a Product Contract",
+            "Part 0 — Compatibility as a Product Contract",
+        ),
+        (
+            "Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough",
+            "Detecting Breaks",
+        ),
+        (
+            "What Each Level Sees — a level-by-level walk-through",
+            "What Each Level Sees",
+        ),
+        ("Exception Unwinding: The Machinery Behind `noexcept`", "Exception Unwinding"),
+        ("Data, Wire & Storage Compatibility", "Data, Wire & Storage Compatibility"),
+        ("ABI/API Compatibility — A Learning Series", "ABI/API Compatibility"),
+    ],
+)
+def test_short_title_drops_the_subtitle_but_keeps_a_parts_name(
+    title: str, short: str
+) -> None:
+    assert ll.short_title(title) == short
+
+
+def test_step_label_numbers_the_educational_sequence_only(tmp_path: Path) -> None:
+    _, ladder_path = _build(tmp_path)
+    ladder = ll.load_ladder(ladder_path)
+    edu, concepts = ladder.sequences
+    assert ll.step_label(edu, edu.tiers[1]) == "Step 1"
+    assert ll.step_label(concepts, concepts.tiers[0]) == "Concepts c1"
+    assert ll.nav_group_title(edu.tiers[1]) == "1. Deeper"
 
 
 def test_real_repository_ladder_is_clean() -> None:

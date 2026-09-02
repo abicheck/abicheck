@@ -174,4 +174,4 @@ topology schema by the
 
 ---
 
-**Ladder:** ← [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md) · Tier 7 · At scale · [Template- and Header-Heavy Libraries](template-heavy-libraries.md) →
+**Ladder:** ← [Triage a Suspicious Finding](triage-a-finding.md) · Step 8 · At Scale · [Template- and Header-Heavy Libraries](template-heavy-libraries.md) →
