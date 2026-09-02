@@ -52,8 +52,10 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
     default_member_access_for_tag as _default_member_access_for_tag,
+    format_qualified_type_name as _format_qualified_type_name,
     local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
     record_kind_from_tag as _record_kind_from_tag,
+    variable_is_const as _variable_is_const,
 )
 from .extract.dwarf_scope import (
     function_entity_id as _dwarf_function_entity_id,
@@ -739,15 +741,12 @@ class _DwarfSnapshotBuilder:
             return
         self._seen_var_mangles.add(mangled)
 
-        type_name = "?"
-        is_const = False
+        type_name, is_const = "?", False
         if "DW_AT_type" in die.attributes:
             type_name, _ = self._resolve_type(die, CU)
             self._referenced_type_names.add(type_name)
-            # Check for const qualifier
-            type_die = _resolve_type_die(die, CU)
-            if type_die is not None and type_die.tag == "DW_TAG_const_type":
-                is_const = True
+            type_die = _resolve_type_die(die, CU)  # see variable_is_const's docstring
+            is_const = _variable_is_const(type_die, CU)
 
         qualified_name = f"{scope}::{name}" if scope else name
 
@@ -1894,7 +1893,7 @@ class _DwarfSnapshotBuilder:
             inner_info = self._resolve_inner_info(die, CU, depth)
             if inner_info is None:
                 return (qualifier, 0)
-            return (f"{qualifier} {inner_info[0]}", inner_info[1])
+            return _format_qualified_type_name(qualifier, inner_info, die, CU)
 
         if tag == "DW_TAG_atomic_type":
             # Spelled "_Atomic" (not the generic tag.split() lowercase form) so

@@ -45,7 +45,16 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "26"
+_SNAPSHOT_CACHE_VERSION: str = "28"
+# v28: AbiSnapshot.semantic_ir's record occurrences now also carry
+# CanonicalEntity.template_arguments (ADR-063 Phase 6, sixth slice). A
+# snapshot cached by an older abicheck build would otherwise silently keep
+# serving Fact.not_collected() for this field forever for identical
+# cache-key inputs.
+# v27: a DWARF-only snapshot (no headers provided) now also populates
+# AbiSnapshot.semantic_ir (ADR-063 Phase 6, fifth slice). A snapshot cached
+# by an older abicheck build would otherwise silently keep serving
+# semantic_ir=None forever for identical cache-key inputs.
 # v26: AbiSnapshot.semantic_ir now also carries constant occurrences
 # (ADR-063 Phase 6, fourth slice). A snapshot cached by an older abicheck
 # build would otherwise silently keep serving a semantic_ir with no
