@@ -414,6 +414,29 @@ def test_normalize_header_ast_functiontype_tag_on_clang_is_present() -> None:
     assert entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_castxml_suffix_qualified_opaque_function_type() -> None:
+    """castxml renders a cv-qualified POINTER VALUE (not a cv-qualified
+    pointee) as a SUFFIX -- ``f"{base} {qual_str}"`` -- so a const
+    function-pointer's opaque fallback resolves to ``"FunctionType*
+    const"``, not ``"const FunctionType*"`` (Codex review, thirteenth
+    round, fresh evidence: an earlier revision only recognized a LEADING
+    cv-keyword, so this suffix-qualified shape was wrongly published as
+    present, conflicting with clang's real spelling in a hybrid dump of an
+    unchanged const callback)."""
+    fn = _function("f", "void", ("FunctionType* const",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+    assert entity.canonical_spelling.status.value == "unsupported"
+
+
 def test_normalize_header_ast_ternary_in_decltype_is_not_unresolved() -> None:
     """A real, fully-resolved type spelling can legally contain a literal
     ``"?"`` -- clang emits one verbatim for a dependent ternary expression

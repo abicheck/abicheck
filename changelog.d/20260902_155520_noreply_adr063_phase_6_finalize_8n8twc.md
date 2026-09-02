@@ -151,3 +151,9 @@
   all, silently reporting no qualification for a genuinely const pointer.
   `has_unresolved_component` gets the identical symmetric fix proactively,
   since it carries the same latent primitive weakness for the same shape.
+  The opaque-`FunctionType` regex now also recognizes a cv-qualifier
+  AFTER a pointer/reference sigil, not only before the tag — castxml
+  renders a cv-qualified pointer VALUE (not pointee) as a suffix
+  (`"FunctionType* const"`), which an earlier revision of the anchored
+  regex missed, wrongly publishing it as present and conflicting with
+  clang's real spelling for an unchanged const callback.

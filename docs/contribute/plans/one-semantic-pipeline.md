@@ -13029,6 +13029,20 @@ the identical shape even though no concrete failure was reported there --
 "fix the cause, not the instance" applied to a shared primitive weakness
 rather than only the one call site that happened to be caught.
 
+**The opaque-`FunctionType` regex gets one more shape (Codex review,
+thirteenth round, fresh evidence): a cv-qualifier can also appear AFTER a
+pointer/reference sigil, not only before the tag.** `type_resolution.py`'s
+own `CvQualifiedType` branch renders a cv-qualified POINTER VALUE (not a
+cv-qualified pointee) as a SUFFIX, matching this codebase's own "T *
+const" convention elsewhere -- so a const function-pointer's opaque
+fallback resolves to `"FunctionType* const"`, not `"const FunctionType*"`.
+An earlier revision of the anchored regex only recognized a LEADING
+cv-keyword, so this suffix-qualified shape was wrongly published as
+present, conflicting with clang's real spelling in a hybrid dump of an
+unchanged const callback. The regex now allows a cv-keyword run after
+EVERY sigil, since castxml's recursive wrapping can in principle nest more
+than one (`"FunctionType** const volatile"`).
+
 **Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already

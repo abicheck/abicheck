@@ -130,8 +130,21 @@ CLANG_EXPR_FINGERPRINT_RE = re.compile(r"^expr:[0-9a-f]{16}$")
 #: carries for its own, coarser substring check; resolving that fully
 #: needs real structural evidence from the parser (which XML tag actually
 #: produced the string), not a normalizer-only text fix.
+#:
+#: **A cv-qualifier can also appear AFTER a pointer/reference sigil, not
+#: only before the tag (Codex review, thirteenth round, fresh evidence).**
+#: ``type_resolution.py``'s own ``CvQualifiedType`` branch renders a
+#: ``CvQualifiedType`` directly wrapping a ``PointerType``/``ReferenceType``
+#: (i.e. a cv-qualified POINTER VALUE, not a cv-qualified pointee) as a
+#: SUFFIX -- ``f"{base} {qual_str}"`` -- matching this codebase's own
+#: "T * const" convention elsewhere (see that function's own docstring), so
+#: a const function-pointer resolves to ``"FunctionType* const"``, not
+#: ``"const FunctionType*"``. The regex allows a cv-keyword run after
+#: EVERY sigil (not just the last), since castxml's recursive wrapping can
+#: in principle nest more than one (``"FunctionType** const volatile"``).
 _CASTXML_OPAQUE_FUNCTION_TYPE_RE = re.compile(
-    r"^(?:const\s+|volatile\s+)*FunctionType(?:\s*(?:[*&]|\[\]))*$"
+    r"^(?:(?:const|volatile)\s+)*FunctionType"
+    r"(?:\s*(?:[*&]|\[\])(?:\s+(?:const|volatile))*)*$"
 )
 
 
