@@ -136,7 +136,12 @@ class TestDwarfSemanticIrCvQualification:
         var = next(v for v in snapshot.variables if v.name == var_name)
         assert snapshot.semantic_ir is not None
         entity = _one_entity(snapshot, var.entity_id)
-        assert entity.cv_qualification.status is FactStatus.PRESENT
+        # PARTIAL, not PRESENT (Codex review, fresh evidence): DWARF never
+        # extracts a volatile fact for a variable at all, so even a
+        # confirmed "const" reading never makes this tuple a complete
+        # answer -- see extract/semantic_normalizer_dwarf.py's own
+        # docstring.
+        assert entity.cv_qualification.status is FactStatus.PARTIAL
         return entity.cv_qualification.value
 
     def test_semantic_ir_is_populated(self, snapshot) -> None:

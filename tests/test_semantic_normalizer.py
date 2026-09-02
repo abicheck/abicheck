@@ -816,6 +816,10 @@ def test_normalize_header_ast_dwarf_variable_cv_qualification_from_is_const() ->
     )
     (entity,) = ir.occurrences.values()
     assert entity.cv_qualification.value == ("const",)
+    # PARTIAL, never PRESENT (Codex review, fresh evidence): DWARF never
+    # extracts a volatile fact for a variable at all, so even a confirmed
+    # "const" here does not make the whole tuple a complete answer.
+    assert entity.cv_qualification.status is FactStatus.PARTIAL
 
 
 def test_normalize_header_ast_dwarf_variable_pointee_const_is_not_top_level() -> None:
@@ -847,15 +851,19 @@ def test_normalize_header_ast_dwarf_variable_pointee_const_is_not_top_level() ->
     )
     (entity,) = ir.occurrences.values()
     assert entity.cv_qualification.value == ()
+    # PARTIAL, not a confirmed-empty PRESENT: is_const=False only confirms
+    # the "const" half of this tuple's vocabulary -- volatile is still
+    # genuinely uncollected, so this is not "confirmed: neither applies".
+    assert entity.cv_qualification.status is FactStatus.PARTIAL
 
 
 def test_normalize_header_ast_dwarf_variable_volatile_is_not_reported() -> None:
     """DWARF extracts no structural volatile fact for a variable at all (no
     backend has an ``is_volatile`` field on ``Variable``) -- a genuinely
     volatile, non-const DWARF variable reports the same empty
-    ``cv_qualification`` a plain variable would, a documented, accepted gap
-    rather than a claimed confirmed absence (see this module's own import
-    target's docstring)."""
+    ``cv_qualification`` value a plain variable would, at ``PARTIAL`` status
+    (Codex review, fresh evidence) rather than a claimed confirmed-empty
+    ``PRESENT`` (see this module's own import target's docstring)."""
     var = Variable(
         name="g_volatile",
         mangled="g_volatile",
@@ -873,6 +881,7 @@ def test_normalize_header_ast_dwarf_variable_volatile_is_not_reported() -> None:
     )
     (entity,) = ir.occurrences.values()
     assert entity.cv_qualification.value == ()
+    assert entity.cv_qualification.status is FactStatus.PARTIAL
 
 
 def test_normalize_header_ast_dwarf_records_enums_typedefs_unaffected() -> None:

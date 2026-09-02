@@ -119,6 +119,21 @@ def variable_cv_qualification(is_const: bool) -> Fact[tuple[str, ...]]:
     """A DWARF-sourced variable's ``cv_qualification``, built from its
     already-extracted, structurally-sound ``Variable.is_const`` -- see this
     module's own docstring for why this differs from the castxml/clang text
-    scan (and why it can only ever report ``()``/``("const",)``, never
-    ``"volatile"``)."""
-    return Fact.present(canonical_cv_qualification(("const",) if is_const else ()))
+    scan (and why it can only ever report ``const``, never ``volatile``).
+
+    Always ``Fact.partial(...)``, never ``Fact.present(...)`` -- including
+    when *is_const* is ``False`` (Codex review, fresh evidence): DWARF's own
+    DIE walk never extracts a volatile-qualifier fact for a variable at all
+    (no backend has an ``is_volatile`` field on ``Variable``), so even a
+    confirmed-non-const result is only ever confirmed for the "const" half
+    of this tuple's vocabulary -- volatile stays genuinely uncollected
+    regardless of what *is_const* says. ``Fact.present(())`` would
+    misrepresent that gap as "confirmed: neither qualifier applies", the
+    identical "PRESENT denotes a complete, confirmed value" mistake this
+    module's own function cv_qualification carve-out already avoids for a
+    different reason.
+    """
+    return Fact.partial(
+        canonical_cv_qualification(("const",) if is_const else ()),
+        "DWARF does not extract a volatile-qualifier fact for a variable",
+    )
