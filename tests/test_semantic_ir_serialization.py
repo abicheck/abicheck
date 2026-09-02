@@ -206,6 +206,36 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(TypeError):
             snapshot_from_dict(document)
 
+    def test_a_missing_disambiguator_is_rejected(self) -> None:
+        """The writer always emits this identity field (an undisambiguated
+        occurrence is `""`), so a missing one is a truncated document —
+        reading it as `""` would rewrite it as genuinely undisambiguated and
+        change what the hybrid merge's matching does with it."""
+        document = self._document_with_disambiguators("a", "b")
+        del document["semantic_ir"]["occurrences"][0]["occurrence"]["disambiguator"]
+        with pytest.raises(ValueError, match="missing required field"):
+            snapshot_from_dict(document)
+
+    def test_a_null_disambiguator_is_rejected(self) -> None:
+        document = self._document_with_disambiguators(None, "b")
+        with pytest.raises(TypeError, match="disambiguator"):
+            snapshot_from_dict(document)
+
+    def test_an_empty_disambiguator_stays_legitimate(self) -> None:
+        # The value the writer emits for every ordinary occurrence: it must
+        # not be caught by the rejections above.
+        eid = entity_id_for_type((), "Foo")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.present("Foo")
+                )
+            }
+        )
+        reloaded = _round_trip(_snapshot(ir))
+        assert reloaded.semantic_ir is not None
+        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+
     def test_a_non_string_producer_is_rejected(self) -> None:
         eid = entity_id_for_type((), "Foo")
         ir = SemanticIR(

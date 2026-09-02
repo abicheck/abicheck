@@ -160,14 +160,6 @@ def _present_or(document: Mapping[str, Any], key: str, default: Any) -> Any:
     return document[key] if key in document else default
 
 
-def _disambiguator(raw: Any) -> str:
-    """An occurrence's disambiguator: absent/``null`` is the ordinary empty
-    case, anything else must genuinely be a string."""
-    if raw is None or raw == "":
-        return ""
-    return identity_text(raw, "semantic_ir occurrence disambiguator")
-
-
 def _entity_to_dict(entity: CanonicalEntity) -> dict[str, Any]:
     document: dict[str, Any] = {
         name: _fact_to_dict(fact) for name, fact in entity.fact_items()
@@ -281,11 +273,21 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
             entity_id=domain_entity_id_from_dto(
                 _mapping(occurrence.get("entity_id"), "semantic_ir entity_id")
             ),
-            # identity_text, never str(): a JSON ``1`` and ``"1"`` would
-            # otherwise become one ``OccurrenceId``, and the assignment
-            # below would silently drop one of the two occurrences
-            # (``storage/AGENTS.md`` invariant 6).
-            disambiguator=_disambiguator(occurrence.get("disambiguator")),
+            # Required and never coerced. This writer always emits the
+            # field (an undisambiguated occurrence is `""`), so `null` or a
+            # missing key is a truncated document, and accepting either as
+            # `""` would rewrite it as a *genuinely* undisambiguated
+            # occurrence -- changing what the hybrid merge's matching does
+            # with it. `identity_text` then refuses a coerced value: a JSON
+            # `1` and `"1"` would otherwise become one `OccurrenceId` and
+            # the assignment below would drop one of the two occurrences
+            # (`storage/AGENTS.md` invariant 6).
+            disambiguator=identity_text(
+                required_field(
+                    occurrence, "disambiguator", "semantic_ir occurrence"
+                ),
+                "semantic_ir occurrence disambiguator",
+            ),
         )
         if occ_id in occurrences:
             # The list encoding can spell a duplicate that the mapping cannot
