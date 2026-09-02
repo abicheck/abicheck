@@ -292,7 +292,16 @@ def apply_case_a_fact_backfill(
             continue
         fact_key = f"{rule.field}_fact"
         for raw, obj in _owner_pairs(d, rule.owner, decoded):
-            if fact_key in raw:
+            # Skip only an entry carrying a *usable* fact, not merely the
+            # key. A `"<field>_fact": {}` or `: null` decodes to nothing
+            # (`decode_fact`'s own `if not raw`), so the owning dataclass's
+            # bridge derives the fact from the legacy value instead -- and
+            # keying this on presence let such an entry past the producer
+            # gate entirely, resolving PRESENT on a document with no
+            # evidence for it at all (CodeRabbit review, PR #995). Falsy is
+            # the same "no fact here" test the decoder already applies, so
+            # the two halves cannot disagree about what the document says.
+            if raw.get(fact_key):
                 continue
             if unreliable:
                 setattr(obj, rule.field, rule.normalized_default)

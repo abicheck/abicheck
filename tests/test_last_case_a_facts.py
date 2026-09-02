@@ -875,3 +875,67 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
             f"_FIELDS: {sorted(set(applied) - enumerated)}; not applied: "
             f"{sorted(enumerated - set(applied))}"
         )
+
+    #: Every falsy `<field>_fact` payload a malformed, truncated or
+    #: hand-authored document can carry. `decode_fact` treats each as "no
+    #: fact" (`if not raw`), so the backfill must too.
+    _EMPTY_FACT_PAYLOADS: tuple[tuple[str, object], ...] = (
+        ("empty-mapping", {}),
+        ("null", None),
+        ("empty-list", []),
+        ("empty-string", ""),
+        ("false", False),
+        ("zero", 0),
+    )
+
+    @pytest.mark.parametrize(
+        "payload_label,payload",
+        _EMPTY_FACT_PAYLOADS,
+        ids=[label for label, _p in _EMPTY_FACT_PAYLOADS],
+    )
+    def test_an_empty_fact_payload_does_not_bypass_the_producer_gate(
+        self, payload_label: str, payload: object
+    ) -> None:
+        """A falsy `<field>_fact` is not a fact, for every rule in the table.
+
+        The backfill skipped any entry whose `<field>_fact` *key* was
+        present, which is not the same question as whether the document
+        carries a usable fact: `decode_fact` returns nothing for a falsy
+        payload, the owning dataclass's bridge then derives `PRESENT` from
+        the legacy value, and the producer gate never ran — so a
+        hand-authored or truncated document reached exactly the confirmed
+        claim this whole mechanism exists to prevent (CodeRabbit review, PR
+        #995). Stated over every rule and every falsy payload rather than
+        the `{}` that was reported, since the presence test was wrong for
+        all of them equally.
+        """
+        for owner, field, collection, resting, _non_resting in self._FIELDS:
+            entry = dict(resting)
+            entry[f"{field}_fact"] = payload
+            d = self._document(owner, collection, entry, self._SHAPES[0][1])
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            got = getattr(obj, f"{field}_fact").status
+            assert got is FactStatus.NOT_COLLECTED, (
+                f"{owner}.{field} with a {payload_label} fact payload on an "
+                f"evidence-free document resolved {got}, not NOT_COLLECTED"
+            )
+
+    def test_a_real_fact_payload_is_still_honoured(self) -> None:
+        """The control: a document that does carry a fact keeps it.
+
+        Without this, making the skip test stricter could simply ignore
+        every persisted fact and re-derive it, which would pass the test
+        above for the wrong reason.
+        """
+        for owner, field, collection, resting, _non_resting in self._FIELDS:
+            entry = dict(resting)
+            entry[f"{field}_fact"] = {"status": "present", "value": entry[field]}
+            d = self._document(owner, collection, entry, self._SHAPES[0][1])
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            assert getattr(obj, f"{field}_fact").status is FactStatus.PRESENT, (
+                f"{owner}.{field}: a persisted PRESENT fact was discarded"
+            )

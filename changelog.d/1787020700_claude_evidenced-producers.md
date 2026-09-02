@@ -37,3 +37,12 @@
   kept a header-only fact `PRESENT` on a document with no header provenance
   (`storage/AGENTS.md`: never let a default value stand in for missing
   evidence).
+
+- A falsy `<field>_fact` payload in a legacy document — `{}`, `null`, or any
+  other empty value — no longer bypasses that gate. The backfill skipped an
+  entry whose `<field>_fact` *key* was present, but `decode_fact` treats a
+  falsy payload as no fact at all, so the owning dataclass's bridge derived
+  `PRESENT` from the legacy value and the producer gate never ran. A
+  truncated or hand-authored document could therefore reach exactly the
+  confirmed claim this mechanism exists to prevent. The skip now tests for a
+  usable fact, the same falsy check the decoder applies.
