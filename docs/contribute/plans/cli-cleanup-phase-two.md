@@ -4598,16 +4598,26 @@ the agreement so a future pass does not re-derive them as new:
   downward, `frontends → workflows`, and then the frontend gets an ordinary
   static import. A dynamic import to dodge an architecture detector is an
   acceptable transitional hack and an unacceptable end state.
-- **CI governance (PR 0B/P0) is still the oldest open item**, and the review
-  found the same shape from outside: Actions check-runs green on the exact
-  merge SHA, `Verify Merge Checks` success, but the commit *status* red from
-  `codecov/patch` (67.96% of diff vs a 90% target) and
-  `required_status_checks.enforcement_level: off`. Two decisions are owed,
-  not one: apply the prepared ruleset
-  (`.github/branch-protection-ruleset.json`), **and** decide whether patch
-  coverage is an authoritative merge gate — if it is, it goes in the required
-  set and PRs meet it; if it is not, it should stop painting merge SHAs red.
-  A permanently red `main` is indistinguishable from a broken one.
+- **CI governance (PR 0B/P0) is closed, by explicit decision, not by
+  completion.** At the time of this checkpoint it read as the oldest open
+  item — the review found the same shape from outside: Actions check-runs
+  green on the exact merge SHA, `Verify Merge Checks` success, but the
+  commit *status* red from `codecov/patch` and
+  `required_status_checks.enforcement_level: off`. Both decisions this
+  bullet used to say were owed have since been made, and made the same way:
+  the Ruleset **was** applied and did block merges on CI completion, exactly
+  as designed — and the maintainer then decided that trade-off isn't wanted
+  going forward. `required_status_checks` was removed from the Ruleset
+  (only `non_fast_forward` remains), `verify-merge-checks.yml` and its
+  dedicated tests were deleted outright, and — same call, same reasoning —
+  `codecov/patch` is not being promoted into the required set either: this
+  repo accepts an occasional red or incomplete merge over paying CI-completion
+  latency on every merge, full stop, and there is no plan to revisit that.
+  See `.github/AGENTS.md`'s "Required-status-check configuration —
+  deliberately not enforced" section for the durable statement of this
+  policy and PR 0's own "Superseded (2026-09)" note above for the mechanical
+  account of what was built, applied, and then reversed. No further
+  governance tightening is planned; this item does not reopen on its own.
 - **Generated plan status.** `plans/index.md`'s hand-maintained status prose
   goes stale between merge and the next docs pass (the review caught exactly
   that, below). The durable fix is not more careful hand-editing: take ADR
@@ -4639,9 +4649,11 @@ Recorded so they are not re-opened as work:
 
 ### Where this lands in the sequence
 
-Two new entries join the "Ordering" block below (PR I, PR J), and the review
-would run repository governance (PR A / PR 0B) ahead of everything as P0 —
-which is what this plan has said since PR 0 and has not happened yet.
+Two new entries join the "Ordering" block below (PR I, PR J). The review
+would have run repository governance (PR A / PR 0B) ahead of everything as
+P0; that item is now closed by explicit decision (see the corrected bullet
+above and PR 0's own "Superseded (2026-09)" note) rather than pending, so it
+no longer sits ahead of the sequence below waiting to happen.
 
 ## Merge criteria for every removal PR here
 
@@ -4688,8 +4700,20 @@ slice that made it safe.
 **Current, authoritative sequence:**
 
 ```text
-PR A  repository governance          = PR 0B — required checks / Ruleset,
-                                       exact-merge-SHA verification
+PR A  repository governance           = PR 0B — required checks / Ruleset,
+      (CLOSED, by decision)             exact-merge-SHA verification. Both
+                                       pieces were built and the Ruleset was
+                                       applied; the maintainer then decided
+                                       against merge-blocking CI going
+                                       forward and reversed it (Ruleset's
+                                       required_status_checks rule removed,
+                                       verify-merge-checks.yml deleted,
+                                       codecov/patch stays informational
+                                       too). See .github/AGENTS.md's
+                                       "Required-status-check configuration
+                                       — deliberately not enforced" section.
+                                       No further governance tightening is
+                                       planned
 PR B  effective configuration parity  — packs resolved once into one
       (DONE)                           CompatibilityEvaluationConfig, pack
                                        parity across every CLI command
