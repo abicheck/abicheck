@@ -166,22 +166,27 @@ def _build_symbol_only_snapshot(
                 visibility=Visibility.ELF_ONLY,
                 # Absence of Itanium _Z prefix is strong evidence of C linkage
                 is_extern_c=not sym.startswith("_Z"),
-                # ADR-063 Phase 2 (ELF-symbol-only slice). `mangled=sym` here
-                # is the raw exported symbol reused for BOTH fields, exactly
-                # the shape model.identity's own module docstring names as
-                # the reason a header/DWARF observation of the identical
-                # symbol must still merge with this one -- see
-                # entity_id_for_variable's docstring for the confirmed
-                # `leaf_name` interaction this offers `mangled_name=sym`
-                # (never `leaf_name`) to guard against. Offered as a genuine
-                # mangling only for the real Itanium-mangled case; a bare C
-                # symbol takes the extern-"C" branch instead, same rule
-                # every other producer in this codebase applies.
+                # ADR-063 Phase 2 (ELF-symbol-only slice). Unlike DWARF's
+                # `mangled = linkage_name or name` (a real fallback to a
+                # non-distinguishing spelling when no genuine linkage name
+                # exists -- see dwarf_scope.function_entity_id's own
+                # docstring for that gate), `sym` here is unconditionally a
+                # real, observed ELF dynamic-symbol-table entry: this
+                # producer only ever constructs a Function/Variable FROM an
+                # actual export, so there is no "no real distinguishing
+                # spelling" case to guard against at all. `sym` is therefore
+                # always offered as the genuine `mangled_name` -- never
+                # gated on the `_Z`-prefix heuristic the sibling
+                # `is_extern_c` field above uses, which (Codex review, PR
+                # #1015, mirroring the identical DWARF finding) wrongly
+                # reclassifies a real, non-Itanium linkage name (e.g. an
+                # `asm("custom_name")`-labeled C++ export) as extern-"C",
+                # discarding its own genuine identity. `entity_id_for_
+                # function`/`entity_id_for_variable`'s own contract makes
+                # this safe regardless of what `is_extern_c` happens to
+                # read: a present `mangled_name` wins outright.
                 entity_id=entity_id_for_function(
-                    (),
-                    sym,
-                    mangled_name=(sym if sym.startswith("_Z") else None),
-                    is_extern_c=not sym.startswith("_Z"),
+                    (), sym, mangled_name=sym, is_extern_c=not sym.startswith("_Z")
                 ),
             )
             for sym in sorted(exported_dynamic_funcs)
@@ -193,10 +198,7 @@ def _build_symbol_only_snapshot(
                 type="?",
                 visibility=Visibility.ELF_ONLY,
                 entity_id=entity_id_for_variable(
-                    (),
-                    sym,
-                    mangled_name=(sym if sym.startswith("_Z") else None),
-                    is_extern_c=not sym.startswith("_Z"),
+                    (), sym, mangled_name=sym, is_extern_c=not sym.startswith("_Z")
                 ),
             )
             for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
