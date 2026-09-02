@@ -377,6 +377,28 @@ class TestGateInfoFromReportDataStructuredFirst:
         assert gate.exit_code == 1
         assert gate.blocking is True
 
+    def test_garbage_full_run_outcome_does_not_bypass_the_contradiction_check(self):
+        """Codex review (P2), fresh evidence beyond the contradiction fix
+        above: the exemption used to be earned by mere key presence
+        (`"full_run_outcome" in data`), so an unscoped, corrupted report
+        could pair a genuinely contradictory severity/run_outcome pair with
+        an arbitrary `full_run_outcome` value (anything, even None) and have
+        the authoritative cross-check silently disabled. The exemption must
+        require full_run_outcome to itself be a well-formed RunOutcome
+        block, the only shape cli_compare_fold._swap_in_scoped_run_outcome
+        ever actually produces."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        data = {
+            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+            "full_run_outcome": None,
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
     def test_operational_failure_folds_into_an_otherwise_clean_severity_block(self):
         """The orthogonal-axes fold: RunOutcome.operational raises an
         otherwise-clean severity gate, exactly the shape ADR-049 Phase 7's

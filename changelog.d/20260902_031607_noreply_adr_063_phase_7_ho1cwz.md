@@ -137,6 +137,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   excluding those two sentinels, and only that goes into
   `run_outcome.compatibility` — `verdict`/`run_outcome.operational` are
   unaffected.
+- **The scoped-report exemption in `GateInfo.from_report_data`'s
+  `severity`/`run_outcome` contradiction check can no longer be triggered by
+  an arbitrary `full_run_outcome` key.** The exemption used to be earned by
+  mere key presence (`"full_run_outcome" in data`), so a corrupted or
+  partially rewritten *unscoped* report could pair a genuinely contradictory
+  `severity`/`run_outcome` pair with any `full_run_outcome` value (even
+  `null`) and have the authoritative fail-closed check silently disabled.
+  The new `_has_valid_full_run_outcome` requires it to parse as a
+  well-formed `RunOutcome` block — the only shape
+  `cli_compare_fold._swap_in_scoped_run_outcome` ever actually produces —
+  before granting the exemption.
 
 ### Changed
 

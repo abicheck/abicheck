@@ -65,6 +65,29 @@ def _run_outcome_gate_and_operational(
     return outcome.gate, outcome.operational
 
 
+def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
+    """Whether *data* carries a well-formed ``full_run_outcome`` block.
+
+    The scoped-report exemption in :func:`_fold_top_level_run_outcome` must
+    be earned by the report's actual shape, not merely by the presence of a
+    same-named key (Codex review, fresh evidence): the original check was
+    ``"full_run_outcome" in data``, so a corrupted or partially rewritten
+    *unscoped* report could pair a genuinely contradictory ``severity``/
+    ``run_outcome`` pair with an arbitrary ``full_run_outcome: null`` (or any
+    other garbage value) and have the authoritative cross-check silently
+    disabled. ``cli_compare_fold._swap_in_scoped_run_outcome`` only ever
+    stamps ``full_run_outcome`` as a copy of the original, well-formed
+    ``run_outcome`` dict, so requiring it to parse via
+    :meth:`~abicheck.policy.outcome.RunOutcome.from_dict` here restores that
+    it can only ever legitimately be present in exactly that scoped shape.
+    """
+    from abicheck.policy.outcome import RunOutcome
+
+    if "full_run_outcome" not in data:
+        return False
+    return RunOutcome.from_dict(data.get("full_run_outcome")) is not None
+
+
 def _run_outcome_blocking_categories(
     gate: PolicyGateDecision, operational: OperationalStatus
 ) -> tuple[str, ...]:
@@ -232,11 +255,13 @@ class GateInfo:
         # ADR-063 Phase 7: fold `RunOutcome`'s top-level axes into the
         # severity-derived result -- see `_fold_top_level_run_outcome`'s own
         # docstring for the full design (including the scoped-report
-        # exemption). `data` (not `sev`) is deliberately what's checked for
-        # `full_run_outcome`/re-read for `run_outcome`: both live at the
-        # report's top level, siblings of `severity`, never nested inside it.
+        # exemption, earned only by a well-formed `full_run_outcome` block --
+        # see `_has_valid_full_run_outcome`). `data` (not `sev`) is
+        # deliberately what's checked for `full_run_outcome`/re-read for
+        # `run_outcome`: both live at the report's top level, siblings of
+        # `severity`, never nested inside it.
         return _fold_top_level_run_outcome(
-            result, run_outcome, scoped_exempt="full_run_outcome" in data
+            result, run_outcome, scoped_exempt=_has_valid_full_run_outcome(data)
         )
 
     @classmethod
