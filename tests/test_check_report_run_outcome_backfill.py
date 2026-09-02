@@ -246,6 +246,33 @@ def test_old_release_report_gets_backfilled_run_outcome() -> None:
     assert run_outcome["compatibility"] == "BREAKING"
 
 
+def test_legacy_output_dir_release_summary_recovers_a_completed_member_verdict() -> (
+    None
+):
+    """Codex review, fresh evidence: `compare-release --output-dir`'s own
+    summary.json (`_write_release_summary_file`) carries `libraries`/
+    `unmatched_old` but never `old_dir`/`new_dir` -- the release branch's
+    original `"old_dir" in out` check missed this shape entirely and fell
+    through to the single-compare fallback, discarding the release's own
+    per-library verdicts. A top-level ERROR sentinel (from one library
+    aborting) must not hide a real BREAKING verdict from a completed sibling
+    library."""
+    report = {
+        "libraries": [
+            {"name": "a", "verdict": "ERROR"},
+            {"name": "b", "verdict": "BREAKING"},
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+        "verdict": "ERROR",
+        "exit": {},
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["operational"] == "extraction_error"
+
+
 def test_legacy_release_report_with_no_exit_or_severity_block_gets_a_real_gate() -> (
     None
 ):

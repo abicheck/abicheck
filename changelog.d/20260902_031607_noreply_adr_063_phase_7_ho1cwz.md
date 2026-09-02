@@ -393,6 +393,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   status on backfill.** The generic-report fallback previously hard-coded
   `operational: none` for this shape, contradicting the current native
   writer (Codex review).
+- **`compare-release --output-dir`'s own `summary.json` shape
+  (`libraries`+`unmatched_old`, but no `old_dir`/`new_dir`) is now
+  recognized by the release-report backfill branch.** The prior shape
+  check (`"old_dir" in out`) missed this writer entirely and fell through
+  to the single-compare fallback, discarding a completed per-library
+  verdict alongside the release's own operational failure (Codex review,
+  fresh evidence).
+- **`gate.py`'s scoped-run (`--used-by`/`--required-symbol`) gate
+  exemption no longer trusts a `full_verdict`/`used_by`/
+  `required_symbol_contract` that is present-but-explicitly-`null`.** The
+  real writer (`_ScopedFold.into_json`) never emits these keys as null —
+  only omits them — so a forged report carrying an explicit null for
+  `full_verdict` (which fails `Verdict` parsing) or for both scoped
+  markers previously still earned the exemption, letting an
+  otherwise-BREAKING severity block bypass the gate check (Codex review,
+  fresh evidence).
 
 ### Changed
 

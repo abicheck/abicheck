@@ -657,6 +657,40 @@ class TestGateInfoFromReportDataStructuredFirst:
         with pytest.raises(_MalformedGate):
             GateInfo.from_report_data(data)
 
+    def test_null_scoped_markers_do_not_bypass_the_check(self):
+        """Codex review, fresh evidence beyond the schema-type fix above:
+        `_ScopedFold.into_json` never emits `full_verdict`/`used_by`/
+        `required_symbol_contract` with an explicit null -- but the exemption
+        previously only checked *key presence*. `full_verdict: None` (fails
+        Verdict parsing), or both scoped markers explicitly `None` (matches
+        neither), must not earn the exemption; an otherwise-BREAKING severity
+        block must still fail closed."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
+
+        outcome = self._run_outcome_block(
+            PolicyGateDecision.NONE, OperationalStatus.NONE
+        )
+        base = {
+            "severity": {
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["x"],
+            },
+            "run_outcome": outcome,
+            "full_run_outcome": outcome,
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data({**base, "full_verdict": None, "used_by": ["a"]})
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(
+                {
+                    **base,
+                    "full_verdict": "BREAKING",
+                    "used_by": None,
+                    "required_symbol_contract": None,
+                }
+            )
+
     def test_operational_failure_folds_into_an_otherwise_clean_severity_block(self):
         """The orthogonal-axes fold: RunOutcome.operational raises an
         otherwise-clean severity gate, exactly the shape ADR-049 Phase 7's

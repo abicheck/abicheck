@@ -80,7 +80,8 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     _stamp_schema_version`` itself keys on: a scan report (``scan_schema_
     version``) reuses :func:`~abicheck.policy.outcome.run_outcome_dict_for_
     scan` exactly the way ``GateInfo.from_scan_report`` would read it back;
-    a release/bundle report (``libraries``+``old_dir``) reuses
+    a release/bundle report (``libraries``+``old_dir``, or ``libraries``+
+    ``unmatched_old`` for a ``--output-dir`` summary) reuses
     :func:`~abicheck.policy.outcome.run_outcome_dict_for_release`, with its
     own ``compatibility_contribution`` fallback to ``severity.exit_code``
     or the legacy verdict mapping when the original ``exit`` block never
@@ -201,7 +202,18 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     except ValueError:
         compatibility = None
 
-    if "libraries" in out and "old_dir" in out:
+    if "libraries" in out and ("old_dir" in out or "unmatched_old" in out):
+        # `old_dir` alone would miss a `compare-release --output-dir`
+        # summary.json (`cli_compare_release_matrix._write_release_summary_
+        # file`'s own shape): it carries `libraries`/`unmatched_old` but no
+        # `old_dir`/`new_dir` at all, so it previously fell through to the
+        # single-compare fallback below -- discarding a completed member
+        # result and the release's own operational failure alike (Codex
+        # review, fresh evidence). `unmatched_old` is present in both
+        # release-shaped writers' output, so the two markers together match
+        # either shape without also matching an unrelated `libraries`-
+        # bearing report.
+        #
         # Recover the worst REAL per-library verdict (Codex review, fresh
         # evidence) rather than trusting the raw top-level `verdict` alone:
         # a legacy release whose top-level verdict is the "ERROR"/

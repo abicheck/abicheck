@@ -170,10 +170,24 @@ def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
        validator :func:`_run_outcome_gate_and_operational` uses for the
        ordinary top-level ``run_outcome`` read, so neither can
        independently drift from the schema.
+    5. Presence alone was still not enough for the *other* two markers
+       either (Codex review, fresh evidence): ``full_verdict: null`` plus
+       ``used_by: null`` satisfied both membership checks, though
+       ``cli_compare_fold._ScopedFold.into_json`` never emits either key
+       with a ``null`` value -- it only ever sets ``full_verdict`` to the
+       real pre-swap ``verdict`` string, and only ever adds ``used_by``/
+       ``required_symbol_contract`` when that attribute is not ``None``.
+       ``full_verdict`` must now parse as a real :class:`Verdict`, and at
+       least one of ``used_by``/``required_symbol_contract`` must be
+       genuinely non-``None``.
     """
     if "full_run_outcome" not in data or "full_verdict" not in data:
         return False
-    if "used_by" not in data and "required_symbol_contract" not in data:
+    try:
+        Verdict(data.get("full_verdict"))
+    except ValueError:
+        return False
+    if data.get("used_by") is None and data.get("required_symbol_contract") is None:
         return False
     return _is_schema_valid_run_outcome(data.get("full_run_outcome"))
 
