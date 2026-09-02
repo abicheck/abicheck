@@ -939,3 +939,70 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
             assert getattr(obj, f"{field}_fact").status is FactStatus.PRESENT, (
                 f"{owner}.{field}: a persisted PRESENT fact was discarded"
             )
+
+    #: (ast_producer, whether a header-AST backend is evidenced by it).
+    #: `ast_producer` has held exactly castxml/clang/hybrid at every write
+    #: site, so anything else is a document this build cannot interpret.
+    _AST_PRODUCERS: tuple[tuple[object, bool], ...] = (
+        ("castxml", True),
+        ("clang", True),
+        ("hybrid", True),
+        (None, True),  # the field predates this document's schema
+        ("gcc-xml", False),  # a producer this build does not know
+        ("CASTXML", False),  # right backend, wrong spelling
+        ("castxml ", False),  # ... and with stray whitespace
+        ("", False),  # malformed/empty
+        ("dwarf", False),  # a real producer name, but not an AST one
+    )
+
+    @pytest.mark.parametrize(
+        "producer,evidences_header",
+        _AST_PRODUCERS,
+        ids=[repr(p) for p, _e in _AST_PRODUCERS],
+    )
+    def test_only_a_recognized_ast_producer_evidences_a_header_backend(
+        self, producer: object, evidences_header: bool
+    ) -> None:
+        """An unrecognized `ast_producer` credits neither backend.
+
+        The `else` branch here covered three different states at once —
+        "hybrid", "the format didn't record it yet", and "the document names
+        something this build has never heard of" — and credited both
+        backends for all three. The third is not a header-AST backend at
+        all, so a header-only fact stayed `PRESENT` on a document naming
+        neither (Codex review, PR #995).
+
+        `None` deliberately still credits both: the document format did not
+        carry the field, and its *recorded* `from_headers` still says a
+        header backend ran. Stated over every rule, with the known spellings
+        as controls so a fix that simply rejected everything fails.
+        """
+        statuses: dict[tuple[str, str], FactStatus] = {}
+        for owner, field, collection, resting, _non_resting in self._FIELDS:
+            shape = {"from_headers": True}
+            if producer is not None:
+                shape["ast_producer"] = producer
+            d = self._document(owner, collection, resting, shape)
+            obj = self._loaded(
+                snapshot_from_dict(json.loads(json.dumps(d))), owner, collection
+            )
+            statuses[owner, field] = getattr(obj, f"{field}_fact").status
+
+        if evidences_header:
+            # Not "every rule stays PRESENT": `Variable.access` names only
+            # castxml and `Param.is_va_list` only clang, so a recognized
+            # producer legitimately fails to evidence some of them, and each
+            # rule's own reliability flag can downgrade independently. The
+            # control is that a recognized producer still credits *something*
+            # — without it, a fix that rejected every producer would satisfy
+            # the negative half below.
+            assert FactStatus.PRESENT in statuses.values(), (
+                f"ast_producer {producer!r} is a recognized header-AST "
+                f"producer but evidenced no rule at all"
+            )
+        else:
+            assert set(statuses.values()) == {FactStatus.NOT_COLLECTED}, (
+                f"ast_producer {producer!r} evidences no backend, but "
+                f"{[k for k, v in statuses.items() if v is not FactStatus.NOT_COLLECTED]}"
+                f" resolved PRESENT"
+            )
