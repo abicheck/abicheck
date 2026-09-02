@@ -133,6 +133,16 @@ inputs:
   requested-depth:
     description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
     required: true
+  explicit-id:
+    description: >
+      This check's checks[].id (G42 "Explicit check identifiers"), if the
+      project declared one -- folded into check_id's '~<explicit_id>' tail
+      so two checks[] entries sharing (name, profile, baseline-channel,
+      requested-depth) but declaring different analysis: each produce a
+      distinct, non-colliding check_id/report. Omit (default) for the
+      pre-G42, unqualified check_id shape.
+    required: false
+    default: ''
   gate-mode:
     description: "'local' (default), 'deferred', or 'advisory' (ADR-047 §7)."
     required: false

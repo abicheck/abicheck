@@ -33,7 +33,13 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.check_report import build_check_id
+from abicheck.buildsource.check_report import (
+    augment_report,
+    build_bootstrap_report,
+    build_check_id,
+    build_new_target_report,
+    build_operational_error_report,
+)
 
 
 class TestBuildCheckIdG42Tails:
@@ -88,3 +94,74 @@ class TestBuildCheckIdG42Tails:
         omitting the parameter entirely, not a validation error."""
         check_id = build_check_id("libpvxs", "p", "c", "source", explicit_id="")
         assert check_id == "libpvxs@p#c@source"
+
+
+class TestReportBuildersThreadExplicitId:
+    """Each of the four public report-envelope builders backing
+    ``actions/check-target/report_envelope.py``'s four modes must fold
+    ``explicit_id`` into the ``check_id`` it stamps -- a real gap a review
+    round found: an earlier revision extended ``build_check_id`` but left
+    all four call sites in this module (and ``report_envelope.py``'s own
+    CLI, see ``test_action_check_target_explicit_id.py``) never passing
+    the parameter through."""
+
+    def test_augment_report(self):
+        report = {"verdict": "COMPATIBLE", "exit_code": 0}
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            explicit_id="l4-plugin",
+        )
+        assert out["check_id"] == "libpvxs@p#c@headers~l4-plugin"
+        assert out["target_id"] == out["check_id"]
+
+    def test_augment_report_no_explicit_id_is_unqualified(self):
+        report = {"verdict": "COMPATIBLE", "exit_code": 0}
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["check_id"] == "libpvxs@p#c@headers"
+
+    def test_build_operational_error_report(self):
+        report = build_operational_error_report(
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            resolve_outcome="ambiguous",
+            resolve_message="could not resolve.",
+            explicit_id="l4-plugin",
+        )
+        assert report["check_id"] == "libpvxs@p#c@headers~l4-plugin"
+        assert report["target_id"] == report["check_id"]
+
+    def test_build_bootstrap_report(self):
+        report = build_bootstrap_report(
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            resolve_message="no baseline yet.",
+            explicit_id="l4-plugin",
+        )
+        assert report["check_id"] == "libpvxs@p#c@headers~l4-plugin"
+
+    def test_build_new_target_report(self):
+        report = build_new_target_report(
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            resolve_message="target new to this baseline-set.",
+            explicit_id="l4-plugin",
+        )
+        assert report["check_id"] == "libpvxs@p#c@headers~l4-plugin"

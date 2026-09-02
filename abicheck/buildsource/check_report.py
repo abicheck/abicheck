@@ -551,6 +551,7 @@ def augment_report(
     name: str, profile_id: str, baseline_channel: str, requested_depth: str, gate_mode: str,
     project: str | None = None, head_sha: str | None = None, base_ref: str | None = None,
     action_version: str | None = None, analysis_exit_code: int | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Layer ADR-047 §7's identity/new fields onto a real analysis report.
 
@@ -574,7 +575,8 @@ def augment_report(
     if gate_mode not in GATE_MODES:
         raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
     out = dict(report)
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
     backfill_exit_block_fields(out)
     _stamp_schema_version(out, report)
@@ -617,6 +619,19 @@ def augment_report(
     return out
 
 
+def _apply_optional_envelope_fields(
+    report: dict[str, Any], *, project: str | None, head_sha: str | None,
+    base_ref: str | None, tool_version: str | None, action_version: str | None,
+) -> None:
+    """Set each optional field only when given (shared by the three builders below)."""
+    for key, value in (
+        ("project", project), ("head_sha", head_sha), ("base_ref", base_ref),
+        ("tool_version", tool_version), ("action_version", action_version),
+    ):
+        if value is not None:
+            report[key] = value
+
+
 def build_operational_error_report(
     *,
     name: str,
@@ -630,6 +645,7 @@ def build_operational_error_report(
     base_ref: str | None = None,
     tool_version: str | None = None,
     action_version: str | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize a full report envelope for a ``resolve-baseline`` failure.
 
@@ -638,7 +654,8 @@ def build_operational_error_report(
     block), so no ``severity`` block is written here at all -- omitting it
     is the ADR-047 §7-documented choice, not an oversight.
     """
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -658,16 +675,9 @@ def build_operational_error_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": OPERATIONAL_ERROR_VERDICT,
     }
-    if project is not None:
-        report["project"] = project
-    if head_sha is not None:
-        report["head_sha"] = head_sha
-    if base_ref is not None:
-        report["base_ref"] = base_ref
-    if tool_version is not None:
-        report["tool_version"] = tool_version
-    if action_version is not None:
-        report["action_version"] = action_version
+    _apply_optional_envelope_fields(
+        report, project=project, head_sha=head_sha, base_ref=base_ref,
+        tool_version=tool_version, action_version=action_version)
     return report
 
 
@@ -683,9 +693,11 @@ def build_bootstrap_report(
     base_ref: str | None = None,
     tool_version: str | None = None,
     action_version: str | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize the "no baseline published yet" advisory pass (§6)."""
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -708,16 +720,9 @@ def build_bootstrap_report(
         "verdict": BOOTSTRAP_VERDICT,
         "message": resolve_message,
     }
-    if project is not None:
-        report["project"] = project
-    if head_sha is not None:
-        report["head_sha"] = head_sha
-    if base_ref is not None:
-        report["base_ref"] = base_ref
-    if tool_version is not None:
-        report["tool_version"] = tool_version
-    if action_version is not None:
-        report["action_version"] = action_version
+    _apply_optional_envelope_fields(
+        report, project=project, head_sha=head_sha, base_ref=base_ref,
+        tool_version=tool_version, action_version=action_version)
     return report
 
 
@@ -733,6 +738,7 @@ def build_new_target_report(
     base_ref: str | None = None,
     tool_version: str | None = None,
     action_version: str | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize the "target new to this baseline-set" advisory pass.
 
@@ -742,7 +748,8 @@ def build_new_target_report(
     ``BOOTSTRAP_VERDICT``: the baseline-set itself resolved cleanly here, it
     simply carries no artifact for this particular target yet.
     """
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -765,16 +772,9 @@ def build_new_target_report(
         "verdict": NEW_TARGET_VERDICT,
         "message": resolve_message,
     }
-    if project is not None:
-        report["project"] = project
-    if head_sha is not None:
-        report["head_sha"] = head_sha
-    if base_ref is not None:
-        report["base_ref"] = base_ref
-    if tool_version is not None:
-        report["tool_version"] = tool_version
-    if action_version is not None:
-        report["action_version"] = action_version
+    _apply_optional_envelope_fields(
+        report, project=project, head_sha=head_sha, base_ref=base_ref,
+        tool_version=tool_version, action_version=action_version)
     return report
 
 

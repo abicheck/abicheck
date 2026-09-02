@@ -13,3 +13,8 @@
   composable `!<environment_id>` tail segment for a later phase (named
   deployment environments); omitting both tails produces the unchanged,
   pre-existing `check_id` shape. Report schema bumped to 2.48.
+  `checks[].id` also threads all the way through
+  `actions/check-target`/`check-project.yml`/`check-single.yml` (a new
+  `explicit-id` input), not just `abicheck project plan`'s generated
+  `run-plan.json` -- the real report envelope `check-target` writes now
+  carries the same `~<id>`-qualified `check_id` the run plan expects.
