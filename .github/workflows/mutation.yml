@@ -94,6 +94,8 @@ jobs:
               - 'abicheck/finding_identity.py'
               - 'abicheck/name_classification.py'
               - 'abicheck/suppression.py'
+              - 'abicheck/policy/selectors.py'
+              - 'abicheck/policy/selectors_namespace_glob.py'
               - 'abicheck/snapshot_io.py'
               - 'abicheck/serialization.py'
               # The lane's own infrastructure. Without these a change to
@@ -135,6 +137,8 @@ jobs:
               - 'tests/test_finding_identity*.py'
               - 'tests/test_name_classification*.py'
               - 'tests/test_suppression*.py'
+              - 'tests/test_selectors*.py'
+              - 'tests/test_selectors_namespace_glob*.py'
               - 'tests/test_snapshot_io*.py'
               - 'tests/test_serialization*.py'
       - name: Decide whether to run

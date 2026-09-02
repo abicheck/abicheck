@@ -13752,6 +13752,33 @@ earlier phases already establish as the pattern.
 
 ### Phase 9 — selector/suppression/reclassification consolidation (D10)
 
+**Landed (complete).** `abicheck/policy/selectors.py`'s `SelectorSet` is the
+one selector grammar `Suppression.__post_init__`/`ReclassifyRule.
+__post_init__` each construct internally and delegate all validation/
+matching to, exactly as designed below — including both selectors this
+section's own history flags as easy to omit (`binding`, `finding_id`) and
+the `finding_id`-matcher upward-dependency fix this section's own Design
+section calls out by name (a first draft did make that mistake again here;
+it was caught and corrected the same way before landing). The namespace-glob
+compilation machinery (`_SegmentGlobMatcher` and everything it depends on)
+moved into a sibling leaf, `abicheck/policy/selectors_namespace_glob.py`,
+purely to keep both files under the architecture gate's 800-line ceiling —
+not part of the original design, a mechanical split forced by the moved
+code's own size (the same reason `diff_types_vtable.py` exists). Every
+pre-existing `suppression.py`/`reclassify.py` selector test is unmodified
+and green; a new `tests/test_policy_selectors.py` exercises the shared leaf
+directly. `reclassify.py`'s `importlib.import_module` workaround and its
+`_suppression_cls()` helper are both deleted, replaced by a static
+`from .policy.selectors import SelectorSet` — confirmed via a repo-wide
+grep that no `importlib.import_module` call remains in that module.
+`scripts/check_architecture.py` gained the `selector-leaf-purity` check
+this section's own Files subsection specifies, exercised in
+`tests/test_architecture_check.py` against a deliberately-reintroduced
+cyclic-import fixture (one test per denylisted module, plus the
+submodule-import and no-op-when-absent cases) to confirm it fails closed.
+See [ADR-063](../adr/063-one-semantic-pipeline.md)'s own Status paragraph
+for the user-facing summary — not restated here, so the two cannot drift.
+
 **Goal.** `suppression.py` and `reclassify.py` share one selector-matching
 primitive instead of two independent grammars kept in sync by hand, and
 `reclassify.py`'s `importlib.import_module` workaround for an import cycle
