@@ -6178,3 +6178,56 @@ looked like the obvious fix and wasn't.
   requested-vs-resolved comparison, just applied the other direction), not
   a one-line patch to either `resolve_input` or the two call sites that
   triggered this entry.
+
+### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
+
+A Codex review round on PR #1016 (R1: teaching `action/run.sh`'s verdict
+readers about `COMPATIBLE_WITH_RISK`) found a sibling gap one level up:
+`_json_report_src`/`_report_compat_verdict` (and every other reader built
+on them — `_severity_gate_categories`, the coverage/annotation queries)
+have exactly two sources to fall back through when the automatic JSON
+sidecar isn't available — a JSON report (`_report_query`, schema-aware) or
+rendered markdown/text (`_text_report_content`, one shared regex). Both
+assume the *primary* report, when there's no JSON at all, is text-shaped.
+`format: sarif`/`format: html` break that assumption, and the automatic
+JSON sidecar is suppressed whenever the step's own `extra-args` already
+supplies a `--write` (any format) — the CLI's `--write` option is
+single-valued (`secondary_output.py`'s `--write FORMAT=PATH`, not
+`multiple=True`), so a step can't ask for both its own secondary format
+*and* the Action's internal JSON sidecar in the same invocation; something
+has to lose, and today the sidecar does.
+
+**SARIF is fixed** (this same PR, same review round): SARIF is itself
+well-formed JSON, and abicheck's SARIF renderer already stamps the native
+verdict string as `runs[0].properties.abiVerdict` (`sarif.py`'s
+`_result_for`) — so `_json_report_src` gained one more, deliberately
+last-resort branch that hands `format: sarif`'s own `OUTPUT_FILE` to
+`_report_query` when no PR_JSON/stdout-JSON/extra-write-json source
+exists, and `compat_verdict`'s query gained a fallback reading that same
+property. Every *other* query (annotations, severity_exit, coverage_where,
+blocking_categories, assurance_*) still silently answers "" against a
+SARIF document — same as the pre-existing "no report at all" case, since
+SARIF's schema has no equivalent top-level keys for any of them — so this
+extension is additive, not a behavior change for the common case where a
+full JSON sidecar already exists.
+
+**HTML is not fixed, and is a materially different problem, not the same
+one degree further:** HTML is not JSON. Recovering a verdict from
+abicheck's rendered HTML report needs real markup parsing (locating a
+`<th>Verdict</th>` cell and reading its sibling, per Codex's own finding —
+`html_report.py` owns that exact shape and could change it without notice)
+rather than a `json.load` call, which is a different, larger class of work
+than the SARIF fix above — not a "one more elif" the SARIF pattern
+generalizes into. It also compounds with the "single `--write` slot"
+constraint noted above: even a correct HTML parser only closes this one
+combination (`format: html` + a conflicting `extra-args --write`), while
+the root constraint (`--write` cannot name two formats in one invocation)
+is itself unaddressed and would need to be fixed first for a *general*
+solution rather than one more per-format special case in `_json_report_src`.
+Not attempted here. If this combination becomes a real reported problem
+rather than a review-found edge case, the honest fix is one of: (a) make
+`--write` accept multiple `FORMAT=PATH` operands (a real CLI capability
+change touching `secondary_output.py` and every command that declares the
+option, not just this Action script), or (b) give `action/run.sh` a real,
+tested HTML-verdict extractor rather than reusing the markdown/text regex
+against markup it was never meant to parse.

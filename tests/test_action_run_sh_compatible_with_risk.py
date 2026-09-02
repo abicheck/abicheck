@@ -286,6 +286,135 @@ class TestFallbackTextReportsCompatibleWithRisk:
         assert outputs["verdict"] == "BREAKING", outputs
 
 
+class TestSarifFallbackReportsCompatibleWithRisk:
+    """Codex review, PR #1016, fresh evidence beyond the markdown-fallback
+    finding above: ``format: sarif`` combined with an ``extra-args --write
+    <non-json>=...`` suppresses the automatic JSON sidecar (``--write`` is a
+    single-valued CLI option -- the user's own ``--write`` wins and there is
+    no second slot for the Action's internal one), so ``_json_report_src``
+    had no JSON source at all and fell back to feeding the *SARIF* primary
+    report to the markdown/text-only regex, which cannot match SARIF's
+    ``runs[0].properties.abiVerdict`` encoding. Fixed by teaching
+    ``_json_report_src`` a deliberately last-resort branch that hands the
+    SARIF file itself (it is well-formed JSON) to ``_report_query``, and
+    teaching that query's ``compat_verdict`` case the SARIF property path.
+    ``format: html`` has the identical trigger but is NOT fixed (HTML isn't
+    JSON) -- see ``docs/contribute/known-gaps.md``.
+    """
+
+    def _sarif_report(self, verdict: str) -> dict:
+        return {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "abicheck"}},
+                    "results": [],
+                    "invocations": [{"executionSuccessful": True, "exitCode": 0}],
+                    "properties": {"abiVerdict": verdict},
+                }
+            ],
+        }
+
+    def _run_sarif(self, tmp_path: Path, *, verdict: str, exit_code: int = 0) -> dict:
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=exit_code, report=self._sarif_report(verdict)
+        )
+        extra_md = tmp_path / "extra.md"
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "sarif",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.sarif"),
+                # A non-JSON --write occupies the CLI's one --write slot,
+                # which is exactly what suppresses the Action's own PR_JSON
+                # injection (_extra_args_has_write_flag) -- reproducing the
+                # reported combination rather than asserting the fixed
+                # helpers in isolation.
+                "INPUT_EXTRA_ARGS": f"--write markdown={extra_md}",
+            },
+            bindir,
+        )
+
+    def test_risk_verdict_is_recovered_from_the_sarif_primary_report(
+        self, tmp_path: Path
+    ) -> None:
+        outputs = self._run_sarif(tmp_path, verdict="COMPATIBLE_WITH_RISK")
+        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_breaking_verdict_is_recovered_from_the_sarif_primary_report(
+        self, tmp_path: Path
+    ) -> None:
+        """Fresh evidence, same fix: before it, an exit-0 BREAKING-under-a-
+        demoting-severity-policy report would have been just as unreadable
+        from a SARIF primary as COMPATIBLE_WITH_RISK was -- both routes
+        through the same now-fixed reader."""
+        outputs = self._run_sarif(tmp_path, verdict="BREAKING")
+        assert outputs["verdict"] == "BREAKING", outputs
+
+    def test_plain_compatible_sarif_report_is_unaffected(self, tmp_path: Path) -> None:
+        """Negative control: the new SARIF fallback must not report a risk
+        where the SARIF document itself says COMPATIBLE."""
+        outputs = self._run_sarif(tmp_path, verdict="COMPATIBLE")
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+
+    def test_sarif_primary_with_a_working_json_sidecar_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: when the automatic JSON sidecar is NOT
+        suppressed (no conflicting extra-args --write), _json_report_src
+        must keep preferring it over the new, deliberately last-resort SARIF
+        branch -- the full abicheck-native JSON answers every query
+        (annotations, severity_exit, ...) that a bare SARIF document cannot.
+        The two payloads deliberately disagree (SARIF says BREAKING, the
+        native JSON sidecar says COMPATIBLE_WITH_RISK) so the assertion can
+        only pass if the sidecar, not the SARIF fallback, actually decided
+        the outcome."""
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        sarif_payload = tmp_path / "sarif_payload.json"
+        sarif_payload.write_text(
+            json.dumps(self._sarif_report("BREAKING")), encoding="utf-8"
+        )
+        json_payload = tmp_path / "json_payload.json"
+        json_payload.write_text(json.dumps(_risk_report()), encoding="utf-8")
+        stub = bindir / "abicheck"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "prev=''\n"
+            'for arg in "$@"; do\n'
+            '  if [[ "$prev" == "-o" ]]; then\n'
+            f'    cp "{sarif_payload}" "$arg"\n'
+            "  fi\n"
+            '  case "$arg" in\n'
+            "    json=*)\n"
+            f'      cp "{json_payload}" "${{arg#json=}}"\n'
+            "      ;;\n"
+            "  esac\n"
+            '  prev="$arg"\n'
+            "done\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "sarif",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.sarif"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+
+
 class TestScanExitZeroReportsCompatibleWithRisk:
     def test_verdict_output_is_compatible_with_risk_not_compatible(
         self, tmp_path: Path

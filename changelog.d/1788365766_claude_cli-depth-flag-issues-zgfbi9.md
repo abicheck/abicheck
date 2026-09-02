@@ -105,3 +105,15 @@
   `BUILD`/`SOURCE` silently skipped the fail-loud guard entirely (running
   the comparison without the requested evidence instead of refusing to),
   and `BINARY` was silently dropped with no forwarding and no notice.
+- **The composite Action can now recover a `COMPATIBLE_WITH_RISK`/
+  `BREAKING`/`API_BREAK` verdict from a `format: sarif` primary report even
+  when `extra-args` supplies its own non-JSON `--write`.** That combination
+  suppresses the Action's automatic JSON sidecar entirely (the CLI's
+  `--write` accepts only one format per run), so the verdict reader
+  previously fell back to matching the markdown/text `Verdict:` pattern
+  against the SARIF document itself, which cannot match SARIF's
+  `runs[0].properties.abiVerdict` encoding — publishing plain `COMPATIBLE`
+  regardless of the real result. SARIF is itself valid JSON, so the reader
+  now falls back to it directly as a true last resort, after every
+  higher-fidelity JSON source. `format: html` has the identical trigger and
+  remains unaddressed (HTML isn't JSON) — see `docs/contribute/known-gaps.md`.

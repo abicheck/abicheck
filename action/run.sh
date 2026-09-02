@@ -2017,6 +2017,30 @@ _json_report_src() {
     # `_extra_args_write_json_path`'s own docstring for why this is needed
     # rather than falling through to "no report").
     echo "$_extra_write_json_path"
+  elif [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+       && { [[ -z "${_output_file_pre_fp+x}" ]] \
+            || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
+    # Deliberately last, not folded into the `json`-format branch above:
+    # SARIF *is* well-formed JSON (unlike html/text/markdown), so it can
+    # answer `_report_query`'s `compat_verdict` from its own
+    # `runs[0].properties.abiVerdict` (see that query's own comment) --
+    # but only `compat_verdict`; every other query (annotations,
+    # severity_exit, coverage_where, blocking_categories, ...) reads a key
+    # SARIF's schema simply doesn't have and silently answers "" from it,
+    # same as today's "no report" case. This branch must therefore never
+    # win over PR_JSON/stdout-JSON/extra_write_json_path above when one of
+    # those full-fidelity abicheck-native sources exists -- it exists
+    # purely to close the gap where NONE of them does: `format: sarif`
+    # paired with an `extra-args --write <non-json>=...`, which both
+    # suppresses the automatic JSON sidecar (the guard a few hundred lines
+    # up) and occupies the one `--write` slot the CLI accepts per
+    # invocation, so there is no other JSON anywhere in this run's output
+    # (Codex review, PR #1016, fresh evidence). `format: html` has the
+    # identical gap and is NOT covered here -- HTML is not JSON, so
+    # answering its verdict would need real markup parsing, not a
+    # `json.load`; left as a documented, narrower limitation (`docs/
+    # contribute/known-gaps.md`).
+    echo "${OUTPUT_FILE}"
   fi
 }
 
@@ -2119,7 +2143,25 @@ elif query == "compat_verdict":
     # alone when the gate demotes the exit code, and `compare` reports
     # `result.verdict` unconditionally. It is therefore the only signal that
     # tells a genuinely clean run from a break the user chose not to gate on.
-    print(_either("verdict", "") or "")
+    verdict = _either("verdict", "") or ""
+    if not verdict:
+        # SARIF has no top-level/nested "verdict" key -- abicheck's SARIF
+        # renderer instead stamps the identical value at
+        # runs[0].properties.abiVerdict (sarif.py's own `_result_for`).
+        # Reached here only as the true last resort: `_json_report_src`
+        # hands this function a SARIF file at all solely when no PR_JSON,
+        # stdout-JSON, or extra_write_json_path source exists for this run
+        # -- which happens when `format: sarif` is paired with an
+        # `extra-args --write <non-json>=...` that both suppresses the
+        # automatic JSON sidecar and occupies the one `--write` slot the
+        # CLI accepts per invocation (Codex review, PR #1016, fresh
+        # evidence -- see `_json_report_src`'s own SARIF branch).
+        runs = report.get("runs")
+        if isinstance(runs, list) and runs and isinstance(runs[0], dict):
+            props = runs[0].get("properties")
+            if isinstance(props, dict):
+                verdict = props.get("abiVerdict") or ""
+    print(verdict)
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
 elif query == "coverage_where":
