@@ -136,6 +136,7 @@ import re
 from collections.abc import Iterable, Mapping
 
 from ..model.declarations import Function, Variable
+from ..model.declarator_qualifiers import _is_declarator_group
 from ..model.entities import EnumType, RecordType
 from ..model.fact import Fact
 from ..model.identity import EntityId
@@ -155,13 +156,25 @@ __all__ = ["normalize_header_ast"]
 #: and :func:`_variable_spelling_fact` below.
 _UNRESOLVED_TYPE_SENTINEL = "?"
 
-#: Whole-word ``const``/``volatile`` matcher for
+#: Whole-word ``const``/``volatile``/``restrict`` matcher for
 #: :func:`_variable_top_level_cv_qualification`'s own depth-aware scan --
 #: mirrors ``model.declarator_qualifiers._CV_WORD_RE`` (duplicated rather
 #: than imported, matching that module's own reasoning for not sharing it
 #: with its sibling ``signature_normalization.py``: leaf modules on two
-#: different sides of the `model`/`extract` boundary, per ADR-063 D10).
-_CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile)\b")
+#: different sides of the `model`/`extract` boundary, per ADR-063 D10),
+#: extended with ``restrict`` -- unlike that sibling's own word-matcher,
+#: this one feeds ``CanonicalEntity.cv_qualification`` directly (see
+#: :data:`~abicheck.model.semantic_ir.CV_QUALIFIER_ORDER`, which names all
+#: three), not a signature-identity spelling that deliberately excludes
+#: ``restrict`` as a non-discriminating qualifier (Codex review, fifth
+#: round, fresh evidence: clang's own variable qualType spells a
+#: restrict-qualified pointer verbatim, e.g. ``"int *restrict"`` for
+#: ``int * restrict gp`` -- unlike castxml's ``type_name_uncached``, which
+#: never emits the word at all, by the deliberate choice recorded in that
+#: function's own ``CvQualifiedType`` branch. Recognizing it here just
+#: means a clang-produced variable's real top-level qualification is
+#: recorded rather than silently read back as an empty tuple).
+_CV_KEYWORD_RE = re.compile(r"\b(?:const|volatile|restrict)\b")
 
 #: castxml's own literal wrapper prefix for an ``_Atomic`` type
 #: (``extract/headers/castxml/type_resolution.py``'s ``AtomicType`` branch)
@@ -310,16 +323,54 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
     template argument (``vector<const int> *g`` -- the vector's own element
     type, not this pointer's qualification) is never mistaken for this
     declaration's own.
+
+    **A declarator-grouping paren is transparent to the sigil search, not
+    depth-increasing (Codex review, fifth round, fresh evidence).** A const
+    function-pointer/pointer-to-array/pointer-to-member-function variable
+    wraps its own sigil in a real, syntactic ``(...)`` group -- clang spells
+    ``int (* const fp)(int)`` for ``int (* const)(int) fp``'s declaration --
+    which an ordinary opaque-paren depth count would treat exactly like a
+    parameter list or a `decltype(...)`'s parens, hiding the sigil at depth
+    1 and reporting no qualification at all.
+    ``model.signature_normalization.canonicalize_function_signature_param_type``
+    already solved this identical shape for a parameter's own type; this
+    reuses its ``_is_declarator_group`` classifier (same "one open paren
+    lookahead, is what follows a bare/qualified sigil rather than a type"
+    test) so a genuine parameter-list/template/`decltype` paren still counts
+    normally, and only the declarator's own grouping paren is skipped.
     """
     depth = 0
     last_sigil = -1
-    for i, ch in enumerate(type_str):
-        if ch in "([<":
+    # True for a paren currently open on this stack that groups a
+    # declarator's own sigil -- popped, not depth-counted, so a sigil (or a
+    # trailing cv-qualifier) inside one is still found at depth 0. Mirrors
+    # `signature_normalization.canonicalize_function_signature_param_type`'s
+    # identical `transparent_parens` stack.
+    transparent_parens: list[bool] = []
+    i = 0
+    n = len(type_str)
+    while i < n:
+        ch = type_str[i]
+        if ch == "(":
+            transparent = _is_declarator_group(type_str, i + 1)
+            transparent_parens.append(transparent)
+            if not transparent:
+                depth += 1
+            i += 1
+            continue
+        if ch == ")":
+            was_transparent = transparent_parens.pop() if transparent_parens else False
+            if not was_transparent:
+                depth = max(0, depth - 1)
+            i += 1
+            continue
+        if ch in "[<":
             depth += 1
-        elif ch in ")]>":
+        elif ch in "]>":
             depth = max(0, depth - 1)
         elif ch in "*&" and depth == 0:
             last_sigil = i
+        i += 1
     region = type_str[last_sigil + 1 :] if last_sigil != -1 else type_str
     depth = 0
     found: list[str] = []

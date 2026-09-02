@@ -40,3 +40,16 @@
   `extract/header_ast_fields.parse_header_ast_fields`. No detector,
   verdict, or exit code changes — `SemanticIR` remains additive and unread
   by the existing pipeline.
+  A variable's own top-level cv-qualification search also treats a
+  declarator-grouping parenthesis as transparent (mirroring
+  `signature_normalization.canonicalize_function_signature_param_type`'s own
+  `_is_declarator_group` classifier), so a const function-pointer/
+  pointer-to-array/pointer-to-member-function variable (clang's own spelling
+  for `int (* const fp)(int)` is `"int (*const)(int)"`) reports its real
+  top-level `const` instead of an empty tuple from a sigil hidden one
+  nesting level too deep, and now recognizes a top-level `restrict` the
+  same way — `CanonicalEntity.cv_qualification`'s vocabulary already names
+  `restrict` alongside `const`/`volatile`, and clang's own variable
+  qualType spells a restrict-qualified pointer verbatim (`"int *restrict"`
+  for `int * restrict gp`), unlike castxml, which never emits the word by
+  deliberate choice.

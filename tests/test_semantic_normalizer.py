@@ -591,6 +591,66 @@ def test_normalize_header_ast_const_template_argument_is_not_top_level() -> None
     assert entity.cv_qualification.value == ()
 
 
+def test_normalize_header_ast_const_function_pointer_variable_is_top_level_const() -> (
+    None
+):
+    """A const function-pointer variable wraps its own sigil in a real
+    declarator-grouping paren (clang's own spelling for ``int (* const
+    fp)(int)`` is ``"int (*const)(int)"``) -- that paren must be transparent
+    to the top-level-sigil search, not counted as an ordinary opaque
+    nesting level the way a parameter list or ``decltype(...)`` is (Codex
+    review, fifth round, fresh evidence: an earlier revision found no
+    top-level sigil at all here, since the sigil sits INSIDE the
+    declarator-grouping paren, and silently reported ``()`` instead of
+    ``("const",)``)."""
+    var = Variable(
+        name="g_fp",
+        mangled="g_fp",
+        type="int (*const)(int)",
+        entity_id=entity_id_for_variable((), "g_fp", mangled_name="g_fp"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_restrict_variable_is_recognized() -> None:
+    """Clang's own variable qualType spells a restrict-qualified pointer
+    verbatim (``"int *restrict"`` for ``int * restrict gp``) -- unlike
+    castxml, which never emits the word at all (a deliberate choice, since
+    ``restrict`` has no ABI/mangling effect and is tracked as its own
+    ``Param.is_restrict`` fact for parameters). ``CanonicalEntity.
+    cv_qualification``'s vocabulary names ``restrict`` alongside ``const``/
+    ``volatile`` (``CV_QUALIFIER_ORDER``), so a variable's own top-level
+    ``restrict`` must be recognized the same way (Codex review, fifth
+    round, fresh evidence: an earlier revision only matched ``const``/
+    ``volatile`` and silently reported ``()`` for a real, present
+    qualifier)."""
+    var = Variable(
+        name="g_ptr",
+        mangled="g_ptr",
+        type="int *restrict",
+        entity_id=entity_id_for_variable((), "g_ptr", mangled_name="g_ptr"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="clang",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("restrict",)
+
+
 def test_normalize_header_ast_unresolved_variable_type_is_failed() -> None:
     """The identical unresolved-type sentinel on a variable's own type is a
     failure, not a confirmed ``"?"`` spelling (Codex review)."""
