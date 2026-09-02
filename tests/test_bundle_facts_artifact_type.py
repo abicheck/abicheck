@@ -78,13 +78,43 @@ class TestBundleFactsArtifactTypeDiscriminator:
         assert d["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
         assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
 
-    def test_missing_artifact_type_defaults_to_current(self) -> None:
-        # A v1 document (schema_version 1) predates this marker entirely --
-        # it must still load, and get the current artifact_type assigned.
+    def test_missing_artifact_type_defaults_to_current_on_a_true_v1_document(
+        self,
+    ) -> None:
+        # A true v1 document (schema_version 1) predates this marker
+        # entirely -- it must still load, and get the current artifact_type
+        # assigned.
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
         d = bundle_facts_to_dict(facts)
         del d["artifact_type"]
+        d["schema_version"] = 1
         assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
+    def test_missing_artifact_type_defaults_when_schema_version_is_absent_too(
+        self,
+    ) -> None:
+        # No schema_version key at all is the same "predates the marker"
+        # case as an explicit 1 -- bundle_facts_from_dict already defaults
+        # a missing schema_version to the current one for other purposes,
+        # but that must not by itself make a missing marker look legacy.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        del d["artifact_type"]
+        del d["schema_version"]
+        assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
+    def test_missing_artifact_type_is_rejected_on_schema_version_2(self) -> None:
+        # Codex review, fresh evidence: schema_version 2 is exactly where
+        # the marker became mandatory -- a document declaring it but
+        # omitting artifact_type is malformed, not legacy, and must not
+        # silently pass through the v1 shape-fallback/default.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        assert d["schema_version"] == 2
+        del d["artifact_type"]
+
+        with pytest.raises(ValueError, match="artifact_type"):
+            bundle_facts_from_dict(d)
 
     def test_mismatched_artifact_type_is_rejected(self) -> None:
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
@@ -98,8 +128,9 @@ class TestBundleFactsArtifactTypeDiscriminator:
 class TestLooksLikeBundleFactsDocument:
     """Two-tier classification: an explicit ``artifact_type`` key is trusted
     outright (in both the match and mismatch directions) -- shape-based
-    fallback applies only when the key is fully absent (a legacy v1
-    document)."""
+    fallback applies only to a true v1 document (``schema_version`` absent
+    or explicitly ``1``); a document declaring ``schema_version`` 2+ with no
+    marker gets neither tier (Codex review, fresh evidence)."""
 
     def test_true_for_a_document_with_the_correct_marker(self) -> None:
         assert looks_like_bundle_facts_document(
@@ -119,7 +150,21 @@ class TestLooksLikeBundleFactsDocument:
         )
 
     def test_true_for_a_legacy_v1_document_with_no_marker_key(self) -> None:
+        assert looks_like_bundle_facts_document(
+            {"schema_version": 1, "per_library_snapshots": {}}
+        )
+
+    def test_true_when_schema_version_is_absent_too(self) -> None:
         assert looks_like_bundle_facts_document({"per_library_snapshots": {}})
+
+    def test_false_for_schema_version_2_with_no_marker_key(self) -> None:
+        # The exact bypass Codex flagged: a document declaring the current
+        # schema_version but omitting the now-mandatory marker must not
+        # fall through to the v1-only shape fallback just because it also
+        # happens to carry a per_library_snapshots-shaped key.
+        assert not looks_like_bundle_facts_document(
+            {"schema_version": 2, "per_library_snapshots": {}}
+        )
 
     def test_false_for_a_non_dict_input(self) -> None:
         assert not looks_like_bundle_facts_document(["not", "a", "dict"])
