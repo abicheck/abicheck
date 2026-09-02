@@ -33,7 +33,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
+from abicheck.bundle_facts import (
+    BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+    BundleFacts,
+    capture_bundle_facts,
+)
 from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.errors import SnapshotError
@@ -102,13 +106,16 @@ class TestBundleFactsArchiveResourceLimits:
         import abicheck.bundle_facts as bundle_facts_module
 
         metadata = {
-            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(5)
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"])
+            for i in range(5)
         }
         facts = capture_bundle_facts(_per_library_snapshots(metadata))
         out = tmp_path / "many.bundlefacts.archive.zip"
         save_bundle_facts(facts, out, format="archive")
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100
+        )
         with pytest.raises(SnapshotError, match="safety limit"):
             load_bundle_facts(out, format="archive")
 
@@ -132,6 +139,7 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"a.so": h},
@@ -164,6 +172,7 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"a.so": h},
@@ -190,6 +199,7 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"a.so": h},
@@ -251,12 +261,15 @@ class TestBundleFactsArchiveResourceLimits:
             BundleArchiveWriter,
         )
 
-        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_JSON_CONTAINER_NODES", 100)
+        monkeypatch.setattr(
+            bundle_archive_module, "DEFAULT_MAX_MANIFEST_JSON_CONTAINER_NODES", 100
+        )
         out = tmp_path / "wide-manifest.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(b'{"library":"a.so","version":"1"}')
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"a.so": h},
@@ -268,7 +281,9 @@ class TestBundleFactsArchiveResourceLimits:
             with BundleArchiveReader.open(out) as reader:
                 reader.read_manifest()
 
-    @pytest.mark.parametrize("missing_field", ["schema_version", "bundle_facts_schema_version"])
+    @pytest.mark.parametrize(
+        "missing_field", ["schema_version", "bundle_facts_schema_version"]
+    )
     def test_load_rejects_a_manifest_missing_a_schema_version_key(
         self, tmp_path: Path, missing_field: str
     ) -> None:
@@ -280,7 +295,12 @@ class TestBundleFactsArchiveResourceLimits:
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         out = tmp_path / "missing-schema-version.bundlefacts.archive.zip"
-        manifest = {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {}}
+        manifest = {
+            "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+            "schema_version": 1,
+            "bundle_facts_schema_version": 1,
+            "library_blobs": {},
+        }
         del manifest[missing_field]
         with BundleArchiveWriter(out) as writer:
             writer.write_manifest(manifest)
@@ -314,6 +334,7 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(b'{"library": "shared.so"}')
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {f"lib{i}.so": h for i in range(5)},
@@ -406,9 +427,7 @@ class TestBundleFactsArchiveResourceLimits:
         review, fresh evidence)."""
         import abicheck.bundle_facts as bundle_facts_module_local
 
-        monkeypatch.setattr(
-            bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3
-        )
+        monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3)
         shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
         facts = BundleFacts(
             per_library_snapshots={f"lib{i}.so": shared_snap for i in range(5)}
@@ -431,9 +450,7 @@ class TestBundleFactsArchiveResourceLimits:
         import abicheck.bundle_facts as bundle_facts_module_local
         import abicheck.serialization as serialization_module
 
-        monkeypatch.setattr(
-            bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3
-        )
+        monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3)
         serialize_calls = 0
         real_snapshot_to_dict = serialization_module.snapshot_to_dict
 
@@ -528,7 +545,8 @@ class TestBundleFactsArchiveResourceLimits:
         from abicheck.serialization import snapshot_to_dict
 
         metadata = {
-            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(3)
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"])
+            for i in range(3)
         }
         facts = BundleFacts(per_library_snapshots=_per_library_snapshots(metadata))
 
@@ -541,7 +559,9 @@ class TestBundleFactsArchiveResourceLimits:
         # Each real per-library blob here is ~2.7 KiB (per the sibling
         # cap-shrinking test above) -- big enough to reject after the 2nd
         # distinct snapshot but not the 1st.
-        monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 4000)
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 4000
+        )
         out = tmp_path / "incremental-cap.bundlefacts.archive.zip"
         with pytest.raises(SnapshotError, match="already exceeds"):
             bundle_facts_module_local.write_bundle_facts_archive(
@@ -612,7 +632,9 @@ class TestBundleFactsArchiveResourceLimits:
 
         base_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
         facts = BundleFacts(
-            per_library_snapshots={f"lib{i}.so": copy.deepcopy(base_snap) for i in range(3)}
+            per_library_snapshots={
+                f"lib{i}.so": copy.deepcopy(base_snap) for i in range(3)
+            }
         )
 
         calls: list[str] = []
@@ -623,7 +645,9 @@ class TestBundleFactsArchiveResourceLimits:
 
         # Each real payload here is ~2987 bytes -- big enough to reject
         # after the 2nd distinct-but-equal object, not the 1st.
-        monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 4000)
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 4000
+        )
         out = tmp_path / "distinct-equal.bundlefacts.archive.zip"
         with pytest.raises(SnapshotError, match="once every duplicate"):
             bundle_facts_module_local.write_bundle_facts_archive(
@@ -656,7 +680,9 @@ class TestBundleFactsArchiveResourceLimits:
                 for i in range(20)
             )
         )
-        facts = capture_bundle_facts({}, manifest=manifest)  # no library snapshots at all
+        facts = capture_bundle_facts(
+            {}, manifest=manifest
+        )  # no library snapshots at all
         out = tmp_path / "oversized-manifest-only.bundlefacts.archive.zip"
 
         # Matches either raise site: the manifest's own now-bounded encode
@@ -686,9 +712,12 @@ class TestBundleFactsArchiveResourceLimits:
         them share a blob)."""
         import abicheck.bundle_facts as bundle_facts_module
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100
+        )
         metadata = {
-            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(5)
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"])
+            for i in range(5)
         }
         facts = capture_bundle_facts(_per_library_snapshots(metadata))
         out = tmp_path / "too-much-content.bundlefacts.archive.zip"
@@ -739,7 +768,9 @@ class TestBundleFactsArchiveResourceLimits:
         past it) must still be rejected with the correct error."""
         import abicheck.bundle_facts as bundle_facts_module
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000
+        )
         snap = AbiSnapshot(library="libbig.so", version="x" * 5000)
         facts = BundleFacts(per_library_snapshots={"libbig.so": snap})
         out = tmp_path / "oversized-snapshot-field.bundlefacts.archive.zip"
@@ -774,7 +805,9 @@ class TestBundleFactsArchiveResourceLimits:
             per_library_snapshots=_per_library_snapshots(_old_metadata()),
             manifest=manifest,
         )
-        out = tmp_path / "manifest-routes-through-bounded-encode.bundlefacts.archive.zip"
+        out = (
+            tmp_path / "manifest-routes-through-bounded-encode.bundlefacts.archive.zip"
+        )
         save_bundle_facts(facts, out, format="archive")
 
         # One call per library snapshot, plus exactly one more for the
@@ -790,7 +823,9 @@ class TestBundleFactsArchiveResourceLimits:
         rejected with the correct error, not exhaust memory first."""
         import abicheck.bundle_facts as bundle_facts_module
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000
+        )
         manifest = InstantiationManifest(
             entries=tuple(
                 ManifestEntry(symbol=f"sym_{i}" * 50, optional_provider=False)
@@ -913,9 +948,12 @@ class TestBundleFactsArchiveResourceLimits:
         # to actually decode, so the assertions below exercise the cap
         # *shrinking* between reads rather than a decode failure.
         cap = 8000
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap
+        )
         metadata = {
-            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(2)
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"])
+            for i in range(2)
         }
         facts = capture_bundle_facts(_per_library_snapshots(metadata))
         out = tmp_path / "two.bundlefacts.archive.zip"
@@ -933,7 +971,9 @@ class TestBundleFactsArchiveResourceLimits:
 
         assert len(calls) == 2
         assert calls[0] == cap  # the full remaining allowance for the first blob
-        assert calls[1] is not None and calls[1] < cap  # reduced by the first blob's own size
+        assert (
+            calls[1] is not None and calls[1] < cap
+        )  # reduced by the first blob's own size
 
     def test_manifest_blob_sharing_a_library_hash_is_charged_for_its_own_materialization(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -967,6 +1007,7 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"libcore.so": h},
@@ -979,7 +1020,9 @@ class TestBundleFactsArchiveResourceLimits:
         # A cap generous enough for exactly one charge of the payload's
         # own bytes, but not two -- the fix's own regression signal.
         cap = len(payload) + 100
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap
+        )
         with pytest.raises(SnapshotError, match="second materialization"):
             load_bundle_facts(out, format="archive")
 
@@ -1004,6 +1047,7 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
                     "schema_version": 1,
                     "bundle_facts_schema_version": 1,
                     "library_blobs": {"libcore.so": h},
@@ -1051,11 +1095,13 @@ class TestBundleFactsArchiveResourceLimits:
         # (hash_counts sums it once); a cap between that and double it is
         # exceeded only if the manifest's own second charge is included --
         # the fix's regression signal, mirroring the reader-side test.
-        library_payload = json_module.dumps(
-            snapshot_to_dict(snap), indent=2
-        ).encode("utf-8")
+        library_payload = json_module.dumps(snapshot_to_dict(snap), indent=2).encode(
+            "utf-8"
+        )
         cap = len(library_payload) + 10
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
+        monkeypatch.setattr(
+            bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap
+        )
         with pytest.raises(SnapshotError, match="byte aggregate safety limit"):
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()

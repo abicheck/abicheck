@@ -59,14 +59,108 @@ if TYPE_CHECKING:
     from .snapshot_io import SnapshotWriteResult
 
 
+def looks_like_bundle_facts_document(data: Any) -> bool:
+    """Classify a decoded JSON object as a stored :class:`~abicheck.
+    bundle_facts.BundleFacts` document (CLI cleanup phase two, PR I
+    prerequisite).
+
+    This is the strong discriminator `BUNDLE_FACTS_SCHEMA_VERSION`'s own
+    docstring (`bundle_facts.py`) calls for -- a pure, read-only classifier
+    over already-decoded JSON, with no side effects and no dependency on
+    `bundle_facts_from_dict`'s own (more permissive) reading rules. Two
+    tiers, in order:
+
+    1. **Explicit marker**: `data["artifact_type"]` is present -- trusted
+       outright, whichever way it answers. A document that names a
+       *different* artifact type must never be reclassified as bundle
+       facts just because it happens to also carry a
+       `per_library_snapshots`-shaped key; the explicit marker is the whole
+       point of having one.
+    2. **Shape fallback** (true v1 documents only): `artifact_type` is
+       absent *and* `schema_version` is absent, or *normalizes* (the same
+       `int(...)` coercion :func:`bundle_facts_from_dict` applies, so
+       `"1"`/`True` keep classifying exactly as they did before this
+       marker existed -- Codex review, fresh evidence: an earlier,
+       unnormalized comparison rejected a legitimate `"schema_version":
+       "1"` baseline) to exactly `1` -- the only signal available before
+       the marker existed (schema_version 2) is `per_library_snapshots`
+       being present and mapping-shaped, mirroring
+       `bundle_facts_from_dict`'s own mandatory-key check. This is a real,
+       accepted false-positive surface (an unrelated document that
+       happens to define that one key) inherited from the v1 format
+       itself, not introduced here -- closing it further would mean
+       rejecting genuine v1 baselines already persisted in users' CI,
+       which `BUNDLE_FACTS_SCHEMA_VERSION`'s own docstring rules out. A
+       document *explicitly* declaring `schema_version` 2+ but omitting
+       the marker gets neither tier -- schema_version 2 is exactly where
+       the marker became mandatory, so an explicit 2+ with no marker is
+       malformed, not legacy, and must not silently pass through the
+       fallback meant for documents that predate the marker's existence.
+
+    Does not itself decode JSON, open a file, or validate the document
+    beyond this one question -- a caller wanting the parsed
+    :class:`~abicheck.bundle_facts.BundleFacts` (or its validation errors)
+    still goes through :func:`bundle_facts_from_dict`."""
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
+
+    if not isinstance(data, dict):
+        return False
+    if "artifact_type" in data:
+        return data.get("artifact_type") == BUNDLE_FACTS_ARTIFACT_TYPE
+    if "schema_version" not in data:
+        is_legacy_v1 = True
+    else:
+        try:
+            # Same coercion bundle_facts_from_dict applies, so a legacy
+            # document spelling schema_version as "1" or 1.0 classifies
+            # identically to one spelling it as the bare int 1 (Codex
+            # review). An explicit `null` is *not* the same as the key
+            # being absent -- checking key presence rather than
+            # `.get(...) is None` keeps that distinction, matching
+            # bundle_facts_from_dict's own equivalent check (Codex
+            # review, fresh evidence: `int(None)` is exactly the
+            # TypeError this reader itself would raise for that value).
+            is_legacy_v1 = int(data["schema_version"]) == 1
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: a JSON exponent like 1e999 decodes to float
+            # inf, and int(inf) raises OverflowError rather than
+            # TypeError/ValueError (Codex review, fresh evidence) -- this
+            # pure classifier must answer False for malformed input, not
+            # crash a future operand dispatcher calling it.
+            is_legacy_v1 = False
+    if not is_legacy_v1:
+        return False
+    return isinstance(data.get("per_library_snapshots"), dict)
+
+
 def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
-    JSON-able dict (G38 Phase 2)."""
+    JSON-able dict (G38 Phase 2).
+
+    ``artifact_type`` is always :data:`~abicheck.bundle_facts.
+    BUNDLE_FACTS_ARTIFACT_TYPE` -- the constant, not ``facts.artifact_type``.
+    ``init=False`` keeps the field out of the constructor, but the dataclass
+    isn't frozen, so ``facts.artifact_type = "other"`` after construction is
+    still possible; reading the constant here (matching how
+    ``write_bundle_facts_archive`` already writes its own marker) means a
+    mutated instance still round-trips correctly instead of silently
+    producing a document ``bundle_facts_from_dict`` would reject.
+    ``schema_version`` is written the same way, for the same reason:
+    ``facts.schema_version`` records whatever version a *loaded* document
+    claimed (useful introspection -- "what version did this originate
+    from"), but this function always emits the *current* shape (it just
+    wrote the v2+-only ``artifact_type`` key unconditionally above), so a
+    round-tripped v1 document must not still declare ``schema_version: 1``
+    while carrying a v2 field -- that combination is exactly the malformed,
+    self-contradictory document schema_version 2's own introduction was
+    meant to make impossible (Codex review, fresh evidence)."""
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, BUNDLE_FACTS_SCHEMA_VERSION
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
 
     return {
-        "schema_version": facts.schema_version,
+        "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+        "schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": {
             name: snapshot_to_dict(snap)
@@ -98,6 +192,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     doesn't know to consult (Codex review).
     """
     from .bundle_facts import (
+        BUNDLE_FACTS_ARTIFACT_TYPE,
         BUNDLE_FACTS_SCHEMA_VERSION,
         DEFAULT_VARIANT_FINGERPRINT,
         BundleFacts,
@@ -117,6 +212,73 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
             "bundle facts file."
         )
+    # A true v1 document -- schema_version absent entirely, or *normalizing*
+    # (the same `int(...)` coercion just above, so a pre-marker document
+    # spelling it "1" or `True` keeps loading exactly as it did before this
+    # marker existed -- Codex review, fresh evidence: a raw, unnormalized
+    # comparison rejected a legitimate `"schema_version": "1"` baseline the
+    # old `int(...)`-based reader accepted) to exactly `1` -- carries no
+    # `artifact_type` key at all: defaults to the current value. A document
+    # that *does* carry the key but names a different artifact type is
+    # rejected outright rather than silently accepted: whoever built it
+    # declared it as something else, and reading it as bundle facts anyway
+    # would score a comparison against a document nobody asked to be read
+    # this way (CLI cleanup phase two, PR I prerequisite -- the whole point
+    # of the explicit marker is that it is trusted, not advisory). A
+    # document explicitly declaring schema_version 2+ but omitting the key
+    # gets neither default nor fallback: schema_version 2 is exactly where
+    # the marker became mandatory, so an explicit 2+ with no marker is
+    # malformed, not legacy -- silently defaulting it would let the
+    # discriminator schema_version 2 exists to enforce be bypassed by the
+    # exact documents it's meant to catch.
+    # `artifact_type` is never passed into the `BundleFacts(...)` call below:
+    # the field is `init=False` (always `BUNDLE_FACTS_ARTIFACT_TYPE`), and
+    # every path that doesn't raise here has already proven the document's
+    # own value equals that constant -- there is nothing left to carry
+    # through (Codex review, fresh evidence: passing a caller-suppliable
+    # value into an `init=False` field isn't even possible, so this also
+    # keeps the constructor call honest about that).
+    if "artifact_type" in d:
+        given_artifact_type = d["artifact_type"]
+        if given_artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
+            raise ValueError(
+                f"bundle facts: unexpected artifact_type {given_artifact_type!r} "
+                f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
+            )
+        # Codex review, fresh evidence (twice): even the *correct* marker
+        # is self-contradictory on a document declaring a schema_version
+        # below 2 -- artifact_type was added in schema_version 2, so no
+        # genuinely-pre-marker document could ever carry it. The first cut
+        # of this check only rejected exactly schema_version == 1, letting
+        # 0, a negative value, or a fractional value int(...) normalizes
+        # below 1 slip through unrejected; use < 2 so every such value is
+        # covered, not just the one legacy encoding. A writer never
+        # produces any of these combinations (bundle_facts_to_dict()
+        # always pairs the marker with the current schema_version);
+        # reaching here means a malformed or hand-edited document, not a
+        # real legacy one.
+        if schema_version < 2:
+            raise ValueError(
+                f"bundle facts: schema_version {schema_version} predates "
+                "artifact_type (added in schema_version 2) -- such a "
+                "document may not declare it"
+            )
+    else:
+        # No try/except needed here (unlike looks_like_bundle_facts_document's
+        # own copy of this check below): by this point `schema_version` is
+        # already the normalized int the top-of-function `int(d.get(...))`
+        # call produced -- if that hadn't been coercible, it would already
+        # have raised before reaching here. "schema_version" absent from
+        # *d* is the one case that int(...) call defaulted rather than
+        # parsed, so it's checked for directly rather than re-deriving it
+        # from the (already-defaulted, no-longer-"absent"-shaped)
+        # `schema_version` value.
+        is_legacy_v1 = "schema_version" not in d or schema_version == 1
+        if not is_legacy_v1:
+            raise ValueError(
+                f"bundle facts: schema_version {schema_version} requires an "
+                "'artifact_type' key (added in schema_version 2); none was given"
+            )
     # "per_library_snapshots" is mandatory, not merely defaulted: a
     # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
     # must not silently load as a valid, current-schema *empty* bundle --
