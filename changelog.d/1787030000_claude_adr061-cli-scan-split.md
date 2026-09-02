@@ -11,3 +11,12 @@
   unchanged. `stable_abi.py` is classified `model` (a 209-line leaf importing
   only the already-`model` `stable_abi_data.py`), which is what let the ABI3
   floor parser move with the rest.
+- **Internal (ADR-061 D5): `reporter.py` down from 1998 to 1747 lines.** The
+  application-compatibility projection (`appcompat_to_json`/
+  `appcompat_to_markdown` plus the five section builders only they use) moved
+  to `report/appcompat_report.py` — one whole concern with no other caller,
+  answering a different question (one application against one library pair)
+  from the library-vs-library report the rest of the module builds.
+  `reporter.appcompat_to_json`/`appcompat_to_markdown` still resolve, through
+  a lazy module-level `__getattr__` rather than a static re-export, which is
+  what keeps the module-level import edge one-way.

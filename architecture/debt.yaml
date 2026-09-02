@@ -983,7 +983,7 @@
     },
     {
       "path": "abicheck/reporter.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1747,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
