@@ -16,7 +16,7 @@
 """``parse_header_ast_fields`` -- the single-parser (non-manifest) choke
 point for a header-AST parser's own ``parse_*()`` methods, feeding both the
 legacy ``AbiSnapshot`` field shapes and a real :class:`~abicheck.model.
-semantic_ir.SemanticIR` (ADR-063 Phase 6, third slice).
+semantic_ir.SemanticIR` (ADR-063 Phase 6, third and fourth slices).
 
 ``dumper.py``'s ``_dump_pe``/``_dump_macho`` have no ``--dump-manifest``
 support (ADR-050 D3 is ELF-scoped) and so never go through
@@ -103,6 +103,8 @@ def parse_header_ast_fields(
     enums = tuple(parser.parse_enums())
     typedefs_qualified = parser.parse_typedefs_qualified()
     typedef_entity_ids = parser.parse_typedef_entity_ids()
+    constants = parser.parse_constants()
+    constant_entity_ids = parser.parse_constant_entity_ids()
     return HeaderAstFields(
         functions=functions,
         variables=variables,
@@ -110,9 +112,9 @@ def parse_header_ast_fields(
         enums=enums,
         typedefs=parser.parse_typedefs(),
         typedefs_qualified=typedefs_qualified,
-        constants=parser.parse_constants(),
+        constants=constants,
         typedef_entity_ids=typedef_entity_ids,
-        constant_entity_ids=parser.parse_constant_entity_ids(),
+        constant_entity_ids=constant_entity_ids,
         semantic_ir=normalize_header_ast(
             types=types,
             enums=enums,
@@ -121,5 +123,7 @@ def parse_header_ast_fields(
             producer=producer,
             functions=functions,
             variables=variables,
+            constants=constants,
+            constant_entity_ids=constant_entity_ids,
         ),
     )

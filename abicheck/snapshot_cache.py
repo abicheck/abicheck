@@ -45,7 +45,11 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "25"
+_SNAPSHOT_CACHE_VERSION: str = "26"
+# v26: AbiSnapshot.semantic_ir now also carries constant occurrences
+# (ADR-063 Phase 6, fourth slice). A snapshot cached by an older abicheck
+# build would otherwise silently keep serving a semantic_ir with no
+# constant occurrences forever for identical cache-key inputs.
 # v25: AbiSnapshot.semantic_ir now also canonicalizes functions/variables,
 # and PE/Mach-O header-AST dumps populate it too (ADR-063 Phase 6, third
 # slice). A snapshot cached by an older abicheck build would otherwise

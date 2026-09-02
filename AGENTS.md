@@ -209,9 +209,16 @@ Core pipeline (in order of data flow):
    ctor/dtor synthetic-key identity rewrites are propagated into
    `semantic_ir` via `_rewrite_semantic_ir_entity_ids`, so a hybrid merge
    never leaves one representation keyed under a retired identity another
-   already moved past). Constants are still not normalized
-   (`parse_constants()` captures only a value expression, never a type
-   string, to canonicalize). BTF/CTF/PDB remain fully unmigrated: those
+   already moved past). **Fourth slice landed:** constants too — both
+   backends already attach a real `entity_id` to every public constant
+   (`parse_constant_entity_ids()`, Phase 2), so the identity half was
+   already done; the normalizer projects `parse_constants()`'s raw value
+   text verbatim as `canonical_spelling`, deliberately uncanonicalized
+   (mirrors `diff_symbols._diff_constants`'s own long-standing raw-string
+   `!=` comparison — there is no *observed* cross-backend value-spelling
+   disagreement the way there is for a function/variable's type spelling,
+   so inventing a canonicalizer here would be a heuristic in search of a
+   bug, not a fix for one). BTF/CTF/PDB remain fully unmigrated: those
    backends do not populate `entity_id` at all yet.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific

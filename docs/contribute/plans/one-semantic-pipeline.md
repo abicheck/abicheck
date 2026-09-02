@@ -12806,10 +12806,46 @@ function's shared, real-mangled-name `EntityId` one-to-one and records the
 identical kind of namespace-qualification-spelling conflict the typedef
 case already has, not a new failure mode.
 
-**Still not landed, and therefore this phase is not complete:** constants
-are still not normalized (`CanonicalEntity.canonical_spelling` is specified
-as a declaration's own *type* spelling, and `parse_constants()` captures
-only a value expression, never a captured type string, to canonicalize);
+**LANDED (fourth slice): constants.** `extract/semantic_normalizer.
+normalize_header_ast` gained `constants`/`constant_entity_ids` parameters
+(default `{}`, so a caller that has not migrated needs no change), mirroring
+`typedefs_qualified`/`typedef_entity_ids`'s own pairing. Both header-AST
+backends already attach a real `EntityId` to every public constant
+(`parse_constant_entity_ids()`, Phase 2) -- the identity half of this
+slice's work was already done before it landed; what remained was wiring
+the existing maps into this normalizer at all, plus the two call sites
+(`dumper_manifest.resolve_header_ast_result`, `extract/header_ast_fields.
+parse_header_ast_fields`) that already compute both maps for the legacy
+`AbiSnapshot.constants`/`constant_entity_ids` fields. **Deliberately no
+canonicalization is applied to the value text.** Every prior slice's
+`canonical_spelling` closes a real, *observed* cross-backend type-spelling
+disagreement (`"char const*"` vs. `"char const *"`, a bare `"Point"` vs.
+`"inner::Point"`); a constant's parsed representation carries only its value
+expression, never a captured type string, and no comparable disagreement in
+*value* spelling has been observed between the two backends. `canonical_
+spelling` is therefore the raw `parse_constants()` string, unchanged --
+mirroring `diff_symbols._diff_constants`'s own `CONSTANT_CHANGED` detector,
+which has always compared the two backends' raw value strings with a plain
+`!=` and never canonicalized either side. Inventing a value-spelling
+canonicalizer with no known target divergence to fix would be exactly the
+kind of speculative heuristic this codebase's own bug-class discipline warns
+against elsewhere (see `_type_index_items`'s/`_diff_constants`'s own
+docstrings on an identity heuristic falsified twice, and the "attempted
+twice, reverted twice" discipline that follows from it) -- a canonicalizer
+in search of a bug to fix, not a fix for an observed one. A constant carries
+no `cv_qualification`/`template_arguments`: it has no captured type for
+either fact to describe. `snapshot_cache._SNAPSHOT_CACHE_VERSION` is bumped
+(25 -> 26) for the same reason every prior slice bumped it: a snapshot
+cached by an older abicheck build would otherwise silently keep serving a
+`semantic_ir` with no constant occurrences forever for identical
+cache-key inputs. `dumper_scoping._scoped_semantic_ir` needed no change:
+both backends already scope `parse_constants()`/`parse_constant_entity_ids()`
+to the public-header surface at parse time (the same `_have_public_set`
+filtering pass Phase 2 already applies), so there is no dependency-header
+constant occurrence for that function to additionally exclude, unlike
+functions/variables/types/enums which are scoped post-hoc.
+
+**Still not landed, and therefore this phase is not complete:**
 DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already
 resolved identity for, it does not resolve identity itself, so extending it
@@ -12823,8 +12859,8 @@ never populated by any backend, header-AST functions/variables included (a
 function *template*'s own template-argument list is a separate, still-open
 piece of this slice's own stated scope, not silently assumed done by the
 ordinary-function work above). A manifest (`--dump-manifest`) dump is a
-further, real gap (Codex review, PR #1001), unchanged by this slice's
-functions/variables addition: `tu_merge.merge_fragments` already collapses
+further, real gap (Codex review, PR #1001), unchanged by the third and
+fourth slices' additions: `tu_merge.merge_fragments` already collapses
 same-identity declarations across translation units into one representative
 entry before `normalize_header_ast` ever runs, so a real ODR-duplicate/
 incomplete-vs-complete pair spread across two TUs never reaches

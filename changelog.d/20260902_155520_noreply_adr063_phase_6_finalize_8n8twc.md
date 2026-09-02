@@ -53,3 +53,20 @@
   qualType spells a restrict-qualified pointer verbatim (`"int *restrict"`
   for `int * restrict gp`), unlike castxml, which never emits the word by
   deliberate choice.
+
+- **`SemanticIR` now also canonicalizes constants** (ADR-063 Phase 6's
+  fourth slice). Both header-AST backends already attach a real `entity_id`
+  to every public constant (`parse_constant_entity_ids()`, Phase 2), so this
+  slice is wiring, not new identity work: `normalize_header_ast` gained
+  `constants`/`constant_entity_ids` parameters (default `{}`) and projects
+  each constant's raw `parse_constants()` value text verbatim as
+  `canonical_spelling` — deliberately uncanonicalized, since (unlike a
+  function/variable's type spelling, where a real cross-backend spelling
+  disagreement is directly observed) there is no known cross-backend
+  disagreement in constant-value spelling to canonicalize; this mirrors
+  `diff_symbols._diff_constants`'s own long-standing `CONSTANT_CHANGED`
+  detector, which has always compared the two backends' raw value strings
+  with a plain `!=`. A constant carries no `cv_qualification`/
+  `template_arguments`, since it has no captured type for either to
+  describe. No detector, verdict, or exit code changes — `SemanticIR`
+  remains additive and unread by the existing pipeline.

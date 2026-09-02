@@ -30,6 +30,7 @@ from abicheck.model.declarations import Function, Param, Variable
 from abicheck.model.entities import EnumType, RecordType
 from abicheck.model.identity import (
     Namespace,
+    entity_id_for_constant,
     entity_id_for_enum,
     entity_id_for_function,
     entity_id_for_type,
@@ -732,6 +733,63 @@ def test_normalize_header_ast_non_const_variable_has_empty_cv_qualification() ->
 def test_normalize_header_ast_functions_and_variables_default_to_empty() -> None:
     """*functions*/*variables* default to ``()`` -- a caller that has not
     migrated to this slice's scope yet needs no change."""
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_projects_constant_value_verbatim() -> None:
+    """A constant's ``canonical_spelling`` is its raw ``parse_constants()``
+    value text, unchanged -- there is no established cross-backend
+    canonicalization for a constant's value expression to apply (this
+    module's own docstring, "Scope of the fourth slice"), so this mirrors
+    ``diff_symbols._diff_constants``'s own long-standing raw-string
+    comparison rather than inventing one."""
+    eid = entity_id_for_constant((), "kMaxWidgets")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        constants={"kMaxWidgets": "42"},
+        constant_entity_ids={"kMaxWidgets": eid},
+    )
+    (entity,) = ir.occurrences.values()
+    assert set(ir.occurrences) == {OccurrenceId(eid)}
+    assert entity.canonical_spelling.value == "42"
+    assert entity.producer == "castxml"
+    # No captured type, so no cv_qualification/template_arguments fact --
+    # both stay at their `Fact.not_collected()` default.
+    assert not entity.cv_qualification.is_present
+    assert not entity.template_arguments.is_present
+
+
+def test_normalize_header_ast_constant_with_no_matching_value_is_skipped() -> None:
+    """A ``constant_entity_ids`` entry with no matching ``constants`` value
+    is tolerated defensively, mirroring the typedef branch's identical
+    treatment of a missing sidecar entry."""
+    eid = entity_id_for_constant((), "kOrphan")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        constants={},
+        constant_entity_ids={"kOrphan": eid},
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_constants_default_to_empty() -> None:
+    """*constants*/*constant_entity_ids* default to ``{}`` -- a caller that
+    has not migrated to this slice's scope yet needs no change."""
     ir = normalize_header_ast(
         types=[],
         enums=[],

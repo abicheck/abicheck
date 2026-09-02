@@ -80,12 +80,31 @@ variable's ``canonical_spelling`` is ``canonicalize_type_name(variable.type)``
 variables across backends) with ``is_const`` carried via
 ``cv_qualification``, mirroring the function treatment.
 
-Constants are still omitted, for a different, independent reason:
-``CanonicalEntity.canonical_spelling`` is specified as a declaration's own
-*type* spelling, and a constant's parsed representation
-(``parse_constants()``) carries only its value expression, not a captured
-type string, to canonicalize. Left for a further slice, named here rather
-than silently dropped.
+**Scope of the fourth slice.** Constants. Every prior slice's
+``canonical_spelling`` is a declaration's own *type* spelling — but a
+constant's parsed representation (``parse_constants()``) carries only its
+value expression (``"42"``, ``"\"hello\""``, ...), never a captured type
+string, so there is no type-spelling gap for this slice to canonicalize the
+way the third slice did for functions/variables. Both backends already
+attach a real ``EntityId`` to every public constant
+(``parse_constant_entity_ids()``, Phase 2), so the identity half of this
+slice's work was already done before it landed — what remained was wiring
+the existing ``constants``/``constant_entity_ids`` maps into this
+normalizer at all. **Deliberately no canonicalization is applied to the
+value text itself** — ``canonical_spelling`` is the raw ``parse_constants()``
+string, unchanged. This mirrors ``diff_symbols._diff_constants``'s own
+``CONSTANT_CHANGED`` detector, which has always compared the two backends'
+raw value strings with a plain ``!=`` and never canonicalized either side;
+inventing a new value-spelling canonicalizer here without concrete evidence
+of a real cross-backend spelling difference (unlike a function/variable's
+type spelling, where ``"char const*"`` vs. ``"char const *"`` is a directly
+observed, real disagreement) would be exactly the kind of speculative
+heuristic this codebase's own bug-class discipline warns against elsewhere
+(see ``_type_index_items``'s/``_diff_constants``'s own docstrings on an
+identity heuristic falsified twice) — a canonicalizer with no known target
+divergence to fix is a heuristic in search of a bug, not a fix for one. A
+constant carries no ``cv_qualification``/``template_arguments`` either: it
+has no captured type for either fact to describe.
 
 A typedef whose underlying type neither backend could resolve is stamped
 ``Fact.failed(...)``, not ``Fact.present("?")`` (Codex review, PR #1001):
@@ -98,11 +117,12 @@ of a failure would have also silently misrepresented the placeholder text
 itself as canonical.
 
 **Known, accepted limitation for a manifest (``--dump-manifest``) dump
-(Codex review, PR #1001; unchanged by the third slice's functions/variables
-addition).** ``dumper_manifest.resolve_header_ast_result`` calls this
+(Codex review, PR #1001; unchanged by the third and fourth slices'
+additions).** ``dumper_manifest.resolve_header_ast_result`` calls this
 function once, on ``merge_fragments()``'s *already-merged*
 ``functions``/``variables``/``types``/``enums``/``typedefs_qualified``/
-``typedef_entity_ids`` — and ``tu_merge.merge_fragments`` itself already
+``typedef_entity_ids``/``constants``/``constant_entity_ids`` — and
+``tu_merge.merge_fragments`` itself already
 collapses same-identity declarations across translation units into one
 representative entry before this normalizer ever sees them ("a merged
 entity carries exactly one ``source_location``", that function's own
@@ -124,7 +144,8 @@ unaffected: there is only one translation unit, so there is nothing for
 Backend-agnostic by construction: ``dumper_castxml.py`` and
 ``dumper_clang.py`` already expose the identical
 ``parse_types()``/``parse_enums()``/``parse_typedefs_qualified()``/
-``parse_typedef_entity_ids()`` surface (verified directly, not assumed), so
+``parse_typedef_entity_ids()``/``parse_constants()``/
+``parse_constant_entity_ids()`` surface (verified directly, not assumed), so
 one function serves both — the same "converge on one shared shape" property
 Phase 6's Design section wants, just realized at the already-parsed-object
 layer instead of a raw-fact layer.
@@ -449,6 +470,8 @@ def normalize_header_ast(
     producer: str,
     functions: Iterable[Function] = (),
     variables: Iterable[Variable] = (),
+    constants: Mapping[str, str] = {},
+    constant_entity_ids: Mapping[str, EntityId] = {},
 ) -> SemanticIR:
     """Build a :class:`SemanticIR` from one header-AST backend's already-
     parsed output.
@@ -462,7 +485,11 @@ def normalize_header_ast(
     ``parse_functions()``/``parse_variables()`` return values, both optional
     (default ``()``) so a caller that has not migrated to the third slice's
     scope yet (or a backend that produces neither, e.g. a future non-header
-    producer) needs no change. *producer* is the backend name
+    producer) needs no change. *constants*/*constant_entity_ids* are its
+    ``parse_constants()``/``parse_constant_entity_ids()`` return values (the
+    same qualified-name key set by construction, mirroring
+    *typedefs_qualified*/*typedef_entity_ids*), also optional (default
+    ``{}``) for the identical reason. *producer* is the backend name
     (``"castxml"``/``"clang"``), stamped onto every
     :class:`~abicheck.model.semantic_ir.CanonicalEntity` this call
     produces, mirroring ``AbiSnapshot.ast_producer``.
@@ -471,10 +498,10 @@ def normalize_header_ast(
     ``entity_id`` (older snapshot reload, or a producer that has not
     populated it) contributes no occurrence — this normalizer canonicalizes
     evidence a backend already resolved identity for, it does not resolve
-    identity itself. A typedef with no matching sidecar entry (should not
-    happen — the two are built from one pass — but tolerated defensively
-    rather than raising, matching this function's read-only, best-effort
-    relationship to its inputs) is likewise skipped.
+    identity itself. A typedef/constant with no matching sidecar entry
+    (should not happen — the two maps of each pair are built from one pass —
+    but tolerated defensively rather than raising, matching this function's
+    read-only, best-effort relationship to its inputs) is likewise skipped.
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for rt in types:
@@ -538,4 +565,15 @@ def normalize_header_ast(
                 _variable_top_level_cv_qualification(var.type)
             ),
         )
+    for qualified_name, entity_id in constant_entity_ids.items():
+        value = constants.get(qualified_name)
+        if value is None:
+            continue
+        # No unresolved-sentinel check and no `cv_qualification` -- unlike a
+        # typedef/function/variable's type spelling, a constant's value text
+        # never comes from `type_name_uncached`'s resolver at all (see this
+        # module's own docstring, "Scope of the fourth slice"), so there is
+        # no "?" placeholder to guard against and no captured type for
+        # `cv_qualification` to describe.
+        _add_occurrence(occurrences, entity_id, Fact.present(value), producer=producer)
     return SemanticIR(occurrences=occurrences)

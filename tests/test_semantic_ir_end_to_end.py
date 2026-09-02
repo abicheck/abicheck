@@ -14,11 +14,12 @@
 # limitations under the License.
 
 """End-to-end ``AbiSnapshot.semantic_ir`` population (ADR-063 Phase 6,
-second and third slices) -- exercises the real production assembly call
-sites this phase wired (``dumper.py``'s ``_dump_elf``, via ``dumper_manifest.
-resolve_header_ast_result``), not the normalizer in isolation
-(``test_semantic_normalizer.py`` covers that). Requires castxml, clang, and
-g++ -- gated the same way ``test_castxml_clang_parity_gate.py`` is.
+second, third, and fourth slices) -- exercises the real production assembly
+call sites this phase wired (``dumper.py``'s ``_dump_elf``, via
+``dumper_manifest.resolve_header_ast_result``), not the normalizer in
+isolation (``test_semantic_normalizer.py`` covers that). Requires castxml,
+clang, and g++ -- gated the same way ``test_castxml_clang_parity_gate.py``
+is.
 
 A fixture with a namespaced record, a namespaced enum, a
 partially-qualified-nested-type typedef, and a function taking that record
@@ -63,6 +64,7 @@ struct Point { int x; int y; };
 enum class Color { RED, GREEN, BLUE };
 typedef inner::Point PointAlias;
 int compute(const inner::Point &p);
+constexpr int kMaxPoints = 10;
 }
 """
 
@@ -111,7 +113,7 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
         for occ in snap.semantic_ir.occurrences
         if occ.entity_id.leaf_name
     }
-    assert leaf_names == {"Point", "Color", "PointAlias"}
+    assert leaf_names == {"Point", "Color", "PointAlias", "kMaxPoints"}
     assert all(
         entity.producer == backend for entity in snap.semantic_ir.occurrences.values()
     )
@@ -155,6 +157,21 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
         if occ.entity_id.leaf_name == "Point"
     )
     assert record_entry[1].canonical_spelling.value == "outer::inner::Point"
+
+    # `kMaxPoints` (ADR-063 Phase 6, fourth slice): the raw value text is
+    # projected verbatim, no canonicalization -- see
+    # `extract/semantic_normalizer.py`'s own docstring ("Scope of the fourth
+    # slice") for why. Both backends agree byte-for-byte here since there is
+    # no cross-backend spelling difference to reconcile for a plain integer
+    # literal.
+    constant_entry = next(
+        (occ, e)
+        for occ, e in snap.semantic_ir.occurrences.items()
+        if occ.entity_id.leaf_name == "kMaxPoints"
+    )
+    assert constant_entry[0].entity_id.kind.value == "constant"
+    assert constant_entry[1].canonical_spelling.value == "10"
+    assert constant_entry[1].producer == backend
 
 
 def test_hybrid_dump_records_the_real_typedef_spelling_conflict(compiled_lib) -> None:
