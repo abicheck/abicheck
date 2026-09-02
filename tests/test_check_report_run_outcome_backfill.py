@@ -221,6 +221,27 @@ def test_old_scan_set_report_carries_evidence_contract_error_member() -> None:
     assert run_outcome["operational"] == "evidence_contract_error"
 
 
+def test_old_scan_set_report_carries_not_comparable_member() -> None:
+    """Codex review, fresh evidence: sibling of the EVIDENCE_CONTRACT_ERROR
+    case above, for NOT_COMPARABLE -- a member's own comparability refusal
+    must survive backfill beside a different, stronger member's real
+    BREAKING verdict, not be silently dropped to operational: 'none'."""
+    report = {
+        "scan_schema_version": "1.23",
+        "verdict": "BREAKING",
+        "exit_code": 4,
+        "per_artifact": [
+            {"artifact": "a.so", "verdict": "BREAKING", "exit_code": 4},
+            {"artifact": "b.so", "verdict": "NOT_COMPARABLE", "exit_code": 6},
+        ],
+        "bundle_verdict": None,
+    }
+    out = _augment(dict(report))
+    run_outcome = out["run_outcome"]
+    assert run_outcome["compatibility"] == "BREAKING"
+    assert run_outcome["operational"] == "not_comparable"
+
+
 def test_old_operational_error_report_preserves_extraction_error() -> None:
     """Codex review, fresh evidence: a pre-2.48 resolve-baseline-failure
     report (build_operational_error_report's own shape) has no severity

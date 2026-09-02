@@ -637,6 +637,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   gained a new `member_not_comparable` parameter mirroring the existing
   `member_evidence_contract_error` one exactly (same "only when otherwise
   `NONE`" fold-in rule), and `ScanSetResult.to_dict()` now passes it.
+- **The legacy artifact-set backfill now propagates a member's
+  `NOT_COMPARABLE` status too, not only `EVIDENCE_CONTRACT_ERROR`**
+  (Codex review, fresh evidence, sibling of the native `ScanSetResult`
+  fix above): `augment_report()`'s legacy backfill path detected only
+  the `EVIDENCE_CONTRACT_ERROR` member sentinel — an older set report
+  with a real root verdict (`BREAKING`) alongside a `per_artifact`
+  member carrying `NOT_COMPARABLE` still stamped the current schema
+  with `run_outcome.operational: "none"` on upgrade, losing the same
+  signal the native writer fix above restores.
 
 ### Changed
 

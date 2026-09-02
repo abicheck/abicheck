@@ -206,6 +206,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         # `verdict` naming an abort sentinel (Codex review, fresh evidence).
         member_verdicts: list[object] | None = None
         member_evidence_contract_error = False
+        member_not_comparable = False
         per_artifact = out.get("per_artifact")
         if isinstance(per_artifact, list):
             member_verdicts = [
@@ -219,12 +220,23 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
                 for entry in per_artifact
                 if isinstance(entry, dict)
             )
+            # Fresh evidence beyond the native ScanSetResult fix (Codex
+            # review): the legacy backfill must propagate a member's
+            # NOT_COMPARABLE sentinel too, or a real root verdict (e.g.
+            # BREAKING) alongside it stamps run_outcome.operational: "none",
+            # losing that part of the set was never compared.
+            member_not_comparable = any(
+                entry.get("verdict") == "NOT_COMPARABLE"
+                for entry in per_artifact
+                if isinstance(entry, dict)
+            )
         out["run_outcome"] = run_outcome_dict_for_scan(
             str(raw_verdict) if raw_verdict is not None else "",
             exit_code,
             report=report,
             member_verdicts=member_verdicts,
             member_evidence_contract_error=member_evidence_contract_error,
+            member_not_comparable=member_not_comparable,
             bundle_incomplete=bool(out.get("bundle_incomplete")),
         )
         return
