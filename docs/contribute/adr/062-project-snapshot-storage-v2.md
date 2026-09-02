@@ -30,9 +30,10 @@ now coexist:
 2. baseline sets (`manifest.json` plus per-library snapshots, sometimes with
    staged binaries);
 3. `BundleFacts`, which embeds every per-library snapshot in one JSON
-   document (`BUNDLE_FACTS_SCHEMA_VERSION = 2` as of CLI cleanup phase
-   two's `artifact_type` self-describing-marker addition; still one
-   undivided document regardless of the exact version);
+   document (schema version tracked by `BUNDLE_FACTS_SCHEMA_VERSION` in
+   `abicheck/bundle_facts.py`, bumped by CLI cleanup phase two's
+   `artifact_type` self-describing-marker addition; still one undivided
+   document regardless of the exact version);
 4. `BuildSourcePack`, which may be embedded inside each snapshot or stored
    out of band.
 
