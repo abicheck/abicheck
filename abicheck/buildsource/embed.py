@@ -148,7 +148,8 @@ def embed_build_source(
     if raw_build_info is not None or raw_sources is not None:
         cfg_path = build_config or discover_build_config(raw_sources)
         # Only operator-supplied input is trusted for subprocess execution: an
-        # explicit --config file or an explicit --build-query command on the CLI.
+        # explicit --config file (PR 3C removed the CLI --build-query; a
+        # programmatic `build_query` argument is the other operator route).
         # Auto-discovered source-tree configs may be attacker-controlled; their
         # non-executable settings are still honored, but their query never runs.
         # (Inferred build queries — cmake/make/bazel that abicheck constructs
@@ -164,7 +165,7 @@ def embed_build_source(
             # distinct here is what lets that split survive the move -- see
             # tests/test_build_source_embed_errors.py.
             raise ValidationError(str(exc)) from exc
-        # CLI overrides (no config file needed): --build-query / --build-compile-db /
+        # Programmatic overrides (no config file needed): build_query / build_compile_db /
         # --build-target win over the .abicheck.yml values when supplied.
         if (
             build_query is not None
@@ -195,7 +196,7 @@ def embed_build_source(
             build_config_trusted_for_query=cfg_trusted_for_query,
             # A build.compile_db is an *explicit* L3 input (its miss must surface,
             # not fall through to inference) when it came from the CLI
-            # --build-compile-db or an operator --config — never from an
+            # build_compile_db or an operator --config — never from an
             # auto-discovered .abicheck.yml (review).
             compile_db_explicit=build_compile_db is not None
             or build_config is not None,

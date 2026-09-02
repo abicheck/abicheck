@@ -115,6 +115,15 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
         "rewritten together; the `replace()` here only runs for a FROZEN "
         "dataclass, and no Fact[T]-bearing model dataclass is frozen."
     ),
+    ("abicheck/extract/semantic_ir_merge.py", "_merge_entity"): (
+        "ADR-063 Phase 6's SemanticEntity holds its Fact[...] fields "
+        "DIRECTLY -- there is no legacy/sibling pair on it, so there is no "
+        "bridge to revert: `updates` maps a field name to the Fact object "
+        "itself. (This entry is the guard's first catch on code it did not "
+        "grow up with: the call arrived from main while this PR was open, "
+        "and the scan flagged it for review rather than letting a `**` "
+        "spelling through unseen.)"
+    ),
     ("abicheck/tu_merge_provenance.py", "_blank_provenance"): (
         "Passes each blanked field's own `<field>_fact` explicitly, "
         "derived from the blanked-field list rather than named one by one."

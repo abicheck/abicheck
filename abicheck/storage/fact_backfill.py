@@ -147,7 +147,7 @@ def apply_case_a_fact_backfill(
     *,
     schema_version: int,
     rules: tuple[CaseAFactRule, ...],
-    from_headers: bool = True,
+    header_provenance_confirmed: bool = True,
     **decoded: list[Any],
 ) -> None:
     """Downgrade every case-(a) fact a legacy document cannot vouch for.
@@ -165,10 +165,10 @@ def apply_case_a_fact_backfill(
 
     Only ever *downgrades*, and only for a document that predates the
     field's own conversion: a v(N)+ document's ``<field>_fact`` was decoded
-    explicitly at construction time and is authoritative. ``from_headers``
-    carries the second downgrade reason (see the body): a producer that
-    never parsed a header cannot have observed a header-AST-only fact, which
-    no reliability flag expresses.
+    explicitly at construction time and is authoritative.
+    ``header_provenance_confirmed`` carries the second downgrade reason (see
+    the body): a producer that never parsed a header cannot have observed a
+    header-AST-only fact, which no reliability flag expresses.
     """
     for rule in rules:
         if schema_version >= rule.min_schema_version:
@@ -176,7 +176,7 @@ def apply_case_a_fact_backfill(
         # Two independent reasons a pre-conversion document's value is not
         # evidence, and the second is not covered by the first (Codex
         # review, PR #993): every ``*_facts_reliable`` flag resolves True
-        # for a snapshot with ``from_headers=False``, since the producer it
+        # for a snapshot whose producer never parsed a header, since the
         # describes never ran -- "trusted by irrelevance". That is the right
         # answer to "is this value a wrong placeholder", and the wrong
         # answer to "did anyone observe it": a legacy DWARF/PDB/symbols-only
@@ -184,8 +184,18 @@ def apply_case_a_fact_backfill(
         # `access: "public"` would otherwise bridge to PRESENT, claiming a
         # confirmed fact the fresh equivalent of that same snapshot reports
         # as NOT_COLLECTED.
+        #
+        # The caller passes header provenance that is *recorded*, never
+        # inferred (Codex review, second round): a document predating the
+        # `from_headers` key has it guessed from "does this snapshot carry
+        # declarations at all", which a legacy DWARF-only dump satisfies
+        # exactly as a header dump does -- `serialization.py` marks that
+        # guess with `from_headers_inferred` for precisely this reason. An
+        # inferred True is UNKNOWN provenance, and unknown fails closed
+        # here, the same way an absent `ast_producer` is read as "possibly
+        # clang-family" rather than silently trusted.
         unreliable = not rule.reliable
-        unproduceable = not from_headers and _needs_header_ast(
+        unproduceable = not header_provenance_confirmed and _needs_header_ast(
             rule.owner, rule.field
         )
         if not (unreliable or unproduceable):
@@ -216,7 +226,7 @@ def apply_legacy_fact_backfill(
     clang_va_list_facts_reliable_value: bool,
     ast_producer_value: str | None,
     *,
-    from_headers: bool = True,
+    header_provenance_confirmed: bool = True,
     variables: list[Any] | None = None,
     enums: list[Any] | None = None,
     header_cv_facts_reliable_value: bool = True,
@@ -246,7 +256,7 @@ def apply_legacy_fact_backfill(
     Phase 5's own case-(a) batches extend the same correction to the fields
     they convert, each with its own ``min_schema_version`` and its own
     guarding flag (``header_cv_facts_reliable_value`` for ``TypeField``'s
-    CV facts, schema v38) — one rule added to the tuple below, never a
+    CV facts, schema v39) — one rule added to the tuple below, never a
     second hand-written loop. The keyword-only spelling keeps every
     pre-existing caller (and every test constructing this call) unchanged:
     a flag left at its default ``True`` states "trustworthy", which is what
@@ -295,8 +305,8 @@ def apply_legacy_fact_backfill(
                 ast_producer_value == "clang" and clang_va_list_facts_reliable_value,
                 False,
             ),
-            # ADR-063 Phase 5 (eighth batch, schema v38): TypeField's own CV
-            # facts. A pre-v38 document carries no is_const_fact/
+            # ADR-063 Phase 5 (eighth batch, schema v39): TypeField's own CV
+            # facts. A pre-v39 document carries no is_const_fact/
             # is_volatile_fact/is_mutable_fact key, so its blanket False
             # values were bridged to Fact.present(False);
             # header_cv_facts_reliable is exactly the signal saying whether
@@ -323,7 +333,7 @@ def apply_legacy_fact_backfill(
                 False,
             ),
             # TypeField's other two case-(a) fields, each with its own
-            # guarding flag: a pre-v38 clang document's blanket `None`
+            # guarding flag: a pre-v39 clang document's blanket `None`
             # default-initializer/deprecation is the same placeholder shape
             # the CV facts have, and the same two flags the detectors
             # already consult say so.
@@ -341,7 +351,7 @@ def apply_legacy_fact_backfill(
                 clang_deprecation_facts_reliable_value,
                 None,
             ),
-            # ADR-063 Phase 5 (ninth batch, schema v39): the other four
+            # ADR-063 Phase 5 (ninth batch, schema v40): the other four
             # `deprecated` surfaces plus EnumType.is_scoped, all guarded by
             # the same flag TypeField.deprecated is -- one rule each, which
             # is the whole point of the rule table.
@@ -380,7 +390,7 @@ def apply_legacy_fact_backfill(
                 clang_deprecation_facts_reliable_value,
                 None,
             ),
-            # ADR-063 Phase 5 (tenth batch, schema v40): the last two
+            # ADR-063 Phase 5 (tenth batch, schema v41): the last two
             # case-(a) fields, each with its own guarding flag.
             CaseAFactRule(
                 "Param",
@@ -397,7 +407,7 @@ def apply_legacy_fact_backfill(
                 AccessLevel.PUBLIC,
             ),
         ),
-        from_headers=from_headers,
+        header_provenance_confirmed=header_provenance_confirmed,
         types=types,
         functions=funcs,
         variables=variables or [],

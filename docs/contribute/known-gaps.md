@@ -5469,6 +5469,23 @@ looked like the obvious fix and wasn't.
   (resolving clang) via its own opt-in override on the shared primitive,
   deliberately preserved when `scan`'s candidate resolution was migrated
   onto the same primitive; that remains its own separate, deferred decision.
+
+  > **Update (2026-09-02): item 2's *explicit-request* half is now closed;
+  > only its unflagged-default half remains.** The paragraph above stays
+  > accurate as a record of *that* migration, but the hardcoded
+  > `source_extractor="auto"` it describes is gone — `scan_engine`'s call
+  > site now passes `service_compare_evidence.explicit_source_extractor(
+  > compile_context) or "auto"`. Full account, including why this was safe
+  > where the earlier "flip it to `effective_frontend`" attempt (recorded
+  > above) was not, and exactly what is still open: the plan's own **item 2**
+  > in
+  > [`cli-cleanup-phase-two.md`](plans/cli-cleanup-phase-two.md), which is the
+  > narrative owner for this item's status. The one thing worth keeping here,
+  > since it is what this file exists for: the reverted attempt was reverted
+  > for surfacing the castxml L4 phantom-implicit-member bug, and that bug
+  > (`Function.is_compiler_generated`, elsewhere in this file) being fixed is
+  > what made the request half tractable at all.
+
   Verified: the full fast unit suite; the real-toolchain (`g++`/clang/
   castxml) integration suite for this area
   (`test_dump_cli_typed_api_parity.py`'s 16 cases — `_CONTRACT_KNOWN_

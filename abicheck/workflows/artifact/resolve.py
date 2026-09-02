@@ -229,7 +229,7 @@ def _gated_build_query_inputs(
     evidence, two rounds).
 
     ``build_query`` is a trusted **executable command** (``build.query`` in
-    ``.abicheck.yml``, or ``--build-query`` on the CLI); ``build_config`` is a
+    ``.abicheck.yml``, or a programmatic ``build_query``); ``build_config`` is a
     path to a ``.abicheck.yml`` that may itself carry a ``build.query`` key,
     so it carries the identical execution risk *by proxy of that one key* --
     it is forced to ``None`` unless *allow_build_query* is exactly ``True``,
@@ -241,7 +241,7 @@ def _gated_build_query_inputs(
     function** (see its own call sites) -- it is a bare path/glob naming an
     *existing* ``compile_commands.json``, a pure data read with "no such
     restriction" (matching this repo's own established ``dump
-    --build-compile-db`` vs. ``--build-query`` distinction, and
+    build_compile_db`` vs. ``build_query`` distinction, and
     ``embed_build_source``'s own pre-existing behavior). Gating it the same
     way as the executable inputs would silently degrade a caller's real
     include paths/defines/dialect for supplying data that was never a
@@ -457,7 +457,7 @@ def _seeded_includes_and_compile_context(
     defaulted to ``None`` so every existing caller (``compare``'s typed
     pipeline, ``dump``'s ``execute_dump_request``) is unaffected. These exist
     only so a caller resolving a side that still carries the CLI's live
-    ``--build-query``/``--build-compile-db``/``--config`` flags (``dump``'s
+    ``build_query``/``build_compile_db`` arguments and ``--config`` flag (``dump``'s
     ELF path, until PR 3C removes them) can route through this one shared
     primitive instead of a second, independent call to the same underlying
     function.
@@ -525,7 +525,8 @@ def _seeded_includes_and_compile_context(
     this function's own docstring already warns against for the *inferred*
     query below; explicit ``build.query`` needs the identical discipline.
     The CLI's own gating (``dump_cmd`` only resolves a non-``None``
-    ``build_config``/``build_query`` when ``--config``/``--build-query`` was
+    ``build_config``/``build_query`` when ``--config`` (or a programmatic
+    ``build_query``) was
     genuinely typed) is a different, CLI-side act of consent that this
     parameter existing lets that one call site assert explicitly, rather than
     this function inferring consent from mere presence.

@@ -294,7 +294,7 @@ _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = ()
 #: (schema v37), when the last five binary-format fields on ``ElfMetadata``/
 #: ``PeMetadata``/``MachoMetadata`` were converted (``model/elf_facts.py``/
 #: ``pe_facts.py``/``macho_facts.py``). Case (a) followed in batches eight
-#: through ten (schema v38-v40).
+#: through ten (schema v39-v41).
 _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = ()
 
 KNOWN_UNCONVERTED_ELIGIBLE_FACTS: frozenset[tuple[str, str]] = frozenset(

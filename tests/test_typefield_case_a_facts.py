@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """``TypeField``'s own case-(a) facts — ADR-063 Phase 5's first **case-(a)**
-batch (schema v38): ``is_const``, ``is_volatile``, ``is_mutable``,
+batch (schema v39): ``is_const``, ``is_volatile``, ``is_mutable``,
 ``default``, ``deprecated``.
 
 Case (a) is the shape Phase 0's own ``vtable``/``vptr_offset_bits``/
@@ -233,8 +233,8 @@ class TestTypeFieldCvFactRoundTrip:
         f = snapshot_from_dict(d).types[0].fields[0]
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
-    def test_schema_version_is_38_or_higher(self) -> None:
-        assert SCHEMA_VERSION >= _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS == 38
+    def test_schema_version_is_39_or_higher(self) -> None:
+        assert SCHEMA_VERSION >= _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS == 39
 
 
 class TestCaseAFactBackfillContract:
@@ -426,6 +426,13 @@ class TestTypeFieldValueFactRoundTrip:
         other = "deprecated" if field_name == "default" else "default"
         d = _minimal_dict(
             schema_version=_MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS - 1,
+            # Recorded header provenance, so the *flag* branch is what this
+            # test isolates: an inferred `from_headers` downgrades every
+            # header-AST-only fact on its own (see
+            # test_last_case_a_facts.py's own provenance class), which would
+            # mask the per-flag independence being checked here.
+            from_headers=True,
+            ast_producer="clang",
             types=[
                 {
                     "name": "Foo",

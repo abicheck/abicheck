@@ -212,8 +212,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--build-info",
                 "--sources",
                 "--compile-db-filter",
-                "--build-query",
-                "--build-compile-db",
                 "--config",
                 "--allow-build-query",
             ],

@@ -71,25 +71,25 @@ _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 36
 # ADR-063 Phase 5 (eighth batch): the schema_version TypeField's own
 # case-(a) is_const_fact/is_volatile_fact/is_mutable_fact siblings started
 # being persisted at.
-_MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS = 38
+_MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS = 39
 
 # The same threshold for TypeField's other two case-(a) fields (`default`,
 # `deprecated`) -- they land in the same schema bump, but each is guarded by
 # its own reliability flag (clang_field_initializer_facts_reliable /
 # clang_deprecation_facts_reliable), so they are named separately here
 # rather than folded into the CV constant above.
-_MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS = 38
+_MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS = 39
 
 # ADR-063 Phase 5 (ninth batch): the schema_version the `deprecated` family
 # (Function/Variable/RecordType/EnumType -- TypeField's own landed one batch
-# earlier, at v38) and EnumType.is_scoped started being persisted at. All
+# earlier, at v39) and EnumType.is_scoped started being persisted at. All
 # five are case (a), guarded by the one flag that already covers them:
 # AbiSnapshot.clang_deprecation_facts_reliable.
-_MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS = 39
+_MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS = 40
 
 # ADR-063 Phase 5 (tenth batch): the schema_version Param.is_restrict_fact
 # and Variable.access_fact started being persisted at -- the last two
 # entries of this phase's own KNOWN_UNCONVERTED_ELIGIBLE_FACTS allowlist,
 # guarded by clang_restrict_facts_reliable and
 # castxml_var_access_facts_reliable respectively.
-_MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 40
+_MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 41

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """``Param.is_restrict`` and ``Variable.access`` — ADR-063 Phase 5's last two
-case-(a) conversions (schema v40), the entries that empty
+case-(a) conversions (schema v41), the entries that empty
 ``KNOWN_UNCONVERTED_ELIGIBLE_FACTS``.
 
 ``Variable.access`` is the one registered fact whose value type is an enum,
@@ -217,11 +217,11 @@ class TestPhase5ConversionIsComplete:
             for pair in pairs:
                 assert pair in registered, f"{flag} gates unregistered {pair}"
 
-    def test_schema_version_is_40_or_higher(self) -> None:
-        assert SCHEMA_VERSION >= _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS == 40
+    def test_schema_version_is_41_or_higher(self) -> None:
+        assert SCHEMA_VERSION >= _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS == 41
 
 
-#: Below *every* per-field threshold this phase introduced (v38-v40), so
+#: Below *every* per-field threshold this phase introduced (v39-v41), so
 #: one document exercises all of them: at or above a field's own threshold a
 #: missing `<field>_fact` key means "malformed", not "legacy", and decodes
 #: to NOT_COLLECTED for a different reason than the one under test here.
@@ -352,7 +352,25 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         assert f.is_const is True
         assert f.is_const_fact.status is FactStatus.PRESENT
 
+    @pytest.mark.parametrize("collection,raw,field", _RESTING)
+    def test_inferred_header_provenance_is_unknown_not_confirmed(
+        self, collection: str, raw: dict, field: str
+    ) -> None:
+        # Codex review, second round: a document predating the
+        # `from_headers` key has it INFERRED from "does this snapshot carry
+        # declarations at all", which a legacy DWARF-only dump satisfies
+        # exactly as a header dump does. An inferred True is unknown
+        # provenance, and must not read as evidence a header backend ran.
+        d = _minimal_dict(schema_version=_PRE_CASE_A, **{collection: [raw]})
+        snap = snapshot_from_dict(d)
+        assert snap.from_headers is True
+        assert snap.from_headers_inferred is True
+        obj = getattr(snap, collection)[0]
+        assert getattr(obj, f"{field}_fact").status is FactStatus.NOT_COLLECTED
+
     def test_a_header_snapshot_is_unaffected(self) -> None:
+        # Recorded (not inferred) header provenance: the flag branch alone
+        # decides, and a reliable castxml document keeps its fact.
         d = _minimal_dict(
             schema_version=_PRE_CASE_A,
             from_headers=True,

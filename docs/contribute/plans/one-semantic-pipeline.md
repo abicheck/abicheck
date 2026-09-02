@@ -12495,6 +12495,79 @@ three phases.
 
 ### Phase 6 — canonical `SemanticIR` between backends and the checker
 
+**LANDED (first slice): the IR, its persistence, and the hybrid merge's
+reconciliation of it — no parser narrowing.** Exactly the ordering this
+phase's own Design section requires ("this model file, and a
+primitive-level test suite pinning its shape directly ... land as their own
+first step in this phase, before any of the following narrowing work"), so
+the per-backend migrations have one concrete target to converge on.
+Landed: `abicheck/model/semantic_ir.py` (`SemanticIR`/`CanonicalEntity`/
+`canonical_cv_qualification`/`semantic_ir_conflict_key`);
+`AbiSnapshot.semantic_ir`/`semantic_ir_conflicts`;
+`abicheck/storage/semantic_ir_codec.py` (schema v38, the list-of-entries
+encoding this section specifies) called from `serialization.py`'s two
+chokepoints; `abicheck/extract/semantic_ir_merge.py` wired into
+`dumper_hybrid.merge_snapshots()`; and four test modules
+(`test_model_semantic_ir.py`, `test_semantic_ir_merge.py`,
+`test_semantic_ir_serialization.py`, `test_dumper_hybrid_semantic_ir.py`).
+
+Three deliberate deviations from this section's letter, each in service of
+its own stated reasoning:
+
+1. **`encode_semantic_ir`/`decode_semantic_ir` live in `storage/`, not in
+   `serialization.py` itself.** The reason this section moved them off the
+   domain types was the `model -> storage` edge ADR-061 forbids; a
+   `storage`-resident codec has no such problem (`storage -> model` is the
+   allowed direction), matches this package's two sibling codecs
+   (`entity_id_codec.py`, `surface_graph_codec.py`), and keeps
+   `serialization.py` — already at its `architecture/debt.yaml` no-growth
+   baseline — to the call-site plumbing.
+2. **An ambiguous group is not "unioned verbatim" for an occurrence both
+   sides key identically** — that phrasing has no meaning for a key
+   collision, and taking it literally means `setdefault` silently discarding
+   the overlay's entity, losing exactly the facts and conflict records this
+   step exists to preserve (Codex review, PR #991). One `OccurrenceId` names
+   one occurrence by that type's own definition, so an exact key match is
+   not a guessed pairing: it merges under the ordinary base-plus-backfill
+   rule. What stays fail-closed is what the ambiguity is actually about —
+   two occurrences pair only when at most one side supplies a
+   disambiguator, never when both supply one and they disagree. (Differing
+   *keys* are not themselves the refusal: castxml supplies no disambiguator
+   at all, so the ordinary match pairs an empty key with a non-empty one.)
+3. **The "two occurrences on one side sharing a non-empty disambiguator"
+   ambiguity is unreachable from a real `SemanticIR`**, because that pair
+   *is* one `OccurrenceId` and therefore one dict key. The guard stays (the
+   matcher takes plain lists, and the invariant belongs to the caller's key
+   type), is tested at that entry point directly, and the limit is recorded
+   rather than papered over with a test that only looks like it covers the
+   case.
+
+**Not landed, and therefore this phase is not complete:** no backend
+produces an IR (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/
+`pdb_metadata.py`/`btf_metadata.py`/`ctf_metadata.py`/`pdb_model.py` are
+untouched), `extract/semantic_normalizer.py` does not exist, and none of
+the five assembly call sites projects through it — so `semantic_ir` is
+`None` on every snapshot a real `dump` produces, a v38 document is
+identical to the v37 one it would have been apart from the version stamp
+itself -- both new keys are sparse, written only when there is something to
+say -- and the snapshot cache
+version is deliberately not bumped. The per-call-site end-to-end parity
+tests this section requires belong with that work, since there is no
+normalizer-mediated assembly path to prove behavior-preserving yet; the
+`--ast-frontend hybrid` half of that requirement is covered now, at the
+merge function itself. One further obligation is named here so the
+narrowing work does not rediscover it: `qualified_name_segments.
+_LAMBDA_IDENTITY_FIELDS` renumbers lambda/closure ordinals across the
+snapshot fields that carry them, and an `EntityId` inside a `SemanticIR`
+key can hold exactly such an ordinal (`Anonymous`/`LocalToFunction`), so
+the first slice that actually populates the IR must decide whether
+`semantic_ir` joins that walk — the same "a sidecar's keys must be
+renumbered exactly when its partner's are" rule the `typedef_entity_ids`
+sidecar already follows. It is not an open question *today* only because
+the map is always empty. The checklist row below ("each backend parser's own
+copy of anonymous-marker/closure-identity/namespace-join logic") is
+correspondingly still open.
+
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
 CV-qualification canonicalization happens once, not once per backend.
 

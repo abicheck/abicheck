@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """The `deprecated` family + ``EnumType.is_scoped`` — ADR-063 Phase 5's
-second case-(a) batch (schema v39).
+second case-(a) batch (schema v40).
 
 One flag (``AbiSnapshot.clang_deprecation_facts_reliable``) guards all six
 fields, on five different owners, which is exactly why the contract is
@@ -183,7 +183,7 @@ class TestDeprecatedFamilyRoundTrip:
         assert got.deprecated_fact.status is FactStatus.NOT_COLLECTED  # type: ignore[attr-defined]
 
     def test_typefield_deprecated_answers_to_the_same_flag(self) -> None:
-        # TypeField.deprecated converted one batch earlier (v38) but shares
+        # TypeField.deprecated converted one batch earlier (v39) but shares
         # this flag; a legacy document must downgrade it identically.
         d = _minimal_dict(
             schema_version=_LEGACY,
