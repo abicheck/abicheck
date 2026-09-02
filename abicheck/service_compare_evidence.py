@@ -136,13 +136,37 @@ def explicit_source_extractor(
     states nothing explicit -- the branch this function has already returned
     ``None`` for.
 
-    Returns ``None`` (i.e. "the caller's own default stands") for a missing
-    context, an ``auto``/unstated frontend, and for ``hybrid`` -- see
-    :data:`L4_SOURCE_EXTRACTORS` for why the last of those is not an L4
-    request that could be honored at all.
+    **Total over its input domain, and deliberately not a validator.** It
+    answers only "is there an explicit L4 backend request here?", returning
+    ``None`` -- "the caller's own default stands" -- for everything else: a
+    missing context, an ``auto``/unstated frontend, ``hybrid`` and
+    ``android`` (neither is an L4 request this path could honor -- see
+    :data:`L4_SOURCE_EXTRACTORS`), and any value that is not a frontend at
+    all. It never raises.
+
+    That the membership test comes *before* the delegation is the point, not
+    an optimization (CodeRabbit review, PR #990). ``effective_frontend``
+    resolves through ``dumper._resolve_header_backend``, which raises
+    ``ValidationError`` on anything outside the four *header-AST* backends --
+    a strictly narrower set than ``api_types.SUPPORTED_FRONTENDS``, which
+    also admits ``android``. Delegating first would therefore turn a value
+    the typed API calls valid into a crash on ``scan``, which previously
+    could not fail here at all. Today three upstream validators (the CLI's
+    own ``AST_FRONTENDS`` choice, the ``.abicheck.yml`` ``compile.frontend``
+    check, and ``frontend_value_errors``) each reject ``android`` before it
+    could reach a ``scan`` compile context, so this is latent rather than
+    live -- but a resolver that is correct only while two independently
+    maintained vocabularies stay in sync is precisely the failure this whole
+    change set exists to remove. Validating frontends stays those
+    validators' job; this function's job is to answer a question.
     """
-    if compile is None or compile.frontend.lower() == "auto":
+    if compile is None:
         return None
+    if compile.frontend.lower() not in L4_SOURCE_EXTRACTORS:
+        return None
+    # Still routed through `effective_frontend` rather than returned
+    # directly, so the "agrees with dump/compare by construction" property
+    # above survives any future normalization it grows.
     resolved = effective_frontend(compile, "auto")
     return resolved if resolved in L4_SOURCE_EXTRACTORS else None
 

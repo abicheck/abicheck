@@ -69,10 +69,21 @@ from abicheck.service_compare_evidence import (
     explicit_source_extractor,
 )
 
-#: Every ``compile.frontend`` spelling the CLI/config layer accepts
-#: (``dumper._resolve_header_backend``'s own accepted set, plus the ``auto``
-#: default), in the case variants ``frontend_value_errors`` validates
-#: case-insensitively and therefore lets through.
+#: Every ``compile.frontend`` spelling that can reach the primitive, in the
+#: case variants ``frontend_value_errors`` validates case-insensitively and
+#: therefore lets through. Deliberately wider than the CLI's own
+#: ``cli_options.AST_FRONTENDS`` choice:
+#:
+#: * ``android`` is in ``api_types.SUPPORTED_FRONTENDS`` but *not* in the
+#:   header-AST backends ``dumper._resolve_header_backend`` accepts, so it is
+#:   the one value where a naive delegation to ``effective_frontend`` raises
+#:   instead of answering (CodeRabbit review, PR #990). Three upstream
+#:   validators reject it before a real ``scan`` could carry it, so this is a
+#:   latent sharp edge rather than a live bug -- which is exactly why it
+#:   belongs in a contract test rather than only in a reachable-input test.
+#: * ``nonsense``/``""`` stand for "not a frontend at all". The primitive is
+#:   not a validator and must answer ``None`` for these rather than raise;
+#:   rejecting a bad frontend is the three upstream validators' job.
 _FRONTEND_SPELLINGS: tuple[str, ...] = (
     "auto",
     "AUTO",
@@ -85,6 +96,10 @@ _FRONTEND_SPELLINGS: tuple[str, ...] = (
     "Clang",
     "hybrid",
     "HYBRID",
+    "android",
+    "ANDROID",
+    "nonsense",
+    "",
 )
 
 #: Every ``ABICHECK_AST_FRONTEND`` value that can reach the resolution, plus
@@ -110,6 +125,9 @@ _EXPECTED_BY_FRONTEND: dict[str, str | None] = {
     "castxml": "castxml",
     "clang": "clang",
     "hybrid": None,
+    "android": None,
+    "nonsense": None,
+    "": None,
 }
 
 
@@ -217,7 +235,7 @@ class TestExplicitlyRequestedSourceExtractorContract:
         _impl, tool_name = _make_source_extractor(answer, "clang")
         assert tool_name == frontend
 
-    @pytest.mark.parametrize("frontend", ("auto", "hybrid"))
+    @pytest.mark.parametrize("frontend", ("auto", "hybrid", "android", "nonsense"))
     def test_none_leaves_the_caller_default_reaching_clang(self, frontend: str) -> None:
         """The None branch preserves today's behaviour end to end.
 
@@ -275,10 +293,41 @@ class TestScanEngineCallSitePropagation:
         assert self._captured_source_extractor(monkeypatch, "castxml") == "castxml"
         assert self._captured_source_extractor(monkeypatch, "clang") == "clang"
 
-    @pytest.mark.parametrize("frontend", ("auto", "hybrid"))
+    @pytest.mark.parametrize("frontend", ("auto", "hybrid", "android", "nonsense"))
     def test_an_unstated_frontend_keeps_scans_own_default(
         self, frontend: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Unchanged behaviour, pinned so a future "just use effective_frontend"
         simplification cannot silently flip ``scan``'s default to castxml."""
         assert self._captured_source_extractor(monkeypatch, frontend) == "auto"
+
+
+class TestNeverRaises:
+    """The primitive is total: it answers, it does not validate.
+
+    Split from the contract class above because it is a different kind of
+    claim — not "what does it answer for X" but "there is no X it refuses to
+    answer for". Rejecting a bad frontend belongs to the three upstream
+    validators (``cli_options.AST_FRONTENDS``' Click choice, the
+    ``.abicheck.yml`` ``compile.frontend`` check, and
+    ``api_types.frontend_value_errors``); a resolver that also raises here
+    turns a value one vocabulary calls valid into a crash the moment the two
+    vocabularies drift, which is the failure mode this whole change set
+    exists to remove.
+    """
+
+    @pytest.mark.parametrize(
+        "frontend",
+        (
+            *_FRONTEND_SPELLINGS,
+            "android-x86",
+            "Clang++",
+            "  clang  ",
+            "castxml\n",
+            "0",
+            "auto ",
+        ),
+    )
+    def test_answers_rather_than_raises(self, frontend: str) -> None:
+        answer = explicit_source_extractor(_ctx(frontend))
+        assert answer is None or answer in L4_SOURCE_EXTRACTORS
