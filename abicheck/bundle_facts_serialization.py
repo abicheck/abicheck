@@ -107,14 +107,22 @@ def looks_like_bundle_facts_document(data: Any) -> bool:
         return False
     if "artifact_type" in data:
         return data.get("artifact_type") == BUNDLE_FACTS_ARTIFACT_TYPE
-    raw_schema_version = data.get("schema_version")
-    try:
-        # Same coercion bundle_facts_from_dict applies, so a legacy
-        # document spelling schema_version as "1" or 1.0 classifies
-        # identically to one spelling it as the bare int 1 (Codex review).
-        is_legacy_v1 = raw_schema_version is None or int(raw_schema_version) == 1
-    except (TypeError, ValueError):
-        is_legacy_v1 = False
+    if "schema_version" not in data:
+        is_legacy_v1 = True
+    else:
+        try:
+            # Same coercion bundle_facts_from_dict applies, so a legacy
+            # document spelling schema_version as "1" or 1.0 classifies
+            # identically to one spelling it as the bare int 1 (Codex
+            # review). An explicit `null` is *not* the same as the key
+            # being absent -- checking key presence rather than
+            # `.get(...) is None` keeps that distinction, matching
+            # bundle_facts_from_dict's own equivalent check (Codex
+            # review, fresh evidence: `int(None)` is exactly the
+            # TypeError this reader itself would raise for that value).
+            is_legacy_v1 = int(data["schema_version"]) == 1
+        except (TypeError, ValueError):
+            is_legacy_v1 = False
     if not is_legacy_v1:
         return False
     return isinstance(data.get("per_library_snapshots"), dict)
@@ -124,15 +132,21 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
     JSON-able dict (G38 Phase 2).
 
-    ``artifact_type`` is always written from *facts* itself, not hardcoded
-    to the current :data:`~abicheck.bundle_facts.BUNDLE_FACTS_ARTIFACT_TYPE`
-    constant -- the dataclass field is the single source of truth for what
-    gets serialized, matching every other field here."""
+    ``artifact_type`` is always :data:`~abicheck.bundle_facts.
+    BUNDLE_FACTS_ARTIFACT_TYPE` -- the constant, not ``facts.artifact_type``.
+    ``init=False`` keeps the field out of the constructor, but the dataclass
+    isn't frozen, so ``facts.artifact_type = "other"`` after construction is
+    still possible; reading the constant here (matching how
+    ``write_bundle_facts_archive`` already writes its own marker) means a
+    mutated instance still round-trips correctly instead of silently
+    producing a document ``bundle_facts_from_dict`` would reject (Codex
+    review, fresh evidence)."""
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
 
     return {
-        "artifact_type": facts.artifact_type,
+        "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
         "schema_version": facts.schema_version,
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": {

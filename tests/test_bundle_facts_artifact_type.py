@@ -89,6 +89,19 @@ class TestBundleFactsArtifactTypeDiscriminator:
         with pytest.raises(TypeError):
             BundleFacts(artifact_type="something-else")  # type: ignore[call-arg]
 
+    def test_serialization_ignores_a_post_construction_mutation(self) -> None:
+        # Codex review, fresh evidence: init=False only blocks constructor
+        # injection -- the dataclass isn't frozen, so plain attribute
+        # assignment after construction still works. bundle_facts_to_dict
+        # must write the real constant regardless, matching how
+        # write_bundle_facts_archive already writes its own marker, rather
+        # than serializing a document bundle_facts_from_dict would reject.
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        facts.artifact_type = "something-else"
+        d = bundle_facts_to_dict(facts)
+        assert d["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
+        assert bundle_facts_from_dict(d).artifact_type == BUNDLE_FACTS_ARTIFACT_TYPE
+
     def test_missing_artifact_type_defaults_to_current_on_a_true_v1_document(
         self,
     ) -> None:
@@ -179,6 +192,15 @@ class TestLooksLikeBundleFactsDocument:
     def test_true_for_a_legacy_v1_document_with_no_marker_key(self) -> None:
         assert looks_like_bundle_facts_document(
             {"schema_version": 1, "per_library_snapshots": {}}
+        )
+
+    def test_false_for_an_explicit_null_schema_version(self) -> None:
+        # Codex review, fresh evidence: an explicit `"schema_version": null`
+        # is not the same as the key being absent -- bundle_facts_from_dict
+        # would raise on int(None), so the classifier must not route it
+        # through the "absent, therefore legacy" branch either.
+        assert not looks_like_bundle_facts_document(
+            {"schema_version": None, "per_library_snapshots": {}}
         )
 
     def test_true_for_a_string_encoded_v1_version(self) -> None:
