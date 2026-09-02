@@ -331,6 +331,50 @@ class TestRenumberConflictKeys:
         fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
         assert conflicts == {fresh_key: "discarded"}
 
+    def test_rewrite_value_is_applied_to_the_moved_conflict_value(self) -> None:
+        """The discarded backend's own spelling (Codex review, PR #1001,
+        third round) can embed the identical closure/anonymous marker the
+        retained spelling does -- unlike the key, a value is plain text
+        with no packed-length encoding to corrupt, so it's rewritten the
+        ordinary way rather than left stale."""
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        conflicts = {old_key: "'(lambda:x.h:20:4)'"}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("New"))
+            }
+        )
+
+        renumber_conflict_keys(
+            conflicts,
+            [old_occ],
+            new_ir,
+            rewrite_value=lambda v: v.replace(":20:4)'", "#1)'"),
+        )
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: "'(lambda:x.h#1)'"}
+
+    def test_default_rewrite_value_is_a_no_op(self) -> None:
+        old_eid = entity_id_for_type((), "Old")
+        new_eid = entity_id_for_type((), "New")
+        old_occ, new_occ = OccurrenceId(old_eid), OccurrenceId(new_eid)
+        old_key = semantic_ir_conflict_key(old_occ, "canonical_spelling")
+        conflicts = {old_key: "unchanged value"}
+        new_ir = SemanticIR(
+            occurrences={
+                new_occ: CanonicalEntity(canonical_spelling=Fact.present("New"))
+            }
+        )
+
+        renumber_conflict_keys(conflicts, [old_occ], new_ir)
+
+        fresh_key = semantic_ir_conflict_key(new_occ, "canonical_spelling")
+        assert conflicts == {fresh_key: "unchanged value"}
+
     def test_unchanged_occurrence_is_left_untouched(self) -> None:
         eid = entity_id_for_type((), "Same")
         occ = OccurrenceId(eid)

@@ -710,5 +710,7 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
         # marker present at all) branch rather than paid by every caller.
         from .model.semantic_ir import renumber_conflict_keys
 
-        renumber_conflict_keys(conflicts, old_occurrence_ids, new_semantic_ir)
+        renumber_conflict_keys(
+            conflicts, old_occurrence_ids, new_semantic_ir, rewrite_value=_rewrite
+        )
     return snapshot

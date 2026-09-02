@@ -48,7 +48,7 @@ Leaf module: depends only on ``model.fact``/``model.availability``/
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
 
@@ -250,6 +250,7 @@ def renumber_conflict_keys(
     conflicts: dict[str, str],
     old_occurrence_ids: Iterable[OccurrenceId],
     new_semantic_ir: SemanticIR,
+    rewrite_value: Callable[[str], str] = lambda value: value,
 ) -> None:
     """Re-key *conflicts* (``AbiSnapshot.semantic_ir_conflicts``) after its
     matching ``SemanticIR.occurrences`` keys were renumbered elsewhere
@@ -269,6 +270,18 @@ def renumber_conflict_keys(
     carries (:meth:`CanonicalEntity.fact_items` — the exhaustive set
     :func:`semantic_ir_conflict_key` is ever called with; see
     ``extract/semantic_ir_merge.py``, this dict's only writer).
+
+    *rewrite_value* is applied to each moved conflict's own **value** — the
+    ``repr()`` of the *discarded* backend's own spelling
+    (``extract/semantic_ir_merge.py``'s only writer of this dict) can embed
+    the identical closure/anonymous marker the *retained* spelling does
+    (Codex review, PR #1001, second round): unlike the key, a value is
+    plain free text with no packed-length encoding to corrupt, so it is
+    safe to rewrite the ordinary way (the caller's own
+    ``apply_anonymous_type_ordinals``-backed callable, matching how every
+    other reachable string in the snapshot is rewritten). Defaults to a
+    no-op so a caller with nothing to rewrite (or that intentionally wants
+    only the keys moved) need not pass one.
 
     *old_occurrence_ids* must be ``new_semantic_ir.occurrences``'s own keys
     *before* they were rewritten, in the identical order (both built by
@@ -296,6 +309,6 @@ def renumber_conflict_keys(
             old_key = semantic_ir_conflict_key(old_occ_id, fact_name)
             if old_key in conflicts:
                 rewritten[semantic_ir_conflict_key(new_occ_id, fact_name)] = (
-                    conflicts.pop(old_key)
+                    rewrite_value(conflicts.pop(old_key))
                 )
     conflicts.update(rewritten)
