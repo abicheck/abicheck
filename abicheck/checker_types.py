@@ -97,11 +97,16 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 # accepted before G42. Mirrors
 # ``abicheck.workflows.aggregate.contracts._CHECK_ID_RE`` -- the two must
 # extend in lockstep (see that module's own comment for why).
+#: Anchored with ``\Z``, not a trailing ``$`` -- without ``re.MULTILINE``,
+#: ``$`` also matches just before a trailing ``\n`` (Codex review; see
+#: ``project_targets._IDENTIFIER_RE``'s identical fix for the full
+#: rationale), which would let a constructed check_id carrying an embedded
+#: newline (e.g. from an unvalidated explicit_id) slip past this check.
 CHECK_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*"
     r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)"
     r"(?:![A-Za-z0-9._-]+)?"
-    r"(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?$"
+    r"(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?\Z"
 )
 
 

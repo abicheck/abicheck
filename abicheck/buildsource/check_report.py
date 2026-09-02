@@ -67,9 +67,9 @@ from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
-#: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
-#: baseline channel names all validate against this.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: §7's delimiter-unambiguity fix). ``\Z``, not ``$`` -- the latter also
+#: matches just before a trailing ``\n`` (Codex review; project_targets.py has the full rationale).
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 #: The five real ``Verdict`` enum values (``abicheck.change_registry_types.
 #: Verdict``), duplicated here as plain strings rather than importing the

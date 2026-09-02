@@ -223,12 +223,12 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1810,
+      "baseline_lines": 1812,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (CheckSpec.id/CheckSpec.analysis_*, the checks[].id/checks[].analysis: parsing this module is the canonical owner of per its own docstring) -- reviewed growth, not a routine edit; no other module owns this project-schema surface to move it to.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1 (CheckSpec.id/CheckSpec.analysis_*, the checks[].id/checks[].analysis: parsing this module is the canonical owner of per its own docstring) -- reviewed growth, not a routine edit; no other module owns this project-schema surface to move it to. Raised a second time (1810 -> 1812) for a Codex-review fix: _IDENTIFIER_RE anchored with a trailing $, which (without re.MULTILINE) also matches just before a trailing newline -- a YAML block-scalar checks[].id/analysis.* value could carry one through and corrupt a downstream GITHUB_OUTPUT write; documented and fixed as \\Z.",
       "review_by": "2026-11-30"
     },
     {

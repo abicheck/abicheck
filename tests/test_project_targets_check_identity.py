@@ -105,6 +105,54 @@ def test_check_id_must_be_a_valid_identifier() -> None:
     assert any("id 'bad id' is not a valid identifier" in e for e in report.errors)
 
 
+def test_check_id_with_a_trailing_newline_is_rejected() -> None:
+    """Codex review: _IDENTIFIER_RE was anchored with a trailing '$', which
+    (without re.MULTILINE) also matches just before a trailing '\\n' -- a
+    YAML block-scalar id: value (PyYAML commonly appends one) would
+    otherwise pass this check with an embedded newline still in it,
+    silently propagating into a generated check_id that report_envelope.py
+    then refuses to write (a newline would corrupt GITHUB_OUTPUT)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "checks": [
+                        {"channel": "none", "depth": "headers", "id": "l4-plugin\n"}
+                    ],
+                }
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("is not a valid identifier" in e for e in report.errors)
+
+
+def test_check_analysis_field_with_a_trailing_newline_is_rejected() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "checks": [
+                        {
+                            "channel": "none",
+                            "depth": "headers",
+                            "analysis": {"evidence": "replay\n"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("is not a valid identifier" in e for e in report.errors)
+
+
 def test_check_analysis_must_be_a_mapping() -> None:
     with pytest.raises(ValueError, match="analysis must be a mapping"):
         CheckSpec.from_dict(

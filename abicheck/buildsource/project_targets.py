@@ -102,8 +102,12 @@ from .scan_levels import USER_DEPTHS, EvidenceDepth
 #: — matches the per-component pattern the report-identity envelope (ADR-047
 #: §7, ``compare_report.schema.json``'s ``check_id``) already enforces for
 #: ``target@profile#baseline_channel@depth``, so a name valid here can never
-#: produce an ambiguous/unparseable check_id downstream.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: produce an ambiguous/unparseable check_id downstream. ``\Z``, not a
+#: trailing ``$`` -- without ``re.MULTILINE``, ``$`` also matches just
+#: before a trailing ``\n`` (a common PyYAML block-scalar artifact), which
+#: would let an embedded newline through into a generated ``check_id`` and
+#: silently break ``GITHUB_OUTPUT`` downstream (Codex review).
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 #: ADR-047 §3 ``targets:`` ``kind`` discriminator.
 TARGET_KIND_LIBRARY = "library"

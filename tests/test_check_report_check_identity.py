@@ -95,6 +95,18 @@ class TestBuildCheckIdG42Tails:
         check_id = build_check_id("libpvxs", "p", "c", "source", explicit_id="")
         assert check_id == "libpvxs@p#c@source"
 
+    def test_rejects_explicit_id_with_a_trailing_newline(self):
+        """Codex review: _IDENTIFIER_RE was anchored with a trailing '$',
+        which (without re.MULTILINE) also matches just before a trailing
+        '\\n' -- a value carrying one would otherwise validate cleanly and
+        propagate a newline into the generated check_id."""
+        with pytest.raises(ValueError):
+            build_check_id("libpvxs", "p", "c", "source", explicit_id="l4-plugin\n")
+
+    def test_rejects_environment_id_with_a_trailing_newline(self):
+        with pytest.raises(ValueError):
+            build_check_id("libpvxs", "p", "c", "source", environment_id="rhel8\n")
+
 
 class TestReportBuildersThreadExplicitId:
     """Each of the four public report-envelope builders backing

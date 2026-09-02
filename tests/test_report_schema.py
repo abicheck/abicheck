@@ -850,6 +850,17 @@ class TestReportIdentityEnvelope:
         with pytest.raises(ValueError, match="check_id"):
             reporter.to_json(result)
 
+    def test_check_id_with_a_trailing_newline_is_rejected(self):
+        """Codex review: CHECK_ID_PATTERN was anchored with a trailing
+        '$', which (without re.MULTILINE) also matches just before a
+        trailing '\\n' -- a check_id carrying one would otherwise pass
+        validate_check_id() and corrupt GITHUB_OUTPUT downstream."""
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@source\n"
+        with pytest.raises(ValueError, match="check_id"):
+            reporter.to_json(result)
+
     def test_explicit_id_qualified_check_id_round_trips_and_validates(self):
         """G42 'Explicit check identifiers': the full construct
         (build_check_id) -> validate-against-schema -> parse

@@ -341,13 +341,20 @@ topics:
       - abicheck/cli_aggregate.py
       - abicheck/buildsource/run_plan.py
       - abicheck/buildsource/project_targets.py
+      - abicheck/buildsource/check_report.py
+      - abicheck/checker_types.py
+      - abicheck/workflows/aggregate/contracts.py
       - abicheck/schemas/aggregate_report.schema.json
+      - abicheck/schemas/compare_report.schema.json
+      - actions/check-target/action.yml
+      - actions/check-target/report_envelope.py
     reference_page: reference/exit-codes.md
     task_pages:
       - use/github-action-recipes.md
       - integration/scenarios/multi-platform.md
       - reference/run-plan-schema.md
       - reference/project-targets-schema.md
+      - reference/check-target.md
 
   suppressions:
     canonical_page: use/suppressions.md

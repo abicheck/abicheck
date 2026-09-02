@@ -68,3 +68,10 @@ class TestParseCheckIdG42Tails:
         """``~<explicit_id>`` before ``!<environment_id>`` is not the fixed
         order this pattern accepts."""
         assert parse_check_id("libfoo@linux-gcc14#release@headers~myid!rhel8") is None
+
+    def test_trailing_newline_is_rejected(self) -> None:
+        """Codex review: ``_CHECK_ID_RE`` was anchored with a trailing
+        ``$``, which (without ``re.MULTILINE``) also matches just before a
+        trailing ``\\n`` -- kept in lockstep with ``CHECK_ID_PATTERN``'s
+        identical fix per this module's own docstring."""
+        assert parse_check_id("libfoo@linux-gcc14#release@headers~myid\n") is None

@@ -157,7 +157,10 @@ _CHECK_ID_RE = re.compile(
     r"#(?P<channel>[A-Za-z0-9][A-Za-z0-9._-]*)"
     r"@(?P<depth>binary|headers|build|source)"
     r"(?:!(?P<environment_id>[A-Za-z0-9._-]+))?"
-    r"(?:~(?P<explicit_id>[A-Za-z0-9][A-Za-z0-9._-]*))?$"
+    # \Z, not a trailing $ -- $ also matches just before a trailing \n
+    # (Codex review; see checker_types.CHECK_ID_PATTERN's identical fix,
+    # kept in lockstep with this pattern per this module's own docstring).
+    r"(?:~(?P<explicit_id>[A-Za-z0-9][A-Za-z0-9._-]*))?\Z"
 )
 
 
