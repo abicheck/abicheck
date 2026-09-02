@@ -127,6 +127,23 @@ class CanonicalEntity:
     producer: str = ""
 
     def __post_init__(self) -> None:
+        # A usable fact must actually carry its declared value. These fields
+        # are `Fact[str]`/`Fact[tuple[str, ...]]`, and their own docstrings
+        # name the confirmed-absence spelling for each: `Fact.present(())`
+        # for a non-template declaration, an empty tuple for no
+        # CV-qualification. `Fact.present(None)` is legitimate in the general
+        # `Fact` vocabulary (for a field whose `T` includes `None`) but not
+        # for these three, and admitting it here would let
+        # `resolved_fact_count` — and through it `canonical_entities()`'s
+        # reduction and the hybrid merge's backfill — treat a value the
+        # entity does not carry as usable evidence (Codex review).
+        for name, fact in self.fact_items():
+            if fact.is_present and fact.value is None:
+                raise ValueError(
+                    f"{name} is {fact.status.value} but carries no value; "
+                    "confirmed absence is spelled with this field's own "
+                    "empty value (\"\" or ()), never None"
+                )
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,

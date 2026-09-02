@@ -49,6 +49,7 @@ and ``serialization.py`` calls it, keeping that module (already at its
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import fields
 from typing import TYPE_CHECKING, Any
 
 from ..model.availability import FactStatus
@@ -69,6 +70,17 @@ if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
 __all__ = ["decode_semantic_ir", "encode_semantic_ir"]
+
+#: Every ``Fact``-typed field on ``CanonicalEntity``, derived from the
+#: dataclass itself so a new field cannot be added to the model and silently
+#: left unrequired here. The writer emits all of them, so a document short of
+#: one is truncated: letting the dataclass default fill it in would turn
+#: missing persisted evidence into a valid `NOT_COLLECTED` availability claim.
+_FACT_FIELDS = tuple(
+    f.name
+    for f in fields(CanonicalEntity)
+    if f.name not in ("producer",)
+)
 
 #: The ``CanonicalEntity`` fields carrying a tuple-valued ``Fact``. JSON has
 #: no tuple, so these come back as lists and are re-tupled on load — without
@@ -173,10 +185,11 @@ def _entity_from_dict(raw: Any) -> CanonicalEntity:
     data = _mapping(raw, "semantic_ir entity")
     facts = {
         name: _fact_from_dict(
-            value, as_tuple=name in _TUPLE_VALUED_FACTS, field_name=name
+            required_field(data, name, "semantic_ir entity"),
+            as_tuple=name in _TUPLE_VALUED_FACTS,
+            field_name=name,
         )
-        for name, value in data.items()
-        if name != "producer"
+        for name in _FACT_FIELDS
     }
     producer = data.get("producer", "")
     return CanonicalEntity(

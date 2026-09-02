@@ -416,14 +416,16 @@ class TestMalformedDocumentsAreRefused:
         with pytest.raises(TypeError):
             snapshot_from_dict(document)
 
-    def test_a_null_value_stays_legitimate_for_every_status(self) -> None:
-        """`Fact.present(None)` is a confirmed absence, and the value-less
-        statuses carry `None` too — the validation must not refuse those."""
+    def test_a_null_value_stays_legitimate_for_a_value_less_status(self) -> None:
+        """`not_collected`/`unsupported`/`failed` carry `None` by
+        construction, so the value validation must not refuse them — only a
+        *usable* status with no value is malformed (see
+        `CanonicalEntity.__post_init__`)."""
         eid = entity_id_for_type((), "Foo")
         ir = SemanticIR(
             occurrences={
                 OccurrenceId(eid): CanonicalEntity(
-                    canonical_spelling=Fact.present(None),  # type: ignore[arg-type]
+                    canonical_spelling=Fact.present(""),
                     template_arguments=Fact.not_collected(),
                     cv_qualification=Fact.unsupported("no evidence"),
                 )
@@ -432,6 +434,27 @@ class TestMalformedDocumentsAreRefused:
         reloaded = _round_trip(_snapshot(ir))
         assert reloaded.semantic_ir is not None
         assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+
+    def test_a_present_fact_with_a_null_value_is_rejected(self) -> None:
+        """The document form of the model rule above: a persisted
+        `{"status": "present", "value": null}` must not load as usable
+        evidence for a value the document does not carry."""
+        document = self._document_with_fact("canonical_spelling", {"value": None})
+        with pytest.raises(ValueError, match="carries no value"):
+            snapshot_from_dict(document)
+
+    @pytest.mark.parametrize(
+        "missing", ["canonical_spelling", "template_arguments", "cv_qualification"]
+    )
+    def test_an_entity_missing_a_fact_field_is_rejected(self, missing: str) -> None:
+        """The writer emits every fact field, so a document short of one is
+        truncated — letting `CanonicalEntity`'s dataclass default fill it in
+        would turn missing persisted evidence into a `NOT_COLLECTED`
+        availability *claim*."""
+        document = self._document_with_fact("canonical_spelling", {})
+        del document["semantic_ir"]["occurrences"][0]["entity"][missing]
+        with pytest.raises(ValueError, match="missing required field"):
+            snapshot_from_dict(document)
 
     def test_a_non_string_conflict_entry_is_rejected(self) -> None:
         document = snapshot_to_dict(_snapshot(None, semantic_ir_conflicts={"k": "v"}))

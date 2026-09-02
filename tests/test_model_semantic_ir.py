@@ -214,8 +214,7 @@ class TestCanonicalCvQualification:
         assert entity.cv_qualification.is_present
 
     @pytest.mark.parametrize(
-        "fact",
-        [Fact.not_collected(), Fact.unsupported(), Fact.failed("no"), Fact.present(None)],
+        "fact", [Fact.not_collected(), Fact.unsupported(), Fact.failed("no")]
     )
     def test_a_fact_with_no_usable_value_is_not_checked(self, fact: object) -> None:
         entity = CanonicalEntity(
@@ -223,6 +222,33 @@ class TestCanonicalCvQualification:
             cv_qualification=fact,  # type: ignore[arg-type]
         )
         assert entity.cv_qualification == fact
+
+    @pytest.mark.parametrize("name", ["canonical_spelling", "cv_qualification"])
+    @pytest.mark.parametrize("constructor", [Fact.present, Fact.partial])
+    def test_a_usable_fact_must_carry_its_value(
+        self, name: str, constructor: object
+    ) -> None:
+        """`Fact.present(None)` is legitimate in the general `Fact`
+        vocabulary, for a field whose `T` includes `None` — but these fields
+        are `Fact[str]`/`Fact[tuple[str, ...]]`, and their own docstrings name
+        the confirmed-absence spelling as this field's *empty* value. Admitting
+        `None` would let `resolved_fact_count` (and through it the reduction
+        and the hybrid backfill) treat a value the entity does not carry as
+        usable evidence."""
+        kwargs = {
+            "canonical_spelling": Fact.present("Foo"),
+            name: constructor(None),  # type: ignore[operator]
+        }
+        with pytest.raises(ValueError, match="carries no value"):
+            CanonicalEntity(**kwargs)  # type: ignore[arg-type]
+
+    def test_the_declared_empty_value_is_how_absence_is_spelled(self) -> None:
+        entity = CanonicalEntity(
+            canonical_spelling=Fact.present(""),
+            template_arguments=Fact.present(()),
+            cv_qualification=Fact.present(()),
+        )
+        assert entity.resolved_fact_count() == 3
 
     def test_confirmed_absence_is_present_and_empty(self) -> None:
         entity = CanonicalEntity(
