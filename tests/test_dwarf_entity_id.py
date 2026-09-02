@@ -232,23 +232,30 @@ class TestDwarfEntityIdNestedRecordDefaultAccess:
 
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
-class TestDwarfEntityIdNonItaniumLinkageName:
+class TestDwarfEntityIdAsmLabeledLinkageName:
     """A real, explicit linkage name that doesn't start with ``_Z`` (an
-    ``asm("...")`` label on an ordinary C++ function) must still take the
-    mangled-identity branch, not the scope-free extern-"C" one --
-    ``Function.is_extern_c``'s own ``not mangled.startswith("_Z")`` heuristic
-    is not a trustworthy is-genuinely-extern-"C" signal the way the two
-    header-AST backends' real language-linkage read is (Codex review, PR
-    #1015)."""
+    ``asm("...")`` label) is structurally indistinguishable, from DWARF
+    evidence alone, between "genuinely extern-\"C\", the label just
+    overrides the exported spelling" and "ordinary C++ linkage, the label
+    picks a stable non-mangled export name" -- no compiler-emitted DWARF
+    attribute marks a subprogram as extern-"C" directly (unlike the two
+    header-AST backends' own AST read). Both sub-cases therefore take the
+    identical extern-"C"-shaped branch here, matching the two header-AST
+    backends' behavior for the genuinely-extern-"C" sub-case (the far more
+    common one), with the other sub-case an accepted, documented residual
+    gap -- see ``dwarf_scope.function_entity_id``'s own docstring for the
+    full reasoning, and ``dumper_elf_fallback._elf_fallback_mangled_name``
+    for the identical ambiguity in ELF-symbol-table-only evidence (Codex
+    review, PR #1015, across two rounds each: an earlier version of this
+    test pinned a "fix" for the ordinary-C++ sub-case that a later round
+    proved wrong by exhibiting the genuinely-extern-"C" sub-case's own
+    regression)."""
 
-    @pytest.fixture()
-    def asm_label_lib(self, tmp_path: Path) -> Path:
+    @staticmethod
+    def _compile(tmp_path: Path, cpp_source: str, so_name: str) -> Path:
         cpp = tmp_path / "lib.cpp"
-        cpp.write_text(
-            'int cppfunc(int x) asm("custom_cpp_name");\n'
-            "int cppfunc(int x) { return x + 1; }\n"
-        )
-        so_path = tmp_path / "libasmlabel_entity.so"
+        cpp.write_text(cpp_source)
+        so_path = tmp_path / so_name
         result = subprocess.run(
             [
                 _GCC.replace("gcc", "g++"),
@@ -266,19 +273,44 @@ class TestDwarfEntityIdNonItaniumLinkageName:
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
 
-    def test_real_non_itanium_linkage_name_takes_mangled_branch(
-        self, asm_label_lib: Path
-    ) -> None:
-        elf_meta = parse_elf_metadata(asm_label_lib)
-        dwarf_meta, dwarf_adv = parse_dwarf(asm_label_lib)
-        snap = build_snapshot_from_dwarf(asm_label_lib, elf_meta, dwarf_meta, dwarf_adv)
+    def test_ordinary_cpp_function_with_asm_label(self, tmp_path: Path) -> None:
+        so_path = self._compile(
+            tmp_path,
+            'int cppfunc(int x) asm("custom_cpp_name");\n'
+            "int cppfunc(int x) { return x + 1; }\n",
+            "libasmlabel_cpp.so",
+        )
+        elf_meta = parse_elf_metadata(so_path)
+        dwarf_meta, dwarf_adv = parse_dwarf(so_path)
+        snap = build_snapshot_from_dwarf(so_path, elf_meta, dwarf_meta, dwarf_adv)
 
         func = next((f for f in snap.functions if f.mangled == "custom_cpp_name"), None)
         assert func is not None
-        # Pre-existing, unrelated heuristic: still (wrongly) reads this as
-        # extern-"C" -- not this PR's to fix, only entity_id's own handling
-        # of it.
+        assert func.entity_id is not None
+        assert func.entity_id.kind == EntityKind.FUNCTION
+        assert func.entity_id.extra == ("extern_c",)
+        assert func.entity_id.leaf_name == "cppfunc"
+
+    def test_genuinely_extern_c_function_with_asm_label(self, tmp_path: Path) -> None:
+        """The case a prior attempt at this fix regressed: a genuinely
+        ``extern "C"`` function with an asm label must take the SAME
+        extern-"C"-shaped branch as the ordinary-C++ sub-case above, not
+        the mangled branch -- matching the two header-AST backends' own
+        trustworthy language-linkage read for this declaration."""
+        so_path = self._compile(
+            tmp_path,
+            'extern "C" int cfunc(int x) asm("custom_c_name");\n'
+            'extern "C" int cfunc(int x) { return x + 1; }\n',
+            "libasmlabel_c.so",
+        )
+        elf_meta = parse_elf_metadata(so_path)
+        dwarf_meta, dwarf_adv = parse_dwarf(so_path)
+        snap = build_snapshot_from_dwarf(so_path, elf_meta, dwarf_meta, dwarf_adv)
+
+        func = next((f for f in snap.functions if f.mangled == "custom_c_name"), None)
+        assert func is not None
         assert func.is_extern_c is True
         assert func.entity_id is not None
         assert func.entity_id.kind == EntityKind.FUNCTION
-        assert func.entity_id.extra == ("mangled", "custom_cpp_name")
+        assert func.entity_id.extra == ("extern_c",)
+        assert func.entity_id.leaf_name == "cfunc"

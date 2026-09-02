@@ -114,28 +114,41 @@ def function_entity_id(
     ``dwarf_snapshot.py``'s own ``mangled`` is already ``linkage_name or
     name`` (a fallback bare spelling when no real ``DW_AT_linkage_name``
     exists) -- offered to ``entity_id_for_function`` as a genuine mangling
-    whenever a real ``DW_AT_linkage_name``/``DW_AT_MIPS_linkage_name`` was
-    present, unconditionally on *is_extern_c*. Deliberately NOT the two
-    header-AST backends' own ``raw_mangled is not None and not is_extern_c``
-    gate: their ``is_extern_c`` is a real language-linkage signal read off
-    the AST node itself, so it is trustworthy enough to override a
-    genuinely-present mangled spelling; DWARF's own *is_extern_c* here is
-    only ``not mangled.startswith("_Z")`` -- a real, explicitly-linked
-    non-Itanium name (e.g. ``int f(int) asm("custom_name")`` on an ordinary
-    C++ function) would satisfy that heuristic while still being a
-    genuinely distinct, real linkage name, and gating on it would wrongly
-    collapse the function onto the scope-free ``extern_c`` tag instead of
-    identifying it by its own real (if unusually-spelled) linkage name --
-    exactly the cross-backend divergence a header-AST dump of the identical
-    declaration would not produce (Codex review, PR #1015). A genuinely
-    extern-"C" function has no distinct linkage name to mangle at all, so
-    GCC/Clang emit no ``DW_AT_linkage_name`` for it -- *has_linkage_name*
-    being ``False`` is already the correct signal for that case, without
-    needing the unreliable prefix check at all; ``entity_id_for_function``'s
-    own contract makes this safe regardless (*mangled_name*, when present,
-    wins outright over *is_extern_c*). *is_extern_c* is still passed
-    through for the one case it remains meaningful: no real linkage name at
-    all, where the constructor falls back to its own extern-"C" tag.
+    only when a real linkage name is present AND it is Itanium-shaped
+    (``is_extern_c`` false, i.e. ``mangled.startswith("_Z")``).
+
+    This is DELIBERATELY not "any real linkage name wins" -- an earlier
+    version of this function tried that (Codex review, PR #1015, round 2)
+    and a later round found the real case it breaks: ``extern "C" int
+    f(int) asm("custom_name")`` gets a real, non-Itanium
+    ``DW_AT_linkage_name`` too, and the two header-AST backends' own
+    ``is_extern_c`` there is a trustworthy language-linkage signal read
+    directly off the AST (an actual ``extern "C"``/``LinkageSpecDecl``
+    node) -- so THEY always take the scope-free extern-"C" branch for a
+    genuinely-extern-"C" function regardless of any asm label, and this
+    producer must match that to avoid a three-way identity split across
+    evidence modes (DWARF/header-AST/ELF-fallback each disagreeing on the
+    same declaration).
+
+    DWARF has no equivalent trustworthy language-linkage signal of its own
+    -- unlike the AST case, nothing marks a DW_TAG_subprogram as
+    ``extern "C"`` directly, so this producer's only available proxy is
+    the SAME Itanium-shape check *is_extern_c* itself already uses. That
+    proxy is reliable in exactly one direction: a real ``_Z``-mangled name
+    definitely is NOT extern-"C" (mangled branch, safe). The reverse is
+    not: a real, explicitly-linked, non-Itanium name (an asm label) is
+    structurally indistinguishable between "genuinely extern-\"C\", label
+    just overrides the exported spelling" and "ordinary C++ linkage, label
+    picks a stable non-mangled export name" -- DWARF carries no signal
+    resolving that either way (mirrors ``dumper_elf_fallback.
+    _elf_fallback_mangled_name``'s identical, irreducible ambiguity from
+    ELF symbol-table-only evidence -- same root cause, no compiler-emitted
+    attribute distinguishes the two cases once a non-Itanium linkage name
+    exists). This function defaults to the extern-"C" branch for that
+    ambiguous case, matching the two header-AST backends' behavior for the
+    far more common genuinely-extern-"C" sub-case; the asm-labeled,
+    NOT-actually-extern-"C" sub-case is an accepted, documented residual
+    gap, not a case either direction actually resolves.
 
     DWARF does not carry a method's own cv-qualification, ref-qualifier, or
     variadic-ness here (unlike the two header-AST backends' own AST-node
@@ -151,7 +164,7 @@ def function_entity_id(
     return entity_id_for_function(
         scope_path,
         name,
-        mangled_name=(mangled if has_linkage_name else None),
+        mangled_name=(mangled if (has_linkage_name and not is_extern_c) else None),
         is_extern_c=is_extern_c,
         param_types=param_types,
         is_const=False,
@@ -165,18 +178,17 @@ def variable_entity_id(
 ) -> EntityId:
     """``EntityId`` for a ``DW_TAG_variable`` DIE's declaration.
 
-    Same "a real linkage name always wins, regardless of its own spelling"
-    rule :func:`function_entity_id` uses (see that function's own docstring
-    for the full reasoning) -- *has_linkage_name* alone gates the mangled
-    branch; a variable with no real ``DW_AT_linkage_name`` at all falls back
-    to the extern-"C"-like branch, derived from *mangled*'s own spelling
-    since ``entity_id_for_variable`` has no dedicated *is_extern_c* concept
-    of its own (unlike ``Function.is_extern_c``).
+    Same Itanium-shape gate :func:`function_entity_id` uses (see that
+    function's own docstring for the full reasoning) -- a real linkage name
+    is offered as genuinely mangled only when it is also ``_Z``-shaped;
+    ``entity_id_for_variable`` has no dedicated *is_extern_c* concept of
+    its own (unlike ``Function.is_extern_c``), so this derives the
+    identical signal locally from *mangled*'s own spelling.
     """
     is_extern_c_like = not mangled.startswith("_Z")
     return entity_id_for_variable(
         scope_path,
         name,
-        mangled_name=(mangled if has_linkage_name else None),
+        mangled_name=(mangled if (has_linkage_name and not is_extern_c_like) else None),
         is_extern_c=is_extern_c_like,
     )
