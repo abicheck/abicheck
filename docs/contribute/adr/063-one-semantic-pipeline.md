@@ -571,11 +571,12 @@
   separately-justified extension beyond the availability-bearing subset
   this phase (and D7's initial realization) actually covers.
 - **Phase 6** (one canonical `SemanticIR` between the backends and the
-  checker) has landed four slices — the IR itself and its persistence, the
+  checker) has landed five slices — the IR itself and its persistence, the
   header-AST normalizer for records/enums/typedefs, functions and
-  variables, and constants — across every header-AST-backed platform
-  (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included); it is
-  **not yet complete**: the DWARF/PDB/BTF/CTF backends produce no IR at all,
+  variables, and constants across every header-AST-backed platform
+  (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included), and now
+  DWARF, the first non-header-AST producer; it is
+  **not yet complete**: the PDB/BTF/CTF backends still produce no IR at all,
   `CanonicalEntity.template_arguments` is never populated by any backend, and
   a `--dump-manifest` multi-TU dump loses occurrence detail. See this
   bullet's own "Still not landed" paragraph below for the exact account.
@@ -685,11 +686,33 @@
   `"True"`/`"False"` literal, both marked `Fact.unsupported()` rather than a
   raw-value `Fact.present(...)` since neither is a spelling of real source
   text.
+  **Fifth slice landed: DWARF, the first non-header-AST producer.**
+  ADR-063 Phase 2's own "fourteenth slice" already gave `dwarf_snapshot.py`
+  a real, typed `ScopePath` and a populated `entity_id` on every
+  `RecordType`/`EnumType`/`Function`/`Variable`/typedef it produces, so this
+  slice needed no new identity work, only a new caller
+  (`dumper_elf_fallback._dwarf_semantic_ir`, called from
+  `_try_dwarf_snapshot` right after `build_snapshot_from_dwarf` returns —
+  not inside `dwarf_snapshot.py` itself, which sits at its own
+  `architecture/debt.yaml` no-growth line-count baseline). Records/enums/
+  typedefs needed no DWARF-specific handling; functions and variables each
+  needed one producer-specific `cv_qualification` carve-out
+  (`extract/semantic_normalizer_dwarf.py`, a new leaf module split out to
+  stay under the 800-line production cap): a function's is unconditionally
+  `Fact.not_collected()`, since DWARF's own DIE walk never reads a method's
+  const/volatile qualifier at all; a variable's is read from the
+  already-extracted, structurally-sound `Variable.is_const` field rather
+  than the castxml/clang text scan — verified against a real compiled
+  fixture that DWARF's own type-name reconstruction renders a const pointer
+  (`int* const`) and a pointer to const data (`const int*`) with the
+  *identical* text, so only the structural field can tell them apart here.
+  `snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (26→27).
   **Still not landed, and therefore this phase is not yet complete**: the
-  DWARF/PDB/BTF/CTF backends still produce no `entity_id` at all, so
+  PDB/BTF/CTF backends still produce no `entity_id` at all, so
   extending the normalizer to them is gated on giving each the Phase 2
   `EntityId` treatment first (the same scale of work Phase 2 did for
-  ELF/PE/Mach-O and the header-AST backends, redone per debug format);
+  ELF/PE/Mach-O, the header-AST backends, and now DWARF, redone per debug
+  format);
   `CanonicalEntity.template_arguments` is still never populated by any
   backend — every real writer only ever constructs `canonical_spelling`/
   `cv_qualification`, so the acceptance-criteria fixture (a

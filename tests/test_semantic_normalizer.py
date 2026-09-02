@@ -14,13 +14,14 @@
 # limitations under the License.
 
 """``extract.semantic_normalizer.normalize_header_ast`` (ADR-063 Phase 6,
-second and third slices).
+second through fifth slices).
 
 Unit-level: exercises the normalizer directly against hand-built
 ``RecordType``/``EnumType``/typedef/``Function``/``Variable`` inputs,
-independent of any real castxml/clang parse (that end-to-end wiring is
-covered by ``test_semantic_ir_end_to_end.py``, which needs the real
-toolchains).
+independent of any real castxml/clang/DWARF parse. Real-toolchain
+end-to-end wiring is covered by ``test_semantic_ir_end_to_end.py``
+(castxml/clang) and ``test_dwarf_semantic_ir.py`` (DWARF, the fifth
+slice's ``producer="dwarf"`` caller).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from __future__ import annotations
 from abicheck.extract.semantic_normalizer import normalize_header_ast
 from abicheck.model.declarations import Function, Param, Variable
 from abicheck.model.entities import EnumType, RecordType
+from abicheck.model.fact import FactStatus
 from abicheck.model.identity import (
     Namespace,
     entity_id_for_constant,
@@ -748,3 +750,161 @@ def test_normalize_header_ast_constants_default_to_empty() -> None:
         producer="castxml",
     )
     assert ir.occurrences == {}
+
+
+# ---------------------------------------------------------------------------
+# producer="dwarf" (ADR-063 Phase 6, fifth slice) -- see this module's own
+# import target's docstring, "Scope of the fifth slice", for why functions
+# and variables each need a dedicated producer branch rather than reusing
+# the castxml/clang handling unconditionally. Real-compiled-fixture,
+# end-to-end coverage of the actual ``dwarf_snapshot``/``dumper_elf_fallback``
+# wiring lives in ``tests/test_dwarf_semantic_ir.py``; these are unit-level,
+# hand-built-object tests of the normalizer's own producer="dwarf" branches,
+# mirroring every other test in this file.
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_header_ast_dwarf_function_cv_qualification_not_collected() -> None:
+    """A DWARF-sourced function's ``cv_qualification`` is ``NOT_COLLECTED``,
+    never a confirmed empty tuple -- ``dwarf_snapshot._build_function`` never
+    reads a method's own const/volatile qualifier at all, so ``is_const``/
+    ``is_volatile`` are always their dataclass default (``False``) here, real
+    const method included. This must stay ``NOT_COLLECTED`` even when the
+    underlying ``Function`` object happens to carry ``is_const=True`` (never
+    true in production DWARF output, but this test does not rely on
+    production behaviour to prove the producer branch itself never reads
+    those fields for ``producer="dwarf"``)."""
+    fn = _function("f", "void", is_const=True, is_volatile=True)
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="dwarf",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.status is FactStatus.NOT_COLLECTED
+    assert entity.producer == "dwarf"
+
+
+def test_normalize_header_ast_dwarf_variable_cv_qualification_from_is_const() -> None:
+    """A DWARF-sourced variable's ``cv_qualification`` comes from the
+    structural ``Variable.is_const`` field, not a text scan over ``type`` --
+    see this module's own import target's docstring for why DWARF's
+    ``is_const`` (derived from the variable's own outermost type DIE) does
+    not carry the pointee-vs-value conflation the header-AST backends' own
+    ``is_const`` has."""
+    var = Variable(
+        name="g_const_ptr",
+        mangled="g_const_ptr",
+        # DWARF's own `_compute_type_name` renders a CONST POINTER
+        # (`int* const`) with the identical text a MUTABLE pointer to CONST
+        # DATA (`const int*`) gets -- see the next test. Only `is_const`
+        # tells the two apart for a DWARF producer.
+        type="const int *",
+        is_const=True,
+        entity_id=entity_id_for_variable((), "g_const_ptr", mangled_name="g_const_ptr"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="dwarf",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ("const",)
+
+
+def test_normalize_header_ast_dwarf_variable_pointee_const_is_not_top_level() -> None:
+    """The DWARF sibling of ``test_normalize_header_ast_canonicalizes_
+    variable_type_spelling`` above: a mutable pointer to const data
+    (``const int *``, ``is_const=False`` since the POINTER itself is not
+    const) must report an EMPTY ``cv_qualification`` -- even though its
+    ``type`` text is IDENTICAL, character for character, to the const-pointer
+    case in the test above. A text scan could never distinguish these two for
+    DWARF (unlike castxml/clang, which spell the two differently); only the
+    structural ``is_const`` field can, which is exactly why the DWARF branch
+    reads it instead."""
+    var = Variable(
+        name="g_ptr_to_const",
+        mangled="g_ptr_to_const",
+        type="const int *",
+        is_const=False,
+        entity_id=entity_id_for_variable(
+            (), "g_ptr_to_const", mangled_name="g_ptr_to_const"
+        ),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="dwarf",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_dwarf_variable_volatile_is_not_reported() -> None:
+    """DWARF extracts no structural volatile fact for a variable at all (no
+    backend has an ``is_volatile`` field on ``Variable``) -- a genuinely
+    volatile, non-const DWARF variable reports the same empty
+    ``cv_qualification`` a plain variable would, a documented, accepted gap
+    rather than a claimed confirmed absence (see this module's own import
+    target's docstring)."""
+    var = Variable(
+        name="g_volatile",
+        mangled="g_volatile",
+        type="volatile int",
+        is_const=False,
+        entity_id=entity_id_for_variable((), "g_volatile", mangled_name="g_volatile"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="dwarf",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.cv_qualification.value == ()
+
+
+def test_normalize_header_ast_dwarf_records_enums_typedefs_unaffected() -> None:
+    """Records/enums/typedefs need no DWARF-specific handling at all --
+    ``producer="dwarf"`` changes only the two function/variable
+    ``cv_qualification`` branches above, never the spelling projection
+    shared with castxml/clang."""
+    scope = (Namespace("ns"),)
+    rt = _record("Widget", "ns::Widget", scope, "Widget")
+    et = EnumType(
+        name="Color",
+        qualified_name="ns::Color",
+        entity_id=entity_id_for_enum(scope, "Color"),
+    )
+    typedef_eid = entity_id_for_typedef(scope, "Handle")
+
+    ir = normalize_header_ast(
+        types=[rt],
+        enums=[et],
+        typedefs_qualified={"ns::Handle": "unsigned long"},
+        typedef_entity_ids={"ns::Handle": typedef_eid},
+        producer="dwarf",
+    )
+
+    assert ir.occurrences[OccurrenceId(rt.entity_id)].canonical_spelling.value == (
+        "ns::Widget"
+    )
+    assert ir.occurrences[OccurrenceId(et.entity_id)].canonical_spelling.value == (
+        "ns::Color"
+    )
+    assert ir.occurrences[OccurrenceId(typedef_eid)].canonical_spelling.value == (
+        "unsigned long"
+    )
+    for entity in ir.occurrences.values():
+        assert entity.producer == "dwarf"

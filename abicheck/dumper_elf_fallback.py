@@ -35,7 +35,9 @@ from .extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,
 )
+from .extract.semantic_normalizer import normalize_header_ast
 from .model import AbiSnapshot, RecordType
+from .model.semantic_ir import SemanticIR
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,6 +51,36 @@ if TYPE_CHECKING:
 # is a pure relocation: callers/tests scoped to that logger (e.g. caplog)
 # must keep seeing these records unchanged.
 log = logging.getLogger("abicheck.dumper")
+
+
+def _dwarf_semantic_ir(snap: AbiSnapshot) -> SemanticIR:
+    """``AbiSnapshot.semantic_ir`` for a DWARF-only snapshot (ADR-063 Phase 6,
+    fifth slice).
+
+    ``dwarf_snapshot.build_snapshot_from_dwarf`` already populates a real
+    ``entity_id`` on every ``RecordType``/``EnumType``/``Function``/
+    ``Variable``/typedef it produces (ADR-063 Phase 2's "fourteenth slice") --
+    this is the same ``normalize_header_ast`` call ``dumper_manifest.
+    resolve_header_ast_result`` makes for the header-AST backends, just
+    applied post-hoc here rather than inline in ``dwarf_snapshot.py`` itself,
+    since that module sits at its own ``architecture/debt.yaml`` no-growth
+    line-count baseline. ``constants``/``constant_entity_ids`` are left at
+    their ``{}`` defaults: DWARF carries no constexpr-initializer evidence at
+    all (see ``AbiSnapshot.constant_entity_ids``'s own docstring) — there is
+    nothing here for a constant occurrence to be built from, not merely
+    nothing wired up. See ``extract/semantic_normalizer_dwarf.py``'s own
+    module docstring for the two producer-specific ``cv_qualification``
+    carve-outs a ``producer="dwarf"`` call needs.
+    """
+    return normalize_header_ast(
+        types=snap.types,
+        enums=snap.enums,
+        typedefs_qualified=snap.typedefs,
+        typedef_entity_ids=snap.typedef_entity_ids,
+        producer="dwarf",
+        functions=snap.functions,
+        variables=snap.variables,
+    )
 
 
 def _try_dwarf_snapshot(
@@ -104,6 +136,7 @@ def _try_dwarf_snapshot(
                 "#define constants and default parameter values will be unavailable."
             )
         _populate_elf_visibility(snap)
+        snap.semantic_ir = _dwarf_semantic_ir(snap)
         return snap, []
     # DWARF snapshot had no symbols of its own (often the case when
     # the binary exports only constructors / extern "C" wrappers that

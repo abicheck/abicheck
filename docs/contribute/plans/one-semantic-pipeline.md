@@ -13466,12 +13466,72 @@ list gains the `"x86_64-unknown-darwin"` case, plus `ios`/`tvos`/
 proves the scope gate for both functions and variables), all in
 `tests/test_dumper_clang_extern_c_identity.py`.
 
+**Landed (fifth slice, 2026-09-02): DWARF, the first non-header-AST
+producer.** ADR-063 Phase 2's "fourteenth slice" (2026-09-02, same day)
+already gave `dwarf_snapshot.py` a real, typed `ScopePath` and a populated
+`entity_id` on every `RecordType`/`EnumType`/`Function`/`Variable`/typedef
+it produces -- this normalizer's own "reads identity, never resolves it"
+contract meant DWARF needed no *new* identity work to become a caller, only
+a new call site: `dumper_elf_fallback._dwarf_semantic_ir` (a thin wrapper
+around the same `normalize_header_ast`, called from `_try_dwarf_snapshot`
+right after `build_snapshot_from_dwarf` returns, rather than inside
+`dwarf_snapshot.py` itself, which sits at its own `architecture/debt.yaml`
+no-growth line-count baseline) passes the builder's
+`types`/`enums`/`typedefs` (already namespace-qualified-keyed, matching
+`typedefs_qualified`'s own convention)/`typedef_entity_ids`/`functions`/
+`variables` straight through, with `producer="dwarf"` and
+`constants={}`/`constant_entity_ids={}` (DWARF carries no constexpr
+initializer evidence at all).
+
+Records/enums/typedefs needed no DWARF-specific handling. Functions and
+variables each needed one producer-specific `cv_qualification` carve-out
+(`extract/semantic_normalizer_dwarf.py`, split into its own leaf module to
+keep `semantic_normalizer.py` under the 800-line production cap, the
+identical reason `semantic_normalizer_artifacts.py` was split out one slice
+earlier): a function's is unconditionally `Fact.not_collected()`, since
+`dwarf_snapshot._build_function` never reads a method's own const/volatile
+qualifier from the DIE at all (`Function.is_const`/`is_volatile` are always
+their dataclass default here, never a confirmed reading -- reusing the
+castxml/clang branch's `Fact.present(...)` would misrepresent "never
+looked" as "confirmed not const"); a variable's is read from the
+already-extracted, structurally-sound `Variable.is_const` field instead of
+`_variable_top_level_cv_qualification`'s text scan, which castxml/clang
+need specifically because *their own* `is_const` is computed with a bare
+whole-string word search that conflates a mutable pointer to const data
+with a genuinely const pointer -- DWARF's `is_const` is not computed that
+way at all (`dwarf_snapshot._process_variable` sets it from whether the
+variable's own outermost type DIE is `DW_TAG_const_type`), so the same
+conflation this normalizer exists to avoid for the other two backends does
+not apply to DWARF, and reading `is_const` there is correct rather than a
+regression. Verified against a real compiled fixture covering all four
+cases (`const int g`, `int* const g`, `const int* g`, `const int* const
+g`): `int* const` and `const int*` render as the IDENTICAL text
+(`"const int *"`) by `dwarf_snapshot._compute_type_name`'s own
+const/pointer composition order, so a text scan could never have told them
+apart for DWARF even in principle -- only the structural field can, which
+is exactly why the DWARF branch reads it instead of reusing the text
+scanner. DWARF extracts no structural volatile fact for a variable at all
+(no backend has an `is_volatile` field on `Variable`), so a DWARF
+variable's `cv_qualification` can only ever contain `"const"`, never
+`"volatile"` -- a documented, accepted gap, not a claimed absence.
+`snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (26 -> 27), the same
+"a stale cache entry would otherwise silently keep serving `semantic_ir=
+None` forever" reasoning every prior slice's own cache bump gives. New
+tests: `tests/test_semantic_normalizer.py` gained a `producer="dwarf"`
+unit-test section (hand-built objects, no compiler needed, mirroring every
+other producer's tests in that file); `tests/test_dwarf_semantic_ir.py`
+(new) exercises the real production wiring end to end against gcc/g++
+compiled fixtures, the same lightweight `skipif`-gated pattern
+`test_dwarf_entity_id.py` uses (no `integration` marker, since this needs
+no castxml/clang).
+
 **Still not landed, and therefore this phase is not complete:**
-DWARF/PDB/BTF/CTF backends produce no IR at all (none of them populate
+PDB/BTF/CTF backends produce no IR at all (none of them populate
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already
 resolved identity for, it does not resolve identity itself, so extending it
 to these backends is gated on giving each of them the Phase 2 `EntityId`
-treatment first); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
+treatment first, the identical prerequisite DWARF's own fifth slice just
+closed); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
 fifth production assembler this phase's own Files list names) remain
 unwired for the same reason; and the phase's own acceptance criteria (a
 closure-parameterized template fixture, requiring function/template-argument
