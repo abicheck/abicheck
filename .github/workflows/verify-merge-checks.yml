@@ -184,11 +184,11 @@ jobs:
             // REQUIRED_CHECKS. Only a `completed_at` after `merged_at` is
             // immediately decisive (`failed`, terminal, no more polling can
             // change it) -- everything else, including a *bad conclusion*,
-            // goes to `pending` and gets another poll. Three Codex review
+            // goes to `pending` and gets another poll. Four Codex review
             // rounds on this exact function established why a bad
             // conclusion can't be trusted as terminal on its own, and why
-            // "most recently *started*" is the wrong way to pick which run
-            // represents a check's current state:
+            // neither `started_at` nor any exclusion built on it can
+            // reliably pick which run represents a check's current state:
             //
             // 1. A rerun selected by "most recently started" could itself
             //    have started *after* the merge -- a real, post-merge rerun
@@ -207,45 +207,46 @@ jobs:
             //    "most recent" by `started_at` with a `0` fallback for a
             //    missing timestamp makes it lose to an *older*, already-
             //    completed run, hiding that the real current attempt is
-            //    still unresolved (Codex review, third round).
+            //    still unresolved.
+            // 4. The third round's fix (rank by `id`; exclude a run only
+            //    once its own `started_at` proves it began after the merge)
+            //    still breaks: a rerun genuinely queued *before* the merge
+            //    can easily not *start executing* until *after* it (runner
+            //    backlog), which sets its `started_at` to a time after
+            //    `merged_at` -- indistinguishable, by that field, from a
+            //    rerun that was both created and started after the merge.
+            //    Excluding it on that basis un-does point 1's fix and falls
+            //    back to an older, possibly-stale run, exactly reproducing
+            //    point 1's bug (Codex review, fourth round).
             //
-            // The GitHub Checks API exposes no run-creation timestamp, so
-            // `started_at` can't answer "which attempt is current" on its
-            // own. `id` can: it is always present (even before a run
-            // starts) and strictly reflects creation order on GitHub's
-            // side, unlike `started_at`, which is absent until execution
-            // begins. So selection ranks by `id`, not `started_at` --
-            // `started_at` is used only for its one piece of *positive*
-            // evidence: a run that has demonstrably started running after
-            // the merge is excluded outright (point 1), since nothing about
-            // it can represent "the state at merge time". A run with no
-            // `started_at` yet is *not* excluded by that rule (point 3) --
-            // there is no way to prove it started after the merge, and
-            // excluding it on suspicion alone would wrongly let an older
-            // completed run stand in for it.
-            //
-            // This leaves one narrow, accepted gap: a rerun triggered after
-            // the merge that is *still queued* (no `started_at` yet) when
-            // this workflow queries is indistinguishable, by any field this
-            // API exposes, from a rerun that was already queued *before*
-            // the merge -- both would out-rank an older completed run by
-            // `id` and read as "pending". Closing it would need a real
-            // check-run creation timestamp, which the API does not provide.
+            // Points 1 and 4 are, in the general case, **not both
+            // solvable** with the fields this API exposes: nothing in a
+            // check run's data says when it was *created*, only when it
+            // *started* or *completed* running, so a run that is merely
+            // queued cannot be proven to belong on either side of the
+            // merge. Rather than keep adding another timestamp heuristic
+            // that only shifts which case breaks, selection ranks by `id`
+            // (creation order, always present, unlike `started_at`) with
+            // **no exclusion at all** -- the highest-`id` run for a check
+            // name is always treated as its current attempt, whatever its
+            // own `started_at` says. This is a deliberate, asymmetric
+            // choice of which failure mode to accept: it can very rarely
+            // produce a false *failure* report (an unrelated rerun
+            // triggered in the few minutes right after a genuinely good
+            // merge, that stays unresolved for this workflow's entire poll
+            // budget, reads as "still incomplete"), but it can never
+            // produce a false *pass* by falling back to a stale older run
+            // the way points 1 and 3's bugs did. For a compensating safety
+            // net whose whole purpose is catching a merge that slipped
+            // through incomplete, an occasional false alarm a human can
+            // dismiss by reading the Actions tab is the correct trade
+            // against ever silently missing a real one.
             function evaluate(checkRuns) {
-              // Positive evidence only: a run is excluded solely when its
-              // own recorded `started_at` proves it began after the merge.
-              // A run with no `started_at` yet is kept -- see the gap noted
-              // above.
-              const isKnownPostMerge = r =>
-                r.started_at != null && Date.parse(r.started_at) > mergedAt;
-              const eligibleRuns = checkRuns.filter(r => !isKnownPostMerge(r));
-
               const byName = new Map();
-              for (const run of eligibleRuns) {
+              for (const run of checkRuns) {
                 // Rank by `id` (creation order, always present) rather than
-                // `started_at` (absent until a run actually starts, which
-                // would make a still-queued current attempt lose to an
-                // older completed one -- point 3 above).
+                // `started_at` (absent until a run actually starts, and not
+                // trustworthy even once it has -- see points 3/4 above).
                 const existing = byName.get(run.name);
                 if (!existing || run.id > existing.id) {
                   byName.set(run.name, run);
