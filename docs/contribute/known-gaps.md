@@ -5469,6 +5469,47 @@ looked like the obvious fix and wasn't.
   (resolving clang) via its own opt-in override on the shared primitive,
   deliberately preserved when `scan`'s candidate resolution was migrated
   onto the same primitive; that remains its own separate, deferred decision.
+
+  > **Update (2026-09-02): item 2's *explicit-request* half is now closed;
+  > only its unflagged-default half remains.** The sentence above is
+  > accurate as a record of that migration, but the hardcoded
+  > `source_extractor="auto"` it describes is gone: `scan_engine`'s call
+  > site now passes `service_compare_evidence.explicit_source_extractor(
+  > compile_context) or "auto"`. The distinction that made this safe to do
+  > where the earlier "flip it to `effective_frontend`" attempt was not
+  > (reverted, elsewhere in this file, for surfacing the castxml L4
+  > phantom-implicit-member bug — since fixed): **ignoring an explicit
+  > request was never the risky behaviour change, only a defect hiding
+  > behind one.** `scan --ast-frontend castxml` accepted the flag, folded it
+  > into `CompileContext.frontend` exactly as `dump`/`compare` do, and then
+  > replayed L4 through clang anyway — so a `scan --against` candidate came
+  > out non-comparable with a `dump` baseline taken with the *identical*
+  > flag. Honoring it changes no default: `explicit_source_extractor`
+  > answers `None` (leaving scan's own `"auto"`, i.e. clang) for a missing
+  > context, an unstated `auto`, and `hybrid`, so no invocation newly
+  > requires castxml. It *delegates to* `effective_frontend` rather than
+  > re-deriving a second resolution, so an explicit request cannot resolve
+  > to one backend on `scan` and another on `dump`/`compare`. `hybrid` is
+  > excluded deliberately, not incidentally: it is an L2-only dual-backend
+  > mode with no L4 extractor, and `scan` — unlike `dump`/`compare` — never
+  > calls `reject_hybrid_source_frontend`, so forwarding it would have
+  > opened a *new* divergence (scan silently skipping L4 where it runs clang
+  > today) while closing an old one. Verified against real castxml 0.7.0 +
+  > clang 18 + g++: the two long-standing xfails in
+  > `test_dump_scan_l3_comparability.py` now pass outright, and
+  > `_SCAN_KNOWN_DIVERGENT_FRONTENDS` with its whole xfail-signature
+  > apparatus is removed — the exhaustive finding-bucket set that apparatus
+  > inspected was kept, repurposed into positive `_assert_scan_*_is_clean`
+  > assertions that are strictly stronger than the `Verdict: NO_CHANGE`
+  > check beside them. Contract coverage:
+  > `tests/test_explicit_source_extractor_propagation.py`, registered under
+  > the `config.propagation_completeness` bug class (whose own known gap
+  > already named "frontend/compiler as a general per-entry-point concern"
+  > as untreated). **Still open, and deliberately so:** the unflagged
+  > default — `scan` resolves an unstated `auto` to clang, `dump`/`compare`
+  > to castxml. That one *is* the real behaviour change, and matching it
+  > would newly require castxml for a plain `scan --depth source` that works
+  > with clang today, so it stays the plan's PR 3A item 2.
   Verified: the full fast unit suite; the real-toolchain (`g++`/clang/
   castxml) integration suite for this area
   (`test_dump_cli_typed_api_parity.py`'s 16 cases — `_CONTRACT_KNOWN_

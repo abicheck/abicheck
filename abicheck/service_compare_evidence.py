@@ -61,7 +61,9 @@ __all__ = [
     "SideEvidence",
     "collect_mode_for",
     "dump_collect_mode_for",
+    "L4_SOURCE_EXTRACTORS",
     "effective_frontend",
+    "explicit_source_extractor",
     "normalized_debug_format",
     "reject_compile_db_filter_scope_mismatch",
     "reject_debug_format_for_binaries",
@@ -93,6 +95,56 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
         else header_backend
     )
     return _resolve_header_backend(requested)
+
+
+#: The backends an ``--ast-frontend`` request can actually select for L4
+#: source-ABI replay: the overlap between ``dumper.HEADER_BACKENDS`` (what the
+#: flag accepts) and what ``buildsource.inline._make_source_extractor``
+#: implements. Deliberately *not* every value :func:`effective_frontend` can
+#: return -- ``hybrid`` is an L2-only, dual-backend header-AST mode with no L4
+#: counterpart at all, which is why ``_make_source_extractor`` answers it with
+#: a ``skipped`` ExtractorRecord rather than an extractor. (The ``android``
+#: adapter in ``buildsource.source_extractors.resolver`` is a third L4 backend,
+#: but it needs a pre-captured dump and is unreachable from ``--ast-frontend``,
+#: so no frontend request can ever resolve to it here.)
+L4_SOURCE_EXTRACTORS: frozenset[str] = frozenset({"castxml", "clang"})
+
+
+def explicit_source_extractor(
+    compile: CompileContext | None,
+) -> str | None:
+    """The L4 replay backend *explicitly* requested, or ``None`` for "unstated".
+
+    Exists so a caller that must not change its own *unflagged* default can
+    still honor an explicit ``--ast-frontend`` / ``compile.frontend`` the same
+    way every other resolver does. ``scan``'s candidate resolution is that
+    caller: it has always let its L4 replay take
+    ``_make_source_extractor``'s own clang reading of ``"auto"`` (see
+    ``scan_engine``'s call site), so adopting :func:`effective_frontend`
+    wholesale would newly *require* castxml for a plain ``scan --depth
+    source`` that works with clang today. Answering only the explicit case
+    keeps that default untouched while closing the real defect underneath it
+    -- ``scan --ast-frontend castxml`` silently replaying L4 through clang,
+    which is what made a ``scan --against`` candidate non-comparable with a
+    ``dump`` baseline taken with the identical flag.
+
+    Deliberately delegates to :func:`effective_frontend` rather than
+    re-deriving the resolution, so an explicit request cannot resolve to one
+    backend here and a different one there: the two agree *by construction*,
+    not by two copies of the same rule staying in sync. ``header_backend`` is
+    passed as ``"auto"`` because it is only consulted when ``compile``
+    states nothing explicit -- the branch this function has already returned
+    ``None`` for.
+
+    Returns ``None`` (i.e. "the caller's own default stands") for a missing
+    context, an ``auto``/unstated frontend, and for ``hybrid`` -- see
+    :data:`L4_SOURCE_EXTRACTORS` for why the last of those is not an L4
+    request that could be honored at all.
+    """
+    if compile is None or compile.frontend.lower() == "auto":
+        return None
+    resolved = effective_frontend(compile, "auto")
+    return resolved if resolved in L4_SOURCE_EXTRACTORS else None
 
 
 @dataclasses.dataclass(frozen=True)

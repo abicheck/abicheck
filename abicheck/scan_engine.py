@@ -281,7 +281,7 @@ def _build_new_snapshot(
     from .api_types import InputSpec
     from .errors import AbicheckError
     from .header_utils import split_public_header_inputs
-    from .service_compare_evidence import SideEvidence
+    from .service_compare_evidence import SideEvidence, explicit_source_extractor
     from .workflows.artifact.execute import _resolve_side_snapshot_impl
 
     # L4 replay's own public-header roots, kept deliberately WIDER than the
@@ -407,15 +407,15 @@ def _build_new_snapshot(
             # (Codex review).
             seed_lang_explicit=lang.lower() == "c",
             defer_cleanup=defer_cleanup,
-            # scan has always taken `embed_build_source`'s own "auto" default,
-            # which `_make_source_extractor` reads as clang; every other
-            # resolver passes `effective_frontend`, which resolves "auto" to
-            # castxml. Matching them would newly require castxml for a `scan
-            # --depth source` that works with clang today -- a real behaviour
-            # change for real users, unverifiable without a castxml-capable
-            # lane, so it stays a documented divergence (plan, PR 3A) rather
-            # than a guessed fix folded into this migration.
-            source_extractor="auto",
+            # An *explicit* `--ast-frontend`/`compile.frontend` is honored the
+            # way every other resolver honors it -- the helper delegates to
+            # `effective_frontend`, so it cannot resolve differently here.
+            # An unstated one keeps `embed_build_source`'s own "auto", which
+            # `_make_source_extractor` reads as clang: adopting
+            # `effective_frontend` wholesale would resolve an unflagged "auto"
+            # to castxml and newly require it for a plain `scan --depth
+            # source`, a documented divergence (plan, PR 3A item 2).
+            source_extractor=explicit_source_extractor(compile_context) or "auto",
             # Kept expanded (individual header files). A change to the shared
             # primitive's raw pass-through was landed and reverted for
             # regressing `clang_public_roots._equivalent_public_roots_for_

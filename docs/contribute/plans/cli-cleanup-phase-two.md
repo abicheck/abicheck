@@ -2204,7 +2204,43 @@ pipelines a fourth time.
   >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
   >    around a resolve-time embed.
   > 2. **The L4 extractor default still diverges, in more than one pairing.**
-  >    `scan`'s candidate resolution hardcodes `source_extractor="auto"`
+  >    **Update (2026-09-02): the *explicit-request* half is closed; only the
+  >    unflagged-default half below remains.** `scan`'s candidate resolution
+  >    no longer ignores the `--ast-frontend`/`compile.frontend` it was
+  >    actually given: `scan_engine`'s call site now passes
+  >    `service_compare_evidence.explicit_source_extractor(
+  >    compile_context) or "auto"`, and that helper *delegates to*
+  >    `effective_frontend` rather than re-deriving a second resolution, so
+  >    an explicit request cannot resolve to one backend on `scan` and a
+  >    different one on `dump`/`compare` — they agree by construction, not by
+  >    two copies of a rule staying in sync. It answers `None` (leaving
+  >    `scan`'s own `"auto"` in place) for a missing context, an unstated
+  >    `auto`, and `hybrid` — the last because `hybrid` is an L2-only
+  >    dual-backend header-AST mode with no L4 extractor at all, so there is
+  >    nothing to honor; forwarding it would reach `_make_source_extractor`'s
+  >    `skipped` branch, which is `dump`'s behaviour but *not* `scan`'s
+  >    today, and `scan` does not call `reject_hybrid_source_frontend`, so
+  >    that would have been a new divergence rather than a closed one.
+  >    Verified against real castxml + clang + g++: the two long-standing
+  >    xfails in `tests/test_dump_scan_l3_comparability.py`
+  >    (`..._is_comparable_on_unchanged_source[castxml]` and
+  >    `..._matches_reported_cli_invocation[castxml]`) now pass outright,
+  >    `_SCAN_KNOWN_DIVERGENT_FRONTENDS` and its whole xfail-signature
+  >    apparatus are gone, and the exhaustive bucket set that apparatus
+  >    inspected was kept — repurposed into positive `_assert_scan_*_is_clean`
+  >    assertions, which are strictly stronger than the `Verdict: NO_CHANGE`
+  >    check they sit next to. Contract tests for the new primitive:
+  >    `tests/test_explicit_source_extractor_propagation.py` (exhaustive over
+  >    the accepted-spelling x `ABICHECK_AST_FRONTEND` domain against a
+  >    hand-written oracle table, grounded in `_make_source_extractor`, plus a
+  >    fast-lane pin on the `scan_engine` call site itself); registered under
+  >    the `config.propagation_completeness` bug class, whose own known gap
+  >    already named "frontend/compiler as a general per-entry-point concern"
+  >    as untreated.
+  >
+  >    **What is deliberately still open**, and is what the rest of this item
+  >    describes: the *unflagged* default. `scan`'s candidate resolution
+  >    hardcodes `source_extractor="auto"`
   >    (`embed_build_source`, ignoring whatever `--ast-frontend` scan itself
   >    received), which resolves to clang; `compare`'s implicit-dump operand
   >    and the typed `execute_dump_request` pipeline reach
