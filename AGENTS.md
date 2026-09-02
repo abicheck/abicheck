@@ -918,9 +918,23 @@ allowlist). To see today's large files, run:
 python scripts/check_ai_readiness.py 2>&1 | grep "exceeds soft limit"
 ```
 
-As of this writing the WARN set (>1500 lines) is `cli.py`, `dumper.py`, and
-`buildsource/crosscheck.py` — the main CLI, binary-metadata extraction, and the
-cross-check engine. Treat that command output (not this sentence) as current.
+That sentence is load-bearing: this paragraph previously named the WARN set as
+"`cli.py`, `dumper.py`, and `buildsource/crosscheck.py`" long after it had
+stopped being true (`cli.py` is now a 131-line registration facade), which is
+exactly the drift the "don't trust hard-coded line counts" warning above is
+about. As a shape rather than a list: the WARN set is **large — roughly 100
+files, about a third of them under `abicheck/`** — and a meaningful number sit
+within a few lines of the 2000-line hard cap, so a routine addition to one can
+turn an ERROR on. Run the command; don't reason from any count written here.
+
+`architecture/debt.yaml` is the sharper gate for these files and the one you
+will actually trip: every one of them carries a `no_growth` baseline
+(`python scripts/check_architecture.py`), so growing one is a reviewed
+debt-baseline change, not an ordinary edit. ADR-061's definition of done wants
+that file empty or holding only accepted exceptions — **the way to shrink an
+entry is to move responsibility out to a properly-owned module, never to
+trim the file to fit** (`report/render_html.py` is a worked example: it took
+~200 lines of formatting out of `html_report.py` by giving them an owner).
 
 When editing any large file, read the specific section you need rather than the
 whole file. Several big commands have already been split into sibling
