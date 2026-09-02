@@ -6002,10 +6002,10 @@ looked like the obvious fix and wasn't.
   chain, each fix closing the previous round's hazard while (in round 2's
   case) introducing this one.
 
-- **The weekly `Mutation testing` scheduled lane (`.github/workflows/
-  mutation.yml`, job `mutmut (detector core)`) can outgrow its own job
-  timeout before producing a receipt — investigated, partially mitigated,
-  not fully fixed.** The job's `timeout-minutes` was originally set to 240
+- **The weekly `Mutation testing` scheduled lane
+  (`.github/workflows/mutation.yml`, job `mutmut (detector core)`) can
+  outgrow its own job timeout before producing a receipt — investigated,
+  partially mitigated, not fully fixed.** The job's `timeout-minutes` was originally set to 240
   with a comment recording that a full baseline run "has taken just over
   two hours" at the time (2x headroom). `only_mutate`
   (`pyproject.toml`'s `[tool.mutmut]`) has grown since — the module map's
