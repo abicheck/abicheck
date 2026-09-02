@@ -4741,8 +4741,10 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        GateOptions prerequisite.
                                        Prerequisite landed (2026-09-02):
                                        BUNDLE_FACTS_ARTIFACT_TYPE
-                                       ("abicheck.bundle-facts",
-                                       schema_version 2) plus the archive
+                                       ("abicheck.bundle-facts"; see
+                                       BUNDLE_FACTS_SCHEMA_VERSION in
+                                       abicheck/bundle_facts.py for the
+                                       current version) plus the archive
                                        container's own
                                        BUNDLE_ARCHIVE_ARTIFACT_TYPE, and
                                        bundle_facts_serialization.looks_like_bundle_facts_document()
