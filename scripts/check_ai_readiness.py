@@ -2278,6 +2278,15 @@ _PROJECT_SNAPSHOT_DTO_FILES = (
     "abicheck/storage/dto.py",
     "abicheck/storage/import_v1.py",
     "abicheck/project_snapshot_store.py",
+    # `semantic_ir_codec.py` is the hand-written encoder `dto.py`'s own
+    # `semantic_ir_to_dto`/`semantic_ir_from_dto` are built on
+    # (`semantic_ir_to_document`/`semantic_ir_from_document`) -- the module
+    # that actually builds the DTO payload this whole check exists to keep
+    # `asdict`-free, not just the thin envelope wrapping it. Omitting it let
+    # an `asdict()` call introduced into the function that actually
+    # constructs the payload pass this ERROR-level gate untouched (Codex
+    # review).
+    "abicheck/storage/semantic_ir_codec.py",
 )
 
 

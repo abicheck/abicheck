@@ -56,6 +56,15 @@ def test_project_snapshot_dto_files_carry_no_asdict(car):
     assert f.errors == [], f"ProjectSnapshot DTO asdict() violations: {f.errors}"
 
 
+def test_semantic_ir_codec_is_included_in_the_scanned_files(car):
+    """`semantic_ir_codec.py` is the hand-written encoder `dto.py`'s own
+    `semantic_ir_to_dto`/`semantic_ir_from_dto` are built on -- the module
+    that actually constructs the DTO payload, not just the thin envelope
+    wrapping it. An `asdict()` introduced there must be caught by this
+    check, not silently outside its scanned file list (Codex review)."""
+    assert "abicheck/storage/semantic_ir_codec.py" in car._PROJECT_SNAPSHOT_DTO_FILES
+
+
 def test_project_snapshot_dto_no_asdict_actually_detects_it(car, tmp_path, monkeypatch):
     """The scan is real, not vacuous — it must fail on a deliberately
     reintroduced `asdict(...)` call in a DTO file."""

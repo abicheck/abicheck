@@ -755,3 +755,41 @@ class TestReadVariantArtifactPair:
         )
         with pytest.raises(ValueError, match="not published"):
             read_variant_artifact_pair(tmp_path, "v1", "a")
+
+    def test_a_reverse_unowned_sibling_is_a_documented_deferred_gap(
+        self, tmp_path: Path
+    ) -> None:
+        """A known, deliberately deferred gap (see this function's own
+        docstring), pinned here rather than left as an untested claim:
+        `manifest.json` publishes artifacts `a` and `b`, both artifact
+        refs name `variant_id: "v1"`, but `v1.json`'s own `artifact_ids`
+        lists only `a` -- `PackageManifest.__post_init__`'s `declared ==
+        owned` invariant is violated in the *reverse* direction
+        (`read_project_manifest` already refuses this exact graph), but
+        detecting it here would require loading every published artifact
+        ref to find which ones claim this variant_id, turning a bounded
+        one-pair lazy read into an O(published artifact count) one. This
+        test documents the current, intentional behavior (no exception)
+        so a future change to either direction is a deliberate decision,
+        not a silent regression in either direction."""
+        self._write_manifest_json(tmp_path, ["v1"], ["a", "b"])
+        self._write_ref(
+            tmp_path / "refs" / "variants" / "v1.json",
+            {"variant_id": "v1", "artifact_ids": ["a"]},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "a.json",
+            {"artifact_id": "a", "variant_id": "v1", "kind": "elf"},
+        )
+        self._write_ref(
+            tmp_path / "refs" / "artifacts" / "b.json",
+            {"artifact_id": "b", "variant_id": "v1", "kind": "elf"},
+        )
+        variant, artifact = read_variant_artifact_pair(tmp_path, "v1", "a")
+        assert variant.variant_id == "v1"
+        assert artifact.artifact_id == "a"
+        # The eager path, by contrast, already refuses this exact graph --
+        # confirming the gap is specific to the lazy pair primitive, not a
+        # missing check across the whole package model.
+        with pytest.raises(ValueError, match="does not match the artifacts"):
+            read_project_manifest(tmp_path)

@@ -706,6 +706,33 @@ def read_variant_artifact_pair(
             f"{unpublished} that are not published in this package's "
             "manifest.json"
         )
+    # A known, deliberately deferred gap (Codex review, a fourth finding on
+    # this same function): `PackageManifest.__post_init__`'s `declared ==
+    # owned` invariant is checked in *both* directions there --
+    # `variant.artifact_ids` must be exactly the set of artifacts whose own
+    # `variant_id` names it, not merely a subset. Everything above checks
+    # the "declared" direction (every id `variant.artifact_ids` names is
+    # itself published and, for the one requested id, self-consistent);
+    # what remains unchecked is the reverse "owned" direction -- a
+    # *different* published artifact (say `b`) whose own `variant_id` also
+    # names this variant, but which `variant.artifact_ids` simply omits.
+    # Detecting that requires loading and inspecting *every* artifact ref
+    # in the package to find which ones claim this `variant_id`, since
+    # `manifest.json`'s own small summary records only the flat list of all
+    # artifact ids with no per-variant partition -- turning a bounded,
+    # one-pair lazy read into an O(published artifact count) one and
+    # defeating the entire performance reason this function (and the lazy
+    # primitives it is built from) exists instead of always calling
+    # `read_project_manifest`. `read_project_manifest` already closes this
+    # exact gap today, at its own, already-eager, cost -- a caller that
+    # needs the full-graph guarantee this function cannot cheaply provide
+    # should use it instead. Not fixed here because no real caller in this
+    # landing needs that guarantee from the lazy path specifically (every
+    # current caller either loads everything via `read_project_manifest`
+    # or a single pair via this function); revisit once a real multi-
+    # artifact lazy caller (A1.6/A1.7) makes the cost/correctness trade a
+    # decision with an actual caller to design against, rather than a
+    # guess.
     return variant, artifact
 
 
