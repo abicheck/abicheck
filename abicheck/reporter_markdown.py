@@ -546,71 +546,29 @@ def _to_markdown_leaf(
     """Leaf-change mode: root type changes with affected interface lists.
 
     *severity_config*, when given, adds the same "Severity Configuration"
-    summary section the full-mode report has (see
-    :func:`_build_severity_summary_md`) — without it, ``report_mode="leaf"``
-    returned before that section was ever built, so it silently had no
-    severity information even when a caller passed ``severity_config``
+    summary section the full-mode report has — without it, ``report_mode=
+    "leaf"`` returned before that section was ever built, so it silently had
+    no severity information even when a caller passed *severity_config*
     through :func:`to_markdown`.
-    """
-    from .checker import _ROOT_TYPE_CHANGE_KINDS
 
-    lines, changes = _view_preamble(
-        result,
-        "leaf-change view",
-        show_only=show_only,
-        show_recommendation=show_recommendation,
+    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
+    via ``report/render_markdown_alternate.py``, the same fact/formatting
+    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
+    """
+    from .report.render_markdown_alternate import (
+        build_leaf_document,
+        render_leaf_document,
     )
 
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
+    return render_leaf_document(
+        build_leaf_document(
+            result,
+            show_impact=show_impact,
+            show_only=show_only,
+            show_recommendation=show_recommendation,
+            severity_config=severity_config,
         )
-
-    # ADR-049 D1: leaf mode groups purely by ChangeKind, so without this a finding compatibility policy never scored still rendered under "Breaking Type Changes" beside a NO_CHANGE verdict -- the same contradiction the full-mode partition exists to prevent, reached by a different renderer (Codex review, fresh evidence). Partitioned before the kind grouping, and disclosed in its own non-verdict section below.
-    from .report_model import ReportModel
-
-    not_evaluated = ReportModel.classify_not_evaluated(changes)
-    # Identity, not equality: `Change` is a plain dataclass, so two distinct
-    # findings can compare equal and an `in`-based split would drop the wrong
-    # one (and cost O(n^2) doing it).
-    _excluded_ids = {id(c) for c in not_evaluated}
-    scored = [c for c in changes if id(c) not in _excluded_ids]
-
-    # Group root type changes by severity
-    type_changes = [c for c in scored if c.kind in _ROOT_TYPE_CHANGE_KINDS]
-    non_type_changes = [c for c in scored if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
-
-    if type_changes:
-        lines += _build_leaf_type_sections(type_changes, result.policy)
-
-    if non_type_changes:
-        lines += ["## Non-Type Changes", ""]
-        for c in non_type_changes:
-            lines.append(_format_change_md(c))
-        lines.append("")
-
-    lines += _build_not_evaluated_section(not_evaluated)
-
-    if not changes:
-        if show_only and result.changes:
-            lines.append("_No changes match the current filter._")
-        else:
-            lines.append("_No ABI changes detected._")
-
-    _append_redundancy_note(lines, result)
-    _append_suppression_note(lines, result)
-    _append_out_of_surface_note(lines, result)
-
-    if show_impact:
-        lines += _build_impact_table(result, displayed_changes=changes)
-
-    lines += _footer_lines()
-    return "\n".join(lines)
+    )
 
 
 #: The report's stable per-finding fingerprint. The implementation moved to
@@ -976,77 +934,26 @@ def _to_markdown_root_cause(
     severity-bucketed sections -- root-cause mode's point is "what's the
     minimal set of things that actually broke", not "what severity bucket
     does each finding independently fall into".
+
+    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
+    via ``report/render_markdown_alternate.py``, the same fact/formatting
+    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
     """
-    lines, changes = _view_preamble(
-        result,
-        "root-cause view",
-        show_only=show_only,
-        show_recommendation=show_recommendation,
+    from .report.render_markdown_alternate import (
+        build_root_cause_document,
+        render_root_cause_document,
     )
 
-    # G29 Phase 3 slice 3 follow-up (Codex review): a --used-by/
-    # --required-symbol scoped-only change or missing-contract label whose
-    # caused_by_type/symbol correlates with a change above must join that
-    # same root-cause group here, not only appear separately in
-    # cli_compare_fold.py's "## Additional scoped-gate findings" appendix --
-    # otherwise the grouped section under-reports finding_count and hides
-    # the correlation, unlike the JSON/SARIF paths (which fold these in).
-    # Real Change objects (scoped_only) can simply be grouped alongside
-    # `changes` in one pass; missing_labels have no Change to group with, so
-    # they're keyed and merged in separately below. Resolved before the
-    # severity table (Codex review, further follow-up) so a scoped run whose
-    # only gating issue is one of these can pass the scoped counts below
-    # instead of the table always reading the pre-scoped `result.changes`.
-    scoped_only, missing_labels, blocks, missing_kind = _resolve_scoped_gate_findings(
-        result,
-        severity_config,
-        show_only,
-    )
-
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-            scoped_counts=getattr(result, "scoped_severity_counts", None),
-            scoped_blocking_categories=getattr(
-                result, "scoped_blocking_categories", None
-            ),
+    return render_root_cause_document(
+        build_root_cause_document(
+            result,
+            show_only=show_only,
+            show_recommendation=show_recommendation,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            contract_evaluation=contract_evaluation,
         )
-    root_cause_section = compute_root_cause_section(
-        changes,
-        scoped_only,
-        missing_labels,
-        blocks,
-        missing_kind,
-        contract_evaluation=contract_evaluation,
     )
-    has_root_cause_entries = root_cause_section is not None
-    lines += _rmd.render_root_cause_section(root_cause_section)
-
-    # Codex review: a scoped-only change or missing-contract label can be the
-    # *only* displayed finding (result.changes itself empty/filtered out) --
-    # gating this purely on `changes` produced a contradictory report with a
-    # populated "## Root Causes" section immediately followed by "No ABI
-    # changes detected."
-    if not changes and not has_root_cause_entries:
-        if show_only and result.changes:
-            lines.append("_No changes match the current filter._")
-        else:
-            lines.append("_No ABI changes detected._")
-
-    _append_redundancy_note(lines, result)
-    _append_suppression_note(lines, result)
-    _append_out_of_surface_note(lines, result)
-
-    if show_impact:
-        lines += _build_impact_table(result, displayed_changes=changes)
-
-    lines += _footer_lines()
-    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1810,64 +1717,14 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
 
 _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
 
-
-def _view_preamble(
-    result: DiffResult,
-    view_label: str,
-    *,
-    show_only: str | None,
-    show_recommendation: bool,
-) -> tuple[list[str], list[Change]]:
-    """Opening block shared by the leaf-change and root-cause markdown views.
-
-    Both views open identically — the titled version/verdict table, the optional
-    recommendation section, then the ``--show-only`` filter applied to the
-    change list with its "Filtered by" note. Stated once so the two views cannot
-    drift apart in what a filter does or how the header reads (CodeFactor:
-    duplicate code). Full mode deliberately does not share this: its table
-    carries four extra count rows and it applies ``--show-only`` silently, with
-    no note line.
-
-    Returns the opening lines and the (possibly filtered) changes to render.
-    """
-    lines: list[str] = [
-        f"# ABI Report: {result.library} ({view_label})",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| **Old version** | `{result.old_version}` |",
-        f"| **New version** | `{result.new_version}` |",
-        f"| **Verdict** | {_VERDICT_EMOJI[result.verdict]} `{_VERDICT_LABEL[result.verdict]}` |",
-        "",
-    ]
-
-    # Coverage-warning banner (Codex review): _append_confidence_section only runs in full mode, so leaf/root-cause views otherwise never surface a coverage_warnings entry (e.g. note_if_same_binary_compared's byte-identical-inputs warning) at all -- shared here rather than duplicated into both _to_markdown_leaf and _to_markdown_root_cause.
-    if result.coverage_warnings:
-        lines += [f"> ⚠️ {w}" for w in result.coverage_warnings]
-        lines.append("")
-
-    if show_recommendation:
-        _append_recommendation_section(lines, result)
-
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        lines.append(
-            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
-        )
-        lines.append("")
-        # A filter can keep a finding while dropping the co-reported one its
-        # own correlated_change_kind names -- clear the now-dangling note
-        # rather than reference a finding this view no longer shows.
-        changes = _suppress_dangling_correlation_notes(changes)
-
-    return lines, changes
+#: ``reporter_markdown._view_preamble`` (the opening block leaf/root-cause
+#: mode share -- title/verdict table, coverage-warning banner, optional
+#: recommendation section, the ``--show-only`` filter note) is retired.
+#: ``report.render_markdown_alternate.build_leaf_document``/
+#: ``build_root_cause_document`` call ``_view_preamble_mapping`` (that
+#: module's own JSON-safe compute half) directly instead -- see this
+#: module's own docstring and ``_to_markdown_leaf``/``_to_markdown_root_
+#: cause``.
 
 
 def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSection:
