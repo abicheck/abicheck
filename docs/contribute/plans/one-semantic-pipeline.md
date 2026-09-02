@@ -12672,16 +12672,60 @@ compute identically (not a spelling problem), and `CanonicalEntity` has no
 dedicated slot for either -- adding one is a model-shape decision for a
 future slice. A variable's `canonical_spelling` is
 `canonicalize_type_name(variable.type)` with `is_const` carried via
-`cv_qualification`, mirroring the function treatment. A compiler-synthesized
-implicit special member (castxml's own `artificial="1"` -- a default/copy/
-move constructor, copy/move assignment, or destructor never written in the
-header) is skipped entirely (`Function.is_compiler_generated`): clang's own
-AST walk never emits such a node at all, so normalizing castxml's side would
-add a phantom occurrence with no clang counterpart -- confirmed as a real,
-not merely theoretical, gap by the real castxml/clang end-to-end fixture in
-`tests/test_semantic_ir_end_to_end.py`, which failed against an earlier
-revision of this slice that did not skip them (`Point`'s implicit
-constructors/assignment/destructor all surfaced with an empty `leaf_name`).
+`cv_qualification`, mirroring the function treatment.
+
+**Not gated on `Function.is_compiler_generated` (Codex review, PR #1012,
+second round, fresh evidence) -- an earlier revision of this slice skipped
+every compiler-generated function, which is both too broad and misses the
+real hazard.** The actual hazard is narrower: a function whose `mangled`
+is castxml's own synthetic ctor/dtor snapshot key (`model.synthetic_key.
+is_synthetic_ctor_key`/`is_synthetic_dtor_key` -- assigned whenever castxml
+"may omit a constructor/destructor's real mangled name even for a public
+user-declared" one, per `extract/headers/castxml/functions.py`'s own
+`function_mangled_name` docstring, so this can hit a genuinely hand-written,
+non-implicit constructor too, not only an implicit one) is NOT a stable
+cross-backend identity. `dumper_hybrid._merge_functions` rewrites such a
+function's merged `mangled`/`entity_id` to a real clang-matched one when
+found via structural matching -- a rewrite this per-backend normalizer
+cannot see (it runs before that hybrid merge step). Including such an
+occurrence would let a hybrid dump's `semantic_ir` end up with a stale,
+unrewritten `entity_id` for a declaration whose flat `functions` entry now
+carries the real one, and/or a genuine duplicate (clang's own `semantic_ir`
+already carries an occurrence for that same real `entity_id`, which
+`merge_semantic_ir`'s bare-`EntityId`-equality matching cannot recognize as
+"the same declaration under castxml's stale synthetic key") -- a strictly
+worse representation-disagreement than the one excluding it avoids. Closing
+this needs `dumper_hybrid.py`'s ctor/dtor rewrite propagated into the
+`semantic_ir` merge too, materially more than this slice's scope --
+named here, not silently narrowed to. A compiler-generated function with a
+REAL mangled name (e.g. a synthesized `operator=`, which castxml gives a
+genuine Itanium mangled name per `Function.is_compiler_generated`'s own
+docstring) has none of this hazard and IS normalized: `AbiSnapshot.
+functions` already includes it, so excluding it from `semantic_ir` too
+would itself be the representation-disagreement this IR exists to avoid,
+for no corresponding safety benefit -- confirmed as a real, not merely
+theoretical, gap by the real castxml/clang end-to-end fixture in
+`tests/test_semantic_ir_end_to_end.py`, which failed against the *first*
+revision of this slice that skipped every compiler-generated function
+regardless of mangled-name shape (`Point`'s implicit
+constructors/destructor, all genuinely synthetic-keyed, surfaced with an
+empty `leaf_name`; its copy/move assignment operators, both genuinely
+real-mangled, were then wrongly excluded too until the second round).
+
+**The unresolved-type-sentinel check is a substring test, not exact
+equality (Codex review, PR #1012, second round, fresh evidence).** castxml's
+own type resolver (`extract/headers/castxml/type_resolution.py`'s
+`type_name_uncached`) composes an unresolved nested type into the enclosing
+spelling -- a pointer/reference/array wrapping an unresolvable pointee
+renders as `"?*"`/`"?&"`/`"?[]"`, a cv-qualified one as `"const ?"` -- so an
+exact-equality check (correct only for the typedef branch's `underlying`
+value, always the outermost `type_name()` result with nothing further
+wrapped around it) misses every composite shape for a function/parameter/
+variable type, and shares the identical gap for a typedef whose underlying
+type is itself one of these composite shapes. `_has_unresolved_component`
+(a substring test -- `"?"` is not a legal token in any real C/C++ type
+spelling, so it can only ever fire on this sentinel) replaces the
+exact-equality check everywhere, typedef branch included.
 `dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
 the second slice deliberately left unwired, per that slice's own note) now
 populate `semantic_ir` too, via a new shared choke point,

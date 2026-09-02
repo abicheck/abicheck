@@ -297,6 +297,26 @@ def test_normalize_header_ast_unresolved_function_param_type_is_failed() -> None
     assert not entity.canonical_spelling.is_present
 
 
+def test_normalize_header_ast_unresolved_pointer_param_type_is_failed() -> None:
+    """castxml's own type resolver composes an unresolved POINTEE into the
+    enclosing spelling (``"?*"``) rather than only ever returning the bare
+    ``"?"`` -- an exact-equality sentinel check misses this composite shape
+    entirely (Codex review, second round, fresh evidence: this reproduces
+    against a version of ``_has_unresolved_component`` that checked
+    ``t == _UNRESOLVED_TYPE_SENTINEL`` instead of substring containment)."""
+    fn = _function("f", "void", ("?*",))
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+
+
 def test_normalize_header_ast_function_cv_qualification() -> None:
     """A member function's ``is_const``/``is_volatile`` populate
     ``cv_qualification`` in canonical order, separately from the spelling
@@ -329,12 +349,20 @@ def test_normalize_header_ast_non_cv_function_has_empty_cv_qualification() -> No
     assert entity.cv_qualification.is_present
 
 
-def test_normalize_header_ast_skips_compiler_generated_functions() -> None:
-    """A compiler-synthesized implicit special member (castxml's own
-    ``artificial="1"``) is never emitted by clang's AST walk at all -- see
-    this module's own skip for the full rationale (Codex review, real
-    castxml/clang parity failure)."""
-    fn = _function("Widget", "void", is_compiler_generated=True)
+def test_normalize_header_ast_skips_synthetic_ctor_key_functions() -> None:
+    """A castxml constructor with no recoverable real mangled name gets a
+    synthetic snapshot key (``model.synthetic_key.SYNTHETIC_CTOR_KEY_PREFIX``)
+    -- not a stable cross-backend identity, and one `dumper_hybrid.
+    _merge_functions` can later rewrite to a real clang-matched mangled
+    name/entity_id, a rewrite this per-backend normalizer cannot see. See
+    this module's own skip for the full rationale (Codex review, second
+    round, real castxml/clang parity failure)."""
+    fn = _function(
+        "Widget",
+        "void",
+        mangled="__abicheck_ctor__Widget()",
+        is_compiler_generated=True,
+    )
     ir = normalize_header_ast(
         types=[],
         enums=[],
@@ -344,6 +372,51 @@ def test_normalize_header_ast_skips_compiler_generated_functions() -> None:
         functions=[fn],
     )
     assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_skips_synthetic_dtor_key_functions() -> None:
+    """The identical skip applies to a synthetic destructor key (``"~Class"``
+    -- ``model.synthetic_key.is_synthetic_dtor_key``)."""
+    fn = _function("~Widget", "void", mangled="~Widget", is_compiler_generated=True)
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    assert ir.occurrences == {}
+
+
+def test_normalize_header_ast_includes_compiler_generated_with_real_mangled_name() -> (
+    None
+):
+    """A compiler-generated function that DOES get a real mangled name (e.g.
+    a synthesized ``operator=`` -- ``Function.is_compiler_generated``'s own
+    docstring) has none of the synthetic-key hazard and must be normalized
+    like any other function -- ``AbiSnapshot.functions`` already includes
+    it, so excluding it from ``semantic_ir`` too would itself be a
+    representation disagreement (Codex review, second round: an earlier
+    revision of this slice skipped every ``is_compiler_generated`` function
+    regardless of whether its mangled name was synthetic)."""
+    fn = _function(
+        "operator=",
+        "Widget &",
+        ("const Widget &",),
+        mangled="_ZN6WidgetaSERKS_",
+        is_compiler_generated=True,
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+    )
+    (entity,) = ir.occurrences.values()
+    assert entity.canonical_spelling.value == "Widget &(Widget const &)"
 
 
 def test_normalize_header_ast_skips_function_without_entity_id() -> None:
@@ -398,6 +471,44 @@ def test_normalize_header_ast_unresolved_variable_type_is_failed() -> None:
         typedef_entity_ids={},
         producer="castxml",
         variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+
+
+def test_normalize_header_ast_unresolved_composite_variable_type_is_failed() -> None:
+    """The identical composite-shape gap (``"?"`` embedded rather than the
+    whole spelling) applies to a variable's own type too (Codex review,
+    second round)."""
+    var = Variable(
+        name="g_widget2",
+        mangled="g_widget2",
+        type="const ?",
+        entity_id=entity_id_for_variable((), "g_widget2", mangled_name="g_widget2"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        variables=[var],
+    )
+    (entity,) = ir.occurrences.values()
+    assert not entity.canonical_spelling.is_present
+
+
+def test_normalize_header_ast_unresolved_composite_typedef_is_failed() -> None:
+    """The typedef branch (pre-existing, second slice) had the identical
+    exact-equality gap -- fixed in the same pass since both call the shared
+    ``_has_unresolved_component`` helper (Codex review, second round)."""
+    eid = entity_id_for_typedef((), "Alias")
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={"Alias": "?*"},
+        typedef_entity_ids={"Alias": eid},
+        producer="castxml",
     )
     (entity,) = ir.occurrences.values()
     assert not entity.canonical_spelling.is_present

@@ -128,14 +128,22 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
     # partially-qualified `"inner::Point"`), which this canonicalization
     # slice reuses `canonicalize_type_name`/
     # `canonicalize_function_signature_param_type` for, not solves.
-    function_entries = [
+    #
+    # castxml also normalizes `Point`'s compiler-generated copy/move
+    # assignment operators here (real mangled names, no synthetic-key
+    # hazard -- see `semantic_normalizer.py`'s own skip condition), so
+    # `compute` is found by its own distinctive spelling rather than by
+    # asserting an exact function-occurrence count, which differs between
+    # backends (clang's AST walk never emits an implicit node at all).
+    compute_entries = [
         e
         for occ, e in snap.semantic_ir.occurrences.items()
         if occ.entity_id.kind.value == "function"
+        and e.canonical_spelling.is_present
+        and e.canonical_spelling.value.startswith("int(")
     ]
-    assert len(function_entries) == 1
-    assert function_entries[0].canonical_spelling.value.startswith("int(")
-    assert function_entries[0].canonical_spelling.value.endswith("Point const &)")
+    assert len(compute_entries) == 1
+    assert compute_entries[0].canonical_spelling.value.endswith("Point const &)")
 
     # The record's own EntityId is genuinely shared -- both backends resolve
     # `outer::inner::Point` to the identical scope/kind/leaf_name, which is
@@ -194,13 +202,18 @@ def test_hybrid_dump_merges_a_real_mangled_function_occurrence(compiled_lib) -> 
     snap = dump(so, [header], header_backend="hybrid")
 
     assert snap.semantic_ir is not None
-    function_entries = [
+    # castxml's own compiler-generated copy/move assignment operators are
+    # normalized here too (real mangled names) -- `compute` is found by its
+    # own distinctive spelling, same as the plain-dump test above.
+    compute_entries = [
         (occ, e)
         for occ, e in snap.semantic_ir.occurrences.items()
         if occ.entity_id.kind.value == "function"
+        and e.canonical_spelling.is_present
+        and e.canonical_spelling.value.startswith("int(")
     ]
-    assert len(function_entries) == 1
-    occ_id, entity = function_entries[0]
+    assert len(compute_entries) == 1
+    occ_id, entity = compute_entries[0]
     assert entity.producer == "castxml"
     assert entity.canonical_spelling.value == "int(Point const &)"
 

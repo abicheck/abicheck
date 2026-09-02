@@ -9,12 +9,17 @@
   (`canonicalize_function_signature_param_type` per parameter,
   `canonicalize_type_name` for the return/variable type), with
   `is_const`/`is_volatile` carried via `CanonicalEntity.cv_qualification`. A
-  compiler-synthesized implicit special member (a default/copy/move
-  constructor, copy/move assignment, or destructor never written in the
-  header) is excluded — clang's own AST walk never produces one at all, so
-  including castxml's side would add a phantom occurrence with no
-  cross-backend counterpart. `dumper.py`'s PE and Mach-O dumps now populate
-  `AbiSnapshot.semantic_ir` too (previously ELF-only), via a new shared
-  choke point, `extract/header_ast_fields.parse_header_ast_fields`. No
-  detector, verdict, or exit code changes — `SemanticIR` remains additive
-  and unread by the existing pipeline.
+  function whose mangled name is castxml's own synthetic constructor/
+  destructor snapshot key (not a stable cross-backend identity, since a
+  later hybrid-merge step may rewrite it to a real clang-matched one) is
+  excluded; a compiler-generated function with a real mangled name (e.g. a
+  synthesized `operator=`) is normalized like any other. An unresolved
+  type is detected structurally (a substring test, since castxml composes
+  its `"?"` placeholder into the enclosing spelling for a pointer/
+  reference/array/cv-qualified pointee), not by exact-string match, and
+  the same fix applies to the pre-existing typedef-underlying-type check.
+  `dumper.py`'s PE and Mach-O dumps now populate `AbiSnapshot.semantic_ir`
+  too (previously ELF-only), via a new shared choke point,
+  `extract/header_ast_fields.parse_header_ast_fields`. No detector,
+  verdict, or exit code changes — `SemanticIR` remains additive and unread
+  by the existing pipeline.

@@ -141,6 +141,7 @@ from ..model.identity import EntityId
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR, canonical_cv_qualification
 from ..model.signature_normalization import canonicalize_function_signature_param_type
+from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 from ..name_classification import canonicalize_type_name
 
 __all__ = ["normalize_header_ast"]
@@ -155,6 +156,27 @@ __all__ = ["normalize_header_ast"]
 _UNRESOLVED_TYPE_SENTINEL = "?"
 
 
+def _has_unresolved_component(raw_type: str) -> bool:
+    """Whether *raw_type* embeds castxml's unresolved-type sentinel
+    anywhere, not only as the WHOLE string (Codex review, second round,
+    fresh evidence).
+
+    castxml's own type resolver (``extract/headers/castxml/type_resolution.
+    py``'s ``type_name_uncached``) composes an unresolved nested type into
+    the ENCLOSING spelling rather than only ever returning the bare
+    ``"?"`` itself — a pointer/reference/array wrapping an unresolvable
+    pointee renders as ``"?*"``/``"?&"``/``"?[]"``, and a cv-qualified one
+    as ``"const ?"`` -- so an exact-equality check (correct for the
+    typedef branch's own ``underlying`` value, which is always the
+    OUTERMOST ``type_name()`` call's result with nothing further wrapped
+    around it) misses every one of these composite shapes for a function/
+    parameter/variable type. ``"?"`` is not a legal token in any real
+    C/C++ type spelling, so a plain substring test is safe: it can only
+    ever fire on this sentinel, never on a real, resolved type.
+    """
+    return _UNRESOLVED_TYPE_SENTINEL in raw_type
+
+
 def _function_spelling_fact(fn: Function) -> Fact[str]:
     """``"<return>(<param>, ...)"`` for *fn*, both canonicalized with the
     identical primitives ``entity_id_for_function`` already applies for the
@@ -163,22 +185,18 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
     of the two.
 
     ``Fact.failed(...)`` — not ``Fact.present(...)`` — whenever the RAW
-    return type or any raw parameter type is exactly the
-    ``_UNRESOLVED_TYPE_SENTINEL`` placeholder (Codex review): castxml emits
-    the identical ``"?"`` sentinel for a function/parameter type it could
-    not resolve the same way it does for a typedef's underlying type (see
-    the typedef branch in :func:`normalize_header_ast`), and treating that
-    as a confirmed spelling would both misrepresent the placeholder as
-    canonical and permanently block a hybrid merge's backfill the moment
-    clang resolves the same declaration (``merge_semantic_ir`` only ever
-    backfills a *non*-present base fact). Checked on the RAW components,
-    before canonicalization -- canonicalizing ``"?"`` first would not
-    change it (no known type spells literally ``"?"``), but checking raw
-    input mirrors the typedef branch's own exact-sentinel check and avoids
-    ever asking a canonicalizer to interpret a placeholder as a type.
+    return type or any raw parameter type embeds castxml's unresolved-type
+    sentinel (:func:`_has_unresolved_component`; Codex review): treating an
+    unresolved (or partially-unresolved) spelling as confirmed would both
+    misrepresent the placeholder as canonical and permanently block a
+    hybrid merge's backfill the moment clang resolves the same declaration
+    (``merge_semantic_ir`` only ever backfills a *non*-present base fact).
+    Checked on the RAW components, before canonicalization -- mirrors the
+    typedef branch's own sentinel check and avoids ever asking a
+    canonicalizer to interpret a placeholder as a type.
     """
     raw_components = (fn.return_type, *(p.type for p in fn.params))
-    if any(t == _UNRESOLVED_TYPE_SENTINEL for t in raw_components):
+    if any(_has_unresolved_component(t) for t in raw_components):
         return Fact.failed("return or parameter type not resolved")
     canonical_return = canonicalize_type_name(fn.return_type)
     canonical_params = ", ".join(
@@ -189,12 +207,12 @@ def _function_spelling_fact(fn: Function) -> Fact[str]:
 
 def _variable_spelling_fact(var: Variable) -> Fact[str]:
     """``canonicalize_type_name(var.type)``, or ``Fact.failed(...)`` when the
-    raw type is exactly the unresolved-type sentinel — see
+    raw type embeds the unresolved-type sentinel — see
     :func:`_function_spelling_fact`'s own docstring for the identical
     reasoning, applied to a variable's single type instead of a function's
     return/parameter types.
     """
-    if var.type == _UNRESOLVED_TYPE_SENTINEL:
+    if _has_unresolved_component(var.type):
         return Fact.failed("type not resolved")
     return Fact.present(canonicalize_type_name(var.type))
 
@@ -304,24 +322,53 @@ def normalize_header_ast(
             continue
         spelling_fact = (
             Fact.failed("underlying type not resolved")
-            if underlying == _UNRESOLVED_TYPE_SENTINEL
+            if _has_unresolved_component(underlying)
             else Fact.present(underlying)
         )
         _add_occurrence(occurrences, entity_id, spelling_fact, producer=producer)
     for fn in functions:
-        if fn.is_compiler_generated:
-            # A compiler-synthesized implicit special member (default/copy/
-            # move constructor, copy/move assignment, destructor) was never
-            # written in the header a user reads -- clang's own AST walk
-            # skips such a node entirely before it ever becomes a `Function`
-            # at all (`Function.is_compiler_generated`'s own docstring), so
-            # normalizing castxml's side (which DOES emit one, `artificial=
-            # "1"`) would add a phantom occurrence with no clang counterpart
-            # and no real declared spelling to canonicalize -- the identical
-            # "leaking into the reachable surface as if genuine public API"
-            # bug this same field exists to guard against elsewhere (see
-            # `buildsource.source_extractors.base.entity_from_function`'s own
-            # `api_relevant` computation, and AGENTS.md's "PR C" entry).
+        if is_synthetic_ctor_key(fn.mangled) or is_synthetic_dtor_key(fn.mangled):
+            # NOT gated on `is_compiler_generated` (Codex review, second
+            # round, fresh evidence: an earlier revision of this slice
+            # skipped every compiler-generated function, which is both too
+            # broad and misses the real hazard). The real hazard is
+            # narrower and specific: castxml's own synthetic ctor/dtor
+            # snapshot key (`model.synthetic_key`) is NOT a stable
+            # cross-backend identity -- it exists only because castxml
+            # could not recover a real mangled name for THIS declaration
+            # (a general castxml limitation that can hit a genuinely
+            # hand-written, non-implicit constructor too, per
+            # `extract/headers/castxml/functions.py`'s own
+            # `function_mangled_name` docstring, not only an implicit
+            # one). `dumper_hybrid._merge_functions` REWRITES the merged
+            # snapshot's flat `functions` entry to a real clang-matched
+            # mangled name/entity_id when one is found via structural
+            # matching -- a rewrite this module's own `semantic_ir`
+            # construction (which runs per-backend, before that hybrid
+            # merge step) cannot see or participate in. Including such an
+            # occurrence here would let a hybrid dump's `semantic_ir` end
+            # up with a STALE, unrewritten entity_id for a declaration
+            # whose flat `functions` entry now carries a different (real)
+            # one -- and/or a genuine duplicate, since clang's OWN
+            # `semantic_ir` already carries an occurrence for that same
+            # real entity_id, which `merge_semantic_ir` (keying on bare
+            # `EntityId` equality) cannot recognize as "the same
+            # declaration, just under castxml's stale synthetic key" and
+            # would union in as if it were a second, independent
+            # declaration -- a strictly worse representation-disagreement
+            # than the one this skip avoids. Closing this needs
+            # `dumper_hybrid.py`'s ctor/dtor rewrite propagated into the
+            # `semantic_ir` merge too (or reworked to operate on
+            # `semantic_ir` first), which is materially more than this
+            # slice's scope -- named here, not silently narrowed to. A
+            # compiler-generated function with a REAL mangled name (e.g. a
+            # synthesized `operator=`, which castxml gives a genuine
+            # Itanium mangled name per `Function.is_compiler_generated`'s
+            # own docstring) has none of this hazard and IS normalized
+            # below, same as any other function -- `AbiSnapshot.functions`
+            # already includes it, so excluding it from `semantic_ir` too
+            # would be exactly the representation-disagreement this IR
+            # exists to avoid, for no corresponding safety benefit.
             continue
         _add_occurrence(
             occurrences,
