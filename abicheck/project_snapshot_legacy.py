@@ -38,6 +38,7 @@ from .project_snapshot_store import (
     DirectoryObjectStore,
     read_artifact_ref,
     read_manifest_summary,
+    read_variant_artifact_pair,
     write_project_manifest,
 )
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
@@ -142,6 +143,16 @@ def read_legacy_snapshot_document(
     the package holds zero or more than one artifact -- multi-artifact
     projects (a real multi-library `ProjectSnapshot`) are real,
     separately-scoped future work this function does not guess at.
+
+    Validates the selected artifact's two-way variant membership
+    (`read_variant_artifact_pair`), not just its own ref document's
+    self-consistency -- a package with a stale or corrupted `refs/variants/
+    *.json` can otherwise publish an artifact whose declared `variant_id`
+    names a variant that does not itself list it back, which
+    `read_project_manifest`/`read_variant_artifact_pair` already refuse
+    elsewhere in this same package; `export_legacy_snapshot` must not
+    silently accept that contradictory membership graph here just because
+    it never asked (Codex review).
     """
     summary = read_manifest_summary(root)
     if artifact_id is None:
@@ -153,7 +164,17 @@ def read_legacy_snapshot_document(
                 "one artifact"
             )
         artifact_id = summary.artifact_ids[0]
+    # `read_artifact_ref` alone only validates the ref document's own
+    # self-consistency (its embedded artifact_id matches the one requested)
+    # -- it says nothing about whether the variant it names actually
+    # declares this artifact back. Load it once to learn its own
+    # `variant_id`, then re-validate the pair through
+    # `read_variant_artifact_pair`, which checks both directions and is
+    # this package's own established integrity path for exactly this.
     artifact = read_artifact_ref(root, artifact_id)
+    _variant, artifact = read_variant_artifact_pair(
+        root, artifact.variant_id, artifact_id
+    )
     store = DirectoryObjectStore(root)
     return export_legacy_snapshot(
         artifact,

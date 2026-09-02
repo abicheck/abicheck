@@ -72,6 +72,28 @@ class TestProjectSnapshotLegacyRoundTrip:
         with pytest.raises(SnapshotError):
             resolve_input(root)
 
+    def test_read_legacy_snapshot_document_rejects_a_stale_variant_ref(
+        self, tmp_path: Path
+    ) -> None:
+        """A package whose `refs/variants/*.json` omits the artifact it
+        itself declares `variant_id` for -- a stale/corrupted membership
+        graph -- must be refused, the same way `read_project_manifest`/
+        `read_variant_artifact_pair` already refuse it, rather than
+        `read_legacy_snapshot_document` silently exporting the artifact
+        anyway (Codex review)."""
+        from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
+        from abicheck.storage.package import variant_ref_relpath
+
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
+        root = _write_package(tmp_path, snap)
+        variant_path = root / variant_ref_relpath("default")
+        corrupted = json.loads(variant_path.read_text(encoding="utf-8"))
+        assert corrupted["artifact_ids"] == ["libfoo.so.1"]
+        corrupted["artifact_ids"] = []
+        variant_path.write_text(json.dumps(corrupted), encoding="utf-8")
+        with pytest.raises(ValueError):
+            read_legacy_snapshot_document(root)
+
 
 class TestIsProjectSnapshotPackageDir:
     def test_true_for_a_real_package(self, tmp_path: Path) -> None:
@@ -141,8 +163,7 @@ class TestRejectUnsupportedAgainstOperand:
             reject_unsupported_against_operand,
         )
 
-        result = reject_unsupported_against_operand(None)
-        assert result is None  # must not raise
+        reject_unsupported_against_operand(None)  # must not raise
 
     def test_a_project_snapshot_package_is_accepted(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.scan_against import (
@@ -151,8 +172,7 @@ class TestRejectUnsupportedAgainstOperand:
 
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         root = _write_package(tmp_path, snap)
-        result = reject_unsupported_against_operand(root)
-        assert result is None  # must not raise
+        reject_unsupported_against_operand(root)  # must not raise
 
     def test_a_plain_directory_is_rejected(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.scan_against import (
@@ -171,5 +191,4 @@ class TestRejectUnsupportedAgainstOperand:
 
         f = tmp_path / "snap.json"
         f.write_text("{}", encoding="utf-8")
-        result = reject_unsupported_against_operand(f)
-        assert result is None  # must not raise
+        reject_unsupported_against_operand(f)  # must not raise
