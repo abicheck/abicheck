@@ -491,6 +491,25 @@ pytest_add_cli_args = [
     # `scripts.check_ai_readiness`/`scripts.fact_field_readers`, matching
     # this file's own "costs no measurement" rule for every entry above.
     "--ignore=tests/test_fact_field_readers.py",
+    # Same class again, a fourth independent trigger site (PR #1016, this
+    # PR's own diff -- discovered the same way as the `test_action_check_
+    # target*`/`test_action_collect_facts.py` entries above: this PR's diff
+    # touches enough `tests/` paths to trip `--scope-run-to-diff`'s "refuse
+    # to scope" fallback to a full, unscoped run, exercising a pre-existing
+    # gap this PR's own changes did not create). `test_manifest_base_commit_
+    # exists_in_history` shells out to a real `git cat-file -e <sha>`
+    # against `ROOT = Path(__file__).resolve().parent.parent` to confirm
+    # each agent-eval task manifest's `base_commit` is a real, known commit;
+    # it already tolerates a *shallow* checkout (skips rather than fails),
+    # but mutmut's clean-test phase runs from a context where `git
+    # rev-parse --is-shallow-repository` doesn't report "true" either (it's
+    # not a shallow clone of this repo at all), so the shallow-fallback
+    # never engages and the hard `assert proc.returncode == 0` fires for a
+    # commit this context simply can't see. No mutation-kill cost: this
+    # file imports no `only_mutate` module (confirmed by grep) -- only
+    # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
+    # by path, none of which is mutated.
+    "--ignore=tests/test_agent_evals.py",
 ]
 
 # ---------------------------------------------------------------------------
