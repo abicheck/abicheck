@@ -308,7 +308,8 @@ with an export macro, `$ORIGIN`-relative rather than absolute `RPATH`, and
 an explicit TLS model for anything reached through `dlopen` — the design
 rules that keep the linker-level contract governable are
 [Part 7's](07-designing-for-stability.md) Pattern 4; how glibc and
-libstdc++ apply them over decades is the subject of the at-scale tier.
+libstdc++ apply them over decades is the subject of
+[How System Libraries Stay Compatible](../system-library-discipline.md).
 
 ---
 
