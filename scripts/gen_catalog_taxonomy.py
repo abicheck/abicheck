@@ -114,6 +114,11 @@ def _case_number(case_name: str) -> int:
 
 
 def _kind_to_topic() -> dict[str, str]:
+    # Make the command work from a clean checkout (no install / no
+    # PYTHONPATH): running `python scripts/gen_catalog_taxonomy.py` puts
+    # scripts/ on sys.path, not the repo root, so `abicheck` wouldn't
+    # otherwise resolve (mirrors gen_detector_spec.py's own bootstrap).
+    sys.path.insert(0, str(ROOT))
     from abicheck.model.change_catalog import build, platform, source, symbols, types
 
     entry_lists = {

@@ -129,6 +129,16 @@ Not attempted in this change (from the original six-phase migration):
 - `examples/CLAUDE.md` — documents the new taxonomy block and the
   rule/variant relationship.
 - `scripts/CLAUDE.md` — inventory row for the new script.
+- `scripts/frozen_competitor_results.json` — `ground_truth_sha256` stamp
+  updated to match `ground_truth.json`'s new byte content (the added
+  `taxonomy` key changes the whole-file digest
+  `benchmark_comparison._ground_truth_digest()` pins the frozen
+  abidiff/ABICC competitor cache to). Verified safe before updating: this
+  branch's `verdicts` object is byte-for-byte identical to the base
+  branch's (`git diff <base> -- examples/ground_truth.json` touches only
+  the new `taxonomy` key), so the frozen competitor results this stamp
+  guards remain valid — nothing about the case fixtures or expected
+  verdicts they were computed against has changed.
 
 ## Tests
 
