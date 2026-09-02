@@ -148,15 +148,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   well-formed `RunOutcome` block — the only shape
   `cli_compare_fold._swap_in_scoped_run_outcome` ever actually produces —
   before granting the exemption.
-- **`scan`'s `run_outcome.assurance` is no longer always `null`.** Every
-  scan writer (`ScanOutcome`, `ScanResult`, `ScanSetResult`) built its
+- **`scan`'s `run_outcome.assurance` is no longer always `null` for a
+  single-binary result.** `ScanOutcome`/`ScanResult` built their
   `RunOutcome` with `assurance=None` unconditionally, even when the
   report's own `diff.analysis_assurance` block was fully computed
-  (`cli_scan_baseline.py`'s `analysis_assurance_report_dict`). The three
-  scan writers now thread that already-serialized block through, and
-  `analysis_assurance_dict` accepts it directly (alongside the live
-  `AnalysisAssurance` object `compare`'s own writers pass) since scan never
-  holds the live object at the point it builds `run_outcome`.
+  (`cli_scan_baseline.py`'s `analysis_assurance_report_dict`). Both now
+  thread that already-serialized block through, and `analysis_assurance_
+  dict` accepts it directly (alongside the live `AnalysisAssurance` object
+  `compare`'s own writers pass) since scan never holds the live object at
+  the point it builds `run_outcome`. **`ScanSetResult` (a `scan
+  --artifact-set` run) still always serializes `assurance: null`** (Codex
+  review, fresh evidence) — it calls `run_outcome_dict_for_scan()` with no
+  `report=`/assurance input at all, so there is no single per-set analysis-
+  assurance block to thread even though individual members may carry their
+  own; a set-level rollup is a real design decision (how to merge several
+  members' assurance blocks) left open rather than attempted here.
 - **A late scan abort's `run_outcome.compatibility` no longer reads `null`
   beside a real `gate`.** A `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`
   abort that already found a real break restores `gate` from its
@@ -607,6 +613,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   malformed block (pinned by
   `test_bundle_incomplete_with_a_truncated_run_outcome_does_not_recover_a_
   verdict`).
+- **A `compare-release` operational-ERROR report's recovered gate now
+  preserves the real compatibility category too, not only the numeric
+  exit** (Codex review, fresh evidence): when one member errors after a
+  sibling produces a real `BREAKING` result, `run_outcome.compatibility`
+  was already loaded correctly, but the returned `GateInfo.blocking_
+  categories` hard-coded only `("operational_error",)`, discarding the
+  recorded `run_outcome.gate: "abi_breaking"` — the aggregate report hid
+  the real compatibility blocker even though the numeric exit was already
+  correct at 4. Now unions the recovered gate category in via the same
+  `_run_outcome_gate_exit_and_category` helper the scan-abort fix above
+  introduced.
 
 ### Changed
 

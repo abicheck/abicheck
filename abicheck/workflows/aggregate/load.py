@@ -401,15 +401,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         # fabricating `Verdict.BREAKING`. Falls back to that synthetic
         # verdict only when no *valid* run_outcome block is present at all
         # (a pre-2.48 report). A valid block whose `compatibility` is
-        # legitimately `null` (e.g. `build_operational_error_report`'s own
-        # extraction-failure report) must NOT read as absent -- that
-        # fabricated a break for a comparison that never ran. A *present
+        # legitimately `null` must NOT read as absent -- that fabricated a
+        # break for a comparison that never ran. A *present
         # but schema-invalid* block is a third case: it must fail closed
         # (unavailable/malformed), not fall through to the fabricated-
-        # `BREAKING` path either. The gate's own `exit_code`/`blocking_
-        # categories` stay unconditional throughout.
+        # `BREAKING` path either. The gate's own `exit_code` floors at 4
+        # unconditionally; a recovered `gate` (e.g. a sibling's `abi_
+        # breaking`) folds into `blocking_categories` too, so the real
+        # blocker isn't hidden behind only `operational_error`.
         try:
-            _run_outcome_gate_and_operational(data)
+            _, error_gate_category = _run_outcome_gate_exit_and_category(data)
         except _MalformedGate as exc:
             return _LoadedReport(
                 target_id=target_id,
@@ -422,6 +423,9 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             )
         error_compat_verdict = _run_outcome_compatibility_verdict(data)
         error_has_valid_run_outcome = _has_valid_run_outcome_block(data)
+        error_blocking_categories = frozenset({"operational_error"}) | (
+            {error_gate_category} if error_gate_category is not None else set()
+        )
         return _LoadedReport(
             target_id=target_id,
             verdict=(
@@ -432,7 +436,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             gate=GateInfo(
                 exit_code=4,
                 blocking=True,
-                blocking_categories=("operational_error",),
+                blocking_categories=tuple(sorted(error_blocking_categories)),
                 from_report=True,
             ),
             library=data.get("library"),

@@ -214,3 +214,50 @@ class TestReleaseJsonRunOutcome:
         )
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["run_outcome"]["gate"] == "abi_breaking"
+
+
+class TestAggregateLoaderPreservesReleaseGateCategory:
+    def test_operational_error_preserves_the_recovered_compatibility_gate_category(
+        self, tmp_path
+    ):
+        """Codex review, fresh evidence: when one `compare-release` member
+        errors after a sibling produces a real `BREAKING` result, the
+        recovered `run_outcome.compatibility` was loaded correctly, but the
+        returned `GateInfo.blocking_categories` hard-coded only
+        `("operational_error",)` and discarded the recorded `run_outcome.
+        gate: "abi_breaking"` -- hiding the real compatibility blocker even
+        though the numeric exit code was already correct at 4."""
+        import json
+
+        from abicheck.workflows.aggregate.load import _load_report_file
+
+        report = tmp_path / "abi-report-linux.json"
+        report.write_text(
+            json.dumps(
+                {
+                    "verdict": "ERROR",
+                    "old_dir": "/old",
+                    "new_dir": "/new",
+                    "libraries": [
+                        {"name": "a", "verdict": "ERROR"},
+                        {"name": "b", "verdict": "BREAKING"},
+                    ],
+                    "run_outcome": {
+                        "schema_version": "1",
+                        "compatibility": "BREAKING",
+                        "assurance": None,
+                        "gate": "abi_breaking",
+                        "operational": "extraction_error",
+                        "lifecycle": "existing",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = _load_report_file(report, prefix="abi-report-")
+
+        assert loaded.gate is not None
+        assert loaded.gate.exit_code == 4
+        assert "abi_breaking" in loaded.gate.blocking_categories
+        assert "operational_error" in loaded.gate.blocking_categories
