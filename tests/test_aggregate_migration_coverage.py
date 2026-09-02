@@ -1125,3 +1125,40 @@ def test_operational_error_with_a_malformed_run_outcome_fails_closed_not_breakin
     assert loaded.verdict is None
     assert loaded.gate is None
     assert loaded.reason is not None and "malformed" in loaded.reason
+
+
+def test_scan_abort_honors_a_structured_gate_the_legacy_blocks_miss(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a `BUDGET_OVERFLOW` report can carry a
+    valid `run_outcome` that preserves a completed ABI-breaking gate even
+    though its legacy `diff.exit`/member contribution blocks are absent --
+    the gate previously computed solely from `_scan_abort_prior_exit`
+    (which found nothing here), loading as exit 1/`budget_overflow` only
+    instead of retaining exit 4 and the `abi_breaking` category the
+    structured gate actually recorded."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.24",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "run_outcome": {
+                    "schema_version": "1",
+                    "compatibility": "BREAKING",
+                    "assurance": None,
+                    "gate": "abi_breaking",
+                    "operational": "budget_overflow",
+                    "lifecycle": "existing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert "abi_breaking" in loaded.gate.blocking_categories

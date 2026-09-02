@@ -52,6 +52,7 @@ from .gate import (
     _run_outcome_blocking_categories,
     _run_outcome_compatibility_verdict,
     _run_outcome_gate_and_operational,
+    _run_outcome_gate_exit_and_category,
     contract_coverage_blocks,
 )
 from .reconcile import ReportFindings, parse_report_findings
@@ -389,31 +390,24 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     head_sha = str(head_sha_raw) if isinstance(head_sha_raw, str) else None
     effective_config_digest = _effective_config_digest(data)
     # A compare-release *operational* failure carries top-level ``verdict:
-    # "ERROR"`` (a library failed to dump/extract/compare) — the release path
-    # ranks it above BREAKING and floors its exit to 4. "ERROR" is not a
-    # ``Verdict`` enum member, so preserve it here as a blocking gate: otherwise
-    # it falls through as a verdictless (unavailable) report that a warn /
-    # optional / unexpected policy could let pass, silently downgrading a hard
-    # operational failure to a coverage gap.
+    # "ERROR"`` (a library failed to dump/extract/compare) — floors its exit
+    # to 4. "ERROR" is not a ``Verdict`` member, so preserve it as a
+    # blocking gate: otherwise it falls through as a verdictless
+    # (unavailable) report a warn/optional/unexpected policy could pass.
     if data.get("verdict") == _OPERATIONAL_ERROR_VERDICT:
         # A release's `run_outcome.compatibility` may already carry another
-        # library's real, completed verdict (the `ERROR` string names only
-        # the OPERATIONALLY failed one) -- read it rather than always
-        # fabricating `Verdict.BREAKING`. Falls back to the synthetic
-        # `Verdict.BREAKING` only when no *valid* run_outcome block is
-        # present at all (a pre-2.48 report). A valid block whose
-        # `compatibility` is legitimately `null` (e.g.
-        # `build_operational_error_report`'s own extraction-failure report)
-        # must NOT be treated the same as an absent block -- that fabricated
-        # an ABI-break verdict for a comparison that never ran. The gate's
-        # own `exit_code`/`blocking_categories` stay unconditional either way.
-        # A *present but schema-invalid* `run_outcome` is a third case,
-        # distinct from both "absent" and "valid" (Codex review, fresh
-        # evidence): `_has_valid_run_outcome_block` reads `False` for it the
-        # same as a genuinely absent block, so without this check it
-        # silently fell through to the legacy fabricated-`BREAKING` path
-        # instead of failing the target unavailable/malformed like every
-        # other structured-`run_outcome` reader in this module.
+        # library's real, completed verdict (`ERROR` names only the
+        # OPERATIONALLY failed one) -- read it rather than always
+        # fabricating `Verdict.BREAKING`. Falls back to that synthetic
+        # verdict only when no *valid* run_outcome block is present at all
+        # (a pre-2.48 report). A valid block whose `compatibility` is
+        # legitimately `null` (e.g. `build_operational_error_report`'s own
+        # extraction-failure report) must NOT read as absent -- that
+        # fabricated a break for a comparison that never ran. A *present
+        # but schema-invalid* block is a third case: it must fail closed
+        # (unavailable/malformed), not fall through to the fabricated-
+        # `BREAKING` path either. The gate's own `exit_code`/`blocking_
+        # categories` stay unconditional throughout.
         try:
             _run_outcome_gate_and_operational(data)
         except _MalformedGate as exc:
@@ -455,47 +449,36 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
             # An operational ERROR means *a* library failed, not that nothing
-            # was compared: `_format_release_json` emits `bundle_findings`/
-            # `matrix_findings` from whatever did complete, regardless of the
-            # top-level verdict (Codex review). Dropping them would lose real
-            # evidence from the one profile most likely to differ. Never
-            # complete, though — a run that errored cannot account for
-            # everything, so these findings can convict their own profile and
-            # clear no other.
+            # was compared: real `bundle_findings`/`matrix_findings` from
+            # whatever did complete are worth keeping, but never complete --
+            # a run that errored cannot account for everything.
             findings=_incomplete_findings(data),
             effective_config_digest=effective_config_digest,
         )
-    # `scan`'s own two abort verdicts (ADR-064 stage 1b's native-CLI abort
-    # report) carry no comparison at all -- a budget overflow or a pinned
-    # depth's evidence-contract violation -- but must still gate, not fall
-    # through as an unavailable/verdictless report a required-target policy
-    # could silently tolerate (Codex review, fresh evidence: neither string
-    # is a `Verdict` member, so this function never even reached
-    # `GateInfo.from_scan_report` for these before this branch existed).
+    # `scan`'s own four abort verdicts carry no comparison at all -- a
+    # budget overflow, a pinned depth's evidence-contract violation, a
+    # comparability refusal, or an incomplete bundle audit -- but must
+    # still gate, not fall through as an unavailable/verdictless report a
+    # required-target policy could silently tolerate (none of the four is a
+    # `Verdict` member).
     #
-    # Unlike the operational-error branch above, `verdict` stays `None` here
-    # rather than a synthetic `Verdict.BREAKING`: a scan that aborted before
-    # comparing never produced an ABI-break finding, so forcing one invents
-    # both a compatibility verdict and an "analyzed" target count for a
-    # comparison that never ran (Codex review, fresh evidence --
-    # `AggregateResult.to_dict()` reported `compatibility.verdict:
-    # "BREAKING"` and complete `analyzed_targets`/required-coverage for this
-    # exact case). The gate is still attached and still counts toward
+    # `verdict` stays `None` here rather than a synthetic `Verdict.
+    # BREAKING`: a scan that aborted before comparing never produced an
+    # ABI-break finding, so forcing one invents both a compatibility
+    # verdict and an "analyzed" target count for a comparison that never
+    # ran. The gate is still attached and still counts toward
     # `AggregateResult.exit_code()`/`blocking_targets` regardless of the
     # target's own required/optional declaration --
-    # `AggregateResult._forced_gate_targets` folds in exactly this shape
-    # (unavailable, but carrying a non-`None` gate) alongside the analyzed
-    # targets, the same way the now-removed synthetic verdict used to. The
-    # gate's own `exit_code` is `max(COVERAGE_INCOMPLETE_EXIT, prior
-    # contribution)`, never scan's raw private code (5 for budget overflow)
-    # -- `GateInfo.from_scan_report` already normalizes every scan exit
-    # outside {0, 2, 4} to `COVERAGE_INCOMPLETE_EXIT`, and the aggregate's
-    # own published contract has no exit 5 -- but a *late* `_BudgetOverflow`
-    # (`attach_prior_on_budget_overflow`) preserves whatever gate/coverage/
-    # assurance/crosscheck decision already existed in `diff.exit`'s own
-    # `*_contribution` fields, and downgrading a real ABI/API break already
-    # found before the abort to a bare coverage-incomplete `1` would hide it
-    # from a severity-aware consumer (Codex review, fresh evidence).
+    # `AggregateResult._forced_gate_targets` folds in exactly this shape.
+    # The gate's own `exit_code` is `max(COVERAGE_INCOMPLETE_EXIT, prior
+    # contribution, run_outcome contribution)`, never scan's raw private
+    # code (5 for budget overflow) -- `GateInfo.from_scan_report` already
+    # normalizes every scan exit outside {0, 2, 4} to `COVERAGE_INCOMPLETE_
+    # EXIT`, but a *late* `_BudgetOverflow` (`attach_prior_on_budget_
+    # overflow`) preserves whatever gate/coverage/assurance/crosscheck
+    # decision already existed, and downgrading a real ABI/API break
+    # already found before the abort to a bare coverage-incomplete `1`
+    # would hide it from a severity-aware consumer.
     raw_scan_verdict = data.get("verdict")
     scan_abort_category = (
         _scan_abort_categories.get(raw_scan_verdict)
@@ -509,22 +492,40 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         assurance_axis, _ = _scan_abort_exit_axis(
             data, "analysis_assurance_contribution"
         )
+        # A valid `run_outcome.gate` can preserve a completed break the
+        # legacy `diff.exit`/member blocks are absent/stale for -- fold it
+        # in too. This branch's own gate is unconditional either way (the
+        # `COVERAGE_INCOMPLETE_EXIT` floor below), unlike the ERROR/release
+        # refusal branches whose *entire* gate comes from `run_outcome` --
+        # so a present-but-invalid block here degrades to "nothing to add"
+        # (0, None) rather than failing the whole target unavailable,
+        # mirroring `_run_outcome_compatibility_verdict`'s own opportunistic,
+        # never-raising design for this exact report shape.
+        try:
+            run_outcome_gate_exit, run_outcome_gate_category = (
+                _run_outcome_gate_exit_and_category(data)
+            )
+        except _MalformedGate:
+            run_outcome_gate_exit, run_outcome_gate_category = 0, None
         blocking_categories = frozenset(
             {scan_abort_category}
         ) | _member_abort_categories(data)
-        # `BUNDLE_INCOMPLETE` typically has a real completed comparison: it
-        # fires after every member scanned cleanly and just the bundle audit
-        # never ran, and `run_outcome_dict_for_scan` preserves the worst
-        # completed member's verdict. A *late* `BUDGET_OVERFLOW`/`EVIDENCE_
-        # CONTRACT_ERROR` abort can carry one too -- read unconditionally for
-        # all four sentinels; `_run_outcome_compatibility_verdict` still
-        # returns `None` when nothing genuinely completed.
+        if run_outcome_gate_category is not None:
+            blocking_categories = blocking_categories | {run_outcome_gate_category}
+        # `BUNDLE_INCOMPLETE` typically has a real completed comparison
+        # (members scanned cleanly, only the bundle audit never ran); a
+        # *late* `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` abort can carry
+        # one too -- read unconditionally for all four sentinels.
         compat_verdict = _run_outcome_compatibility_verdict(data)
         return _LoadedReport(
             target_id=target_id,
             verdict=compat_verdict,
             gate=GateInfo(
-                exit_code=max(COVERAGE_INCOMPLETE_EXIT, _scan_abort_prior_exit(data)),
+                exit_code=max(
+                    COVERAGE_INCOMPLETE_EXIT,
+                    _scan_abort_prior_exit(data),
+                    run_outcome_gate_exit,
+                ),
                 blocking=True,
                 blocking_categories=tuple(sorted(blocking_categories)),
                 from_report=True,

@@ -255,6 +255,29 @@ def _run_outcome_blocking_categories(
     return tuple(cats)
 
 
+def _run_outcome_gate_exit_and_category(
+    data: Mapping[str, Any],
+) -> tuple[int, str | None]:
+    """The exit-code and blocking-category label ``run_outcome.gate`` itself
+    contributes -- ``(0, None)`` when the block is genuinely absent or its
+    gate is :attr:`PolicyGateDecision.NONE`. A present-but-invalid block
+    raises :class:`_MalformedGate`, same as :func:`_run_outcome_gate_and_
+    operational` (which this wraps). Callers fold the exit code in via
+    ``max()`` alongside their own legacy-derived contribution, and the
+    category into their own blocking-category set -- for a scan-abort
+    report whose legacy ``diff.exit``/member contribution blocks are absent
+    or stale relative to a real, already-completed ABI/API break the
+    structured gate still records (Codex review, fresh evidence).
+    """
+    outcome = _run_outcome_gate_and_operational(data)
+    if outcome is None:
+        return 0, None
+    gate, _operational = outcome
+    if gate is PolicyGateDecision.NONE:
+        return 0, None
+    return policy_gate_decision_exit_code(gate), gate.value
+
+
 class _MalformedGate(ValueError):
     """A gate/severity block that is *present but invalid*.
 

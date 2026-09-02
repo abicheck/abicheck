@@ -589,6 +589,24 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   nonblocking. Now restricted to the shared 0/1/2/4 scheme
   (`_GATE_EXIT_CODE.values()`); an out-of-scheme value falls back to the
   root verdict/exit code the same way a missing value already does.
+- **A `scan` abort report (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`/
+  `NOT_COMPARABLE`/`BUNDLE_INCOMPLETE`) now honors a valid `run_outcome.
+  gate` when its legacy `diff.exit`/member contribution blocks are absent
+  or stale** (Codex review, fresh evidence): the scan-abort branch
+  recovered `run_outcome.compatibility` but computed the gate solely from
+  `_scan_abort_prior_exit`, so a current-schema budget-overflow report
+  with `run_outcome.compatibility: "BREAKING"`/`run_outcome.gate:
+  "abi_breaking"` loaded as exit 1 with only `budget_overflow`, losing the
+  real exit-4/`abi_breaking` category the structured gate recorded. New
+  `_run_outcome_gate_exit_and_category` (`gate.py`) reads and folds it in
+  via the same `max()`/category-union machinery. Unlike the ERROR/release
+  refusal branches, this branch's own gate is unconditional either way (the
+  `COVERAGE_INCOMPLETE_EXIT` floor), so a present-but-invalid `run_outcome`
+  here degrades to "nothing to add" rather than failing the whole target
+  unavailable — preserving this branch's existing fail-open behavior for a
+  malformed block (pinned by
+  `test_bundle_incomplete_with_a_truncated_run_outcome_does_not_recover_a_
+  verdict`).
 
 ### Changed
 
