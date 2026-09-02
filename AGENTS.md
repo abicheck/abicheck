@@ -183,6 +183,14 @@ Core pipeline (in order of data flow):
    `from abicheck.elf_metadata import ElfMetadata` still resolves. **A new
    fact's field goes in `model/`, next to the format it belongs to — not in
    the parser.**
+   `model/semantic_ir.py` is ADR-063 Phase 6's canonical, backend-independent
+   IR (`SemanticIR.occurrences`, keyed by `OccurrenceId` so an ODR-duplicate
+   pair is never collapsed; `CanonicalEntity` holds only the non-identity
+   payload). Persisted as `AbiSnapshot.semantic_ir` (schema v38,
+   `storage/semantic_ir_codec.py`) and reconciled across the two header-AST
+   backends by `extract/semantic_ir_merge.py` — but **no backend produces one
+   yet**: the parser narrowing and `extract/semantic_normalizer.py` are the
+   remainder of that phase.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

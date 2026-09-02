@@ -504,7 +504,53 @@
   reported fact" population D7's own amendment scopes as a future,
   separately-justified extension beyond the availability-bearing subset
   this phase (and D7's initial realization) actually covers.
-- **Phases 6–10** are still unimplemented design text.
+- **Phase 6** (one canonical `SemanticIR` between the backends and the
+  checker) has landed its **first slice — the IR itself, its persistence,
+  and the hybrid merge's reconciliation of it — and no parser narrowing.**
+  That ordering is the plan's own: `SemanticIR` is defined and tested
+  before any backend is narrowed onto it, so the per-backend migrations
+  converge on one shape rather than on each backend's own reading of
+  "canonical" behind a shared name. `abicheck/model/semantic_ir.py` (new)
+  defines `SemanticIR.occurrences: Mapping[OccurrenceId, CanonicalEntity]`
+  — keyed by occurrence, never collapsed per `EntityId`, so an
+  ODR-duplicate/incomplete-declaration pair keeps both sides' availability
+  — plus `canonical_entities()` as the explicit, order-independent
+  reduction (most-resolved occurrence wins, ties broken on
+  `canonical_key`), and `CanonicalEntity`, which carries only the
+  non-identity payload (`Fact`-wrapped canonical spelling, template
+  arguments, CV-qualification, and a `producer` tag), never a second copy
+  of the identity its key already states. `AbiSnapshot.semantic_ir` and
+  `AbiSnapshot.semantic_ir_conflicts` persist through
+  `storage/semantic_ir_codec.py` (`SCHEMA_VERSION` 37→38) as a **list of
+  entries** rather than a string-keyed map, for the two reasons the plan
+  names: `dataclasses.asdict()` raises outright on a dataclass dict key,
+  and a rendered string key cannot carry back the typed `ScopePath` inside
+  an `OccurrenceId`. `dumper_hybrid.merge_snapshots()` gains the fifth
+  reconciliation step (`extract/semantic_ir_merge.py`): base-plus-backfill
+  with castxml as the base, a clang-only entity unioned in, a two-sided
+  disagreement keeping castxml's value and recording the discarded one
+  per *occurrence* (`fact_provenance`'s declaration-only key cannot
+  separate two matched pairs sharing one `EntityId`), and a fail-closed
+  matcher that leaves a group with no unique complete matching entirely
+  unmerged. Each of the plan's four review-falsified matching rules is
+  pinned as a property test (`tests/test_semantic_ir_merge.py`); one of
+  them — two occurrences on one side sharing a non-empty disambiguator —
+  turns out to be structurally unreachable from a real `SemanticIR` (that
+  pair *is* one `OccurrenceId`, hence one dict key), so the guard is
+  tested at the matcher's own list-taking entry point and the reachability
+  limit is stated rather than left implied by a test that only appears to
+  cover it. **Deliberately not in this slice, and therefore not yet
+  observable to any user:** no backend produces an IR yet
+  (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/
+  `pdb_metadata.py`/`btf_metadata.py`/`ctf_metadata.py` are unchanged),
+  `extract/semantic_normalizer.py` does not exist, and none of the five
+  assembly call sites projects through it — so `semantic_ir` is `None` on
+  every snapshot a real `dump` produces, every v38 document is
+  byte-identical to the v37 one it would have been, and the snapshot cache
+  version is deliberately *not* bumped (no dumping-pipeline output
+  changed). The parser narrowing, the normalizer, and the per-call-site
+  parity tests are the remainder of this phase.
+- **Phases 7–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this

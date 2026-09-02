@@ -30,6 +30,7 @@ inside this directory.
 | Change | Module |
 |---|---|
 | Header-AST parser backend (castxml or clang), split by parsed entity or parser-state responsibility per ADR-061 D9 | `headers/castxml/`, `headers/clang/` |
+| Reconciling two backends' `SemanticIR` into one (the `--ast-frontend hybrid` merge, ADR-063 Phase 6) | `semantic_ir_merge.py` |
 | ELF/PE/Mach-O binary parsing | `binary/` (not yet created — still `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py`) |
 | DWARF/PDB debug-info parsing | `debug/` (not yet created) |
 | compile-commands/CMake/Bazel/Make build evidence | `build/` (not yet created) |

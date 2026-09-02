@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         PythonApiSurface,
         PythonExtMetadata,
     )
+    from .semantic_ir import SemanticIR
     from .sycl_facts import SyclMetadata
 
 _model_log = _logging.getLogger(__name__)
@@ -672,6 +673,19 @@ class AbiSnapshot:
     ast_resolved_standard_fact: Fact[str | None] | None = field(
         default=None, kw_only=True
     )
+
+    # ADR-063 Phase 6 (schema v38) — the canonical, backend-independent IR
+    # these declarations were canonicalized into, keyed by ``OccurrenceId``
+    # (``model/semantic_ir.py`` owns the full rationale).
+    # Additive: the legacy ``functions``/``types``/... fields stay populated
+    # as before, one entry per occurrence (never a ``canonical_entities()``
+    # reduction). ``None`` predating it / for an un-narrowed backend.
+    semantic_ir: SemanticIR | None = field(default=None, kw_only=True)
+    # Every fact BOTH header-AST backends resolved, disagreeing, on a hybrid
+    # merge — keyed by ``semantic_ir_conflict_key``, absent key == none. Not
+    # ``fact_provenance``: that keeps only the winner's name, per declaration
+    # (``extract/semantic_ir_merge.py``: why neither half of that suffices).
+    semantic_ir_conflicts: dict[str, str] = field(default_factory=dict, kw_only=True)
 
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
