@@ -626,32 +626,89 @@ def _lambda_identity_containers_and_strings(
 ) -> tuple[list[object], list[str]] | None:
     """Collect :data:`_LAMBDA_IDENTITY_FIELDS`' containers and strings, or
     ``None`` once none mentions ``"(lambda"``/``"(unnamed "`` -- shared with
-    ``storage.snapshot_load_normalization``, an importer of this helper."""
+    ``storage.snapshot_load_normalization``, an importer of this helper.
+
+    Deliberately does NOT look at ``semantic_ir_conflicts`` -- see
+    :func:`_conflict_only_marker_strings` for why.
+    """
     containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
     strings: list[str] = []
     for container in containers:
         _collect_strings(container, strings)
-    # ADR-063 Phase 6 (second slice, Codex review, PR #1001, sixth round):
-    # a hybrid conflict's DISCARDED spelling can be the only place a
-    # closure/anonymous marker appears at all -- the retained occurrence
-    # and its OccurrenceId key may carry no marker of their own. Since this
-    # is the preflight collect_anonymous_type_ordinals() below assigns
-    # ordinals from, leaving semantic_ir_conflicts out of it meant such a
-    # marker never got an ordinal, so renumber_conflict_keys()'s rewrite
-    # (called further down in renumber_anonymous_closure_identities) left it
-    # in raw :line:col form forever. Only extends the ordinal-collection
-    # string pool -- renumber_conflict_keys() still owns the actual
-    # decode/rewrite/re-encode of each conflict value.
-    conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
-    if conflicts:
-        from .model.semantic_ir import conflict_value_strings
-
-        for value in conflicts.values():
-            strings.extend(conflict_value_strings(value))
     markers = ("(lambda", "(unnamed ", "(anonymous ")
     if not any(m in s for s in strings for m in markers):
         return None
     return containers, strings
+
+
+def _has_any_marker(strings: _Iterable[str]) -> bool:
+    markers = ("(lambda", "(unnamed ", "(anonymous ")
+    return any(m in s for s in strings for m in markers)
+
+
+def _conflict_only_marker_strings(snapshot: object) -> list[str]:
+    """Decode every ``semantic_ir_conflicts`` value's real string
+    component(s), for :func:`_extend_ordinals_with_conflict_only_markers`
+    to consult only -- NEVER folded into
+    :func:`_lambda_identity_containers_and_strings`'s own pool (Codex
+    review, PR #1001, sixth then seventh round). A hybrid conflict's
+    discarded spelling can be the ONLY place a closure/anonymous marker
+    appears at all, so it still needs an ordinal -- but
+    :func:`collect_anonymous_type_ordinals` numbers a ``(marker, header)``
+    group by SORTED source position, so mixing a conflict-only coordinate
+    straight into that pool would insert it wherever it sorts and shift
+    every later REAL declaration's ordinal: whether a backend disagreement
+    happens to exist between two otherwise-identical snapshots would then,
+    on its own, relabel real closures and manufacture spurious removals/
+    additions in a comparison. Assigned separately instead, as a pure
+    continuation that never touches an already-assigned real ordinal.
+    """
+    conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
+    if not conflicts:
+        return []
+    from .model.semantic_ir import conflict_value_strings
+
+    strings: list[str] = []
+    for value in conflicts.values():
+        strings.extend(conflict_value_strings(value))
+    return strings
+
+
+def _extend_ordinals_with_conflict_only_markers(
+    ordinals: dict[tuple[str, str, int, int], int],
+    conflict_strings: _Iterable[str],
+) -> None:
+    """Assign an ordinal, in place in *ordinals*, to a marker coordinate
+    that appears ONLY inside a hybrid conflict's discarded value.
+
+    Each new ``(marker, header)`` coordinate is appended AFTER every
+    ordinal that group already has (``max(existing) + 1``, continuing in
+    ascending ``(line, col)`` order among the new coordinates only) --
+    never inserted into the same sorted sequence real declarations were
+    numbered from (see :func:`_conflict_only_marker_strings` for why). A
+    coordinate matching an existing entry (the conflict names the literal
+    same closure a retained declaration does) needs no new entry -- the
+    existing lookup already covers it.
+    """
+    new_coordinates: dict[tuple[str, str], set[tuple[int, int]]] = {}
+    for text in conflict_strings:
+        for match in _anon_type_ordinal_matches(text):
+            coordinate_key = (match.marker, match.header, match.line, match.col)
+            if coordinate_key in ordinals:
+                continue
+            group_key = (match.marker, match.header)
+            new_coordinates.setdefault(group_key, set()).add((match.line, match.col))
+
+    for (marker, header), coords in new_coordinates.items():
+        existing_ordinals = [
+            ordinal
+            for (m, h, _line, _col), ordinal in ordinals.items()
+            if m == marker and h == header
+        ]
+        next_ordinal = (max(existing_ordinals) if existing_ordinals else 0) + 1
+        for line, col in sorted(coords):
+            ordinals[(marker, header, line, col)] = next_ordinal
+            next_ordinal += 1
 
 
 def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
@@ -692,10 +749,16 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     if getattr(_defer_renumber, "active", False):
         return snapshot
     collected = _lambda_identity_containers_and_strings(snapshot)
-    if collected is None:
+    conflict_strings = _conflict_only_marker_strings(snapshot)
+    if collected is None and not _has_any_marker(conflict_strings):
         return snapshot
-    containers, strings = collected
+    containers, strings = collected if collected is not None else ([], [])
     ordinals = collect_anonymous_type_ordinals(strings)
+    # Extended AFTER real ordinals are assigned, and never mixed into their
+    # own coordinate pool -- see _conflict_only_marker_strings()'s own
+    # docstring for why a conflict-only marker must never participate in
+    # the sorted numbering real, retained declarations get.
+    _extend_ordinals_with_conflict_only_markers(ordinals, conflict_strings)
     if not ordinals:
         return snapshot
 

@@ -284,6 +284,81 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
             "clang::Wrapper<(lambda:task_group.h#1)>"
         )
 
+    def test_conflict_only_marker_never_shifts_a_real_declarations_ordinal(
+        self,
+    ) -> None:
+        """ADR-063 Phase 6 (second slice, Codex review, PR #1001, seventh
+        round): a naive fix for the sibling test above (folding conflict
+        values straight into the SAME string pool
+        ``collect_anonymous_type_ordinals`` assigns ordinals from) has its
+        own bug -- that function numbers a ``(marker, header)`` group by
+        SORTED source position, so a conflict-only coordinate earlier in
+        the header than any real one would insert itself first and push
+        every real ordinal up by one. Whether a hybrid backend disagreement
+        happens to exist between two otherwise-identical snapshots would
+        then, on its own, relabel real closures and manufacture spurious
+        removals/additions in a comparison -- exactly what this test pins
+        against: two REAL closures at lines 20 and 30 must keep ordinals
+        #1/#2 regardless of whether a conflict-only marker at line 10 (an
+        earlier position that would sort first) is present at all.
+        Confirmed to fail (real ordinals become #2/#3) against a version
+        that merged conflict values into the same coordinate pool."""
+        marker_20 = _closure("task_group.h", 20, 4)
+        marker_30 = _closure("task_group.h", 30, 4)
+        marker_10 = _closure("task_group.h", 10, 4)  # conflict-only, sorts FIRST
+
+        eid_20 = entity_id_for_type((Namespace("ns"), Record(marker_20)), "R")
+        eid_30 = entity_id_for_type((Namespace("ns"), Record(marker_30)), "S")
+        occ_id_20 = OccurrenceId(eid_20)
+        occ_id_30 = OccurrenceId(eid_30)
+        # A third, unrelated occurrence carries the conflict-only marker --
+        # its own key/value stay stable, only the conflict value embeds it.
+        alias_eid = entity_id_for_type((), "Alias")
+        alias_occ_id = OccurrenceId(alias_eid)
+        conflict_key = semantic_ir_conflict_key(alias_occ_id, "canonical_spelling")
+        semantic_ir = SemanticIR(
+            occurrences={
+                occ_id_20: CanonicalEntity(
+                    canonical_spelling=Fact.present(f"ns::{marker_20}::R")
+                ),
+                occ_id_30: CanonicalEntity(
+                    canonical_spelling=Fact.present(f"ns::{marker_30}::S")
+                ),
+                alias_occ_id: CanonicalEntity(canonical_spelling=Fact.present("Alias")),
+            }
+        )
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[
+                _record("R", qualified=f"ns::{marker_20}::R"),
+                _record("S", qualified=f"ns::{marker_30}::S"),
+            ],
+            semantic_ir=semantic_ir,
+            semantic_ir_conflicts={
+                conflict_key: repr(f"clang::Wrapper<{marker_10}>"),
+            },
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        # The two REAL closures keep the ordinals they'd get without the
+        # conflict at all -- #1 for line 20, #2 for line 30.
+        renumbered_r = snap.types[0].qualified_name
+        renumbered_s = snap.types[1].qualified_name
+        assert renumbered_r is not None
+        assert renumbered_s is not None
+        assert "#1" in renumbered_r
+        assert "#2" in renumbered_s
+        assert ":20:4" not in renumbered_r
+        assert ":30:4" not in renumbered_s
+
+        # The conflict-only marker still gets a stable ordinal of its own
+        # (continuing after the real ones), never left in raw form and
+        # never colliding with #1/#2.
+        assert snap.semantic_ir_conflicts[conflict_key] == repr(
+            "clang::Wrapper<(lambda:task_group.h#3)>"
+        )
+
     def test_semantic_ir_conflicts_untouched_when_nothing_needs_renumbering(
         self,
     ) -> None:
