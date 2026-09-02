@@ -68,9 +68,9 @@ is a no-op. A JSON-shaped object is stored at
 
 ## Version axes
 
-A package's `manifest.json` states seven independent version axes (D2) —
-none of them the single overloaded `schema_version` integer `.abi.json`
-uses:
+A package's `manifest.json` states seven core version axes plus two
+legacy-import provenance axes (D2) — none of them the single overloaded
+`schema_version` integer `.abi.json` uses:
 
 | Axis | Meaning |
 |---|---|

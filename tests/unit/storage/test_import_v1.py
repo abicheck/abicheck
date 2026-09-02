@@ -209,6 +209,45 @@ class TestMaxKnownSchemaVersion:
             )
 
     @pytest.mark.parametrize(
+        "malformed", [float("nan"), float("inf"), 38.9, "38", True, None]
+    )
+    def test_a_malformed_max_known_schema_version_is_refused(
+        self, malformed: object
+    ) -> None:
+        """`max_known_schema_version` gates the same refusal as the
+        document's own `schema_version`, so it must be validated with the
+        same rigor. `float("nan")`/`float("inf")` are the sharpest case:
+        Python's `>` comparison against either is always `False`, so an
+        uncoerced NaN/inf ceiling would silently accept a document of *any*
+        schema_version, defeating the refusal entirely rather than merely
+        mis-scoping it (CodeRabbit review)."""
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = SCHEMA_VERSION + 1000
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="max_known_schema_version"):
+            _import_legacy_snapshot(
+                doc,
+                store=store,
+                artifact_id="libfoo",
+                max_known_schema_version=malformed,  # type: ignore[arg-type]
+            )
+
+    @pytest.mark.parametrize("malformed", [0, -1, -38])
+    def test_a_non_positive_max_known_schema_version_is_refused(
+        self, malformed: int
+    ) -> None:
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        doc["schema_version"] = 1
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="max_known_schema_version"):
+            _import_legacy_snapshot(
+                doc,
+                store=store,
+                artifact_id="libfoo",
+                max_known_schema_version=malformed,
+            )
+
+    @pytest.mark.parametrize(
         "malformed",
         [38.9, "38", True, None, [38], {"v": 38}],
     )

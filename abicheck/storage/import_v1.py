@@ -152,6 +152,28 @@ def import_legacy_snapshot(
     Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
     _mapping(legacy_document, "legacy_document")
+    # This value gates the "too new to interpret" refusal below, so -- the
+    # same as the document's own schema_version just below -- it is not
+    # informational and must not be coerced: `bool` is rejected (a `bool`
+    # is an `int` subclass in Python), and non-`int` numeric types are
+    # rejected outright rather than truncated, since a caller passing
+    # `float("nan")`/`float("inf")` would otherwise silently defeat the
+    # ceiling entirely -- `source_schema_version > float("nan")` and
+    # `... > float("inf")` are both always `False`, regardless of how new
+    # the document's own schema_version actually is (CodeRabbit review).
+    if isinstance(max_known_schema_version, bool) or not isinstance(
+        max_known_schema_version, int
+    ):
+        raise ValueError(
+            "max_known_schema_version must be an int, not "
+            f"{type(max_known_schema_version).__name__} "
+            f"({max_known_schema_version!r})"
+        )
+    if max_known_schema_version <= 0:
+        raise ValueError(
+            "max_known_schema_version must be a positive int, not "
+            f"{max_known_schema_version!r}"
+        )
     if artifact_kind is None:
         stated_platform = legacy_document.get("platform")
         artifact_kind = (

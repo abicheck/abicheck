@@ -56,7 +56,7 @@ Callers wanting a real `BundleFacts` in one of these archives go through
 
 ### ADR-062 Phase 0 primitives, plus Phase 1's object model, DTO layer, and import adapter
 
-Seven primitives (four Phase 0, three Phase 1), each consumed directly by its own module — no service locator; `__init__.py` is a re-export surface only.
+Seven primitives (four Phase 0, three Phase 1), plus the internal `guards.py`; each is consumed directly by its own module — no service locator; `__init__.py` is a re-export surface only.
 
 | Module | Owns |
 |---|---|
