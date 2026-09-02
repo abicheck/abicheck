@@ -2922,6 +2922,21 @@ fi
 
 echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"
 
+# Whether `format: sarif` + `upload-sarif: true` was requested but the
+# *effective* format (an `extra-args --format` override) isn't sarif -- see
+# the `report-path` output block below for the full rationale. Computed
+# once, outside the `{ ... } >> "$GITHUB_OUTPUT"` redirect: a workflow-command
+# annotation (`::warning::`) echoed *inside* that block would be silently
+# swallowed into the environment file as a bogus, undeclared record instead
+# of reaching the Actions log -- exactly the fate this diagnostic exists to
+# avoid for the upload it explains (Codex review, PR #998, fresh evidence).
+_SARIF_UPLOAD_FORMAT_MISMATCH=0
+if [[ "${FORMAT:-}" == "sarif" && "${INPUT_UPLOAD_SARIF:-false}" == "true" \
+   && "${_EFFECTIVE_FORMAT:-$FORMAT}" != "sarif" ]]; then
+  _SARIF_UPLOAD_FORMAT_MISMATCH=1
+  echo "::warning title=abicheck upload-sarif::format: sarif and upload-sarif: true were requested, but extra-args overrode --format away from sarif, so the real output is not SARIF. Skipping the SARIF upload (report-path withheld) rather than uploading mismatched content."
+fi
+
 # ---------------------------------------------------------------------------
 # Set outputs
 # ---------------------------------------------------------------------------
@@ -2930,21 +2945,17 @@ echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"
   echo "exit-code=$ABICHECK_EXIT"
   # Only emit report-path when a real report file was produced.
   #
-  # Withheld even when one exists whenever `format: sarif` was requested
-  # together with `upload-sarif: true` but the *effective* format (an
-  # `extra-args --format` override) isn't sarif -- this is action.yml's
-  # own upload-sarif step's entire gate (`if: ... &&
-  # steps.run-abicheck.outputs.report-path != ''`), and that step's `if:`
-  # reads the Action's nominal `format` input, which a shell-local
-  # `$_EFFECTIVE_FORMAT` cannot change (Codex review, PR #998, fresh
-  # evidence: this closes both the default-output-path case and an
-  # explicit `output-file:` case alike, since either way `$OUTPUT_FILE`
-  # would hold real, non-SARIF content that must never reach that step).
-  # No other output/behavior changes -- `report-path` for any other
-  # purpose than gating that one step is unaffected.
-  if [[ "${FORMAT:-}" == "sarif" && "${INPUT_UPLOAD_SARIF:-false}" == "true" \
-     && "${_EFFECTIVE_FORMAT:-$FORMAT}" != "sarif" ]]; then
-    echo "::warning title=abicheck upload-sarif::format: sarif and upload-sarif: true were requested, but extra-args overrode --format away from sarif, so the real output is not SARIF. Skipping the SARIF upload (report-path withheld) rather than uploading mismatched content."
+  # Withheld even when one exists whenever the sarif/upload-sarif mismatch
+  # above was detected -- this is action.yml's own upload-sarif step's
+  # entire gate (`if: ... && steps.run-abicheck.outputs.report-path != ''`),
+  # and that step's `if:` reads the Action's nominal `format` input, which a
+  # shell-local `$_EFFECTIVE_FORMAT` cannot change: this closes both the
+  # default-output-path case and an explicit `output-file:` case alike,
+  # since either way `$OUTPUT_FILE` would hold real, non-SARIF content that
+  # must never reach that step. No other output/behavior changes --
+  # `report-path` for any other purpose than gating that one step is
+  # unaffected.
+  if [[ "$_SARIF_UPLOAD_FORMAT_MISMATCH" == "1" ]]; then
     echo "report-path="
   elif [[ -n "${OUTPUT_FILE:-}" && -f "${OUTPUT_FILE}" ]]; then
     echo "report-path=${OUTPUT_FILE}"

@@ -832,7 +832,20 @@ lands in two stages rather than one atomic change:
       and explicit-path cases identically and needing no new Action output
       or `action.yml` change (`tests/
       test_action_run_sh_compare_pr_json_write.py::
-      TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch`). Still
+      TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch`).
+      **An eighth review round (Codex, fresh evidence) caught a real bug in
+      that very fix, not a new instance of the class**: the `::warning::`
+      diagnostic explaining the skipped upload was echoed *inside* the
+      `{ ... } >> "$GITHUB_OUTPUT"` redirected block, so it never reached the
+      Actions log at all — instead it was silently swallowed into the
+      environment file as a bogus, undeclared record (its own embedded `=`,
+      inside `title=abicheck`, makes it look like a key/value pair to the
+      runner). Fixed by hoisting the mismatch check and its warning out of
+      that block entirely, computed once into `$_SARIF_UPLOAD_FORMAT_MISMATCH`
+      before the output-setting block reads it. The existing tests only
+      inspected the raw `$GITHUB_OUTPUT` file's contents and could not have
+      caught this; extended to also assert the warning reaches run.sh's own
+      stdout/stderr and never appears inside `$GITHUB_OUTPUT`. Still
       open: the release fan-out's `GateOptions` unification, the typed-API half of
       this parity pass, the `--format text` gap named above, and a real
       `--artifact-set` member-level evidence-contract signal for the Action

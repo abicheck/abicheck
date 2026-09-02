@@ -345,11 +345,16 @@ class TestSarifDefaultOutputFileUsesEffectiveFormat:
         assert "abicheck-results.sarif" in argv, argv
 
 
-def _compare_github_output(tmp_path: Path, env_extra: dict[str, str]) -> str:
+def _compare_github_output(
+    tmp_path: Path, env_extra: dict[str, str]
+) -> tuple[str, str]:
     """Run compare mode with a stub that actually honors ``-o PATH`` (writing
     real content there, unlike ``_compare_argv``'s stdout-only stub, since
     this test cares whether ``$OUTPUT_FILE`` ends up a real, non-empty file)
-    and return the ``$GITHUB_OUTPUT`` file's contents.
+    and return ``($GITHUB_OUTPUT file contents, run.sh's own stdout+stderr)``
+    -- the latter so a caller can confirm a workflow-command annotation
+    (``::warning::``) actually reached the log rather than being silently
+    swallowed into the environment file.
     """
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
@@ -399,7 +404,7 @@ def _compare_github_output(tmp_path: Path, env_extra: dict[str, str]) -> str:
         capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    return github_output.read_text(encoding="utf-8")
+    return github_output.read_text(encoding="utf-8"), result.stdout + result.stderr
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -422,7 +427,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
         self, tmp_path: Path
     ) -> None:
         explicit = tmp_path / "myreport.sarif"
-        out = _compare_github_output(
+        out, log = _compare_github_output(
             tmp_path,
             {
                 "INPUT_FORMAT": "sarif",
@@ -433,13 +438,18 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
         )
         assert explicit.is_file()  # the mismatched content really was written
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
+        # The warning must reach the log, not the environment file (Codex
+        # review, PR #998, fresh evidence: an earlier revision echoed it
+        # *inside* the redirected `{ ... } >> "$GITHUB_OUTPUT"` block).
+        assert "::warning" in log, log
+        assert "::warning" not in out, out
 
     def test_default_output_file_withholds_report_path_on_mismatch(
         self, tmp_path: Path
     ) -> None:
         # The no-explicit-output-file default path, now checked via
         # report-path directly rather than only via -o's absence from argv.
-        out = _compare_github_output(
+        out, log = _compare_github_output(
             tmp_path,
             {
                 "INPUT_FORMAT": "sarif",
@@ -448,15 +458,18 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             },
         )
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
+        assert "::warning" in log, log
+        assert "::warning" not in out, out
 
     def test_matching_sarif_still_publishes_report_path(self, tmp_path: Path) -> None:
         # Negative control: the ordinary, unoverridden sarif+upload
         # combination must keep publishing report-path exactly as before.
-        out = _compare_github_output(
+        out, log = _compare_github_output(
             tmp_path,
             {"INPUT_FORMAT": "sarif", "INPUT_UPLOAD_SARIF": "true"},
         )
         assert "report-path=abicheck-results.sarif" in out, out
+        assert "::warning" not in log, log
 
     def test_mismatch_without_upload_sarif_still_publishes_report_path(
         self, tmp_path: Path
@@ -464,7 +477,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
         # The suppression is scoped to the upload-sarif combination
         # specifically -- report-path for any other purpose is unaffected.
         explicit = tmp_path / "myreport.sarif"
-        out = _compare_github_output(
+        out, log = _compare_github_output(
             tmp_path,
             {
                 "INPUT_FORMAT": "sarif",
@@ -473,6 +486,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             },
         )
         assert f"report-path={explicit}" in out, out
+        assert "::warning" not in log, log
 
 
 def test_both_branches_share_the_same_write_guard() -> None:
