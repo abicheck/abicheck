@@ -27,13 +27,13 @@ carrier, populated across the function-diff path; and, as this module's own
 ``EntityId.key`` property, the first read of that carrier by a real
 consumer (``finding_identity.resolve_change_identity``'s new alias --
 additive only, no existing primary/canonical id changes).
-``dwarf_snapshot.py``/``dumper_elf_fallback.py`` now populate it too. Still
-open: the mangled-name-is-genuine determination stays owned by
+``dwarf_snapshot.py``/``dumper_elf_fallback.py``/``dumper.py``'s PE and
+Mach-O export-only producers now populate it too. Still open: the
+mangled-name-is-genuine determination stays owned by
 ``finding_identity.is_real_mangled_name``/``normalize_mangled_name``;
-PE/Mach-O producers carry no ``entity_id``; the post-parse consumer
-migrations (``diff_filtering.py``/``type_reachability.py``); and promoting
-``entity:`` to a real match tier, blocked on ``Anonymous``/
-``LocalToFunction`` ordinal cross-release instability (twice reverted).
+``diff_filtering.py``/``type_reachability.py``'s consumer migrations; and
+promoting ``entity:`` to a real match tier (blocked on ``Anonymous``/
+``LocalToFunction`` ordinal cross-release instability, twice reverted).
 
 ``EntityKind``/``ObservationKind`` relocated here from ``storage.
 entity_ids`` (domain vocabulary belongs in ``model``, not the storage wire
