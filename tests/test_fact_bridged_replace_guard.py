@@ -293,15 +293,30 @@ class TestNoUnsyncedReplace:
         drives `_rel`'s real code end to end, so a regression in `_rel`'s
         own implementation -- whatever its source spelling -- fails this
         assertion directly, on any host.
+
+        Parametrized over several independently-chosen path shapes, not
+        just the one two-component `abicheck/dwarf_snapshot.py` path the
+        original failure happened to name (Codex review): an
+        implementation that normalized only, say, the first backslash
+        (`s.replace("\\\\", "/", 1)`) would satisfy a single-shape
+        assertion while still breaking a real multi-backslash key like
+        `abicheck/extract/semantic_ir_merge.py`.
         """
+        windows_paths = [
+            PureWindowsPath("abicheck") / "dwarf_snapshot.py",
+            PureWindowsPath("abicheck") / "extract" / "semantic_ir_merge.py",
+            PureWindowsPath("abicheck") / "storage" / "package.py",
+            PureWindowsPath("tests") / "unit" / "storage" / "test_dto.py",
+        ]
+        for windows_path in windows_paths:
 
-        class _FakeWindowsPath:
-            def relative_to(self, _other: Path) -> PureWindowsPath:
-                return PureWindowsPath("abicheck") / "dwarf_snapshot.py"
+            class _FakeWindowsPath:
+                def relative_to(self, _other: Path) -> PureWindowsPath:
+                    return windows_path
 
-        result = _rel(_FakeWindowsPath())  # type: ignore[arg-type]
-        assert result == "abicheck/dwarf_snapshot.py"
-        assert "\\" not in result
+            result = _rel(_FakeWindowsPath())  # type: ignore[arg-type]
+            assert result == windows_path.as_posix()
+            assert "\\" not in result
 
         # A source-level backstop for the same invariant, kept alongside
         # the behavioral assertion above rather than in place of it: it
