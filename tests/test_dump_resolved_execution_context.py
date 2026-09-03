@@ -41,11 +41,12 @@ from abicheck.service_dump_pipeline import (
 from abicheck.workflows.resolved_execution_context import ResolvedExecutionContext
 
 
-def _snapshot(version: str = "1.0") -> AbiSnapshot:
+def _snapshot(version: str = "1.0", *, from_headers: bool = False) -> AbiSnapshot:
     return AbiSnapshot(
         library="libfoo.so.1",
         version=version,
         functions=[Function(name="foo", mangled="foo", return_type="void", params=[])],
+        from_headers=from_headers,
     )
 
 
@@ -173,10 +174,12 @@ class TestExecuteDumpRequestWithAssurance:
     def test_result_carries_the_resolved_compile_context(self, snap_path, monkeypatch):
         """Codex review, PR #1037: `with_assurance()` alone leaves
         `compile_contexts` empty even when the P0.3 fold produced a real
-        `effective_compile_context` -- `DumpResult.resolved_execution_context`
-        must carry it too, under the `"input"` label, so a consumer reading
-        through the unified context sees the same toolchain
-        `DumpResult.effective_compile_context` itself exposes."""
+        `effective_compile_context` that a header-AST parse actually
+        consumed (`snap.from_headers`) -- `DumpResult.
+        resolved_execution_context` must carry it too, under the `"input"`
+        label, so a consumer reading through the unified context sees the
+        same toolchain `DumpResult.effective_compile_context` itself
+        exposes."""
         from abicheck.compile_context import CompileContext
         from abicheck.workflows.artifact.execute import SideResolution
 
@@ -186,7 +189,7 @@ class TestExecuteDumpRequestWithAssurance:
 
         def _fake_resolve(*args, **kwargs):
             return SideResolution(
-                snapshot=_snapshot(),
+                snapshot=_snapshot(from_headers=True),
                 effective_includes=(),
                 effective_compile_context=fake_ctx,
             )
@@ -202,3 +205,38 @@ class TestExecuteDumpRequestWithAssurance:
         assert dict(result.resolved_execution_context.compile_contexts) == {
             "input": fake_ctx
         }
+
+    def test_compile_context_excluded_for_a_binary_only_depth(
+        self, snap_path, monkeypatch
+    ):
+        """Codex review, PR #1037, second round: the P0.3 fold can resolve a
+        real `CompileContext` even for a binary-only dump (e.g. from
+        `-p`/`--compile-db` alone, with no headers ever parsed) --
+        `ResolvedExecutionContext.compile_contexts`'s own docstring documents
+        that field as absent, not placeholder-valued, for exactly this case.
+        `DumpResult.effective_compile_context` itself stays unconditional
+        (a different, pre-existing field), so only the unified context's
+        view is gated here."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        resolved = resolve_dump_request(request)
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(from_headers=False),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {}
