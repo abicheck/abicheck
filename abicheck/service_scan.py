@@ -1396,7 +1396,20 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # preprocessor phase (which runs `clang -E` with a compile unit's `directory`
     # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
     build_dir_cleanups: list[Callable[[], None]] = []
-    gate = resolve_scan_gate_options(req)
+    try:
+        gate = resolve_scan_gate_options(req)
+    except ValueError as exc:
+        # `resolve_release_gate_options` raises bare `ValueError`
+        # (invalid `exit_code_scheme`) or `PolicyError` (invalid
+        # `severity_preset`, a `ValueError` subclass) for a malformed
+        # request -- neither is `ValidationError`, so a Tier-2 caller
+        # guarding this call with `except ValidationError` (the type
+        # every other malformed-`ScanRequest` field raises) would miss
+        # it and see the raw exception instead. Same translation
+        # `_resolve_scan_contract_config` above already applies to its
+        # own `resolve_scan_config` call (CodeRabbit review, fresh
+        # evidence, PR #1032).
+        raise ValidationError(str(exc)) from exc
     try:
         core = run_scan_core(
             start=_time.monotonic(),

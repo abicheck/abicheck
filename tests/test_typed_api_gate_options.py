@@ -714,6 +714,35 @@ class TestScanRequestGateOptions:
         with pytest.raises(ValidationError, match="exit_code_scheme"):
             run_scan(ScanRequest(binaries=[new], exit_code_scheme="severity"))
 
+    def test_invalid_gate_fields_raise_validation_error(self, tmp_path: Path) -> None:
+        """CodeRabbit review, fresh evidence, PR #1032: `run_scan` called
+        `resolve_scan_gate_options` -> `resolve_release_gate_options` with
+        no exception translation at all -- an invalid `exit_code_scheme`
+        raised bare `ValueError` and an invalid `severity_preset` raised
+        `PolicyError` (a `ValueError` subclass, from `resolve_severity_
+        config`), neither of which is `ValidationError`, the type every
+        other malformed-`ScanRequest` field raises (see the sibling test
+        above). A Tier-2 caller guarding `run_scan` with
+        `except ValidationError` -- the documented contract -- would miss
+        both and see the raw exception instead. Fixed by translating both
+        at the `resolve_scan_gate_options` call site, mirroring the
+        existing `_resolve_scan_contract_config` -> `resolve_scan_config`
+        translation just above it in `service_scan.py`."""
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        old, new = self._pair(tmp_path)
+        with pytest.raises(ValidationError, match="exit_code_scheme"):
+            run_scan(
+                ScanRequest(binaries=[new], baseline=old, exit_code_scheme="legacy ")
+            )
+        with pytest.raises(ValidationError):
+            run_scan(
+                ScanRequest(
+                    binaries=[new], baseline=old, severity_preset="not-a-preset"
+                )
+            )
+
     def test_default_severity_fields_leave_the_pre_existing_behaviour_unchanged(
         self, tmp_path: Path
     ) -> None:
