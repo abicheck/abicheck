@@ -9,8 +9,12 @@ lifecycle: active
 **ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed — roadmap
 ADR, partially implemented. Phase 0's `Fact[T]`/`FactStatus` infrastructure
 and AI-readiness gates have landed, and a narrow Phase 1 slice has too; see
-ADR-063's own Status line for the authoritative, per-slice detail — this
-plan document does not restate it, to avoid the two drifting apart again.
+each phase's own "Landed"/"Still not landed" paragraph below in this plan
+for the authoritative per-slice detail, plus
+`docs/_meta/one-semantic-pipeline-status.yaml` for the concept-level
+authority summary. ADR-063 itself no longer restates this detail — its own
+duplicated status block was removed (PR 0, 2026-09-02) precisely because it
+kept drifting out of sync with this plan.
 **Effort:** XL, multi-quarter, phased — do not attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
 ADR-062, ADR-042, ADR-046/048, ADR-049, ADR-050 (each partially implemented
 already; see "Sequencing against in-flight ADRs" below).
@@ -65,6 +69,204 @@ assume:
 | ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
 | ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; `scan`'s candidate resolution already converges on the shared `workflows.artifact.execute._resolve_side_snapshot_impl` primitive that `execute_dump_request` itself calls internally (`resolve_dump_request` only validates evidence and builds a `ResolvedDumpRequest` — it never calls the primitive; `service_input_resolution` is only a delegating facade re-exporting this module's owner), but `dump`'s own real ELF/PE/Mach-O execution still runs the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C" for the `dump` half, not a new design |
+
+## Phase 2B-8B: consumer-cutover extension (accepted 2026-09-02)
+
+An external review of the codebase as of merge commit `aa78c37` (PR #1015)
+assessed this plan against ADR-063's own governing invariant rather than
+against each phase's individually-scoped acceptance criteria. Its findings
+and its six proposed sub-phases were reviewed and **accepted** on
+2026-09-02 (this PR) — they are now part of this plan's roadmap, not a
+standing proposal. A per-concept, machine-readable summary of "who is
+authoritative today, and what has to land before the legacy representation
+can be removed" now lives in
+`docs/_meta/one-semantic-pipeline-status.yaml`; update it in the same PR
+that changes a concept's status rather than letting this prose and that
+ledger drift apart the way ADR-063's own Phase 2/6 status paragraphs
+briefly did (see PR #1019).
+
+The review's conclusion: **the primitives this plan calls for — `Fact[T]`,
+`EntityId`/`ScopePath`, `SemanticIR`, `AnalysisPlan`, `RunOutcome`, sectioned
+storage, `ReportDocument` — are, in large part, built, but they have
+mostly been added *alongside* the legacy representations they were meant to
+replace, not yet made the sole authority those legacy representations funnel
+through.** That is a materially different claim from "phases remain," and
+the review's own headline numbers make the shape of the gap concrete:
+infrastructure/building-blocks roughly 75-80% built; actual consumer cutover
+onto the one semantic model roughly 35-45% done; legacy-representation
+removal under 15% done. Concretely, the review found:
+
+- `SemanticIR` is real, persisted, and (since Phase 6's third/fourth
+  slices) covers records/enums/typedefs/functions/variables/constants on
+  both header-AST backends — but no detector, verdict, or exit path reads
+  it; the checker still reads the legacy `AbiSnapshot.functions`/`types`/…
+  collections exclusively, with `semantic_ir` computed and stored beside
+  them. Two independently-mutable representations of the same entities
+  existing side by side is exactly the shape ADR-063's governing invariant
+  exists to forbid, even though each individual phase that produced this
+  state met its own stated acceptance criteria.
+- Phase 0/5 converted `Fact[T]` representation and populated the registry
+  (see `abicheck/model/fact_registry.py`'s `FACT_REGISTRY` for the current
+  count — this document doesn't freeze it; `KNOWN_UNCONVERTED_ELIGIBLE_FACTS`
+  is empty), but every migrated reader still resolves through
+  `resolved_fact_value(fact, legacy_default)` or an equivalent local
+  helper doing the identical present-or-default collapse — a review
+  finding on this PR named three: `diff_param_qualifiers._fact_bool`,
+  `diff_cxx_rules._fact_str_list`, `compare.surface_graph.fact_list`.
+  Each reads `.is_present`/`.value` directly rather than calling the
+  shared primitive, but all collapse `NotCollected`/`Unsupported`/`Failed`
+  back onto the same `False`/`None`/`[]` default the legacy field always
+  held, so 5B's inventory of what to migrate is every such
+  default-collapsing unwrap, not only literal `resolved_fact_value` call
+  sites. This was Phase 0's own explicit, correct acceptance bar
+  ("representation, not detector logic"), but it means no fact anywhere
+  has reached `FactLifecycle.CONSUMED` — a detector branching on
+  `FactStatus` at all remains unscheduled work, named as out of scope by
+  every phase that touches facts rather than owned by any of them.
+- `AnalysisPlan` (Phase 4) is deliberately a narrow, side-effect-free
+  preflight object by design (so `--dry-run` stays free of ambiguous
+  resolution) — but that means no single resolved runtime object exists
+  for real execution either; policy, pack, contract, and public-surface
+  state are each still (re)resolved independently downstream of it.
+- Phase 3's closure-walk-not-graph-traversal outcome (see ADR-063's own
+  D5 "Amendment" note and `docs/contribute/known-gaps.md`'s three-review-
+  round account) is a correct, reviewed decision given the demonstrated
+  hazards of reading a mergeable evidence graph for a value with exactly
+  one legitimate source — but it leaves D5's own text unfulfilled, and
+  `AbiSnapshot.surface_graph` genuinely has no production reader today.
+- `action/run.sh` still decodes raw process exit codes and its own shell
+  `case` logic into a verdict rather than reading `run_outcome` from the
+  report (Phase 7's own named, deliberate scope boundary — real, not an
+  oversight, but still a second live representation of the same outcome).
+- Sectioned storage (Phase 8) is real and is now the default write shape,
+  but most sections still carry the pre-existing JSON encoding for their
+  fields rather than a typed domain DTO — `semantic_ir` is the only
+  section actually promoted to one so far.
+- `buildsource/entity_identity.py`'s `CanonicalIdentity` (L5) remains a
+  second, deliberately out-of-scope identity system alongside `EntityId`
+  (Phase 2's own named scope boundary) — permanently duplicate under a
+  literal reading of "one concept, one representation," pending a bridge
+  or reclassification neither this plan nor ADR-063 currently schedules.
+
+**None of this contradicts any individual phase's own "Landed"/"Still not
+landed" accounting elsewhere in this plan** — every *landed slice* met its
+own stated acceptance criteria at the time it landed. (ADR-063 itself no
+longer carries this per-phase accounting at all: PR 0 removed its
+duplicated status block, leaving this plan's own per-phase sections as the
+primary source, plus the machine-readable ledger at
+`docs/_meta/one-semantic-pipeline-status.yaml` for the concept-level
+authority split — see the "Adopted sub-phases" table above for how the two
+relate.) That is narrower than "every phase is complete": Phase 3's
+own D5 text remains unfulfilled for the reason recorded in its "Amendment"
+note, Phase 6's acceptance-criteria fixture (a closure-parameterized
+template) is still unmet, and several later phases are explicitly still in
+progress — each says so plainly in its own status paragraph elsewhere in
+this document, and this review does not dispute any of those self-reports.
+The review's point is that the plan's phase
+list, read end to end, did not until this update contain a phase whose job
+is "make the new representation the *only* one a consumer can reach" for
+`SemanticIR`, `Fact` semantics, or a single resolved runtime context — only
+Phase 9 (selectors) and Phase 10 (title only, unimplemented) were framed
+around deletion/authority at all, and Phase 10 itself still documents that
+detector migration and legacy-projection retirement are separate future
+work it does not itself schedule. The six sub-phases below close that gap.
+
+**Adopted sub-phases** — each slots after the parent phase it extends in
+the numbering, and each starts at status `not_started`. This table is the
+status owner for the six sub-phases themselves; the ledger
+(`docs/_meta/one-semantic-pipeline-status.yaml`) tracks status one level
+up, per *concept* (`facts`/`identity`/`semantic_ir`/…), and each
+concept's own `removal_gate` names which sub-phase closes it — the two are
+complementary, not the same data twice. Update the `Status` column below
+when a first PR lands against a sub-phase:
+
+| Sub-phase | Status | Closes | One-line goal |
+|---|---|---|---|
+| **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
+| **4B — Resolved execution context** | not started | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme |
+| **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
+| **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
+| **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
+| **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+
+**Recommended sequencing:** 2B and 6B are
+the highest-value pair, in that order — 2B closes the last identity-provider
+gap 6B's own migration would otherwise trip on, and 6B is what actually
+starts retiring the legacy `AbiSnapshot.functions`/`types`/… read path
+rather than adding a further passenger beside it. The review's explicit
+recommendation is **not** to keep widening `SemanticIR`'s/`FactRegistry`'s
+producer coverage (more backends, more fields) until at least one full
+vertical slice — request → `SemanticIR` → a `FactStatus`-aware detector →
+`RunOutcome` → report, with the legacy read path for that one detector
+family actually removed — exists as a proof of the pattern the remaining
+phases would repeat. Widening producers without first proving a consumer
+cutover increases the number of representations to keep in sync faster than
+it retires any of them, which is precisely the failure mode ADR-063 exists
+to stop.
+
+**A mechanical definition of done for the whole ADR**, accepted as the
+target — evaluated once 6B (or an equivalent) has landed at least one real
+cohort, not before: the pipeline is complete only when (1) every front end builds one
+request type; (2) every real execution resolves one execution context;
+(3) every extractor's output reaches one canonical `SemanticIR` (Phase 6's
+own type — no new type is proposed here; `AbiSnapshot.semantic_ir` remains
+the persisted container); (4) the checker
+reads no backend-specific or legacy `AbiSnapshot` collection
+(`.functions`/`.types`/…) directly, only `SemanticIR` through the read
+index Phase 6B defines;
+(5) every detector consuming an availability-bearing fact explicitly
+branches on its `FactStatus`; (6) stable-entity matching goes through
+`EntityId`, with string identity as a named legacy fallback only;
+(7) public surface has one authoritative query, whatever that query's own
+final design turns out to be after Phase 3's amendment (see below);
+(8) release/artifact-set fan-out calls the same pair operation single
+`compare` does; (9) `RunOutcome -> ExitDecision` is the only path a
+consumer follows to a numeric exit code, never the reverse (exit code back
+to inferred semantics, except inside a documented legacy-report compat
+adapter); (10) the Action and every renderer read decisions instead of
+re-deriving them; (11) current writers emit canonical, typed section DTOs,
+with legacy shapes confined to import adapters; (12) an architecture/AST
+check finds no legacy reader of a migrated representation outside its
+compatibility layer; (13) live, legacy-flat, sectioned, and `ProjectSnapshot`
+inputs describing the same comparison agree on semantic digest, finding
+identity, verdict, assurance, gate, and `RunOutcome`; (14) the checks behind
+(12)/(13) run as **required**, not merely informative, CI gates — worth
+flagging because PR #1011 disabled required-status-check enforcement and
+post-merge verification on this repository, so today's AI-readiness/
+architecture gates are informative only and do not themselves block a
+regression from merging.
+
+**Phase 3 (D5) amendment — accepted:** rather than a further attempt to make
+`compute_public_surface()` read the mergeable evidence graph (three review
+rounds already found that unsafe for the reasons ADR-063's own D5
+"Amendment" note and `docs/contribute/known-gaps.md` record), formally split
+the concept D5 conflated into two: a **`SemanticReferenceIndex`**
+(deterministic, built from `SemanticIR`/snapshot declarations alone,
+authoritative for the public-surface closure walk — what
+`referenced_identifiers_by_node()` already computes today, just not yet
+sourced from `SemanticIR`) and the existing **evidence graph**
+(multi-producer, provenance/confidence-bearing, for explanation and L5
+analysis, never for a decision with exactly one legitimate source). This
+would formally close D5's own literal "traversal over one authoritative
+graph" text with a decision that matches what already shipped, rather than
+leaving that text describing a design three review rounds rejected.
+Recorded here as accepted; ADR-063's own D5 text (this same PR) carries
+the matching amendment note.
+
+**On this plan document's own size and structure:** this document has grown
+past fifteen thousand lines, carrying multi-round PR review history inline
+with each phase's design. The review's suggestion — move each phase's own
+review-round history to `docs/contribute/plans/history/one-semantic-pipeline/
+phase-N.md` and keep this document to "where are we, what blocks the next
+step, what's the next bounded PR" per phase, plus a small machine-readable
+authority ledger (`concepts: {primitive, producers, consumers, authority,
+removal_gate}` per concept, generated into a status table rather than
+hand-copied) — is a reasonable direction for a future documentation-only PR,
+but is not attempted in this update: it is a structural change to how this
+plan is maintained, not a status correction, and risks losing citations
+(commit hashes, PR numbers, specific Codex-round findings) that later
+phases' own text still points back to. Recorded here as a named, deferred
+proposal rather than silently acted on.
 
 ## Phases
 
@@ -12406,12 +12608,14 @@ shared machinery came out of the case-(a) half —
 `storage/fact_codec.apply_case_a_fact_backfill` (one navigator + a
 `CaseAFactRule` table, replacing Phase 0's three open-coded legacy-load
 corrections) and `decode_fact_with_legacy_presence` — plus fixes for five
-real merge-path mutation traps the conversions surfaced. Per-batch detail,
-including what this phase deliberately did **not** attempt (no detector
-branches on `FactStatus`; no codegen of the model field, the serialization
-pair, or suppression/report wiring), lives in
-[ADR-063](../adr/063-one-semantic-pipeline.md)'s own Status paragraph —
-not restated here, so the two cannot drift.
+real merge-path mutation traps the conversions surfaced. Per-batch commit
+detail is not separately tracked beyond this summary and the PR history for
+Phase 5's landing commits; what this phase deliberately did **not** attempt
+(no detector branches on `FactStatus`; no codegen of the model field, the
+serialization pair, or suppression/report wiring) is recorded here, in this
+paragraph, rather than in ADR-063 — its own duplicated per-phase status
+block was removed (PR 0, 2026-09-02) to keep this plan the single place
+that detail lives.
 
 **Goal.** A new fact requires declaring the model field plus one registry
 entry, not nine touched files spread across serialization, diff,
@@ -13618,12 +13822,17 @@ this slice attempted. An enum/typedef/variable can never itself be a
 template entity at all in the vocabulary this codebase's model tracks.
 
 **Still not landed, and therefore this phase is not complete:**
-PDB/BTF/CTF backends produce no IR at all (none of them populate
-`entity_id` yet -- this normalizer canonicalizes evidence a backend already
-resolved identity for, it does not resolve identity itself, so extending it
-to these backends is gated on giving each of them the Phase 2 `EntityId`
-treatment first, the identical prerequisite DWARF's own fifth slice just
-closed); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
+PDB/BTF/CTF backends produce no `SemanticIR` at all -- this normalizer
+canonicalizes evidence a backend already resolved identity for, it does not
+resolve identity itself, and no `normalize_header_ast`-style assembler
+exists yet for any of these three, nor have any of them received the
+prerequisite Phase 2 `EntityId` treatment (`entity_id` population) at all.
+DWARF has closed both gaps: Phase 2's fourteenth slice (2026-09-02) gave
+`dwarf_snapshot.py` a populated `entity_id` on `RecordType`/`EnumType`/
+`Function`/`Variable`/typedefs, and Phase 6's own fifth slice (2026-09-02,
+`dumper_elf_fallback._dwarf_semantic_ir`) then closed the `SemanticIR`
+assembly step on top of it -- the first non-header-AST producer to reach
+`SemanticIR`. `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
 fifth production assembler this phase's own Files list names) remain
 unwired for the same reason; and the phase's own acceptance criteria (a
 closure-parameterized template fixture) remain only PARTIALLY met --
@@ -14954,8 +15163,10 @@ this section's own Files subsection specifies, exercised in
 `tests/test_architecture_check.py` against a deliberately-reintroduced
 cyclic-import fixture (one test per denylisted module, plus the
 submodule-import and no-op-when-absent cases) to confirm it fails closed.
-See [ADR-063](../adr/063-one-semantic-pipeline.md)'s own Status paragraph
-for the user-facing summary — not restated here, so the two cannot drift.
+The paragraph above is this phase's own user-facing summary — ADR-063
+itself no longer restates per-phase detail (its duplicated status block was
+removed by PR 0, 2026-09-02); see this plan's own pointer paragraph at the
+top of the document for the current set of status sources.
 
 **Goal.** `suppression.py` and `reclassify.py` share one selector-matching
 primitive instead of two independent grammars kept in sync by hand, and
