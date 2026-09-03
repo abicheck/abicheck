@@ -618,6 +618,7 @@ _ALLOWED_RESOLVER_CALLERS = (
     "dwarf_snapshot.py",
     "extract/dwarf_scope.py",
     "extract/export_symbol_identity.py",
+    "extract/pdb_scope.py",  # ADR-063 Phase 6: same, from a flat CodeView name.
 )
 
 _RESOLVER_NAMES = frozenset(

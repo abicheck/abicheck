@@ -82,6 +82,7 @@ if TYPE_CHECKING:
 
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "ResolvedComparePair",
@@ -106,6 +107,26 @@ class ResolvedComparePair:
     end reporting on them) and each side's resolved
     :class:`~abicheck.service_compare_evidence.SideEvidence` (whose
     ``collect_mode`` drives the embedded build-source diff).
+
+    ``resolved_execution_context`` (One Semantic Pipeline PR 1, sub-phase 4B):
+    the :class:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext` built from this same request's own
+    :class:`~abicheck.workflows.plan.AnalysisPlan`
+    (:func:`resolve_compare_request` already calls ``AnalysisPlanner.resolve``
+    for its pre-flight check; this is that same, otherwise-discarded plan,
+    not a second resolution). Optional and additive — no existing consumer
+    reads it, and nothing here changes because of it — but every real
+    ``resolve_compare_request`` call now populates one from real production
+    inputs, closing 4B's own "no live caller wired yet" gap for the
+    ``compare`` path specifically. Carries no ``evaluation_config``/
+    ``compile_contexts`` yet: this seam resolves before ADR-049's D7
+    evaluation config exists for the native CLI (that resolution happens in
+    ``cli_compare_receipt.py``, one layer up, past a Click context this
+    shared pipeline does not have) and before any per-side
+    :class:`~abicheck.compile_context.CompileContext` is captured back out of
+    :func:`~abicheck.service_input_resolution.resolve_side_snapshot`'s own
+    internals — attaching either later, from whichever layer resolves it, is
+    follow-on work this field does not block.
     """
 
     old: AbiSnapshot
@@ -114,6 +135,7 @@ class ResolvedComparePair:
     new_fmt: str | None
     old_evidence: SideEvidence
     new_evidence: SideEvidence
+    resolved_execution_context: ResolvedExecutionContext | None = None
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:
@@ -302,7 +324,7 @@ def resolve_compare_request(
     # rather than discovering the gap mid-run or not at all. See
     # `abicheck.workflows.plan`'s own module docstring for exactly what this
     # does and does not check.
-    AnalysisPlanner.resolve(request)
+    plan = AnalysisPlanner.resolve(request)
     # validate() accepts lang case-insensitively; the ELF dump path does
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.
@@ -401,6 +423,8 @@ def resolve_compare_request(
     # gains nothing from the extraction threads.
     populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
     enforce_requested_depth(request.depth, (("old", old), ("new", new)))
+    from .workflows.resolved_execution_context import ResolvedExecutionContext
+
     return ResolvedComparePair(
         old=old,
         new=new,
@@ -408,6 +432,7 @@ def resolve_compare_request(
         new_fmt=new_fmt,
         old_evidence=old_evidence,
         new_evidence=new_evidence,
+        resolved_execution_context=ResolvedExecutionContext.from_plan(plan),
     )
 
 

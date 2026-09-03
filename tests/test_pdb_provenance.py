@@ -14,6 +14,7 @@ from pathlib import Path
 
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from abicheck.model import ScopeOrigin
+from abicheck.model.identity import EntityKind, Namespace, Record
 from abicheck.pdb_metadata import parse_pdb_debug_info
 from abicheck.pdb_model import model_types_from_dwarf_metadata
 from abicheck.pdb_parser import (
@@ -228,6 +229,54 @@ class TestModelBridge:
         assert by_name["Flags"].fields[0].is_bitfield is True
         assert by_name["Flags"].fields[0].bitfield_bits == 1
         assert by_name["U"].kind == "union" and by_name["U"].is_union is True
+
+    def test_bare_name_gets_a_scope_free_entity_id(self) -> None:
+        """ADR-063 Phase 6 (PDB EntityId slice): a top-level type gets a
+        real ``entity_id`` too, not just ``None``."""
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["Vec3"] = StructLayout(name="Vec3", byte_size=12)
+        meta.enums["Color"] = EnumInfo(
+            name="Color", underlying_byte_size=4, members={"RED": 0}
+        )
+        records, enums = model_types_from_dwarf_metadata(meta)
+        assert records[0].entity_id is not None
+        assert records[0].entity_id.kind is EntityKind.TYPE
+        assert records[0].entity_id.leaf_name == "Vec3"
+        assert records[0].entity_id.scope == ()
+        assert enums[0].entity_id is not None
+        assert enums[0].entity_id.kind is EntityKind.ENUM
+        assert enums[0].entity_id.leaf_name == "Color"
+
+    def test_namespaced_name_gets_a_namespace_scope_segment(self) -> None:
+        """CodeView's own flat, already-``"::"``-qualified name is the only
+        evidence available -- nothing else in this PDB says "NS" is a
+        namespace rather than a class, so it defaults to Namespace (see
+        extract.pdb_scope's own docstring for why)."""
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["NS::Vec3"] = StructLayout(name="NS::Vec3", byte_size=12)
+        records, _ = model_types_from_dwarf_metadata(meta)
+        assert records[0].entity_id.scope == (Namespace("NS"),)
+        assert records[0].entity_id.leaf_name == "Vec3"
+
+    def test_nested_type_gets_a_record_scope_segment(self) -> None:
+        """When the enclosing name IS itself a separately-recorded struct
+        in this same PDB, the disambiguation heuristic correctly resolves
+        it to a Record segment instead of a Namespace one."""
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["Outer"] = StructLayout(name="Outer", byte_size=4)
+        meta.structs["Outer::Inner"] = StructLayout(name="Outer::Inner", byte_size=8)
+        records, _ = model_types_from_dwarf_metadata(meta)
+        by_name = {r.name: r for r in records}
+        assert by_name["Outer::Inner"].entity_id.scope == (Record("Outer", "public"),)
+        assert by_name["Outer"].entity_id.scope == ()
+
+    def test_distinct_qualified_names_never_collide_on_entity_id(self) -> None:
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["A::Widget"] = StructLayout(name="A::Widget", byte_size=4)
+        meta.structs["B::Widget"] = StructLayout(name="B::Widget", byte_size=4)
+        records, _ = model_types_from_dwarf_metadata(meta)
+        ids = {r.entity_id for r in records}
+        assert len(ids) == 2
 
 
 class TestHeaderScopeFallback:
@@ -462,3 +511,13 @@ class TestDumpPeFallbackBuildsPdbTypes:
         # we confirm the type reached the model so provenance is possible.
         apply_provenance(snap, public_headers=[hdr], public_header_dirs=None)
         assert names["Widget"].origin == _SO.PUBLIC_HEADER
+        # ADR-063 Phase 6 (PDB EntityId slice): the real production call
+        # chain also populates semantic_ir for this type, through the
+        # identical entity_id it was just given.
+        assert snap.semantic_ir is not None
+        widget_id = names["Widget"].entity_id
+        assert widget_id is not None
+        (occ_id,) = snap.semantic_ir.occurrences_for(widget_id)
+        entity = snap.semantic_ir.occurrences[occ_id]
+        assert entity.canonical_spelling.value == "Widget"
+        assert entity.producer == "pdb"
