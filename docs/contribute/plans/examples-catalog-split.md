@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded, and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phases 3-6 tracked in the table below, not started.
+**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded, and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 6 implemented; Phases 3 and 5 in progress; Phase 4 not started. See the table below for per-phase detail.
 
 ## Problem
 

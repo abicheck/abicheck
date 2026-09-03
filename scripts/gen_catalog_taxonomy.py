@@ -129,7 +129,10 @@ RELATED_RULES: dict[str, list[str]] = {
     ],
     "case126_sycl_device_impl_ptr": ["public-class-representation-changed"],
     # -- oneMKL case study --
-    "case112_lp64_ilp64": ["public-integer-model-width-changed"],
+    "case112_lp64_ilp64": [
+        "public-integer-model-width-changed",
+        "typedef-underlying-changed",
+    ],
     # -- Linux kernel case studies --
     "case121_kernel_btf_struct_field_added": ["embedded-type-size-increased"],
     "case175_kabi_crc_changed": ["symbol-type-signature-hash-changed"],

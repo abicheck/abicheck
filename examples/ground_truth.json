@@ -4311,7 +4311,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
-    "public-integer-model-width-changed"
+    "public-integer-model-width-changed",
+    "typedef-underlying-changed"
    ],
    "rule_slug": null,
    "variant_of": null

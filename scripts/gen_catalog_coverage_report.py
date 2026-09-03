@@ -68,28 +68,42 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     for case_id, entry in rules.items():
         slug_cases.setdefault(entry["rule_slug"], []).append(case_id)  # type: ignore[arg-type]
 
+    # A family's canonical case(s) are those with variant_of=None; everything
+    # else in the family is a variant case. Reported separately -- a family
+    # with 2 cases has exactly 1 variant case, not "more than one variant".
     variant_families = {
         slug: cases for slug, cases in slug_cases.items() if len(cases) > 1
     }
-    variant_case_count = sum(len(cases) for cases in variant_families.values())
+    variant_case_ids = [
+        case_id
+        for cases in variant_families.values()
+        for case_id in cases
+        if rules[case_id]["variant_of"] is not None
+    ]
 
     lines = [
         "## Rule coverage",
         "",
         f"- **{len(slug_cases)} distinct compatibility rules** demonstrated "
         f"across **{len(rules)} rule-entity cases**.",
-        f"- **{len(variant_families)} rules** have more than one demonstrated "
-        f"variant ({variant_case_count} cases total) -- these are robustness "
+        f"- **{len(variant_families)} of those rules** have a demonstrated "
+        f"variant beyond their canonical case ({len(variant_case_ids)} "
+        "variant cases total, one per family below) -- these are robustness "
         "demonstrations of an already-counted rule, not additional rules.",
         f"- **{len(slug_cases) - len(variant_families)} rules** have exactly "
-        "one demonstrated case so far.",
+        "one demonstrated case so far, with no variant yet.",
         "",
-        "| Rule | Cases |",
-        "|---|---|",
+        "| Rule | Canonical case | Variant case(s) |",
+        "|---|---|---|",
     ]
     for slug in sorted(variant_families):
         cases = sorted(variant_families[slug])
-        lines.append(f"| `{slug}` | {', '.join(f'`{c}`' for c in cases)} |")
+        canonical = [c for c in cases if rules[c]["variant_of"] is None]
+        variants = [c for c in cases if rules[c]["variant_of"] is not None]
+        lines.append(
+            f"| `{slug}` | {', '.join(f'`{c}`' for c in canonical)} | "
+            f"{', '.join(f'`{c}`' for c in variants)} |"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -139,18 +153,35 @@ def _ecosystem_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
 
 
 def _workflow_coverage() -> str:
+    workflows_dir = example_catalog.EXAMPLES_DIR / "workflows"
+    workflows = (
+        sorted(p.name for p in workflows_dir.iterdir() if p.is_dir())
+        if workflows_dir.is_dir()
+        else []
+    )
+    header = (
+        f"**{len(workflows)} workflow example{'' if len(workflows) == 1 else 's'}** "
+        "so far, out of the 8 task-oriented workflows Phase 5 of the "
+        "examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) "
+        "targets: compare one library, audit a release, multi-library "
+        "project, evidence depth, build/source evidence, Python API, "
+        "suppressions, GitHub Actions."
+    )
+    rows = [f"| `{name}` |" for name in workflows] or ["| _(none yet)_ |"]
     return "\n".join(
         [
             "## Workflow coverage",
             "",
-            "**0 workflow examples** -- pending Phase 5 of the examples/catalog "
-            "split (`docs/contribute/plans/examples-catalog-split.md`), which "
-            "rebuilds `examples/` as a small, curated, task-oriented set "
-            "(compare one library, audit a release, multi-library project, "
-            "evidence depth, build/source evidence, Python API, suppressions, "
-            "GitHub Actions). Reported here as pending rather than omitted, "
-            "so this page states all five dimensions the plan tracks, not "
-            "just the ones already implemented.",
+            header,
+            "",
+            "| Workflow |",
+            "|---|",
+            *rows,
+            "",
+            "Reported here as its real, current count (derived from "
+            "`examples/workflows/`'s own subdirectories) rather than a "
+            "static placeholder, so this page states all five dimensions "
+            "the plan tracks, not just the ones already implemented.",
             "",
         ]
     )

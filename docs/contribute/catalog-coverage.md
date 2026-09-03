@@ -7,18 +7,18 @@ Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the ca
 ## Rule coverage
 
 - **160 distinct compatibility rules** demonstrated across **167 rule-entity cases**.
-- **7 rules** have more than one demonstrated variant (14 cases total) -- these are robustness demonstrations of an already-counted rule, not additional rules.
-- **153 rules** have exactly one demonstrated case so far.
+- **7 of those rules** have a demonstrated variant beyond their canonical case (7 variant cases total, one per family below) -- these are robustness demonstrations of an already-counted rule, not additional rules.
+- **153 rules** have exactly one demonstrated case so far, with no variant yet.
 
-| Rule | Cases |
-|---|---|
-| `embedded-type-size-increased` | `case07_struct_layout`, `case14_cpp_class_size` |
-| `enum-member-value-changed` | `case08_enum_value_change`, `case20_enum_member_value_changed` |
-| `executable-stack-flag-changed` | `case136_executable_stack_removed`, `case49_executable_stack` |
-| `exported-function-removed` | `case01_symbol_removal`, `case12_function_removed` |
-| `inline-function-outlined` | `case16_inline_to_non_inline`, `case47_inline_to_outlined` |
-| `public-api-gains-internal-dependency` | `case160_public_api_internal_dep_added`, `case190_public_inline_function_references_internal_constant` |
-| `symbol-version-node-removed` | `case139_symbol_version_node_removed`, `case65_symbol_version_removed` |
+| Rule | Canonical case | Variant case(s) |
+|---|---|---|
+| `embedded-type-size-increased` | `case07_struct_layout` | `case14_cpp_class_size` |
+| `enum-member-value-changed` | `case08_enum_value_change` | `case20_enum_member_value_changed` |
+| `executable-stack-flag-changed` | `case49_executable_stack` | `case136_executable_stack_removed` |
+| `exported-function-removed` | `case01_symbol_removal` | `case12_function_removed` |
+| `inline-function-outlined` | `case16_inline_to_non_inline` | `case47_inline_to_outlined` |
+| `public-api-gains-internal-dependency` | `case160_public_api_internal_dep_added` | `case190_public_inline_function_references_internal_constant` |
+| `symbol-version-node-removed` | `case65_symbol_version_removed` | `case139_symbol_version_node_removed` |
 
 ## Scenario coverage
 
@@ -44,4 +44,10 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 ## Workflow coverage
 
-**0 workflow examples** -- pending Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`), which rebuilds `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Reported here as pending rather than omitted, so this page states all five dimensions the plan tracks, not just the ones already implemented.
+**1 workflow example** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
+
+| Workflow |
+|---|
+| `compare-release` |
+
+Reported here as its real, current count (derived from `examples/workflows/`'s own subdirectories) rather than a static placeholder, so this page states all five dimensions the plan tracks, not just the ones already implemented.
