@@ -12650,6 +12650,28 @@ cutover, `FactStatus`-aware detectors, and the rest) — this slice closes
 the "one resolved context type exists, fully shaped, and is tested" step
 for real, not consumer migration.
 
+**"PR 2" (first slice) landed the query facade a consumer migration
+converges on, not the migration itself.** `model/semantic_ir_index.py`'s
+`SemanticIRIndex` wraps a `SemanticIR` and answers exactly the lookups the
+review's Phase 6B sketch names as prerequisite — `entity(EntityId)`,
+`occurrences_for(EntityId)`, `entities_of_kind(EntityKind)` (with
+`functions()`/`variables()`/`records()` convenience filters over it), and
+`fact(EntityId, fact_name)`. `references(entity)` — the review's sixth
+named query — is deliberately not implemented here: it names a
+graph-shaped traversal that belongs with the public-surface reference
+index this same plan's Phase 3/D5 amendment governs, and adding a second,
+ad hoc answer to "what does this reference" here would preempt that design
+rather than serve it. Same posture as `ResolvedExecutionContext`: pure
+composition over `SemanticIR.canonical_entities()`/`SemanticIR.
+occurrences_for()`, no re-derivation, its own primitive-level test suite
+(`tests/test_semantic_ir_index.py`), and **no live caller** — no detector
+in `diff_symbols.py`/`diff_types.py` reads through it yet. The actual
+consumer cutover (routing a detector family's matching through this index
+instead of the legacy `AbiSnapshot.functions`/`variables`/`types`
+projections, and proving the two agree via a parity test before any read
+path is removed) is still the next, larger, not-yet-attempted step this
+paragraph's own "still open" list already named.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
