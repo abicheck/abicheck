@@ -4194,6 +4194,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compat-addition",
     "exported-function-removed",
     "exported-type-removed"
    ],
@@ -4217,6 +4218,7 @@
    "related_rules": [
     "exported-function-removed",
     "exported-type-removed",
+    "var-removed",
     "virtual-dispatch-contract-removed"
    ],
    "rule_slug": null,
@@ -6808,6 +6810,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compat-addition",
     "exported-function-removed",
     "exported-type-removed"
    ],
@@ -7061,6 +7064,7 @@
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
    "related_rules": [
+    "compat-addition",
     "exported-function-removed",
     "symbol-source-owner-changed"
    ],

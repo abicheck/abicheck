@@ -103,6 +103,7 @@ LINUX_KERNEL_CASE_STUDIES = {121, 175, 176}
 RELATED_RULES: dict[str, list[str]] = {
     # -- oneTBB case studies --
     "case78_task_arena_attach_tag": [
+        "compat-addition",
         "exported-function-removed",
         "exported-type-removed",
     ],
@@ -112,12 +113,14 @@ RELATED_RULES: dict[str, list[str]] = {
         "type-field-added-compatible",
     ],
     "case107_task_scheduler_init_removed": [
+        "compat-addition",
         "exported-function-removed",
         "exported-type-removed",
     ],
     "case108_task_class_removed": [
         "exported-function-removed",
         "exported-type-removed",
+        "var-removed",
         "virtual-dispatch-contract-removed",
     ],
     "case109_flow_graph_policy_renames": [
@@ -152,6 +155,7 @@ RELATED_RULES: dict[str, list[str]] = {
     "case90_bundle_intra_dep_removed": ["exported-function-removed"],
     "case91_bundle_intra_signature_drift": ["param-type-change", "return-type"],
     "case92_bundle_provider_changed": [
+        "compat-addition",
         "exported-function-removed",
         "symbol-source-owner-changed",
     ],
