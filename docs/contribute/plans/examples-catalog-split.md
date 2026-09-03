@@ -36,14 +36,24 @@ separate.
 
 ## Non-goals for this change
 
-Per the phased migration below, this change is deliberately **Phase 1 (full)
-plus Phase 2's rule/variant classification pass** — additive metadata only:
+This change has grown beyond its original Phase 1+2-only scope (see the
+per-phase status table below: Phase 1 and Phase 2 are complete, Phase 6 is
+implemented, and Phases 3 and 5 have real, in-progress work), but the
+following remain true regardless of how far any individual phase has
+progressed:
 
-- No `examples/case*/` directory is moved, renamed, or deleted.
+- No `examples/case*/` directory is moved, renamed, or deleted (Phase 4,
+  not started).
 - No case is removed from `ground_truth.json["verdicts"]` or from any gate
-  that counts cases.
-- `examples/` is not yet split into a curated user-facing tree and a
-  separate `catalog/` tree (Phases 4-5).
+  that counts cases — every change so far is either new metadata
+  (`taxonomy`), a new report (`catalog-coverage.md`), a new path resolver
+  with unchanged behavior (`example_catalog.py`), or a new, independent
+  `examples/workflows/` tree that doesn't touch the `caseNN_*` calibration
+  catalog at all.
+- `examples/case*/` itself is not yet physically split into a curated
+  user-facing tree and a separate `catalog/` tree — that's still Phase 4,
+  and `examples/workflows/`'s curated examples (Phase 5) are additive
+  alongside it, not a replacement for it.
 
 ## What Phase 1 implements
 
