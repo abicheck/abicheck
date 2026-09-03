@@ -38,7 +38,13 @@ def _minimal_dict(**overrides: object) -> dict:
         "variables": [],
         "types": [],
         "enums": [],
-        "typedefs": [],
+        # A mapping, matching AbiSnapshot.typedefs' real dict[str, str] type
+        # (and every real schema fixture, v1.json included) -- Codex review,
+        # PR #1044: storage.sparse_section_codec.DeclarationsSection now
+        # validates this field's wire shape, so a `[]` placeholder here (the
+        # wrong type, tolerated only because nothing previously checked it)
+        # fails to import rather than silently round-tripping.
+        "typedefs": {},
     }
     base.update(overrides)
     return base
@@ -62,7 +68,8 @@ def _make_snap(**kwargs: object) -> AbiSnapshot:
         "variables": [],
         "types": [],
         "enums": [],
-        "typedefs": [],
+        # See _minimal_dict's identical note just above.
+        "typedefs": {},
     }
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
