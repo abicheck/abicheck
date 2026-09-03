@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded, and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phases 3-6 not started.
+**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded, and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phases 3-6 tracked in the table below, not started.
 
 ## Problem
 
@@ -166,23 +166,21 @@ each entry.
 
 ## Known gaps / remaining phases
 
-Not attempted in this change (from the original six-phase migration):
+Not attempted in this change (from the original six-phase migration). Each
+row is tracked independently — update its Status cell in the same PR that
+makes progress on it, rather than leaving this table to drift the way
+`related_rules` did before this pass:
 
-- **Phase 3** — make every path resolver in the codebase
-  (`benchmark_comparison.py`, `gen_examples_docs.py`,
-  `check_ai_readiness.py`, the various validators) go through a declarative
-  `catalog.resolve(case_id)` rather than a hard-coded `EXAMPLES_DIR /
-  case_name`, so Phase 4 doesn't require touching every consumer at once.
-- **Phase 4** — the physical directory split (`catalog/rules/`,
-  `catalog/patterns/`, `catalog/case-studies/`, `catalog/capabilities/`),
-  with redirects for existing doc URLs.
-- **Phase 5** — rebuild `examples/` as a small, curated, task-oriented set
-  (compare one library, audit a release, multi-library project, evidence
-  depth, build/source evidence, Python API, suppressions, GitHub Actions).
-- **Phase 6** — split benchmark/coverage reporting into separate rule,
-  variant, scenario, ecosystem, and workflow dimensions instead of one flat
-  case count, per this plan's "stop reporting all cases as semantically
-  equal" motivation above.
+| Phase | Status | Depends on | Description |
+|---|---|---|---|
+| 3 | Not started | — | Make every path resolver in the codebase (`benchmark_comparison.py`, `gen_examples_docs.py`, `check_ai_readiness.py`, the various validators) go through a declarative `catalog.resolve(case_id)` rather than a hard-coded `EXAMPLES_DIR / case_name`, so Phase 4 doesn't require touching every consumer at once. |
+| 4 | Not started | Phase 3 | The physical directory split (`catalog/rules/`, `catalog/patterns/`, `catalog/case-studies/`, `catalog/capabilities/`), with redirects for existing doc URLs. |
+| 5 | Not started | — | Rebuild `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Independent of Phase 4 — the curated set and the calibration catalog are different trees regardless of which one physically moves first. |
+| 6 | Not started | — | Split benchmark/coverage reporting into separate rule, variant, scenario, ecosystem, and workflow dimensions instead of one flat case count, per this plan's "stop reporting all cases as semantically equal" motivation above. Depends on Phase 2's `related_rules`/`rule_slug` data (done) but not on Phases 3-5. |
+
+Each phase is its own PR against this plan, not a single follow-up commit —
+Phase 4 in particular touches every consumer that currently assumes
+`examples/caseNN_*` and needs its own validated, reviewable diff.
 
 ## Files & surfaces
 
