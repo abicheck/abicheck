@@ -485,6 +485,22 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
     variant can carry `[[deprecated]]` too, and ``_diff_unions`` never
     checks ``deprecated`` at all.
+
+    **ADR-063 Phase 5B investigated, and deliberately did NOT convert, this
+    detector (and its three ``deprecated`` siblings plus ``EnumType.
+    is_scoped``) to a direct ``compare_facts(f_old.deprecated_fact, ...)``
+    read.** A real conversion attempt regressed a genuine end-to-end test:
+    a legacy pre-qualification-fix ``--ast-frontend hybrid`` snapshot's
+    JSON carries no per-declaration ``deprecated_fact`` key, always
+    serializes *some* legacy ``deprecated`` value (no "omitted" concept),
+    and the legacy-load correction deliberately does not force such a
+    snapshot's reconstructed fact to ``NOT_COLLECTED`` for a hybrid
+    producer -- so a direct ``Fact[T]`` read cannot recover the one
+    ambiguity ``AbiSnapshot.fact_provenance`` (this detector's actual gate,
+    a separate G28-Phase-3 mechanism) exists to resolve for that shape. See
+    ``docs/contribute/plans/one-semantic-pipeline.md``'s 5B section for the
+    full trace, recorded per this repo's "say so explicitly and record the
+    gap" convention.
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
