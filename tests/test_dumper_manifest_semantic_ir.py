@@ -275,3 +275,81 @@ def test_per_tu_local_declaration_pair_survives_across_tus(tmp_path: Path) -> No
     (entity_id,) = entity_ids
     occurrences = merged.semantic_ir.occurrences_for(entity_id)
     assert len(occurrences) == 4
+
+
+def test_externally_linked_proto_and_def_shared_across_tus_stay_distinct(
+    tmp_path: Path,
+) -> None:
+    """Codex review, PR #1024, fresh evidence beyond the prior same-TU-only
+    case: when multiple TUs each ``#include`` the identical shared header
+    containing BOTH an externally-linked prototype and its own definition
+    (``int helper();`` followed by ``int helper() { ... }``), every
+    fragment contributes the identical two-location set for the one
+    external ``EntityId``. That must NOT make
+    :func:`~abicheck.extract.manifest_semantic_ir._ambiguous_by_source_location`
+    fire (there is no genuine cross-TU *split* -- every fragment agrees),
+    but blindly blanking the disambiguator for a "non-ambiguous" entity
+    (an earlier revision's bug) silently collapsed the prototype and the
+    definition -- two distinct, real declarations -- into a single
+    occurrence. This is the general fix: retain one occurrence per
+    distinct location while still deduplicating the identical
+    location-set redundantly observed by each including TU."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("int helper();\nint helper() { return 1; }\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    helper_fns = [f for f in merged.functions if f.name == "helper"]
+    entity_ids = {fn.entity_id for fn in helper_fns}
+    assert None not in entity_ids
+    (entity_id,) = entity_ids
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 2, (
+        "the prototype and its definition are two distinct real "
+        "declarations and must not collapse merely because every "
+        "including TU observes the identical pair"
+    )
+    disambiguators = {occ.disambiguator for occ in occurrences}
+    assert len(disambiguators) == 2
+    assert all(str(shared_h) in d for d in disambiguators)
+    assert not any(
+        d.startswith("tu_a:") or d.startswith("tu_b:") for d in disambiguators
+    ), (
+        "an externally-linked entity must never be TU-qualified -- only "
+        "the locally-linked branch combines with tu_name"
+    )
+
+
+def test_externally_linked_proto_and_def_redundantly_seen_by_a_third_tu(
+    tmp_path: Path,
+) -> None:
+    """General-property extension of the case above: a THIRD TU
+    redundantly seeing the identical shared proto+def pair must still
+    collapse the redundant observation while keeping both real
+    declarations -- 2 occurrences total, never 3 (one collapsed away
+    entirely) and never growing per additional redundant TU."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("int helper3();\nint helper3() { return 1; }\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h), _tu("tu_c", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    helper_fns = [f for f in merged.functions if f.name == "helper3"]
+    entity_ids = {fn.entity_id for fn in helper_fns}
+    assert None not in entity_ids
+    (entity_id,) = entity_ids
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 2
+    disambiguators = {occ.disambiguator for occ in occurrences}
+    assert len(disambiguators) == 2

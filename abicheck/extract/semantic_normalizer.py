@@ -134,49 +134,44 @@ non-present base fact) — recording it as a real, present spelling instead
 of a failure would have also silently misrepresented the placeholder text
 itself as canonical.
 
-**Known, accepted limitation for a manifest (``--dump-manifest``) dump
-(Codex review, PR #1001; unchanged by the third and fourth slices'
-additions).** ``dumper_manifest.resolve_header_ast_result`` calls this
-function once, on ``merge_fragments()``'s *already-merged*
-``functions``/``variables``/``types``/``enums``/``typedefs_qualified``/
-``typedef_entity_ids``/``constants``/``constant_entity_ids`` — and
-``tu_merge.merge_fragments`` itself already
-collapses same-identity declarations across translation units into one
-representative entry before this normalizer ever sees them ("a merged
-entity carries exactly one ``source_location``", that function's own
-docstring). So a real ODR-duplicate/incomplete-vs-complete-declaration
-pair spread across two TUs never reaches ``SemanticIR.occurrences`` as two
-occurrences, even though that is exactly the shape ``OccurrenceId``-keying
-exists to preserve (see ``model/semantic_ir.py``'s own docstring) — this
-normalizer produces no *more* loss than the legacy
-``functions``/``variables``/``types``/``enums`` fields already have for a
-manifest dump (all read from the identical, already-merged lists), but it
-also does not yet realize the IR's fuller multi-occurrence potential for
-that case.
-
-**Investigated, not merely unattempted — and a first analysis of it here
-was itself corrected by review (Codex, PR #1024, fresh evidence).** The
-obvious close (normalize each ``TuFragment`` before ``merge_fragments``
-collapses identities, keyed by a real TU disambiguator) is not a no-op
-merely because two occurrences project to byte-identical ``CanonicalEntity``
-payloads — that conflates the payload with the occurrence, and
-``SemanticIR.occurrences`` exists precisely to preserve occurrence COUNT
-independent of payload equality (``model/semantic_ir.py``'s own "keyed by
-``OccurrenceId``" paragraph). The real, still-open blocker is sharper:
-nothing today distinguishes a genuine cross-TU declaration split from a
-declaration merely observed redundantly because many TUs ``#include`` the
-same header — both fold through the identical ``tu_merge.merge_fragments``
-machinery, and naively disambiguating every occurrence by its originating
-TU would multiply the (far more common) shared-header case into noise
-rather than fix the (rare) genuine-split case. Closing this needs
-``tu_merge.py`` to expose a new per-entity trivial-vs-genuine-variance
-signal it does not have today — see
-``docs/contribute/plans/one-semantic-pipeline.md``'s Phase 6 section for
-the full analysis, including why the seemingly-narrower "disambiguate only
-on raw candidate inequality" alternative isn't obviously correct either.
-A single-header (non-manifest) dump is unaffected: there is only one
+**Formerly a known, accepted limitation for a manifest (``--dump-manifest``)
+dump (Codex review, PR #1001) — closed by ``extract.manifest_semantic_ir``
+(ADR-063 Phase 6, multi-TU slice; Codex review, PR #1024, fresh evidence).**
+This function itself is unchanged for that path and still only ever sees
+``merge_fragments()``'s *already-merged*, single-``source_location``-per-
+entity output when called directly (the legacy single-TU branch of
+``dumper_manifest.resolve_header_ast_result`` still calls it exactly this
+way, and remains correctly unaffected by the gap below — there is only one
 translation unit, so there is nothing for ``merge_fragments`` to collapse
-ahead of this function in the first place.
+ahead of this function in the first place). But for a REAL manifest
+(``dump_manifest is not None``), ``resolve_header_ast_result`` no longer
+routes through this function's own merged-input call at all:
+``dumper_manifest.run_tu_loop`` now overwrites ``MergedTuFragments.
+semantic_ir`` with ``extract.manifest_semantic_ir.manifest_semantic_ir()``'s
+own result, computed from the RAW, pre-merge ``TuFragment``s instead —
+closing the exact gap this paragraph used to describe as open. The
+"Investigated, not merely unattempted" analysis directly below records why
+the seemingly-obvious fix wasn't a plain no-op and what its real, once-open
+blocker turned out to be; ``extract/manifest_semantic_ir.py``'s own module
+docstring is the canonical, up-to-date account of the two disambiguation
+signals that closed it (cross-fragment source-location variance, and
+per-fragment TU-local-linkage classification) — read it first for any
+follow-up work in this area rather than treating the historical record
+below as still describing today's behavior.
+
+**Investigated, not merely unattempted — historical record only, kept for
+why the fix landed where it did rather than here.** A first analysis of the
+gap (Codex, PR #1024) argued the obvious close was blocked because nothing
+distinguished a genuine cross-TU declaration split from a declaration
+merely observed redundantly via a shared ``#include`` — and concluded that
+closing it would need ``tu_merge.py`` itself to expose a new signal. That
+conclusion turned out to be unnecessary once corrected: the actual fix
+(``extract/manifest_semantic_ir.py``) never touches ``tu_merge.py`` at all,
+comparing each raw fragment's own *complete* per-entity location set
+directly, before ``merge_fragments`` ever runs. See ``docs/contribute/
+plans/one-semantic-pipeline.md``'s Phase 6 section for the full analysis,
+including why the seemingly-narrower "disambiguate only on raw candidate
+inequality" alternative wasn't obviously correct either.
 
 Backend-agnostic by construction: ``dumper_castxml.py`` and
 ``dumper_clang.py`` already expose the identical

@@ -103,9 +103,9 @@ from typing import Any
 from .dumper_clang_streaming import suppress_streaming_prune
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
-from .model.identity import EntityKind
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
+from .occurrence_dependency_scope import occurrence_survives_dependency_scope
 from .provenance import is_dependency_header
 from .type_reachability import (
     _NON_PUBLIC_ORIGINS,
@@ -1133,6 +1133,7 @@ def _scoped_semantic_ir(
     kept_enums: list[EnumType],
     kept_functions: list[Function],
     kept_variables: list[Variable],
+    header_roots: Sequence[Path | str] | None = None,
 ) -> tuple[SemanticIR | None, dict[str, str]]:
     """The ``SemanticIR``/``semantic_ir_conflicts`` counterpart of this
     module's flat functions/variables/types/enums filtering (ADR-063 Phase
@@ -1154,7 +1155,7 @@ def _scoped_semantic_ir(
     this function at all (the legacy ``typedefs``/``typedefs_qualified``
     fields stay unfiltered for the identical reason), so a typedef
     occurrence would be inconsistent with the *legacy* fields if dropped
-    here.
+    here. Also see :mod:`~abicheck.occurrence_dependency_scope` for a second, per-occurrence check applied here (Codex review, PR #1024).
 
     Every ``semantic_ir_conflicts`` entry belonging to an excluded
     occurrence is dropped too (Codex review, PR #1001, on an earlier
@@ -1183,16 +1184,7 @@ def _scoped_semantic_ir(
     kept_occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     excluded_occurrences: list[tuple[OccurrenceId, CanonicalEntity]] = []
     for occ_id, entity in semantic_ir.occurrences.items():
-        if (
-            occ_id.entity_id.kind
-            not in (
-                EntityKind.TYPE,
-                EntityKind.ENUM,
-                EntityKind.FUNCTION,
-                EntityKind.VARIABLE,
-            )
-            or occ_id.entity_id in kept_entity_ids
-        ):
+        if occurrence_survives_dependency_scope(occ_id, kept_entity_ids, header_roots):
             kept_occurrences[occ_id] = entity
         else:
             excluded_occurrences.append((occ_id, entity))
@@ -1358,6 +1350,7 @@ def scope_snapshot_excluding_dependencies(
         kept_enums,
         kept_functions,
         kept_variables,
+        header_roots,
     )
     return dataclasses.replace(
         snap,

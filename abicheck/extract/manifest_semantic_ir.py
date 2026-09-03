@@ -159,7 +159,11 @@ def _is_locally_linked_function(fn: Function) -> bool:
 
 
 def _is_locally_linked_variable(var: Variable) -> bool:
-    """See ``tu_merge._variable_key``'s own docstring."""
+    """See ``tu_merge._variable_key``'s own docstring -- including the
+    plain-C ``var.mangled == var.name`` fallback branch, closed by
+    ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review)."""
+    if var.mangled == var.name:
+        return var.is_static
     return _has_local_linkage_mangling(var.mangled)
 
 
@@ -207,7 +211,23 @@ def _fragment_locations(fragment: TuFragment) -> dict[EntityId, set[str]]:
     return locations
 
 
-def _ambiguous_by_source_location(fragments: Sequence[TuFragment]) -> set[EntityId]:
+def _per_entity_location_sets(
+    fragments: Sequence[TuFragment],
+) -> dict[EntityId, set[frozenset[str]]]:
+    """Every ``EntityId``'s own set of per-fragment *complete* location
+    sets, shared by both :func:`_ambiguous_by_source_location` and
+    :func:`_multi_location_non_ambiguous_entity_ids` -- one pass over the
+    fragments, read two different ways rather than recomputed twice."""
+    per_entity_fragment_sets: dict[EntityId, set[frozenset[str]]] = defaultdict(set)
+    for fragment in fragments:
+        for entity_id, locs in _fragment_locations(fragment).items():
+            per_entity_fragment_sets[entity_id].add(frozenset(locs))
+    return per_entity_fragment_sets
+
+
+def _ambiguous_by_source_location(
+    per_entity_fragment_sets: dict[EntityId, set[frozenset[str]]],
+) -> set[EntityId]:
     """Every ``EntityId`` whose declarations span more than one *distinct*
     per-fragment location-set -- the only entities a genuine cross-TU
     split could hide behind. Compares each fragment's own *complete* set
@@ -222,10 +242,6 @@ def _ambiguous_by_source_location(fragments: Sequence[TuFragment]) -> set[Entity
     case, whether from one or several locations each) are also not
     ambiguous -- only fragments whose own location-sets genuinely differ
     from each other are."""
-    per_entity_fragment_sets: dict[EntityId, set[frozenset[str]]] = defaultdict(set)
-    for fragment in fragments:
-        for entity_id, locs in _fragment_locations(fragment).items():
-            per_entity_fragment_sets[entity_id].add(frozenset(locs))
     return {
         entity_id
         for entity_id, fragment_sets in per_entity_fragment_sets.items()
@@ -233,9 +249,46 @@ def _ambiguous_by_source_location(fragments: Sequence[TuFragment]) -> set[Entity
     }
 
 
+def _multi_location_non_ambiguous_entity_ids(
+    per_entity_fragment_sets: dict[EntityId, set[frozenset[str]]],
+) -> set[EntityId]:
+    """Every ``EntityId`` that is NOT cross-fragment ambiguous (every
+    fragment that observes it agrees on the identical, single location
+    set) but whose one agreed-upon location set itself has MORE THAN ONE
+    member -- e.g. an externally-linked prototype immediately followed by
+    its own definition, both declared together in one shared header that
+    every including TU sees identically (Codex review, PR #1024, fresh
+    evidence beyond the prior same-TU-only case: this also happens across
+    *multiple* fragments whose complete multi-location sets are equal to
+    each other, not only within one fragment).
+
+    :func:`manifest_semantic_ir` must NOT blank the per-location
+    disambiguator for one of these -- doing so unconditionally (as an
+    earlier revision did for every non-ambiguous entity) collapses the two
+    real, distinct declarations into one occurrence, exactly the ODR-
+    duplicate-collapsing bug this IR exists to avoid. An entity whose one
+    agreed-upon location set has exactly one member (the ordinary case --
+    a single declaration observed redundantly by every including TU) is
+    correctly excluded here: blanking its disambiguator is what lets
+    ``occurrences.setdefault`` fold every fragment's redundant observation
+    of that one real declaration down to the single occurrence it is."""
+    result: set[EntityId] = set()
+    for entity_id, fragment_sets in per_entity_fragment_sets.items():
+        if len(fragment_sets) != 1:
+            continue
+        (only_location_set,) = fragment_sets
+        if len(only_location_set) > 1:
+            result.add(entity_id)
+    return result
+
+
 def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
     """See this module's own docstring."""
-    ambiguous_entity_ids = _ambiguous_by_source_location(fragments)
+    per_entity_fragment_sets = _per_entity_location_sets(fragments)
+    ambiguous_entity_ids = _ambiguous_by_source_location(per_entity_fragment_sets)
+    multi_location_entity_ids = _multi_location_non_ambiguous_entity_ids(
+        per_entity_fragment_sets
+    )
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for fragment in sorted(fragments, key=lambda f: f.tu_name):
         local_entity_ids = _locally_linked_entity_ids_in_fragment(fragment)
@@ -260,7 +313,24 @@ def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
                     entity_id=occ_id.entity_id,
                     disambiguator=f"{fragment.tu_name}:{occ_id.disambiguator}",
                 )
-            elif occ_id.entity_id not in ambiguous_entity_ids:
+            elif (
+                occ_id.entity_id not in ambiguous_entity_ids
+                and occ_id.entity_id not in multi_location_entity_ids
+            ):
+                # Blank the disambiguator only when this entity's one
+                # agreed-upon location set has exactly one member -- the
+                # ordinary "redundant observation of one real declaration"
+                # case. An entity in `multi_location_entity_ids` keeps its
+                # own per-location disambiguator unchanged (never replaced
+                # with `tu_name` -- that combining form is only for the
+                # locally-linked branch above): since every fragment that
+                # sees it produces the identical location-derived text for
+                # each of its real declarations, `occurrences.setdefault`
+                # below still naturally folds the same declaration seen
+                # redundantly across TUs while keeping the distinct real
+                # declarations distinct (see
+                # `_multi_location_non_ambiguous_entity_ids`'s own
+                # docstring).
                 occ_id = OccurrenceId(entity_id=occ_id.entity_id, disambiguator="")
             occurrences.setdefault(occ_id, entity)
     return SemanticIR(occurrences=occurrences)

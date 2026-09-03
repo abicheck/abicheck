@@ -268,25 +268,31 @@ def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
     to an ordinary marker-free symbol, e.g. ``_ZN6Widget7counterE`` --
     Codex review, PR #635 round 6).
 
-    **Known, accepted limitation**: unlike :class:`Function`,
-    :class:`Variable` carries no ``is_static`` field at all, so a plain-C
-    (or `extern "C"`) file-scope ``static`` variable -- whose mangled name
-    equals its bare name, carrying no Itanium marker to detect -- has no
-    signal this function can read to distinguish it from an ordinary
-    external variable. Closing that gap needs a new ``Variable.is_static``
-    model field (a schema change, `dumper_clang.py`/`dumper_castxml.py`
-    updates to populate it) -- out of proportionate scope for this fix,
-    matching this PR's typedef-qualification precedent (see G32 Phase C
-    PR discussion) of documenting a producer-side gap rather than papering
-    over it. The C++ case (the more common source of same-named
-    file-scope/anonymous-namespace variable collisions in practice) is
-    fully handled.
+    **Previously a known, accepted limitation, now closed (Codex/
+    CodeRabbit review, PR #1024, fresh evidence).** Unlike :class:`Function`,
+    :class:`Variable` used to carry no ``is_static`` field at all, so a
+    plain-C (or `extern "C"`) file-scope ``static`` variable -- whose
+    mangled name equals its bare name, carrying no Itanium marker to
+    detect -- had no signal this function could read to distinguish it
+    from an ordinary external variable of the same name. Confirmed
+    empirically to be a real, currently-reachable collision (a real clang
+    C-mode compile of two TUs, one declaring `static int counter;` and an
+    unrelated one declaring `extern int counter;`, both folded into ONE
+    ``Variable`` by this function's own merge, silently discarding one
+    declaration outright). ``Variable.is_static`` (mirroring
+    ``Function.is_static`` exactly -- same castxml ``static="1"`` XML
+    attribute / clang ``storageClass == "static"`` AST field) closes the
+    same way :func:`_function_key` already handles its own plain-C
+    fallback branch: when ``var.mangled == var.name`` (no C++ mangling was
+    applied at all), ``var.is_static`` is now an unambiguous, purely-C
+    linkage signal, mirroring :func:`_function_key`'s identical branch for
+    the identical reason.
     """
-    name = (
-        f"{tu_name}::{var.mangled}"
-        if _has_local_linkage_mangling(var.mangled)
-        else var.mangled
-    )
+    if var.mangled == var.name:
+        is_local = var.is_static
+    else:
+        is_local = _has_local_linkage_mangling(var.mangled)
+    name = f"{tu_name}::{var.mangled}" if is_local else var.mangled
     return entity_key("variable", name)
 
 

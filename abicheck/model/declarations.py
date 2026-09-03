@@ -332,6 +332,27 @@ class Variable:
     # See Function.elf_binding for the ELF-linkage rationale; same population
     # path (dumper_elf_symbols._populate_elf_visibility).
     elf_binding: SymbolBinding | None = None
+    # Storage-linkage signal, mirroring Function.is_static exactly (same
+    # castxml `static="1"` XML attribute / clang `storageClass ==
+    # "static"` AST-node field, populated by each header-AST backend's own
+    # `parse_variables()`). Closes a real gap `tu_merge._variable_key`'s own
+    # docstring long documented as a "known, accepted limitation": a plain-C
+    # (or `extern "C"`) file-scope `static` variable has no Itanium mangling
+    # marker at all (its mangled spelling equals its bare name, identical to
+    # an ordinary external variable's), so before this field existed there
+    # was no signal to tell a same-named `static` and `extern` C variable
+    # apart across translation units -- confirmed empirically (PR #1024
+    # review, CodeRabbit) to actually collide: `tu_merge.merge_fragments`
+    # silently folded both into one `Variable`, discarding one entirely, and
+    # `extract.manifest_semantic_ir` collapsed them onto one `EntityId`
+    # (only accidentally kept apart when their source locations happened to
+    # differ, since that axis is independent of linkage). Appended after
+    # every pre-existing field (never inserted mid-list) so this additive
+    # field cannot shift the positional slot of any field that came before
+    # it -- the same discipline `Function.hidden_friend_owner`'s own comment
+    # states, for the identical reason (`Variable` is a public,
+    # non-keyword-only dataclass too).
+    is_static: bool = False
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from
