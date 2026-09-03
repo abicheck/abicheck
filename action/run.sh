@@ -1836,6 +1836,21 @@ echo ""
 ABICHECK_EXIT=0
 ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
+#: A private, run.sh-owned signal channel `abicheck scan` writes to when it
+#: hits its own `_EvidenceContractError` abort (ADR-037 D5) -- created and
+#: named entirely by this script (never from any `INPUT_*`/PR-controlled
+#: value), so its *path* can't be spoofed, and its content is a fixed
+#: literal `abicheck` itself writes verbatim, with no interpolated
+#: diagnostic text -- so, unlike `$STDERR_CONTENT`, its *content* can't be
+#: spoofed either (Codex review, second round: a `grep -Fxq` whole-line
+#: match on combined stderr was still forgeable, since a legal Unix
+#: filename may itself contain embedded newlines -- a crafted
+#: `INPUT_NEW_LIBRARY` path echoed verbatim into an unrelated "Failed to
+#: load --binary" error could still produce a standalone line identical to
+#: the marker text). `_evidence_contract_gated`'s stderr-fallback branch
+#: below now only checks whether *this* file is non-empty, never parses
+#: `$STDERR_CONTENT` for it.
+_EVIDENCE_CONTRACT_MARKER_FILE=$(mktemp)
 #: PR_JSON (Codex review) is created well after this trap is installed --
 #: either by the primary CMD's own --write
 #: (compare/scan, non-JSON primary format) or by `_maybe_post_pr_comment`'s
@@ -1845,7 +1860,7 @@ STDERR_FILE=$(mktemp)
 #: a non-PR-comment run or `pr-comment-on: never` where the temp file was
 #: still created but never posted. Without this, a persistent self-hosted
 #: runner accumulates one JSON report per scan run indefinitely.
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
+trap 'rm -f "$STDERR_FILE" "$_EVIDENCE_CONTRACT_MARKER_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
 # `_json_report_src`/`_extra_args_write_json_path` below trust `OUTPUT_
 # FILE`/a user-supplied `--write json=PATH` purely on "the file exists and
@@ -1909,13 +1924,13 @@ fi
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
-  "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
+  ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE="$_EVIDENCE_CONTRACT_MARKER_FILE" "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
   if [[ -s "$STDERR_FILE" ]]; then
     cat "$STDERR_FILE" >&2
   fi
 else
   # Capture stdout for job summary; stderr goes to temp file
-  ABICHECK_OUTPUT=$("${CMD[@]}" 2>"$STDERR_FILE") || ABICHECK_EXIT=$?
+  ABICHECK_OUTPUT=$(ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE="$_EVIDENCE_CONTRACT_MARKER_FILE" "${CMD[@]}" 2>"$STDERR_FILE") || ABICHECK_EXIT=$?
   echo "$ABICHECK_OUTPUT"
   if [[ -s "$STDERR_FILE" ]]; then
     cat "$STDERR_FILE" >&2
@@ -2457,25 +2472,31 @@ _assurance_gated() {
 # over from a previous step never false-positives here.
 #
 # Update (2026-09-03, closing the "--format text gap" this ADR-064 comment
-# used to name as still open): falls back to a stderr grep, the same shape
-# `_assurance_gated`'s own fallback already uses, when there is no readable
-# JSON report at all -- `format: text` with no JSON secondary output, where
-# `cli_scan.py` writes no JSON report (`_emit_scan_abort_report`'s own
-# docstring) but now always prints a stable stderr marker line ahead of the
-# ClickException on this abort (independent of `--format`, see that catch
-# site's own comment) precisely so this fallback has something stable to
-# match -- not `ce.message` itself, which differs across this exception's
-# two independent raise sites (a pinned depth with no source evidence, and
-# `--abi3` targeting a binary that isn't a recognisable CPython extension
-# module) and would need two independently-drifting patterns.
+# used to name as still open): falls back to `$_EVIDENCE_CONTRACT_MARKER_FILE`
+# when there is no readable JSON report at all -- `format: text` with no JSON
+# secondary output, where `cli_scan.py` writes no JSON report
+# (`_emit_scan_abort_report`'s own docstring). That file is a private,
+# run.sh-owned signal channel (see its own definition, above the CMD
+# invocation) `abicheck scan` writes a fixed literal to on this abort,
+# unrelated to `ce.message` (two independent raise sites -- a pinned depth
+# with no source evidence, and `--abi3` targeting a binary that isn't a
+# recognisable CPython extension module -- which would need two
+# independently-drifting stderr patterns).
 #
-# `-Fx` (whole-line, literal match), not a bare substring `grep -q`: several
-# `INPUT_*` values (e.g. `INPUT_NEW_LIBRARY`) are PR-controlled, and an
-# unanchored match would let a crafted path/filename that merely *contains*
-# the marker text inside some other stderr line (e.g. a "Failed to load"
-# path error) get misclassified as this axis (Codex review). `cli_scan.py`
-# prints the marker as its own complete stderr line with no other content,
-# so a whole-line match loses nothing genuine.
+# Update (2026-09-03, second round -- Codex review, fresh evidence): this
+# fallback used to `grep -Fxq` a stable marker line out of `$STDERR_CONTENT`.
+# Even a *whole-line* match on that combined stream stayed forgeable: a
+# legal Unix filename may itself contain embedded newlines, so a crafted
+# `INPUT_NEW_LIBRARY` path -- echoed verbatim into a wholly unrelated
+# "Failed to load --binary" `ClickException`, a different raise site than
+# this axis's own -- could still produce a standalone stderr line identical
+# to the marker text and spoof this classification for an ordinary load
+# failure. No amount of anchoring on `$STDERR_CONTENT` closes that class,
+# since the content itself is attacker-influenced; the fix moved the signal
+# off that shared, tainted channel entirely onto a file whose *path* is
+# chosen solely by this script (never from any `INPUT_*` value) and whose
+# *content* is a fixed literal `cli_scan.py` writes with no interpolated
+# diagnostic text -- so neither half is attacker-reachable.
 _evidence_contract_gated() {
   local _src _verdict
   _src=$(_json_report_src)
@@ -2484,8 +2505,7 @@ _evidence_contract_gated() {
     [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]
     return
   fi
-  echo "$STDERR_CONTENT" \
-    | grep -Fxq 'abicheck: scan aborted — evidence-contract error (ADR-037 D5)'
+  [[ -s "$_EVIDENCE_CONTRACT_MARKER_FILE" ]]
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate

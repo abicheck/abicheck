@@ -33,6 +33,7 @@ import-cycles gate flags.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,60 @@ from .buildsource.scan_levels import EvidenceDepth
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import SourceMethod
+
+
+def write_evidence_contract_marker() -> None:
+    """Signal an ``_EvidenceContractError`` abort (ADR-037 D5) to
+    ``action/run.sh`` over a non-forgeable channel, when the Action set one
+    up.
+
+    The one genuine side effect in this otherwise click-free/side-effect-
+    free module (see the module docstring) -- deliberately isolated here
+    rather than inlined at ``cli_scan.py``'s call site, both to keep that
+    (near the 2000-line hard cap) module's own except-block terse and so
+    this security property has exactly one place to read/audit.
+
+    History: the first version of this signal (2026-09-03) printed a fixed
+    marker line to stderr for ``action/run.sh``'s ``_evidence_contract_
+    gated()`` to grep when no JSON report exists (``--format text``, no
+    JSON secondary output). Two review rounds (Codex, on PR #1032) found
+    that channel fundamentally unsound, not just under-anchored: stderr is
+    shared with other diagnostics that interpolate attacker-controlled text
+    verbatim (e.g. ``scan_engine.py``'s own "Failed to load --binary
+    {binary}" on a wholly unrelated raise site) -- round 1 closed an
+    unanchored substring match (``grep -q`` -> whole-line ``grep -Fxq``),
+    round 2 showed *even a whole-line match stays forgeable*, since a legal
+    Unix filename may itself contain embedded newlines: a crafted
+    ``INPUT_NEW_LIBRARY`` path echoed into that unrelated error could still
+    produce a standalone stderr line identical to the marker text. No
+    amount of anchoring closes that class, since the content of the shared
+    stream is itself attacker-influenced.
+
+    The fix moves the signal off stderr entirely, onto
+    ``$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`` -- a private temp-file path
+    ``action/run.sh`` creates and names itself (via ``mktemp``, never from
+    any ``INPUT_*``/PR-controlled value) and passes only to this one
+    invocation's environment. Neither half of the signal is attacker-
+    reachable: the *path* is chosen solely by the trusted wrapper script,
+    and the *content* written here is a fixed literal with no interpolated
+    diagnostic text -- unlike stderr, nothing else in this process ever
+    writes to that path, so no unrelated error can produce a false
+    positive on it. A stderr marker line is still printed alongside this
+    (unchanged, for human debugging in the Action's log) but is no longer
+    consulted for classification.
+
+    No-op (silently) when the env var isn't set -- true for every direct
+    CLI invocation outside the composite Action, and for the Action's own
+    non-``scan`` modes, which never raise this exception. Best-effort: a
+    write failure (unwritable path, out of disk) must never mask the real
+    ``_EvidenceContractError`` it's reporting alongside."""
+    marker_path = os.environ.get("ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE")
+    if not marker_path:
+        return
+    try:
+        Path(marker_path).write_text("evidence_contract_error\n", encoding="utf-8")
+    except OSError:
+        pass
 
 
 # --- operand/flag validation (click-free, no ScanOutcome dependency) --------

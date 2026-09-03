@@ -119,6 +119,7 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     render_verdict_lines,
     resolve_effective_allow_query,
     scan_pattern_roots,
+    write_evidence_contract_marker,
 )
 from .frontends.cli.help import scan_help_options
 from .frontends.cli.options.params import (
@@ -1958,15 +1959,13 @@ def scan_cmd(
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
         # A pinned depth that can't collect its evidence is a usage contract
-        # violation → a clean CLI error (exit 1), distinct from the verdict codes
-        # (2/4) and the budget code (5).
-        #
-        # Stable stderr marker (closes ADR-064's "--format text gap" for this
-        # abort): unlike `ce.message` -- two independent raise sites, so two
-        # drifting texts -- this one literal line lets `action/run.sh`'s
-        # `_evidence_contract_gated()` recognize the abort even with no JSON
-        # report (`--format text`, no `--write json=...`). Printed on every
-        # `fmt`; `ce.message` still follows unchanged via the ClickException.
+        # violation → a clean CLI error (exit 1), distinct from the verdict
+        # codes (2/4) and the budget code (5). Signals the Action over a
+        # private marker file when one is configured -- see
+        # `write_evidence_contract_marker`'s own docstring for the full
+        # rationale (closes ADR-064's "--format text gap" without the
+        # stderr-parsing forgery class two review rounds found there).
+        write_evidence_contract_marker()
         click.echo(
             "abicheck: scan aborted — evidence-contract error (ADR-037 D5)",
             err=True,

@@ -37,16 +37,31 @@ explicit ``FINAL_EXIT=1``, or the step silently starts passing.
 Update (2026-09-03): closes the one gap this module's own tests used to
 leave open — a ``--format text`` invocation with no JSON secondary output,
 where ``_json_report_src`` answers nothing and ``_evidence_contract_gated``
-previously had no signal at all to consult. ``cli_scan.py``'s
-``_EvidenceContractError`` catch site now always prints a stable stderr
-marker line ahead of the existing ``Error: <message>`` text, independent of
-``--format``, and ``_evidence_contract_gated`` falls back to grepping
-``STDERR_CONTENT`` for it — the same shape ``_assurance_gated``'s own
-stderr fallback already established for a sibling gap. The
-``test_evidence_contract_gated_stderr_fallback_*`` tests below cover it,
-including a real end-to-end run of the native CLI (not a stubbed
-``STDERR_CONTENT`` string) to prove the Python-side marker and the bash-side
-grep pattern actually agree.
+previously had no signal at all to consult.
+
+Update (2026-09-03, second round — Codex review, two rounds of fresh
+evidence): the first version of this fix signaled the abort by printing a
+fixed marker line to stderr for ``_evidence_contract_gated`` to grep. Round
+1 closed an unanchored substring match (``grep -q`` -> whole-line
+``grep -Fxq``); round 2 showed that even a whole-line match on
+``$STDERR_CONTENT`` stays forgeable, since a legal Unix filename may itself
+contain embedded newlines — a crafted ``INPUT_NEW_LIBRARY`` path echoed
+verbatim into a wholly *unrelated* "Failed to load --binary" error
+(a different raise site than this axis's own) could still produce a
+standalone stderr line identical to the marker text. No anchoring closes
+that class, since the shared stream's content is itself attacker-
+influenced. The fix (this revision) moves the signal off stderr entirely,
+onto ``$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`` — a private temp-file path
+``action/run.sh`` creates and names itself (never from any ``INPUT_*``
+value) and passes only to this one invocation's environment;
+``cli_scan.py``'s ``write_evidence_contract_marker()`` writes a fixed
+literal there with no interpolated diagnostic text. Neither the path nor
+the content is attacker-reachable. The
+``test_evidence_contract_gated_marker_file_*`` tests below cover it,
+including a real end-to-end run of the native CLI (not a stubbed marker
+file) to prove the Python-side writer and the bash-side check actually
+agree, and a dedicated forgery test proving the embedded-newline class
+Codex found is now closed.
 """
 
 from __future__ import annotations
@@ -380,17 +395,23 @@ def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_p
 _STDERR_MARKER = "abicheck: scan aborted — evidence-contract error (ADR-037 D5)"
 
 
-def _run_stderr_fallback_pipeline(stderr_content: str) -> subprocess.CompletedProcess:
+def _run_marker_file_pipeline(
+    marker_path: Path,
+    *,
+    stderr_content: str = "",
+) -> subprocess.CompletedProcess:
     """Execute the real, unmodified ``_evidence_contract_gated`` with
     ``_json_report_src`` answering empty (the ``--format text``, no JSON
-    secondary shape) and ``STDERR_CONTENT`` set to *stderr_content* --
-    prints ``GATED=1``/``GATED=0``, mirroring ``_run_real_gated_pipeline``'s
-    own shape for the JSON-report case above."""
+    secondary shape), ``$_EVIDENCE_CONTRACT_MARKER_FILE`` set to
+    *marker_path* (which the caller may leave absent, empty, or populated),
+    and ``STDERR_CONTENT`` set to *stderr_content* (present purely to prove
+    it is never consulted -- see the forgery-regression test below)."""
     script = (
         _extract(_EVIDENCE_CONTRACT_GATED_START, _EVIDENCE_CONTRACT_GATED_END)
         + f"""
 _json_report_src() {{ :; }}
 _report_query() {{ :; }}
+_EVIDENCE_CONTRACT_MARKER_FILE={shlex.quote(marker_path.as_posix())}
 STDERR_CONTENT={shlex.quote(stderr_content)}
 if _evidence_contract_gated; then
   echo "GATED=1"
@@ -402,63 +423,74 @@ fi
     return _run_bash_script(script)
 
 
-def test_evidence_contract_gated_stderr_fallback_matches_the_real_marker():
-    """No JSON report at all (``_json_report_src``/``_report_query`` both
-    answer empty) — the exact stderr shape a ``--format text`` invocation
-    now produces on this abort. The stderr fallback must gate on it."""
-    result = _run_stderr_fallback_pipeline(
-        f"Some preceding output\n{_STDERR_MARKER}\nError: pinned depth 'source' ...\n"
-    )
+def test_evidence_contract_gated_marker_file_matches_when_populated(tmp_path):
+    """A non-empty marker file (the real shape ``write_evidence_contract_
+    marker()`` produces) must gate -- the ``--format text``, no-JSON-report
+    fallback path this whole module exists to cover."""
+    marker = tmp_path / "marker"
+    marker.write_text("evidence_contract_error\n", encoding="utf-8")
+    result = _run_marker_file_pipeline(marker)
     assert result.returncode == 0, result.stderr
     assert "GATED=1" in result.stdout
 
 
-def test_evidence_contract_gated_stderr_fallback_ignores_a_near_miss():
-    """A near-miss stderr string (missing the ADR reference suffix) must
-    not gate — only an exact substring match may, the same discipline the
-    JSON-verdict hostile-value test above already enforces for the other
-    source."""
-    result = _run_stderr_fallback_pipeline(
-        "abicheck: scan aborted — evidence-contract error\nError: some other failure\n"
-    )
+def test_evidence_contract_gated_marker_file_ignores_when_missing(tmp_path):
+    """No marker file at all (the ordinary case for every other CLI error,
+    and for every non-``scan`` Action mode) must not gate."""
+    marker = tmp_path / "never-created"
+    result = _run_marker_file_pipeline(marker)
     assert result.returncode == 0, result.stderr
     assert "GATED=0" in result.stdout
 
 
-def test_evidence_contract_gated_stderr_fallback_ignores_an_unrelated_error():
-    """A genuine, unrelated CLI error (bad flag, crash) must not gate --
-    the fallback is scoped to the one marker line this abort prints, not to
-    "any stderr exists"."""
-    result = _run_stderr_fallback_pipeline(
-        "Usage: abicheck scan [OPTIONS] ARTIFACT\nError: no such option: --bogus\n"
-    )
+def test_evidence_contract_gated_marker_file_ignores_when_empty(tmp_path):
+    """A marker file that exists but is empty (``run.sh``'s own ``mktemp``
+    creates it up front, before the CLI ever runs) must not gate -- the
+    check is ``-s`` (non-empty), not mere existence, so an untouched
+    pre-created temp file never false-positives."""
+    marker = tmp_path / "marker"
+    marker.touch()
+    result = _run_marker_file_pipeline(marker)
     assert result.returncode == 0, result.stderr
     assert "GATED=0" in result.stdout
 
 
-def test_evidence_contract_gated_stderr_fallback_rejects_a_substring_spoof():
-    """A PR-controlled path/filename embedded inside a genuine, unrelated
-    error line that merely *contains* the marker text (e.g. a hostile
-    ``--binary``/``INPUT_NEW_LIBRARY`` value someone named after the marker
-    string) must not gate — the match is whole-line (``grep -Fx``), not an
-    unanchored substring (Codex review: a bare ``grep -q`` here would let
-    such a path spoof this axis, since ``INPUT_NEW_LIBRARY`` and friends are
-    PR-controlled on ``pull_request`` triggers per action/AGENTS.md's
-    untrusted-input convention)."""
-    result = _run_stderr_fallback_pipeline(
-        "Error: Failed to load --binary "
-        "'./abicheck: scan aborted — evidence-contract error (ADR-037 D5)/lib.so'\n"
+def test_evidence_contract_gated_ignores_stderr_entirely_even_with_a_forged_marker_line(
+    tmp_path,
+):
+    """Regression for the class Codex found on PR #1032 (second review
+    round): the previous fix matched the marker as a whole *stderr* line
+    (``grep -Fxq``), which stayed forgeable because a legal Unix filename
+    may itself contain embedded newlines -- a crafted ``INPUT_NEW_LIBRARY``
+    path echoed verbatim into a wholly unrelated "Failed to load --binary"
+    error could still produce a standalone stderr line identical to the
+    marker text and spoof this classification for an ordinary load
+    failure. This test reproduces exactly that forged stderr content (with
+    the marker as its own line, embedded via a literal newline the way a
+    hostile filename would produce one) with NO real marker file present,
+    and asserts the fallback still reads GATED=0 -- proving
+    ``_evidence_contract_gated`` no longer reads ``$STDERR_CONTENT`` at all
+    for this decision, so no stderr content, forged or not, can reach it."""
+    marker = tmp_path / "never-created"
+    forged_stderr = (
+        "Error: Failed to load --binary './prefix\n"
+        f"{_STDERR_MARKER}\n"
+        "suffix/lib.so': [Errno 2] No such file or directory\n"
     )
+    result = _run_marker_file_pipeline(marker, stderr_content=forged_stderr)
     assert result.returncode == 0, result.stderr
     assert "GATED=0" in result.stdout
 
 
-def test_evidence_contract_gated_prefers_a_readable_json_report_over_stderr():
+def test_evidence_contract_gated_prefers_a_readable_json_report_over_marker_file(
+    tmp_path,
+):
     """When a JSON report IS readable, its ``verdict`` is authoritative --
-    the stderr fallback must never override a report that says otherwise,
-    even if the marker happens to appear in ``STDERR_CONTENT`` too (e.g. a
-    stale marker left over from an earlier, unrelated failure this run's own
-    retry logic printed)."""
+    the marker-file fallback must never override a report that says
+    otherwise, even if a (stale, or same-run coverage-gated) marker file is
+    populated too."""
+    marker = tmp_path / "marker"
+    marker.write_text("evidence_contract_error\n", encoding="utf-8")
     script = (
         _report_query_and_gated_fragment()
         + f"""
@@ -466,7 +498,7 @@ _PY_BIN=":"
 _PY_SAFE_DIR="."
 _json_report_src() {{ echo "does-not-matter"; }}
 _report_query() {{ echo "NO_CHANGE"; }}
-STDERR_CONTENT={shlex.quote(_STDERR_MARKER)}
+_EVIDENCE_CONTRACT_MARKER_FILE={shlex.quote(marker.as_posix())}
 if _evidence_contract_gated; then
   echo "GATED=1"
 else
@@ -479,14 +511,17 @@ fi
     assert "GATED=0" in result.stdout
 
 
-def test_evidence_contract_gated_stderr_fallback_matches_a_real_cli_run(tmp_path):
+def test_evidence_contract_gated_marker_file_matches_a_real_cli_run(tmp_path):
     """End-to-end: run the real ``abicheck scan --depth source`` CLI (the
     default ``--format text``, no ``--write json=...``) against a real
-    snapshot with no source evidence, and feed its real stderr into the
-    real ``_evidence_contract_gated`` pipeline with no JSON report -- proves
-    the Python-side marker (``cli_scan.py``) and the bash-side grep pattern
+    snapshot with no source evidence, with
+    ``ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`` pointed at a real temp path
+    (exactly as ``action/run.sh`` sets it up), and feed the resulting
+    marker file into the real ``_evidence_contract_gated`` pipeline with no
+    JSON report -- proves the Python-side writer
+    (``write_evidence_contract_marker``) and the bash-side check
     (``run.sh``) actually agree, rather than two independently-drifting
-    copies of the same literal string."""
+    halves of the same contract."""
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol
     from abicheck.model import AbiSnapshot, AccessLevel, Function, Visibility
     from abicheck.serialization import snapshot_to_json
@@ -509,6 +544,8 @@ def test_evidence_contract_gated_stderr_fallback_matches_a_real_cli_run(tmp_path
     snap_path = tmp_path / "new.abi.json"
     snap_path.write_text(snapshot_to_json(snap), encoding="utf-8")
 
+    marker_path = tmp_path / "marker"
+
     proc = subprocess.run(
         [
             sys.executable,
@@ -522,23 +559,18 @@ def test_evidence_contract_gated_stderr_fallback_matches_a_real_cli_run(tmp_path
         capture_output=True,
         text=True,
         timeout=60,
+        env={
+            **os.environ,
+            "ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE": str(marker_path),
+        },
     )
     assert proc.returncode != 0
     assert _STDERR_MARKER in proc.stderr, proc.stderr
-
-    script = (
-        _extract(_EVIDENCE_CONTRACT_GATED_START, _EVIDENCE_CONTRACT_GATED_END)
-        + f"""
-_json_report_src() {{ :; }}
-_report_query() {{ :; }}
-STDERR_CONTENT={shlex.quote(proc.stderr)}
-if _evidence_contract_gated; then
-  echo "GATED=1"
-else
-  echo "GATED=0"
-fi
-"""
+    assert marker_path.is_file() and marker_path.stat().st_size > 0, (
+        "write_evidence_contract_marker() did not populate the marker file "
+        f"a real _EvidenceContractError abort should always write ({marker_path})"
     )
-    result = _run_bash_script(script)
+
+    result = _run_marker_file_pipeline(marker_path)
     assert result.returncode == 0, result.stderr
     assert "GATED=1" in result.stdout

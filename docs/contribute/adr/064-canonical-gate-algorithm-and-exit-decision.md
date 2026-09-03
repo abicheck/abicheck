@@ -81,11 +81,23 @@ site now always prints a stable stderr marker line, and `action/run.sh`'s
 `_evidence_contract_gated()` falls back to matching it when no JSON report
 exists (see "Staged landing, additive first" below, item 1's own newest
 update for the full account, including why `_BudgetOverflow` never needed
-this — its exit code is already unambiguous). Still open: the rest of the
-cross-front-end parity pass (typed API; the `--artifact-set` member-level
-evidence-contract signal, the one remaining half of the `--format text` gap
-— a member's abort never reaches the single-binary catch site this update
-fixed); and **stage 2**, the `--exit-code-scheme` removal itself. See
+this — its exit code is already unambiguous). **Update (2026-09-03, second
+round):** that stderr-marker channel turned out to be unsound, not just
+under-anchored — two Codex review rounds on the landing PR (#1032) found it
+forgeable regardless of anchoring (a whole-line `grep -Fxq` still loses to a
+crafted `INPUT_NEW_LIBRARY` path containing an embedded newline, echoed
+verbatim into a wholly unrelated "Failed to load --binary" error). Fixed by
+moving the signal off stderr entirely onto a private marker file
+`action/run.sh` creates and names itself
+(`$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`, never from any `INPUT_*` value)
+— see `cli_scan_helpers.write_evidence_contract_marker`'s own docstring for
+the full account of both rounds. The stderr marker line is still printed
+for human debugging but is no longer consulted for classification. Still
+open: the rest of the cross-front-end parity pass (typed API; the
+`--artifact-set` member-level evidence-contract signal, the one remaining
+half of the `--format text` gap — a member's abort never reaches the
+single-binary catch site this update fixed); and **stage 2**, the
+`--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
