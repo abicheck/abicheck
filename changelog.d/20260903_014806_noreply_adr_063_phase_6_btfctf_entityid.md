@@ -33,6 +33,14 @@
   this codebase's own `Fact`/`FactStatus` discipline exists to preserve
   elsewhere. `semantic_ir` is now left `None` on either presence-only path
   (Codex review, fresh evidence).
+- **A bare BTF/CTF blob (no ELF container) now also populates
+  `semantic_ir`** (Codex review, fresh evidence): `workflows/
+  input_resolution.py::_resolve_raw_typeinfo` is a second, independent
+  production call site that constructs the `AbiSnapshot` directly from a
+  raw `.btf`/`.ctf` file and never goes through `dumper_elf_fallback.py`'s
+  own fallback, so it kept stamping `semantic_ir=None` despite carrying
+  the identical struct/enum metadata. Now calls the same
+  `semantic_ir_from_debug_metadata` this slice already uses elsewhere.
 
 ### Testing
 
