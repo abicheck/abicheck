@@ -30,7 +30,7 @@ You maintain a shared library (`.so`, `.dll`, `.dylib`). Other people's binaries
 - reorder a virtual method, renumber an enum, change a calling convention,
 - or change a default argument, a macro, or an inline body that never even reaches the binary?
 
-Any of these makes existing programs **crash, corrupt data silently, or refuse to load** after an upgrade. Compilers do not warn about it. Tests that rebuild everything from source do not catch it. Users find out in production.
+The first three kinds make existing programs **crash, corrupt data silently, or refuse to load** after an upgrade: a binary ABI break. The last kind is a source-level API break: already-compiled programs keep running with the old value baked in, but anything rebuilt against the new headers behaves differently. Compilers do not warn about either. Tests that rebuild everything from source do not catch the first. Users find out in production.
 
 **abicheck** compares two versions of a library, together with their public headers, debug info, build data, and optionally sources, and tells you exactly which existing consumers will break, why, and what version bump you owe.
 
@@ -46,7 +46,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Breadth of detection.** **397 ABI/API change types** across functions, variables, structs, classes, enums, unions, typedefs, templates, vtables, symbol versions, SONAMEs, dependencies, hardening flags, and platform metadata, each classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. [Change kind reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
 - **Separate verdicts for binary breaks and source breaks.** `BREAKING` means old binaries stop working. `API_BREAK` means consumers must recompile but their existing binaries still run. Other tools collapse the two; abicheck is the only one in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK`.
 - **Public-surface scoping.** With headers, findings are filtered to the library's public ABI, so churn in internal types does not fail your build. Opt-in [contract-aware mode](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/) goes further and gates only on the contract you declare: public headers, the export table, or everything.
-- **Zero false positives on the benchmark catalog**, at every evidence tier. Numbers below.
+- **Zero false positives on the benchmark catalog** in both measured lanes, headers-only (L2) and full evidence (L3 to L5). Lower tiers do over-call internal churn; that is exactly what adding headers removes. Numbers below.
 - **Cross-platform, pure Python.** Linux ELF, Windows PE/COFF, macOS Mach-O. Python 3.10+, no compiler required for binary-only and debug-info modes.
 - **Built for CI.** Deterministic exit codes, SARIF, JSON, Markdown, HTML, and JUnit output, snapshot baselines, policy profiles, suppressions with expiry, a first-class [GitHub Action](#github-action), and a typed [Python API](#python-api) that resolves through the same request objects as the CLI.
 - **Beyond one library.** Compare a multi-library release as one bundle, check whether a *specific application* still works (`--used-by`), verify a plugin still satisfies its host (`--required-symbol`), or validate a binary's whole dependency stack across two sysroots (`deps compare`).
@@ -165,16 +165,16 @@ Run on 2026-07-18 against abicheck 0.5.0, castxml 0.6.3, libabigail 2.4.0, ABICC
 pip install abicheck
 ```
 
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need [castxml](https://github.com/CastXML/CastXML) 0.6.11 or newer, or a direct clang. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need [castxml](https://github.com/CastXML/CastXML) in the supported range `>=0.6.11,<0.8.0` with a bundled Clang 18 or newer (abicheck's version gate rejects anything else for an authoritative L2 scan), or a direct clang. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
 **conda-forge** (recommended for the full pipeline; bundles a working castxml):
 
 ```bash
-conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11"
+conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11,<0.8.0"
 conda activate abicheck
 ```
 
-Pin `castxml>=0.6.11` as shown: the feedstock's own floor is looser than abicheck's version gate.
+Pin `castxml>=0.6.11,<0.8.0` as shown: the feedstock's own floor is looser than abicheck's version gate. The canonical per-environment guidance, including the bundled-Clang requirement, is in [Install](https://abicheck.github.io/abicheck/start/install/) and the [environment reference](https://abicheck.github.io/abicheck/reference/environment/).
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
@@ -299,7 +299,7 @@ Details, including which toolchains each lane exercises: [Platform Support](http
 
 ## Examples and validation
 
-The [`examples/`](examples/README.md) directory contains **197 real-world ABI/API scenarios** with ground-truth verdicts: 192 single-library `v1`/`v2` pairs with a consumer app, plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
+The [`examples/`](examples/README.md) directory contains **197 real-world ABI/API scenarios** with ground-truth verdicts: 192 single-library cases (most are `v1`/`v2` pairs with a consumer app; the rest are single-snapshot audits and hand-built L3 to L5 evidence-model fixtures for breaks no artifact layer can see) plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
 
 Every release is validated against the full **197-case catalog** (`python scripts/benchmark_comparison.py --suite all`), and the pinned 74-case cross-tool subset is attached to each GitHub Release for apples-to-apples comparison with libabigail and ABICC. The [validation runbook](docs/contribute/examples-validation-runbook.md) describes the full proof matrix.
 
