@@ -6155,7 +6155,11 @@ looked like the obvious fix and wasn't.
 
 - **`--depth` is a floor for live extraction, not a ceiling for a pre-built
   snapshot — real, cross-cutting, and previously undocumented outside one
-  function's own docstring.** `enforce_requested_depth`
+  function's own docstring. Fixed (ADR-063 Phase 8 follow-up): the
+  comparison-time projection this entry's own "real fix" paragraph called
+  for is now `abicheck.policy.depth_projection.project_snapshot_to_depth`,
+  applied by `classify_compare_pair` right after `enforce_requested_depth`
+  confirms the floor.** `enforce_requested_depth`
   (`workflows/artifact/execute.py`) already fails a run when the *resolved*
   evidence falls short of an explicit `--depth`, and its own docstring has
   long carried this note: "this is a floor, not a ceiling. An input that is
@@ -6179,26 +6183,160 @@ looked like the obvious fix and wasn't.
   entry so the directory/package path states the same acknowledged
   limitation explicitly rather than silently inheriting an undocumented
   one.
-  **Not fixed here, and the two obvious-looking fixes are each wrong for a
-  reason worth recording so they aren't re-attempted as the "obvious"
-  patch:** stripping a resolved snapshot's higher-level facts down to the
-  requested depth *before* comparing would work for this one call site, but
-  would also discard evidence a caller legitimately wants to keep on a
-  snapshot that gets reused for a *later* comparison at a higher depth —
-  `--depth` is meant to gate what a comparison *uses*, not to mutate a
+  **The two obvious-looking fixes below were, and remain, correctly
+  rejected — the eventual fix is neither of them, kept here so both stay
+  un-reattempted:** stripping a resolved snapshot's higher-level facts down
+  to the requested depth *before* comparing would work for this one call
+  site, but would also discard evidence a caller legitimately wants to keep
+  on a snapshot that gets reused for a *later* comparison at a higher depth
+  — `--depth` is meant to gate what a comparison *uses*, not to mutate a
   snapshot's own persisted content. Rejecting `--depth binary` outright for
   any operand backed by a pre-built snapshot (matching the pre-#1016
   directory/package behavior) would reintroduce exactly the asymmetry D1
-  closed, since the single-pair path already accepts and silently
-  under-enforces the same combination. The real fix needs a
-  comparison-time projection — resolve the snapshot as today, then filter
-  what `checker.compare()` is allowed to see down to the requested rung,
-  keeping the resolved `AbiSnapshot` itself untouched — which is a real,
-  separate design question (which facts a given depth "sees" needs the
-  same explicit mapping `evidence_depth.py`'s own rank table already gives
-  requested-vs-resolved comparison, just applied the other direction), not
-  a one-line patch to either `resolve_input` or the two call sites that
-  triggered this entry.
+  closed, since the single-pair path already accepted and silently
+  under-enforced the same combination.
+
+  **The fix actually shipped is exactly the comparison-time projection this
+  entry called for**: resolve the snapshot as before, then filter what
+  `checker.compare()` is allowed to see down to the requested rung, keeping
+  the resolved `AbiSnapshot` itself untouched.
+  `abicheck.policy.depth_projection.project_snapshot_to_depth` is that
+  filter — pure (returns a deep copy), mapped onto the public
+  `binary`/`headers`/`build`/`source` ladder via the exact same rank table
+  (`evidence_depth.DEPTH_RANK`) this entry's own "applied the other
+  direction" phrase named, and validated against the one prior
+  already-trusted reference implementation of this idea:
+  `scripts/check_tier_accuracy.py`'s `project()`, which the per-tier
+  accuracy gate runs against a real (if synthetic) labelled corpus.
+  `classify_compare_pair` (`service_compare_pipeline.py`) applies it (via
+  `project_pair_to_depth`) to a local `old`/`new` view, gated on
+  `request.depth is not None` — the same "no explicit depth, no effect"
+  contract `enforce_requested_depth` already has — right after that
+  function confirms the floor; `pair.old`/`pair.new` themselves are never
+  mutated, so a caller reading the unprojected snapshot elsewhere is
+  unaffected. `dump` deliberately does **not** apply this at write time,
+  for the exact reason given above (it would discard evidence a later,
+  deeper comparison might want) — `--depth` on `dump` stays floor-only,
+  unchanged. See `project_snapshot_to_depth`'s own docstring for the
+  precise field-by-field scope (visibility/origin scoping, macro/constexpr
+  constants, the Python-API stub surface, the header-AST `SemanticIR`, the
+  header-only `surface_graph`, `build_mode`, the `BuildSourcePack`
+  L3/L4/L5 split; below `headers` with no DWARF backing (`dwarf.has_dwarf`
+  false), `types`/`enums`/`typedefs`/signatures are fully stripped too,
+  not merely re-scoped — matching a real DWARF-less binary-only dump
+  exactly, per `extract/export_symbol_identity.py`'s own production
+  behavior).
+
+  **A second review round (Codex, same PR) found two more real gaps in the
+  first cut of this fix, both now closed:** (1) the projection was wired
+  only into `classify_compare_pair` — the typed-API/release-fan-out
+  chokepoint — while the *native* `abicheck compare` CLI
+  (`cli_compare_helpers.run_compare`) and `scan --against`'s baseline path
+  (`cli_scan_baseline._run_baseline_compare`) each call
+  `compare_snapshots()` directly and never saw it; both now apply
+  `project_pair_to_depth` themselves, right after resolving their own
+  pair, mirroring `classify_compare_pair`'s placement. (2) the `binary`
+  rung's structural-fact handling was fixed at DWARF-informed (L1)
+  behavior unconditionally — a purely header-derived snapshot with no
+  DWARF at all still leaked full `types`/`enums`/function-signature data
+  through a `binary`-depth projection; `_snapshot_has_native_debug_info`
+  now picks L0 (fully stripped) vs. L1 (structural facts kept) per
+  snapshot, not fixed to one or the other.
+
+  **A third review round (Codex, same PR) found four more real gaps, all
+  now closed:** (1) an explicit out-of-band `--old/new-sources`/
+  `--old/new-build-info` pack directory is resolved *separately* from the
+  snapshot object `project_pair_to_depth` projects — `cli_compare_helpers.
+  run_compare` passed the raw pack paths straight through to
+  `prepare_embedded_build_source`, which reloads and diffs them
+  unconditionally, so a pack-backed `compare --sources ... --depth binary`
+  still leaked full L3-L5 findings even after the first two rounds' fixes.
+  Closed with a new `project_build_source_pack_to_depth` (mirroring
+  `project_snapshot_to_depth`'s own `build_source` capping, factored into a
+  shared `_project_build_source_pack` helper both call) — `run_compare` now
+  resolves each side's pack itself, caps it, attaches the capped pack back
+  onto `old.build_source`/`new.build_source`, and passes `None` for the
+  four path arguments so `prepare_embedded_build_source`'s own
+  `resolve_side_pack` falls back to the now-capped embedded payload instead
+  of reloading the raw one; the same fix also corrected the *reporting*
+  side (`analysis_assurance`/`old_evidence_depth`/`new_evidence_depth`),
+  which previously re-resolved the uncapped pack from the raw paths a
+  second time for these fields even after the findings themselves were
+  capped. (2) `snap.contract` (an ADR-050 `ExtractionContract`) survived a
+  `binary`-depth projection, so `checker.compare()` could still raise a
+  scope/profile mismatch error from two sides' *original* header scopes
+  even though a binary-only comparison never looks at either — now cleared
+  alongside the other L2+ facts. (3) a `Visibility.HIDDEN` (non-exported)
+  function/variable was promoted to `ELF_ONLY` like every other function/
+  variable, manufacturing a false `*_removed_elf_only` finding for a
+  declaration no real binary-only dump would ever have seen as a symbol at
+  all — now dropped from the projected snapshot entirely instead. (4)
+  `types`/`enums` were kept or dropped by the whole-snapshot
+  `dwarf.has_dwarf` flag, the same coarse signal functions/variables still
+  use — but this codebase's model *does* carry real per-record DWARF
+  evidence for these two families (`DwarfMetadata.structs`/`.enums`, keyed
+  by name), so an uninstantiated header-only record sitting alongside
+  unrelated real DWARF content was incorrectly retained; a new
+  `_dwarf_confirmed_names` filtered `types`/`enums` per declaration name
+  instead of by the whole-snapshot flag. **Superseded by the fourth review
+  round below** — the per-record name check turned out to be one level too
+  narrow.
+
+  **A fourth review round (Codex, same PR) found three more real gaps, all
+  now closed:** (1) the third round's per-record `_dwarf_confirmed_names`
+  fix retained a *header-derived* `RecordType`/`EnumType` wholesale
+  whenever DWARF merely confirmed the same-named struct/enum *existed* —
+  DWARF confirming a struct's name says nothing about whether its *fields*
+  agree with the header's own spelling (DWARF only ever backfills numeric
+  *layout* onto a header-derived record — `dumper_layout_backfill.py`'s
+  own scope — never its field-level type text), so a header-only field-type
+  change could still leak through a `binary`-depth projection whenever an
+  unrelated real DWARF struct happened to share the changed struct's name.
+  Fixed by replacing the per-record name check with a whole-snapshot
+  `not snap.from_headers` requirement (`_structural_facts_are_dwarf_
+  confirmed`, replacing `_dwarf_confirmed_names`/`_snapshot_has_native_
+  debug_info`): `AbiSnapshot.from_headers`'s own field comment states the
+  real distinction precisely — "DWARF-derived declarations populate the
+  SAME functions/types lists [as header-derived ones] but must NOT be
+  mistaken for header-level evidence." Only a genuinely DWARF/symbols-only
+  dump (`from_headers` is `False`, where `dwarf_snapshot.py`'s own
+  DWARF-only extraction path populates `types`/`enums`/`typedefs`/
+  function-variable signatures directly from DWARF DIEs) may now keep
+  those fields wholesale; a header-derived snapshot always clears them at
+  `binary` depth, same as the no-DWARF-at-all case. A real DWARF-visible
+  struct/enum layout change on a header-derived snapshot is still caught
+  independently, through the untouched `snap.dwarf.structs`/`.enums`
+  fields via `diff_platform._diff_dwarf` (which this module never clears,
+  and degrades gracefully with no header model at all — "If the header
+  model is absent... fall back to comparing all DWARF types", that
+  function's own comment) — function/variable signature changes have no
+  equivalent independent DWARF-native detector, a real, separately-
+  justified gap (it would need a new per-declaration confirmation fact the
+  dumper does not currently record), not attempted here. (2) a function/
+  variable promoted from a header parser's own "declared public, without
+  contrary evidence" fallback (e.g. `dumper_castxml._variable_visibility`'s
+  un-emitted customization-point-object case) was promoted to `ELF_ONLY`
+  the same as a genuinely exported one, manufacturing a false
+  `*_removed`/`*_removed_elf_only` finding for a declaration no real
+  binary-only dump would ever have seen as a symbol at all. Fixed with a
+  new `_exported_symbol_names` (a small, local copy of the same "raw
+  export table" read this codebase's `crosscheck_base.py`/
+  `snapshot_exports.py`/`post_manifest.py`/`diff_unnamed_types.py` each
+  already keep their own independent copy of, since a `policy`-layer
+  caller may import `model`/`compare` but not `extract`, ADR-061, where
+  most of those live): a surviving function/variable must now also appear
+  in the snapshot's own raw ELF/PE/Mach-O export table before promotion to
+  `ELF_ONLY`; skipped (falls back to the prior, looser behavior) when no
+  platform table was parsed at all, so a synthetic/incomplete snapshot
+  isn't stripped to nothing. (3) nulling a `BuildSourcePack`'s
+  `source_abi`/`source_graph` between `build` and `source` left their own
+  `LayerCoverage` rows in `pack.manifest.coverage` still claiming
+  `PRESENT`/`PARTIAL` — `evidence_report.optional_coverage()` returns
+  those rows directly, so a report could still claim source-ABI/
+  source-graph evidence backed a comparison the depth ceiling actually
+  excluded it from. Fixed with `_mark_layers_not_collected`, demoting the
+  L4/L5 coverage rows to `NOT_COLLECTED` in the same place the payload
+  fields themselves are cleared.
 
 ### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
 

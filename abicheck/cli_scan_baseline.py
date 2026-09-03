@@ -1107,6 +1107,12 @@ def _run_baseline_compare(
             f"Failed to load --baseline {baseline}: {exc}"
         ) from exc
 
+    # ADR-063 Phase 8 "--depth" ceiling (PR #1020): mirrors
+    # `cli_compare_helpers.run_compare`'s own capped view.
+    from .service_compare_pipeline import project_pair_to_depth
+
+    old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)
+
     # Preserve hard L0 removals even when the richer header/source view cannot
     # prove public-header ownership for the removed entity.  A source/full scan
     # may parse both sides' headers through different consumer macro contexts;

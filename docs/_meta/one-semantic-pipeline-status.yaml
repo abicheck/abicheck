@@ -38,7 +38,8 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of merge commit aa78c37 (PR #1015) plus PR #1019's own status-sync fixes.
+# as of merge commit bb14e8e (PR #1021) plus PR #1019's own status-sync
+# fixes, merged forward across PR #1019's own conflict-resolution merge.
 # Update this file in the same PR that changes a concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
@@ -50,7 +51,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: aa78c37
+as_of_commit: bb14e8e
 as_of_date: "2026-09-02"
 
 concepts:
@@ -93,9 +94,13 @@ concepts:
       family reads SemanticIR through a shared read index instead of
       AbiSnapshot.functions/types/..., with an architecture-gate rule
       forbidding a direct legacy-collection read for that family.
-      Producers remain partial regardless (DWARF/PDB/BTF/CTF backends
-      populate no SemanticIR at all; --dump-manifest loses occurrence
-      detail; CanonicalEntity.template_arguments is unpopulated).
+      Producers remain partial regardless (PDB/BTF/CTF backends populate
+      no entity_id or SemanticIR at all; --dump-manifest loses occurrence
+      detail; CanonicalEntity.template_arguments is populated for records
+      but not for function templates, and clang produces no occurrence at
+      all for a template specialization). DWARF's own SemanticIR gap
+      closed 2026-09-02 (Phase 6's fifth slice), the first non-header-AST
+      producer to reach it.
 
   public_surface:
     primitive: complete

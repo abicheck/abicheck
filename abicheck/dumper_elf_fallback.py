@@ -35,7 +35,9 @@ from .extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,
 )
+from .extract.semantic_normalizer import normalize_header_ast
 from .model import AbiSnapshot, RecordType
+from .model.semantic_ir import SemanticIR
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,6 +51,68 @@ if TYPE_CHECKING:
 # is a pure relocation: callers/tests scoped to that logger (e.g. caplog)
 # must keep seeing these records unchanged.
 log = logging.getLogger("abicheck.dumper")
+
+
+def _dwarf_semantic_ir(snap: AbiSnapshot) -> SemanticIR:
+    """``AbiSnapshot.semantic_ir`` for a DWARF-only snapshot (ADR-063 Phase 6,
+    fifth slice).
+
+    ``dwarf_snapshot.build_snapshot_from_dwarf`` already populates a real
+    ``entity_id`` on every ``RecordType``/``EnumType``/``Function``/
+    ``Variable``/typedef it produces (ADR-063 Phase 2's "fourteenth slice") --
+    this is the same ``normalize_header_ast`` call ``dumper_manifest.
+    resolve_header_ast_result`` makes for the header-AST backends, just
+    applied post-hoc here rather than inline in ``dwarf_snapshot.py`` itself,
+    since that module sits at its own ``architecture/debt.yaml`` no-growth
+    line-count baseline. ``constants``/``constant_entity_ids`` are left at
+    their ``{}`` defaults: DWARF carries no constexpr-initializer evidence at
+    all (see ``AbiSnapshot.constant_entity_ids``'s own docstring) — there is
+    nothing here for a constant occurrence to be built from, not merely
+    nothing wired up. See ``extract/semantic_normalizer_dwarf.py``'s own
+    module docstring for the two producer-specific ``cv_qualification``
+    carve-outs a ``producer="dwarf"`` call needs.
+    """
+    return normalize_header_ast(
+        types=snap.types,
+        enums=snap.enums,
+        typedefs_qualified=snap.typedefs,
+        typedef_entity_ids=snap.typedef_entity_ids,
+        producer="dwarf",
+        functions=snap.functions,
+        variables=snap.variables,
+    )
+
+
+def _dwarf_types_semantic_ir(types: list[RecordType]) -> SemanticIR:
+    """The :func:`_dwarf_semantic_ir` counterpart for the symbol-only
+    fallback (Codex review, PR #1021, fresh evidence): when the DWARF walk
+    found real record types but no functions/variables of its own (a DSO
+    combining DWARF-bearing C++ objects with assembly-only exported
+    symbols), ``_try_dwarf_snapshot`` returns those *types* alone rather
+    than a full snapshot, and ``_build_symbol_only_snapshot`` below
+    preserves them (see its own docstring) -- but until this function
+    existed, it never normalized them, so a headerless dump omitted
+    ``semantic_ir`` entirely despite holding DWARF entities with valid
+    ``entity_id``s.
+
+    Deliberately narrower than :func:`_dwarf_semantic_ir`: *types* is the
+    only DWARF-derived evidence this fallback snapshot carries at all (no
+    ``enums``/typedefs are captured on this path, and the snapshot's own
+    ``functions``/``variables`` are raw ELF-export-table entries with no
+    DWARF backing -- see ``_build_symbol_only_snapshot``'s own docstring --
+    so including them here would misattribute a ``producer="dwarf"``
+    occurrence to evidence DWARF never actually supplied). Their absence
+    from the returned ``SemanticIR`` is honest sparseness, not a gap: a
+    caller finding no occurrence for one of their entity IDs correctly
+    learns "no structural evidence", not "confirmed empty".
+    """
+    return normalize_header_ast(
+        types=types,
+        enums=(),
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="dwarf",
+    )
 
 
 def _try_dwarf_snapshot(
@@ -104,6 +168,7 @@ def _try_dwarf_snapshot(
                 "#define constants and default parameter values will be unavailable."
             )
         _populate_elf_visibility(snap)
+        snap.semantic_ir = _dwarf_semantic_ir(snap)
         return snap, []
     # DWARF snapshot had no symbols of its own (often the case when
     # the binary exports only constructors / extern "C" wrappers that
@@ -182,4 +247,6 @@ def _build_symbol_only_snapshot(
         language_profile=profile_hint,
     )
     _populate_elf_visibility(snapshot)
+    if dwarf_only_types:
+        snapshot.semantic_ir = _dwarf_types_semantic_ir(dwarf_only_types)
     return snapshot

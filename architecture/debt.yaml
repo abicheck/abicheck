@@ -503,12 +503,12 @@
     },
     {
       "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1343,
+      "baseline_lines": 1349,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was.",
       "review_by": "2026-11-30"
     },
     {

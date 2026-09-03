@@ -12158,18 +12158,32 @@ doesn't itself trip the `cli-contract` gate — but it's still not through
 `service.run_compare`/`resolve_compare_request`, so it never constructs an
 `AnalysisPlan` either and has no pre-flight check for its own inputs.
 `_resolve_stranded_library()` (the `--bundle-facts-out` path's own
-fallback for a library missing from the normal per-pair comparison) calls
-`cli_resolve._resolve_input()` directly — the same Tier-2 resolution
-`resolve_compare_request` itself calls, but reached independently, bypassing
-the `AnalysisPlan`-producing wrapper around it, with its own bespoke ELF
-fallback (`except Exception: ... AbiSnapshot(...)`) on top. Neither is
-this phase's own Goal to migrate (an `AnalysisPlan` pre-flight check for a
-probe-matrix build-config diff or a deliberately-degrading stranded-library
-fallback is a real, separate design question, not a drive-by widening of
-this phase's Files list) — named here explicitly instead, as a residual
-this phase does **not** close: `cli_compare_release.py`'s release fan-out
-is converged for its main per-pair comparison path only; these two
-narrower branches remain outside the typed `AnalysisPlan` pipeline, a gap
+fallback for a library missing from the normal per-pair comparison) used
+to call `cli_resolve._resolve_input()` directly — the same Tier-2
+resolution `resolve_compare_request` itself calls, but reached
+independently, bypassing the `AnalysisPlan`-producing wrapper around it,
+with its own bespoke ELF fallback (`except Exception: ... AbiSnapshot(...)`)
+on top. Neither was this phase's own Goal to migrate (an `AnalysisPlan`
+pre-flight check for a probe-matrix build-config diff or a
+deliberately-degrading stranded-library fallback is a real, separate
+design question, not a drive-by widening of this phase's Files list) —
+named here explicitly instead, as a residual this phase does **not**
+close.
+
+**`_resolve_stranded_library()` was later migrated (ADR-063 Phase 8
+follow-up, not this phase), narrowing the residual to one branch.** Unlike
+the matrix branch, a stranded library genuinely is one dump-shaped input
+(a path, headers, includes, version, language, an optional depth) once
+looked at correctly, so it now builds a real `DumpRequest` and runs it
+through `resolve_dump_request`/`execute_dump_request` — gaining a real
+`AnalysisPlanner.resolve()` pre-flight check and dropping its hand-rolled
+`depth=binary` header-clearing special-case, while keeping its
+degrade-to-ELF-only-on-failure fallback exactly as before. `_collect_
+matrix_result()` remains unmigrated and is expected to stay that way: it
+has no requested-vs-resolved evidence input for an `AnalysisPlan` to check
+feasibility of at all (two already-empty synthetic snapshots, an
+already-computed `extra_changes` list), so `cli_compare_release.py`'s
+release fan-out is now converged everywhere except that one branch, a gap
 for a future, separately-scoped pass to close rather than a silent
 omission from this plan's own accounting. `bundle.py`'s `compare_bundle()`
 takes already-computed `per_library_results` as an input rather than
@@ -13670,24 +13684,163 @@ list gains the `"x86_64-unknown-darwin"` case, plus `ios`/`tvos`/
 proves the scope gate for both functions and variables), all in
 `tests/test_dumper_clang_extern_c_identity.py`.
 
+**Landed (fifth slice, 2026-09-02): DWARF, the first non-header-AST
+producer.** ADR-063 Phase 2's "fourteenth slice" (2026-09-02, same day)
+already gave `dwarf_snapshot.py` a real, typed `ScopePath` and a populated
+`entity_id` on every `RecordType`/`EnumType`/`Function`/`Variable`/typedef
+it produces -- this normalizer's own "reads identity, never resolves it"
+contract meant DWARF needed no *new* identity work to become a caller, only
+a new call site: `dumper_elf_fallback._dwarf_semantic_ir` (a thin wrapper
+around the same `normalize_header_ast`, called from `_try_dwarf_snapshot`
+right after `build_snapshot_from_dwarf` returns, rather than inside
+`dwarf_snapshot.py` itself, which sits at its own `architecture/debt.yaml`
+no-growth line-count baseline) passes the builder's
+`types`/`enums`/`typedefs` (already namespace-qualified-keyed, matching
+`typedefs_qualified`'s own convention)/`typedef_entity_ids`/`functions`/
+`variables` straight through, with `producer="dwarf"` and
+`constants={}`/`constant_entity_ids={}` (DWARF carries no constexpr
+initializer evidence at all).
+
+Records/enums/typedefs needed no DWARF-specific handling. Functions and
+variables each needed one producer-specific `cv_qualification` carve-out
+(`extract/semantic_normalizer_dwarf.py`, split into its own leaf module to
+keep `semantic_normalizer.py` under the 800-line production cap, the
+identical reason `semantic_normalizer_artifacts.py` was split out one slice
+earlier): a function's is unconditionally `Fact.not_collected()`, since
+`dwarf_snapshot._build_function` never reads a method's own const/volatile
+qualifier from the DIE at all (`Function.is_const`/`is_volatile` are always
+their dataclass default here, never a confirmed reading -- reusing the
+castxml/clang branch's `Fact.present(...)` would misrepresent "never
+looked" as "confirmed not const"); a variable's is read from the
+already-extracted, structurally-sound `Variable.is_const` field instead of
+`_variable_top_level_cv_qualification`'s text scan, which castxml/clang
+need specifically because *their own* `is_const` is computed with a bare
+whole-string word search that conflates a mutable pointer to const data
+with a genuinely const pointer -- DWARF's `is_const` is not computed that
+way at all (`dwarf_snapshot._process_variable` sets it from whether the
+variable's own outermost type DIE is `DW_TAG_const_type`), so the same
+conflation this normalizer exists to avoid for the other two backends does
+not apply to DWARF, and reading `is_const` there is correct rather than a
+regression. Verified against a real compiled fixture covering all four
+cases (`const int g`, `int* const g`, `const int* g`, `const int* const
+g`): `int* const` and `const int*` render as the IDENTICAL text
+(`"const int *"`) by `dwarf_snapshot._compute_type_name`'s own
+const/pointer composition order, so a text scan could never have told them
+apart for DWARF even in principle -- only the structural field can, which
+is exactly why the DWARF branch reads it instead of reusing the text
+scanner. DWARF extracts no structural volatile fact for a variable at all
+(no backend has an `is_volatile` field on `Variable`), so a DWARF
+variable's `cv_qualification` can only ever contain `"const"`, never
+`"volatile"` -- a documented, accepted gap, not a claimed absence.
+`snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (26 -> 27), the same
+"a stale cache entry would otherwise silently keep serving `semantic_ir=
+None` forever" reasoning every prior slice's own cache bump gives. New
+tests: `tests/test_semantic_normalizer.py` gained a `producer="dwarf"`
+unit-test section (hand-built objects, no compiler needed, mirroring every
+other producer's tests in that file); `tests/test_dwarf_semantic_ir.py`
+(new) exercises the real production wiring end to end against gcc/g++
+compiled fixtures, the same lightweight `skipif`-gated pattern
+`test_dwarf_entity_id.py` uses (no `integration` marker, since this needs
+no castxml/clang).
+
+**Landed (sixth slice, 2026-09-02): `CanonicalEntity.template_arguments`,
+for records.** Backend-agnostic and extraction-free, unlike every prior
+slice's own per-producer work: a concrete class-template specialization's
+`RecordType.qualified_name`/`name` already embeds its full `Name<Arg1,
+Arg2>` compound spelling on every backend that surfaces one at all
+(confirmed with real castxml AND DWARF output -- castxml's `type_name_
+uncached` resolves a specialization to an ordinary, indistinguishable-
+from-non-template `<Struct name="Box&lt;int, 3&gt;">` element; a
+compiler's own DWARF `DW_AT_name` for an emitted instantiation is the
+identical compound spelling), so decomposing it needs no new identity
+work and no producer-specific branch at all: `extract/semantic_normalizer_
+template_args.py`'s `split_template_arguments` (a new leaf module, split
+out purely for line budget) is a pure bracket/paren/angle-aware text
+splitter over whatever text `canonical_spelling` already reads -- it finds
+the record's own leaf segment's (after its last top-level `::`, so a
+nested specialization's own arguments are never confused with an enclosing
+scope's) top-level `<...>` and splits its contents on top-level commas,
+verbatim. Deliberately never runs an argument through `canonicalize_type_
+name`: a plain text split cannot tell a type argument from a non-type one
+(a literal value, an enumerator) apart from its own text alone, and no
+concrete cross-backend value-spelling divergence is observed to justify
+guessing -- the identical "no canonicalizer without a known target
+divergence to fix" discipline the fourth slice's constants already
+established. Wired into `normalize_header_ast`'s existing `types` loop
+(one line, `template_arguments=Fact.present(split_template_arguments(rt_
+name) or ())`) -- `Fact.present(())` (a confirmed, not merely absent,
+non-template) for every record that isn't one.
+
+A closure-typed argument's own raw `"(lambda at <path>:<line>:<col>)"`
+marker is stored UNrenumbered by this function -- deliberately, since
+`template_arguments` was never added to `qualified_name_segments.
+_PAYLOAD_FIELD_EXCLUSIONS`, so the pre-existing `renumber_anonymous_
+closure_identities` walk (already reaching every string in `AbiSnapshot.
+semantic_ir`, confirmed by grep before assuming it) canonicalizes it
+post-hoc to the identical stable ordinal it already gives the SAME marker
+embedded in the record's own `canonical_spelling`/`EntityId` -- confirmed
+end to end against a REAL compiled fixture, not assumed: a template
+instantiated with a real lambda's closure type, run through the actual
+`dump()` production pipeline, shows the decomposed argument and the
+record's own identity key converging on byte-identical renumbered text
+(`tests/test_semantic_ir_end_to_end.py`'s new closure-parameterized-
+template test -- exactly this slice's own named acceptance-criteria
+fixture).
+
+**clang is a confirmed, named exception, and it is a missing OCCURRENCE,
+not a wrong FACT.** `dumper_clang.py`'s categorizing walk collects
+`CXXRecordDecl`/`RecordDecl` nodes for `self._records` (and therefore
+`parse_types()`) but never a `ClassTemplateSpecializationDecl` (confirmed
+directly -- `extract.headers.clang.templates.build_specialization_
+index`'s own docstring states this exactly, for an unrelated vtable/
+base-lookup reason), so a concrete specialization is never itself a
+`RecordType` on that backend at all; only the UNINSTANTIATED PATTERN
+(bare `"Box"`, never `"Box<int, 3>"`) is. Every clang-produced record this
+normalizer sees is therefore, unconditionally and confirmedly, NOT an
+instantiation -- `Fact.present(())` is the CORRECT, confirmed answer for
+every one of them, not a gap. What clang cannot do is produce ANY
+occurrence at all for a concrete specialization, so this phase's own
+acceptance-criteria fixture cannot show cross-backend AGREEMENT on that
+specific entity -- confirmed with a real end-to-end test
+(`test_semantic_ir_template_arguments_end_to_end`) that asserts exactly
+this asymmetry (castxml: one real, decomposed occurrence; clang: none at
+all) rather than assuming parity, squarely within this phase's own stated
+acceptance bar ("not... an identical `SemanticIR` regardless of source
+backend").
+
+Functions/typedefs/variables/enums are deliberately untouched: none of
+them can themselves be a template instantiation the way a record can in
+this codebase's model. A function TEMPLATE's own instantiation is real
+(`identity<int>`), but neither backend's `Function.name` embeds the
+argument spelling the way a record's compound name does -- confirmed with
+real castxml output: an instantiated function's own `name` stays the
+bare, unparameterized `"identity"`, with only the Itanium-MANGLED name
+carrying the argument, needing a real demangler to decode it back into
+argument spellings -- a materially different, larger project (a
+mangled-name argument decoder, not a compound-spelling text split) than
+this slice attempted. An enum/typedef/variable can never itself be a
+template entity at all in the vocabulary this codebase's model tracks.
+
 **Still not landed, and therefore this phase is not complete:**
-DWARF/PDB/BTF/CTF backends produce no `SemanticIR` at all -- this
-normalizer canonicalizes evidence a backend already resolved identity for,
-it does not resolve identity itself, and no `normalize_header_ast`-style
-assembler exists yet for any of these four. DWARF's own Phase 2 prerequisite
-already landed (Phase 2's fourteenth slice, 2026-09-02: `dwarf_snapshot.py`
-populates `entity_id` on `RecordType`/`EnumType`/`Function`/`Variable`/
-typedefs), so DWARF's remaining gap here is specifically the `SemanticIR`
-assembly step, not identity -- PDB/BTF/CTF have neither yet. `service.py`'s
-BTF/CTF dispatch and PDB path (a fourth and
+PDB/BTF/CTF backends produce no `SemanticIR` at all -- this normalizer
+canonicalizes evidence a backend already resolved identity for, it does not
+resolve identity itself, and no `normalize_header_ast`-style assembler
+exists yet for any of these three, nor have any of them received the
+prerequisite Phase 2 `EntityId` treatment (`entity_id` population) at all.
+DWARF has closed both gaps: Phase 2's fourteenth slice (2026-09-02) gave
+`dwarf_snapshot.py` a populated `entity_id` on `RecordType`/`EnumType`/
+`Function`/`Variable`/typedefs, and Phase 6's own fifth slice (2026-09-02,
+`dumper_elf_fallback._dwarf_semantic_ir`) then closed the `SemanticIR`
+assembly step on top of it -- the first non-header-AST producer to reach
+`SemanticIR`. `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
 fifth production assembler this phase's own Files list names) remain
 unwired for the same reason; and the phase's own acceptance criteria (a
-closure-parameterized template fixture, requiring function/template-argument
-normalization) remain unmet -- `CanonicalEntity.template_arguments` is still
-never populated by any backend, header-AST functions/variables included (a
-function *template*'s own template-argument list is a separate, still-open
-piece of this slice's own stated scope, not silently assumed done by the
-ordinary-function work above). A manifest (`--dump-manifest`) dump is a
+closure-parameterized template fixture) remain only PARTIALLY met --
+castxml's own occurrence now really does decompose and canonicalize a
+closure-typed template argument end to end, but clang produces no
+comparable occurrence to agree with it at all (above), and a function
+template's own template-argument list remains a separate, unattempted
+gap (also above). A manifest (`--dump-manifest`) dump is a
 further, real gap (Codex review, PR #1001), unchanged by the third and
 fourth slices' additions: `tu_merge.merge_fragments` already collapses
 same-identity declarations across translation units into one representative

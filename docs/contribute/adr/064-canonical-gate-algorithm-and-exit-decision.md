@@ -70,11 +70,14 @@ gap that same parity pass's review rounds found — `extra-args: --format
 json` overriding a `format: text`/`markdown` step's nominal format, which
 `action/run.sh`'s JSON-detection sites (`_STDOUT_JSON_FILE`,
 `_json_report_src`'s `OUTPUT_FILE` branch) previously missed — is fixed; see
-"Staged landing, additive first" below, item 1's own end-of-list note. Still
-open: the release fan-out's `GateOptions` unification; the rest of the
-cross-front-end parity pass (typed API; the `--format text` gap named
-above; a real `--artifact-set` member-level evidence-contract signal); and
-**stage 2**, the
+"Staged landing, additive first" below, item 1's own end-of-list note.
+**Landed (2026-09-02): the release fan-out's `GateOptions` unification.**
+See "Staged landing, additive first" below, item 1's own final update for
+the account — it landed as additive stage-1b wiring, not atomic-stage work
+as this section originally assumed (see "Consequences" below for the
+correction). Still open: the rest of the cross-front-end parity pass
+(typed API; the `--format text` gap named above; a real `--artifact-set`
+member-level evidence-contract signal); and **stage 2**, the
 `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
@@ -938,6 +941,46 @@ lands in two stages rather than one atomic change:
       `action/run.sh`'s own logic with no shortcut claim standing in for
       it. No code change and no new test -- this is prose accuracy only,
       the same class the fourth round already established needs neither.
+
+      **Landed (2026-09-02): the release fan-out's `GateOptions`
+      unification** (`abicheck/policy/release_gate_options.py`'s
+      `GateOptions`/`resolve_release_gate_options` -- this package's own
+      home for deciding gate/severity effect, per `abicheck/policy/
+      AGENTS.md`; reached from the release fan-out's `frontends`-classified
+      `cli_compare_release_helpers.py` through `abicheck/workflows/gate.py`'s
+      existing re-export facade, since `frontends -> policy` is forbidden).
+      Before this, the release fan-out threaded six raw preset/category/scheme strings
+      independently through `_resolve_release_severity_config`,
+      `_compute_release_severity_exit_code`, and
+      `_fold_release_global_severity`, each re-deriving the identical
+      `SeverityConfig` from the same strings -- exactly the shape PR B's
+      own "finalized" note (see `cli-cleanup-phase-two.md`'s "PR 4"
+      section) flagged as unsafe to fix reactively, ahead of this ADR's
+      settled design. `resolve_release_gate_options` now performs that
+      resolution exactly once (folding a selected `kind: gate` pack via
+      the pre-existing `apply_release_gate_pack`, then applying the same
+      `exit_code_scheme == "severity"`-with-no-config-present fallback to
+      `PRESET_DEFAULT` and forced-`legacy`-clears-severity corrections
+      `compare_release_cmd` used to apply inline at its own call site);
+      `_compute_release_severity_exit_code`/`_fold_release_global_severity`
+      now take the resulting `GateOptions` instead of the raw strings, and
+      `GateOptions.severity is None` is the one place "no severity setting
+      is in effect" is decided, replacing the two duplicated `if
+      release_exit_code_scheme == "legacy"`/`"severity"` checks that used
+      to appear at both the call site and inside each downstream function.
+      **Landed additively, contrary to this ADR's original "Consequences"
+      framing** (see that section's own correction below): the rewrite
+      changes no CLI surface and no externally observable exit code --
+      verified by the existing severity/exit-code test suite
+      (`tests/test_config_review.py`, `tests/test_cov95_cli.py`,
+      `tests/test_pack_application.py`, `tests/test_compare_release.py`):
+      their call sites were updated to build a `GateOptions` instead of
+      passing the six raw strings directly, and every expected result
+      stayed the same against the new call shape, so this did not need to
+      wait for stage 2. Still open, unchanged by this landing: the typed-API
+      half of the parity pass, the `--format text` gap named above, and a
+      real `--artifact-set` member-level evidence-contract signal for the
+      Action to consume.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
@@ -984,11 +1027,27 @@ alongside the flag deletion itself.
   via **stage 1b** (`resolve_release_exit_decision_for_report`,
   `abicheck/policy/exit_decision_precedence.py`, per "Staged landing"
   above) — not the atomic stage; that block is additive and needs no
-  algorithm-selector decision to exist. Only the
-  release fan-out's *internal* severity/exit-code representation changing
-  shape (raw strings → `GateOptions`-shaped object) is atomic-stage work,
-  since it is the same rewrite that removes `--exit-code-scheme`. Neither
-  step changes the release's externally observable exit codes.
+  algorithm-selector decision to exist. **Correction (2026-09-02):** this
+  paragraph originally placed the release fan-out's *internal*
+  severity/exit-code representation change (raw strings →
+  `GateOptions`-shaped object) in the atomic stage too, reasoning that it
+  was "the same rewrite that removes `--exit-code-scheme`". It landed
+  instead as additive stage-1b work (see "Staged landing, additive first"
+  above, item 1's own 2026-09-02 update) — the internal shape change and
+  the CLI flag's removal turned out to be separable: nothing about
+  replacing raw-string re-derivation with one resolved object depends on
+  the flag still existing, and the rewrite provably changes no externally
+  observable exit code for any invocation the CLI supports today (verified
+  by the existing test suite's call sites, updated to build a `GateOptions`
+  instead of passing the six raw strings directly, still producing every
+  expected result unchanged) -- independent of whether `--exit-code-scheme`
+  itself is later deleted. That eventual stage-2 removal is its own,
+  separately visible exit-code change for the one, no-longer-supported
+  invocation spelling (exit `64`, "No such option"), not something this
+  internal rewrite causes or forecloses. So both steps change no
+  externally observable exit code *for the invocations each one leaves
+  supported*, which is the invariant this paragraph was stating; only
+  which stage the internal rewrite belongs to was wrong.
 
 ## Cross-references
 

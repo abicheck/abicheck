@@ -1461,7 +1461,7 @@ class TestJUnitCLICompare:
             ],
         )
         assert result.exit_code == 0, result.output
-        root = xml_fromstring(result.output)
+        root = xml_fromstring(result.stdout)  # stderr carries the depth=binary scope warning
         assert root.tag == "testsuites"
 
     def test_format_junit_accepted_by_cli(self) -> None:

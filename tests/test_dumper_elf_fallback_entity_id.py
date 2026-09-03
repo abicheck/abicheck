@@ -31,11 +31,12 @@ from pathlib import Path
 
 from abicheck.dumper_elf_fallback import _build_symbol_only_snapshot
 from abicheck.elf_metadata import ElfMetadata
+from abicheck.model import RecordType
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
-from abicheck.model.identity import EntityKind
+from abicheck.model.identity import EntityKind, entity_id_for_type
 
 
-def _snap(funcs: set[str], variables: set[str] = frozenset()):
+def _snap(funcs: set[str], variables: set[str] = frozenset(), dwarf_only_types=None):
     return _build_symbol_only_snapshot(
         Path("/nonexistent/lib.so"),
         "1.0",
@@ -45,7 +46,7 @@ def _snap(funcs: set[str], variables: set[str] = frozenset()):
         funcs,
         variables,
         set(),
-        [],
+        dwarf_only_types or [],
         None,
     )
 
@@ -98,3 +99,48 @@ def test_distinct_exports_never_collide_regardless_of_mangling() -> None:
     snap = _snap({"_Z3addii", "custom_cpp_name", "plain_c_fn"})
     ids = {f.entity_id for f in snap.functions}
     assert len(ids) == 3
+
+
+def _record(name: str) -> RecordType:
+    return RecordType(name=name, kind="struct", entity_id=entity_id_for_type((), name))
+
+
+def test_semantic_ir_is_populated_when_dwarf_types_are_preserved() -> None:
+    """Codex review, PR #1021, fresh evidence: when the DWARF walk found
+    real record types but no functions/variables of its own (a DSO
+    combining DWARF-bearing C++ objects with assembly-only exported
+    symbols), the symbol-only fallback previously left ``semantic_ir=None``
+    even though it preserves those types (``dwarf_only_types``) with real
+    ``entity_id``s -- a headerless dump silently omitted IR entirely."""
+    types = [_record("Widget")]
+    snap = _snap({"plain_c_fn"}, dwarf_only_types=types)
+    assert snap.semantic_ir is not None
+    entity_id = types[0].entity_id
+    assert entity_id is not None
+    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
+    entity = snap.semantic_ir.occurrences[occ_id]
+    assert entity.canonical_spelling.value == "Widget"
+    assert entity.producer == "dwarf"
+
+
+def test_semantic_ir_omits_the_elf_only_functions_and_variables() -> None:
+    """The fallback's ``functions``/``variables`` are raw ELF-export-table
+    entries with no DWARF backing at all (unlike *types*, which really did
+    come from the DWARF walk) -- normalizing them under ``producer="dwarf"``
+    would misattribute evidence DWARF never supplied, so they carry no
+    occurrence in this snapshot's ``semantic_ir`` at all (honest sparseness,
+    not a claim of "confirmed empty")."""
+    types = [_record("Widget")]
+    snap = _snap({"plain_c_fn"}, dwarf_only_types=types)
+    func = next(f for f in snap.functions if f.name == "plain_c_fn")
+    assert func.entity_id is not None
+    assert snap.semantic_ir is not None
+    assert snap.semantic_ir.occurrences_for(func.entity_id) == ()
+
+
+def test_semantic_ir_stays_none_without_any_dwarf_types() -> None:
+    """Negative control: the pure ELF-export-only case (no DWARF debug info
+    at all) must keep behaving exactly as before this fix -- there is no
+    DWARF evidence of any kind to normalize."""
+    snap = _snap({"plain_c_fn"})
+    assert snap.semantic_ir is None

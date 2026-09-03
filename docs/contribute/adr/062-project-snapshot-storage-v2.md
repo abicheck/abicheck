@@ -47,7 +47,17 @@ readable. The directory writer/reader
 path — but no `dump` CLI flag produces one today.
 Folding baseline sets/`BundleFacts` into sections, multi-artifact packages,
 variant capture, and the `.tar.zst` transport form (A1.4-A1.8) remain not
-implemented. All of Phase 2 is not implemented.
+implemented — note this is the **remainder of Phase 1**, not Phase 2 (Phase
+2 is the separate scale/performance work: lazy loading, streaming encode,
+cache migration, indexes). A full per-item design for A1.1's `.tar.zst`
+remainder and A1.4-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
+now exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
+"Phase 1" section — design only, not implemented by that addition; the
+object model these items build on (`PackageManifest.artifact_refs`/
+`variant_refs`, `ArtifactRef.kind`/`.sections`) already supports every one
+of them without a schema change, which is why each item below is scoped as
+a producer/CLI-wiring gap rather than a storage-format gap. All of Phase 2
+is not implemented.
 **Decision maker:** abicheck maintainers
 **Supersedes (partially):** [ADR-015](015-snapshot-serialization.md)'s
 single-document logical model. [ADR-059](059-compressed-snapshot-storage.md)'s

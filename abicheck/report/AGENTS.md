@@ -17,37 +17,36 @@ Use explicit implementation modules rather than broad compatibility facades.
 During ADR-061 migration, each moved projection names its workflow result in
 the module name. `aggregate.py` projects `AggregateResult` to JSON-compatible
 mapping or text. `document.py` is the shared immutable `ReportDocument`
-Phase 2 is establishing across every output format. Its projections are
+Phase 2 established across every output format. Its projections are
 `render_json.py` (JSON, and therefore SARIF — SARIF is a JSON format and
 needs no serializer of its own), `render_text.py` (the one-line `--stat`
 summary, `render_stat_document`), `render_xml.py` (JUnit),
-`render_markdown.py` (Markdown prose), `render_html.py` (HTML's reusable
-per-section formatters), `render_html_document.py` (HTML's whole-document
-projection), and `render_markdown_document.py` (Markdown's: `to_review_digest`
-and `to_markdown`'s default view). `scoped_gate.py` (below) mutates a JSON
-`dict`, not a result.
+`render_markdown.py` (Markdown prose), `render_html.py`/`render_html_document.py`
+(HTML's per-section formatters/whole-document projection),
+`render_markdown_document.py` (Markdown's `to_review_digest`/`to_markdown`
+default view), and `render_markdown_alternate.py` (Markdown's `--report-mode leaf`/`root-cause`). `scoped_gate.py` (below) mutates a JSON `dict`, not a result.
 
-**HTML and Markdown's full mode + review digest now cross the canonical
-`ReportDocument` boundary; Markdown's leaf/root-cause modes and `--stat`'s
-adjacent paths do not yet.** JSON, SARIF, JUnit, `--stat`, HTML, and
-Markdown's default view construct a `ReportDocument` (HTML via
-`html_report.build_html_document`; Markdown via `render_markdown_document.
-build_markdown_document`/`build_review_digest_document`) and project it
-purely; `reporter_markdown.py`'s leaf/root-cause modes alone still build
-their own per-section structs straight from a `DiffResult`, no document --
-tracked in `duplication-and-convergence-assessment.md`'s Phase 4. Markdown's
-per-`Change` sections needed a JSON-safe row `Change` itself isn't, mirroring
-HTML's `ChangeRow`: `render_markdown_document.py`'s own `_change_row`
-family resolves `impact_for` compute-side, leaving `render_markdown.py`'s
-`_format_change_md` family serving leaf/root-cause mode unconverted. HTML's and Markdown's
-whole-document assembly each split into its own `render_*_document.py`
-sibling (once each combined module passed the architecture check's
-new-file ceiling): `render_html.py`/`render_markdown.py` keep the reusable
-per-section renderers; `render_html_document.py`/`render_markdown_document.py`
-own only "assemble the complete page/report from a finished document" plus
-the `_*_from_mapping` reconstruction helpers a document round trip requires
-(it turns every dataclass into a plain mapping, tuple into a list).
-`html_template.render_document` is unrelated despite the name — page chrome.
+**Every format now crosses the canonical `ReportDocument` boundary — ADR-061
+Phase 2's Markdown item is closed in full.** JSON, SARIF, JUnit, `--stat`,
+HTML, and every Markdown view (default, review digest, leaf, root-cause)
+construct a `ReportDocument` and project it purely; `reporter_markdown.py`
+builds no report section directly any more — `_to_markdown_leaf`/
+`_to_markdown_root_cause` are thin `build_*`/`render_*` delegates, same
+shape as `to_markdown`'s full-mode branch. Markdown's per-`Change` sections
+need a JSON-safe row `Change` isn't, mirroring HTML's `ChangeRow`:
+`render_markdown_document.py`'s `_change_row`/`_row_contract_tag` family
+resolves `impact_for` compute-side and is shared (imported, not duplicated)
+by `render_markdown_alternate.py`'s leaf-mode row renderer, leaving
+`render_markdown.py`'s `_format_change_md` family serving only its one
+remaining caller, the scoped-gate text append in `cli_compare_fold.py`.
+HTML's and Markdown's whole-document assembly each split into its own
+`render_*_document.py` sibling once the combined module passed the
+architecture check's new-file ceiling — Markdown split again once
+leaf/root-cause landed. `render_html.py`/`render_markdown.py` keep the
+reusable per-section renderers; the `*_document.py`/`*_alternate.py`
+siblings assemble the complete report from a finished document plus the
+`_*_from_mapping` reconstruction helpers a round trip requires (dataclass ->
+mapping, tuple -> list). `html_template.render_document` is unrelated.
 
 `render_xml.py` exists because a `ReportDocument` holds JSON values only, and
 an `ElementTree` is not one. `element_to_mapping`/`element_from_mapping` are
@@ -103,10 +102,11 @@ stays.
 
 ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate`
 folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch
--> render pass. It and `render_markdown_document.py` reach legacy, still-flat
-`reporter`/`reporter_markdown` via `importlib`, never a static import (which
-would close a real import-cycle-growth violation), since `modules.yaml`'s
-`frozen_root_families` forbids a new `abicheck/reporter_*.py` sibling.
+-> render pass. It and both `render_markdown_*.py` document modules reach
+legacy, still-flat `reporter`/`reporter_markdown` via `importlib`, never a
+static import (`modules.yaml`'s `frozen_root_families` forbids a new
+`abicheck/reporter_*.py` sibling, and a static import would close a real
+import-cycle-growth violation).
 
 ## Tests
 

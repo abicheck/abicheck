@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``normalize_header_ast`` — projects already-parsed header-AST facts into
-a real :class:`~abicheck.model.semantic_ir.SemanticIR` (ADR-063 Phase 6,
-second and third slices).
+"""``normalize_header_ast`` — projects already-parsed header-AST (and, since
+the fifth slice, DWARF) facts into a real
+:class:`~abicheck.model.semantic_ir.SemanticIR` (ADR-063 Phase 6, second
+through sixth slices).
 
 **Second slice, not the phase's full scope.** The plan
 (``docs/contribute/plans/one-semantic-pipeline.md``, "Phase 6") originally
@@ -106,6 +107,23 @@ divergence to fix is a heuristic in search of a bug, not a fix for one. A
 constant carries no ``cv_qualification``/``template_arguments`` either: it
 has no captured type for either fact to describe.
 
+**Scope of the fifth slice.** DWARF, the first non-header-AST producer,
+via ``dwarf_snapshot.build_snapshot_from_dwarf``. Records/enums/typedefs
+need no DWARF-specific handling; functions and variables each need one
+producer-specific ``cv_qualification`` carve-out, since DWARF's own DIE
+walk extracts different (and in one case more reliable) evidence than the
+two header-AST backends do -- see ``extract/semantic_normalizer_dwarf.py``'s
+own module docstring for the full account, including the real-compiled-
+fixture verification behind each carve-out.
+
+**Scope of the sixth slice.** ``CanonicalEntity.template_arguments``, for
+records only -- a pure, backend-agnostic decomposition of a record's own
+already-canonical compound ``Name<Arg1, Arg2>`` spelling (whatever backend
+produced it), needing no new identity work and no producer-specific branch;
+see ``extract/semantic_normalizer_template_args.py``'s own module docstring
+for the full account, including exactly why functions/typedefs/variables/
+enums stay untouched and what remains unmet for clang.
+
 A typedef whose underlying type neither backend could resolve is stamped
 ``Fact.failed(...)``, not ``Fact.present("?")`` (Codex review, PR #1001):
 both backends spell an unresolved chain with the identical ``"?"``
@@ -148,7 +166,12 @@ Backend-agnostic by construction: ``dumper_castxml.py`` and
 ``parse_constant_entity_ids()`` surface (verified directly, not assumed), so
 one function serves both — the same "converge on one shared shape" property
 Phase 6's Design section wants, just realized at the already-parsed-object
-layer instead of a raw-fact layer.
+layer instead of a raw-fact layer. The fifth slice's ``dwarf_snapshot.py``
+caller confirms this was a real property, not one coincidentally true of
+only two XML/JSON-shaped producers: DWARF supplies the identical collections
+built from a completely different source (a DIE walk, not an AST dump), and
+needed only the two documented ``producer=="dwarf"`` evidence-availability
+carve-outs above, never a parallel normalizer.
 """
 
 from __future__ import annotations
@@ -168,11 +191,13 @@ from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR, canonical_cv_qualification
 from ..model.signature_normalization import canonicalize_function_signature_param_type
 from ..name_classification import canonicalize_type_name
+from . import semantic_normalizer_dwarf
 from .semantic_normalizer_artifacts import (
     CLANG_EXPR_FINGERPRINT_RE,
     has_unresolved_component,
     is_castxml_opaque_function_type,
 )
+from .semantic_normalizer_template_args import split_template_arguments
 
 __all__ = ["normalize_header_ast"]
 
@@ -479,6 +504,39 @@ def _variable_top_level_cv_qualification(type_str: str) -> tuple[str, ...]:
     return canonical_cv_qualification(found)
 
 
+def _function_cv_qualification_fact(
+    fn: Function, producer: str
+) -> Fact[tuple[str, ...]]:
+    """A function's ``cv_qualification`` fact, producer-aware: castxml/clang
+    get ``Fact.present(...)`` from real, AST-node-derived ``is_const``/
+    ``is_volatile`` evidence; DWARF gets a dedicated, honest computation --
+    see :mod:`~abicheck.extract.semantic_normalizer_dwarf`'s own docstring
+    for why."""
+    if producer == semantic_normalizer_dwarf.DWARF_PRODUCER:
+        return semantic_normalizer_dwarf.function_cv_qualification()
+    return Fact.present(
+        canonical_cv_qualification(
+            (
+                *(("const",) if fn.is_const else ()),
+                *(("volatile",) if fn.is_volatile else ()),
+            )
+        )
+    )
+
+
+def _variable_cv_qualification_fact(
+    var: Variable, producer: str
+) -> Fact[tuple[str, ...]]:
+    """A variable's ``cv_qualification`` fact, producer-aware: castxml/clang
+    get :func:`_variable_top_level_cv_qualification`'s text scan over
+    ``var.type``; DWARF gets its own structural computation instead -- see
+    :mod:`~abicheck.extract.semantic_normalizer_dwarf`'s own docstring for
+    why the two backends need different sources of evidence here."""
+    if producer == semantic_normalizer_dwarf.DWARF_PRODUCER:
+        return semantic_normalizer_dwarf.variable_cv_qualification(var.is_const)
+    return Fact.present(_variable_top_level_cv_qualification(var.type))
+
+
 def _add_occurrence(
     occurrences: dict[OccurrenceId, CanonicalEntity],
     entity_id: EntityId | None,
@@ -486,6 +544,7 @@ def _add_occurrence(
     *,
     producer: str,
     cv_qualification: Fact[tuple[str, ...]] | None = None,
+    template_arguments: Fact[tuple[str, ...]] | None = None,
 ) -> None:
     """Record one occurrence, first-observation-wins on a key collision.
 
@@ -524,6 +583,11 @@ def _add_occurrence(
             if cv_qualification is not None
             else {}
         ),
+        **(
+            {"template_arguments": template_arguments}
+            if template_arguments is not None
+            else {}
+        ),
     )
 
 
@@ -556,9 +620,12 @@ def normalize_header_ast(
     same qualified-name key set by construction, mirroring
     *typedefs_qualified*/*typedef_entity_ids*), also optional (default
     ``{}``) for the identical reason. *producer* is the backend name
-    (``"castxml"``/``"clang"``), stamped onto every
+    (``"castxml"``/``"clang"``/``"dwarf"``), stamped onto every
     :class:`~abicheck.model.semantic_ir.CanonicalEntity` this call
-    produces, mirroring ``AbiSnapshot.ast_producer``.
+    produces, mirroring ``AbiSnapshot.ast_producer`` for the header-AST
+    callers (DWARF has no ``ast_producer`` equivalent to mirror — see
+    this module's own docstring, "Scope of the fifth slice", for exactly
+    which functions/variables facts *producer* changes the handling of).
 
     A ``RecordType``/``EnumType``/``Function``/``Variable`` with no
     ``entity_id`` (older snapshot reload, or a producer that has not
@@ -571,11 +638,13 @@ def normalize_header_ast(
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for rt in types:
+        rt_name = rt.qualified_name or rt.name
         _add_occurrence(
             occurrences,
             rt.entity_id,
-            Fact.present(rt.qualified_name or rt.name),
+            Fact.present(rt_name),
             producer=producer,
+            template_arguments=Fact.present(split_template_arguments(rt_name) or ()),
         )
     for et in enums:
         _add_occurrence(
@@ -612,14 +681,7 @@ def normalize_header_ast(
             fn.entity_id,
             _function_spelling_fact(fn, producer),
             producer=producer,
-            cv_qualification=Fact.present(
-                canonical_cv_qualification(
-                    (
-                        *(("const",) if fn.is_const else ()),
-                        *(("volatile",) if fn.is_volatile else ()),
-                    )
-                )
-            ),
+            cv_qualification=_function_cv_qualification_fact(fn, producer),
         )
     for var in variables:
         _add_occurrence(
@@ -627,9 +689,7 @@ def normalize_header_ast(
             var.entity_id,
             _variable_spelling_fact(var, producer),
             producer=producer,
-            cv_qualification=Fact.present(
-                _variable_top_level_cv_qualification(var.type)
-            ),
+            cv_qualification=_variable_cv_qualification_fact(var, producer),
         )
     for qualified_name, entity_id in constant_entity_ids.items():
         value = constants.get(qualified_name)
