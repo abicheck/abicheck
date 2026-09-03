@@ -38,7 +38,10 @@ from abicheck.compatibility_evaluation_config import (
 from abicheck.compile_context import CompileContext
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.workflows.plan import AnalysisPlan, SidePlan
-from abicheck.workflows.resolved_execution_context import ResolvedExecutionContext
+from abicheck.workflows.resolved_execution_context import (
+    EvidenceView,
+    ResolvedExecutionContext,
+)
 
 
 def _identity(identity_id: str = "strict_abi") -> ImmutableIdentity:
@@ -186,12 +189,34 @@ class TestResolutionDigest:
     def test_changes_when_requested_depth_changes(self):
         cfg = _evaluation_config()
         a = ResolvedExecutionContext(
-            operation="compare", requested_depth="headers", evaluation_config=cfg
+            operation="compare",
+            evidence=EvidenceView.for_request("headers"),
+            evaluation_config=cfg,
         )
         b = ResolvedExecutionContext(
-            operation="compare", requested_depth="source", evaluation_config=cfg
+            operation="compare",
+            evidence=EvidenceView.for_request("source"),
+            evaluation_config=cfg,
         )
         assert a.resolution_digest() != b.resolution_digest()
+
+    def test_unaffected_by_effective_depth_alone(self):
+        """`resolution_digest()` fingerprints the resolved *input*
+        (`evidence.requested_depth`), never the post-execution
+        `effective_depth`/`depth_satisfied` -- those are outcomes, not
+        inputs (see module docstring)."""
+        cfg = _evaluation_config()
+        a = ResolvedExecutionContext(
+            operation="compare",
+            evidence=EvidenceView(requested_depth="headers", effective_depth="headers"),
+            evaluation_config=cfg,
+        )
+        b = ResolvedExecutionContext(
+            operation="compare",
+            evidence=EvidenceView(requested_depth="headers", effective_depth="binary"),
+            evaluation_config=cfg,
+        )
+        assert a.resolution_digest() == b.resolution_digest()
 
     def test_changes_when_evaluation_config_changes(self):
         a = ResolvedExecutionContext(
@@ -335,3 +360,121 @@ class TestResolutionDigest:
         digest = ResolvedExecutionContext(operation="compare").resolution_digest()
         assert digest.startswith("sha256:")
         assert len(digest) == len("sha256:") + 64
+
+
+class TestEvidenceView:
+    def test_bare_construction_defaults(self):
+        evidence = EvidenceView()
+        assert evidence.requested_depth is None
+        assert evidence.effective_depth is None
+        assert evidence.depth_satisfied is None
+
+    def test_available_depths_is_the_public_depth_ladder(self):
+        from abicheck.buildsource.scan_levels import USER_DEPTHS
+
+        evidence = EvidenceView()
+        assert evidence.available_depths == tuple(d.value for d in USER_DEPTHS)
+        assert evidence.available_depths == ("binary", "headers", "build", "source")
+
+    def test_for_request_carries_only_the_requested_depth(self):
+        evidence = EvidenceView.for_request("headers")
+        assert evidence.requested_depth == "headers"
+        assert evidence.effective_depth is None
+        assert evidence.depth_satisfied is None
+
+    def test_from_assurance_copies_the_real_analysis_assurance_verbatim(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        assurance = AnalysisAssurance(
+            requested_depth="headers", effective_depth="binary", depth_satisfied=False
+        )
+        evidence = EvidenceView.from_assurance(assurance)
+        assert evidence.requested_depth == "headers"
+        assert evidence.effective_depth == "binary"
+        assert evidence.depth_satisfied is False
+
+    def test_from_assurance_never_recomputes_never_recalculates_depth_satisfied(self):
+        """A structurally-shaped stand-in (not the real `AnalysisAssurance`)
+        still works -- `from_assurance` reads attributes via `getattr`, it
+        never re-derives `depth_satisfied` from `requested_depth`/
+        `effective_depth` itself (that would be a second, independently
+        computed copy of `AnalysisAssurance`'s own logic)."""
+
+        class _FakeAssurance:
+            requested_depth = "source"
+            effective_depth = "source"
+            depth_satisfied = None  # deliberately not re-derived to True
+
+        evidence = EvidenceView.from_assurance(_FakeAssurance())
+        assert evidence.depth_satisfied is None
+
+    def test_from_assurance_missing_attributes_degrade_to_none(self):
+        evidence = EvidenceView.from_assurance(object())
+        assert evidence.requested_depth is None
+        assert evidence.effective_depth is None
+        assert evidence.depth_satisfied is None
+
+
+class TestResolvedExecutionContextEvidenceIntegration:
+    def test_requested_depth_property_reads_through_evidence(self):
+        ctx = ResolvedExecutionContext(
+            operation="compare", evidence=EvidenceView.for_request("build")
+        )
+        assert ctx.requested_depth == "build"
+        assert ctx.evidence.requested_depth == "build"
+
+    def test_from_plan_builds_a_requested_only_view_with_no_assurance(self):
+        plan = _plan(requested_depth="source")
+        ctx = ResolvedExecutionContext.from_plan(plan)
+        assert ctx.evidence.requested_depth == "source"
+        assert ctx.evidence.effective_depth is None
+
+    def test_from_plan_with_assurance_builds_the_full_post_execution_view(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        plan = _plan(requested_depth="source")
+        assurance = AnalysisAssurance(
+            requested_depth="source", effective_depth="build", depth_satisfied=False
+        )
+        ctx = ResolvedExecutionContext.from_plan(plan, assurance=assurance)
+        assert ctx.evidence.requested_depth == "source"
+        assert ctx.evidence.effective_depth == "build"
+        assert ctx.evidence.depth_satisfied is False
+
+    def test_with_assurance_returns_a_new_context_leaving_the_original_untouched(self):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        plan = _plan(requested_depth="headers")
+        original = ResolvedExecutionContext.from_plan(plan)
+        assurance = AnalysisAssurance(
+            requested_depth="headers", effective_depth="headers", depth_satisfied=True
+        )
+        updated = original.with_assurance(assurance)
+        # The original, pre-execution context is untouched (frozen dataclass).
+        assert original.evidence.effective_depth is None
+        # The new one carries the full post-execution view.
+        assert updated.evidence.effective_depth == "headers"
+        assert updated.evidence.depth_satisfied is True
+        assert updated is not original
+
+    def test_with_assurance_preserves_every_other_field(self):
+        plan = _plan(operation="dump", requested_depth="headers")
+        cfg = _evaluation_config()
+        contexts = {"old": CompileContext(gcc_path="/usr/bin/gcc")}
+        original = ResolvedExecutionContext.from_plan(
+            plan, evaluation_config=cfg, compile_contexts=contexts
+        )
+        updated = original.with_assurance(
+            type(
+                "_A",
+                (),
+                {
+                    "requested_depth": "headers",
+                    "effective_depth": "headers",
+                    "depth_satisfied": True,
+                },
+            )()
+        )
+        assert updated.operation == original.operation
+        assert updated.evaluation_config is original.evaluation_config
+        assert dict(updated.compile_contexts) == dict(original.compile_contexts)

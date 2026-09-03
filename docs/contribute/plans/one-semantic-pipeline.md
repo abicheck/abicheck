@@ -183,7 +183,7 @@ when a first PR lands against a sub-phase:
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
-| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself, composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s — no live caller wired yet, so the sub-phase's own gap stays open |
+| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). The type is now fully shaped per its own original description — no live caller wired yet, so the sub-phase's own gap (downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
 | **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
@@ -12597,33 +12597,58 @@ plan's own progress).** `abicheck/workflows/resolved_execution_context.py`
 operation`/`requested_depth` (via `ResolvedExecutionContext.from_plan`)
 with an already-resolved `CompatibilityEvaluationConfig` and a per-side
 `CompileContext` mapping into one typed container, plus a
-`resolution_digest()` fingerprint of that resolved input. Deliberately
-does **not** attempt the review's own literal "requested/effective/
-available depth" field list: "effective depth" already has one authority
-(`analysis_assurance.AnalysisAssurance`, necessarily a *post*-execution
-fact), and a second, pre-execution "effective depth" field here would be
-exactly the "two independently constructible representations of the same
-fact" shape the Governing Invariant forbids -- see the module's own
-docstring for the full reasoning. Likewise does not attempt to replace
-`effective_config_digest.py`'s two-tier digest (that module's own
-docstring already gives a considered reason no single object holds every
-configuration axis for every run; several rich-tier fields are themselves
-comparison *outcomes*, not inputs a pre-execution object could carry) --
-`resolution_digest()` is a separate, narrower, differently-named
-fingerprint of the resolved *input* only. Pure composition: it re-derives
-nothing from either `AnalysisPlan`, `CompatibilityEvaluationConfig`, or
+`resolution_digest()` fingerprint of that resolved input. Does not attempt
+to replace `effective_config_digest.py`'s two-tier digest (that module's
+own docstring already gives a considered reason no single object holds
+every configuration axis for every run; several rich-tier fields are
+themselves comparison *outcomes*, not inputs a pre-execution object could
+carry) -- `resolution_digest()` is a separate, narrower, differently-named
+fingerprint of the resolved *input* only, and deliberately excludes
+`evaluation_config.provenance` (Codex review, PR #1027: provenance records
+*how* a value was selected, not the value itself, so two front ends
+resolving the identical values must hash identically). Pure composition: it
+re-derives nothing from `AnalysisPlan`, `CompatibilityEvaluationConfig`, or
 `CompileContext`, and (like `compatibility_evaluation_frontend.py` before
 it) is landed with its own primitive-level test suite
-(`tests/test_resolved_execution_context.py`) and no live caller yet --
-the type, tested, before any command is migrated to build or consume one.
+(`tests/test_resolved_execution_context.py`) and no live caller yet -- the
+type, tested, before any command is migrated to build or consume one.
+
+**The "requested/effective/available depth" axis is now closed too, via a
+new `EvidenceView` type** (second slice, same PR) -- resolving without
+duplicating the one existing authority for "effective depth"
+(`analysis_assurance.AnalysisAssurance`, necessarily a *post*-execution
+fact: what a side's resolved snapshot actually turned out to carry, not
+knowable at the point a `ResolvedExecutionContext` is first assembled).
+`EvidenceView` always carries `requested_depth` (knowable pre-execution,
+via `EvidenceView.for_request`) and `available_depths` (the static
+four-rung `--depth` ladder, `buildsource.scan_levels.USER_DEPTHS` restated
+as plain values -- build-time vocabulary, not a per-run computed fact, so
+stating it duplicates nothing); `effective_depth`/`depth_satisfied` stay
+`None` until `EvidenceView.from_assurance()` copies them verbatim off a
+real, already-computed `AnalysisAssurance` (read via `getattr`, not an
+`isinstance` check against that heavier checker-layer type, so this
+`workflows`-layer leaf module stays import-cycle-free) -- never re-derived.
+`ResolvedExecutionContext.with_assurance()` returns a *new* context (frozen
+dataclasses don't mutate) whose `EvidenceView` is complete, for a caller
+that built a pre-execution context and only later has a real
+`AnalysisAssurance` to attach; `ResolvedExecutionContext.from_plan()` also
+takes an optional `assurance` parameter to build the full view directly,
+for a caller resolving the context after a run has already completed.
+`resolution_digest()` reads only `evidence.requested_depth`, never
+`effective_depth`/`depth_satisfied` -- an outcome has no place in a
+fingerprint of the resolved *input* (pinned by
+`test_unaffected_by_effective_depth_alone`).
+
 **Still open, and not attempted here:** wiring a real call site
 (`cli_compare_receipt.resolve_and_apply`/`resolve_dump_request` are the
 two places an `AnalysisPlan` and a resolved `CompatibilityEvaluationConfig`
 are both already available in the same call, but neither is changed to
-construct a `ResolvedExecutionContext` yet), and everything the review's
-"PR 2"-onward sequence describes (a semantic consumer cutover, `FactStatus`-
-aware detectors, and the rest) — this slice closes only the "one resolved
-context type exists and is tested" step, not consumer migration.
+construct a `ResolvedExecutionContext` yet, nor does anything call
+`with_assurance()` once a real `AnalysisAssurance` exists), and everything
+the review's "PR 2"-onward sequence describes (a semantic consumer
+cutover, `FactStatus`-aware detectors, and the rest) — this slice closes
+the "one resolved context type exists, fully shaped, and is tested" step
+for real, not consumer migration.
 
 ---
 

@@ -36,21 +36,30 @@ resolved configuration for this run" has to know to go collect three
 separately-threaded objects from three different call sites, with no single
 type describing what a fully resolved run's own inputs actually are.
 
-**Why this does not attempt a single "requested/effective/available depth"
-computation, though the plan's own PR 1 description names one.** That fact
-already has one authority --
-:class:`abicheck.analysis_assurance.AnalysisAssurance` -- and it is
-necessarily a *post*-execution fact: "effective depth" is what a side's
-resolved snapshot actually turned out to carry, not something knowable at
-the point a :class:`ResolvedExecutionContext` is assembled (before
-extraction has run at all, mirroring :class:`~abicheck.workflows.plan.AnalysisPlan`'s
-own "requested, not resolved" scope for the identical reason -- see that
-module's docstring). Inventing a second, pre-execution "effective depth"
-field here would be exactly the "two independently constructible
-representations of the same fact" shape the Governing Invariant forbids, so
-this module carries only ``requested_depth`` (the same value
-:class:`~abicheck.workflows.plan.AnalysisPlan` already resolves) and leaves
-"effective"/"available" to the existing post-execution authority.
+**How this closes the "requested/effective/available depth" axis without
+duplicating its one existing authority.** "Effective depth" already has an
+authority -- :class:`abicheck.analysis_assurance.AnalysisAssurance` -- and
+it is necessarily a *post*-execution fact: what a side's resolved snapshot
+actually turned out to carry, not something knowable at the point a
+:class:`ResolvedExecutionContext` is first assembled (before extraction has
+run at all, mirroring :class:`~abicheck.workflows.plan.AnalysisPlan`'s own
+"requested, not resolved" scope for the identical reason -- see that
+module's docstring). Recomputing "effective"/"available" independently here
+would be exactly the "two independently constructible representations of
+the same fact" shape the Governing Invariant forbids. :class:`EvidenceView`
+resolves this by construction rather than by omission: it always carries
+``requested_depth`` (knowable pre-execution) and ``available_depths`` (the
+static four-rung ``--depth`` ladder,
+:data:`~abicheck.buildsource.scan_levels.USER_DEPTHS` restated as plain
+values -- build-time vocabulary, not a per-run computed fact, so stating it
+here duplicates nothing); ``effective_depth``/``depth_satisfied`` stay
+``None`` until :meth:`EvidenceView.from_assurance` copies them verbatim off
+a real, already-computed ``AnalysisAssurance`` -- never re-derived. A
+:class:`ResolvedExecutionContext` built before execution therefore carries
+a genuinely partial :class:`EvidenceView` (by construction, not as a
+missing feature), and :meth:`ResolvedExecutionContext.with_assurance`
+returns a *new* context (frozen dataclasses don't mutate) whose
+:class:`EvidenceView` is complete, once a caller has one to attach.
 
 **Why this does not compute a rich-tier effective-config digest.**
 :mod:`abicheck.effective_config_digest` is explicit that no single object
@@ -89,6 +98,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from ..buildsource.scan_levels import USER_DEPTHS
+
 if TYPE_CHECKING:
     from ..compatibility_evaluation_config import (
         CompatibilityEvaluationConfig,
@@ -97,7 +108,14 @@ if TYPE_CHECKING:
     from ..compile_context import CompileContext
     from .plan import AnalysisPlan
 
-__all__ = ["ResolvedExecutionContext"]
+__all__ = ["EvidenceView", "ResolvedExecutionContext"]
+
+#: The public ``--depth`` ladder, restated as plain string values --
+#: build-time vocabulary derived from the one authority
+#: (:data:`abicheck.buildsource.scan_levels.USER_DEPTHS`), not a per-run
+#: computed fact. Module-level so it is computed once, not once per
+#: :class:`EvidenceView` construction.
+_AVAILABLE_DEPTHS: tuple[str, ...] = tuple(depth.value for depth in USER_DEPTHS)
 
 
 def _canonical_repr(obj: object) -> str:
@@ -193,14 +211,61 @@ def _sha256_of(*parts: str) -> str:
 
 
 @dataclass(frozen=True)
+class EvidenceView:
+    """The coarse ``--depth`` evidence-ladder view for one run.
+
+    *requested_depth* is knowable pre-execution (the same value
+    :attr:`abicheck.workflows.plan.AnalysisPlan.requested_depth` already
+    carries). *available_depths* is the static four-rung public ladder
+    (:data:`abicheck.buildsource.scan_levels.USER_DEPTHS`) -- always
+    populated, since it names what a request *could* have asked for, not
+    what this run resolved. *effective_depth*/*depth_satisfied* are
+    ``None`` until :meth:`from_assurance` copies them off a real
+    :class:`abicheck.analysis_assurance.AnalysisAssurance` -- this class
+    never computes them itself (see module docstring)."""
+
+    requested_depth: str | None = None
+    effective_depth: str | None = None
+    depth_satisfied: bool | None = None
+    available_depths: tuple[str, ...] = _AVAILABLE_DEPTHS
+
+    @classmethod
+    def for_request(cls, requested_depth: str | None) -> EvidenceView:
+        """The pre-execution view: only *requested_depth* is knowable yet."""
+        return cls(requested_depth=requested_depth)
+
+    @classmethod
+    def from_assurance(cls, assurance: object) -> EvidenceView:
+        """The post-execution view, copied verbatim off *assurance* -- a
+        real :class:`abicheck.analysis_assurance.AnalysisAssurance` in
+        practice. Reads ``requested_depth``/``effective_depth``/
+        ``depth_satisfied`` via ``getattr`` rather than importing that
+        class and ``isinstance``-checking against it: `analysis_assurance.py`
+        imports `checker_types.DiffResult` and sits well above this
+        `workflows`-layer module in the dependency graph (`workflows` may
+        import `model`/`storage`/`extract`/`compare`/`policy`, never a
+        checker-layer module), so a structural read is what lets this leaf
+        module stay import-cycle-free while still accepting the real
+        object any caller already has in hand."""
+        return cls(
+            requested_depth=getattr(assurance, "requested_depth", None),
+            effective_depth=getattr(assurance, "effective_depth", None),
+            depth_satisfied=getattr(assurance, "depth_satisfied", None),
+        )
+
+
+@dataclass(frozen=True)
 class ResolvedExecutionContext:
     """One resolved run's configuration, composed from already-resolved parts.
 
     *operation* mirrors :attr:`abicheck.workflows.plan.AnalysisPlan.operation`
-    (``"dump"``/``"compare"``/``"scan"``). *requested_depth* mirrors
-    :attr:`~abicheck.workflows.plan.AnalysisPlan.requested_depth` -- the
-    coarse ``--depth`` request, never a resolved/effective value (see module
-    docstring). *evaluation_config* is the ADR-049 D7 resolved
+    (``"dump"``/``"compare"``/``"scan"``). *evidence* is the
+    :class:`EvidenceView` for this run -- built pre-execution via
+    :meth:`EvidenceView.for_request` (only ``requested_depth``/
+    ``available_depths`` known), or post-execution via
+    :meth:`EvidenceView.from_assurance` once a real
+    :class:`abicheck.analysis_assurance.AnalysisAssurance` exists (see
+    :meth:`with_assurance`). *evaluation_config* is the ADR-049 D7 resolved
     :class:`~abicheck.compatibility_evaluation_config.CompatibilityEvaluationConfig`
     for this run, when one was resolved (a plain run with no
     ``--pack``/``--contract`` may have none -- this field is ``None`` rather
@@ -216,7 +281,7 @@ class ResolvedExecutionContext:
     """
 
     operation: str
-    requested_depth: str | None = None
+    evidence: EvidenceView = field(default_factory=EvidenceView)
     evaluation_config: CompatibilityEvaluationConfig | None = None
     compile_contexts: Mapping[str, CompileContext] = field(default_factory=dict)
 
@@ -228,6 +293,14 @@ class ResolvedExecutionContext:
             self, "compile_contexts", MappingProxyType(dict(self.compile_contexts))
         )
 
+    @property
+    def requested_depth(self) -> str | None:
+        """Convenience alias for ``evidence.requested_depth`` -- the coarse
+        ``--depth`` request, never a resolved/effective value (see module
+        docstring). Reads through :attr:`evidence` rather than duplicating
+        it as a second field, so the two can never disagree."""
+        return self.evidence.requested_depth
+
     @classmethod
     def from_plan(
         cls,
@@ -235,6 +308,7 @@ class ResolvedExecutionContext:
         *,
         evaluation_config: CompatibilityEvaluationConfig | None = None,
         compile_contexts: Mapping[str, CompileContext] | None = None,
+        assurance: object | None = None,
     ) -> ResolvedExecutionContext:
         """Compose a context from an already-resolved
         :class:`~abicheck.workflows.plan.AnalysisPlan` plus whatever
@@ -243,12 +317,36 @@ class ResolvedExecutionContext:
         verbatim -- it does not re-run planning, and it does not require
         *plan* to be the source of the other two arguments (a caller that
         has not resolved a compile context for every side, or any
-        evaluation config at all, simply omits them)."""
+        evaluation config at all, simply omits them). *assurance*, when
+        given (a real, already-computed
+        :class:`abicheck.analysis_assurance.AnalysisAssurance`), builds the
+        full post-execution :class:`EvidenceView` via
+        :meth:`EvidenceView.from_assurance` instead of the pre-execution,
+        requested-only view -- for a caller resolving this context *after*
+        a run has already completed, rather than before."""
+        evidence = (
+            EvidenceView.from_assurance(assurance)
+            if assurance is not None
+            else EvidenceView.for_request(plan.requested_depth)
+        )
         return cls(
             operation=plan.operation,
-            requested_depth=plan.requested_depth,
+            evidence=evidence,
             evaluation_config=evaluation_config,
             compile_contexts=compile_contexts or {},
+        )
+
+    def with_assurance(self, assurance: object) -> ResolvedExecutionContext:
+        """A new context (frozen dataclasses don't mutate) whose
+        :attr:`evidence` is the full post-execution
+        :class:`EvidenceView`, copied off *assurance* via
+        :meth:`EvidenceView.from_assurance`. Every other field is carried
+        over unchanged -- this exists for a caller that built a
+        pre-execution context (via :meth:`from_plan` with no *assurance*)
+        and only later, once a run completes, has a real
+        :class:`abicheck.analysis_assurance.AnalysisAssurance` to attach."""
+        return dataclasses.replace(
+            self, evidence=EvidenceView.from_assurance(assurance)
         )
 
     def provenance_for(self, field_name: str) -> ValueProvenance | None:
