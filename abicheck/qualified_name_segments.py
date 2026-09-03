@@ -14,12 +14,16 @@
 
 """Shared qualified-name segmentation and versioned inline-namespace helpers.
 
-Leaf module (its only ``abicheck`` import is its own sibling
-``qualified_name_segments_walk.py``, itself a leaf) so it can be shared
-between ``diff_namespaces.py`` (which owns the segment-splitting logic this
-module was extracted from) and any other detector that needs to recognize a
-versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) without
-re-implementing the same regex.
+Leaf module: its ``abicheck`` imports are its own sibling
+``qualified_name_segments_walk.py`` (itself a leaf) and
+``model.qualified_name_split`` (the bracket-depth-aware ``"::"``-splitting
+primitive :func:`raw_segments` delegates to -- see that module's own
+docstring for why it lives in ``model/`` rather than here: ``extract`` may
+depend on ``model`` but not on this, `compare`-layer, module). So it can be
+shared between ``diff_namespaces.py`` (which owns the segment-splitting
+logic this module was extracted from) and any other detector that needs to
+recognize a versioned inline-namespace segment (``v1``, ``_V2``, ``__1``,
+...) without re-implementing the same regex.
 
 A versioned inline namespace makes the *same* declaration reachable under
 two qualified spellings: the full path (``detail::v1::x``) and the
@@ -67,6 +71,9 @@ from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
 # `from .qualified_name_segments import _walk_rewrite_strings` call site
 # (this module's own use below, plus tests exercising the walk directly) is
 # unaffected.
+from .model.qualified_name_split import (
+    split_top_level_scopes as _split_top_level_scopes,
+)
 from .qualified_name_segments_walk import (
     _PAYLOAD_FIELD_EXCLUSIONS as _PAYLOAD_FIELD_EXCLUSIONS,
     _collect_strings as _collect_strings,
@@ -225,35 +232,12 @@ def raw_segments(qualified: str) -> list[str]:
 
     Splits on ``::`` at template-nesting depth zero only, so
     ``ns::Map<std::pair<int, int>>::iterator`` yields three segments and the
-    ``::`` inside the argument list is not a separator.
+    ``::`` inside the argument list is not a separator. Delegates to
+    :func:`~abicheck.model.qualified_name_split.split_top_level_scopes` --
+    see that module's own docstring for why the splitting primitive itself
+    lives in ``model/`` rather than here.
     """
-    if not qualified:
-        return []
-    if "::" not in qualified and "<" not in qualified:
-        return [qualified]
-    out: list[str] = []
-    buf: list[str] = []
-    depth = 0
-    i = 0
-    n = len(qualified)
-    while i < n:
-        ch = qualified[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            if depth > 0:
-                depth -= 1
-        elif depth == 0 and ch == ":" and i + 1 < n and qualified[i + 1] == ":":
-            if buf:
-                out.append("".join(buf).strip())
-                buf = []
-            i += 2
-            continue
-        buf.append(ch)
-        i += 1
-    if buf:
-        out.append("".join(buf).strip())
-    return [s for s in out if s]
+    return _split_top_level_scopes(qualified)
 
 
 # ---------------------------------------------------------------------------

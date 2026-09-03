@@ -13617,14 +13617,99 @@ mangled-name argument decoder, not a compound-spelling text split) than
 this slice attempted. An enum/typedef/variable can never itself be a
 template entity at all in the vocabulary this codebase's model tracks.
 
+**Seventh slice landed: PDB, types only (`RecordType`/`EnumType` via TPI).**
+The identical Phase 2 `EntityId` treatment DWARF's fifth slice needed, but
+structurally harder to apply: PDB's own TPI type records carry no scope
+tree at all to walk (unlike DWARF's DIE tree or the two header-AST
+backends' AST trees) -- CodeView names each struct/class/union/enum with
+its own FLAT, already-`"::"`-qualified spelling as one string
+(`"NS::Outer::Inner"`), with no separate parent-scope reference. The new
+`extract/pdb_scope.py` therefore does the reverse of `extract/
+dwarf_scope.py`'s/the header-AST backends' own scope-construction modules:
+it PARSES a qualified name string back into typed `ScopePath` segments,
+rather than building one while walking a tree.
+
+That parsing itself needed a shared primitive `extract` could actually
+import: `qualified_name_segments.raw_segments` already had the exact
+bracket-depth-aware `"::"`-splitting algorithm needed, but that module
+belongs to the `compare` layer, which `extract` may not depend on (ADR-061
+-- the identical constraint `extract/headers/scope_segments.py`'s own
+docstring already documents for that module's `version_suffix`). Rather
+than reimplementing the same fiddly splitting loop a second time -- exactly
+the "two independently constructible representations of the same fact"
+shape this codebase's own governing invariant forbids elsewhere -- the
+primitive itself moved down to a new leaf module,
+`model/qualified_name_split.py`, which both `qualified_name_segments.
+raw_segments` (now a one-line delegate) and `extract/pdb_scope.py` build
+on. `raw_segments`'s own existing 152-test coverage (lambda-identity,
+scope-segments, semantic_ir-template-args, qualified-type-matching) all
+passed unchanged against the delegating version, confirming the move
+preserved behavior exactly.
+
+The one genuinely new judgment call: given a qualified name's flat text
+alone, is an enclosing segment a namespace or a nested class? CodeView's
+spelling carries no direct signal either way. `pdb_scope.py` resolves it
+by checking whether the ACCUMULATED prefix up to that segment is itself a
+name this same PDB separately recorded as a struct/class/union (the
+caller's own `DwarfMetadata.structs` key set, already computed and
+in hand -- no second pass needed) -- a `Record` segment if so, `Namespace`
+otherwise. **This heuristic is UNVERIFIED against real MSVC output**: this
+environment has no MSVC/`cl.exe` toolchain (the `windows-msvc` CI lane's
+own `msvc`-marker gate is the only place that exists), so it is covered
+only by hand-built qualified-name-string tests -- the identical "no
+compiler needed" discipline `tests/test_pdb_parser.py`'s synthetic
+MSF/TPI/DBI byte-stream fixtures already establish for this backend,
+applied one layer up (post-parse qualified-name strings, not raw TPI
+bytes). Its own documented, accepted limitation: a purely
+forward-declared-and-never-defined enclosing class would not appear in
+the known-record-names set (`pdb_metadata._is_user_visible` filters
+forward-ref-only entries out entirely) and would misclassify as a
+namespace -- an edge case the qualified-name text alone cannot resolve,
+matching the DWARF/header-AST backends' own practice of documenting an
+evidence gap explicitly rather than guessing past it. No anonymous-type
+handling either: CodeView synthesizes an internal name for an unnamed
+struct/union/enum rather than leaving it genuinely anonymous the way a
+DWARF DIE or a Clang/castxml AST node can be, and `_is_user_visible`
+already filters those compiler-internal names out before they ever reach
+this module.
+
+`pdb_model.py`'s `_record_from_layout`/`_enum_from_info` now stamp a real
+`entity_id` via this module, and the new `pdb_model.pdb_semantic_ir()`
+calls the existing, UNMODIFIED `normalize_header_ast` -- no PDB-specific
+`Fact`-carve-out module needed for this types-only slice (unlike DWARF's
+fifth slice, which needed `extract/semantic_normalizer_dwarf.py` for its
+own cv_qualification gaps): the normalizer's `types`/`enums` loop never
+touches `cv_qualification` at all (a functions/variables-only fact this
+slice does not populate for PDB), so `producer="pdb"` needs no new
+producer-dispatch branch there. Wired into the real production call chain
+(`service_dump_native_pe._dump_pe`'s existing header-scoping fallback
+branch -- the same narrow "headers requested, castxml could not resolve a
+surface" path `pdb_model.py`'s own pre-existing docstring already
+describes, not a new call site) and verified end to end through that real
+chain (`tests/test_pdb_provenance.py::TestDumpPeFallbackBuildsPdbTypes`),
+not only in isolation.
+
+**Still not landed on the PDB side**: PDB's own function/variable
+identity. The DBI module symbol streams -- where CodeView's
+`S_GPROC32`/`S_LPROC32`/`S_GDATA32`/`S_LDATA32` records live, the PDB
+analogue of `DW_TAG_subprogram`/`DW_TAG_variable` -- are parsed by
+NOTHING today (`pdb_parser.py`'s own DBI header fields for these streams
+are read but never acted on), so there is no PDB-native `Function`/
+`Variable` at all to attach an `EntityId` to yet. Giving PDB function/
+variable identity is therefore not "add an `entity_id=` field to an
+existing extraction path" the way DWARF's third slice was -- it needs
+genuinely new parser work first, a materially larger, separate project
+this types-only slice does not attempt.
+
 **Still not landed, and therefore this phase is not complete:**
-PDB/BTF/CTF backends produce no IR at all (none of them populate
+the BTF/CTF backends produce no IR at all (neither populates
 `entity_id` yet -- this normalizer canonicalizes evidence a backend already
 resolved identity for, it does not resolve identity itself, so extending it
 to these backends is gated on giving each of them the Phase 2 `EntityId`
-treatment first, the identical prerequisite DWARF's own fifth slice just
-closed); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
-fifth production assembler this phase's own Files list names) remain
+treatment first, the same prerequisite DWARF's fifth slice and PDB's
+seventh slice each needed for their own debug format); `service.py`'s
+BTF/CTF dispatch (a fourth production assembler this phase's own Files
+list names, PDB's own dispatch now wired above) remains
 unwired for the same reason; and the phase's own acceptance criteria (a
 closure-parameterized template fixture) remain only PARTIALLY met --
 castxml's own occurrence now really does decompose and canonicalize a

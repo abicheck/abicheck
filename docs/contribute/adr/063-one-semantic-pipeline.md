@@ -571,13 +571,17 @@
   separately-justified extension beyond the availability-bearing subset
   this phase (and D7's initial realization) actually covers.
 - **Phase 6** (one canonical `SemanticIR` between the backends and the
-  checker) has landed six slices — the IR itself and its persistence, the
+  checker) has landed seven slices — the IR itself and its persistence, the
   header-AST normalizer for records/enums/typedefs, functions and
   variables, and constants across every header-AST-backed platform
   (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included), DWARF
-  (the first non-header-AST producer), and now `CanonicalEntity.
-  template_arguments` for records; it is
-  **not yet complete**: the PDB/BTF/CTF backends still produce no IR at all,
+  (the first non-header-AST producer), `CanonicalEntity.
+  template_arguments` for records, and now PDB (the second non-header-AST
+  producer, types only — `RecordType`/`EnumType` via TPI); it is
+  **not yet complete**: PDB's own function/variable identity is unattempted
+  (needs new DBI module-symbol-stream parsing PDB does not do at all today
+  — a materially larger, separate project from this slice's types-only
+  scope), the BTF/CTF backends still produce no IR at all,
   clang produces no occurrence at all for a concrete template
   specialization (so `template_arguments` cross-backend agreement remains
   unexercised there), a function template's own argument list is unattempted,
@@ -762,11 +766,50 @@
   the Itanium-MANGLED name carries it, needing a real demangler to decode
   back into argument spellings, a materially larger, separately-scoped
   project this slice does not attempt).
+  **Seventh slice landed: PDB, types only.** PDB's own TPI type records
+  carry no scope tree at all — unlike DWARF's DIE walk and the two
+  header-AST backends' AST walks, CodeView names each struct/class/union/
+  enum with its own FLAT, already-`"::"`-qualified spelling, so
+  `extract/pdb_scope.py` (new) does the reverse of what `extract/
+  dwarf_scope.py`/`extract/headers/*/scope.py` do: PARSING a qualified
+  name string back into typed scope segments, not building one while
+  walking a tree. It reuses a new, dependency-free
+  `model.qualified_name_split.split_top_level_scopes` (the same
+  bracket-depth-aware `"::"`-splitting algorithm `qualified_name_segments.
+  raw_segments` already had, now shared rather than duplicated — that
+  module belongs to the `compare` layer `extract` may not import, so the
+  primitive itself moved down to `model/` where both layers can reach it)
+  and disambiguates each enclosing segment as a `Record` vs. a `Namespace`
+  by checking whether the accumulated prefix is itself a name PDB
+  separately recorded as a struct/class/union — a heuristic, not a
+  certainty, since CodeView's flat spelling carries no other signal; **not
+  verified against real MSVC output** (this environment has no MSVC
+  toolchain — see `tests/test_msvc_pdb_e2e.py`'s own `msvc`-marker gate),
+  covered only by hand-built qualified-name-string tests mirroring
+  `tests/test_pdb_parser.py`'s existing synthetic-byte-stream discipline
+  for this backend. `pdb_model.py`'s `_record_from_layout`/`_enum_from_info`
+  now stamp a real `entity_id` using this module, and the new
+  `pdb_model.pdb_semantic_ir()` calls the existing, unmodified
+  `normalize_header_ast` — no PDB-specific `Fact` carve-out module needed
+  for this types-only slice, since the normalizer's `types`/`enums` loop
+  never touches `cv_qualification` (a functions/variables-only fact this
+  slice does not populate for PDB) at all. Wired into the real production
+  call chain (`service_dump_native_pe._dump_pe`'s header-scoping fallback
+  branch, the same narrow path `pdb_model.py`'s own docstring already
+  describes), verified end to end through that real chain, not only in
+  isolation. **Still not landed**: PDB's own function/variable identity —
+  the DBI module symbol streams where CodeView's `S_GPROC32`/`S_LDATA32`/
+  etc. live (the PDB analogue of `DW_TAG_subprogram`/`DW_TAG_variable`)
+  are parsed by nothing today, so there is no PDB-native `Function`/
+  `Variable` to attach an `EntityId` to at all yet — a materially larger,
+  separate project (new parser work, not just an `entity_id=` field on an
+  existing extraction path the way DWARF's own third slice was) than this
+  types-only slice attempted.
   **Still not landed, and therefore this phase is not yet complete**: the
-  PDB/BTF/CTF backends still produce no `entity_id` at all, so
+  BTF/CTF backends still produce no `entity_id` at all, so
   extending the normalizer to them is gated on giving each the Phase 2
   `EntityId` treatment first (the same scale of work Phase 2 did for
-  ELF/PE/Mach-O, the header-AST backends, and now DWARF, redone per debug
+  ELF/PE/Mach-O, the header-AST backends, and now DWARF/PDB, redone per debug
   format); clang producing no occurrence at all for a concrete template
   specialization (above) still leaves the acceptance criteria's own
   cross-backend-agreement bar unmet for that entity, closable only by
