@@ -38,9 +38,10 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of merge commit bb14e8e (PR #1021) plus PR #1019's own status-sync
-# fixes, merged forward across PR #1019's own conflict-resolution merge.
-# Update this file in the same PR that changes a concept's landed status.
+# as of merge commit b2d8eaaf (PR #1024, the multi-TU manifest occurrence-
+# detail fix), which itself carries forward bb14e8e (PR #1021) plus PR
+# #1019's own status-sync fixes. Update this file in the same PR that
+# changes a concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -51,8 +52,8 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: bb14e8e
-as_of_date: "2026-09-02"
+as_of_commit: b2d8eaaf
+as_of_date: "2026-09-03"
 
 concepts:
   facts:

@@ -13881,7 +13881,7 @@ mangled-name argument decoder, not a compound-spelling text split) than
 this slice attempted. An enum/typedef/variable can never itself be a
 template entity at all in the vocabulary this codebase's model tracks.
 
-**Seventh slice landed: BTF/CTF, types only.** Both `btf_metadata.
+**Eighth slice landed: BTF/CTF, types only.** Both `btf_metadata.
 parse_btf_metadata` and `ctf_metadata.parse_ctf_metadata` reduce their own
 richer, format-specific parse to the shared `DwarfMetadata` shape (via
 `BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) purely so
@@ -13941,7 +13941,7 @@ produces no IR at all (does not populate `entity_id` yet -- this
 normalizer canonicalizes evidence a backend already resolved identity
 for, it does not resolve identity itself, so extending it to PDB is
 gated on giving it the Phase 2 `EntityId` treatment first, the identical
-prerequisite DWARF's own fifth slice and BTF/CTF's own seventh slice each
+prerequisite DWARF's own fifth slice and BTF/CTF's own eighth slice each
 closed for their own producer -- DWARF via Phase 2's fourteenth slice
 populating `entity_id` on `dwarf_snapshot.py`'s `RecordType`/`EnumType`/
 `Function`/`Variable`/typedefs, then Phase 6's own fifth slice assembling
