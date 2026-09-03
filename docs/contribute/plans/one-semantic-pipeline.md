@@ -183,7 +183,7 @@ when a first PR lands against a sub-phase:
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
-| **4B — Resolved execution context** | not started | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme |
+| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). The type is now fully shaped per its own original description — no live caller wired yet, so the sub-phase's own gap (downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
 | **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
@@ -12590,6 +12590,66 @@ high-risk `--changed-path` seed rather than an unset-vs-set `--depth`
 alone. See `docs/contribute/known-gaps.md`'s matching "thirteenth review
 round" entry for the full account.
 
+**Adjacent, additive infrastructure landed under a separate name --
+`ResolvedExecutionContext` ("PR 1" of a follow-up review of this whole
+plan's own progress).** `abicheck/workflows/resolved_execution_context.py`
+(new): a frozen `ResolvedExecutionContext` composing `AnalysisPlan.
+operation`/`requested_depth` (via `ResolvedExecutionContext.from_plan`)
+with an already-resolved `CompatibilityEvaluationConfig` and a per-side
+`CompileContext` mapping into one typed container, plus a
+`resolution_digest()` fingerprint of that resolved input. Does not attempt
+to replace `effective_config_digest.py`'s two-tier digest (that module's
+own docstring already gives a considered reason no single object holds
+every configuration axis for every run; several rich-tier fields are
+themselves comparison *outcomes*, not inputs a pre-execution object could
+carry) -- `resolution_digest()` is a separate, narrower, differently-named
+fingerprint of the resolved *input* only, and deliberately excludes
+`evaluation_config.provenance` (Codex review, PR #1027: provenance records
+*how* a value was selected, not the value itself, so two front ends
+resolving the identical values must hash identically). Pure composition: it
+re-derives nothing from `AnalysisPlan`, `CompatibilityEvaluationConfig`, or
+`CompileContext`, and (like `compatibility_evaluation_frontend.py` before
+it) is landed with its own primitive-level test suite
+(`tests/unit/workflows/test_resolved_execution_context.py`) and no live caller yet -- the
+type, tested, before any command is migrated to build or consume one.
+
+**The "requested/effective/available depth" axis is now closed too, via a
+new `EvidenceView` type** (second slice, same PR) -- resolving without
+duplicating the one existing authority for "effective depth"
+(`analysis_assurance.AnalysisAssurance`, necessarily a *post*-execution
+fact: what a side's resolved snapshot actually turned out to carry, not
+knowable at the point a `ResolvedExecutionContext` is first assembled).
+`EvidenceView` always carries `requested_depth` (knowable pre-execution,
+via `EvidenceView.for_request`) and `available_depths` (the static
+four-rung `--depth` ladder, `buildsource.scan_levels.USER_DEPTHS` restated
+as plain values -- build-time vocabulary, not a per-run computed fact, so
+stating it duplicates nothing); `effective_depth`/`depth_satisfied` stay
+`None` until `EvidenceView.from_assurance()` copies them verbatim off a
+real, already-computed `AnalysisAssurance` (read via `getattr`, not an
+`isinstance` check against that heavier checker-layer type, so this
+`workflows`-layer leaf module stays import-cycle-free) -- never re-derived.
+`ResolvedExecutionContext.with_assurance()` returns a *new* context (frozen
+dataclasses don't mutate) whose `EvidenceView` is complete, for a caller
+that built a pre-execution context and only later has a real
+`AnalysisAssurance` to attach; `ResolvedExecutionContext.from_plan()` also
+takes an optional `assurance` parameter to build the full view directly,
+for a caller resolving the context after a run has already completed.
+`resolution_digest()` reads only `evidence.requested_depth`, never
+`effective_depth`/`depth_satisfied` -- an outcome has no place in a
+fingerprint of the resolved *input* (pinned by
+`test_unaffected_by_effective_depth_alone`).
+
+**Still open, and not attempted here:** wiring a real call site
+(`cli_compare_receipt.resolve_and_apply`/`resolve_dump_request` are the
+two places an `AnalysisPlan` and a resolved `CompatibilityEvaluationConfig`
+are both already available in the same call, but neither is changed to
+construct a `ResolvedExecutionContext` yet, nor does anything call
+`with_assurance()` once a real `AnalysisAssurance` exists), and everything
+the review's "PR 2"-onward sequence describes (a semantic consumer
+cutover, `FactStatus`-aware detectors, and the rest) — this slice closes
+the "one resolved context type exists, fully shaped, and is tested" step
+for real, not consumer migration.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
@@ -13924,22 +13984,78 @@ castxml's own occurrence now really does decompose and canonicalize a
 closure-typed template argument end to end, but clang produces no
 comparable occurrence to agree with it at all (above), and a function
 template's own template-argument list remains a separate, unattempted
-gap (also above). A manifest (`--dump-manifest`) dump is a
-further, real gap (Codex review, PR #1001), unchanged by the third and
-fourth slices' additions: `tu_merge.merge_fragments` already collapses
-same-identity declarations across translation units into one representative
-entry before `normalize_header_ast` ever runs, so a real ODR-duplicate/
-incomplete-vs-complete pair spread across two TUs never reaches
-`SemanticIR.occurrences` as two occurrences there -- no *more* loss than the
-legacy `functions`/`variables`/`types`/`enums` fields already have for a
-manifest dump (all read the identical merged lists), but not yet the IR's
-fuller multi-occurrence potential either. Closing this needs per-TU-fragment
-normalization before the merge collapses identities, with a real TU-context
-disambiguator threaded through -- materially more than either slice's scope;
-a single-header dump is unaffected (nothing for the merge to collapse ahead
-of it). See `extract/semantic_normalizer.py`'s own docstring for the same
-note. The original Design/Files/Tests/Acceptance-criteria sections below
-are kept verbatim as the phase's full target shape -- each slice is a step
+gap (also above). A manifest (`--dump-manifest`) dump's own occurrence-
+detail loss (Codex review, PR #1001) is now closed -- see the corrected
+account below, kept in full for the institutional-memory reasons the
+paragraph itself explains.
+
+**Multi-TU manifest occurrence detail: two wrong analyses, then the real
+fix (Codex, PR #1024) -- recorded precisely rather than quietly
+corrected a third time.** An earlier revision of
+this section argued the obvious close (normalize each `TuFragment` before
+`merge_fragments` collapses identities, keyed by a real per-TU
+disambiguator) was a no-op, reasoning that a `RecordType`'s forward-
+declaration/full-definition split produces two byte-identical
+`CanonicalEntity` PAYLOADS (`canonical_spelling`/`template_arguments` both
+derive from the qualified name text alone; `cv_qualification` is
+`NOT_COLLECTED` for every record regardless) and concluding genuinely
+closing the gap needed `CanonicalEntity` to grow a new completeness/
+availability field. That conflated the payload with the occurrence: two
+occurrences with identical payloads are still two distinct declarations,
+and `SemanticIR.occurrences` (keyed by `OccurrenceId`, not `EntityId`)
+exists precisely to preserve occurrence COUNT independent of whether two
+payloads happen to coincide -- so the "pure duplication" framing, and the
+model-extension conclusion drawn from it, were both wrong.
+
+**A second analysis then claimed the blocker was sharper still: that
+nothing today distinguishes a genuine cross-TU declaration split from the
+ordinary, far more common case of the identical declaration observed
+redundantly because many TUs `#include` the same header, and that closing
+it needed `tu_merge.py` to expose a new per-entity trivial-vs-genuine-
+variance signal it does not have today.** This was also wrong, and a
+second Codex review round on PR #1024 pointed at the fix directly: the
+distinguishing signal already exists, on the pre-merge candidates
+themselves, and does not need `tu_merge.py` to expose anything new.
+`RecordType`/`EnumType`/`Function`/`Variable` (both header-AST backends)
+already carry their own `source_location` (`"file:line"`) from parsing --
+a genuine cross-TU split (a public header's forward declaration, a
+private header's full definition) reports two *different* locations,
+while the ordinary redundant-`#include` case reports the *identical*
+location from every including TU, since it is literally the same file and
+line. That is exactly the distinction the second analysis said did not
+exist.
+
+**The actual fix, landed:** `extract/manifest_semantic_ir.py`'s new
+`manifest_semantic_ir(fragments)` normalizes each contributing TU's own
+raw, pre-merge `TuFragment` independently (never reading
+`merge_fragments`'s already-folded output at all) and unions the
+resulting per-fragment `SemanticIR.occurrences` maps (first-fragment-wins
+on a key collision, fragments ordered by `tu_name` to stay deterministic).
+`extract/semantic_normalizer.normalize_header_ast` gained a
+`disambiguate_by_source_location: bool = False` parameter (default
+preserves every existing caller's behavior unchanged); when true, each
+type/enum/function/variable occurrence's `OccurrenceId.disambiguator` is
+set to that declaration's own `source_location`. Typedefs/constants carry
+no `source_location` in this codebase's model at all (neither has an
+"incomplete" form to begin with), so this pass leaves them exactly as
+`merge_fragments`'s own flat fields already do. `dumper_manifest.
+run_tu_loop` calls `manifest_semantic_ir(fragments)` and attaches the
+result to `MergedTuFragments.semantic_ir` (a new field);
+`resolve_header_ast_result` prefers that richer value when present,
+falling back to the legacy single-pass `normalize_header_ast` call only
+when a caller's `MergedTuFragments` never set it. Verified against real
+clang output in `tests/test_dumper_manifest_semantic_ir.py`: a genuine
+two-TU forward-declaration/full-definition split produces exactly two
+occurrences with two distinct `source_location`-derived disambiguators,
+and three TUs sharing one unmodified header collapse to exactly one
+occurrence -- confirming both the fix and that it does not regress the
+overwhelmingly common shared-header case into per-TU noise. A single-TU
+manifest dump is unaffected either way (nothing for the merge to collapse
+ahead of it, and the resulting IR matches a single-header dump's own
+shape). See `extract/semantic_normalizer.py`'s and
+`extract/manifest_semantic_ir.py`'s own docstrings for the same account.
+The original Design/Files/Tests/Acceptance-criteria sections below are
+kept verbatim as the phase's full target shape -- each slice is a step
 toward that target, not a redefinition of it.
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
