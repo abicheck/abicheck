@@ -235,8 +235,20 @@ Core pipeline (in order of data flow):
    `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
    identifier spellings a castxml `init` text could genuinely carry
    verbatim, so the exception applies only to clang's own artifact, not to
-   every occurrence of those two strings. BTF/CTF/PDB remain fully
-   unmigrated: those backends do not populate `entity_id` at all yet.
+   every occurrence of those two strings. BTF/CTF remain fully unmigrated:
+   those backends do not populate `entity_id` at all yet. **PDB's own
+   slice landed, types only:** `extract/pdb_scope.py` parses CodeView's
+   flat, already-`"::"`-qualified struct/class/union/enum names back into
+   typed `ScopePath` segments (the reverse of DWARF's/the header-AST
+   backends' own tree-walk construction — CodeView carries no parent-scope
+   tree to walk), disambiguating an enclosing segment as a `Record` only
+   when the accumulated prefix up to it is itself a name PDB separately
+   recorded as a struct/class/union, defaulting to `Namespace` otherwise —
+   an unverified heuristic (no MSVC toolchain in this environment to check
+   it against), with function/variable identity and any anonymous-nested-
+   type handling explicitly out of scope for this slice. See ADR-063
+   Phase 6's PDB slice for the full account, including its documented,
+   accepted limitations.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

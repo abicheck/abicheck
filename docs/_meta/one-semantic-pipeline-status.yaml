@@ -51,8 +51,8 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: bb14e8e
-as_of_date: "2026-09-02"
+as_of_commit: e254a9e
+as_of_date: "2026-09-03"
 
 concepts:
   facts:
@@ -90,10 +90,24 @@ concepts:
       must still be migrated onto EntityId; a StableEntityId/
       SnapshotLocalIdentity split must still land so the entity: alias can
       be promoted into a real match tier without risking cross-release
-      suppression-id drift. Separately, producers remain partial: PDB/BTF/
-      CTF backends still do not populate entity_id at all (AGENTS.md's own
+      suppression-id drift. Separately, producers remain partial: BTF/CTF
+      backends still do not populate entity_id at all (AGENTS.md's own
       Phase 6 note), so this concept's evidence is incomplete for those
-      three backends independent of the consumer-migration gate above.
+      two backends independent of the consumer-migration gate above. PDB
+      now populates entity_id for RecordType/EnumType (types only,
+      2026-09-03) via an unverified-against-real-MSVC namespace-vs-record
+      heuristic (no MSVC toolchain available to check it against); PDB
+      function/variable identity remains unimplemented. PDB also cannot
+      distinguish a user-declared inline namespace from an ordinary one
+      (CodeView's flat TPI names carry no source-level `inline` marker,
+      unlike DWARF's DW_AT_export_symbols or Clang's isInline) and always
+      emits a plain Namespace segment, a live EntityId mismatch against a
+      header-AST backend's InlineNamespace for any declaration nested
+      inside one -- a structural, accepted gap (matching castxml's own
+      documented inability to produce InlineNamespace at all), documented
+      as extract/pdb_scope.py's 4th limitation, not expected to close
+      without new evidence of a CodeView record this module does not
+      parse today.
 
   semantic_ir:
     primitive: complete
@@ -105,13 +119,21 @@ concepts:
       family reads SemanticIR through a shared read index instead of
       AbiSnapshot.functions/types/..., with an architecture-gate rule
       forbidding a direct legacy-collection read for that family.
-      Producers remain partial regardless (PDB/BTF/CTF backends populate
-      no entity_id or SemanticIR at all; --dump-manifest loses occurrence
-      detail; CanonicalEntity.template_arguments is populated for records
-      but not for function templates, and clang produces no occurrence at
-      all for a template specialization). DWARF's own SemanticIR gap
-      closed 2026-09-02 (Phase 6's fifth slice), the first non-header-AST
-      producer to reach it.
+      Producers remain partial regardless (BTF/CTF backends populate no
+      entity_id or SemanticIR at all; CanonicalEntity.template_arguments
+      is populated for records but not for function templates, and clang
+      produces no occurrence at all for a template specialization).
+      DWARF's own SemanticIR gap closed 2026-09-02 (Phase 6's fifth
+      slice), the first non-header-AST producer to reach it.
+      --dump-manifest's own occurrence-detail loss closed 2026-09-03: each
+      contributing TU's raw, pre-merge fragment is now normalized
+      independently and disambiguated by cross-fragment source-location
+      variance and TU-local (internal) linkage, rather than reading
+      tu_merge.merge_fragments's already-folded output. PDB's own
+      SemanticIR gap closed 2026-09-03 (Phase 6's seventh slice, types
+      only) via the new extract/pdb_scope.py -- PDB function/variable
+      identity remains unimplemented (needs new DBI module-symbol-stream
+      parsing).
 
   public_surface:
     primitive: complete
@@ -134,7 +156,13 @@ concepts:
       Phase 4B (resolved-execution-context): a ResolvedExecutionContext
       built for real (non-dry-run) execution, carrying resolved
       policy/pack/contract/evidence-depth state so downstream code stops
-      independently re-resolving each of them per call site.
+      independently re-resolving each of them per call site. A first real
+      call site landed 2026-09-03: service_compare_pipeline.
+      resolve_compare_request builds one from its own already-resolved
+      AnalysisPlan and attaches it on ResolvedComparePair, additive and
+      unread by any consumer -- resolve_dump_request remains unwired, and
+      no evaluation_config/compile_contexts/with_assurance() caller exists
+      yet, so this gate stays open.
 
   run_outcome:
     primitive: complete

@@ -134,30 +134,44 @@ non-present base fact) — recording it as a real, present spelling instead
 of a failure would have also silently misrepresented the placeholder text
 itself as canonical.
 
-**Known, accepted limitation for a manifest (``--dump-manifest``) dump
-(Codex review, PR #1001; unchanged by the third and fourth slices'
-additions).** ``dumper_manifest.resolve_header_ast_result`` calls this
-function once, on ``merge_fragments()``'s *already-merged*
-``functions``/``variables``/``types``/``enums``/``typedefs_qualified``/
-``typedef_entity_ids``/``constants``/``constant_entity_ids`` — and
-``tu_merge.merge_fragments`` itself already
-collapses same-identity declarations across translation units into one
-representative entry before this normalizer ever sees them ("a merged
-entity carries exactly one ``source_location``", that function's own
-docstring). So a real ODR-duplicate/incomplete-vs-complete-declaration
-pair spread across two TUs never reaches ``SemanticIR.occurrences`` as two
-occurrences, even though that is exactly the shape ``OccurrenceId``-keying
-exists to preserve (see ``model/semantic_ir.py``'s own docstring) — this
-normalizer produces no *more* loss than the legacy
-``functions``/``variables``/``types``/``enums`` fields already have for a
-manifest dump (all read from the identical, already-merged lists), but it
-also does not yet realize the IR's fuller multi-occurrence potential for
-that case. Closing this needs per-TU-fragment normalization *before*
-``merge_fragments`` collapses identities, threading a real TU-context
-disambiguator through — materially more than either slice's "project
-already-parsed output" scope. A single-header (non-manifest) dump is
-unaffected: there is only one translation unit, so there is nothing for
-``merge_fragments`` to collapse ahead of this function in the first place.
+**Formerly a known, accepted limitation for a manifest (``--dump-manifest``)
+dump (Codex review, PR #1001) — closed by ``extract.manifest_semantic_ir``
+(ADR-063 Phase 6, multi-TU slice; Codex review, PR #1024, fresh evidence).**
+This function itself is unchanged for that path and still only ever sees
+``merge_fragments()``'s *already-merged*, single-``source_location``-per-
+entity output when called directly (the legacy single-TU branch of
+``dumper_manifest.resolve_header_ast_result`` still calls it exactly this
+way, and remains correctly unaffected by the gap below — there is only one
+translation unit, so there is nothing for ``merge_fragments`` to collapse
+ahead of this function in the first place). But for a REAL manifest
+(``dump_manifest is not None``), ``resolve_header_ast_result`` no longer
+routes through this function's own merged-input call at all:
+``dumper_manifest.run_tu_loop`` now overwrites ``MergedTuFragments.
+semantic_ir`` with ``extract.manifest_semantic_ir.manifest_semantic_ir()``'s
+own result, computed from the RAW, pre-merge ``TuFragment``s instead —
+closing the exact gap this paragraph used to describe as open. The
+"Investigated, not merely unattempted" analysis directly below records why
+the seemingly-obvious fix wasn't a plain no-op and what its real, once-open
+blocker turned out to be; ``extract/manifest_semantic_ir.py``'s own module
+docstring is the canonical, up-to-date account of the two disambiguation
+signals that closed it (cross-fragment source-location variance, and
+per-fragment TU-local-linkage classification) — read it first for any
+follow-up work in this area rather than treating the historical record
+below as still describing today's behavior.
+
+**Investigated, not merely unattempted — historical record only, kept for
+why the fix landed where it did rather than here.** A first analysis of the
+gap (Codex, PR #1024) argued the obvious close was blocked because nothing
+distinguished a genuine cross-TU declaration split from a declaration
+merely observed redundantly via a shared ``#include`` — and concluded that
+closing it would need ``tu_merge.py`` itself to expose a new signal. That
+conclusion turned out to be unnecessary once corrected: the actual fix
+(``extract/manifest_semantic_ir.py``) never touches ``tu_merge.py`` at all,
+comparing each raw fragment's own *complete* per-entity location set
+directly, before ``merge_fragments`` ever runs. See ``docs/contribute/
+plans/one-semantic-pipeline.md``'s Phase 6 section for the full analysis,
+including why the seemingly-narrower "disambiguate only on raw candidate
+inequality" alternative wasn't obviously correct either.
 
 Backend-agnostic by construction: ``dumper_castxml.py`` and
 ``dumper_clang.py`` already expose the identical
@@ -545,6 +559,7 @@ def _add_occurrence(
     producer: str,
     cv_qualification: Fact[tuple[str, ...]] | None = None,
     template_arguments: Fact[tuple[str, ...]] | None = None,
+    disambiguator: str = "",
 ) -> None:
     """Record one occurrence, first-observation-wins on a key collision.
 
@@ -558,21 +573,16 @@ def _add_occurrence(
     clang backfill during hybrid merge, since ``merge_semantic_ir`` only
     backfills a *non*-present base fact).
 
-    Neither header-AST backend supplies a per-occurrence disambiguator
-    today (``model/occurrence.py``'s own docstring: an empty disambiguator
-    is the overwhelming common case), so two declarations that genuinely
-    share one ``EntityId`` within a single backend's own output — a forward
-    declaration alongside its definition, most plausibly — collide on the
-    identical ``OccurrenceId`` and cannot be told apart here. Keeping the
-    first is a documented limitation of this slice, not a silent
-    swallow: :class:`~abicheck.model.semantic_ir.SemanticIR` itself is
-    built to hold every occurrence once a real disambiguator exists (see
-    that module's own docstring), so closing this gap is a matter of
-    threading one through, not a shape change to this function.
+    *disambiguator* defaults to ``""``: a single-TU normalize call never
+    passes one, so two declarations sharing one ``EntityId`` within a
+    single backend's own output still collide on one ``OccurrenceId`` there
+    — a documented limitation, not a silent swallow. See
+    :func:`normalize_header_ast`'s *disambiguate_by_source_location* for
+    the caller that supplies one.
     """
     if entity_id is None:
         return
-    occ_id = OccurrenceId(entity_id)
+    occ_id = OccurrenceId(entity_id, disambiguator)
     if occ_id in occurrences:
         return
     occurrences[occ_id] = CanonicalEntity(
@@ -602,9 +612,23 @@ def normalize_header_ast(
     variables: Iterable[Variable] = (),
     constants: Mapping[str, str] = {},
     constant_entity_ids: Mapping[str, EntityId] = {},
+    disambiguate_by_source_location: bool = False,
 ) -> SemanticIR:
     """Build a :class:`SemanticIR` from one header-AST backend's already-
     parsed output.
+
+    *disambiguate_by_source_location* is ``False`` for every existing
+    caller, preserving prior behavior byte-for-byte. Set ``True`` only for
+    ONE translation unit's own raw, pre-merge candidates (ADR-063 Phase 6's
+    multi-TU slice — see ``dumper_manifest._manifest_semantic_ir``): each
+    occurrence's ``OccurrenceId`` is then disambiguated by the
+    declaration's own ``source_location`` (``""`` when absent), so a
+    genuine cross-TU split (public forward declaration, private full
+    definition, two locations) yields two occurrences, while a
+    declaration observed redundantly via a shared ``#include`` collapses
+    to one (an unmodified declaration reports the same ``file:line``
+    everywhere). Typedefs/constants carry no ``source_location`` at all,
+    so they are unaffected either way.
 
     *types*/*enums* are the backend's ``parse_types()``/``parse_enums()``
     return values; *typedefs_qualified*/*typedef_entity_ids* are its
@@ -637,6 +661,10 @@ def normalize_header_ast(
     read-only, best-effort relationship to its inputs) is likewise skipped.
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+
+    def _location_disambiguator(source_location: str | None) -> str:
+        return (source_location or "") if disambiguate_by_source_location else ""
+
     for rt in types:
         rt_name = rt.qualified_name or rt.name
         _add_occurrence(
@@ -645,6 +673,7 @@ def normalize_header_ast(
             Fact.present(rt_name),
             producer=producer,
             template_arguments=Fact.present(split_template_arguments(rt_name) or ()),
+            disambiguator=_location_disambiguator(rt.source_location),
         )
     for et in enums:
         _add_occurrence(
@@ -652,6 +681,7 @@ def normalize_header_ast(
             et.entity_id,
             Fact.present(et.qualified_name or et.name),
             producer=producer,
+            disambiguator=_location_disambiguator(et.source_location),
         )
     for qualified_name, entity_id in typedef_entity_ids.items():
         underlying = typedefs_qualified.get(qualified_name)
@@ -682,6 +712,7 @@ def normalize_header_ast(
             _function_spelling_fact(fn, producer),
             producer=producer,
             cv_qualification=_function_cv_qualification_fact(fn, producer),
+            disambiguator=_location_disambiguator(fn.source_location),
         )
     for var in variables:
         _add_occurrence(
@@ -690,6 +721,7 @@ def normalize_header_ast(
             _variable_spelling_fact(var, producer),
             producer=producer,
             cv_qualification=_variable_cv_qualification_fact(var, producer),
+            disambiguator=_location_disambiguator(var.source_location),
         )
     for qualified_name, entity_id in constant_entity_ids.items():
         value = constants.get(qualified_name)

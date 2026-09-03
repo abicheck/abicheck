@@ -54,12 +54,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.model import AbiSnapshot
+from abicheck.serialization import snapshot_from_dict
 
 pytestmark = [
     pytest.mark.integration,
@@ -115,7 +116,7 @@ def _build_lib(src_dir: Path, out_so: Path) -> None:
     )
 
 
-def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> dict[str, Any]:
+def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> AbiSnapshot:
     result = CliRunner().invoke(
         main,
         [
@@ -132,7 +133,13 @@ def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> dict[str, Any
         ],
     )
     assert result.exit_code == 0, result.output
-    return json.loads(out_json.read_text(encoding="utf-8"))
+    # `dump -o` writes the D8-sectioned on-disk shape (ADR-062/ADR-063 Phase
+    # 8), not a flat top-level dict -- ``ast_resolved_standard`` lives under
+    # ``sections.debug.payload`` there. ``snapshot_from_dict`` is the one
+    # maintained compatibility surface that reads either that shape or a
+    # legacy flat one, so go through it (and the real ``AbiSnapshot``
+    # attribute) rather than indexing the raw JSON directly.
+    return snapshot_from_dict(json.loads(out_json.read_text(encoding="utf-8")))
 
 
 def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
@@ -163,17 +170,11 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     # forced to gnu++20" is asserted directly instead of "stayed None".
     old_snap = _dump_snapshot(old_so, old_dir / "pvxs.h", tmp_path / "old.abi.json")
     new_snap = _dump_snapshot(new_so, new_dir / "pvxs.h", tmp_path / "new.abi.json")
-    assert old_snap.get("ast_resolved_standard") != "gnu++20", old_snap.get(
-        "ast_resolved_standard"
-    )
-    assert new_snap.get("ast_resolved_standard") != "gnu++20", new_snap.get(
-        "ast_resolved_standard"
-    )
+    assert old_snap.ast_resolved_standard != "gnu++20", old_snap.ast_resolved_standard
+    assert new_snap.ast_resolved_standard != "gnu++20", new_snap.ast_resolved_standard
     # Both sides were built identically and dumped under the identical
     # resolved clang -- their (possibly probed) dialects must still agree.
-    assert old_snap.get("ast_resolved_standard") == new_snap.get(
-        "ast_resolved_standard"
-    )
+    assert old_snap.ast_resolved_standard == new_snap.ast_resolved_standard
 
     out_json = tmp_path / "report.json"
     result = CliRunner().invoke(
@@ -246,7 +247,9 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
     _build_lib(old_dir, old_so)
     _build_lib(new_dir, new_so)
 
-    def _dump_with_explicit_gnu11(so_path: Path, header: Path, out_json: Path) -> dict:
+    def _dump_with_explicit_gnu11(
+        so_path: Path, header: Path, out_json: Path
+    ) -> AbiSnapshot:
         result = CliRunner().invoke(
             main,
             [
@@ -265,7 +268,10 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
             ],
         )
         assert result.exit_code == 0, result.output
-        return json.loads(out_json.read_text(encoding="utf-8"))
+        # See `_dump_snapshot`'s own comment: `dump -o` writes the
+        # D8-sectioned on-disk shape, so read it back through
+        # `snapshot_from_dict` rather than indexing the raw JSON.
+        return snapshot_from_dict(json.loads(out_json.read_text(encoding="utf-8")))
 
     old_snap = _dump_with_explicit_gnu11(
         old_so, old_dir / "pvxs.h", tmp_path / "old-gnu11.abi.json"
@@ -275,15 +281,9 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
     )
     # The decisive assertion: both sides actually resolved to gnu++11, not
     # merely "not gnu++20" -- and they agree with each other.
-    assert old_snap.get("ast_resolved_standard") == "gnu++11", old_snap.get(
-        "ast_resolved_standard"
-    )
-    assert new_snap.get("ast_resolved_standard") == "gnu++11", new_snap.get(
-        "ast_resolved_standard"
-    )
-    assert old_snap.get("ast_resolved_standard") == new_snap.get(
-        "ast_resolved_standard"
-    )
+    assert old_snap.ast_resolved_standard == "gnu++11", old_snap.ast_resolved_standard
+    assert new_snap.ast_resolved_standard == "gnu++11", new_snap.ast_resolved_standard
+    assert old_snap.ast_resolved_standard == new_snap.ast_resolved_standard
 
     out_json = tmp_path / "report-gnu11.json"
     result = CliRunner().invoke(

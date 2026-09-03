@@ -41,6 +41,7 @@ from __future__ import annotations
 
 from ...model.identity import (
     Anonymous,
+    EntityId,
     InlineNamespace,
     Namespace,
     Record,
@@ -54,6 +55,7 @@ __all__ = [
     "NO_ACCESS",
     "RECORD_TAG_KINDS",
     "anonymous_segment",
+    "entity_is_record_member",
     "flat_names",
     "namespace_segment",
     "record_segment",
@@ -92,24 +94,32 @@ def namespace_segment(name: str, *, is_inline: bool = False) -> ScopeSegment:
     lookup but *not* to mangling, which is exactly the distinction a flat
     ``"::"``-joined spelling cannot express.
 
-    ``version_tag`` is deliberately left empty by this slice, and that is a
-    scope boundary rather than an oversight. This repository has exactly one
-    definition of "what an inline-namespace version tag is" —
-    :func:`abicheck.qualified_name_segments.version_suffix`, the signal
+    ``version_tag`` is deliberately left empty by this slice -- still true,
+    but no longer for the reason first written here. This repository has
+    exactly one definition of "what an inline-namespace version tag is" —
+    :func:`abicheck.model.qualified_name_split.version_suffix`, the signal
     ADR-025's versioned-inline-namespace-alias handling
     (``diff_namespaces.detect_inline_namespace_version_bump``) already keys
-    on — and that module belongs to the ``compare`` layer, which ``extract``
-    may not import under ADR-061's dependency direction (confirmed by
-    ``scripts/check_architecture.py`` failing on exactly that edge). The two
-    ways to fill the field today would each be worse than leaving it empty:
-    re-deriving the rule here creates a second, independently-drifting
-    notion of a version tag, and relocating the existing one into ``model``
-    is a real ``compare``-layer migration of its own, not a drive-by. No
-    discriminating power is lost meanwhile —
-    :class:`~abicheck.model.identity.InlineNamespace` is identity on
-    ``name`` too, so ``v1`` and ``v2`` are already distinct segments; the
-    tag is a convenience payload a later slice can populate once the signal
-    lives somewhere ``extract`` may read.
+    on. It originally lived in the ``compare``-layer
+    ``qualified_name_segments`` module, which ``extract`` may not import
+    under ADR-061's dependency direction (confirmed by
+    ``scripts/check_architecture.py`` failing on exactly that edge) — that
+    barrier is what this docstring used to cite. A second, independent
+    ``extract``-adjacent need for the identical recognition --
+    ``pdb_metadata._is_user_visible``, PDB's own struct/enum visibility
+    filter, which feeds ``extract/pdb_scope.py``'s ``ScopePath``
+    construction -- motivated moving :func:`version_suffix` (and
+    its sibling :func:`~abicheck.model.qualified_name_split.
+    is_inline_abi_namespace_segment`) down into ``model/qualified_name_split.py``
+    (Codex review, PR #1025) — see that module's own docstring — so the
+    signal now genuinely lives somewhere ``extract`` may read. Wiring it up
+    here is nonetheless left for separate follow-up, not attempted as a
+    drive-by alongside that move: no consumer of
+    :class:`~abicheck.model.identity.InlineNamespace`'s ``version_tag`` field
+    from a header-AST producer exists yet, and no discriminating power is
+    lost meanwhile — ``InlineNamespace`` is identity on ``name`` too, so
+    ``v1`` and ``v2`` are already distinct segments regardless of
+    ``version_tag``.
 
     >>> namespace_segment("inner")
     Namespace(name='inner')
@@ -249,4 +259,40 @@ def strip_record_scopes(path: ScopePath) -> ScopePath:
             isinstance(seg, Record)
             or (isinstance(seg, Anonymous) and seg.kind != ANONYMOUS_NAMESPACE)
         )
+    )
+
+
+def entity_is_record_member(entity_id: EntityId | None) -> bool:
+    """Whether *entity_id*'s own innermost scope segment is a
+    :class:`~abicheck.model.identity.Record` -- i.e. this declaration is a
+    class/struct/union MEMBER, not a file- or namespace-scope one (Codex
+    review, PR #1024, fresh evidence beyond the reasoning
+    ``tu_merge._function_key``/``_variable_key`` already documented).
+
+    Exists to close a real gap in the "mangled == name means genuinely
+    unmangled" heuristic those two functions (and their
+    ``manifest_semantic_ir`` mirrors) use to fall back to a raw
+    ``is_static``/mangled-marker linkage check: clang's header AST also
+    reports NO ``mangledName`` for a declaration belonging to an
+    *uninstantiated* class template (a static data member or a method),
+    since mangling a member requires a concrete instantiation that does
+    not exist yet -- confirmed empirically (``template<class T> struct A {
+    static int x; };`` parses with no ``mangledName`` for ``x`` at all, the
+    identical shape ``_function_key``'s own docstring already documents
+    for a template method). That fallback previously assumed "no mangling
+    at all" could only mean a plain-C/``extern "C"`` declaration, wrongly
+    treating an uninstantiated template member's own ``is_static``/
+    non-static default as a genuine internal-linkage signal. A record
+    member's own ``EntityId`` always carries the enclosing class in its
+    ``scope`` (populated from the real AST scope walk regardless of
+    whether mangling succeeded), so checking for a trailing
+    :class:`~abicheck.model.identity.Record` segment there is a signal
+    independent of mangled-name availability -- unlike ``is_static``,
+    which the AST sets identically whether or not mangling could be
+    computed.
+    """
+    return (
+        entity_id is not None
+        and bool(entity_id.scope)
+        and isinstance(entity_id.scope[-1], Record)
     )

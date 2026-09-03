@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`42`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`43`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 42,
+  "schema_version": 43,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -175,6 +175,22 @@ and `Variable.access_fact` — the last two fields ADR-063 Phase 5's registry
 tracked as eligible-but-unconverted, closing that phase's field-by-field
 conversion. `access_fact`'s decoded value is rebuilt into a real
 `AccessLevel` member, the same reconstruction `elf_binding_fact` needs.
+
+Then (v42) the on-disk wire format itself changed, not just a field:
+ADR-062/063 Phase 8's redesign made `snapshot_to_json()` write
+`storage.sectioned_document`'s single-file sectioned envelope instead of a flat
+document. Bumped specifically so a pre-Phase-8 reader (whose own
+`SCHEMA_VERSION` was already 41) hits the hard-rejection path below instead of
+silently reading every top-level field as absent/empty — a same-numbered
+envelope change would have given that reader no signal at all. This build
+itself reads the envelope transparently regardless of version, per
+`snapshot_from_dict`'s own `is_sectioned_document` check. Finally (v43)
+`Variable.is_static` persisted — closes the plain-C/`extern "C"` same-named
+static-vs-external variable identity collision `tu_merge._variable_key`'s own
+docstring long documented as a known, accepted limitation; missing on a pre-v43
+snapshot loads as `False`, matching every prior reader's implicit assumption
+since the field did not exist.
+
 ### Forward / backward compatibility
 
 abicheck loads a snapshot best-effort and never migrates it in place. The rule
@@ -184,7 +200,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 41`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 43`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -263,7 +279,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `42`). |
+| `schema_version` | int | Snapshot format version (currently `43`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -397,7 +413,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `42`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `43`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

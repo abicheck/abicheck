@@ -93,6 +93,9 @@ from .extract.headers.castxml.names import (
     is_synthetic_ctor_key as is_synthetic_ctor_key,
     is_synthetic_dtor_key as is_synthetic_dtor_key,
 )
+from .extract.headers.scope_segments import (
+    entity_is_record_member as entity_is_record_member,
+)
 from .model import (
     AccessLevel,
     EnumType,
@@ -555,6 +558,11 @@ class _CastxmlParser:
                     or self._type_alignment_bits(el.get("type", "")),
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
+                    # See Variable.is_static's own comment -- mirrors
+                    # `_parse_function_element`'s identical `el.get("static")
+                    # == "1"` read for the same XML attribute castxml emits
+                    # on a Variable element too (confirmed empirically).
+                    is_static=el.get("static") == "1",
                     # ADR-063 Phase 2 -- see symbol_is_bare_name above.
                     entity_id=entity_id_for_variable(
                         self._scope_path(el),
