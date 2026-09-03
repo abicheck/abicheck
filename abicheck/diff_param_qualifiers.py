@@ -55,7 +55,7 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .compare.fact_comparison import compare_facts
+from .compare.va_list_diff import diff_va_list_params
 from .diff_helpers import make_change
 from .finding_identity_ctor_dtor import iter_matched_function_pairs
 from .model import Function
@@ -139,39 +139,10 @@ def param_va_list_changes(
     could otherwise fabricate a ``PARAM_BECAME_VA_LIST``/
     ``PARAM_LOST_VA_LIST`` finding against a real ``va_list`` parameter on
     the other side purely from that side's own capture gap.
+
+    Delegation-only facade over :func:`abicheck.compare.va_list_diff.
+    diff_va_list_params` (Codex review, PR #1033) — the evidence-reliability
+    gate above stays here since it's a snapshot-level question, not a raw
+    change; the per-parameter loop moved.
     """
-    changes: list[Change] = []
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            va_list_cmp = compare_facts(
-                p_old.is_va_list_fact, p_new.is_va_list_fact, False
-            )
-            if not va_list_cmp.is_comparable:
-                continue
-            old_is_va_list = bool(va_list_cmp.old_value)
-            new_is_va_list = bool(va_list_cmp.new_value)
-            if not old_is_va_list and new_is_va_list:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_BECAME_VA_LIST,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.type,
-                        new_value="va_list",
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
-            elif old_is_va_list and not new_is_va_list:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_LOST_VA_LIST,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value="va_list",
-                        new_value=p_new.type,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
-    return changes
+    return diff_va_list_params(old_map, new_map)

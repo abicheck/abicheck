@@ -34,6 +34,18 @@ severity, or a CLI flag is in the wrong layer.
   the primitive first landed (Codex review, PR #1033) — deciding "does this
   differ" is exactly what `model/AGENTS.md`'s own scoped contract reserves
   for this package, not `model/`.
+- `base_class_diff.py` — `diff_bases()` (ADR-063 Phase 5B): the
+  `FactStatus`-aware `bases`/`virtual_bases` raw-change identification
+  moved out of the legacy `diff_types.py` (Codex review, PR #1033) — new
+  behavior in a `no_growth`-tracked legacy `compare` module belongs here
+  per this file's own Purpose note, not as growth in the legacy file.
+  `diff_types._diff_type_bases` is now a delegation-only facade.
+- `va_list_diff.py` — `diff_va_list_params()` (ADR-063 Phase 5B): the
+  `FactStatus`-aware `Param.is_va_list` per-parameter raw-change loop moved
+  out of `diff_param_qualifiers.param_va_list_changes` the same way
+  (Codex review, PR #1033) — that function's own evidence-reliability gate
+  (a snapshot-level question, not a raw change) stays in
+  `diff_param_qualifiers.py` as a thin facade.
 
 ## Conventions
 
