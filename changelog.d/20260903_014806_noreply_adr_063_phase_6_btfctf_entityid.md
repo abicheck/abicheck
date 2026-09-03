@@ -18,3 +18,17 @@
   `snapshot_cache.py`'s `_SNAPSHOT_CACHE_VERSION` is bumped so a snapshot
   cached by an older abicheck build doesn't keep serving `semantic_ir=None`
   forever for an auto-detected BTF/CTF dump's identical cache-key inputs.
+
+### Testing
+
+- Added `tests/test_dumper_elf_fallback_coverage.py`, exercising
+  `dumper_elf_fallback._try_dwarf_snapshot`'s three previously-untested
+  branches (the `--dwarf-only`-with-headers warning, the "headers were
+  actually given" suppression of the no-headers info log, and the
+  "DWARF produced no functions/variables of its own" types-only fallback)
+  by monkeypatching `dwarf_snapshot.build_snapshot_from_dwarf` — the same
+  pattern `tests/test_dumper_layout_backfill.py` already uses for that
+  module — closing the `codecov/patch` gap the Codecov patch-coverage
+  check flagged on this PR (`dumper_elf_fallback.py` patch coverage;
+  `extract/debug_layout_semantic_ir.py` was already fully covered by the
+  existing test suite once run alongside `tests/test_dwarf_semantic_ir.py`).
