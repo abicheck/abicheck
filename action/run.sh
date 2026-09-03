@@ -2175,6 +2175,21 @@ elif query == "assurance_notes":
 elif query == "assurance_status":
     aa = _either("analysis_assurance", {})
     print(aa.get("status", "") if isinstance(aa, dict) else "")
+elif query == "run_outcome":
+    # ADR-063 Phase 7 (D6): the report's own `run_outcome` block -- the
+    # canonical, already-folded `compatibility`/`gate`/`operational` axes,
+    # nested the same compare-root-vs-scan-under-`diff` way every other
+    # query here already handles via `_either`. `sys.argv[3]` names which
+    # axis to print; an absent block, an absent axis, or a non-string value
+    # (`compatibility`/`assurance` are `null` on a report that never ran a
+    # real comparison) all print nothing -- the same "cannot tell" contract
+    # every other query in this function follows, so a caller reading this
+    # falls back to its own pre-existing derivation (`compat_verdict`/
+    # `severity_exit`) rather than misreading `null` as a real answer.
+    ro = _either("run_outcome", None)
+    ro = ro if isinstance(ro, dict) else {}
+    value = ro.get(sys.argv[3]) if len(sys.argv) > 3 else None
+    print(value if isinstance(value, str) else "")
 elif query == "annotations":
     # CLI cleanup phase two, PR E: the Action's own renderer -- reads the
     # persisted `annotations` array (schema 2.43/2.44) instead of relying
@@ -2479,8 +2494,23 @@ _assurance_gated() {
 # left to answer 0 through the absent-block rule below, exactly as a
 # legacy-scheme run does.
 _severity_gate_exit() {
-  local _src _answer
+  local _src _answer _gate
   _src=$(_json_report_src)
+  # ADR-063 Phase 7 (D6): prefer the report's own `run_outcome.gate` axis --
+  # already the compatibility-policy gate this function exists to answer,
+  # for both schemes (a legacy-scheme report still populates it, folded from
+  # `legacy_exit_code(verdict)` -- see `policy/outcome.py`'s own
+  # `run_outcome_dict_for_diff_result` docstring), so this needs no
+  # scheme-specific handling of its own. Falls through to the pre-existing
+  # `severity_exit`/text derivation below whenever the axis is absent (an
+  # older abicheck, or no readable JSON at all).
+  _gate=$(_report_query "$_src" run_outcome gate)
+  case "$_gate" in
+    none) echo 0; return ;;
+    addition_quality) echo 1; return ;;
+    potential_breaking) echo 2; return ;;
+    abi_breaking) echo 4; return ;;
+  esac
   _answer=$(_report_query "$_src" severity_exit)
   if [[ -n "$_answer" ]]; then
     echo "$_answer"
@@ -2550,6 +2580,19 @@ _severity_gate_categories() {
 _report_compat_verdict() {
   local _src _answer
   _src=$(_json_report_src)
+  # ADR-063 Phase 7 (D6): the report's own `run_outcome.compatibility` is
+  # this exact fact (`result.verdict`, unconditionally) under its canonical
+  # name -- preferred over the raw `verdict`/`abiVerdict` field lookups
+  # below, which stay as this function's fallback for a report from an
+  # older abicheck (no `run_outcome` block) or a synthetic report whose
+  # `run_outcome.compatibility` is `null` (no real comparison ever ran, so
+  # `_report_query` prints nothing for it -- `compat_verdict` may still hold
+  # an operational sentinel string those reports use instead).
+  _answer=$(_report_query "$_src" run_outcome compatibility)
+  if [[ -n "$_answer" ]]; then
+    echo "$_answer"
+    return
+  fi
   _answer=$(_report_query "$_src" compat_verdict)
   if [[ -n "$_answer" ]]; then
     echo "$_answer"

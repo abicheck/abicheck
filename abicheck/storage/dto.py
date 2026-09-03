@@ -67,16 +67,20 @@ from .guards import (
 )
 from .legacy_sections import LEGACY_SECTION_KINDS
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
+from .types_section_codec import TypesSection
 
 __all__ = [
     "SECTION_SCHEMA_VERSIONS",
     "SEMANTIC_IR_SECTION_KIND",
+    "TYPES_SECTION_KIND",
     "SectionDTO",
     "legacy_section_from_dto",
     "legacy_section_to_dto",
     "migrate_section_dto",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",
+    "types_from_dto",
+    "types_to_dto",
 ]
 
 #: This module's own D8-constrained section kind for the domain `SemanticIR`
@@ -88,6 +92,22 @@ __all__ = [
 #: validate against — the same reasoning `package.py`'s own "known,
 #: deliberately deferred gap" note already applies to `ArtifactRef.sections`.
 SEMANTIC_IR_SECTION_KIND = "semantic_ir"
+
+#: ADR-063 Track 4 (8B): the one `storage.legacy_sections.LEGACY_SECTION_
+#: KINDS` member with a real, dedicated `TypesSection` DTO instead of the
+#: generic `legacy_section_to_dto` pass-through -- see
+#: `types_section_codec.py`'s own module docstring for why `"types"` is the
+#: section this lands for first. Unlike `SEMANTIC_IR_SECTION_KIND` above,
+#: this name IS one of `LEGACY_SECTION_KINDS` (the D8 field-partition in
+#: `legacy_sections.py` still assigns the `types` field to this section
+#: kind) -- only its *DTO encoding function* is specialized here, not its
+#: membership in that vocabulary.
+TYPES_SECTION_KIND = "types"
+
+#: Section kinds `legacy_section_to_dto`/`legacy_section_from_dto` must
+#: refuse -- each has its own dedicated codec instead of the generic
+#: pass-through envelope those two functions provide.
+_SPECIALIZED_SECTION_KINDS = frozenset({SEMANTIC_IR_SECTION_KIND, TYPES_SECTION_KIND})
 
 #: Every section kind this module knows how to encode, and the current DTO
 #: version each one is written at today — `StorageVersions.
@@ -326,12 +346,13 @@ def legacy_section_to_dto(section_kind: str, payload: Mapping[str, Any]) -> Sect
     `semantic_ir_to_dto` already documents, applied to a section whose
     payload is already flat JSON rather than a typed domain object.
     """
-    if section_kind not in SECTION_SCHEMA_VERSIONS or section_kind == (
-        SEMANTIC_IR_SECTION_KIND
+    if (
+        section_kind not in SECTION_SCHEMA_VERSIONS
+        or section_kind in _SPECIALIZED_SECTION_KINDS
     ):
         raise ValueError(
             f"{section_kind!r} is not a legacy section kind -- expected one "
-            f"of {sorted(set(SECTION_SCHEMA_VERSIONS) - {SEMANTIC_IR_SECTION_KIND})}"
+            f"of {sorted(set(SECTION_SCHEMA_VERSIONS) - _SPECIALIZED_SECTION_KINDS)}"
         )
     return SectionDTO(
         section_kind=section_kind,
@@ -347,19 +368,45 @@ def legacy_section_from_dto(dto: SectionDTO) -> dict[str, Any]:
     own frozen `MappingProxyType`/`tuple` storage — a shallow `dict(...)`
     copy would leave every nested container still frozen).
 
-    Rejects a `semantic_ir`-kind `dto`, symmetrically with
-    `legacy_section_to_dto`'s own refusal to *encode* one -- that kind has
-    its own decoder (`semantic_ir_from_dto`), and returning its raw payload
-    here would silently bypass it rather than raising the identical error
-    `legacy_section_to_dto` already gives a caller that gets this backwards
-    (CodeRabbit review).
+    Rejects a `semantic_ir`- or `types`-kind `dto`, symmetrically with
+    `legacy_section_to_dto`'s own refusal to *encode* either -- each has its
+    own dedicated decoder (`semantic_ir_from_dto`/`types_from_dto`), and
+    returning its raw payload here would silently bypass it rather than
+    raising the identical error `legacy_section_to_dto` already gives a
+    caller that gets this backwards (CodeRabbit review, extended to `types`
+    for the identical reason when that section gained its own DTO).
     """
-    if dto.section_kind not in LEGACY_SECTION_KINDS:
+    if dto.section_kind not in LEGACY_SECTION_KINDS or dto.section_kind in (
+        _SPECIALIZED_SECTION_KINDS
+    ):
         raise ValueError(
             f"{dto.section_kind!r} is not a legacy section kind -- expected "
-            f"one of {LEGACY_SECTION_KINDS}"
+            f"one of {sorted(set(LEGACY_SECTION_KINDS) - _SPECIALIZED_SECTION_KINDS)}"
         )
     current = migrate_section_dto(dto)
     payload = current.to_dict()["payload"]
     assert isinstance(payload, dict)
     return payload
+
+
+def types_to_dto(section: TypesSection) -> SectionDTO:
+    """The domain `TypesSection` (ADR-063 Track 4 / 8B) as a `SectionDTO` --
+    built on `TypesSection.to_document`, never `asdict`, mirroring
+    `semantic_ir_to_dto`'s own "version stamp over an existing, reviewed
+    encoding" shape for its own single-field payload."""
+    return SectionDTO(
+        section_kind=TYPES_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[TYPES_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def types_from_dto(dto: SectionDTO) -> TypesSection:
+    """The inverse of `types_to_dto` — migrates *dto* to the current version
+    first, then decodes via `TypesSection.from_document`."""
+    if dto.section_kind != TYPES_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {TYPES_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    return TypesSection.from_document(current.payload)

@@ -92,11 +92,14 @@ from typing import Any
 from .dto import (
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
+    TYPES_SECTION_KIND,
     SectionDTO,
     legacy_section_from_dto,
     legacy_section_to_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
+    types_from_dto,
+    types_to_dto,
 )
 from .guards import mapping as _mapping
 from .legacy_sections import (
@@ -107,6 +110,7 @@ from .legacy_sections import (
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
+from .types_section_codec import TypesSection
 from .versioning import StorageVersions
 
 __all__ = [
@@ -253,7 +257,15 @@ def import_legacy_snapshot(
     sections: dict[str, ObjectRef] = {}
     section_schema_versions: dict[str, int] = {}
     for section_kind, payload in legacy_sections.items():
-        section_dto = legacy_section_to_dto(section_kind, payload)
+        # ADR-063 Track 4 (8B): `"types"` has its own dedicated DTO
+        # (`TypesSection`) instead of the generic pass-through every other
+        # legacy section still uses -- see `types_section_codec.py`'s own
+        # module docstring for why this is the section this promotion
+        # landed for first.
+        if section_kind == TYPES_SECTION_KIND:
+            section_dto = types_to_dto(TypesSection.from_document(payload))
+        else:
+            section_dto = legacy_section_to_dto(section_kind, payload)
         sections[section_kind] = ObjectRef(
             kind=section_kind, digest=store.put(section_dto.to_dict())
         )
@@ -348,6 +360,14 @@ def export_legacy_snapshot(
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))
+        elif section_kind == TYPES_SECTION_KIND:
+            # `TypesSection.from_document`'s own validation already refuses
+            # a missing/malformed `types` list structurally -- the
+            # `missing_required_section_fields` check the generic branch
+            # below still needs is redundant here (the section's only field
+            # IS its one required field), so there is nothing further to
+            # check before merging it into the rebuilt document.
+            document.update(types_from_dto(dto).to_document())
         else:
             payload = legacy_section_from_dto(dto)
             # A section whose *object* hashes and decodes fine can still
