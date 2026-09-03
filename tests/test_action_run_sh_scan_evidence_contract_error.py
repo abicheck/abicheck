@@ -33,12 +33,27 @@ envelope for this abort (``_emit_scan_abort_report``/
 mirroring ``test_action_run_sh_scan_not_comparable.py``'s own rationale: a
 verdict newly split out of the generic ``ERROR`` bucket must carry its own
 explicit ``FINAL_EXIT=1``, or the step silently starts passing.
+
+Update (2026-09-03): closes the one gap this module's own tests used to
+leave open — a ``--format text`` invocation with no JSON secondary output,
+where ``_json_report_src`` answers nothing and ``_evidence_contract_gated``
+previously had no signal at all to consult. ``cli_scan.py``'s
+``_EvidenceContractError`` catch site now always prints a stable stderr
+marker line ahead of the existing ``Error: <message>`` text, independent of
+``--format``, and ``_evidence_contract_gated`` falls back to grepping
+``STDERR_CONTENT`` for it — the same shape ``_assurance_gated``'s own
+stderr fallback already established for a sibling gap. The
+``test_evidence_contract_gated_stderr_fallback_*`` tests below cover it,
+including a real end-to-end run of the native CLI (not a stubbed
+``STDERR_CONTENT`` string) to prove the Python-side marker and the bash-side
+grep pattern actually agree.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -360,3 +375,153 @@ def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_p
         "hostile JSON verdict value executed as a shell command "
         f"(marker file {marker} was created)"
     )
+
+
+_STDERR_MARKER = "abicheck: scan aborted — evidence-contract error (ADR-037 D5)"
+
+
+def _run_stderr_fallback_pipeline(stderr_content: str) -> subprocess.CompletedProcess:
+    """Execute the real, unmodified ``_evidence_contract_gated`` with
+    ``_json_report_src`` answering empty (the ``--format text``, no JSON
+    secondary shape) and ``STDERR_CONTENT`` set to *stderr_content* --
+    prints ``GATED=1``/``GATED=0``, mirroring ``_run_real_gated_pipeline``'s
+    own shape for the JSON-report case above."""
+    script = (
+        _extract(_EVIDENCE_CONTRACT_GATED_START, _EVIDENCE_CONTRACT_GATED_END)
+        + f"""
+_json_report_src() {{ :; }}
+_report_query() {{ :; }}
+STDERR_CONTENT={shlex.quote(stderr_content)}
+if _evidence_contract_gated; then
+  echo "GATED=1"
+else
+  echo "GATED=0"
+fi
+"""
+    )
+    return _run_bash_script(script)
+
+
+def test_evidence_contract_gated_stderr_fallback_matches_the_real_marker():
+    """No JSON report at all (``_json_report_src``/``_report_query`` both
+    answer empty) — the exact stderr shape a ``--format text`` invocation
+    now produces on this abort. The stderr fallback must gate on it."""
+    result = _run_stderr_fallback_pipeline(
+        f"Some preceding output\n{_STDERR_MARKER}\nError: pinned depth 'source' ...\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "GATED=1" in result.stdout
+
+
+def test_evidence_contract_gated_stderr_fallback_ignores_a_near_miss():
+    """A near-miss stderr string (missing the ADR reference suffix) must
+    not gate — only an exact substring match may, the same discipline the
+    JSON-verdict hostile-value test above already enforces for the other
+    source."""
+    result = _run_stderr_fallback_pipeline(
+        "abicheck: scan aborted — evidence-contract error\nError: some other failure\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "GATED=0" in result.stdout
+
+
+def test_evidence_contract_gated_stderr_fallback_ignores_an_unrelated_error():
+    """A genuine, unrelated CLI error (bad flag, crash) must not gate --
+    the fallback is scoped to the one marker line this abort prints, not to
+    "any stderr exists"."""
+    result = _run_stderr_fallback_pipeline(
+        "Usage: abicheck scan [OPTIONS] ARTIFACT\nError: no such option: --bogus\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "GATED=0" in result.stdout
+
+
+def test_evidence_contract_gated_prefers_a_readable_json_report_over_stderr():
+    """When a JSON report IS readable, its ``verdict`` is authoritative --
+    the stderr fallback must never override a report that says otherwise,
+    even if the marker happens to appear in ``STDERR_CONTENT`` too (e.g. a
+    stale marker left over from an earlier, unrelated failure this run's own
+    retry logic printed)."""
+    script = (
+        _report_query_and_gated_fragment()
+        + f"""
+_PY_BIN=":"
+_PY_SAFE_DIR="."
+_json_report_src() {{ echo "does-not-matter"; }}
+_report_query() {{ echo "NO_CHANGE"; }}
+STDERR_CONTENT={shlex.quote(_STDERR_MARKER)}
+if _evidence_contract_gated; then
+  echo "GATED=1"
+else
+  echo "GATED=0"
+fi
+"""
+    )
+    result = _run_bash_script(script)
+    assert result.returncode == 0, result.stderr
+    assert "GATED=0" in result.stdout
+
+
+def test_evidence_contract_gated_stderr_fallback_matches_a_real_cli_run(tmp_path):
+    """End-to-end: run the real ``abicheck scan --depth source`` CLI (the
+    default ``--format text``, no ``--write json=...``) against a real
+    snapshot with no source evidence, and feed its real stderr into the
+    real ``_evidence_contract_gated`` pipeline with no JSON report -- proves
+    the Python-side marker (``cli_scan.py``) and the bash-side grep pattern
+    (``run.sh``) actually agree, rather than two independently-drifting
+    copies of the same literal string."""
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import AbiSnapshot, AccessLevel, Function, Visibility
+    from abicheck.serialization import snapshot_to_json
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+                access=AccessLevel.PUBLIC,
+            )
+        ],
+        elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3foov")]),
+    )
+    snap_path = tmp_path / "new.abi.json"
+    snap_path.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "scan",
+            str(snap_path),
+            "--depth",
+            "source",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode != 0
+    assert _STDERR_MARKER in proc.stderr, proc.stderr
+
+    script = (
+        _extract(_EVIDENCE_CONTRACT_GATED_START, _EVIDENCE_CONTRACT_GATED_END)
+        + f"""
+_json_report_src() {{ :; }}
+_report_query() {{ :; }}
+STDERR_CONTENT={shlex.quote(proc.stderr)}
+if _evidence_contract_gated; then
+  echo "GATED=1"
+else
+  echo "GATED=0"
+fi
+"""
+    )
+    result = _run_bash_script(script)
+    assert result.returncode == 0, result.stderr
+    assert "GATED=1" in result.stdout

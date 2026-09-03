@@ -506,11 +506,11 @@ def _emit_scan_abort_report(
     aborted here produced no stdout content at all -- so a consumer parsing
     it as JSON was already broken; this only adds content where none
     existed, it does not change either abort's exit code or its existing
-    stderr message. `--format text` is unchanged: `bo.message`/`ce.message`
-    already read as the human-facing explanation, and there is no
-    `ScanOutcome` to feed `_render_text` (most of its fields were never
-    computed at this point) -- inventing prose for that gap is a separate,
-    genuinely open design question ADR-064 leaves unresolved.
+    stderr message. `--format text` still gets no JSON *report* from this
+    function -- inventing one is a separate design question this function
+    does not attempt (the `_EvidenceContractError` catch site now prints its
+    own stable stderr marker instead, independent of `fmt`; see that catch
+    site's own comment for why a report render isn't the fix here).
     Shaped as a real (if minimal) ``ScanOutcome.to_dict()``-compatible
     envelope -- top-level ``verdict``/``exit_code``, the exit decision under
     ``diff.exit`` -- rather than `scan_abort_result_fields`'s own ``report``
@@ -1960,6 +1960,17 @@ def scan_cmd(
         # A pinned depth that can't collect its evidence is a usage contract
         # violation → a clean CLI error (exit 1), distinct from the verdict codes
         # (2/4) and the budget code (5).
+        #
+        # Stable stderr marker (closes ADR-064's "--format text gap" for this
+        # abort): unlike `ce.message` -- two independent raise sites, so two
+        # drifting texts -- this one literal line lets `action/run.sh`'s
+        # `_evidence_contract_gated()` recognize the abort even with no JSON
+        # report (`--format text`, no `--write json=...`). Printed on every
+        # `fmt`; `ce.message` still follows unchanged via the ClickException.
+        click.echo(
+            "abicheck: scan aborted — evidence-contract error (ADR-037 D5)",
+            err=True,
+        )
         _emit_scan_abort_report(
             "evidence_contract_error",
             fmt,

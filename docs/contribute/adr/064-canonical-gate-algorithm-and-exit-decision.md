@@ -75,10 +75,17 @@ json` overriding a `format: text`/`markdown` step's nominal format, which
 See "Staged landing, additive first" below, item 1's own final update for
 the account — it landed as additive stage-1b wiring, not atomic-stage work
 as this section originally assumed (see "Consequences" below for the
-correction). Still open: the rest of the cross-front-end parity pass
-(typed API; the `--format text` gap named above; a real `--artifact-set`
-member-level evidence-contract signal); and **stage 2**, the
-`--exit-code-scheme` removal itself. See
+correction). **Update (2026-09-03):** the single-binary half of the
+`--format text` gap closed — `cli_scan.py`'s `_EvidenceContractError` catch
+site now always prints a stable stderr marker line, and `action/run.sh`'s
+`_evidence_contract_gated()` falls back to matching it when no JSON report
+exists (see "Staged landing, additive first" below, item 1's own newest
+update for the full account, including why `_BudgetOverflow` never needed
+this — its exit code is already unambiguous). Still open: the rest of the
+cross-front-end parity pass (typed API; the `--artifact-set` member-level
+evidence-contract signal, the one remaining half of the `--format text` gap
+— a member's abort never reaches the single-binary catch site this update
+fixed); and **stage 2**, the `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -981,6 +988,52 @@ lands in two stages rather than one atomic change:
       half of the parity pass, the `--format text` gap named above, and a
       real `--artifact-set` member-level evidence-contract signal for the
       Action to consume.
+
+      **Landed (2026-09-03): the single-binary half of the `--format text`
+      gap.** `_BudgetOverflow` was never actually ambiguous on this axis --
+      its exit code 5 is unique among `scan`'s exit codes, so `action/
+      run.sh`'s exit-code `case` already maps it straight to
+      `BUDGET_OVERFLOW` with no JSON report needed. Only
+      `_EvidenceContractError` (exit 1, shared with a genuine CLI usage
+      error) had the gap. `cli_scan.py`'s `_EvidenceContractError` catch
+      site now always prints one stable stderr marker line ahead of its
+      existing `Error: <message>` text, independent of `fmt`/
+      `secondary_fmt` -- not the message text itself, which differs across
+      this exception's two raise sites (a pinned depth with no source
+      evidence, and `--abi3` targeting a binary that isn't a recognisable
+      CPython extension module) and so cannot be matched by one pattern;
+      inventing a full text *report* remains the separate, still-open
+      design question `_emit_scan_abort_report`'s own docstring names, and
+      this change does not attempt it. `action/run.sh`'s
+      `_evidence_contract_gated()` now falls back to grepping
+      `STDERR_CONTENT` for that marker whenever `_json_report_src` answers
+      nothing (the report-readable branch is unchanged and still wins when
+      a report exists) -- the identical shape `_assurance_gated()`'s own
+      stderr fallback already established for a sibling gap. Tests:
+      `tests/test_cli_scan_abort_report.py`'s
+      `test_evidence_contract_error_text_format_has_no_json_report` (the
+      marker is now present even though the JSON report still isn't), and
+      `tests/test_action_run_sh_scan_evidence_contract_error.py`'s new
+      `test_evidence_contract_gated_stderr_fallback_*` tests -- including
+      one running the real native CLI end-to-end and feeding its real
+      stderr into the real, unmodified bash pipeline, proving the
+      Python-side marker and the bash-side grep pattern actually agree
+      rather than being two independently-drifting copies of one literal
+      string, plus a near-miss/unrelated-error negative test and a
+      report-wins-over-a-stale-marker precedence test. **Still open,
+      deliberately not attempted in this slice:** the `--artifact-set`
+      member-level signal -- a member's `_EvidenceContractError` is caught
+      inside `service_scan._run_scan_one_member` and converted to a
+      per-member `ScanResult` there, so it never reaches this single-binary
+      catch site or its stderr marker at all. `run_scan_set`'s aggregate
+      `ScanSetResult.to_dict()` already surfaces the top-level
+      `EVIDENCE_CONTRACT_ERROR` verdict for `--format json`, but a `format:
+      text` artifact-set step has no analogous stderr signal, and
+      `action/run.sh` doesn't attempt a JSON secondary for `--artifact-set`
+      at all today (`SCAN_ARTIFACT_SET` explicitly skips the automatic
+      `--write json=...` injection) -- a separate, not-yet-scoped piece of
+      work. The typed-API half of the parity pass also remains open,
+      unchanged.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

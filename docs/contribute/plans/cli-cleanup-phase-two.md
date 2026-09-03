@@ -3776,6 +3776,46 @@ second top-level spelling of the same fact.
 > Still open: the typed-API half of the parity pass, the `--format
 > text` gap, and a real `--artifact-set` member-level evidence-contract
 > signal for the Action to consume.
+>
+> **Update (2026-09-03): the single-binary half of the `--format text` gap
+> closed.** `cli_scan.py`'s `_EvidenceContractError` catch site (the one
+> half of "the `--format text` gap" `action/run.sh` actually needed —
+> `_BudgetOverflow` was never ambiguous, since its exit code 5 is unique
+> and the Action's exit-code `case` already maps it straight to
+> `BUDGET_OVERFLOW` with no JSON needed) now always prints a stable stderr
+> marker line ahead of its existing `Error: <message>` text, independent of
+> `fmt`/`secondary_fmt` — deliberately *not* inventing a full text render of
+> the abort (that remains the separate, genuinely open design question
+> `_emit_scan_abort_report`'s own docstring names), just a single greppable
+> line. `action/run.sh`'s `_evidence_contract_gated()` falls back to
+> matching that marker in `STDERR_CONTENT` whenever `_json_report_src`
+> answers nothing — the same shape `_assurance_gated`'s own stderr fallback
+> already established for a sibling gap — so a `format: text` scan step
+> (the Action's documented default) that hits this abort now publishes
+> `EVIDENCE_CONTRACT_ERROR` instead of falling into the generic `ERROR`
+> bucket a bad flag or crash gets. Not the message text itself (`ce.message`
+> differs across this exception's two independent raise sites — a pinned
+> depth with no source evidence, and `--abi3` targeting a binary that isn't
+> a recognisable CPython extension module — so matching either message's
+> own wording would need two independently-drifting patterns); a dedicated
+> marker line the shared `except` clause prints once. Tests:
+> `tests/test_cli_scan_abort_report.py::test_evidence_contract_error_text_format_has_no_json_report`
+> (the marker is now present even though the JSON report still isn't) and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py`'s new
+> `test_evidence_contract_gated_stderr_fallback_*` tests, including one that
+> runs the real native CLI end-to-end and feeds its real stderr into the
+> real bash pipeline — proving the Python-side marker and the bash-side
+> grep pattern actually agree, not two independently-drifting copies of the
+> same literal string. **Still open, deliberately not attempted in this
+> slice:** the `--artifact-set` member-level signal (a member's
+> `_EvidenceContractError` is caught inside `_run_scan_one_member` and never
+> reaches this catch site or its stderr marker at all — `run_scan_set`'s
+> aggregate `ScanSetResult.to_dict()` already surfaces the top-level
+> `EVIDENCE_CONTRACT_ERROR` verdict for `--format json`, but a `format:
+> text` artifact-set step has no analogous stderr signal, and the Action
+> doesn't even attempt a JSON secondary for `--artifact-set` today — a
+> separate, not-yet-scoped piece of work), and the typed-API half of the
+> parity pass.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4793,12 +4833,21 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        (abicheck/policy/release_gate_options.py,
                                        reached from the frontends-classified
                                        cli_compare_release_helpers.py through
-                                       workflows/gate.py's facade); still
-                                       open: the typed-API half of the
-                                       parity pass, the scan --format text
-                                       gap, a real --artifact-set member-level
+                                       workflows/gate.py's facade); the
+                                       single-binary half of the scan
+                                       --format text gap closed 2026-09-03
+                                       (a stable stderr marker on
+                                       _EvidenceContractError, matched by
+                                       action/run.sh's own stderr fallback --
+                                       see PR 4's own section for the full
+                                       account); still open: the typed-API
+                                       half of the parity pass, a real
+                                       --artifact-set member-level
                                        evidence-contract signal for the
-                                       Action
+                                       Action (the --format text gap's
+                                       remaining half -- a member's abort
+                                       never reaches the single-binary catch
+                                       site's stderr marker at all)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;

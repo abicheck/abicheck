@@ -2454,17 +2454,30 @@ _assurance_gated() {
 # The JSON report's top-level `verdict` is authoritative when readable --
 # `_json_report_src` already only trusts a report written by *this*
 # invocation (its own fingerprint/freshness checks), so a stale report left
-# over from a previous step never false-positives here. Empty (unreadable/
-# no report) when the primary format is `text` with no JSON secondary
-# output: `cli_scan.py` writes no report at all on that path
-# (`_emit_scan_abort_report`'s own docstring), which stays this wrapper's
-# one remaining, ADR-064-documented open gap -- a text-only invocation
-# still reads as a generic CLI error, same as before this fix.
+# over from a previous step never false-positives here.
+#
+# Update (2026-09-03, closing the "--format text gap" this ADR-064 comment
+# used to name as still open): falls back to a stderr grep, the same shape
+# `_assurance_gated`'s own fallback already uses, when there is no readable
+# JSON report at all -- `format: text` with no JSON secondary output, where
+# `cli_scan.py` writes no JSON report (`_emit_scan_abort_report`'s own
+# docstring) but now always prints a stable stderr marker line ahead of the
+# ClickException on this abort (independent of `--format`, see that catch
+# site's own comment) precisely so this fallback has something stable to
+# match -- not `ce.message` itself, which differs across this exception's
+# two independent raise sites (a pinned depth with no source evidence, and
+# `--abi3` targeting a binary that isn't a recognisable CPython extension
+# module) and would need two independently-drifting patterns.
 _evidence_contract_gated() {
   local _src _verdict
   _src=$(_json_report_src)
   _verdict=$(_report_query "$_src" compat_verdict)
-  [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]
+  if [[ -n "$_verdict" ]]; then
+    [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]
+    return
+  fi
+  echo "$STDERR_CONTENT" \
+    | grep -q 'abicheck: scan aborted — evidence-contract error (ADR-037 D5)'
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate

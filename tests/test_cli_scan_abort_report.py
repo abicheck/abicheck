@@ -156,6 +156,12 @@ def test_evidence_contract_error_text_format_has_no_json_report(
     )
     assert res.exit_code != 0, res.output
     assert "{" not in res.output
+    # Update (2026-09-03, closing the "--format text gap" ADR-064 named as
+    # still open): no JSON *report*, but a stable stderr marker is now
+    # always printed on this abort -- the signal `action/run.sh`'s
+    # `_evidence_contract_gated()` stderr fallback greps for when there is
+    # no JSON report to read at all.
+    assert "abicheck: scan aborted — evidence-contract error (ADR-037 D5)" in res.output
 
 
 def test_budget_overflow_writes_secondary_json_report(
