@@ -465,10 +465,10 @@ def classify_compare_pair(
     # single-pair `compare` CLI -- a no-op unless a caller (today, the
     # release fan-out) populated `CompareRequest.pack_policy_overrides`/
     # `pack_internal_namespaces`. `pf` is reused for the receipt below too
-    # (Codex review, fresh evidence): `policy_file_with_packs` clears
-    # `source_path`/`source_sha256` whenever it folds pack content in, so
-    # the merged object no longer falsely claims `policy_file_path`
-    # provenance while keeping the pack's own contribution in the receipt --
+    # (Codex review, fresh evidence, three rounds over): the receipt
+    # installer records the forwarded pack's own contribution honestly
+    # (`compare_gate_receipt._with_pack_forwarded_provenance`) rather than
+    # this call site needing to hide or discard the file's real identity --
     # see that function's own docstring for the full account.
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs

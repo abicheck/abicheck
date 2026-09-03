@@ -444,15 +444,18 @@ class TestCompareRequestContractContextGateReceipt:
         )
         assert result.diff.verdict.name == "COMPATIBLE"
 
-    def test_pack_folded_receipt_never_claims_a_real_files_identity(
+    def test_pack_folded_receipt_names_both_real_contributors(
         self, tmp_path: Path
     ) -> None:
-        """The specific mechanism the fix relies on: once a pack folds
-        content into a *real*, loaded `--policy-file`, the receipt's
-        `policy.overrides` provenance can no longer point at that file's own
-        path/digest -- the merged object is no longer purely what was on
-        disk. `EXIT_CODE_SCHEME_FIELD`/severity provenance are untouched
-        (packs here don't touch those), only the policy-file-sourced fields."""
+        """Codex review, fresh evidence, round 3: an intermediate revision
+        of this fix cleared the real file's own `path`/`sha256` whenever a
+        pack also contributed, to avoid crediting the file with the pack's
+        override -- but that threw away the file's own, independently-real
+        identity too. The correct receipt shape (mirroring
+        `_overrides_provenance`'s existing treatment of a real `--pack
+        <path>` manifest) names the file *and* records the forwarded pack's
+        own contribution as a distinct `selected_by` hop -- neither
+        overwriting the other."""
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
 
@@ -467,8 +470,39 @@ class TestCompareRequestContractContextGateReceipt:
         )
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         prov = cfg.provenance["policy.overrides"]
+        # The file's own identity is preserved, not discarded.
+        assert prov.path == str(policy_file_path)
+        assert prov.sha256 is not None
+        # And the forwarded pack's contribution is recorded as its own hop.
+        options = {hop.option for hop in prov.selected_by}
+        assert "pack_policy_overrides" in options
+
+    def test_pack_only_internal_namespaces_are_not_credited_to_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        """`surface.internal_namespaces` is a *replace*, not a merge (unlike
+        `policy.overrides`): a pack that sets it overwrites the file's own
+        value outright, so crediting the file's `path`/`sha256` for it would
+        be false whenever a pack actually did -- unlike `policy.overrides`,
+        this provenance entry carries no file identity at all."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        policy_file_path = tmp_path / "policy.yml"
+        policy_file_path.write_text(
+            "base_policy: strict_abi\ninternal_namespaces:\n  - detail\n",
+            encoding="utf-8",
+        )
+        result = self._run(
+            old,
+            new,
+            policy_file_path=policy_file_path,
+            pack_internal_namespaces=("impl",),
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.surface.internal_namespaces == ("impl",)
+        prov = cfg.provenance["surface.internal_namespaces"]
         assert prov.path is None
         assert prov.sha256 is None
+        assert prov.selected_by[0].option == "pack_internal_namespaces"
 
 
 class TestCompareResultSeverityConfigRenderingParity:

@@ -41,24 +41,33 @@ pipeline may not import (``engine-cli-boundary``) -- the same primitives
 (:mod:`abicheck.contract_context`) are used directly here instead of a
 second, diverging implementation.
 
-*policy_file* (Codex review, fresh evidence, twice over): the caller passes
-the same pack-folded ``PolicyFile`` it scores the comparison with.
-``pack_application.policy_file_with_packs`` clears the folded object's
-``source_path``/``source_sha256`` whenever it actually merges pack content
-in, so this no longer misattributes a pack's ``overrides`` as
-``policy_file_path``-sourced while still keeping them in the receipt (an
-earlier revision passed the *pre-fold* file instead, which fixed the
-misattribution but silently dropped the pack's contribution from the
-receipt entirely -- see that function's own docstring for the full account
-of why dropping the source there is safe for every other caller).
+*policy_file* (Codex review, fresh evidence, three rounds over): the caller
+passes the same pack-folded ``PolicyFile`` it scores the comparison with,
+keeping that file's own ``source_path``/``source_sha256`` (round 3: an
+intermediate revision cleared them whenever a pack contributed, which threw
+away the file's own real identity along with avoiding a false claim over
+the pack's). :func:`_with_pack_forwarded_provenance` closes the actual gap
+instead: ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces``
+carry already-resolved values with no pack-manifest path to attribute an
+identity to (unlike a real ``--pack <path>`` manifest, which
+``compatibility_evaluation_frontend._overrides_provenance`` already
+represents correctly via a ``selected_by`` entry per contributing pack) --
+so this appends one more ``selected_by`` hop naming the forwarded
+contribution honestly, by request field rather than by file, instead of
+either crediting or discarding the real file's own provenance to
+compensate for it.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
+
+from ..contract_relevance_types import SelectorLayer
 
 if TYPE_CHECKING:
     from ..api_types import CompareRequest
+    from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
@@ -108,6 +117,8 @@ def install_resolved_gate_receipt(
         policy_file=policy_file,
         suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
     )
+    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
+        config = _with_pack_forwarded_provenance(config, request)
     result.evaluation_config = config
 
     # `DiffResult.contract_context` is deliberately typed `object | None`
@@ -152,3 +163,51 @@ def install_resolved_gate_receipt(
             for category in SEVERITY_CATEGORY_FIELDS
         },
     )
+
+
+def _with_pack_forwarded_provenance(
+    config: CompatibilityEvaluationConfig, request: CompareRequest
+) -> CompatibilityEvaluationConfig:
+    """*config* with an honest record of a forwarded pack's contribution.
+
+    ``policy.overrides`` is additive (D8), so a request's own
+    ``pack_policy_overrides`` gets one more ``selected_by`` hop appended
+    (``compatibility_evaluation_frontend._overrides_provenance``'s own
+    pattern for a real ``--pack`` manifest, extended to a contributor with
+    no manifest path to name) -- the file's own path/sha256 stay, since its
+    own entries genuinely are a subset of the merged mapping.
+    ``surface.internal_namespaces`` is not additive: a pack that sets it
+    *replaces* the file's value outright, so crediting the file's path/
+    sha256 there would be false whenever a pack actually did -- that
+    provenance entry is replaced outright instead of extended.
+    """
+    from ..compatibility_evaluation_config import SelectedByEntry, ValueProvenance
+    from ..compatibility_evaluation_frontend import POLICY_OVERRIDES_FIELD
+    from ..compatibility_evaluation_wiring import INTERNAL_NAMESPACES_FIELD
+
+    provenance = dict(config.provenance)
+    if request.pack_policy_overrides:
+        prior = provenance.get(POLICY_OVERRIDES_FIELD)
+        if prior is not None:
+            provenance[POLICY_OVERRIDES_FIELD] = replace(
+                prior,
+                selected_by=(
+                    *prior.selected_by,
+                    SelectedByEntry(
+                        layer=SelectorLayer.API_REQUEST,
+                        option="pack_policy_overrides",
+                    ),
+                ),
+            )
+    if request.pack_internal_namespaces is not None:
+        provenance[INTERNAL_NAMESPACES_FIELD] = ValueProvenance(
+            layer=SelectorLayer.API_REQUEST,
+            source_kind="api_request",
+            selected_by=(
+                SelectedByEntry(
+                    layer=SelectorLayer.API_REQUEST,
+                    option="pack_internal_namespaces",
+                ),
+            ),
+        )
+    return replace(config, provenance=provenance)
