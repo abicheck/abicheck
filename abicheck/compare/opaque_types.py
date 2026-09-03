@@ -16,10 +16,27 @@
 """``OpaqueTypeIndex`` — one snapshot's opaque-type set, in both identity
 tiers (ADR-063 Phase 2's post-parse consumer migration).
 
-Owned by ``compare/`` per ADR-061's routing table ("match old/new entities
-or identify a raw change"): this is a matching index, not a filtering step.
-``diff_filtering.py`` keeps the *policy* half — which types count as opaque,
-and which findings that suppresses — and reads this type for the join.
+Placed in ``compare/`` alongside the ``diff_filtering.py`` call site it
+serves, not because ``find_opaque_types``' own is_opaque/implementation-
+source/by-value-exposure determination is itself a ``compare``-layer
+"match old/new entities" question -- ADR-061 would call that a genuine
+suppression-eligibility *policy* decision (Codex review on PR #1041).
+It stays here anyway, for two independent reasons neither of which this
+module can fix on its own: ``diff_filtering.py`` -- the only caller, and
+this decision's textbook home per its own stated intent -- sits on a
+documented zero-slack no-growth debt pin (``architecture/debt.yaml``),
+so moving this logic back there would grow a file that PR was explicit
+about not growing; and ``policy/`` -- ADR-061's actual routing-table
+target -- is unreachable too, since ``compare/AGENTS.md`` classifies
+``diff_filtering.py`` itself as one of ``compare/``'s own legacy paths,
+whose permitted-imports rule forbids depending on ``policy/`` at all.
+``diff_filtering._downgrade_opaque_type_changes`` is the actual
+suppression *application* -- deciding a matched change should be
+downgraded -- while :class:`OpaqueTypeIndex` itself (:meth:`intersect`/
+:meth:`contains`) is a genuine identity-matching primitive; the
+functions below sit in the gap between the two, misplaced by that
+measure but not movable without a separate migration of
+``diff_filtering.py`` out of ``compare/``'s legacy classification first.
 """
 
 from __future__ import annotations
