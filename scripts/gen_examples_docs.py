@@ -21,13 +21,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES_DIR = ROOT / "examples"
+
+# Phase 3 resolver (scripts/CLAUDE.md) -- this script's own directory is
+# already on sys.path when run directly (`python scripts/gen_examples_docs.py`).
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 DOCS_EXAMPLES_DIR = ROOT / "docs" / "reference" / "examples"
 #: DOCS_EXAMPLES_DIR's location relative to docs/ root -- drives how many
 #: "../" segments a link from a generated case page needs to reach another
 #: docs/-relative path (see _rewrite_links).
 DOCS_EXAMPLES_DIR_FROM_DOCS_ROOT = "reference/examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 EXAMPLES_README = EXAMPLES_DIR / "README.md"
 REPO_ROOT_FROM_DOCS_EXAMPLES = "../../.."
 
@@ -165,7 +170,7 @@ class Case:
 
 
 def _read_case(name: str, meta: dict) -> Case:
-    readme = EXAMPLES_DIR / name / "README.md"
+    readme = example_catalog.case_dir(name) / "README.md"
     if not readme.exists():
         raise FileNotFoundError(f"missing per-case README: {readme}")
     text = readme.read_text(encoding="utf-8")
@@ -278,7 +283,7 @@ def _meta_table(case: Case) -> str:
 
 
 def _source_links(case: Case) -> str:
-    case_dir = EXAMPLES_DIR / case.name
+    case_dir = example_catalog.case_dir(case.name)
     files = sorted(
         p.name for p in case_dir.iterdir() if p.is_file() and p.name != "README.md"
     )
@@ -467,7 +472,7 @@ class ReadmeEntry:
 
 def _case_title(name: str) -> str:
     """Short H1 title of a per-case README (caseNN prefix stripped)."""
-    text = (EXAMPLES_DIR / name / "README.md").read_text(encoding="utf-8")
+    text = (example_catalog.case_dir(name) / "README.md").read_text(encoding="utf-8")
     m = re.match(r"\s*#\s+(.+?)\n", text)
     if not m:
         raise ValueError(f"examples/{name}/README.md: first line must be an H1")

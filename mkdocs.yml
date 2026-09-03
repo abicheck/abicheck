@@ -273,6 +273,7 @@ nav:
       - SciPy / Scientific-Python Roadmap: contribute/scipy-scientific-python-roadmap.md
       - Python Build Ecosystem Positioning: contribute/python-build-ecosystem-positioning.md
     - Parity & Reports:
+      - Catalog Coverage: contribute/catalog-coverage.md
       - ABICC Parity Status: contribute/abicc-parity-status.md
       - ABICC Test Coverage Comparison: contribute/abicc-test-coverage-comparison.md
       - ABICC Format Compliance: reference/abicc-format-compliance.md

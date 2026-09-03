@@ -60,8 +60,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES = ROOT / "examples"
-GROUND_TRUTH = EXAMPLES / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md) -- this script's own directory is
+# already on sys.path when run directly (`python scripts/gen_catalog_taxonomy.py`).
+import example_catalog  # noqa: E402
+
+EXAMPLES = example_catalog.EXAMPLES_DIR
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # ---------------------------------------------------------------------------
 # Explicit case-number groupings from the examples-catalog-split design doc.
@@ -444,7 +449,7 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
     taxonomy: dict[str, dict[str, object]] = {}
     for case_name, entry in verdicts.items():
         case_num = _case_number(case_name)
-        case_dir = EXAMPLES / case_name
+        case_dir = example_catalog.case_dir(case_name)
         entity, scenario_kind = _entity_and_scenario_kind(case_num)
 
         mode = entry.get("mode")

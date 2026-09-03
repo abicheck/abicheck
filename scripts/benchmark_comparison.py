@@ -59,7 +59,12 @@ from pathlib import Path
 from typing import Any
 
 REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
+
+# Phase 3 resolver (scripts/CLAUDE.md) -- this script's own directory is
+# already on sys.path when run directly (`python scripts/benchmark_comparison.py`).
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 REPORT_DIR = REPO_DIR / "benchmark_reports"
 BUILD_DIR = REPORT_DIR / "_build"
 
@@ -1955,7 +1960,7 @@ def _merge_frozen_into_results(
 
 def _ground_truth_digest() -> str | None:
     """SHA-256 of examples/ground_truth.json so a benchmark run is pinned to it."""
-    gt = EXAMPLES_DIR / "ground_truth.json"
+    gt = example_catalog.GROUND_TRUTH_PATH
     if not gt.is_file():
         return None
     import hashlib
@@ -2756,8 +2761,9 @@ def _run_l3l5_case(name: str, entry: dict[str, Any]) -> ToolResult:
         return ToolResult(verdict="SKIP")
     started = time.monotonic()
     try:
-        old = json.loads((EXAMPLES_DIR / name / "old.json").read_text())
-        new = json.loads((EXAMPLES_DIR / name / "new.json").read_text())
+        case_dir = example_catalog.case_dir(name)
+        old = json.loads((case_dir / "old.json").read_text())
+        new = json.loads((case_dir / "new.json").read_text())
         tier = entry.get("min_evidence")
         from abicheck.checker_policy import compute_verdict  # noqa: PLC0415
 
@@ -2892,10 +2898,8 @@ def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
         from abicheck.buildsource.crosscheck import run_crosschecks  # noqa: PLC0415
         from abicheck.serialization import load_snapshot  # noqa: PLC0415
 
-        snap_path = (
-            EXAMPLES_DIR
-            / name
-            / str((entry.get("fixtures") or ["snapshot.abi.json"])[0])
+        snap_path = example_catalog.case_dir(name) / str(
+            (entry.get("fixtures") or ["snapshot.abi.json"])[0]
         )
         snapshot = load_snapshot(snap_path)
         res = run_crosschecks(snapshot)
