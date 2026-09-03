@@ -83,7 +83,12 @@ ScanAbortAxis = Literal["budget_overflow", "evidence_contract_error"]
 #: `service_scan.ScanResult` already used before it carried a `report` too.
 _SCAN_ABORT_VERDICTS: dict[ScanAbortAxis, tuple[str, int]] = {
     "budget_overflow": ("BUDGET_OVERFLOW", 5),
-    "evidence_contract_error": ("EVIDENCE_CONTRACT_ERROR", 1),
+    # 7, not the generic ClickException code 1: `cli_scan.py`'s
+    # `_EXIT_EVIDENCE_CONTRACT_ERROR` (2026-09-03) -- kept as a literal
+    # here rather than an import, mirroring how `budget_overflow`'s own 5
+    # already duplicates `cli_scan.py`'s `_EXIT_BUDGET_OVERFLOW` (frontends
+    # imports workflows, never the reverse, per ADR-061).
+    "evidence_contract_error": ("EVIDENCE_CONTRACT_ERROR", 7),
 }
 
 

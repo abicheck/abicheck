@@ -1771,19 +1771,21 @@ def compare_request_inputs(
     and for the same reason (see ``_apply_contract_evaluation_shadow``'s
     ``scope_public_headers_is_explicit=True``).
 
-    A ``CompareRequest`` carries no severity, exit-code-scheme, or pack
-    inputs: those are gate/reporting concerns the Tier-2 comparison API does
-    not own. They resolve to their built-in defaults here, which is what makes
-    a CLI run stating none of them cross-front-end equal to the equivalent
-    request (:func:`cross_front_end_differences`).
+    ``severity_preset``/``exit_code_scheme`` forward too -- else this
+    receipt's ``gate.*`` block could disagree with ``CompareResult.
+    exit_decision``, which reads them directly. Neither has a per-category
+    or pack field on ``CompareRequest``, so both resolve to built-in
+    defaults, matching a CLI run stating neither (:func:`cross_front_end_differences`).
 
     ``policy_file_path`` and ``suppress`` *are* request fields, though, and
     are loaded from the request when the caller does not pass an
-    already-loaded *policy_file*/*suppression*. Ignoring them unless the
-    caller separately re-loaded the same files would let a request naming an
-    ``sdk_vendor`` policy file resolve to ``strict_abi`` with no suppression
-    source at all -- an effective configuration that does not represent the
-    typed request it was built from (Codex review).
+    already-loaded *policy_file*/*suppression* -- ignoring them otherwise
+    would let a request naming an ``sdk_vendor`` policy file resolve to
+    ``strict_abi`` with no suppression source at all.
+
+    ``policy_base`` goes through :func:`stated_policy_base`, not raw
+    ``request.policy`` -- else an unknown name paired with a valid file
+    (accepted; the file wins) raises post-comparison (scan adapter's gap).
     """
     if policy_file is None and request.policy_file_path is not None:
         policy_file = _load_policy_file(request.policy_file_path)
@@ -1792,10 +1794,12 @@ def compare_request_inputs(
     return ExplicitCompatibilityInputs(
         contract_mode=request.contract_mode,
         scope_public_headers=request.scope_public,
-        policy_base=request.policy,
+        policy_base=stated_policy_base(request.policy, policy_file),
         policy_file=policy_file,
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
+        exit_code_scheme=request.exit_code_scheme,
+        severity_preset=request.severity_preset,
     )
 
 

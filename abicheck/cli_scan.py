@@ -166,6 +166,14 @@ _merge_compile_config = merge_compile_config
 #: generic error code (1) so CI can tell a budget overflow from a real break.
 _EXIT_BUDGET_OVERFLOW = 5
 
+#: Exit code for scan's own evidence-contract abort (ADR-037 D5,
+#: ``_EvidenceContractError``) -- a dedicated code, not the generic
+#: ClickException code (1). Earlier stderr/marker-file signals for this axis
+#: were each shown forgeable by a PR-controlled build script; a process's own
+#: exit code, reported to its parent by the OS kernel, cannot be. See
+#: ADR-064. Distinct from every other value scan uses (0/1/2/4/5/6/64).
+_EXIT_EVIDENCE_CONTRACT_ERROR = 7
+
 #: Suffixes ``time``-style duration strings accept (``15m``, ``900s``, ``1h``).
 _DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
 
@@ -506,11 +514,11 @@ def _emit_scan_abort_report(
     aborted here produced no stdout content at all -- so a consumer parsing
     it as JSON was already broken; this only adds content where none
     existed, it does not change either abort's exit code or its existing
-    stderr message. `--format text` is unchanged: `bo.message`/`ce.message`
-    already read as the human-facing explanation, and there is no
-    `ScanOutcome` to feed `_render_text` (most of its fields were never
-    computed at this point) -- inventing prose for that gap is a separate,
-    genuinely open design question ADR-064 leaves unresolved.
+    stderr message. `--format text` still gets no JSON *report* from this
+    function -- inventing one is a separate design question this function
+    does not attempt (the `_EvidenceContractError` catch site now prints its
+    own stable stderr marker instead, independent of `fmt`; see that catch
+    site's own comment for why a report render isn't the fix here).
     Shaped as a real (if minimal) ``ScanOutcome.to_dict()``-compatible
     envelope -- top-level ``verdict``/``exit_code``, the exit decision under
     ``diff.exit`` -- rather than `scan_abort_result_fields`'s own ``report``
@@ -1421,6 +1429,9 @@ def scan_cmd(
       5  --budget overflow
       6  NOT_COMPARABLE (ADR-050 D2): ARTIFACT and --against were not
          extracted under a comparable profile/scope contract
+      7  evidence-contract error (ADR-037 D5): a pinned --depth/
+         --source-method had no source evidence, or --abi3 targeted a
+         non-CPython-extension binary. No comparison ever ran
 
     \b
     With --against, --severity-preset/--exit-code-scheme (or
@@ -1430,8 +1441,8 @@ def scan_cmd(
     --severity-preset info-only can exit 0 on a breaking comparison, and an
     error-level addition or quality finding can exit 1 on an otherwise
     compatible one. The report states which — a `severity gate:` line in the
-    text output, a `diff.severity` block in --format json. 5/6 are unaffected
-    (both are decided before the comparison runs).
+    text output, a `diff.severity` block in --format json. 5/6/7 are
+    unaffected (decided before or independent of the comparison).
 
     \b
     Examples:
@@ -1957,9 +1968,10 @@ def scan_cmd(
         )
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
-        # A pinned depth that can't collect its evidence is a usage contract
-        # violation → a clean CLI error (exit 1), distinct from the verdict codes
-        # (2/4) and the budget code (5).
+        # A pinned depth that can't collect its evidence is a usage-contract
+        # violation with its own dedicated exit code -- see
+        # `_EXIT_EVIDENCE_CONTRACT_ERROR`'s own comment for why.
+        click.echo(f"Error: {ce.message}", err=True)
         _emit_scan_abort_report(
             "evidence_contract_error",
             fmt,
@@ -1967,7 +1979,7 @@ def scan_cmd(
             secondary_fmt=secondary_fmt,
             secondary_output=secondary_output,
         )
-        raise click.ClickException(ce.message) from ce
+        sys.exit(_EXIT_EVIDENCE_CONTRACT_ERROR)
     except PlanningError as exc:
         raise click.UsageError(str(exc)) from exc
     finally:

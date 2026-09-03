@@ -157,7 +157,7 @@ def resolve_scan_exit_decision(
     evidence_contract_error: bool = False,
     budget_overflow: bool = False,
     not_comparable: bool = False,
-    evidence_contract_error_code: int = 1,
+    evidence_contract_error_code: int = 7,
     budget_overflow_code: int = 5,
     not_comparable_code: int = 6,
     prior_decision: ExitDecision | None = None,
@@ -209,7 +209,7 @@ def resolve_scan_exit_decision(
     unwired caller already computed by hand -- so no existing call site's
     actually-returned exit code changed *because* this function exists. The
     `*_code` keyword arguments default to `scan`'s own real
-    numbers (1/5/6, shared by both budget-overflow axes since they map to
+    numbers (7/5/6, shared by both budget-overflow axes since they map to
     the identical exit code regardless of which raised it) but are
     accepted explicitly rather than hard-coded, so a future caller for a
     different command with the same axes (none is known today) is not

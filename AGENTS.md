@@ -235,20 +235,36 @@ Core pipeline (in order of data flow):
    `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
    identifier spellings a castxml `init` text could genuinely carry
    verbatim, so the exception applies only to clang's own artifact, not to
-   every occurrence of those two strings. BTF/CTF remain fully unmigrated:
-   those backends do not populate `entity_id` at all yet. **PDB's own
-   slice landed, types only:** `extract/pdb_scope.py` parses CodeView's
-   flat, already-`"::"`-qualified struct/class/union/enum names back into
-   typed `ScopePath` segments (the reverse of DWARF's/the header-AST
-   backends' own tree-walk construction — CodeView carries no parent-scope
-   tree to walk), disambiguating an enclosing segment as a `Record` only
-   when the accumulated prefix up to it is itself a name PDB separately
-   recorded as a struct/class/union, defaulting to `Namespace` otherwise —
-   an unverified heuristic (no MSVC toolchain in this environment to check
-   it against), with function/variable identity and any anonymous-nested-
-   type handling explicitly out of scope for this slice. See ADR-063
-   Phase 6's PDB slice for the full account, including its documented,
-   accepted limitations.
+   every occurrence of those two strings. Both PDB and BTF/CTF now have
+   their own Phase 6 slice landed, types only, each with function/variable
+   identity explicitly out of scope. **PDB's own slice:**
+   `extract/pdb_scope.py` parses CodeView's flat, already-`"::"`-qualified
+   struct/class/union/enum names back into typed `ScopePath` segments (the
+   reverse of DWARF's/the header-AST backends' own tree-walk construction
+   — CodeView carries no parent-scope tree to walk), disambiguating an
+   enclosing segment as a `Record` only when the accumulated prefix up to
+   it is itself a name PDB separately recorded as a struct/class/union,
+   defaulting to `Namespace` otherwise — an unverified heuristic (no MSVC
+   toolchain in this environment to check it against). A named declaration
+   nested inside a CodeView-synthesized anonymous scope (e.g.
+   `N::<unnamed-tag>::Inner`) still reaches the model with its layout
+   facts, but its `entity_id` is left unset (`extract/pdb_scope.py` builds
+   no `Anonymous` scope segment at all). See ADR-063 Phase 6's PDB slice
+   for the full account, including its documented, accepted limitations.
+   **BTF/CTF's own slice:** `extract/debug_layout_semantic_ir.py` bridges
+   the shared `DwarfMetadata` shape both formats reduce to
+   (`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) into
+   transient, `entity_id`-bearing `RecordType`/`EnumType` objects — no
+   scope heuristic needed at all (both are pure-C formats with no
+   namespace/class nesting, so every `ScopePath` is unconditionally empty,
+   unlike PDB's own unverified namespace-vs-record heuristic). Wired into
+   the ELF headerless fallback path; deliberately leaves
+   `AbiSnapshot.types`/`.enums` untouched for a BTF/CTF-sourced snapshot
+   (only `semantic_ir` gains occurrences) — widening what other
+   `.types`-consuming detectors see is a separate, larger design question
+   this slice does not attempt. Function/variable/typedef identity remains
+   unimplemented for both formats (neither's own richer parse carries that
+   evidence across its own `to_dwarf_metadata()` conversion at all).
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info
@@ -1077,7 +1093,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes

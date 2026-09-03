@@ -2434,38 +2434,18 @@ _assurance_gated() {
     | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
 }
 
-# Did `scan`'s own evidence-contract axis (ADR-037 D5 -- a *pinned*
+# scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
 # --depth/--source-method whose required source evidence was never
-# collected, `scan_engine._EvidenceContractError`) produce this abort,
-# rather than a genuine CLI usage error?
-#
-# `cli_scan.py` raises that as a `click.ClickException` (exit 1, stderr
-# `Error: <message>`) -- the identical stderr shape a bad flag produces, so
-# `_is_cli_error`'s own `^Error:` match cannot tell the two apart by itself
-# (a real, previously-unrecognized cross-front-end parity gap, CLI cleanup
-# phase two / ADR-064: the native CLI's `--format json` path already writes
-# a real, distinguishable `verdict: "EVIDENCE_CONTRACT_ERROR"` envelope for
-# this abort via `_emit_scan_abort_report`/`scan_abort_result_fields`, but
-# this wrapper folded it into the same generic "CLI error" bucket a syntax
-# typo gets, losing the distinction and printing a misleading "CLI error"
-# annotation for a well-formed command that simply lacked evidence for its
-# own pinned depth).
-#
-# The JSON report's top-level `verdict` is authoritative when readable --
-# `_json_report_src` already only trusts a report written by *this*
-# invocation (its own fingerprint/freshness checks), so a stale report left
-# over from a previous step never false-positives here. Empty (unreadable/
-# no report) when the primary format is `text` with no JSON secondary
-# output: `cli_scan.py` writes no report at all on that path
-# (`_emit_scan_abort_report`'s own docstring), which stays this wrapper's
-# one remaining, ADR-064-documented open gap -- a text-only invocation
-# still reads as a generic CLI error, same as before this fix.
-_evidence_contract_gated() {
-  local _src _verdict
-  _src=$(_json_report_src)
-  _verdict=$(_report_query "$_src" compat_verdict)
-  [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]
-}
+# collected, `scan_engine._EvidenceContractError`) has its own dedicated
+# process exit code (`_EXIT_EVIDENCE_CONTRACT_ERROR = 7` in `cli_scan.py`)
+# as of 2026-09-03, checked directly in the `case $ABICHECK_EXIT in ...`
+# dispatch below -- no helper predicate needed. Earlier revisions tried a
+# stderr marker line, then a marker-file path passed as an environment
+# variable; both were shown forgeable by a PR-controlled build script
+# running as part of this very scan's own evidence collection (three Codex
+# review rounds, PR #1032 -- see ADR-064 for the full account). A process's
+# own exit code, reported to its parent by the OS kernel via `wait()`, is
+# the one channel nothing this run spawns can forge.
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
 # (`severity.exit_code`, schema 2.3). Computed by abicheck *before* the
@@ -2853,8 +2833,8 @@ elif [[ "$MODE" == "dump" ]]; then
 elif [[ "$MODE" == "scan" ]]; then
   # scan exit codes: 0=compatible/advisory, 1=severity error or incomplete
   # contract coverage (see below), 2=API break, 4=ABI break, 5=budget
-  # overflow, 6=not_comparable. Click usage errors also use exit 2 —
-  # distinguish via stderr.
+  # overflow, 6=not_comparable, 7=evidence contract error (ADR-037 D5).
+  # Click usage errors also use exit 2 — distinguish via stderr.
   if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
     VERDICT="ERROR"
     echo "::error::abicheck scan failed due to a CLI argument or configuration error (exit code 2)."
@@ -2863,37 +2843,40 @@ elif [[ "$MODE" == "scan" ]]; then
     case $ABICHECK_EXIT in
       0) _resolve_clean_exit_verdict ;;
       1)
-        # `scan` exit 1 now has four possible sources, not one. It used to
-        # be coverage-only ("scan's own verdict codes are 0/2/4/5, so 1 can
+        # `scan` exit 1 has four possible sources, not one: it used to be
+        # coverage-only ("scan's own verdict codes are 0/2/4/5, so 1 can
         # only come from the orthogonal contract-coverage axis"), but a
         # severity-scheme `scan --against` gates natively at 1 on an
         # error-level addition/quality finding — so that reasoning would
         # publish ERROR for a severity-policy result, or drop the severity
         # gate when coverage happened to contribute too (Codex review).
-        # A crash also exits 1 and must still stay ERROR. ADR-037 D5's
-        # evidence-contract axis (either a pinned depth with no evidence to
-        # collect, or --abi3 targeting a binary _run_abi3_audit can't
-        # recognise as a CPython extension module) also exits 1 via a
-        # `click.ClickException` -- indistinguishable from a crash/bad-flag
-        # CLI error by stderr shape alone (`_evidence_contract_gated`'s own
-        # docstring), so it must be checked ahead of `_is_cli_error` or it
-        # is silently swallowed by that generic bucket.
+        # A crash also exits 1 and must still stay ERROR.
+        #
+        # ADR-037 D5's evidence-contract axis moved off this code for a
+        # *single* ARTIFACT (its own dedicated exit code, 7, checked in its
+        # own arm below -- see `cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_
+        # ERROR` for why), but `--artifact-set` still floors *its* own exit
+        # code at 1 for exactly this axis
+        # (`service_scan._aggregate_scan_set_verdict`, since a member's own
+        # abort is caught inside `_run_scan_one_member` and never reaches
+        # `cli_scan.py`'s single-binary catch site at all -- a separate,
+        # not-yet-closed half of this same gap, see ADR-064). Only the JSON
+        # report can tell that case apart from a real CLI error at exit 1
+        # (Codex review, fresh evidence -- restoring the check an earlier
+        # revision of this fix dropped entirely, regressing the
+        # `--artifact-set` case): `_json_report_src`/`_report_query` are the
+        # same primitives every other exit-1 disambiguation here already
+        # uses, so this needs no new helper.
         #
         # Resolved the same way, and in the same order, as the compare branch
         # below: the report's pre-fold `severity.exit_code` tells the axes
         # apart rather than a guess.
         _sev_exit=$(_severity_gate_exit)
-        if _evidence_contract_gated; then
+        _src=$(_json_report_src)
+        _verdict=$(_report_query "$_src" compat_verdict)
+        if [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]; then
           VERDICT="EVIDENCE_CONTRACT_ERROR"
-          # Generic on purpose (Codex review, fresh evidence): scan_engine's
-          # _EvidenceContractError has two independent raise sites -- a
-          # pinned --depth/--source-method with no source evidence, and
-          # --abi3 targeting a binary _run_abi3_audit can't recognise as a
-          # CPython extension module -- and the JSON envelope this wrapper
-          # reads carries only the verdict, not which one fired. Naming the
-          # depth/evidence cause here would misdiagnose the abi3 case, which
-          # has nothing to do with a pin or missing evidence.
-          echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 1). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
+          echo "::error::abicheck scan aborted: at least one --artifact-set member's evidence contract could not be satisfied (ADR-037 D5, exit code 1). This is NOT a CLI usage error and NOT an ABI/API break — see the JSON report's per_artifact entries for which member and why."
         elif _is_cli_error; then
           VERDICT="ERROR"
           echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
@@ -2928,11 +2911,12 @@ elif [[ "$MODE" == "scan" ]]; then
         # (Codex review). ERROR is left alone -- that is an operational
         # failure, not a gated compatibility result, and `_verdict_rank`
         # ranks it 0 only because it must never be escalated *from* here.
-        # EVIDENCE_CONTRACT_ERROR is the same shape: no comparison ever ran,
-        # so there is no compatibility verdict to escalate to (harmless
-        # either way, since `_escalate_verdict_to_report`'s own guard only
-        # fires on a BREAKING/API_BREAK report -- excluded here for the same
-        # reason ERROR is, not because it would misbehave).
+        # EVIDENCE_CONTRACT_ERROR (the restored --artifact-set case above)
+        # is the same shape: no comparison ever ran, so there is no
+        # compatibility verdict to escalate to (harmless either way, since
+        # `_escalate_verdict_to_report`'s own guard only fires on a
+        # BREAKING/API_BREAK report -- excluded here for the same reason
+        # ERROR is, not because it would misbehave).
         if [[ "$VERDICT" != "ERROR" && "$VERDICT" != "EVIDENCE_CONTRACT_ERROR" ]]; then
           _escalate_verdict_to_report
         fi
@@ -2940,6 +2924,30 @@ elif [[ "$MODE" == "scan" ]]; then
       2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
       4) VERDICT="BREAKING" ;;
       5) VERDICT="BUDGET_OVERFLOW" ;;
+      7)
+        # ADR-037 D5's evidence-contract axis (either a pinned depth with no
+        # evidence to collect, or --abi3 targeting a binary
+        # _run_abi3_audit can't recognise as a CPython extension module) --
+        # its own dedicated exit code (`cli_scan.py`'s
+        # `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of
+        # `--format` or whether a JSON report exists (see this file's own
+        # history above the removed `_evidence_contract_gated` helper for
+        # why earlier stderr/marker-file signals for this axis were each
+        # shown forgeable). No comparison ever ran, so there is no
+        # compatibility verdict to escalate to -- same shape as ERROR in
+        # that respect, deliberately not escalated.
+        VERDICT="EVIDENCE_CONTRACT_ERROR"
+        # Generic on purpose (Codex review, fresh evidence): scan_engine's
+        # _EvidenceContractError has two independent raise sites -- a
+        # pinned --depth/--source-method with no source evidence, and
+        # --abi3 targeting a binary _run_abi3_audit can't recognise as a
+        # CPython extension module -- and this exit code alone doesn't say
+        # which fired. Naming the depth/evidence cause here would
+        # misdiagnose the abi3 case, which has nothing to do with a pin or
+        # missing evidence; the command's own stderr (printed above) names
+        # the exact cause.
+        echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
+        ;;
       6)
         # NOT_COMPARABLE (ADR-050 D2: a scope/profile mismatch between the
         # candidate and --against baseline) is a valid, reportable outcome,
@@ -3386,27 +3394,26 @@ _maybe_post_pr_comment() {
   # with nothing new to show for it (Codex review).
   [[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0
   # EVIDENCE_CONTRACT_ERROR deliberately does NOT get the same skip
-  # (Codex review, fresh evidence): unlike BUDGET_OVERFLOW, reaching this
-  # verdict already proves `_evidence_contract_gated` found a populated,
-  # readable JSON report -- that is the only way it can have returned
-  # true. So there is a real report to reuse, not "nothing to reuse",
-  # and `pr_comment_scan_abort.scan_abort_incomplete_reason`
-  # (abicheck/pr_comment_scan_abort.py) already renders this exact
-  # envelope as a blocking "analysis incomplete" finding, the same
-  # treatment NOT_COMPARABLE gets -- its own docstring names the GitHub
-  # Action as one of the paths meant to reach it. Skipping here would
-  # leave any previous sticky BREAKING/API_BREAK comment stale and
-  # misleading instead of updating it to reflect the incomplete analysis.
-  # Falling through to the normal reuse-or-rerun path below never actually
-  # reruns for this verdict (Codex review, fresh evidence, superseding an
-  # earlier "a rerun is cheap here" version of this comment): reaching
-  # EVIDENCE_CONTRACT_ERROR already proves `_json_report_src` found a
-  # report, and `_can_reuse_primary_json` (below) now trusts that same
-  # lookup unconditionally rather than requiring `$FORMAT == "json"` on
-  # top of it -- so the report this verdict's own detection already found
-  # is exactly what gets reused here too, for every raise site (the
-  # abi3 one included, whose own rerun would not have been the cheap,
-  # precondition-only kind a real rerun is for the pinned-depth site).
+  # (Codex review, fresh evidence): unlike BUDGET_OVERFLOW, this verdict
+  # can still have a real JSON report worth reusing.
+  #
+  # Update (2026-09-03): this verdict now has two independent sources. A
+  # single ARTIFACT sets it directly from `ABICHECK_EXIT == 7` (`cli_scan.
+  # py`'s own dedicated `_EXIT_EVIDENCE_CONTRACT_ERROR` -- see that arm's
+  # own comment for why), not from finding a JSON report -- for that
+  # source, reaching this verdict does NOT prove a report exists (a
+  # `--format text` run with no JSON secondary output produces none at
+  # all). A `--artifact-set` member abort, by contrast, still sets it via
+  # the exit-1 arm's own JSON-verdict check (restored after a Codex review
+  # caught its removal as a real regression), which -- like the pre-round-4
+  # design this comment originally described -- *does* prove a report
+  # exists. Falling through to the normal reuse-or-rerun path below does
+  # the right thing either way: `_can_reuse_primary_json` finds and
+  # reuses a report when one exists (JSON primary, or a text primary with
+  # a JSON `--write` secondary), and the `else` branch below re-runs for
+  # JSON when none does -- exactly the same reuse-or-rerun contract every
+  # other verdict here already relies on, so this axis needs no special
+  # case of its own any more.
   case "${GITHUB_EVENT_NAME:-}" in
     pull_request | pull_request_target) ;;
     *)
@@ -3658,17 +3665,17 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
-  # EVIDENCE_CONTRACT_ERROR (exit 1, ADR-037 D5) unconditionally fails the
-  # step too, the same way NOT_COMPARABLE and BUDGET_OVERFLOW do -- no
-  # fail-on-* flag governs it, since this axis means no compatibility
-  # comparison ran at all. Splitting this verdict out of the generic ERROR
-  # bucket above (this fix's own point: ERROR and EVIDENCE_CONTRACT_ERROR
-  # read identically on stderr, but are distinguishable via the JSON
-  # report) means it no longer matches the top-level `VERDICT == "ERROR"`
-  # branch's own `FINAL_EXIT=1`, so it needs this explicit twin or the step
-  # would silently pass. Generic wording, same reason as the exit-1
-  # dispatch's own comment: two independent _EvidenceContractError raise
-  # sites, only one of which is a pinned depth with missing evidence.
+  # EVIDENCE_CONTRACT_ERROR (exit 7, ADR-037 D5 -- cli_scan.py's own
+  # dedicated _EXIT_EVIDENCE_CONTRACT_ERROR, unconditional and
+  # un-spoofable regardless of format or JSON report) unconditionally
+  # fails the step too, the same way NOT_COMPARABLE and BUDGET_OVERFLOW
+  # do -- no fail-on-* flag governs it, since this axis means no
+  # compatibility comparison ran at all. This verdict doesn't match the
+  # top-level `VERDICT == "ERROR"` branch's own `FINAL_EXIT=1`, so it
+  # needs this explicit twin or the step would silently pass. Generic
+  # wording, same reason as the exit-7 dispatch's own comment: two
+  # independent _EvidenceContractError raise sites, only one of which is
+  # a pinned depth with missing evidence.
   if [[ "$VERDICT" == "EVIDENCE_CONTRACT_ERROR" ]]; then
     echo "::error::Scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5) — see the command's own error message above for the exact cause."
     FINAL_EXIT=1

@@ -13,36 +13,59 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Behavioral tests for ``action/run.sh``'s ``scan`` exit-1 VERDICT mapping
-for ``_EvidenceContractError`` (ADR-037 D5, scan_engine.py) — extracted
+"""Behavioral tests for ``action/run.sh``'s ``scan`` VERDICT mapping for
+``_EvidenceContractError`` (ADR-037 D5, scan_engine.py) — extracted
 verbatim, same discipline as the sibling ``test_action_run_sh_*.py`` files
 (``test_action_run_sh_scan_not_comparable.py`` is the closest analog).
 
 CLI cleanup phase two / ADR-064's own "still open" item: a full
 cross-front-end parity pass between the native CLI and this composite
-Action. ``cli_scan.py`` raises ``_EvidenceContractError`` as a
-``click.ClickException`` (exit 1, stderr ``Error: <message>``) — the
-identical stderr shape a bad flag or a crash produces, so before this fix
-``_is_cli_error``'s own ``^Error:`` match won the exit-1 disambiguation
-unconditionally, folding a well-formed command that merely lacked evidence
-for its own pinned ``--depth`` into the same generic "CLI error" bucket a
-syntax typo gets — even though the native CLI's ``--format json`` path
-already writes a real, distinguishable ``verdict: "EVIDENCE_CONTRACT_ERROR"``
-envelope for this abort (``_emit_scan_abort_report``/
-``scan_abort_result_fields``). The final-exit-code block is exercised too,
-mirroring ``test_action_run_sh_scan_not_comparable.py``'s own rationale: a
-verdict newly split out of the generic ``ERROR`` bucket must carry its own
+Action. This axis's classification signal has been through four
+iterations, the first three each shown forgeable in turn:
+
+1. Originally: `_EvidenceContractError` raised a generic
+   `click.ClickException` (exit 1, stderr `Error: <message>`) -- the
+   identical shape a bad flag or a crash produces, so `_is_cli_error`'s own
+   `^Error:` match won the exit-1 disambiguation unconditionally, folding a
+   well-formed command that merely lacked evidence for its own pinned
+   `--depth` into the same generic "CLI error" bucket a syntax typo gets.
+2. 2026-09-03: a stable stderr marker line, matched by
+   `_evidence_contract_gated()` via `grep -q` -- an unanchored substring
+   match a crafted diagnostic could spoof.
+3. 2026-09-03, second round (Codex): the marker match tightened to
+   whole-line (`grep -Fxq`), still forgeable since a legal Unix filename
+   may itself contain embedded newlines.
+4. 2026-09-03, third round (Codex): the marker moved to a private
+   temp-file path passed as an environment variable
+   (`$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`) -- still forgeable, since a
+   PR-controlled build script spawned during this scan's own evidence
+   collection inherits (or, even after the variable is popped from
+   `os.environ`, can recover from `/proc/<pid>/environ`) the same
+   information.
+
+**Current design (2026-09-03, fourth round): a dedicated process exit
+code.** `cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR = 7` is this
+process's own choice, made once at its own `sys.exit()` call, and reported
+to its trusted parent shell by the OS kernel via `wait()` -- no subprocess
+this run spawns can alter its own ancestor's eventual exit status. The
+`case $ABICHECK_EXIT in ... 7) ...` dispatch below needs no helper
+predicate, no JSON report, and no stderr/environment signal at all: the
+numeric exit code alone is unambiguous and un-spoofable. The final-exit-
+code block is exercised too, mirroring
+``test_action_run_sh_scan_not_comparable.py``'s own rationale: a verdict
+newly split out of the generic ``ERROR`` bucket must carry its own
 explicit ``FINAL_EXIT=1``, or the step silently starts passing.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+import pytest
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
@@ -52,16 +75,6 @@ _FINAL_EXIT_SCAN_START = (
     "  # scan: BREAKING/API_BREAK follow the fail-on flags"
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
-#: Includes the real `$OSTYPE`-detection preamble that sets
-#: `_RUNNING_ON_WINDOWS`, not just the function body -- see
-#: `_report_query_and_gated_fragment`'s own docstring for why a hardcoded
-#: value here was a real, self-masking bug.
-_IS_PATH_QUALIFIED_START = 'case "$OSTYPE" in'
-_IS_PATH_QUALIFIED_END = "}\n"
-_REPORT_QUERY_START = "_report_query() {\n"
-_REPORT_QUERY_END = "PYQUERY\n}\n"
-_EVIDENCE_CONTRACT_GATED_START = "_evidence_contract_gated() {\n"
-_EVIDENCE_CONTRACT_GATED_END = "}\n"
 
 
 def _bash_executable() -> str:
@@ -89,44 +102,6 @@ def _exit_case_fragment() -> str:
     return text[case_start:case_end]
 
 
-def _extract(start_marker: str, end_marker: str) -> str:
-    """One verbatim ``name() { ... }`` function body from ``run.sh``, found
-    by its exact opening line and the first matching end-marker after it."""
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(start_marker)
-    end = text.index(end_marker, start) + len(end_marker)
-    return text[start:end]
-
-
-def _report_query_and_gated_fragment() -> str:
-    """The real ``$OSTYPE``-detection preamble (sets ``_RUNNING_ON_WINDOWS``),
-    ``_is_path_already_qualified``, ``_report_query`` (which it calls), and
-    ``_evidence_contract_gated`` (which calls ``_report_query``), extracted
-    verbatim -- the real pipeline that turns a JSON report file into the
-    boolean ``_evidence_contract_gated`` decision, unmodified.
-
-    Including the real preamble (rather than a caller-supplied
-    ``_RUNNING_ON_WINDOWS`` value) matters on a real Windows Git-Bash host:
-    `.as_posix()`-converted paths keep their drive letter (``D:/...``), which
-    ``_is_path_already_qualified`` only recognises via its
-    ``$_RUNNING_ON_WINDOWS == "true"`` branch. An earlier revision hardcoded
-    ``_RUNNING_ON_WINDOWS="false"`` in the caller instead, which silently
-    misclassified every drive-letter path as *not* already-qualified,
-    prepending a bogus ``$PWD/`` prefix -- ``_report_query`` then failed to
-    open the (now-wrong) path and printed nothing, same observable outcome
-    as a real near-miss. That made the hostile-value test (which expects
-    ``GATED=0`` either way) pass for the wrong reason on windows-latest CI,
-    and was only caught once a positive-path test (`GATED=1` expected)
-    exposed it as a real failure there (windows-latest CI)."""
-    return (
-        _extract(_IS_PATH_QUALIFIED_START, _IS_PATH_QUALIFIED_END)
-        + "\n"
-        + _extract(_REPORT_QUERY_START, _REPORT_QUERY_END)
-        + "\n"
-        + _extract(_EVIDENCE_CONTRACT_GATED_START, _EVIDENCE_CONTRACT_GATED_END)
-    )
-
-
 def _final_exit_scan_fragment() -> str:
     """The scan branch of the final-exit-code ``if/elif`` chain, extracted
     verbatim, stopping right before the sibling ``compare`` branch (see
@@ -145,8 +120,8 @@ def _run_bash_script(
     """Run *script* via a real bash, from a temp file rather than an inline
     ``-c`` argument.
 
-    This module's own dispatch/gating scripts (extracted run.sh fragments
-    plus this file's own harness text) run to several KB with many nested
+    This module's own dispatch scripts (extracted run.sh fragments plus
+    this file's own harness text) run to several KB with many nested
     double quotes. Passed as a single subprocess argv string, Windows
     reconstructs that argv via ``list2cmdline`` (MSVCRT backslash/quote
     escaping rules) and Git Bash's own MSYS runtime then re-parses the
@@ -159,13 +134,7 @@ def _run_bash_script(
     (``test_action_run_sh_helpers.py``'s ``_run_harness``,
     ``test_action_run_sh_py_safe_path.py``'s ``_run_bash_script``): a file
     on disk needs no argv reconstruction at all, since bash reads its own
-    content directly. An earlier revision of this module's own malicious-
-    fixture test tried to work around a narrower instance of the same class
-    (a raw Windows backslash path embedded in the inline script) with
-    ``Path.as_posix()`` alone -- confirmed on windows-latest CI insufficient,
-    since the corruption is triggered by the script's own pre-existing
-    quote/backslash density (e.g. the real ``_is_path_already_qualified``'s
-    ``\\\\*`` pattern), not by any one interpolated path."""
+    content directly."""
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
@@ -185,20 +154,28 @@ def _run_bash_script(
 def _run_exit_mapping(
     abicheck_exit: int,
     *,
-    evidence_contract_gated: bool = False,
     is_cli_error: bool = False,
     severity_exit: str = "0",
+    report_verdict: str = "",
 ) -> subprocess.CompletedProcess:
     # Stub every helper the extracted case-block calls -- this test is
-    # scoped to the mapping itself.
+    # scoped to the mapping itself. No `_evidence_contract_gated` stub any
+    # more: exit 7 is its own `case` arm, dispatched purely on the numeric
+    # exit code, with no predicate to stub. `_json_report_src`/`_report_query`
+    # are the pair exit 1's `--artifact-set` EVIDENCE_CONTRACT_ERROR check
+    # reads (see `test_exit_1_artifact_set_evidence_contract_error_from_
+    # json_report` below) -- stubbed here too so every exit-1 test in this
+    # module exercises the real dispatch order, not just the tests that care
+    # about this one branch.
     stubs = f"""
 _resolve_clean_exit_verdict() {{ VERDICT="COMPATIBLE"; }}
 _severity_gate_exit() {{ echo "{severity_exit}"; }}
-_evidence_contract_gated() {{ return {0 if evidence_contract_gated else 1}; }}
 _is_cli_error() {{ return {0 if is_cli_error else 1}; }}
 _coverage_gated() {{ return 1; }}
 _assurance_gated() {{ return 1; }}
 _escalate_verdict_to_report() {{ :; }}
+_json_report_src() {{ echo "/tmp/stub-report.json"; }}
+_report_query() {{ echo "{report_verdict}"; }}
 """
     script = (
         stubs
@@ -210,41 +187,109 @@ _escalate_verdict_to_report() {{ :; }}
     return _run_bash_script(script)
 
 
-def test_exit_1_evidence_contract_error_maps_to_its_own_verdict():
-    """The signal the CLI now provides (a JSON verdict of
-    EVIDENCE_CONTRACT_ERROR) must win over the generic CLI-error bucket,
-    even though both conditions are simultaneously true on real stderr
-    (Click's ClickException always prints "Error: ...")."""
-    result = _run_exit_mapping(1, evidence_contract_gated=True, is_cli_error=True)
+def test_exit_7_maps_to_evidence_contract_error_verdict():
+    """Exit code 7 (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`) maps
+    unconditionally to `VERDICT=EVIDENCE_CONTRACT_ERROR` -- no JSON report,
+    no stderr content, no environment variable needed, since the dispatch
+    is a plain `case` match on the exit code alone."""
+    result = _run_exit_mapping(7)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+def test_exit_7_ignores_stderr_and_is_cli_error_stub():
+    """Even when `_is_cli_error` would (wrongly) return true for exit 7,
+    the `case` arm for 7 is reached unconditionally -- `_is_cli_error` is
+    never even consulted for this exit code, unlike exit 1's shared
+    bucket."""
+    result = _run_exit_mapping(7, is_cli_error=True)
     assert result.returncode == 0, result.stderr
     assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
 
 
 def test_exit_1_plain_cli_error_still_maps_to_error():
-    """A genuine bad-flag/crash abort (no evidence-contract JSON signal)
-    must still classify as the generic ERROR bucket, unchanged."""
-    result = _run_exit_mapping(1, evidence_contract_gated=False, is_cli_error=True)
+    """A genuine bad-flag/crash abort at exit 1 must still classify as the
+    generic ERROR bucket, unaffected by evidence-contract-error moving to
+    its own exit code."""
+    result = _run_exit_mapping(1, is_cli_error=True)
     assert result.returncode == 0, result.stderr
     assert "VERDICT=ERROR" in result.stdout
 
 
 def test_exit_1_severity_error_unaffected():
-    """A severity-scheme gate at exit 1 (no evidence-contract abort, no CLI
-    error) must still classify as SEVERITY_ERROR, unchanged."""
-    result = _run_exit_mapping(
-        1, evidence_contract_gated=False, is_cli_error=False, severity_exit="2"
-    )
+    """A severity-scheme gate at exit 1 (no CLI error) must still classify
+    as SEVERITY_ERROR, unaffected by evidence-contract-error moving off
+    exit 1 entirely. `severity_exit="1"` is `compute_exit_code`'s own value
+    for an error-level `addition`/`quality_issues` finding -- `"2"` is
+    `potential_breaking`'s code, a different category this docstring does
+    not claim to model (CodeRabbit review, fresh evidence: the mismatch
+    meant this test never actually validated the addition/quality-error
+    exit-decision contract it describes)."""
+    result = _run_exit_mapping(1, is_cli_error=False, severity_exit="1")
     assert result.returncode == 0, result.stderr
     assert "VERDICT=SEVERITY_ERROR" in result.stdout
 
 
+def test_exit_1_artifact_set_evidence_contract_error_from_json_report():
+    """`--artifact-set` still floors *its own* exit code at 1 for a
+    member's evidence-contract abort (`service_scan._aggregate_scan_set_
+    verdict`, since a member's own abort is caught inside
+    `_run_scan_one_member` and never reaches `cli_scan.py`'s single-binary
+    exit-7 catch site) -- the JSON report's `compat_verdict` is the only
+    signal that tells this case apart from a genuine CLI error at exit 1,
+    so it must win the exit-1 dispatch. This is the regression Round-6
+    review caught: an earlier revision of the exit-7 redesign deleted the
+    whole JSON-verdict check without noticing `--artifact-set` still needed
+    it, silently reclassifying every such abort as generic ERROR."""
+    result = _run_exit_mapping(1, report_verdict="EVIDENCE_CONTRACT_ERROR")
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+def test_exit_1_artifact_set_evidence_contract_error_beats_cli_error_stub():
+    """The JSON-verdict check runs before `_is_cli_error` in the real
+    dispatch order -- even a (wrongly) true `_is_cli_error` stub must not
+    override a report that already says EVIDENCE_CONTRACT_ERROR."""
+    result = _run_exit_mapping(
+        1, is_cli_error=True, report_verdict="EVIDENCE_CONTRACT_ERROR"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "hostile_verdict",
+    [
+        "EVIDENCE_CONTRACT_ERROR ",  # trailing space
+        " EVIDENCE_CONTRACT_ERROR",  # leading space
+        "evidence_contract_error",  # wrong case
+        "EVIDENCE_CONTRACT_ERRORX",  # extra trailing char
+        "not EVIDENCE_CONTRACT_ERROR really",  # embedded, not the whole value
+        "EVIDENCE_CONTRACT_ERROR\nVERDICT=EVIDENCE_CONTRACT_ERROR",  # injected newline
+    ],
+)
+def test_exit_1_hostile_verdict_string_does_not_trigger_the_bucket(
+    hostile_verdict: str,
+) -> None:
+    """Malicious-fixture negative control (a `--artifact-set` member's JSON
+    report is derived from an attacker-influenced library/build, so its
+    `compat_verdict` field must not be trusted as anything but data): the
+    dispatch compares `$_verdict` to the literal string
+    `EVIDENCE_CONTRACT_ERROR` with bash `[[ ... == ... ]]`, not a substring
+    or regex match, so no near-miss spelling, embedded value, or injected
+    line can reach the `EVIDENCE_CONTRACT_ERROR` bucket -- it must still
+    classify as a plain CLI error (this harness's `_is_cli_error` stub
+    default) or `ERROR`, never the axis a crafted fixture is trying to
+    forge."""
+    result = _run_exit_mapping(1, is_cli_error=True, report_verdict=hostile_verdict)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" not in result.stdout
+    assert "VERDICT=ERROR" in result.stdout
+
+
 def test_evidence_contract_error_still_fails_the_step():
-    """Before this fix, an evidence-contract abort read as VERDICT=ERROR,
-    which the final-exit-code block's own `[[ "$VERDICT" == "ERROR" ]]`
-    branch (outside the scan-specific fragment under test here) always
-    failed. Splitting it into its own verdict removes that automatic path,
-    so the scan-specific block must carry an explicit twin or the step
-    would silently start passing on this exact abort (Codex review)."""
+    """A verdict split out of the generic ``ERROR`` bucket must carry its
+    own explicit ``FINAL_EXIT=1``, or the step silently starts passing."""
     script = _final_exit_scan_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
     script = (
         'MODE="scan"\n'
@@ -262,101 +307,75 @@ def test_evidence_contract_error_still_fails_the_step():
     assert "FINAL_EXIT=1" in result.stdout
 
 
-def _run_real_gated_pipeline(
-    tmp_path: Path, verdict: str
-) -> subprocess.CompletedProcess:
-    """Execute the real, unmodified ``_is_path_already_qualified``/
-    ``_report_query``/``_evidence_contract_gated`` pipeline (extracted
-    verbatim from run.sh) against a JSON report whose ``verdict`` field is
-    *verdict* -- prints ``GATED=1``/``GATED=0`` depending on the outcome.
-    Shared by the exact-sentinel positive test and the hostile-value
-    negative test below, so both exercise the identical real pipeline
-    rather than two independently-drifting copies of the harness."""
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps({"verdict": verdict}), encoding="utf-8")
+def _real_scan_no_evidence(tmp_path: Path) -> subprocess.CompletedProcess:
+    """Run the real ``abicheck scan --depth source`` CLI against a real
+    snapshot with no source evidence -- the genuine
+    ``_EvidenceContractError`` (pinned-depth raise site) end to end."""
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import AbiSnapshot, AccessLevel, Function, Visibility
+    from abicheck.serialization import snapshot_to_json
 
-    py_safe_dir = tmp_path / "py-safe"
-    py_safe_dir.mkdir()
-    # Forward-slash form of every interpolated filesystem path -- harmless
-    # either way once `_run_bash_script` writes this script to a real file
-    # (a literal backslash inside a double-quoted bash string is passed
-    # through unchanged), but kept for readability/consistency with the
-    # rest of this file's Windows-path handling.
-    py_bin = Path(sys.executable).as_posix()
-    py_safe_dir_posix = py_safe_dir.as_posix()
-    report_posix = report.as_posix()
-    script = (
-        _report_query_and_gated_fragment()
-        + f"""
-_PY_BIN="{py_bin}"
-_PY_SAFE_DIR="{py_safe_dir_posix}"
-_json_report_src() {{ echo "{report_posix}"; }}
-if _evidence_contract_gated; then
-  echo "GATED=1"
-else
-  echo "GATED=0"
-fi
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+                access=AccessLevel.PUBLIC,
+            )
+        ],
+        elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3foov")]),
+    )
+    snap_path = tmp_path / "new.abi.json"
+    snap_path.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+    return subprocess.run(
+        [sys.executable, "-m", "abicheck", "scan", str(snap_path), "--depth", "source"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_real_cli_run_exits_7_with_an_error_prefixed_message(tmp_path):
+    """End-to-end: the real CLI's own exit code for this abort is exactly
+    7 (not 1, and not any other value), and stderr keeps the human-facing
+    ``Error: <message>`` shape ``click.ClickException`` used to produce, so
+    existing log-reading tooling/eyeballs see the same prefix as before."""
+    proc = _real_scan_no_evidence(tmp_path)
+    assert proc.returncode == 7, (proc.returncode, proc.stderr)
+    assert proc.stderr.startswith("Error: "), proc.stderr
+    assert "source evidence" in proc.stderr, proc.stderr
+
+
+def test_real_cli_exit_code_dispatches_through_the_real_run_sh_case_block(tmp_path):
+    """Feed the *real* exit code the CLI just produced into the *real,
+    unmodified* ``case $ABICHECK_EXIT in ... esac`` block extracted from
+    ``run.sh`` -- proves the Python-side exit code and the bash-side
+    dispatch actually agree on the number 7, rather than two
+    independently-drifting halves of the same contract."""
+    proc = _real_scan_no_evidence(tmp_path)
+    assert proc.returncode == 7, (proc.returncode, proc.stderr)
+
+    stubs = """
+_resolve_clean_exit_verdict() { VERDICT="COMPATIBLE"; }
+_severity_gate_exit() { echo "0"; }
+_is_cli_error() { return 1; }
+_coverage_gated() { return 1; }
+_assurance_gated() { return 1; }
+_escalate_verdict_to_report() { :; }
 """
+    script = (
+        stubs
+        + f"ABICHECK_EXIT={proc.returncode}\n"
+        + 'STDERR_CONTENT=""\n'
+        + _exit_case_fragment()
+        + '\necho "VERDICT=$VERDICT"\n'
     )
-    return _run_bash_script(script)
-
-
-def test_evidence_contract_gated_matches_the_real_sentinel(tmp_path):
-    """The positive case the exit-1 dispatch tests above all stub away:
-    every one of ``test_exit_1_evidence_contract_error_maps_to_its_own_
-    verdict``/``test_exit_1_plain_cli_error_still_maps_to_error``/
-    ``test_exit_1_severity_error_unaffected`` replaces
-    ``_evidence_contract_gated`` with a stub, and the hostile-value test
-    below only proves a near-miss does *not* gate -- none of the five
-    tests in this module would fail if the real
-    ``_report_query``/``_evidence_contract_gated`` pipeline were broken to
-    always return false (a regression that would silently restore the
-    exact pre-fix misclassification for every genuine
-    ``EVIDENCE_CONTRACT_ERROR`` report), since that pipeline's *positive*
-    path was never executed anywhere in this module (Codex review, fresh
-    evidence). Runs the identical real pipeline as the hostile-value test,
-    via the shared ``_run_real_gated_pipeline`` helper, with the exact
-    sentinel string a real ``_emit_scan_abort_report`` envelope carries."""
-    result = _run_real_gated_pipeline(tmp_path, "EVIDENCE_CONTRACT_ERROR")
+    result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
-    assert "GATED=1" in result.stdout
-
-
-def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_path):
-    """``_evidence_contract_gated`` reads a JSON report's ``verdict`` field
-    and compares it against a fixed literal — proven here by *executing*
-    the real, unmodified ``_is_path_already_qualified``/``_report_query``/
-    ``_evidence_contract_gated`` pipeline against a crafted, adversarial
-    report file, not by asserting the script's text (the class of gap
-    #705 shipped and #758 had to close with an executing test: a
-    text-only assertion proves nothing about behaviour under a hostile
-    value).
-
-    The report's ``verdict`` is data straight from a comparison report on
-    every real invocation — but this test does not trust that abicheck's
-    own writer only ever emits one of its fixed sentinel strings; it
-    supplies a value engineered to look dangerous if the pipeline ever
-    stopped being a plain string comparison: command-substitution syntax
-    (`` `...` ``, ``$(...)``) and a value that merely *resembles* the real
-    sentinel (extra trailing content) rather than equalling it exactly.
-    Two properties are checked by execution, not by reading: (1) no shell
-    command from the payload ever runs (a marker file the payload tries to
-    create must not exist afterwards), and (2) a near-miss string must not
-    compare equal — a substring/prefix match would be its own, different
-    injection-adjacent bug (an attacker-influenced value that merely
-    starts with the sentinel could otherwise forge a false positive)."""
-    marker = tmp_path / "pwned"
-    hostile_verdict = (
-        f"EVIDENCE_CONTRACT_ERROR`touch {marker}`$(touch {marker}); touch {marker} #"
-    )
-    result = _run_real_gated_pipeline(tmp_path, hostile_verdict)
-    assert result.returncode == 0, result.stderr
-    # A near-miss (extra trailing content) must not compare equal to the
-    # real sentinel -- only an exact match may gate.
-    assert "GATED=0" in result.stdout
-    # Nothing in the hostile value's command-substitution/backtick payload
-    # ever executed as a shell command.
-    assert not marker.exists(), (
-        "hostile JSON verdict value executed as a shell command "
-        f"(marker file {marker} was created)"
-    )
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout

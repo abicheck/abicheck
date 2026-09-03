@@ -1548,6 +1548,8 @@ def _dump_elf(
                 exported_dynamic_tls,
                 dwarf_only_types,
                 profile_hint,
+                # Presence-only probe never parsed structs/enums (Codex review, PR #1026).
+                None if (symbols_only or debug_presence_only) else resolved_debug_format,
             )
         # Built here (session open): "auto" can fall back to clang (G16), so
         # ast_result.is_clang is the only reliable signal (Codex review).

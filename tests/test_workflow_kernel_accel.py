@@ -313,6 +313,42 @@ def test_resolve_input_ingests_raw_ctf_blob() -> None:
     assert "task_state" in (snap.dwarf.structs or {})
 
 
+def test_resolve_input_raw_btf_blob_populates_semantic_ir() -> None:
+    """A bare BTF blob (no ELF container) must also get a real
+    ``semantic_ir`` occurrence for its struct types (Codex review, fresh
+    evidence): ``workflows/input_resolution.py::_resolve_raw_typeinfo``
+    constructs the snapshot directly and never goes through
+    ``dumper_elf_fallback.py``'s own fallback, so it needs the identical
+    ``semantic_ir_from_debug_metadata`` call applied at its own call site."""
+    from abicheck.model.identity import entity_id_for_type
+    from abicheck.service import resolve_input
+
+    case = _REPO / "examples" / "case121_kernel_btf_struct_field_added"
+    snap = resolve_input(case / "v1.btf")
+    assert snap.semantic_ir is not None
+    entity_id = entity_id_for_type((), "task_state")
+    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
+    assert snap.semantic_ir.occurrences[occ_id].producer == "btf"
+
+
+def test_resolve_input_raw_ctf_blob_populates_semantic_ir() -> None:
+    """Same gap, CTF side: a bare CTF blob's snapshot must also carry a real
+    ``semantic_ir`` occurrence for its struct types."""
+    import tempfile
+
+    from abicheck.model.identity import entity_id_for_type
+    from abicheck.service import resolve_input
+
+    with tempfile.TemporaryDirectory() as td:
+        blob = Path(td) / "types.ctf"
+        blob.write_bytes(_CtfBlob().build_struct("task_state", n_fields=2))
+        snap = resolve_input(blob)
+    assert snap.semantic_ir is not None
+    entity_id = entity_id_for_type((), "task_state")
+    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
+    assert snap.semantic_ir.occurrences[occ_id].producer == "ctf"
+
+
 def test_resolve_input_rejects_truncated_btf_blob() -> None:
     """A file with the BTF magic but a truncated/garbage body parses to empty
     metadata; resolve_input must reject it (not accept an empty baseline)."""

@@ -185,7 +185,7 @@ when a first PR lands against a sub-phase:
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`) — `vtable`/`vptr_offset_bits` and every other reader of the two converted fields (`diff_cxx_rules.py`, `diff_stdlib_impl.py`, `diff_time64.py`, `idioms.py`, `surface_graph.py`, `buildsource/header_graph.py`, `diff_cpp_patterns.py`) remain on the old collapse, so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed |
-| **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
+| **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
@@ -12729,6 +12729,53 @@ review's "PR 2"-onward sequence describes (a semantic consumer cutover,
 slice closes one real call site for `compare`, not consumer migration or
 full wiring.
 
+**"PR 2" (first slice) landed the query facade a consumer migration
+converges on, not the migration itself.** `model/semantic_ir_index.py`'s
+`SemanticIRIndex` wraps a `SemanticIR` and answers exactly the lookups the
+review's Phase 6B sketch names as prerequisite — `entity(EntityId)`,
+`occurrences_for(EntityId)`, `entities_of_kind(EntityKind)` (with
+`functions()`/`variables()`/`records()` convenience filters over it), and
+`fact(EntityId, fact_name)`. `references(entity)` — the review's sixth
+named query — is deliberately not implemented here: it names a
+graph-shaped traversal that belongs with the public-surface reference
+index this same plan's Phase 3/D5 amendment governs, and adding a second,
+ad hoc answer to "what does this reference" here would preempt that design
+rather than serve it. Same posture as `ResolvedExecutionContext`: pure
+composition over `SemanticIR.canonical_entities()`/`SemanticIR.
+occurrences_for()`, no re-derivation, its own primitive-level test suite
+(`tests/test_semantic_ir_index.py`), and **no live caller** — no detector
+in `diff_symbols.py`/`diff_types.py` reads through it yet. The actual
+consumer cutover (routing a detector family's matching through this index
+instead of the legacy `AbiSnapshot.functions`/`variables`/`types`
+projections, and proving the two agree via a parity test before any read
+path is removed) is still the next, larger, not-yet-attempted step this
+paragraph's own "still open" list already named.
+
+**Preparation step, same PR-2 umbrella: real-fixture parity between
+`SemanticIRIndex` and the legacy function-matching key.** Before any
+matcher rewrite, `tests/test_semantic_ir_index_function_parity.py` proves,
+on a real compiled fixture (two overloads plus one `extern "C"` function,
+both header-AST backends), the concrete fact a cutover of
+`diff_symbols._match_old_function`'s exact-key join would depend on:
+`SemanticIRIndex.functions()` sees *exactly* the same identity set as
+`AbiSnapshot.functions` (no function invisible to the index, no phantom
+entity absent from the legacy list), and two functions the legacy
+`Function.mangled`-keyed join keeps apart never collapse onto one
+`EntityId`. **Explicitly not claimed by this preparation step**: the
+extern "C" *alias-fallback* tier (`SymbolIdentityIndex.unique_alias_match`,
+`_match_old_function`'s `name:` join) is not shown to already agree with
+`EntityId` equality in general — that fallback joins on a bare, unscoped
+display name, while `entity_id_for_function`'s own `extern_c` tag is
+scope-qualified (see `model/identity.py`'s own docstring and
+`test_model_identity.py::test_extern_c_ignores_param_types`). A real
+fixture's extern "C" function sits at global scope on both sides, so this
+asymmetry does not surface in the case tested — it is recorded here as an
+open question the eventual matcher must resolve (either widen the
+extern-C `EntityId` tag to be scope-oblivious, matching production's
+unscoped alias join, or keep the alias-fallback tier as a distinct,
+non-`EntityId` join even after the exact-key tier cuts over), not silently
+assumed away by this step.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
@@ -14044,20 +14091,75 @@ existing extraction path" the way DWARF's third slice was -- it needs
 genuinely new parser work first, a materially larger, separate project
 this types-only slice does not attempt.
 
+**Ninth slice landed: BTF/CTF, types only.** Both `btf_metadata.
+parse_btf_metadata` and `ctf_metadata.parse_ctf_metadata` reduce their own
+richer, format-specific parse to the shared `DwarfMetadata` shape (via
+`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) purely so
+the checker's pre-existing `_diff_dwarf`/`_diff_advanced_dwarf` detectors
+work against any of the three debug formats unmodified -- but that
+conversion carries only flat, name-keyed `StructLayout`/`EnumInfo` dicts,
+never a `RecordType`/`EnumType` model object, so nothing along that path
+had ever had an `entity_id` to build an occurrence from. New
+`extract/debug_layout_semantic_ir.py` bridges that shared shape into
+transient `RecordType`/`EnumType` objects carrying a real `entity_id`, then
+feeds them through the same `normalize_header_ast` every other producer
+uses. Wired into the ELF headerless (symbol-only) fallback path
+(`dumper_elf_fallback._build_symbol_only_snapshot`, the only place a
+BTF/CTF-resolved `dumper.py` run reaches -- a real DWARF resolution instead
+goes through `dwarf_snapshot.build_snapshot_from_dwarf`, whose own
+`entity_id`-bearing types have existed since Phase 2).
+
+No PDB-style scope-resolution heuristic applies at all: BTF (the Linux
+kernel's BPF Type Format) and CTF (illumos/Solaris's Compact C Type
+Format) are both pure-C debug formats with no namespace/class nesting
+whatsoever, so every `ScopePath` this slice builds is unconditionally
+empty -- none of PDB's own documented limitations (namespace-vs-record
+ambiguity, forward-declared enclosing classes, function-local scopes,
+nested anonymous aggregates) have a BTF/CTF analogue, and none needed
+inventing here.
+
+**Deliberately does not widen `AbiSnapshot.types`/`.enums`.** Every prior
+Phase 6 slice (DWARF and PDB) only ever adds `entity_id`/`SemanticIR`
+normalization on top of a model-type bridge that already existed
+*independently* of Phase 6, for other reasons (DWARF's own DIE-walk
+builder predates this phase entirely; PDB's own `pdb_model.py` bridge,
+wired into the PE header-scoping fallback so those types reach
+`AbiSnapshot.types`/`.enums` and, from there, `surface.py`/vtable/
+internal-leak detection, likewise predates this phase). BTF/CTF never had
+such a bridge at all, so building one that newly feeds `.types`/`.enums`
+would be a genuinely new, larger change -- newly exposing BTF/CTF structs
+to every other `.types`-consuming detector for the first time, a
+materially larger, separately-scoped design question this slice does not
+attempt. This slice's own `RecordType`/`EnumType` values are therefore
+transient: consumed only by `normalize_header_ast` and discarded
+immediately after, with `AbiSnapshot.types`/`.enums` left exactly as they
+already are for a BTF/CTF-sourced snapshot (empty, on the current
+headerless fallback path). A future slice giving BTF/CTF real model-type
+population (mirroring what PDB's own PE-fallback wiring already does) can
+reuse this same `entity_id` assignment without redoing it.
+
+Function/variable/typedef identity is a further, unattempted gap:
+`BtfMetadata`/`CtfMetadata`'s own `func_protos`/`typedefs` fields are not
+even carried across either format's own `to_dwarf_metadata()` conversion
+(see that method's own docstring) -- there is no *matching*
+`EntityId`-bearing evidence reaching the normalizer for those kinds at
+all, not a case this slice silently drops.
+
+`service.py`'s own BTF/CTF dispatch (a third production assembler this
+phase's own "not the only production assembly call sites" note above
+names -- the separate call site around where it parses a raw BTF/CTF blob
+and constructs an `AbiSnapshot` directly from `btf.to_dwarf_metadata()`/
+`_typeinfo_functions(btf.func_protos)`/`dict(btf.typedefs)`, and the
+identical CTF branch beside it, NOT the `dumper_elf_fallback.py` path this
+slice wires) has since been wired too (Codex review, fresh evidence): that
+dispatch lives on today as `workflows/input_resolution.py::
+_resolve_raw_typeinfo` (ADR-061 Phase 4 relocated it out of `service.py`
+verbatim, before this slice's own review round), and now calls
+`semantic_ir_from_debug_metadata` for both its BTF and CTF branches, the
+same as `dumper_elf_fallback.py`'s own call site.
+
 **Still not landed, and therefore this phase is not complete:**
-the BTF/CTF backends produce no IR at all (neither populates
-`entity_id` yet -- this normalizer canonicalizes evidence a backend already
-resolved identity for, it does not resolve identity itself, so extending it
-to these backends is gated on giving each of them the Phase 2 `EntityId`
-treatment first, the same prerequisite DWARF's fifth slice and PDB's
-seventh slice each needed for their own debug format -- DWARF via Phase 2's
-fourteenth slice populating `entity_id` on `dwarf_snapshot.py`'s
-`RecordType`/`EnumType`/`Function`/`Variable`/typedefs, then Phase 6's own
-fifth slice assembling `SemanticIR` on top of it, the first non-header-AST
-producer to reach it); `service.py`'s BTF/CTF dispatch (a fourth production
-assembler this phase's own Files list names, PDB's own dispatch now wired
-above) remains
-unwired for the same reason; and the phase's own acceptance criteria (a
+the phase's own acceptance criteria (a
 closure-parameterized template fixture) remain only PARTIALLY met --
 castxml's own occurrence now really does decompose and canonicalize a
 closure-typed template argument end to end, but clang produces no

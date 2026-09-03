@@ -1,0 +1,4 @@
+### Fixed
+
+- **A `CompareRequest(contract_evaluation=True, exit_code_scheme="auto", ...)` raised `ValueError` after the comparison had already completed.** The gate-receipt installer (added in the previous fix) installed `GateOptions.exit_code_scheme` onto the persisted contract context directly — but that field can still be the unresolved `"auto"` spelling, and `with_resolved_gate`'s `GateConfig` only accepts `"legacy"`/`"severity"`. It now receives the same resolved `"legacy"`/`"severity"` string `CompareResult.exit_decision` itself was scored with, computed once and shared between the two.
+- The same installer re-read `request.suppress` from disk a second time instead of reusing the `SuppressionList` that already scored the comparison, risking a receipt that digests different content than what was actually evaluated if the file changed between the two reads. It now builds its `SuppressionSource` from the already-loaded list.

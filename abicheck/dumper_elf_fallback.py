@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from .dumper_elf_symbols import _populate_elf_visibility
 from .dumper_toolchain import _safe_mtime, _safe_size
+from .extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
 from .extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,
@@ -189,11 +190,22 @@ def _build_symbol_only_snapshot(
     exported_dynamic_tls: set[str],
     dwarf_only_types: list[RecordType],
     profile_hint: str | None,
+    resolved_debug_format: str | None = None,
 ) -> AbiSnapshot:
     """Build a symbol-only :class:`AbiSnapshot` when no headers are available.
 
     Issues the appropriate ``UserWarning`` based on whether DWARF-derived
     types are present, then assembles the snapshot from ELF-exported symbols.
+
+    *resolved_debug_format* (ADR-063 Phase 6, BTF/CTF slice): ``dumper.py``'s
+    own resolved format string (``"dwarf"``/``"btf"``/``"ctf"``/``None``) --
+    see :func:`abicheck.extract.debug_layout_semantic_ir.
+    semantic_ir_from_debug_metadata`'s own module docstring for why BTF/CTF
+    need this call's own ``dwarf_meta`` normalized separately from
+    *dwarf_only_types* (which is real-DWARF-DIE-walk-only evidence and
+    always empty on a BTF/CTF-resolved path). Defaults to ``None`` so every
+    pre-existing caller (including this module's own unit tests) is
+    unaffected.
     """
     # No headers → symbol-only fallback. When the DWARF snapshot
     # builder produced types but no functions, we still preserve
@@ -249,4 +261,8 @@ def _build_symbol_only_snapshot(
     _populate_elf_visibility(snapshot)
     if dwarf_only_types:
         snapshot.semantic_ir = _dwarf_types_semantic_ir(dwarf_only_types)
+    elif resolved_debug_format in ("btf", "ctf") and dwarf_meta.has_dwarf:
+        snapshot.semantic_ir = semantic_ir_from_debug_metadata(
+            dwarf_meta, resolved_debug_format
+        )
     return snapshot

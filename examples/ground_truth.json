@@ -4193,7 +4193,11 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "compat-addition",
+    "exported-function-removed",
+    "exported-type-removed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4212,7 +4216,11 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compat-addition",
+    "compatible-type-added",
     "exported-function-removed",
+    "exported-type-removed",
+    "var-removed",
     "virtual-dispatch-contract-removed"
    ],
    "rule_slug": null,
@@ -4231,7 +4239,11 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "compatible-type-added",
+    "public-typedef-removed",
+    "tag-struct-renamed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4265,7 +4277,10 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "compat-addition",
+    "exported-function-removed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4282,7 +4297,9 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "constructor-overload-ambiguity"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4300,7 +4317,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
-    "public-integer-model-width-changed"
+    "public-integer-model-width-changed",
+    "typedef-underlying-changed"
    ],
    "rule_slug": null,
    "variant_of": null
@@ -4471,7 +4489,9 @@
    "scope": "single-library",
    "artifact_shape": "btf-pair",
    "validation_owner": "btf",
-   "related_rules": [],
+   "related_rules": [
+    "embedded-type-size-increased"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4557,7 +4577,8 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
-    "public-class-representation-changed"
+    "public-class-representation-changed",
+    "public-struct-private-field-type"
    ],
    "rule_slug": null,
    "variant_of": null
@@ -4945,7 +4966,9 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
-   "related_rules": [],
+   "related_rules": [
+    "audit-private-header-leak"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4961,7 +4984,9 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
-   "related_rules": [],
+   "related_rules": [
+    "header-build-context-mismatch"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -4977,7 +5002,9 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
-   "related_rules": [],
+   "related_rules": [
+    "odr-type-variant"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -5010,7 +5037,10 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
-   "related_rules": [],
+   "related_rules": [
+    "audit-accidental-export",
+    "audit-public-not-exported"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -5026,7 +5056,9 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-audit",
    "validation_owner": "g20-audit",
-   "related_rules": [],
+   "related_rules": [
+    "audit-private-header-leak"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -5426,7 +5458,9 @@
    "scope": "single-library",
    "artifact_shape": "kabi-pair",
    "validation_owner": "kabi",
-   "related_rules": [],
+   "related_rules": [
+    "symbol-type-signature-hash-changed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -5441,7 +5475,9 @@
    "scope": "single-library",
    "artifact_shape": "kabi-pair",
    "validation_owner": "kabi",
-   "related_rules": [],
+   "related_rules": [
+    "symbol-export-namespace-changed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -5714,7 +5750,12 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "compatible-type-added",
+    "embedded-type-size-increased",
+    "public-api-gains-internal-dependency",
+    "type-field-added-compatible"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -6773,7 +6814,12 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "compat-addition",
+    "compatible-type-added",
+    "exported-function-removed",
+    "exported-type-removed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -6841,7 +6887,11 @@
    "scope": "single-library",
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
-   "related_rules": [],
+   "related_rules": [
+    "exported-function-removed",
+    "exported-type-removed",
+    "overload-set-removed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -6875,7 +6925,9 @@
    "scope": "multi-library",
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
-   "related_rules": [],
+   "related_rules": [
+    "soname-inconsistent"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -6978,7 +7030,9 @@
    "scope": "multi-library",
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
-   "related_rules": [],
+   "related_rules": [
+    "exported-function-removed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -6995,7 +7049,10 @@
    "scope": "multi-library",
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
-   "related_rules": [],
+   "related_rules": [
+    "param-type-change",
+    "return-type"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7012,7 +7069,11 @@
    "scope": "multi-library",
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
-   "related_rules": [],
+   "related_rules": [
+    "compat-addition",
+    "exported-function-removed",
+    "symbol-source-owner-changed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7029,7 +7090,10 @@
    "scope": "multi-library",
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
-   "related_rules": [],
+   "related_rules": [
+    "exported-function-removed",
+    "missing-template-instantiation"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7047,7 +7111,9 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
-    "empty-tag-type-gains-state"
+    "embedded-type-size-increased",
+    "empty-tag-type-gains-state",
+    "type-field-added-compatible"
    ],
    "rule_slug": null,
    "variant_of": null
@@ -7149,7 +7215,10 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "compare-cases",
-   "related_rules": [],
+   "related_rules": [
+    "exported-function-removed",
+    "internal-symbol-required-by-public-api"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7164,7 +7233,9 @@
    "scope": "single-library",
    "artifact_shape": "snapshot-pair",
    "validation_owner": "compare-cases",
-   "related_rules": [],
+   "related_rules": [
+    "exported-function-removed"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7179,7 +7250,10 @@
    "scope": "single-library",
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
-   "related_rules": [],
+   "related_rules": [
+    "internal-declaration-renamed-reconciled",
+    "public-api-gains-internal-dependency"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7194,7 +7268,9 @@
    "scope": "single-library",
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
-   "related_rules": [],
+   "related_rules": [
+    "public-api-gains-internal-dependency"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7209,7 +7285,10 @@
    "scope": "single-library",
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
-   "related_rules": [],
+   "related_rules": [
+    "internal-declaration-moved-reconciled",
+    "public-api-gains-internal-dependency"
+   ],
    "rule_slug": null,
    "variant_of": null
   },
@@ -7224,7 +7303,10 @@
    "scope": "single-library",
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
-   "related_rules": [],
+   "related_rules": [
+    "internal-declaration-identity-reconciled",
+    "public-api-gains-internal-dependency"
+   ],
    "rule_slug": null,
    "variant_of": null
   }

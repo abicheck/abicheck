@@ -78,7 +78,7 @@ def apply_abi3_dry_run_check_set(
             "C-API imports): "
             + ", ".join(f"{n} ({p})" for n, p in bad)
             + ". Each such member's own scan would report "
-            "EVIDENCE_CONTRACT_ERROR (exit 1)."
+            "EVIDENCE_CONTRACT_ERROR (exit 7)."
         )
     else:
         result.add(

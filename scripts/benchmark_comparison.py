@@ -59,7 +59,17 @@ from pathlib import Path
 from typing import Any
 
 REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
+
+# Phase 3 resolver (scripts/CLAUDE.md). This script's own directory is
+# already on sys.path when run directly, but not when imported as
+# `scripts.benchmark_comparison` (the documented programmatic surface,
+# `run_suite()`'s own docstring) -- guard mirrors fact_detector_misuse.py's
+# identical sibling-import guard for the identical reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 REPORT_DIR = REPO_DIR / "benchmark_reports"
 BUILD_DIR = REPORT_DIR / "_build"
 
@@ -1955,7 +1965,7 @@ def _merge_frozen_into_results(
 
 def _ground_truth_digest() -> str | None:
     """SHA-256 of examples/ground_truth.json so a benchmark run is pinned to it."""
-    gt = EXAMPLES_DIR / "ground_truth.json"
+    gt = example_catalog.GROUND_TRUTH_PATH
     if not gt.is_file():
         return None
     import hashlib
@@ -2756,8 +2766,9 @@ def _run_l3l5_case(name: str, entry: dict[str, Any]) -> ToolResult:
         return ToolResult(verdict="SKIP")
     started = time.monotonic()
     try:
-        old = json.loads((EXAMPLES_DIR / name / "old.json").read_text())
-        new = json.loads((EXAMPLES_DIR / name / "new.json").read_text())
+        case_dir = example_catalog.case_dir(name)
+        old = json.loads((case_dir / "old.json").read_text())
+        new = json.loads((case_dir / "new.json").read_text())
         tier = entry.get("min_evidence")
         from abicheck.checker_policy import compute_verdict  # noqa: PLC0415
 
@@ -2892,10 +2903,8 @@ def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
         from abicheck.buildsource.crosscheck import run_crosschecks  # noqa: PLC0415
         from abicheck.serialization import load_snapshot  # noqa: PLC0415
 
-        snap_path = (
-            EXAMPLES_DIR
-            / name
-            / str((entry.get("fixtures") or ["snapshot.abi.json"])[0])
+        snap_path = example_catalog.case_dir(name) / str(
+            (entry.get("fixtures") or ["snapshot.abi.json"])[0]
         )
         snapshot = load_snapshot(snap_path)
         res = run_crosschecks(snapshot)
@@ -3405,7 +3414,7 @@ def _run_evidence_tiers(args: Any) -> None:
     REPORT_DIR.mkdir(exist_ok=True)
     BUILD_DIR.mkdir(exist_ok=True)
     all_cases = sorted(
-        d for d in EXAMPLES_DIR.iterdir() if d.is_dir() and d.name.startswith("case")
+        (path for _, path in example_catalog.iter_case_dirs()), key=lambda d: d.name
     )
     if args.suite == "pinned74":
         all_cases = [d for d in all_cases if PINNED_74_CASE_RE.match(d.name)]
@@ -3475,7 +3484,7 @@ def run_suite(args: argparse.Namespace) -> tuple[list[dict], list[Any], set[str]
     BUILD_DIR.mkdir(exist_ok=True)
 
     all_cases = sorted(
-        d for d in EXAMPLES_DIR.iterdir() if d.is_dir() and d.name.startswith("case")
+        (path for _, path in example_catalog.iter_case_dirs()), key=lambda d: d.name
     )
     if args.suite == "pinned74":
         all_cases = [d for d in all_cases if PINNED_74_CASE_RE.match(d.name)]

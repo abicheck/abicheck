@@ -225,12 +225,14 @@ class TestResolveScanExitDecision:
     def test_evidence_contract_error_alone(self) -> None:
         decision = resolve_scan_exit_decision(evidence_contract_error=True)
         assert decision is not None
-        assert decision.code == 1
+        # 7, not the generic ClickException code 1 -- cli_scan.py's
+        # dedicated `_EXIT_EVIDENCE_CONTRACT_ERROR` (2026-09-03).
+        assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
         assert decision.compatibility_contribution == 0
         assert decision.contract_coverage_contribution == 0
         assert decision.analysis_assurance_contribution == 0
-        assert decision.evidence_contract_error_contribution == 1
+        assert decision.evidence_contract_error_contribution == 7
 
     def test_budget_overflow_alone(self) -> None:
         decision = resolve_scan_exit_decision(budget_overflow=True)
@@ -311,7 +313,7 @@ class TestResolveScanExitDecision:
             evidence_contract_error=True, budget_overflow=True, not_comparable=True,
         )
         assert decision is not None
-        assert decision.code == 1
+        assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
 
     def test_budget_overflow_before_evidence_check_dominates_everything(self) -> None:

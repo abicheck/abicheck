@@ -79,6 +79,7 @@ types, so `from abicheck.elf_metadata import ElfMetadata` still resolves.
 | A `EntityResolver`/canonical-identity resolution rule | `entity_resolver.py`, `entity_identity.py` |
 | An already-built L5 graph node/edge public/internal/consumer-compiled classification predicate | `source_graph_query.py` |
 | A canonical, backend-independent IR field or canonicalization rule (ADR-063 Phase 6) | `semantic_ir.py` |
+| A read-only query/lookup over an already-built `SemanticIR` (entity/occurrence/kind lookups; ADR-063 Phase 6B) | `semantic_ir_index.py` |
 
 `__init__.py` is the supported import surface and stays a re-export list
 with `__all__` — no logic, no new names that are not owned by a submodule.
