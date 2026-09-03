@@ -38,12 +38,7 @@ def _minimal_dict(**overrides: object) -> dict:
         "variables": [],
         "types": [],
         "enums": [],
-        # A mapping, matching AbiSnapshot.typedefs' real dict[str, str] type
-        # (and every real schema fixture, v1.json included) -- Codex review,
-        # PR #1044: storage.sparse_section_codec.DeclarationsSection now
-        # validates this field's wire shape, so a `[]` placeholder here (the
-        # wrong type, tolerated only because nothing previously checked it)
-        # fails to import rather than silently round-tripping.
+        # dict, matching AbiSnapshot.typedefs' real type (Codex review, #1044).
         "typedefs": {},
     }
     base.update(overrides)

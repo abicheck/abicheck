@@ -129,11 +129,38 @@ def _unfreeze(value: Any) -> Any:
 #: already declines to attempt.
 _MAPPING_OR_NONE = "mapping_or_none"
 _MAPPING = "mapping"
+#: An *ordered* sequence -- `list`/`tuple` only, never `set`/`frozenset`
+#: (Codex review, PR #1044, fourth round: `ast_compile_args` is a real
+#: compiler invocation's argument list, where position is semantically
+#: significant -- accepting a `set` let `canonical_form`'s own sorting
+#: silently invent an argument order a `set` never had to begin with,
+#: turning real provenance into fabricated provenance rather than merely
+#: rejecting a malformed one). Still accepts both `list` and `tuple` since
+#: several real `AbiSnapshot` fields this shape covers are `tuple[...]`-
+#: typed at the Python attribute level (`ast_compile_args`,
+#: `dwarf_layout_coherence_mismatches`) and reach this check before any
+#: JSON round trip has coerced them to a `list`.
 _LIST = "list"
+#: The `set[...]`-typed sibling of `_LIST` -- `build_context_defines` is
+#: `AbiSnapshot`'s only field where the collection is genuinely unordered
+#: (a set of preprocessor defines; `serialization.py` itself round-trips it
+#: via `set(d.get(...))`), so accepting `set`/`frozenset` here does not
+#: fabricate an order the way it would for `_LIST`.
+_UNORDERED_LIST = "unordered_list"
 _STR = "str"
 _STR_OR_NONE = "str_or_none"
 _BOOL = "bool"
 _BOOL_OR_NONE = "bool_or_none"
+#: `int | None` -- `source_size` specifically (Codex review, PR #1044,
+#: fourth round: a fractional value passed `_NUMBER_OR_NONE` and then
+#: silently broke `fold_l0_hard_removals`'s binary-identity comparison
+#: against `Path.stat().st_size`, itself always an `int`).
+_INT_OR_NONE = "int_or_none"
+#: `float | int | None` -- reserved for a genuinely fractional-or-whole
+#: numeric field (`source_mtime`, a Unix timestamp); `bool` is an `int`
+#: subclass in Python and is excluded explicitly from both numeric shapes,
+#: the same discipline `storage.import_v1`'s own schema_version guards
+#: apply, so a stray `true`/`false` doesn't pass as a timestamp/size.
 _NUMBER_OR_NONE = "number_or_none"
 
 
@@ -143,18 +170,8 @@ def _check_field_shape(section_kind: str, name: str, value: Any, shape: str) -> 
     elif shape == _MAPPING:
         ok = isinstance(value, Mapping)
     elif shape == _LIST:
-        # `list`/`tuple`/`set`/`frozenset` alike: several real
-        # `AbiSnapshot` fields this shape covers are `tuple[...]`- or
-        # `set[...]`-typed at the Python attribute level (`ast_compile_args`,
-        # `dwarf_layout_coherence_mismatches`, `build_context_defines`) and
-        # reach this check before any JSON round trip has coerced them to a
-        # `list` -- `storage.canonical.canonical_form`'s own docstring
-        # already establishes these four as one logical "array" shape
-        # ("JSON has one array type... deliberately collapsed, and that is
-        # not a collision"), so treating them differently here would
-        # contradict the very normalization this value is about to go
-        # through. `str`/`bytes` are deliberately excluded even though both
-        # are iterable -- neither is a JSON array.
+        ok = isinstance(value, (list, tuple))
+    elif shape == _UNORDERED_LIST:
         ok = isinstance(value, (list, tuple, set, frozenset))
     elif shape == _STR:
         ok = isinstance(value, str)
@@ -164,10 +181,9 @@ def _check_field_shape(section_kind: str, name: str, value: Any, shape: str) -> 
         ok = isinstance(value, bool)
     elif shape == _BOOL_OR_NONE:
         ok = value is None or isinstance(value, bool)
+    elif shape == _INT_OR_NONE:
+        ok = value is None or (isinstance(value, int) and not isinstance(value, bool))
     elif shape == _NUMBER_OR_NONE:
-        # `bool` is an `int` subclass in Python -- excluded explicitly, the
-        # same discipline `storage.import_v1`'s own schema_version guards
-        # apply, so a stray `true`/`false` doesn't pass as a timestamp/size.
         ok = value is None or (
             isinstance(value, (int, float)) and not isinstance(value, bool)
         )
@@ -340,7 +356,7 @@ class BinarySection(_SparseSectionMixin):
         "source_path": _STR_OR_NONE,
         "source_mtime": _NUMBER_OR_NONE,
         "source_mtime_epoch": _BOOL,
-        "source_size": _NUMBER_OR_NONE,
+        "source_size": _INT_OR_NONE,
     }
 
     elf: Any
@@ -550,7 +566,7 @@ class DebugSection(_SparseSectionMixin):
         "clang_va_list_facts_reliable": _BOOL,
         "castxml_var_access_facts_reliable": _BOOL,
         "parsed_with_build_context": _BOOL,
-        "build_context_defines": _LIST,
+        "build_context_defines": _UNORDERED_LIST,
     }
 
     dwarf: Any

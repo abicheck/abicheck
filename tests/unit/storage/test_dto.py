@@ -913,3 +913,49 @@ class TestSparseSectionDTOs:
         sections, so a newly-added optional field fails this test rather
         than silently reaching `extra` unchecked."""
         assert set(cls.OPTIONAL_FIELD_SHAPES) == cls.OPTIONAL_FIELDS
+
+    def test_ast_compile_args_rejects_a_set_a_real_list_and_tuple_still_work(
+        self,
+    ) -> None:
+        """Codex review, PR #1044, fourth round: `ast_compile_args` is a
+        real compiler invocation's ordered argument list -- accepting a
+        `set` let `canonical_form`'s own sorting silently invent an
+        argument order a `set` never had, turning real provenance into
+        fabricated provenance. `list`/`tuple` (the real `AbiSnapshot.
+        ast_compile_args` wire/attribute shapes) must still work."""
+        with pytest.raises(ValueError, match="must be a list"):
+            DebugSection.from_document(
+                {"dwarf": None, "dwarf_advanced": None, "ast_compile_args": {"-O2"}}
+            )
+        DebugSection.from_document(
+            {"dwarf": None, "dwarf_advanced": None, "ast_compile_args": ["-O2"]}
+        )
+        DebugSection(
+            dwarf=None, dwarf_advanced=None, extra={"ast_compile_args": ("-O2",)}
+        )
+
+    def test_build_context_defines_accepts_a_set(self) -> None:
+        """The one genuinely unordered field -- `set`/`frozenset` must still
+        be accepted here, unlike `ast_compile_args` above."""
+        section = DebugSection.from_document(
+            {
+                "dwarf": None,
+                "dwarf_advanced": None,
+                "build_context_defines": {"FOO", "BAR"},
+            }
+        )
+        assert set(section.to_document()["build_context_defines"]) == {"FOO", "BAR"}
+
+    def test_source_size_rejects_a_fractional_value(self) -> None:
+        """Codex review, PR #1044, fourth round: `source_size` is `int |
+        None` (`Path.stat().st_size` is always an `int`) -- a fractional
+        value must be rejected rather than silently persisted and later
+        breaking `fold_l0_hard_removals`'s binary-identity comparison."""
+        with pytest.raises(ValueError, match="must be a int or none"):
+            BinarySection.from_document(
+                {"elf": None, "pe": None, "macho": None, "source_size": 1.5}
+            )
+        # A real int must still work.
+        BinarySection.from_document(
+            {"elf": None, "pe": None, "macho": None, "source_size": 1024}
+        )
