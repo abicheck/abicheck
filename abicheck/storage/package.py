@@ -65,9 +65,9 @@ from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
 from .canonical import (
-    canonical_form,
+    copy_of_canonical_form,
     raw_digest,
-    semantic_digest,
+    semantic_digest_of_canonical_form,
     strip_capture_metadata,
 )
 from .guards import (
@@ -775,11 +775,11 @@ class InMemoryObjectStore:
             if digest not in self._objects:
                 self._objects[digest] = payload
             return digest
-        # Normalize once, then hash and store from that same snapshot -- a
-        # second independent traversal of a stateful `Mapping` could digest
-        # different content than what gets stored (Codex review).
+        # Normalize once, then hash and store from that same snapshot -- a second independent traversal of a
+        # stateful `Mapping` could digest different content than what gets stored (Codex review). Hashed via
+        # `semantic_digest_of_canonical_form`, not `semantic_digest`, since `stripped` is already canonical.
         stripped = strip_capture_metadata(content)
-        digest = semantic_digest(stripped, algorithm=algorithm)
+        digest = semantic_digest_of_canonical_form(stripped, algorithm=algorithm)
         if digest not in self._objects:
             self._objects[digest] = stripped
         return digest
@@ -792,9 +792,9 @@ class InMemoryObjectStore:
             raise KeyError(f"no object stored under digest {digest!r}") from None
         if isinstance(stored, bytes):
             return stored  # immutable already -- no copy needed
-        # An isolated copy, not the store's own object -- else a caller
-        # could mutate it in place, uncorrectably (Codex review).
-        return canonical_form(stored)
+        # An isolated copy, not the store's own object -- else a caller could mutate it in place, uncorrectably
+        # (Codex review). `stored` is already canonical, so `copy_of_canonical_form`'s plain copy suffices.
+        return copy_of_canonical_form(stored)
 
     def has(self, digest: str) -> bool:
         return _identity_text(digest, "digest") in self._objects
