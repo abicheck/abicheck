@@ -1771,11 +1771,13 @@ def compare_request_inputs(
     and for the same reason (see ``_apply_contract_evaluation_shadow``'s
     ``scope_public_headers_is_explicit=True``).
 
-    A ``CompareRequest`` carries no severity, exit-code-scheme, or pack
-    inputs: those are gate/reporting concerns the Tier-2 comparison API does
-    not own. They resolve to their built-in defaults here, which is what makes
-    a CLI run stating none of them cross-front-end equal to the equivalent
-    request (:func:`cross_front_end_differences`).
+    ``severity_preset``/``exit_code_scheme`` forward too (2026-09-03, Codex
+    review, PR #1032) -- else this receipt's ``gate.*`` block could
+    disagree with ``CompareResult.exit_decision``, which reads them
+    directly. No per-category or pack fields: neither exists on
+    ``CompareRequest`` (gate/reporting concerns the Tier-2 API doesn't
+    own), so both resolve to their built-in defaults here, matching a CLI
+    run stating neither (:func:`cross_front_end_differences`).
 
     ``policy_file_path`` and ``suppress`` *are* request fields, though, and
     are loaded from the request when the caller does not pass an
@@ -1796,6 +1798,8 @@ def compare_request_inputs(
         policy_file=policy_file,
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
+        exit_code_scheme=request.exit_code_scheme,
+        severity_preset=request.severity_preset,
     )
 
 

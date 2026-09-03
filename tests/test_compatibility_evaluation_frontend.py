@@ -937,6 +937,34 @@ class TestApiAdapter:
         assert cfg.policy.base.id == "plugin_abi"
         assert cfg.provenance[POLICY_BASE_FIELD].layer is SelectorLayer.LEGACY_ALIAS
 
+    def test_severity_preset_and_exit_code_scheme_forward(self, tmp_path):
+        """Regression (Codex review, PR #1032): a typed CompareRequest's
+        severity_preset/exit_code_scheme fields must reach
+        ExplicitCompatibilityInputs -- otherwise a --contract JSON report's
+        persisted gate.* receipt could disagree with
+        CompareResult.exit_decision, which reads the two request fields
+        directly, for a request combining contract_evaluation=True with
+        either field."""
+        inputs = compare_request_inputs(
+            self._request(
+                tmp_path, severity_preset="info-only", exit_code_scheme="severity"
+            )
+        )
+        assert inputs.severity_preset == "info-only"
+        assert inputs.exit_code_scheme == "severity"
+
+    def test_one_call_adapter_reflects_severity_and_exit_code_scheme(self, tmp_path):
+        """End-to-end sibling of the above: the whole-config adapter's own
+        gate namespace must carry the same values, not just the lower-level
+        ExplicitCompatibilityInputs the prior test checks directly."""
+        cfg = compatibility_config_from_compare_request(
+            self._request(
+                tmp_path, severity_preset="info-only", exit_code_scheme="severity"
+            )
+        )
+        assert cfg.gate.exit_code_scheme == "severity"
+        assert cfg.gate.preset is not None and cfg.gate.preset.id == "info-only"
+
 
 class TestPhase1Gate:
     """ "Every front end resolves equivalent semantic input to an equal
