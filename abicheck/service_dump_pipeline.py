@@ -611,6 +611,7 @@ def execute_dump_request(
             :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
+    from . import service
     from .dependency_info import populate_side_dependency_info
     from .evidence_depth import depth_rank, gated_source_label
 
@@ -721,23 +722,36 @@ def execute_dump_request(
                 ),
             )
         )
-        # Codex review, PR #1037: `with_assurance()` alone leaves
-        # `compile_contexts` empty. `resolution.effective_compile_context`,
-        # when the P0.3 fold produced one AND a header-AST parse actually
-        # ran *this invocation*, is what `ResolvedExecutionContext.
-        # compile_contexts`'s own docstring wants -- documented absent, not
-        # placeholder-valued, when no header-AST context was resolved.
-        # `snap.from_headers` alone is not enough (third Codex round): a
-        # JSON-snapshot `resolved.fmt is None` input short-circuits straight
-        # to the persisted snapshot in `resolve_input` (no header-AST parse
-        # at all), yet the *loaded* snapshot can itself carry a stale
-        # `from_headers=True` from whatever dump originally produced it --
-        # `resolved.fmt is not None` (a real ELF/PE/Mach-O magic-byte match)
-        # is what actually gates a header-AST parse having run here.
-        # `DumpResult.effective_compile_context` stays unconditional either
-        # way (a separate, pre-existing field).
+        # Codex review, PR #1037 (five rounds -- see git history for the
+        # narrower, now-superseded gates this replaced): `with_assurance()`
+        # alone leaves `compile_contexts` empty. `resolution.
+        # effective_compile_context`, when the P0.3 fold produced one AND a
+        # header-AST parse actually ran *this invocation*, is what
+        # `ResolvedExecutionContext.compile_contexts`'s own docstring wants
+        # -- documented absent, not placeholder-valued, when no header-AST
+        # context was resolved. `DumpResult.effective_compile_context` stays
+        # unconditional either way (a separate, pre-existing field).
         #
-        # `request.input.dump_manifest is None` (fourth Codex round):
+        # "Did a header-AST parse run" cannot be answered from `resolved.fmt`
+        # (computed from the *raw*, pre-resolution input path): a JSON
+        # snapshot or ABICC Perl dump input short-circuits straight to a
+        # loaded/imported snapshot in `resolve_input` with no parse at all,
+        # while a GNU ld linker script input resolves `fmt=None` on its own
+        # text-file path yet `resolve_input` follows it and *does* run a
+        # real parse against the real target underneath. Nor can it be
+        # answered from `snap.from_headers`/`snap.platform` alone: both are
+        # ordinary persisted `AbiSnapshot` fields, so a loaded JSON snapshot
+        # can carry an equally stale `True`/`"elf"` from whatever dump
+        # originally produced the file, not from this invocation.
+        # `resolve_linker_script_chain` is the identical primitive
+        # `checker.compare`'s own same-binary hashing already uses to answer
+        # "what does this input actually resolve to" for the identical
+        # multi-hop-script reason -- detecting *that* target's binary format
+        # is a real, per-invocation fact no persisted snapshot field can
+        # misreport, and it agrees with `resolved.fmt` for every input that
+        # isn't itself a linker script.
+        #
+        # `side.dump_manifest is None` (fourth Codex round):
         # `resolution.effective_compile_context` is derived from the
         # request/InputSpec's own compile settings only, but a manifest-
         # driven dump's real header-AST parse runs under
@@ -750,10 +764,17 @@ def execute_dump_request(
         # attempted here; the manifest path already has no
         # `resolved_execution_context.evaluation_config`/other resolved
         # fields either (see this pipeline's own "Not in scope" notes).
+        parsed_fmt = None
+        if side.path is not None:
+            from .binary_utils import resolve_linker_script_chain
+
+            parsed_fmt = service.detect_binary_format(
+                resolve_linker_script_chain(side.path)
+            )
         if (
             resolution.effective_compile_context is not None
             and snap.from_headers
-            and resolved.fmt is not None
+            and parsed_fmt is not None
             and side.dump_manifest is None
         ):
             resolved_execution_context = dataclasses.replace(

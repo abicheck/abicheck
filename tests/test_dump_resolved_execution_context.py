@@ -335,3 +335,47 @@ class TestExecuteDumpRequestWithAssurance:
 
         assert result.effective_compile_context == fake_ctx
         assert dict(result.resolved_execution_context.compile_contexts) == {}
+
+    def test_compile_context_included_for_a_followed_linker_script(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, PR #1037, fifth round: a GNU ld linker script input
+        resolves ``resolved.fmt is None`` on its own text-file path (not
+        ELF/PE/Mach-O magic bytes), but ``resolve_input`` follows it and
+        runs a real parse against the real ELF target underneath --
+        ``resolved.fmt`` alone wrongly excluded this genuinely-participating
+        compile context. Detecting the format of the *followed* target
+        (``resolve_linker_script_chain``, the identical primitive
+        ``checker.compare``'s own same-binary hashing already uses) is what
+        correctly includes it."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        target = tmp_path / "libfoo.so.1"
+        target.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        script = tmp_path / "libfoo.so"
+        script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
+
+        request = DumpRequest(input=InputSpec(path=script))
+        resolved = resolve_dump_request(request)
+        assert resolved.fmt is None  # the raw linker-script path itself
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(from_headers=True),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {
+            "input": fake_ctx
+        }
