@@ -25,6 +25,7 @@ from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef as is_version_stamped_typedef,
+    typedef_index_pair,
 )
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
@@ -102,7 +103,6 @@ from .model import (
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
 from .model.identity import EntityId
-from .model.semantic_ir_legacy_adapter import typedef_index_pair
 
 #: Back-compat alias: the ADR-063 Phase 6 typedef cutover moved this
 #: predicate into ``diff_typedefs.py`` with the rest of its family, but
@@ -111,7 +111,6 @@ from .model.semantic_ir_legacy_adapter import typedef_index_pair
 #: ``as``-aliased import, since ruff only recognizes the identical-name form
 #: as an intentional re-export.
 _is_version_stamped_typedef = is_version_stamped_typedef
-
 
 
 def _field_type_genuinely_changed(

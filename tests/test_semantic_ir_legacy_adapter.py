@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from hypothesis import given, strategies as st
 
+from abicheck.compare.typedefs import typedef_index_pair
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
@@ -50,7 +51,6 @@ from abicheck.model.semantic_ir_legacy_adapter import (
     legacy_typedef_ir,
     producer_entity_id,
     render_display_name,
-    typedef_index_pair,
 )
 
 _names = st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=6)

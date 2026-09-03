@@ -30,7 +30,11 @@ from __future__ import annotations
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.compare.typedefs import diff_typedefs, is_version_stamped_typedef
+from abicheck.compare.typedefs import (
+    diff_typedefs,
+    is_version_stamped_typedef,
+    typedef_index_pair,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
@@ -41,10 +45,7 @@ from abicheck.model.identity import (
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.semantic_ir_index import SemanticIRIndex
-from abicheck.model.semantic_ir_legacy_adapter import (
-    legacy_typedef_ir,
-    typedef_index_pair,
-)
+from abicheck.model.semantic_ir_legacy_adapter import legacy_typedef_ir
 
 
 def _snap(**kw) -> AbiSnapshot:

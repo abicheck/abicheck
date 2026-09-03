@@ -24,6 +24,7 @@ and which findings that suppresses — and reads this type for the join.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -197,11 +198,41 @@ def _by_value_scan_spellings(tname: str) -> tuple[str, ...]:
     Returns *tname* itself plus its unqualified leaf spelling (the segment
     after the last ``"::"``) when the two differ -- never only the leaf, so
     an already-bare name is unaffected and this stays a pure widening of
-    what the old single-spelling scan already caught."""
+    what the old single-spelling scan already caught. The *leaf* spelling
+    is deliberately more collision-prone than the full name (``Handle`` can
+    legitimately name an unrelated type in another scope) -- see
+    :func:`_references_type_token`, the caller's own match predicate, for
+    the boundary check that keeps that widening from over-matching."""
     if "::" not in tname:
         return (tname,)
     leaf = tname.rsplit("::", 1)[-1]
     return (tname, leaf) if leaf and leaf != tname else (tname,)
+
+
+def _references_type_token(spelling: str, text: str) -> bool:
+    """Whether *text* references *spelling* as a whole type-name token,
+    never as part of a longer identifier.
+
+    A plain ``spelling in text`` substring test (this scan's original
+    behavior, kept only for the full, already-qualified name) matches
+    ``Handle`` inside an unrelated ``OtherHandle`` just as readily as inside
+    a real ``ns::Handle`` reference -- harmless for a full name (a C/C++
+    identifier can never be a substring of another one without an
+    intervening non-identifier character on both sides, so this predicate
+    changes nothing for that candidate), but a real false-positive risk for
+    the *leaf* spelling :func:`_by_value_scan_spellings` widens the scan
+    with (Codex review on PR #1041): matching ``Handle`` inside
+    ``OtherHandle`` would wrongly mark the genuinely opaque ``ns::Handle``
+    as by-value exposed, dropping it from both identity tiers and reporting
+    a private layout change as breaking. Boundaries are ``\\w``/non-``\\w``
+    only, via ``re``'s own zero-width lookaround -- ``::`` either side of a
+    qualified reference (``other::Handle``) is non-word, so a same-spelling
+    reference in an unrelated *scope* still matches (a separate, documented,
+    still-open gap; see ``TestKnownGapStaysDocumented`` in
+    ``tests/test_opaque_identity_tiers.py``), which is unrelated to the
+    embedded-substring case this predicate closes."""
+    pattern = r"(?<!\w)" + re.escape(spelling) + r"(?!\w)"
+    return re.search(pattern, text) is not None
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
@@ -215,7 +246,8 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
             if tname in by_value_types:
                 continue
             if any(
-                spelling in rt for spelling in _by_value_scan_spellings(tname)
+                _references_type_token(spelling, rt)
+                for spelling in _by_value_scan_spellings(tname)
             ) and not (rt.endswith("*") or "* " in rt):
                 by_value_types.add(tname)
         for param in func.params:
@@ -224,7 +256,10 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
                 if tname in by_value_types:
                     continue
                 if (
-                    any(spelling in pt for spelling in _by_value_scan_spellings(tname))
+                    any(
+                        _references_type_token(spelling, pt)
+                        for spelling in _by_value_scan_spellings(tname)
+                    )
                     and param.pointer_depth == 0
                     and not pt.endswith("*")
                 ):
@@ -238,7 +273,8 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
             if tname in by_value_types:
                 continue
             if any(
-                spelling in vt for spelling in _by_value_scan_spellings(tname)
+                _references_type_token(spelling, vt)
+                for spelling in _by_value_scan_spellings(tname)
             ) and not (vt.endswith("*") or "* " in vt):
                 by_value_types.add(tname)
     return by_value_types

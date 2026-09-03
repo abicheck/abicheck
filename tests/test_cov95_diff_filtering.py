@@ -473,11 +473,60 @@ def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
     assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
 
 
-def test_find_by_value_types_bare_spelling_check_does_not_apply_to_already_bare_names():
-    """The leaf-spelling widening only ever adds a second candidate for a
-    *qualified* name -- an already-bare opaque name's behavior (including
-    its false negatives on an unrelated substring) is completely
-    unaffected."""
+def test_find_by_value_types_leaf_widening_ignores_an_embedded_collision():
+    """The specific case the P2 follow-up review named: the leaf-spelling
+    widening for ``ns::Handle`` must not treat an unrelated ``OtherHandle``
+    by-value use as exposing ``ns::Handle`` -- that would wrongly drop a
+    genuinely opaque type out of both identity tiers and report a private
+    layout change as breaking."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="h", type="OtherHandle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == set()
+
+
+def test_find_by_value_types_leaf_widening_still_matches_a_real_scope_collision():
+    """The converse of the case above, and a documented, still-open gap
+    (mirroring ``TestKnownGapStaysDocumented`` in
+    ``tests/test_opaque_identity_tiers.py``): a *real*, separately-scoped
+    ``other::Handle`` reference still matches the ``ns::Handle`` leaf
+    spelling, since token-boundary matching cannot itself distinguish two
+    different scopes sharing a leaf name -- only an entity-identity based
+    join can. Pinned so a future tightening of this predicate doesn't
+    silently start relying on token boundaries to solve a problem they
+    were never meant to solve."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="h", type="other::Handle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
+
+
+def test_find_by_value_types_does_not_match_a_name_embedded_in_a_longer_identifier():
+    """Regression for the follow-up Codex review on PR #1041: the scan
+    matches a type-name *token*, never a bare substring, so an unrelated
+    identifier that merely contains the spelling (``OtherHandle`` containing
+    ``Handle``) does not count as a by-value exposure. This applies to both
+    scan candidates -- the full (possibly qualified) name and the leaf
+    spelling the qualification-mismatch widening above adds -- since a real
+    C/C++ identifier can never be a substring of another one without an
+    intervening non-identifier character on both sides, so token matching
+    changes nothing for a genuine reference either way."""
     opaque = {"Handle"}
     snap = _snap(
         functions=[
@@ -489,9 +538,7 @@ def test_find_by_value_types_bare_spelling_check_does_not_apply_to_already_bare_
             )
         ]
     )
-    # Substring matching still fires here (pre-existing, unrelated
-    # imprecision) -- this pins that the widening changed nothing about it.
-    assert _find_by_value_types(snap, opaque) == {"Handle"}
+    assert _find_by_value_types(snap, opaque) == set()
 
 
 # ── _downgrade_opaque_type_changes (1047, 1049-1054) ─────────────────────────
