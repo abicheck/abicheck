@@ -554,6 +554,58 @@ def test_find_by_value_types_recognizes_a_reference_as_indirect():
         assert _find_by_value_types(snap, {"Handle"}) == set(), reference_spelling
 
 
+def test_find_by_value_types_ignores_sigils_inside_a_template_argument():
+    """Regression for the fourth-round Codex review on PR #1041: the
+    indirection check originally looked for ``*``/``&`` *anywhere* in the
+    rendered text, so a by-value template specialization whose *template
+    argument* happens to contain one of those sigils -- a non-type
+    template argument that is itself a pointer/reference
+    (``Callback<&ns::handler>``), or a function-pointer type argument
+    (``Box<void (*)()>``) -- was wrongly treated as pointer/reference
+    indirection at the *outer* declarator. That let a genuinely by-value
+    exposure escape detection, leaving the record wrongly in the opaque
+    index and its real layout change suppressed as a false negative.
+    Only a sigil at template depth zero counts; one nested inside
+    ``<...>`` must not. Checked across return type, parameter, and
+    variable."""
+    for template_spelling in ("Callback<&ns::handler>", "Box<void (*)()>"):
+        opaque = {"Callback", "Box"}
+        snap = _snap(
+            functions=[
+                _fn(
+                    "f",
+                    "f",
+                    return_type=template_spelling,
+                    params=[Param(name="p", type=template_spelling, pointer_depth=0)],
+                )
+            ],
+            variables=[Variable(name="g", mangled="g", type=template_spelling)],
+        )
+        found = _find_by_value_types(snap, opaque)
+        expected = "Callback" if template_spelling.startswith("Callback") else "Box"
+        assert expected in found, template_spelling
+
+
+def test_find_by_value_types_still_recognizes_a_trailing_pointer_after_a_template():
+    """Complement of the template-nesting fix above: a *real* top-level
+    pointer declarator following a template argument list
+    (``Box<void (*)()> *``) must still be recognized as indirection -- the
+    depth-zero check closes back to zero after the template's own closing
+    ``>``, so the trailing ``*`` is outside any nesting and still counts."""
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="Box<void (*)()> *",
+                params=[Param(name="p", type="Box<void (*)()> *", pointer_depth=1)],
+            )
+        ],
+        variables=[Variable(name="g", mangled="g", type="Box<void (*)()> *")],
+    )
+    assert _find_by_value_types(snap, {"Box"}) == set()
+
+
 def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
     """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
     ``RecordType.name``, which may be qualified (``ns::Handle``), while a

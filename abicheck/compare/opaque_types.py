@@ -308,8 +308,32 @@ def _is_indirect_spelling(text: str) -> bool:
     rvalue reference alike (Codex review on PR #1041, follow-up round --
     without this, a genuinely opaque type referenced only by ``Handle&``
     was wrongly counted as by-value exposed and dropped out of both
-    identity tiers, reporting its private layout change as breaking)."""
-    return "*" in text or "&" in text
+    identity tiers, reporting its private layout change as breaking).
+
+    Both checks above only look at whether the sigil occurs *anywhere*,
+    which over-counts a by-value template specialization whose *template
+    argument* happens to contain one: ``Callback<&ns::handler>`` (a
+    non-type template argument that is itself a pointer/reference) or
+    ``Box<void (*)()>`` (a function-pointer type argument) are both
+    passed by value at the outer declarator -- the ``&``/``*`` belongs to
+    the argument, not to the outer type -- yet the plain substring check
+    still returned ``True``, leaving the record wrongly out of the opaque
+    index and its real layout change reported as a false breaking finding
+    (Codex review on PR #1041, follow-up round). Only a sigil at *template
+    depth zero* -- outside any ``<...>`` nesting -- is evidence of the
+    outer declarator's own indirection; depth tracking mirrors
+    :func:`~abicheck.diff_helpers.depth_aware_bare_name`'s own ``<``/``>``
+    bracket counting."""
+    depth = 0
+    for ch in text:
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            if depth > 0:
+                depth -= 1
+        elif depth == 0 and (ch == "*" or ch == "&"):
+            return True
+    return False
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
