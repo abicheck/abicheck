@@ -27,6 +27,10 @@ import json
 import os
 
 import pytest
+from _production_scale_snapshot import (
+    graph_heavy_snapshot as _graph_heavy_snapshot,
+    graph_heavy_snapshot_at_scale_json_bytes,
+)
 
 from abicheck.errors import SnapshotError
 from abicheck.model import (
@@ -82,24 +86,14 @@ def _sample_snapshot() -> AbiSnapshot:
     )
 
 
-def _graph_heavy_snapshot(n: int = 200) -> AbiSnapshot:
-    """A snapshot with repeated, JSON-compressible content — a small stand-in
-    for the real ~57 MB L5 header graph section a large library carries
-    (`AGENTS.md`'s daal/oneapi::dal acceptance numbers), used to validate
-    that repeated content compresses well without needing a multi-hundred-MB
-    fixture in the test suite."""
-    funcs = [
-        Function(
-            name=f"widget_call_{i}",
-            mangled=f"_ZN6widget4callE{i}i",
-            return_type="int",
-            params=[Param(name="x", type="int"), Param(name="y", type="const char*")],
-            visibility=Visibility.PUBLIC,
-            source_location=f"/usr/include/widget/detail/generated_{i % 20}.h:{i}",
-        )
-        for i in range(n)
-    ]
-    return AbiSnapshot(library="libwidget", version="1.0", functions=funcs)
+# `_graph_heavy_snapshot` (the small-n builder used directly below and at
+# n=8600 by the two production-scale tests further down) and the shared,
+# cached n=8600 fixture (and its serialized/compressed derivatives) used by
+# those tests and by test_snapshot_compression_public_api_scale.py now live
+# in _production_scale_snapshot.py -- a leaf helper module, not grown in
+# here a second time (this module was already at this repo's own file-size
+# soft cap for the identical reason that sibling test file was split out of
+# it in the first place). See that module's own docstring.
 
 
 # ── Round trips across encodings ────────────────────────────────────────
@@ -596,11 +590,7 @@ def test_zstd_round_trip_at_production_scale_and_level(tmp_path):
     covered by CI's dedicated `-m slow` lane (`ci.yml`)."""
     zstandard = pytest.importorskip("zstandard")
 
-    snap = _graph_heavy_snapshot(n=8600)
-    original_bytes = json.dumps(snapshot_to_dict(snap)).encode()
-    assert (
-        len(original_bytes) > 8 * 1024 * 1024
-    )  # past the single-segment collapse point
+    original_bytes = graph_heavy_snapshot_at_scale_json_bytes()
 
     # The real production chokepoint: no manual CompressionParameters, no
     # explicit window -- exactly what `dump`/`write_snapshot` call.
@@ -640,11 +630,7 @@ def test_gzip_round_trip_at_production_scale(tmp_path):
     actually true for every supported algorithm, not because a gzip-specific
     bug is already known. Cheap to run (gzip compresses this size in well
     under a second, unlike zstd level 19), so no `slow` marker needed."""
-    snap = _graph_heavy_snapshot(n=8600)
-    original_bytes = json.dumps(snapshot_to_dict(snap)).encode()
-    assert (
-        len(original_bytes) > 8 * 1024 * 1024
-    )  # same realistic scale as the zstd test
+    original_bytes = graph_heavy_snapshot_at_scale_json_bytes()
 
     p = tmp_path / "production_scale.abicheck.json.gz"
     result = write_snapshot_bytes(
