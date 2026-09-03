@@ -2468,6 +2468,14 @@ _assurance_gated() {
 # two independent raise sites (a pinned depth with no source evidence, and
 # `--abi3` targeting a binary that isn't a recognisable CPython extension
 # module) and would need two independently-drifting patterns.
+#
+# `-Fx` (whole-line, literal match), not a bare substring `grep -q`: several
+# `INPUT_*` values (e.g. `INPUT_NEW_LIBRARY`) are PR-controlled, and an
+# unanchored match would let a crafted path/filename that merely *contains*
+# the marker text inside some other stderr line (e.g. a "Failed to load"
+# path error) get misclassified as this axis (Codex review). `cli_scan.py`
+# prints the marker as its own complete stderr line with no other content,
+# so a whole-line match loses nothing genuine.
 _evidence_contract_gated() {
   local _src _verdict
   _src=$(_json_report_src)
@@ -2477,7 +2485,7 @@ _evidence_contract_gated() {
     return
   fi
   echo "$STDERR_CONTENT" \
-    | grep -q 'abicheck: scan aborted — evidence-contract error (ADR-037 D5)'
+    | grep -Fxq 'abicheck: scan aborted — evidence-contract error (ADR-037 D5)'
 }
 
 # The compatibility axis's own exit code, from the JSON report's severity gate

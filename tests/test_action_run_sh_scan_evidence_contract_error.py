@@ -436,6 +436,23 @@ def test_evidence_contract_gated_stderr_fallback_ignores_an_unrelated_error():
     assert "GATED=0" in result.stdout
 
 
+def test_evidence_contract_gated_stderr_fallback_rejects_a_substring_spoof():
+    """A PR-controlled path/filename embedded inside a genuine, unrelated
+    error line that merely *contains* the marker text (e.g. a hostile
+    ``--binary``/``INPUT_NEW_LIBRARY`` value someone named after the marker
+    string) must not gate — the match is whole-line (``grep -Fx``), not an
+    unanchored substring (Codex review: a bare ``grep -q`` here would let
+    such a path spoof this axis, since ``INPUT_NEW_LIBRARY`` and friends are
+    PR-controlled on ``pull_request`` triggers per action/AGENTS.md's
+    untrusted-input convention)."""
+    result = _run_stderr_fallback_pipeline(
+        "Error: Failed to load --binary "
+        "'./abicheck: scan aborted — evidence-contract error (ADR-037 D5)/lib.so'\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "GATED=0" in result.stdout
+
+
 def test_evidence_contract_gated_prefers_a_readable_json_report_over_stderr():
     """When a JSON report IS readable, its ``verdict`` is authoritative --
     the stderr fallback must never override a report that says otherwise,
