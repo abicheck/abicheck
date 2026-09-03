@@ -166,6 +166,24 @@ class TestIterTopLevelChars:
         assert _top_level("S<A{1 < 2}>") == "S"
         assert _top_level("S<A{1 < 2}> *") == "S *"
 
+    def test_known_gap_an_unparenthesized_relational_inside_a_template_is_still_mistaken_for_nesting(
+        self,
+    ) -> None:
+        """**Documented, still-open** (see `iter_top_level_chars`'s own
+        docstring): a relational `<`/`>` used as a non-type template
+        argument WITHOUT a disambiguating `(...)`/`[...]` wrap around it
+        (`S<N < 2, &h>`) is still mistaken for a nested template
+        open/close, the same accepted residual
+        `extract.semantic_normalizer_artifacts.has_unresolved_component`
+        already documents for the identical case -- disambiguating this
+        needs real expression parsing, not a textual bracket stack.
+        Pinned as a test so the gap is executable rather than prose --
+        change this assertion when/if that parsing is added, do not
+        delete it (Codex review on PR #1041, follow-up round)."""
+        # The real trailing top-level " *" is wrongly swallowed as if it
+        # were still inside the (already-closed) outer template.
+        assert _top_level("S<N < 2, &h> *") == "S"
+
 
 class TestSkipTemplateArguments:
     """`skip_template_arguments` -- the sibling stack loop
@@ -227,6 +245,20 @@ class TestSkipTemplateArguments:
 
     def test_an_unterminated_template_argument_list_consumes_the_rest(self) -> None:
         assert skip_template_arguments("Box<unterminated", 3) == len("Box<unterminated")
+
+    def test_known_gap_an_unparenthesized_relational_inside_the_arguments_consumes_too_much(
+        self,
+    ) -> None:
+        """Sibling of `TestIterTopLevelChars`'s identically-named
+        documented gap: `S<N < 2, &h> *`'s inner, unparenthesized `<`
+        pushes a spurious nested level, so the matching `>` two
+        characters later is consumed as that spurious level's close
+        instead of leaving the outer template open -- the real close
+        found afterward is the wrong one, and the trailing ` *` is
+        swallowed as if still nested (Codex review on PR #1041,
+        follow-up round)."""
+        text = "S<N < 2, &h> *"
+        assert skip_template_arguments(text, 1) == len(text)
 
     def test_a_braced_initializer_inside_the_arguments_is_skipped(self) -> None:
         """A C++20 structural non-type template argument's own braced

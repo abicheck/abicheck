@@ -203,6 +203,31 @@ def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
     backslash escapes (``'\\''`` doesn't end one character early), so a
     ``'>'``/``'<'`` inside a non-type template argument's own literal
     doesn't affect the bracket stack either.
+
+    **Documented, accepted residual, inherited unchanged from
+    ``has_unresolved_component`` (Codex review on PR #1041, follow-up
+    round; fresh evidence, same underlying limitation): a relational
+    ``<``/``>`` used as a non-type template argument WITHOUT a
+    disambiguating ``(...)``/``[...]`` wrapping around it is still
+    mistaken for a nested template open/close** -- e.g. ``S<N < 2, &h>``'s
+    inner ``<`` sits directly inside the outer ``<...>`` (no enclosing
+    paren), so it pushes a second stack level exactly like a genuine
+    nested template-id would, and the matching ``>`` two characters later
+    closes that spurious level instead of leaving the outer one open.
+    This is not a new gap this function introduces: C++'s own grammar
+    requires exactly this disambiguating wrap in the first place --
+    ``template-id`` parsing greedily treats a bare ``<`` following a name
+    inside a template-argument-list as opening a nested one, so
+    unparenthesized ``N < 2`` in that position does not compile as a
+    relational expression at all. A pretty-printer *could* still drop a
+    source parenthesization it judges redundant when re-emitting the
+    argument's spelling, which is the scenario worth guarding against --
+    but resolving it needs real expression parsing to know which ``<`` is
+    the outer template's own close versus an inner comparison, exactly
+    the boundary ``has_unresolved_component``'s own docstring already
+    draws for the identical case. Left as-is rather than attempting a
+    heuristic third fix for an ambiguity the language itself does not
+    resolve without parentheses.
     """
     stack: list[str] = []
     quote = ""
@@ -256,6 +281,12 @@ def skip_template_arguments(text: str, pos: int) -> int:
     way as ``(...)``/``[...]`` -- a C++20 structural non-type argument's
     braced initializer (``S<A{1 < 2}>``) is a bracket group too, not a
     template opener (Codex review on PR #1041, follow-up round).
+
+    Shares :func:`iter_top_level_chars`'s documented, accepted residual:
+    an unparenthesized relational ``<``/``>`` used as a non-type template
+    argument (``S<N < 2, &h>``) is still mistaken for a nested template
+    open/close -- see that function's own docstring for the full
+    reasoning (Codex review on PR #1041, follow-up round).
     """
     if pos >= len(text) or text[pos] != "<":
         return pos
