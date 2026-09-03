@@ -362,6 +362,19 @@ def test_is_impl_source_variants():
 # ── _find_opaque_types / _find_by_value_types (991, 1005-1023) ───────────────
 
 
+def _opaque_spellings(index) -> set[str]:
+    """The spelling tier of an ``_OpaqueTypeIndex``, for the assertions below.
+
+    ``_find_opaque_types`` returns a two-tier index rather than the flat
+    ``set[str]`` it used to (ADR-063 Phase 2's post-parse consumer
+    migration); these cases build ``RecordType``s with no ``entity_id``, so
+    the stable tier is empty by construction and the spelling tier is what
+    they are actually about.
+    """
+    assert index.stable == frozenset()
+    return {identity.spelling for identity in index.local}
+
+
 def test_find_opaque_types_impl_source_pointer_only():
     # Type defined in an impl file, used only via pointer → opaque.
     snap = _snap(
@@ -375,7 +388,7 @@ def test_find_opaque_types_impl_source_pointer_only():
             )
         ],
     )
-    assert _find_opaque_types(snap) == {"Hidden"}
+    assert _opaque_spellings(_find_opaque_types(snap)) == {"Hidden"}
 
 
 def test_find_opaque_types_by_value_excluded():
@@ -384,14 +397,14 @@ def test_find_opaque_types_by_value_excluded():
         types=[RecordType(name="Hidden", kind="struct", source_location="impl.c:5")],
         functions=[_fn("ret", "ret", return_type="Hidden")],
     )
-    assert _find_opaque_types(snap) == set()
+    assert _opaque_spellings(_find_opaque_types(snap)) == set()
 
 
 def test_find_opaque_types_empty_when_no_candidates():
     snap = _snap(
         types=[RecordType(name="Pub", kind="struct", source_location="pub.h:1")]
     )
-    assert _find_opaque_types(snap) == set()
+    assert _opaque_spellings(_find_opaque_types(snap)) == set()
 
 
 def test_find_by_value_types_param_and_variable():
