@@ -56,7 +56,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-GROUND_TRUTH = Path(__file__).resolve().parent.parent / "examples" / "ground_truth.json"
+_REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # Fields that describe the *run*, not the cases in it, and so must agree
 # across every shard of one toolchain. Disagreement means the shards came

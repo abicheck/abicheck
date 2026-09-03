@@ -38,6 +38,11 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
 PACK = REPO / "agent-evals" / "skills" / "skill-eval-pack.json"
 
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+import example_catalog  # noqa: E402
+
 
 def _load_script(name: str) -> Any:
     """Import a `scripts/` module by path — they are not an importable package."""
@@ -110,9 +115,7 @@ def test_category_a_expectations_are_resolved_into_the_pack(
 ) -> None:
     """Resolved, not restated: the catalog stays the one fact owner and the
     pack carries its answer, so a consumer needs neither."""
-    catalog = json.loads(
-        (REPO / "examples" / "ground_truth.json").read_text(encoding="utf-8")
-    )
+    catalog = example_catalog.load_ground_truth()
     for scenario_id, entry in pack["scenarios"].items():
         if entry["category"] != "A":
             continue
@@ -262,9 +265,7 @@ def test_scenario_digest_covers_the_ground_truth_entry() -> None:
         "status": "ready",
         "case": "case01_symbol_removal",
     }
-    catalog = json.loads(
-        (REPO / "examples" / "ground_truth.json").read_text(encoding="utf-8")
-    )
+    catalog = example_catalog.load_ground_truth()
     original = gen._scenario_digest(scenario, catalog)
 
     mutated = json.loads(json.dumps(catalog))

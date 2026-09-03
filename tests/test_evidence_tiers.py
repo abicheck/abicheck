@@ -11,13 +11,18 @@ exercised separately by ``benchmark_comparison.py --evidence-tiers``.
 from __future__ import annotations
 
 import importlib.util
-import json
+import sys
 from pathlib import Path
 
 import pytest
 
 _REPO = Path(__file__).resolve().parent.parent
-_GT_PATH = _REPO / "examples" / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO / "scripts"))
+import example_catalog  # noqa: E402
+
 _ET_PATH = _REPO / "scripts" / "evidence_tiers.py"
 
 _spec = importlib.util.spec_from_file_location("evidence_tiers", _ET_PATH)
@@ -25,7 +30,7 @@ assert _spec and _spec.loader
 evidence_tiers = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(evidence_tiers)
 
-_VERDICTS: dict[str, dict] = json.loads(_GT_PATH.read_text())["verdicts"]
+_VERDICTS: dict[str, dict] = example_catalog.load_ground_truth()["verdicts"]
 
 
 def test_every_case_has_min_evidence() -> None:

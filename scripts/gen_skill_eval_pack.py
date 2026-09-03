@@ -89,6 +89,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+import example_catalog  # noqa: E402
 from skill_eval_surface import normalize_newlines  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -98,8 +100,8 @@ EVAL_DIR = ROOT / "agent-evals" / "skills"
 SCENARIOS = EVAL_DIR / "scenarios.yaml"
 RUBRIC = EVAL_DIR / "rubric.yaml"
 TRIGGER_CORPUS = ROOT / "tests" / "agent_skills" / "trigger_corpus.yaml"
-GROUND_TRUTH = ROOT / "examples" / "ground_truth.json"
-EXAMPLES = ROOT / "examples"
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
+EXAMPLES = example_catalog.EXAMPLES_DIR
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
 #: Bumped when the pack's own shape changes, so a consumer reading an older
@@ -208,6 +210,9 @@ def _fixture_paths(scenario: dict[str, Any]) -> list[Path]:
     whose inputs change must go stale, so the closure is hashed, not the path.
     """
     if scenario["category"] == "A":
+        # EXAMPLES (not example_catalog.case_dir directly) so
+        # tests/test_skill_eval_pack.py's `monkeypatch.setattr(gen, "EXAMPLES",
+        # tmp_path)` seam still redirects this to a throwaway root.
         case_dir = EXAMPLES / scenario["case"]
         return _tree_files(case_dir) if case_dir.is_dir() else []
     fixture = ROOT / scenario["fixture"]
@@ -404,6 +409,7 @@ def build_pack() -> dict[str, Any]:
     scenarios: dict[str, Any] = {}
     for scenario in manifest["scenarios"]:
         if scenario["category"] == "A":
+            # EXAMPLES, not example_catalog.case_dir -- see _fixture_paths above.
             fixture_root = (EXAMPLES / scenario["case"]).relative_to(ROOT).as_posix()
         else:
             fixture_root = scenario["fixture"]

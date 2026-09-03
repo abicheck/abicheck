@@ -24,19 +24,23 @@ runs.
 
 from __future__ import annotations
 
-import json
+import sys
 from collections import Counter
 from pathlib import Path
 
 import pytest
 
-_GROUND_TRUTH = Path(__file__).parent.parent / "examples" / "ground_truth.json"
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
 _KNOWN_PLATFORMS = {"linux", "macos", "windows"}
 
 
 def _verdicts() -> dict[str, dict]:
-    data = json.loads(_GROUND_TRUTH.read_text(encoding="utf-8"))
-    return data["verdicts"]
+    return example_catalog.load_ground_truth()["verdicts"]
 
 
 def test_every_case_supports_the_linux_baseline() -> None:

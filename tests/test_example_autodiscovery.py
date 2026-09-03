@@ -22,7 +22,6 @@ Marked `@pytest.mark.integration` — requires a C/C++ compiler + castxml in PAT
 """
 from __future__ import annotations
 
-import json
 import os
 import platform
 import shutil
@@ -90,8 +89,8 @@ SHARED_LIB_SUFFIX = _shared_lib_suffix()
 # Single source of truth: add cases / known_gap fields there, not here.
 # To skip a case, set its "expected" value to null in ground_truth.json.
 # ---------------------------------------------------------------------------
-_GT_PATH = REPO_DIR / "examples" / "ground_truth.json"
-_gt_data = json.loads(_GT_PATH.read_text())
+_GT_PATH = example_catalog.GROUND_TRUTH_PATH
+_gt_data = example_catalog.load_ground_truth()
 EXPECTED: dict[str, str | None] = {
     k: v.get("expected") for k, v in _gt_data["verdicts"].items()
 }

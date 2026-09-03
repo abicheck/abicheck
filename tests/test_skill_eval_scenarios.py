@@ -26,6 +26,7 @@ while grading nothing.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import jsonschema
@@ -33,11 +34,17 @@ import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO / "scripts"))
+import example_catalog  # noqa: E402
+
 EVAL = REPO / "agent-evals" / "skills"
 SCHEMA_DIR = EVAL / "schema"
 SCENARIOS = EVAL / "scenarios.yaml"
 RUBRIC = EVAL / "rubric.yaml"
-GROUND_TRUTH = REPO / "examples" / "ground_truth.json"
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 PUBLISHED_SKILLS = REPO / ".agents" / "skills"
 
 
@@ -116,7 +123,7 @@ def test_category_a_cases_resolve(scenarios: list[dict], ground_truth: dict) -> 
         if scenario["category"] != "A":
             continue
         case = scenario["case"]
-        assert (REPO / "examples" / case).is_dir(), (
+        assert example_catalog.case_dir(case).is_dir(), (
             f"{scenario['id']}: no examples/{case}/"
         )
         assert case in ground_truth["verdicts"], (

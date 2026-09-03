@@ -29,7 +29,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES = ROOT / "examples"
 
 # Run-as-script support: when invoked as `python scripts/gen_g20_fixtures.py`,
 # sys.path[0] is scripts/, not the repo root, so the abicheck import below fails
@@ -39,7 +38,10 @@ if str(ROOT) not in sys.path:
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import example_catalog  # noqa: E402
 from fixture_sync import sync_fixtures  # noqa: E402
+
+EXAMPLES = example_catalog.EXAMPLES_DIR
 
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption  # noqa: E402
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402

@@ -65,8 +65,17 @@ import sys
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parents[1]
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+# This script's own directory is already on sys.path when run directly, but not
+# when loaded via importlib (tests/test_examples_validation_status_sync.py) --
+# guard mirrors gen_examples_docs.py's identical sibling-import guard.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import example_catalog  # noqa: E402
+
 README = REPO_DIR / "examples" / "README.md"
-GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # Rows whose Scope column (4th cell) is a plain "<N> catalog cases" count that
 # must track the live case count in ground_truth.json — these lanes always

@@ -27,20 +27,27 @@ evidence. Compiler-free, mirrors ``tests/test_environment_drift.py``'s
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.serialization import snapshot_from_dict
-from abicheck.suppression import SuppressionList
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
 
-_EXAMPLES = Path(__file__).parent.parent / "examples"
-_GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
+from abicheck.serialization import snapshot_from_dict  # noqa: E402
+from abicheck.suppression import SuppressionList  # noqa: E402
+
+_EXAMPLES = example_catalog.EXAMPLES_DIR
+_GT = example_catalog.load_ground_truth()["verdicts"]
 
 
 def _snapshots(case_name: str):
-    case_dir = _EXAMPLES / case_name
+    case_dir = example_catalog.case_dir(case_name)
     old = snapshot_from_dict(json.loads((case_dir / "old.abi.json").read_text()))
     new = snapshot_from_dict(json.loads((case_dir / "new.abi.json").read_text()))
     return old, new

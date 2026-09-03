@@ -23,23 +23,32 @@ time64/LFS ABI-flip collapse. All tests use synthetic ``ElfMetadata`` /
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
-from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.diff_platform_elf_dynamic import (
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
+from abicheck.diff_platform_elf_dynamic import (  # noqa: E402
     _diff_dt_relr,
     _diff_elf_dynamic_section,
     _diff_hash_styles,
 )
-from abicheck.diff_platform_elf_symbols import _diff_elf_symbol_versioning
-from abicheck.diff_time64 import _diff_time64_abi
-from abicheck.diff_versioning import (
+from abicheck.diff_platform_elf_symbols import _diff_elf_symbol_versioning  # noqa: E402
+from abicheck.diff_time64 import _diff_time64_abi  # noqa: E402
+from abicheck.diff_versioning import (  # noqa: E402
     _parse_dotted_numeric_version,
     apply_runtime_floor_contract,
 )
-from abicheck.elf_metadata import ElfImport, ElfMetadata
-from abicheck.environment_matrix import EnvironmentMatrix
-from abicheck.model import AbiSnapshot
+from abicheck.elf_metadata import ElfImport, ElfMetadata  # noqa: E402
+from abicheck.environment_matrix import EnvironmentMatrix  # noqa: E402
+from abicheck.model import AbiSnapshot  # noqa: E402
 
 
 def _elf(**kwargs) -> ElfMetadata:
@@ -1571,22 +1580,16 @@ class TestCase170Example:
     @pytest.fixture()
     def snapshots(self):
         import json
-        from pathlib import Path
 
         from abicheck.serialization import snapshot_from_dict
 
-        case_dir = Path(__file__).parent.parent / "examples" / self.CASE
+        case_dir = example_catalog.case_dir(self.CASE)
         old = snapshot_from_dict(json.loads((case_dir / "old.abi.json").read_text()))
         new = snapshot_from_dict(json.loads((case_dir / "new.abi.json").read_text()))
         return old, new
 
     def test_matches_ground_truth(self, snapshots) -> None:
-        import json
-        from pathlib import Path
-
-        gt = json.loads(
-            (Path(__file__).parent.parent / "examples" / "ground_truth.json").read_text()
-        )["verdicts"][self.CASE]
+        gt = example_catalog.load_ground_truth()["verdicts"][self.CASE]
         result = compare(*snapshots)
         assert result.verdict.value == gt["expected"]
         kinds = {c.kind.value for c in result.changes}
@@ -1601,9 +1604,7 @@ class TestCase170Example:
         assert floor.new_value == "GLIBC_2.34"
 
     def test_env_matrix_files_settle_the_verdict(self, snapshots) -> None:
-        from pathlib import Path
-
-        case_dir = Path(__file__).parent.parent / "examples" / self.CASE
+        case_dir = example_catalog.case_dir(self.CASE)
         newer = EnvironmentMatrix.from_yaml(case_dir / "env-newer.yaml")
         older = EnvironmentMatrix.from_yaml(case_dir / "env-older.yaml")
         assert compare(*snapshots, env_matrix=newer).verdict is Verdict.COMPATIBLE

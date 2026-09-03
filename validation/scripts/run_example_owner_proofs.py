@@ -14,7 +14,13 @@ from collections import Counter
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parents[2]
-GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "example_owner_proofs.v1"
 
 OWNER_PROOFS = {
