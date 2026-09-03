@@ -123,6 +123,16 @@ def _is_polymorphic(
     sets it ``False`` at all), so this is defense in depth for a
     hand-constructed or future snapshot that could set the two out of
     sync, not a fix for an observed gap.
+
+    A confirmed ``is_standard_layout=True`` is a third, independent way to
+    trust the empty reading (Codex review, fresh evidence — mirrors
+    ``diff_layout._check_vptr_introduced``'s identical fallback): the C++
+    standard-layout requirement excludes virtual functions and virtual base
+    classes transitively, so it conclusively proves *this record's own*
+    vtable is empty even when ``vtable_fact`` itself wasn't collected. It
+    only substitutes for the ``vtable_fact`` check above, not for the
+    transitive base walk below — a base whose *own* evidence is missing
+    still degrades that base to indeterminate on its own terms.
     """
     if name in memo:
         return memo[name]
@@ -136,8 +146,16 @@ def _is_polymorphic(
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact
-    own_vtable_confirmed_empty = vtable_facts_reliable and (
-        vtable_fact is None or vtable_fact.status is FactStatus.PRESENT
+    standard_layout_fact = rec.is_standard_layout_fact
+    own_confirmed_non_polymorphic_by_standard_layout = (
+        standard_layout_fact is not None
+        and standard_layout_fact.status is FactStatus.PRESENT
+        and standard_layout_fact.value is True
+    )
+    own_vtable_confirmed_empty = (
+        own_confirmed_non_polymorphic_by_standard_layout
+        or vtable_facts_reliable
+        and (vtable_fact is None or vtable_fact.status is FactStatus.PRESENT)
     )
     # Guard against inheritance cycles (malformed input): assume non-polymorphic
     # while resolving, overwrite below.

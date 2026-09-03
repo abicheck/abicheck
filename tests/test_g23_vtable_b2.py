@@ -340,3 +340,58 @@ class TestReconstructionFactStatus:
         )
         types = {"P": rec}
         assert _is_polymorphic("P", types, {}) is None
+
+    def test_uncollected_vtable_confirmed_non_polymorphic_via_standard_layout(
+        self,
+    ):
+        """Codex review, fresh evidence -- mirrors ``diff_layout.
+        _check_vptr_introduced``'s identical fallback: a confirmed
+        ``is_standard_layout=True`` conclusively proves the record's own
+        vtable is empty (the standard-layout requirement excludes virtual
+        functions/bases transitively), so it substitutes for an uncollected
+        ``vtable_fact`` rather than leaving this record indeterminate.
+        """
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_standard_layout=True,
+            is_standard_layout_fact=Fact.present(True),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is False
+
+    def test_uncollected_vtable_stays_indeterminate_when_standard_layout_also_uncollected(
+        self,
+    ):
+        # The fallback only applies when is_standard_layout is itself
+        # confirmed -- an uncollected is_standard_layout_fact provides no
+        # evidence, so this stays indeterminate exactly like the
+        # no-fallback case above.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None
+
+    def test_uncollected_vtable_stays_indeterminate_when_standard_layout_confirmed_false(
+        self,
+    ):
+        # A confirmed is_standard_layout=False says nothing about
+        # polymorphism either way (plenty of non-standard-layout classes
+        # are still non-polymorphic) -- must not be treated as the
+        # fallback signal.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_standard_layout=False,
+            is_standard_layout_fact=Fact.present(False),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None
