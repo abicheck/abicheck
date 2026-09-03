@@ -255,3 +255,33 @@ class TestTypedefIndexPair:
         assert isinstance(old_index, SemanticIRIndex)
         assert old_index.entities_of_kind(EntityKind.TYPEDEF) == {}
         assert new_index.entities_of_kind(EntityKind.TYPEDEF) == {}
+
+    def test_matching_names_with_a_stale_underlying_spelling_still_falls_back(
+        self,
+    ) -> None:
+        """The name-only reading of the gate this regression test pins: a
+        snapshot's ``semantic_ir`` can carry the *right* typedef identity
+        while its ``canonical_spelling`` disagrees with what the legacy
+        alias map (independently resolved from the same snapshot's flat
+        typedef collection) says the same alias resolves to -- e.g. a
+        hand-built or loaded snapshot where the two representations were
+        never cross-validated. Comparing display names alone would accept
+        this IR and either silently drop or silently fabricate a
+        ``TYPEDEF_BASE_CHANGED`` finding depending on which side is stale.
+        The gate must also compare the resolved underlying spelling, so this
+        must still fall back to the legacy adapter on both sides."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        # The IR's own value ("long") disagrees with the alias map's value
+        # ("int") for the identical, correctly-identified alias.
+        old = _snap(semantic_ir=_typedef_ir({eid: "long"}))
+        new = _snap(semantic_ir=_typedef_ir({eid: "long"}))
+        maps = {"ns::Alias": "int"}
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs=maps, new_typedefs=maps
+        )
+        # Both adapted (fell back to the legacy projection), not the real IR
+        # whose stale "long" would otherwise have leaked through.
+        for index in (old_index, new_index):
+            for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
+                assert producer_entity_id(eid_) is None
+                assert index.fact(eid_, "canonical_spelling").value == "int"

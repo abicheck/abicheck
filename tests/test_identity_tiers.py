@@ -26,6 +26,7 @@ without the stability gate, the fallback tier's equality ignores its
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.model.identity import (
@@ -147,6 +148,34 @@ class TestStableEntityIdGate:
             extra=("anonymous", "3"),
         )
         assert stable_entity_id(marked) is None
+
+    @given(scope=_scope_paths(unstable=True))
+    def test_direct_construction_cannot_bypass_the_gate(
+        self, scope: tuple[ScopeSegment, ...]
+    ) -> None:
+        """The factory (:func:`stable_entity_id`) is not the only way to
+        build a ``StableEntityId`` -- the dataclass constructor itself is
+        still directly callable, same as every other frozen dataclass in
+        this codebase. If the gate only lived in the factory, a caller
+        writing ``StableEntityId(entity_id)`` directly could smuggle an
+        unstable ordinal into the stable tier and obtain an incorrect
+        cross-snapshot match. ``__post_init__`` re-applies the identical
+        predicate so unchecked construction is not just discouraged but
+        impossible."""
+        unstable_id = _entity_id(scope)
+        assert not entity_id_is_cross_snapshot_stable(unstable_id)
+        with pytest.raises(ValueError, match="cross-snapshot-stable"):
+            StableEntityId(unstable_id)
+
+    @given(entity_id=_any_entity_id)
+    def test_direct_construction_of_a_genuinely_stable_id_succeeds(
+        self, entity_id: EntityId
+    ) -> None:
+        """The gate only rejects; it never makes a stable id un-constructible
+        outside the factory."""
+        if not entity_id_is_cross_snapshot_stable(entity_id):
+            return
+        assert StableEntityId(entity_id).entity_id == entity_id
 
 
 # -- Tier separation -------------------------------------------------------

@@ -185,25 +185,44 @@ def legacy_typedef_ir(snapshot: AbiSnapshot, typedefs: dict[str, str]) -> Semant
     return SemanticIR(occurrences=occurrences)
 
 
-def _typedef_display_names(index: SemanticIRIndex) -> tuple[str, ...]:
-    """The alias keys *index* projects for typedefs, **in order**, dropping
-    any identity with no faithful rendering (which is what makes an
-    unrenderable scope visible to the gate below as a missing key).
+def _typedef_display_names_and_underlying(
+    index: SemanticIRIndex,
+) -> tuple[tuple[str, ...], tuple[str | None, ...]]:
+    """The alias keys *index* projects for typedefs, **in order**, paired
+    with each one's underlying-type spelling, dropping any identity with no
+    faithful rendering (which is what makes an unrenderable scope visible to
+    the gate below as a missing key).
 
-    Ordered, not a set, because nothing between a detector and a report
-    re-sorts findings -- emission order *is* output order. Two projections
-    holding the same aliases in a different order would therefore produce
-    the same findings in a different sequence, which is a real (if cosmetic)
-    output difference the gate below would otherwise wave through. Both
-    orders derive from the same header-AST element pass in practice, so
-    requiring equality here costs nothing real and removes the assumption.
+    Names are ordered, not a set, because nothing between a detector and a
+    report re-sorts findings -- emission order *is* output order. Two
+    projections holding the same aliases in a different order would
+    therefore produce the same findings in a different sequence, which is a
+    real (if cosmetic) output difference the gate below would otherwise wave
+    through. Both orders derive from the same header-AST element pass in
+    practice, so requiring equality here costs nothing real and removes the
+    assumption.
+
+    The underlying spelling is returned alongside the name, rather than
+    trusted separately, because the identity key and the value it resolves
+    to are independent facts about an ``EntityId`` -- a producer (or a
+    hand-built/loaded snapshot) can carry the right typedef *identities*
+    while disagreeing with the legacy alias map about what one of them
+    resolves *to*. Comparing names alone would let the gate accept an IR
+    whose spellings are stale relative to the legacy projection, silently
+    changing (or silently losing) a ``TYPEDEF_BASE_CHANGED`` finding. A
+    typedef entity with no ``canonical_spelling`` fact yields ``None`` here,
+    which never equals a legacy string and so always fails the gate below.
     """
     names: list[str] = []
-    for entity_id in index.entities_of_kind(EntityKind.TYPEDEF):
+    underlying: list[str | None] = []
+    for entity_id, entity in index.entities_of_kind(EntityKind.TYPEDEF).items():
         rendered = render_display_name(entity_id)
-        if rendered is not None:
-            names.append(rendered)
-    return tuple(names)
+        if rendered is None:
+            continue
+        names.append(rendered)
+        spelling = entity.canonical_spelling
+        underlying.append(spelling.value if spelling.is_present else None)
+    return tuple(names), tuple(underlying)
 
 
 def typedef_index_pair(
@@ -218,10 +237,13 @@ def typedef_index_pair(
 
     The gate is strict and symmetric: **both** sides' IR-backed typedef
     display-name key sets must exactly equal the alias maps this comparison
-    already resolved. Any difference at all — an unrenderable anonymous
-    scope, a producer that resolved identity for only some typedefs, a
-    DWARF-only side with no IR, a pre-v38 reload — and both sides fall back
-    to :func:`legacy_typedef_ir`.
+    already resolved, *and* each key's IR-resolved underlying-type spelling
+    must exactly equal that same alias map's value. Any difference at all —
+    an unrenderable anonymous scope, a producer that resolved identity for
+    only some typedefs, a DWARF-only side with no IR, a pre-v38 reload, or
+    an IR whose ``canonical_spelling`` disagrees with (or is absent versus)
+    the legacy projection's own resolved value — and both sides fall back to
+    :func:`legacy_typedef_ir`.
 
     Both-or-neither matters, and is not merely tidiness: pairing an
     IR-backed old side with an adapted new side would compare two
@@ -232,13 +254,22 @@ def typedef_index_pair(
     never an unordered set: two producers can agree on how many typedefs
     exist while disagreeing about which, and two that agree on which can
     still disagree about the order findings would be emitted in (see
-    :func:`_typedef_display_names`).
+    :func:`_typedef_display_names_and_underlying`). Values are compared
+    positionally against that same ordered sequence rather than through a
+    second name-keyed lookup, since the name sequence has already been
+    proven to equal the legacy map's key order by the time the value
+    comparison runs.
     """
     old_index = SemanticIRIndex(old.semantic_ir or SemanticIR())
     new_index = SemanticIRIndex(new.semantic_ir or SemanticIR())
-    if _typedef_display_names(old_index) == tuple(
-        old_typedefs
-    ) and _typedef_display_names(new_index) == tuple(new_typedefs):
+    old_names, old_underlying = _typedef_display_names_and_underlying(old_index)
+    new_names, new_underlying = _typedef_display_names_and_underlying(new_index)
+    if (
+        old_names == tuple(old_typedefs)
+        and old_underlying == tuple(old_typedefs.values())
+        and new_names == tuple(new_typedefs)
+        and new_underlying == tuple(new_typedefs.values())
+    ):
         return old_index, new_index
     return (
         SemanticIRIndex(legacy_typedef_ir(old, old_typedefs)),

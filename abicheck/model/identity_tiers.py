@@ -96,9 +96,25 @@ class StableEntityId:
     see ``identity_stability``'s own docstring for what a consumer still
     has to establish beyond it (this type makes the gate un-forgettable,
     it does not widen what the gate proves).
+
+    ``__post_init__`` re-applies the same gate :func:`stable_entity_id`
+    uses, so the guarantee holds for direct construction
+    (``StableEntityId(entity_id)``) too, not only for callers that go
+    through the factory function -- a caller bypassing the factory is a
+    normal, unprevented Python pattern (dataclasses stay directly
+    constructible), so the type itself has to be the enforcement point.
     """
 
     entity_id: EntityId
+
+    def __post_init__(self) -> None:
+        if not entity_id_is_cross_snapshot_stable(self.entity_id):
+            msg = (
+                f"StableEntityId requires a cross-snapshot-stable EntityId, "
+                f"got {self.entity_id!r} -- use stable_entity_id() to "
+                f"construct one from a possibly-unstable id instead"
+            )
+            raise ValueError(msg)
 
     @property
     def key(self) -> str:
