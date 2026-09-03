@@ -149,3 +149,56 @@ class TestResolvedContractModeWiring:
         )
         assert result.exit_code in (0, 1, 2, 4), result.output
         assert captured["contract_mode"] == ContractMode.EXPORTS
+
+    def test_pack_only_run_with_no_contract_flag_stays_none(
+        self, tmp_path, monkeypatch
+    ):
+        """Regression (full-suite run, fresh evidence): a ``--pack``-only run
+        with no ``--contract`` still resolves a non-``None``
+        ``evaluation_config`` (``resolve_and_apply``'s early-return only skips
+        when *neither* ``contract_evaluation`` nor a pack applies), and
+        ``ContractConfig.mode`` always carries a concrete default -- so
+        naively threading ``evaluation_config.contract.mode`` through
+        unconditionally passed a non-``None`` ``contract_mode`` into
+        ``compare_snapshots`` while ``contract_evaluation`` stayed ``False``,
+        tripping its own "contract_mode requires contract_evaluation"
+        usage-error guard for every such run. Must stay ``contract_mode=None``
+        (and exit 0), the same as before this migration.
+        """
+        old_p, new_p = _write_pair(tmp_path)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        pack_path = pack_dir / "pack.yml"
+        pack_path.write_text(
+            "id: p\nversion: 1\nkind: policy\nassignments:\n  func_removed: ignore\n",
+            encoding="utf-8",
+        )
+
+        captured: dict[str, object] = {}
+        from abicheck.service import compare_snapshots as _real_compare_snapshots
+
+        def _capturing_compare_snapshots(*args, **kwargs):
+            captured["contract_mode"] = kwargs.get("contract_mode")
+            captured["contract_evaluation"] = kwargs.get("contract_evaluation")
+            return _real_compare_snapshots(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--pack",
+                str(pack_path),
+                "--format",
+                "json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["contract_evaluation"] is False
+        assert captured["contract_mode"] is None
