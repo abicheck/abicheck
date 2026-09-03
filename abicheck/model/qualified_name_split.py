@@ -70,9 +70,11 @@ Leaf module: no imports beyond the stdlib.
 from __future__ import annotations
 
 import re as _re
+from collections.abc import Iterator as _Iterator
 
 __all__ = [
     "is_inline_abi_namespace_segment",
+    "iter_top_level_chars",
     "split_top_level_scopes",
     "version_suffix",
 ]
@@ -166,3 +168,59 @@ def split_top_level_scopes(qualified: str) -> list[str]:
     if buf:
         out.append("".join(buf).strip())
     return [s for s in out if s]
+
+
+def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
+    """Yield ``(index, char)`` for every character of *text* sitting at
+    true top level -- outside any ``(...)``/``[...]``/``<...>`` bracket
+    nesting and outside any quoted string/character literal.
+
+    Tracks a bracket-KIND-aware STACK, not a flat depth counter, mirroring
+    ``extract.semantic_normalizer_artifacts.has_unresolved_component``'s
+    own hardened design (see that function's docstring for the full
+    account, arrived at over seven review rounds): a real ``>>`` shift/
+    comparison operator sitting inside a parenthesized non-type template
+    argument is not two template closers, and a ``<`` already inside an
+    open paren/bracket is a real comparison operator, not a template
+    opener -- a ``<``/``>`` only pushes/pops the stack when the innermost
+    still-open entry is (or, for ``>``, already is) itself a ``<``.
+    Because ``<``/``>`` are consumed as stack operations rather than
+    yielded, a caller never sees them directly; it only ever learns where
+    the *other* top-level characters are (``::``, ``*``, ``&``, ...),
+    which is all :func:`~abicheck.diff_helpers.depth_aware_bare_name` and
+    :func:`~abicheck.compare.opaque_types._is_indirect_spelling` need.
+
+    Adds quote handling on top of that shared design (not needed by
+    ``has_unresolved_component``'s own castxml-sentinel search, needed by
+    both callers above): a quoted literal is skipped outright, honoring
+    backslash escapes (``'\\''`` doesn't end one character early), so a
+    ``'>'``/``'<'`` inside a non-type template argument's own literal
+    doesn't affect the bracket stack either.
+    """
+    stack: list[str] = []
+    quote = ""
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "([":
+            stack.append(ch)
+        elif ch in ")]":
+            if stack:
+                stack.pop()
+        elif ch == "<":
+            if not stack or stack[-1] not in "([":
+                stack.append(ch)
+        elif ch == ">":
+            if stack and stack[-1] == "<":
+                stack.pop()
+        elif not stack:
+            yield i, ch
+        i += 1

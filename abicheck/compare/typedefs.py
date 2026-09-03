@@ -317,6 +317,19 @@ def _typedef_display_names_and_underlying(
     return tuple(names), tuple(underlying)
 
 
+def _typedef_identities_by_alias(index: SemanticIRIndex) -> dict[str, EntityId]:
+    """Alias -> resolved ``EntityId`` for every typedef entity *index*
+    projects a faithful display name for -- the identity half of the
+    fidelity gate, alongside :func:`_typedef_display_names_and_underlying`'s
+    name/value half."""
+    out: dict[str, EntityId] = {}
+    for entity_id in index.entities_of_kind(EntityKind.TYPEDEF):
+        rendered = render_display_name(entity_id)
+        if rendered is not None:
+            out[rendered] = entity_id
+    return out
+
+
 def typedef_index_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -342,7 +355,19 @@ def typedef_index_pair(
     The gate is strict and symmetric: **both** sides' IR-backed typedef
     display-name key sets must exactly equal the alias maps this comparison
     already resolved, *and* each key's IR-resolved underlying-type spelling
-    must exactly equal that same alias map's value. Any difference at all —
+    must exactly equal that same alias map's value, *and* each key's
+    IR-resolved ``EntityId`` must exactly equal the identity the legacy
+    adapter would independently assign that same alias (Codex review on
+    PR #1041, follow-up round). This third check closes a narrower gap the
+    first two don't: names and values can agree while the *identity*
+    disagrees -- e.g. a loaded/hand-built snapshot whose real IR resolves
+    ``ns::Alias`` under one scope-derived ``EntityId`` while its
+    ``typedef_entity_ids`` sidecar (what the legacy adapter would use)
+    resolves a differently-scoped one that happens to render to the same
+    text. Picking the IR path there would stamp a different ``entity_id``
+    on the emitted finding than the pre-cutover detector did for identical
+    data, silently changing which stored ``entity:``-alias suppression
+    rules match. Any difference at all — including that identity mismatch,
     an unrenderable anonymous scope, a producer that resolved identity for
     only some typedefs, a DWARF-only side with no IR, a pre-v38 reload, or
     an IR whose ``canonical_spelling`` disagrees with (or is absent versus)
@@ -368,14 +393,17 @@ def typedef_index_pair(
     new_index = SemanticIRIndex(new.semantic_ir or SemanticIR())
     old_names, old_underlying = _typedef_display_names_and_underlying(old_index)
     new_names, new_underlying = _typedef_display_names_and_underlying(new_index)
+    legacy_old_index = SemanticIRIndex(legacy_typedef_ir(old, old_typedefs))
+    legacy_new_index = SemanticIRIndex(legacy_typedef_ir(new, new_typedefs))
     if (
         old_names == tuple(old_typedefs)
         and old_underlying == tuple(old_typedefs.values())
         and new_names == tuple(new_typedefs)
         and new_underlying == tuple(new_typedefs.values())
+        and _typedef_identities_by_alias(old_index)
+        == _typedef_identities_by_alias(legacy_old_index)
+        and _typedef_identities_by_alias(new_index)
+        == _typedef_identities_by_alias(legacy_new_index)
     ):
         return old_index, new_index
-    return (
-        SemanticIRIndex(legacy_typedef_ir(old, old_typedefs)),
-        SemanticIRIndex(legacy_typedef_ir(new, new_typedefs)),
-    )
+    return legacy_old_index, legacy_new_index

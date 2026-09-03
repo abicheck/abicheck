@@ -459,6 +459,32 @@ class TestDepthAwareBareName:
         `::` *after* the templated segment closes must still split."""
         assert depth_aware_bare_name("ns::S<arr[1 > 0], dep::Tag>::Inner") == "Inner"
 
+    def test_does_not_split_on_a_quoted_literal_angle(self) -> None:
+        """Regression for the Codex review on PR #1041, seventh follow-up
+        round: a quoted character literal used as a non-type template
+        argument (`S<'>', dep::Tag>`, valid C++, retained verbatim by
+        clang) has the same problem one level down from the parenthesized/
+        bracketed relational cases: the `>` inside the literal sits at
+        neither paren nor bracket depth, so it still closed the outer
+        template early, splitting inside `dep::Tag` instead of returning
+        the whole unqualified leaf."""
+        assert depth_aware_bare_name("api::S<'>', dep::Tag>") == "S<'>', dep::Tag>"
+
+    def test_handles_a_right_shift_inside_a_parenthesized_non_type_argument(
+        self,
+    ) -> None:
+        """The bracket-KIND-aware stack `iter_top_level_chars` shares with
+        `extract.semantic_normalizer_artifacts.has_unresolved_component`
+        also resolves a case no round of this fix set out to close
+        directly: a real `>>` shift/comparison operator inside a
+        parenthesized non-type template argument (`S<(N >> 1), dep::Tag>`)
+        is not two template closers, so it must not split inside
+        `dep::Tag` either."""
+        assert (
+            depth_aware_bare_name("api::S<(N >> 1), dep::Tag>")
+            == "S<(N >> 1), dep::Tag>"
+        )
+
     def test_tolerates_unbalanced_brackets(self) -> None:
         """Defensive-floor coverage for the paren/bracket/angle depth
         guards: a stray closing `)`, `]`, or `>` with no matching opener

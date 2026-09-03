@@ -309,3 +309,35 @@ def test_find_by_value_types_array_subscript_relational_angle_is_not_a_bracket()
         variables=[Variable(name="g", mangled="g", type=template_spelling)],
     )
     assert "S" in _find_by_value_types(snap, opaque)
+
+
+def test_find_by_value_types_quoted_literal_angle_is_not_a_bracket():
+    """Regression for the seventh-round Codex review on PR #1041: a quoted
+    character literal used as a non-type template argument (`S<'>', &h>`,
+    valid C++, retained verbatim by clang) has the identical problem one
+    level down from the parenthesized/bracketed relational cases: the `>`
+    inside the literal sits at neither paren nor bracket depth, so it
+    still closed the outer template one `>` early, leaving the
+    genuinely-nested `&h` wrongly read as top-level indirection. Quoted
+    text is now skipped outright by the shared
+    `iter_top_level_chars` primitive."""
+    template_spelling = "S<'>', &h>"
+    opaque = {"S"}
+    snap = _snap(
+        [RecordType(name="S", kind="struct", is_opaque=True)],
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        types=snap.types,
+        functions=[
+            Function(
+                name="f",
+                mangled="f",
+                return_type=template_spelling,
+                params=[Param(name="p", type=template_spelling, pointer_depth=0)],
+            )
+        ],
+        variables=[Variable(name="g", mangled="g", type=template_spelling)],
+    )
+    assert "S" in _find_by_value_types(snap, opaque)

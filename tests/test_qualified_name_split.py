@@ -24,7 +24,10 @@ segment-splitting behavior this function's callers build on.
 
 from __future__ import annotations
 
-from abicheck.model.qualified_name_split import split_top_level_scopes
+from abicheck.model.qualified_name_split import (
+    iter_top_level_chars,
+    split_top_level_scopes,
+)
 
 
 def test_empty_string_yields_no_segments() -> None:
@@ -76,3 +79,76 @@ def test_unbalanced_closing_angle_bracket_does_not_underflow_depth() -> None:
     depth negative and start treating a REAL top-level '::' after it as
     still nested."""
     assert split_top_level_scopes("A>::B") == ["A>", "B"]
+
+
+def _top_level(text: str) -> str:
+    """The characters `iter_top_level_chars` yields, joined back into a
+    string -- convenient for asserting what survives the scan."""
+    return "".join(ch for _, ch in iter_top_level_chars(text))
+
+
+class TestIterTopLevelChars:
+    """`iter_top_level_chars` -- the bracket-KIND-aware-stack, quote-aware
+    primitive shared by `diff_helpers.depth_aware_bare_name` and
+    `compare.opaque_types._is_indirect_spelling` (Codex review on
+    PR #1041, several rounds)."""
+
+    def test_a_bare_string_is_returned_whole(self) -> None:
+        assert _top_level("Handle") == "Handle"
+
+    def test_parenthesized_and_bracketed_content_is_skipped(self) -> None:
+        # Everything from "<" through its matching ">" is nested (the "S"
+        # itself sits before the "<" and so is still genuinely top level).
+        assert _top_level("S<(N > 0), &h>") == "S"
+        assert _top_level("S<arr[1 > 0], &h>") == "S"
+
+    def test_a_quoted_literal_is_skipped_including_its_delimiters(self) -> None:
+        assert _top_level("S<'>', &h>") == "S"
+
+    def test_a_backslash_escaped_quote_does_not_end_the_literal_early(self) -> None:
+        # '\'' is a three-character char literal (escaped single quote);
+        # the unescaped closing quote is the fourth character. If the
+        # escape were mishandled, the literal's own "'" would end the
+        # quote early and its "'" -- an indirection sigil -- would wrongly
+        # surface as top level.
+        assert _top_level("S<'\\'', &h>") == "S"
+
+    def test_content_after_a_closed_bracket_or_literal_is_still_yielded(self) -> None:
+        assert _top_level("S<(N > 0)> *") == "S *"
+        assert _top_level("S<'x'> *") == "S *"
+
+    def test_a_real_right_shift_inside_parens_is_not_two_template_closes(
+        self,
+    ) -> None:
+        """`>>` inside a parenthesized non-type template argument is a
+        shift/comparison operator, not two nested `<...>` closes -- the
+        bracket-KIND-aware stack (mirroring `extract.
+        semantic_normalizer_artifacts.has_unresolved_component`'s own
+        design) must not pop a `<` that was never pushed for it. If it
+        did, the trailing ` *` below would wrongly read as still nested
+        instead of surfacing as real top-level indirection."""
+        assert _top_level("S<(N >> 1), &h>") == "S"
+        assert _top_level("S<(N >> 1), &h> *") == "S *"
+
+    def test_a_less_than_inside_parens_is_a_real_comparison_not_a_template_open(
+        self,
+    ) -> None:
+        assert _top_level("S<(N < 0), &h>") == "S"
+
+    def test_tolerates_unbalanced_closing_brackets(self) -> None:
+        """A stray ')'/']'/'>' with no matching opener must not raise or
+        underflow the stack -- defensive floor for malformed/adversarial
+        rendered text, not a shape any real declarator produces. None of
+        the three is itself yielded (each is always treated as a closer,
+        matched or not), but text after them is unaffected."""
+        assert _top_level(")]> *") == " *"
+
+    def test_an_unterminated_quote_consumes_the_rest_of_the_text(self) -> None:
+        assert _top_level("S<'unterminated") == "S"
+
+    def test_a_trailing_backslash_is_not_followed_by_an_out_of_range_index(
+        self,
+    ) -> None:
+        """A backslash as the very last character inside an (unterminated)
+        quoted literal must not attempt to skip past the end of *text*."""
+        assert _top_level("'\\") == ""

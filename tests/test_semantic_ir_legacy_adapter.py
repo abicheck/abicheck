@@ -186,16 +186,69 @@ class TestSyntheticIdentity:
 
 class TestTypedefIndexPair:
     def test_a_faithful_ir_on_both_sides_is_used(self) -> None:
+        """A real producer populates ``semantic_ir`` and the legacy
+        ``typedef_entity_ids`` sidecar from the same pass (see
+        ``dumper.py``'s own ``ast_result.typedef_entity_ids``), so a
+        genuinely faithful snapshot carries both, agreeing -- the identity
+        half of the fidelity gate (Codex review on PR #1041, follow-up
+        round) requires exactly that agreement."""
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         maps = {"ns::Alias": "int"}
-        old = _snap(semantic_ir=_typedef_ir({eid: "int"}))
-        new = _snap(semantic_ir=_typedef_ir({eid: "long"}))
+        old = _snap(
+            semantic_ir=_typedef_ir({eid: "int"}),
+            typedef_entity_ids={"ns::Alias": eid},
+        )
+        new = _snap(
+            semantic_ir=_typedef_ir({eid: "long"}),
+            typedef_entity_ids={"ns::Alias": eid},
+        )
         old_index, new_index = typedef_index_pair(
             old, new, old_typedefs=maps, new_typedefs={"ns::Alias": "long"}
         )
         # The real IR was used: its own payload, not the adapter's.
         assert old_index.fact(eid, "canonical_spelling").value == "int"
         assert new_index.fact(eid, "canonical_spelling").value == "long"
+
+    def test_a_sidecar_identity_disagreeing_with_the_ir_forces_the_fallback(
+        self,
+    ) -> None:
+        """Regression for the Codex review on PR #1041, follow-up round:
+        names and values matching is not enough -- the real IR's own
+        ``EntityId`` for an alias must also agree with what the legacy
+        adapter would independently assign that same alias via the
+        ``typedef_entity_ids`` sidecar. A loaded or Python-constructed
+        snapshot can carry a real IR resolving ``ns::Alias`` under one
+        scope while its sidecar names a *different*, differently-scoped
+        identity that happens to render back to the identical alias text
+        (e.g. two same-named typedefs the sidecar and the IR each
+        associate with a different one of two structurally distinct
+        anonymous scopes). Picking the IR path there would stamp the
+        wrong ``entity_id`` on the emitted finding relative to the
+        pre-cutover detector, silently changing which stored
+        ``entity:``-alias suppression rules match -- so this must fall
+        back to the adapter instead, even though every name and value
+        still matches exactly."""
+        ir_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        sidecar_eid = entity_id_for_typedef((Namespace("other"),), "Alias")
+        maps = {"ns::Alias": "int"}
+        old = _snap(
+            semantic_ir=_typedef_ir({ir_eid: "int"}),
+            typedef_entity_ids={"ns::Alias": sidecar_eid},
+        )
+        new = _snap(
+            semantic_ir=_typedef_ir({ir_eid: "int"}),
+            typedef_entity_ids={"ns::Alias": sidecar_eid},
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs=maps, new_typedefs=maps
+        )
+        # The adapter ran, not the real IR: its identities are synthetic
+        # (the sidecar's own EntityId doesn't render back to "ns::Alias",
+        # since it names a different scope, so `legacy_typedef_ir` falls
+        # back to a synthetic identity for it too).
+        for index in (old_index, new_index):
+            for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
+                assert producer_entity_id(eid_) is None
 
     def test_an_ir_missing_one_alias_falls_back_on_both_sides(self) -> None:
         """Set equality, not a count: the IR here has the right *number* of
@@ -285,3 +338,18 @@ class TestTypedefIndexPair:
             for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
                 assert producer_entity_id(eid_) is None
                 assert index.fact(eid_, "canonical_spelling").value == "int"
+
+
+def test_typedef_identities_by_alias_skips_an_unrenderable_entity() -> None:
+    """Defensive-floor coverage for `_typedef_identities_by_alias`: an
+    entity whose identity has no faithful flat rendering (an anonymous
+    scope) is skipped rather than keyed under `None` -- direct unit test
+    since `typedef_index_pair`'s own callers never reach this branch (an
+    unrenderable real-IR entity already fails the name-sequence check
+    first, short-circuiting before the identity comparison runs)."""
+    from abicheck.compare.typedefs import _typedef_identities_by_alias
+
+    anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+    named = entity_id_for_typedef((Namespace("ns"),), "Alias")
+    index = SemanticIRIndex(_typedef_ir({anon: "int", named: "int"}))
+    assert _typedef_identities_by_alias(index) == {"ns::Alias": named}

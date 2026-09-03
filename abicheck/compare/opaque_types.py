@@ -36,6 +36,7 @@ from ..model.identity_tiers import (
     snapshot_local_identity,
     stable_entity_id,
 )
+from ..model.qualified_name_split import iter_top_level_chars
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -313,72 +314,24 @@ def _is_indirect_spelling(text: str) -> bool:
     Both checks above only look at whether the sigil occurs *anywhere*,
     which over-counts a by-value template specialization whose *template
     argument* happens to contain one: ``Callback<&ns::handler>`` (a
-    non-type template argument that is itself a pointer/reference) or
-    ``Box<void (*)()>`` (a function-pointer type argument) are both
-    passed by value at the outer declarator -- the ``&``/``*`` belongs to
-    the argument, not to the outer type -- yet the plain substring check
-    still returned ``True``, leaving the record wrongly out of the opaque
-    index and its real layout change reported as a false breaking finding
-    (Codex review on PR #1041, follow-up round). Only a sigil at *template
-    depth zero* -- outside any ``<...>`` nesting -- is evidence of the
-    outer declarator's own indirection; depth tracking mirrors
-    :func:`~abicheck.diff_helpers.depth_aware_bare_name`'s own ``<``/``>``
-    bracket counting.
-
-    A flat ``<``/``>`` counter is itself fooled by a non-type template
-    argument containing a *relational* ``>``/``<`` rather than a real
-    bracket -- ``ns::S<(N > 0), &handler>`` closes the parenthesized
-    comparison's stray ``>`` as if it were the outer template's own
-    closing delimiter, dropping the tracked depth back to zero one
-    ``>`` early, so the genuinely-nested ``&handler`` is then wrongly
-    read as top-level indirection (Codex review on PR #1041, third
-    follow-up round). A relational comparison used as a non-type
-    template argument must itself be parenthesized to be valid C++ (an
-    unparenthesized bare ``<``/``>`` there is a syntax error, which is
-    exactly why every real-world spelling of this shape already carries
-    the parens), so tracking parenthesis nesting alongside angle-bracket
-    nesting -- and only letting ``<``/``>`` affect the angle depth while
-    parenthesis depth is zero -- resolves the ambiguity precisely: a
-    relational operator's ``<``/``>`` always sits inside at least one
-    open paren, a real template delimiter never does.
-
-    An array-subscript comparison needs no such parens, though --
-    ``S<arr[1 > 0], &h>``'s bracketed ``1 > 0`` is valid C++ with no
-    surrounding paren at all, so tracking parenthesis nesting alone still
-    let this exact shape close the outer template early on the
-    subscript's own stray ``>`` (Codex review on PR #1041, fourth
-    follow-up round). Square-bracket nesting is tracked the same way
-    parenthesis nesting is -- a ``<``/``>``/``*``/``&`` only counts while
-    both parenthesis and bracket depth are zero -- since a subscript's own
-    relational ``<``/``>`` always sits inside an open bracket, a real
-    template delimiter never does."""
-    angle_depth = 0
-    paren_depth = 0
-    bracket_depth = 0
-    for ch in text:
-        if ch == "(":
-            paren_depth += 1
-        elif ch == ")":
-            if paren_depth > 0:
-                paren_depth -= 1
-        elif ch == "[":
-            bracket_depth += 1
-        elif ch == "]":
-            if bracket_depth > 0:
-                bracket_depth -= 1
-        elif paren_depth == 0 and bracket_depth == 0 and ch == "<":
-            angle_depth += 1
-        elif paren_depth == 0 and bracket_depth == 0 and ch == ">":
-            if angle_depth > 0:
-                angle_depth -= 1
-        elif (
-            angle_depth == 0
-            and paren_depth == 0
-            and bracket_depth == 0
-            and (ch == "*" or ch == "&")
-        ):
-            return True
-    return False
+    non-type template argument that is itself a pointer/reference),
+    ``Box<void (*)()>`` (a function-pointer type argument),
+    ``ns::S<(N > 0), &handler>``/``S<arr[1 > 0], &h>`` (a relational
+    comparison as a non-type argument, parenthesized or array-subscripted),
+    or ``S<'>', &h>`` (a quoted literal) are all passed by value at the
+    outer declarator -- the sigil belongs to the argument, not to the
+    outer type -- yet the plain substring check still returned ``True``,
+    leaving the record wrongly out of the opaque index and its real layout
+    change reported as a false breaking finding (Codex review on PR #1041,
+    across several follow-up rounds). Only a sigil
+    :func:`~abicheck.model.qualified_name_split.iter_top_level_chars`
+    yields is evidence of the outer declarator's own indirection -- that
+    shared primitive already tracks ``<...>``/``(...)``/``[...]`` nesting
+    and quoted literals internally (never yielding ``<``/``>`` themselves,
+    only what sits genuinely outside all of them), so no local depth
+    tracking is needed here at all; it closes every case above at once
+    instead of one more special case here."""
+    return any(ch in "*&" for _, ch in iter_top_level_chars(text))
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:

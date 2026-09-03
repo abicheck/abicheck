@@ -56,6 +56,7 @@ from .model import AbiSnapshot
 # through that path.
 from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .model.identity import EntityId
+from .model.qualified_name_split import iter_top_level_chars
 from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
@@ -525,35 +526,21 @@ def fact_same_producer_qualified(
 def depth_aware_bare_name(qualified: str) -> str:
     """The innermost, fully-unqualified leaf of a ``::``-qualified name.
 
-    Splits only on a depth-zero ``"::"``, tracking ``<``/``>`` nesting (so
-    ``"Wrapper<dep::Tag>"``'s own ``::`` isn't mistaken for the outer
-    boundary), with ``()``/``[]`` nesting additionally suspending that
-    tracking so a relational ``>`` inside either -- e.g.
-    ``S<arr[1 > 0], dep::Tag>`` -- isn't mistaken for a real closing ``>``
-    (Codex review on PR #1041; same fix as opaque_types._is_indirect_spelling).
-
-    A small, local duplicate of ``type_reachability_spelling._bare_type_name``
-    rather than an import of it -- that module imports ``diff_cxx_rules``,
-    which imports this one, so importing it here would add a real cycle."""
-    depth = 0
-    suspend = 0  # inside "(...)"/"[...]"
+    Splits only on a top-level ``"::"`` -- via
+    :func:`~abicheck.model.qualified_name_split.iter_top_level_chars`,
+    which tracks a bracket-KIND-aware stack over ``()``/``[]``/``<>`` and
+    quoted literals -- so ``"Wrapper<dep::Tag>"``'s own ``::`` isn't
+    mistaken for the outer boundary, and neither is one inside a non-type
+    template argument's own parenthesized/bracketed/quoted expression
+    (Codex review on PR #1041, several rounds). A small, local caller of
+    that shared primitive rather than a second copy of the splitting loop
+    itself: ``type_reachability_spelling._bare_type_name`` would be the
+    natural sibling, but that module imports ``diff_cxx_rules``, which
+    imports this one, so importing it here would add a real cycle."""
     last_split = 0
-    i, n = 0, len(qualified)
-    while i < n:
-        ch = qualified[i]
-        if ch in "([":
-            suspend += 1
-        elif ch in ")]":
-            suspend = max(0, suspend - 1)
-        elif suspend == 0 and ch == "<":
-            depth += 1
-        elif suspend == 0 and ch == ">":
-            depth = max(0, depth - 1)
-        elif suspend == 0 and ch == ":" and qualified[i + 1 : i + 2] == ":":
-            if depth == 0:
-                last_split = i + 2
-                i += 1
-        i += 1
+    for i, ch in iter_top_level_chars(qualified):
+        if ch == ":" and qualified[i + 1 : i + 2] == ":":
+            last_split = i + 2
     return qualified[last_split:]
 
 
