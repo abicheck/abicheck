@@ -791,3 +791,70 @@ class TestAlgorithmPortability:
         # The control: this isn't "reject everything", only what isn't
         # guaranteed portable.
         assert semantic_digest({"x": 1}, algorithm="sha3_256").startswith("sha3_256:")
+
+
+class TestAlreadyCanonicalHelpers:
+    """`InMemoryObjectStore.put()`/`get()` (`abicheck.storage.package`) hash
+    and copy content they already normalized via `canonical_form` themselves
+    -- re-running `canonical_form` on that same output a second time is a
+    wasted traversal, since `canonical_form` is idempotent and pure.
+    `semantic_digest_of_canonical_form`/`copy_of_canonical_form` exist to
+    skip that redundant pass. This is a call-site-independent property of
+    `canonical_form` itself (`canonical_form(canonical_form(x)) ==
+    canonical_form(x)` for every value in its accepted domain), not specific
+    to any one snapshot shape, so it is tested here directly against
+    Hypothesis-generated values rather than only through one benchmark.
+    """
+
+    @given(_json_values)
+    def test_hashing_an_already_canonical_value_matches_semantic_digest(
+        self, value: object
+    ) -> None:
+        from abicheck.storage.canonical import semantic_digest_of_canonical_form
+
+        canonical = canonical_form(value)
+        assert semantic_digest_of_canonical_form(
+            canonical, algorithm="sha256"
+        ) == semantic_digest(value)
+
+    @given(_json_values)
+    def test_copying_an_already_canonical_value_matches_canonical_form(
+        self, value: object
+    ) -> None:
+        from abicheck.storage.canonical import copy_of_canonical_form
+
+        canonical = canonical_form(value)
+        assert copy_of_canonical_form(canonical) == canonical_form(value)
+
+    def test_the_copy_is_isolated_from_the_original(self) -> None:
+        """The property `InMemoryObjectStore.get()` actually depends on:
+        mutating the returned copy must never reach the stored object."""
+        from abicheck.storage.canonical import copy_of_canonical_form
+
+        original = canonical_form({"a": [1, 2, {"b": 3}]})
+        copy = copy_of_canonical_form(original)
+        assert copy == original
+        assert copy is not original
+
+        copy["a"].append(4)
+        copy["a"][2]["b"] = 99
+        assert original == {"a": [1, 2, {"b": 3}]}
+
+    def test_a_mapping_and_a_custom_mapping_subtype_still_agree(self) -> None:
+        """`canonical_form`'s `dict`/`list` fast path is keyed on exact
+        `type()`, ahead of the general `isinstance(..., Mapping)` branch --
+        so a non-`dict` `Mapping` (here, `MappingProxyType`) must still take
+        the general branch and produce the identical canonical form a plain
+        `dict` with the same content does."""
+        from types import MappingProxyType
+
+        plain = {"b": 2, "a": 1}
+        proxy = MappingProxyType({"b": 2, "a": 1})
+        assert canonical_form(proxy) == canonical_form(plain)
+        assert semantic_digest(proxy) == semantic_digest(plain)
+
+    def test_a_tuple_and_a_list_still_agree(self) -> None:
+        """Same fast-path-vs-general-branch concern, for sequences: a
+        `tuple` (not `list`) must still take the general `Sequence` branch
+        and canonicalize identically to the equivalent `list`."""
+        assert canonical_form((1, "x", {"a": 2})) == canonical_form([1, "x", {"a": 2}])
