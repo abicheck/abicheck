@@ -250,7 +250,24 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     :func:`_references_unqualified_type_token`, which additionally refuses a
     match immediately preceded by ``::`` -- otherwise the leaf widening
     would treat a real, separately-scoped ``other::Handle`` reference as
-    exposing ``ns::Handle`` too."""
+    exposing ``ns::Handle`` too.
+
+    **Documented, still-open gap** (Codex review on PR #1041, follow-up
+    round): rejecting a preceding ``::`` closes the *qualified*-collision
+    case, but a *bare* same-leaf reference in a genuinely different scope
+    (e.g. a function declared inside namespace ``other`` whose own
+    unqualified ``Handle`` parameter really means ``other::Handle``) still
+    matches ``ns::Handle``'s leaf candidate -- there is no textual marker
+    left to reject on, since the reference carries no qualifier at all. This
+    is the exposure-detection mirror of the identical, already-accepted
+    bare-name-collision limitation on the *suppression* side (see
+    ``TestKnownGapStaysDocumented`` in ``tests/test_opaque_identity_tiers.py``)
+    -- both are the same underlying limitation of matching by rendered
+    spelling instead of by an entity's actual owning scope, which is
+    exactly what ``EntityId``-based identity resolution exists to close
+    properly, not a heuristic patch here. See
+    ``test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap``
+    in ``tests/test_cov95_diff_filtering.py`` for the pinned reproduction."""
     if _references_type_token(tname, text):
         return True
     if "::" not in tname:
@@ -259,6 +276,24 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     if not leaf or leaf == tname:
         return False
     return _references_unqualified_type_token(leaf, text)
+
+
+def _is_pointer_spelling(text: str) -> bool:
+    """Whether rendered type *text* declares a pointer (any indirection
+    level, any cv-qualifier spelling).
+
+    The original check here (``text.endswith("*")`` or ``"* " in text``)
+    only recognized a pointer whose ``*`` sits at the very end or is
+    followed by a space -- missing a cv-qualified pointer declarator like
+    ``"Handle *const"`` or ``"Handle*const"`` (both clang and castxml can
+    render the qualifier with no separating space), which wrongly counted
+    as *not* a pointer and so as a by-value exposure. A real C/C++
+    declarator can only contain ``*`` as a pointer/indirection marker --
+    never as part of a bare type name -- so any ``*`` anywhere in the
+    rendered text is sufficient evidence of at least one indirection level,
+    with no false-positive risk from the type name itself (Codex review on
+    PR #1041)."""
+    return "*" in text
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
@@ -271,8 +306,8 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if _type_is_by_value_referenced(tname, rt) and not (
-                rt.endswith("*") or "* " in rt
+            if _type_is_by_value_referenced(tname, rt) and not _is_pointer_spelling(
+                rt
             ):
                 by_value_types.add(tname)
         for param in func.params:
@@ -283,7 +318,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
                 if (
                     _type_is_by_value_referenced(tname, pt)
                     and param.pointer_depth == 0
-                    and not pt.endswith("*")
+                    and not _is_pointer_spelling(pt)
                 ):
                     by_value_types.add(tname)
     # Also check variables — a public variable of this type means it's by-value
@@ -294,8 +329,8 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if _type_is_by_value_referenced(tname, vt) and not (
-                vt.endswith("*") or "* " in vt
+            if _type_is_by_value_referenced(tname, vt) and not _is_pointer_spelling(
+                vt
             ):
                 by_value_types.add(tname)
     return by_value_types

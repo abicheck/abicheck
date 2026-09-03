@@ -505,6 +505,30 @@ def test_find_by_value_types_pointer_only_returns_empty():
     assert _find_by_value_types(snap, {"Hidden"}) == set()
 
 
+def test_find_by_value_types_recognizes_a_cv_qualified_pointer_no_space():
+    """Regression for the second-round Codex review on PR #1041:
+    ``"Handle *const"`` (and the no-space ``"Handle*const"`` clang/castxml
+    can also emit) previously matched neither ``endswith("*")`` nor
+    ``"* " in text``, so a genuinely pointer-only reference was wrongly
+    treated as a by-value exposure -- dropping a genuinely opaque type out
+    of both identity tiers and reporting its private layout change as
+    breaking. Checked across return type, parameter, and variable, and
+    across both the spaced and unspaced qualifier spelling."""
+    for pointer_spelling in ("Handle *const", "Handle*const", "Handle * const"):
+        snap = _snap(
+            functions=[
+                _fn(
+                    "f",
+                    "f",
+                    return_type=pointer_spelling,
+                    params=[Param(name="p", type=pointer_spelling, pointer_depth=1)],
+                )
+            ],
+            variables=[Variable(name="g", mangled="g", type=pointer_spelling)],
+        )
+        assert _find_by_value_types(snap, {"Handle"}) == set(), pointer_spelling
+
+
 def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
     """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
     ``RecordType.name``, which may be qualified (``ns::Handle``), while a
@@ -575,6 +599,41 @@ def test_find_by_value_types_leaf_widening_ignores_a_real_scope_collision():
         ]
     )
     assert _find_by_value_types(snap, opaque) == set()
+
+
+def test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap():
+    """**Documented, still-open** (Codex review on PR #1041, follow-up
+    round; see ``_type_is_by_value_referenced``'s own docstring): the leaf
+    widening's ``::``-prefix rejection closes the *qualified* collision
+    (``other::Handle``, see the sibling test above), but a genuinely
+    different scope's *bare* same-leaf reference carries no qualifier to
+    reject on at all, so it still matches ``ns::Handle``'s leaf candidate.
+    This mirrors the identical, already-accepted bare-name collision on the
+    suppression side (``TestKnownGapStaysDocumented`` in
+    ``tests/test_opaque_identity_tiers.py``) -- both are the same
+    limitation of spelling-only matching without an entity's real owning
+    scope, which only ``EntityId``-based identity resolution actually
+    closes. Pinned so a future tightening of this predicate doesn't
+    silently start relying on token boundaries to solve a problem only
+    scope-aware identity can solve -- change this assertion when that
+    lands, do not delete it."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "other_consume",
+                "other_consume",
+                return_type="void",
+                # In a real header this bare `Handle` would mean
+                # `other::Handle` (a function declared inside a different
+                # namespace) -- indistinguishable, from rendered text
+                # alone, from a bare reference that really does mean
+                # `ns::Handle`.
+                params=[Param(name="h", type="Handle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
 
 
 def test_type_is_by_value_referenced_handles_an_empty_leaf_spelling():
