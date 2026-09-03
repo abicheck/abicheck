@@ -269,3 +269,89 @@ class TestSeverityGateExitPrefersRunOutcomeGate:
             bindir,
         )
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
+
+
+class TestReportCompatVerdictPreservesOperationalFailures:
+    """`_report_compat_verdict` must not launder a real operational failure
+    into a plain compatibility break (Codex review, fresh evidence).
+
+    A directory/package release can legitimately carry BOTH axes at once: one
+    library's real `BREAKING` result (`run_outcome.compatibility`) alongside a
+    *different* library's failed extraction (`run_outcome.operational:
+    extraction_error`) -- with the release's own top-level `verdict` sentinel
+    (`"ERROR"`) recording exactly that combination
+    (`policy.outcome.run_outcome_dict_for_release`'s own docstring:
+    `compatibility` is deliberately never the release's reported sentinel).
+    Reading `run_outcome.compatibility` unconditionally would let
+    `_escalate_verdict_to_report` promote the Action's published verdict to
+    `BREAKING` and claim the severity policy produced this run's exit, hiding
+    that a library never finished comparing at all.
+    """
+
+    def test_an_operational_failure_is_not_escalated_to_a_compatibility_break(
+        self, tmp_path: Path
+    ) -> None:
+        report = {
+            "report_schema_version": "2.49",
+            # The release's own reported sentinel -- an operational failure,
+            # not a compatibility result. If `_report_compat_verdict` read
+            # `run_outcome.compatibility` here, it would see "BREAKING"
+            # instead and escalate to it, masking this sentinel entirely.
+            "verdict": "ERROR",
+            "changes": [],
+            "run_outcome": {
+                "schema_version": "1.0",
+                "compatibility": "BREAKING",
+                "assurance": None,
+                "gate": "none",
+                "operational": "extraction_error",
+                "lifecycle": "existing",
+            },
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=1, report=report)
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] != "BREAKING", outputs
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+    def test_a_none_operational_axis_still_lets_compatibility_escalate(
+        self, tmp_path: Path
+    ) -> None:
+        """The contrast case: with `operational: none`, a real `BREAKING`
+        result must still escalate exactly as before -- this fix narrows the
+        trust condition, it doesn't remove escalation altogether."""
+        report = {
+            "report_schema_version": "2.49",
+            "verdict": "COMPATIBLE",
+            "changes": [],
+            "run_outcome": {
+                "schema_version": "1.0",
+                "compatibility": "BREAKING",
+                "assurance": None,
+                "gate": "none",
+                "operational": "none",
+                "lifecycle": "existing",
+            },
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=1, report=report)
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "BREAKING", outputs

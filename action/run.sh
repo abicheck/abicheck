@@ -2578,7 +2578,7 @@ _severity_gate_categories() {
 # allowed between the two halves, which is what stops a `COMPATIBLE` verdict
 # line from matching on a later "breaking" word in its own explanatory tail.
 _report_compat_verdict() {
-  local _src _answer
+  local _src _answer _operational
   _src=$(_json_report_src)
   # ADR-063 Phase 7 (D6): the report's own `run_outcome.compatibility` is
   # this exact fact (`result.verdict`, unconditionally) under its canonical
@@ -2588,10 +2588,31 @@ _report_compat_verdict() {
   # `run_outcome.compatibility` is `null` (no real comparison ever ran, so
   # `_report_query` prints nothing for it -- `compat_verdict` may still hold
   # an operational sentinel string those reports use instead).
-  _answer=$(_report_query "$_src" run_outcome compatibility)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
+  #
+  # Only trusted when `run_outcome.operational` is absent or `none` (Codex
+  # review, fresh evidence): a directory/package release can legitimately
+  # carry BOTH axes at once -- one library's real `BREAKING` result
+  # (`compatibility`) alongside a *different* library's failed extraction
+  # (`operational: extraction_error`), with the release's own top-level
+  # `verdict` sentinel (`"ERROR"`) recording exactly that combination
+  # (`policy.outcome.run_outcome_dict_for_release`'s own docstring:
+  # `compatibility` is deliberately never the release's reported sentinel).
+  # Returning `compatibility` here unconditionally let a real operational
+  # failure silently launder into a plain compatibility break -- the
+  # escalation path below (`_escalate_verdict_to_report`) would then claim
+  # the severity policy produced this run's exit, hiding that a library
+  # never finished comparing at all. Falling through to the legacy
+  # `compat_verdict` query in that case preserves this function's original,
+  # correct behavior for a release report (its raw `verdict` field is the
+  # operational sentinel, which this function's own callers already know
+  # not to escalate on).
+  _operational=$(_report_query "$_src" run_outcome operational)
+  if [[ -z "$_operational" || "$_operational" == "none" ]]; then
+    _answer=$(_report_query "$_src" run_outcome compatibility)
+    if [[ -n "$_answer" ]]; then
+      echo "$_answer"
+      return
+    fi
   fi
   _answer=$(_report_query "$_src" compat_verdict)
   if [[ -n "$_answer" ]]; then
