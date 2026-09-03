@@ -372,20 +372,29 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     exactly what ``EntityId``-based identity resolution exists to close
     properly, not a heuristic patch here. See
     ``test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap``
-    in ``tests/test_cov95_diff_filtering.py`` for the pinned reproduction."""
+    in ``tests/test_cov95_diff_filtering.py`` for the pinned reproduction.
+
+    Each regex scan is gated on a plain substring check first (``tname in
+    text`` / ``leaf in text``) -- a token match always contains its own
+    candidate as a substring, so this is behavior-preserving, and it skips
+    the regex entirely for the common miss case on a snapshot with many
+    opaque candidates and few actual references (CodeRabbit review on
+    PR #1041)."""
     matched = False
-    for m in _type_token_matches(tname, text):
-        matched = True
-        if not _occurrence_is_indirect(text, m.end()):
-            return True
+    if tname in text:
+        for m in _type_token_matches(tname, text):
+            matched = True
+            if not _occurrence_is_indirect(text, m.end()):
+                return True
     if matched or "::" not in tname:
         return False
     leaf = depth_aware_bare_name(tname)
     if not leaf or leaf == tname:
         return False
-    for m in _unqualified_type_token_matches(leaf, text):
-        if not _occurrence_is_indirect(text, m.end()):
-            return True
+    if leaf in text:
+        for m in _unqualified_type_token_matches(leaf, text):
+            if not _occurrence_is_indirect(text, m.end()):
+                return True
     return False
 
 

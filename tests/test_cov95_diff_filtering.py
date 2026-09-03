@@ -776,6 +776,24 @@ def test_type_is_by_value_referenced_handles_an_empty_leaf_spelling():
     assert not _type_is_by_value_referenced("ns::", "ns::Handle used here")
 
 
+def test_type_is_by_value_referenced_substring_prefilter_is_behavior_preserving():
+    """The plain substring guard (`tname in text` / `leaf in text`) added
+    ahead of each regex scan (CodeRabbit review on PR #1041) is purely a
+    performance short-circuit -- it must not change the answer for either
+    a genuine miss (the name/leaf is absent entirely) or the token-boundary
+    near-miss case where the substring is present but embedded in a longer
+    identifier, so no real token match exists either way."""
+    from abicheck.compare.opaque_types import _type_is_by_value_referenced
+
+    # Absent entirely -- the substring guard skips the regex scan, same
+    # answer (False) as the unguarded scan would give.
+    assert not _type_is_by_value_referenced("ns::Handle", "totally unrelated text")
+    # Substring present but only as part of a longer identifier -- the
+    # guard lets the regex run (it must, to reject the embedded case), and
+    # the token-boundary regex itself still correctly declines the match.
+    assert not _type_is_by_value_referenced("ns::Handle", "ns::HandleWrapper used")
+
+
 def test_find_by_value_types_does_not_match_a_name_embedded_in_a_longer_identifier():
     """Regression for the follow-up Codex review on PR #1041: the scan
     matches a type-name *token*, never a bare substring, so an unrelated
