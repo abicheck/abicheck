@@ -379,3 +379,50 @@ class TestExecuteDumpRequestWithAssurance:
         assert dict(result.resolved_execution_context.compile_contexts) == {
             "input": fake_ctx
         }
+
+    def test_compile_context_excluded_for_a_json_snapshot_with_ld_script_looking_text(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, PR #1037, sixth round: `resolve_linker_script_chain`'s
+        own text-content probe has no way to know a call already established
+        the input is a serialized JSON snapshot -- `resolve_input` itself
+        never reaches linker-script handling for JSON (it short-circuits
+        earlier in its own dispatch order), but calling the chain resolver
+        independently, with no such short-circuit, risked a false positive
+        on a snapshot whose own bytes coincidentally contain an
+        ``INPUT(...)``-shaped literal naming a real co-located file.
+        ``sniff_text_format`` (the same check ``resolve_input`` itself
+        applies first) must exclude "json"/"perl" before the chain resolver
+        ever runs."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        # A real file the coincidental "INPUT(...)" text would resolve to,
+        # if the linker-script probe were reached at all.
+        (tmp_path / "libfoo.so.1").write_bytes(b"\x7fELF" + b"\x00" * 200)
+        snap_p = tmp_path / "lib.abi.json"
+        snap_p.write_text(
+            snapshot_to_json(_snapshot(version="INPUT(libfoo.so.1) note")),
+            encoding="utf-8",
+        )
+
+        request = DumpRequest(input=InputSpec(path=snap_p))
+        resolved = resolve_dump_request(request)
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(from_headers=True),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {}

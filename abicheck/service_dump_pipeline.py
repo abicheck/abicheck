@@ -722,55 +722,53 @@ def execute_dump_request(
                 ),
             )
         )
-        # Codex review, PR #1037 (five rounds -- see git history for the
+        # Codex review, PR #1037 (six rounds -- see git history for the
         # narrower, now-superseded gates this replaced): `with_assurance()`
         # alone leaves `compile_contexts` empty. `resolution.
         # effective_compile_context`, when the P0.3 fold produced one AND a
         # header-AST parse actually ran *this invocation*, is what
         # `ResolvedExecutionContext.compile_contexts`'s own docstring wants
-        # -- documented absent, not placeholder-valued, when no header-AST
-        # context was resolved. `DumpResult.effective_compile_context` stays
-        # unconditional either way (a separate, pre-existing field).
+        # -- documented absent, not placeholder-valued, otherwise.
+        # `DumpResult.effective_compile_context` stays unconditional either
+        # way (a separate, pre-existing field).
         #
-        # "Did a header-AST parse run" cannot be answered from `resolved.fmt`
-        # (computed from the *raw*, pre-resolution input path): a JSON
-        # snapshot or ABICC Perl dump input short-circuits straight to a
-        # loaded/imported snapshot in `resolve_input` with no parse at all,
-        # while a GNU ld linker script input resolves `fmt=None` on its own
-        # text-file path yet `resolve_input` follows it and *does* run a
-        # real parse against the real target underneath. Nor can it be
-        # answered from `snap.from_headers`/`snap.platform` alone: both are
-        # ordinary persisted `AbiSnapshot` fields, so a loaded JSON snapshot
-        # can carry an equally stale `True`/`"elf"` from whatever dump
-        # originally produced the file, not from this invocation.
-        # `resolve_linker_script_chain` is the identical primitive
-        # `checker.compare`'s own same-binary hashing already uses to answer
-        # "what does this input actually resolve to" for the identical
-        # multi-hop-script reason -- detecting *that* target's binary format
-        # is a real, per-invocation fact no persisted snapshot field can
-        # misreport, and it agrees with `resolved.fmt` for every input that
-        # isn't itself a linker script.
+        # "Did a header-AST parse run" is answered by detecting the format of
+        # the *actually-resolved* target, mirroring `resolve_input`'s own
+        # dispatch order rather than any single proxy: `resolved.fmt`/
+        # `snap.from_headers`/`snap.platform` each disagree with reality for
+        # some input shape (a loaded JSON/Perl snapshot short-circuits with
+        # no parse at all, yet can carry a stale `from_headers=True`/
+        # `platform` from whatever dump produced the file; a GNU ld linker
+        # script resolves `fmt=None` on its own text path even though
+        # `resolve_input` follows it and does run a real parse on the target
+        # underneath). `sniff_text_format` first rules out the two verbatim-
+        # load formats (same check `resolve_input` itself applies first, so
+        # a JSON snapshot whose own bytes coincidentally contain literal
+        # `INPUT(...)`-shaped text is never fed to the linker-script probe);
+        # only then does `resolve_linker_script_chain` -- the identical
+        # primitive `checker.compare`'s own same-binary hashing already uses
+        # for "what does this input actually resolve to" -- follow any
+        # script to its real target for detection.
         #
-        # `side.dump_manifest is None` (fourth Codex round):
-        # `resolution.effective_compile_context` is derived from the
-        # request/InputSpec's own compile settings only, but a manifest-
-        # driven dump's real header-AST parse runs under
-        # `dumper_manifest.resolve_header_ast_result`'s own manifest-
-        # authoritative `dump_manifest.frontend_context` instead (e.g.
-        # `"device"`) -- reproducing that resolution here, rather than
-        # excluding it, risks recording a wrong (`"host"`) context that
-        # actively misleads a consumer, which is worse than the field
-        # staying absent for this one input shape. A documented gap, not
-        # attempted here; the manifest path already has no
-        # `resolved_execution_context.evaluation_config`/other resolved
-        # fields either (see this pipeline's own "Not in scope" notes).
+        # `side.dump_manifest is None`: a manifest-driven dump's real
+        # header-AST parse runs under its own manifest-authoritative
+        # `dump_manifest.frontend_context` (e.g. `"device"`), not the
+        # request-derived context resolved here -- recording it would risk a
+        # wrong (`"host"`) toolchain, so this case is excluded rather than
+        # reconstructed (a documented gap; the manifest path already carries
+        # no `evaluation_config`/other resolved fields either).
         parsed_fmt = None
         if side.path is not None:
-            from .binary_utils import resolve_linker_script_chain
+            parsed_fmt = service.detect_binary_format(side.path)
+            if parsed_fmt is None and service.sniff_text_format(side.path) not in (
+                "json",
+                "perl",
+            ):
+                from .binary_utils import resolve_linker_script_chain
 
-            parsed_fmt = service.detect_binary_format(
-                resolve_linker_script_chain(side.path)
-            )
+                parsed_fmt = service.detect_binary_format(
+                    resolve_linker_script_chain(side.path)
+                )
         if (
             resolution.effective_compile_context is not None
             and snap.from_headers
