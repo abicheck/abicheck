@@ -13642,37 +13642,55 @@ legacy `functions`/`variables`/`types`/`enums` fields already have for a
 manifest dump (all read the identical merged lists), but not yet the IR's
 fuller multi-occurrence potential either.
 
-**Investigated, not landed: the naive fix is a no-op with today's
-`CanonicalEntity` fields.** The obvious close -- normalize each
-`TuFragment` before `merge_fragments` collapses identities, keyed by a real
-per-TU disambiguator -- was investigated and set aside, because it would
-produce zero observable difference for the exact case this gap names,
-not merely a smaller one. `merge_fragments`'s own trivial-merge rule (this
-module's own docstring, above) already restricts a compatible merge to a
-forward-declaration/full-definition pair, a declaration/redeclaration
-pair, or an added-default-argument difference -- and for a `RecordType`,
-none of `CanonicalEntity`'s four fields (`canonical_spelling`,
-`template_arguments`, `cv_qualification`, `producer`) vary across that
-specific split: `canonical_spelling`/`template_arguments` both derive from
-the record's own qualified name text, which a forward declaration and its
-definition share byte-for-byte; `cv_qualification` is `NOT_COLLECTED` for
-every record regardless (this normalizer never populates it for types,
-only for functions/variables); and `producer` cannot legitimately differ
-within one successful merge (a per-fragment AST-producer mismatch is
-`HETEROGENEOUS_ABI_CONTEXT`, a hard `TuMergeError` raised before any
-merge completes). Normalizing per-fragment and keying by a TU
-disambiguator would therefore build two `OccurrenceId`s mapping to two
-byte-identical `CanonicalEntity` values -- pure duplication with no
-information the single merged occurrence didn't already carry, for the
-one pair `merge_fragments` itself allows through as "compatible". Actually
-distinguishing the two would need a genuine model extension --
-`CanonicalEntity` growing a completeness/availability discriminator (e.g.
-"this occurrence is a forward declaration" vs. "this occurrence is the
-full definition") that does not exist today -- which is a real schema
-change with its own persistence/comparability implications (ADR-063
-Phase 0's `Fact[T]` discipline, `AbiSnapshot.semantic_ir`'s schema-v38
-envelope), not a caller-ordering fix, and is out of scope for a
-without-review speculative addition. A single-header dump remains
+**Investigated, not landed -- and a first analysis of this gap was itself
+corrected by review (Codex, PR #1024, fresh evidence), which is worth
+recording precisely rather than quietly fixing.** An earlier revision of
+this section argued the obvious close (normalize each `TuFragment` before
+`merge_fragments` collapses identities, keyed by a real per-TU
+disambiguator) was a no-op, reasoning that a `RecordType`'s forward-
+declaration/full-definition split produces two byte-identical
+`CanonicalEntity` PAYLOADS (`canonical_spelling`/`template_arguments` both
+derive from the qualified name text alone; `cv_qualification` is
+`NOT_COLLECTED` for every record regardless) and concluding genuinely
+closing the gap needed `CanonicalEntity` to grow a new completeness/
+availability field. That conflated the payload with the occurrence: two
+occurrences with identical payloads are still two distinct declarations,
+and `SemanticIR.occurrences` (keyed by `OccurrenceId`, not `EntityId`)
+exists precisely to preserve occurrence COUNT independent of whether two
+payloads happen to coincide -- so the "pure duplication" framing, and the
+model-extension conclusion drawn from it, were both wrong.
+
+**The real blocker is sharper, and still unresolved: nothing today
+distinguishes a genuine cross-TU declaration split from the ordinary,
+far more common case of the identical declaration observed redundantly
+because many TUs `#include` the same header.** Both shapes fold through
+the identical `tu_merge.merge_fragments`/`_merge_group` machinery to one
+successful merge result -- the per-key candidate list `_merge_group`
+builds internally (grouping each key's per-TU representative candidates
+before folding them) is exactly the signal that would distinguish the two
+cases, but it is discarded once folding completes; nothing surfaces it to
+a caller today. Naively disambiguating every manifest-dump occurrence by
+its originating TU, without that signal, would not repair the genuine-
+split case -- it would multiply the shared-header case (the overwhelming
+majority of entities in any real multi-TU dump) into one redundant
+occurrence per including TU, trading a real but narrow loss for a much
+larger one. The narrower-seeming alternative -- disambiguating only when
+the raw per-TU candidates are not literally equal -- is not obviously
+correct either without verification against real fixtures: a purely
+per-TU-incidental difference (e.g. only the TU that happens to include an
+annotated redeclaration sees a `[[deprecated]]` attribute the others
+don't) would trip that test too, even though `merge_fragments` itself
+already treats that shape as one compatible declaration via
+`_merge_identical_modulo_provenance`'s own provenance-blanking equality,
+not a real split. Genuinely closing this needs `tu_merge.py` to expose,
+per merged entity, a new trivial-vs-genuine-variance signal it does not
+have today -- a real design question in `tu_merge.py`'s own heavily-
+reviewed merge lattice (that module's docstring records a long history of
+narrow, fixture-driven corrections to its own compatible-merge rules),
+not a caller-ordering change in the normalizer, and one this codebase's
+own identity-heuristic history (AGENTS.md's "Primitive-level property
+tests" section) says deserves real scrutiny against fixtures before being
+trusted, not a first guess shipped untested. A single-header dump remains
 unaffected either way (nothing for the merge to collapse ahead of it).
 See `extract/semantic_normalizer.py`'s own docstring for the same note.
 The original Design/Files/Tests/Acceptance-criteria sections below are

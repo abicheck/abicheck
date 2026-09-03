@@ -783,17 +783,23 @@
   TUs into one *before* `normalize_header_ast` ever runs, so a real
   ODR-duplicate/incomplete-declaration pair spread across two TUs never
   reaches `SemanticIR.occurrences` as two occurrences the way one spread
-  across two header-AST parses of a single TU already does. **Investigated
-  and set aside, not merely unattempted**: the obvious fix (normalize each
-  TU fragment before the merge collapses identities) was traced through and
-  found to be a no-op for the one pair `merge_fragments` itself treats as
-  compatible (a record's forward-declaration/full-definition split) —
-  none of `CanonicalEntity`'s four fields actually differ between the two
-  occurrences it would produce, so genuinely closing this needs a real
-  model extension (a completeness/availability discriminator
-  `CanonicalEntity` does not carry today), not a caller-ordering change.
-  See the plan's own "Still not landed, and therefore this phase is not
-  complete" list for the full analysis.
+  across two header-AST parses of a single TU already does. **Investigated,
+  not merely unattempted — and a first analysis of it was itself corrected
+  (Codex review, PR #1024, fresh evidence)**: normalizing each TU fragment
+  before the merge collapses identities is not a no-op — two occurrences
+  with identical `CanonicalEntity` payloads are still two real
+  declarations, and `SemanticIR.occurrences` exists precisely to preserve
+  that count regardless of payload equality. The real, still-open blocker
+  is sharper: nothing today distinguishes a genuine cross-TU declaration
+  split from a declaration merely observed redundantly because many TUs
+  `#include` the same header — both shapes fold through the identical
+  `tu_merge.merge_fragments` machinery, and naively disambiguating every
+  occurrence by its originating TU would multiply the (far more common)
+  shared-header case into noise rather than fix the (rare) genuine-split
+  case. Closing this needs `tu_merge.py` to expose a new per-entity
+  trivial-vs-genuine-variance signal it does not have today. See the
+  plan's own "Still not landed, and therefore this phase is not complete"
+  list for the full analysis.
 - **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
   is **implemented**: `abicheck/policy/outcome.py` (new) defines
   `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`
