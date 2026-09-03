@@ -485,6 +485,15 @@ class TestDepthAwareBareName:
             == "S<(N >> 1), dep::Tag>"
         )
 
+    def test_does_not_split_on_a_braced_structural_template_argument(self) -> None:
+        """A C++20 structural non-type template argument's own braced
+        initializer (`S<A{1 < 2}>`, which clang can render verbatim) must
+        have its internal `<` tracked as nested like a paren/bracket, not
+        mistaken for a template opener that would prematurely close the
+        outer template and split inside it (Codex review on PR #1041,
+        follow-up round)."""
+        assert depth_aware_bare_name("api::S<A{1 < 2}>::Inner") == "Inner"
+
     def test_tolerates_unbalanced_brackets(self) -> None:
         """Defensive-floor coverage for the paren/bracket/angle depth
         guards: a stray closing `)`, `]`, or `>` with no matching opener

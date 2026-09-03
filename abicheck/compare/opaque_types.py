@@ -42,6 +42,7 @@ measure but not movable without a separate migration of
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -53,7 +54,10 @@ from ..model.identity_tiers import (
     snapshot_local_identity,
     stable_entity_id,
 )
-from ..model.qualified_name_split import skip_template_arguments
+from ..model.qualified_name_split import (
+    enclosing_close_positions,
+    skip_template_arguments,
+)
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -205,9 +209,9 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
 _CV_OR_SPACE_RE = re.compile(r"(?:\s+|\bconst\b|\bvolatile\b)*")
 
 
-def _type_token_match(spelling: str, text: str) -> re.Match[str] | None:
-    """The first occurrence of *spelling* in *text* as a whole type-name
-    token, never as part of a longer identifier, or ``None``.
+def _type_token_matches(spelling: str, text: str) -> Iterator[re.Match[str]]:
+    """Every occurrence of *spelling* in *text* as a whole type-name token,
+    never as part of a longer identifier.
 
     A plain ``spelling in text`` substring test (this scan's original
     behavior) matches ``Handle`` inside an unrelated ``OtherHandle`` just as
@@ -226,16 +230,21 @@ def _type_token_match(spelling: str, text: str) -> re.Match[str] | None:
     This alone does **not** stop a leaf spelling from matching inside a
     *different* qualified reference (``other::Handle`` still contains a
     token-bounded ``Handle``, since ``::`` is non-word on both sides) -- see
-    :func:`_unqualified_type_token_match`, which the leaf candidate uses
-    instead, for that closing half. Returns the ``re.Match`` (not a bool) so
-    :func:`_type_is_by_value_referenced` can classify indirection relative
-    to *this specific occurrence*, not the whole text."""
+    :func:`_unqualified_type_token_matches`, which the leaf candidate uses
+    instead, for that closing half. Yields every ``re.Match`` (not just the
+    first, and not a bool) so :func:`_type_is_by_value_referenced` can
+    classify indirection relative to *each* occurrence independently --
+    ``Pair<Handle*, Handle>`` has one indirect and one by-value occurrence
+    of ``Handle``, and stopping at the first match alone missed the second
+    (Codex review on PR #1041, follow-up round)."""
     pattern = r"(?<!\w)" + re.escape(spelling) + r"(?!\w)"
-    return re.search(pattern, text)
+    return re.finditer(pattern, text)
 
 
-def _unqualified_type_token_match(spelling: str, text: str) -> re.Match[str] | None:
-    """As :func:`_type_token_match`, plus refusing a match immediately
+def _unqualified_type_token_matches(
+    spelling: str, text: str
+) -> Iterator[re.Match[str]]:
+    """As :func:`_type_token_matches`, plus refusing a match immediately
     preceded by ``::`` -- i.e. *spelling* must appear bare, never as the
     trailing segment of a different qualified name.
 
@@ -246,20 +255,29 @@ def _unqualified_type_token_match(spelling: str, text: str) -> re.Match[str] | N
     dropping the genuinely opaque type out of both identity tiers and
     reporting its private layout change as breaking (Codex review on
     PR #1041, following up on the embedded-substring case
-    :func:`_type_token_match` alone closes). The full, already-qualified
+    :func:`_type_token_matches` alone closes). The full, already-qualified
     candidate is unaffected -- it is never scanned through this function --
     so a genuine ``ns::Handle`` reference still matches regardless of what
     precedes it."""
     pattern = r"(?<!\w)(?<!:)" + re.escape(spelling) + r"(?!\w)"
-    return re.search(pattern, text)
+    return re.finditer(pattern, text)
+
+
+def _sigil_follows(text: str, pos: int) -> bool:
+    """Whether *text* has a ``*``/``&`` at *pos*, after skipping whitespace
+    and a leading cv-qualifier keyword (:data:`_CV_OR_SPACE_RE`) -- so
+    ``"Handle *const"``/``"Handle const *"`` (either cv-qualifier order or
+    spacing) both still find the ``*``."""
+    m = _CV_OR_SPACE_RE.match(text, pos)
+    pos = m.end() if m else pos
+    return pos < len(text) and text[pos] in "*&"
 
 
 def _occurrence_is_indirect(text: str, end: int) -> bool:
-    """Whether the declarator sigil that applies to a matched type-name
-    occurrence -- skipping the occurrence's own ``<...>`` template
-    arguments (if any) and any whitespace/cv-qualifier keyword after them
-    -- is a pointer/reference, i.e. whether *this specific occurrence* is
-    passed by pointer/reference rather than by value.
+    """Whether a matched type-name occurrence is passed by pointer/
+    reference rather than by value, checking the occurrence's own
+    declarator sigil first and then, if none, every *enclosing*
+    declarator's sigil outward to true top level.
 
     Occurrence-relative, not a whole-text scan (Codex review on PR #1041,
     fresh evidence beyond every prior template-argument-nesting fix): for
@@ -284,20 +302,32 @@ def _occurrence_is_indirect(text: str, end: int) -> bool:
     genuine top-level indirection can sit only after they close:
     ``"Box<void (*)()> *"``'s trailing ``*`` makes ``Box`` a pointer, but
     it comes after the whole ``<void (*)()>``, not right after ``"Box"``
-    itself. ``"Handle *const"``/``"Handle const *"`` (either cv-qualifier
-    order or spacing) both still find the ``*`` via :data:`_CV_OR_SPACE_RE`;
-    ``"Handle&"``/``"Handle&&"`` need no such skip."""
-    pos = skip_template_arguments(text, end)
-    m = _CV_OR_SPACE_RE.match(text, pos)
-    pos = m.end() if m else pos
-    return pos < len(text) and text[pos] in "*&"
+    itself.
+
+    A sigil applying to an *enclosing* declarator protects a nested
+    occurrence too, not only the occurrence's own immediate sigil (Codex
+    review on PR #1041, follow-up round): ``Pair<Handle>*``'s ``Handle``
+    is itself followed only by ``>``, but the enclosing ``Pair<...>``'s
+    own trailing ``*`` means a consumer of that pointer never needs to
+    know ``Handle``'s layout either -- they never construct or copy a
+    ``Pair<Handle>`` by value, only ever hold a pointer to one.
+    :func:`~abicheck.model.qualified_name_split.enclosing_close_positions`
+    walks every bracket enclosing the occurrence, innermost first, so each
+    enclosing level's own trailing sigil is checked in turn."""
+    if _sigil_follows(text, skip_template_arguments(text, end)):
+        return True
+    return any(
+        _sigil_follows(text, enclosing_end)
+        for enclosing_end in enclosing_close_positions(text, end)
+    )
 
 
 def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     """Whether *text* references *tname* as a by-value type, trying both
     the full name and (when applicable) its unqualified leaf spelling, and
-    classifying indirection relative to whichever occurrence matched (see
-    :func:`_occurrence_is_indirect`).
+    classifying indirection relative to each occurrence that matched (see
+    :func:`_occurrence_is_indirect`) -- *any* by-value occurrence of either
+    candidate is enough to count as exposed.
 
     *tname* is ``RecordType.name`` -- which may be qualified
     (``"ns::Handle"``) even when the signature text this function scans
@@ -313,7 +343,7 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     ``opaque``, and the stable tier then suppresses the resulting finding
     with no spelling mismatch left to (accidentally) save it.
 
-    The full name is checked via :func:`_type_token_match`; an unqualified
+    The full name is checked via :func:`_type_token_matches`; an unqualified
     leaf spelling (the segment after the last *depth-zero* ``"::"`` -- see
     :func:`~abicheck.diff_helpers.depth_aware_bare_name`, since a naive
     ``rsplit("::", 1)`` would cut inside a qualified template argument
@@ -322,7 +352,7 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     Codex review on PR #1041, follow-up round; tried only when the leaf
     differs from the full name -- an already-bare name gets no second
     candidate) is checked via the *stricter*
-    :func:`_unqualified_type_token_match`, which additionally refuses a
+    :func:`_unqualified_type_token_matches`, which additionally refuses a
     match immediately preceded by ``::`` -- otherwise the leaf widening
     would treat a real, separately-scoped ``other::Handle`` reference as
     exposing ``ns::Handle`` too.
@@ -343,18 +373,20 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     properly, not a heuristic patch here. See
     ``test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap``
     in ``tests/test_cov95_diff_filtering.py`` for the pinned reproduction."""
-    m = _type_token_match(tname, text)
-    if m is not None:
-        return not _occurrence_is_indirect(text, m.end())
-    if "::" not in tname:
+    matched = False
+    for m in _type_token_matches(tname, text):
+        matched = True
+        if not _occurrence_is_indirect(text, m.end()):
+            return True
+    if matched or "::" not in tname:
         return False
     leaf = depth_aware_bare_name(tname)
     if not leaf or leaf == tname:
         return False
-    m = _unqualified_type_token_match(leaf, text)
-    if m is None:
-        return False
-    return not _occurrence_is_indirect(text, m.end())
+    for m in _unqualified_type_token_matches(leaf, text):
+        if not _occurrence_is_indirect(text, m.end()):
+            return True
+    return False
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:

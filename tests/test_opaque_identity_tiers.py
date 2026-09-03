@@ -394,3 +394,91 @@ def test_occurrence_is_indirect_handles_unbalanced_template_arguments():
     from abicheck.compare.opaque_types import _occurrence_is_indirect
 
     assert _occurrence_is_indirect("Handle<unterminated", 6) is False
+
+
+def test_find_by_value_types_checks_every_occurrence_not_just_the_first():
+    """Regression for the Codex review on PR #1041, follow-up round: when
+    the same opaque type occurs more than once in one rendered type text
+    and the first occurrence is indirect but a later one is by value, the
+    by-value occurrence must still be found. `Pair<Handle*, Handle>` has
+    `Handle` both as a pointer (first) and by value (second) template
+    argument -- the second must not be shadowed by the first."""
+    opaque = {"Handle"}
+    template = "Pair<Handle*, Handle>"
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[Function(name="f", mangled="f", return_type=template)],
+    )
+    assert "Handle" in _find_by_value_types(snap, opaque)
+
+
+def test_find_by_value_types_honors_an_enclosing_pointer():
+    """Regression for the Codex review on PR #1041, follow-up round: when
+    a matched type is a template argument of an outer type that is itself
+    only ever exposed by pointer (`Pair<Handle>*`), the enclosing pointer
+    protects the nested occurrence too -- a consumer holding only a
+    `Pair<Handle>*` never needs `Handle`'s own layout, since it never
+    constructs or copies a `Pair<Handle>` by value."""
+    opaque = {"Handle"}
+    template = "Pair<Handle>*"
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[Function(name="f", mangled="f", return_type=template)],
+    )
+    assert _find_by_value_types(snap, opaque) == set()
+
+
+def test_find_by_value_types_enclosing_pointer_does_not_shield_other_arguments():
+    """Complement of the enclosing-pointer fix: `Pair<Handle>*` protects
+    `Handle` because `Pair<Handle>` itself is only ever exposed by
+    pointer -- it must not also protect an unrelated *sibling* type that
+    is genuinely exposed by value elsewhere in the same signature."""
+    opaque = {"Handle", "Other"}
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[
+            Function(
+                name="f",
+                mangled="f",
+                return_type="void",
+                params=[
+                    Param(name="p", type="Pair<Handle>*", pointer_depth=1),
+                    Param(name="q", type="Other", pointer_depth=0),
+                ],
+            )
+        ],
+    )
+    found = _find_by_value_types(snap, opaque)
+    assert "Handle" not in found
+    assert "Other" in found
+
+
+def test_find_by_value_types_ignores_a_braced_structural_template_argument():
+    """Regression for the Codex review on PR #1041, follow-up round: a
+    C++20 structural non-type template argument's own braced initializer
+    (`S<A{1 < 2}>`, which clang can render verbatim) must not have its
+    internal `<` mistaken for a template opener -- `S` itself is by value
+    here (no top-level indirection follows the whole `<...>`), and the
+    brace's own `<`/`>` must not desynchronize the bracket stack for
+    whatever follows."""
+    opaque = {"S"}
+    template = "S<A{1 < 2}> *"
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[Function(name="f", mangled="f", return_type=template)],
+    )
+    # The trailing top-level '*' (after the braced argument closes) makes
+    # this a pointer, not a by-value exposure.
+    assert _find_by_value_types(snap, opaque) == set()
+
+    template_by_value = "S<A{1 < 2}>"
+    snap_by_value = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[Function(name="f", mangled="f", return_type=template_by_value)],
+    )
+    assert "S" in _find_by_value_types(snap_by_value, opaque)

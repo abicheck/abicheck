@@ -25,6 +25,7 @@ segment-splitting behavior this function's callers build on.
 from __future__ import annotations
 
 from abicheck.model.qualified_name_split import (
+    enclosing_close_positions,
     iter_top_level_chars,
     skip_template_arguments,
     split_top_level_scopes,
@@ -157,6 +158,14 @@ class TestIterTopLevelChars:
         quoted literal must not attempt to skip past the end of *text*."""
         assert _top_level("'\\") == ""
 
+    def test_a_braced_initializer_is_skipped_like_a_paren_or_bracket(self) -> None:
+        """A C++20 structural non-type template argument's own braced
+        initializer (`S<A{1 < 2}>`, which clang can render verbatim) must
+        have its internal `<` tracked as nested, not mistaken for a
+        template opener (Codex review on PR #1041, follow-up round)."""
+        assert _top_level("S<A{1 < 2}>") == "S"
+        assert _top_level("S<A{1 < 2}> *") == "S *"
+
 
 class TestSkipTemplateArguments:
     """`skip_template_arguments` -- the sibling stack loop
@@ -218,3 +227,83 @@ class TestSkipTemplateArguments:
 
     def test_an_unterminated_template_argument_list_consumes_the_rest(self) -> None:
         assert skip_template_arguments("Box<unterminated", 3) == len("Box<unterminated")
+
+    def test_a_braced_initializer_inside_the_arguments_is_skipped(self) -> None:
+        """A C++20 structural non-type template argument's own braced
+        initializer (`S<A{1 < 2}>`) must have its internal `<` tracked as
+        nested, not mistaken for a template opener (Codex review on
+        PR #1041, follow-up round)."""
+        text = "S<A{1 < 2}> *"
+        end = skip_template_arguments(text, 1)
+        assert text[end:] == " *"
+
+
+class TestEnclosingClosePositions:
+    """`enclosing_close_positions` -- the primitive
+    `compare.opaque_types._occurrence_is_indirect` uses to check every
+    bracket level enclosing a matched occurrence (not just its own level)
+    for a following `*`/`&` (Codex review on PR #1041, follow-up round:
+    "honor enclosing pointers around nested type occurrences")."""
+
+    def test_no_enclosing_bracket_at_true_top_level(self) -> None:
+        assert enclosing_close_positions("Handle *", 6) == []
+
+    def test_a_single_enclosing_paren(self) -> None:
+        text = "f(Handle) *"
+        # pos 8 is just after "Handle", inside the "(...)".
+        assert enclosing_close_positions(text, 8) == [9]
+        assert text[9:] == " *"
+
+    def test_a_single_enclosing_bracket(self) -> None:
+        text = "arr[Handle] *"
+        assert enclosing_close_positions(text, 10) == [11]
+        assert text[11:] == " *"
+
+    def test_a_single_enclosing_brace(self) -> None:
+        text = "S<A{Handle}> *"
+        assert enclosing_close_positions(text, 10) == [11, 12]
+        assert text[11:] == "> *"
+        assert text[12:] == " *"
+
+    def test_a_single_enclosing_angle_bracket(self) -> None:
+        text = "Pair<Handle> *"
+        assert enclosing_close_positions(text, 11) == [12]
+        assert text[12:] == " *"
+
+    def test_multiple_nested_enclosing_levels_innermost_first(self) -> None:
+        text = "Outer<Pair<Handle>> *"
+        # pos 17 is just after "Handle", nested inside two "<...>" levels.
+        closes = enclosing_close_positions(text, 17)
+        assert closes == [18, 19]
+        assert text[18:] == "> *"
+        assert text[19:] == " *"
+
+    def test_a_bracket_not_enclosing_pos_is_not_returned(self) -> None:
+        """A bracketed group that closes *before* `pos` is unrelated and
+        must not appear in the result."""
+        text = "(Other) Handle *"
+        assert enclosing_close_positions(text, 14) == []
+
+    def test_unbalanced_opening_brackets_are_defensively_dropped(self) -> None:
+        """An opener with no matching closer anywhere in *text* (malformed/
+        adversarial rendered text) must not appear in the result -- there is
+        no "just after close" position for it."""
+        assert enclosing_close_positions("(Handle", 7) == []
+
+    def test_a_quoted_literal_before_pos_does_not_confuse_the_scan(self) -> None:
+        text = "f('>', Handle) *"
+        assert enclosing_close_positions(text, 13) == [14]
+        assert text[14:] == " *"
+
+    def test_a_backslash_escaped_quote_before_pos_does_not_end_it_early(self) -> None:
+        text = "f('\\'', Handle) *"
+        assert enclosing_close_positions(text, 14) == [15]
+        assert text[15:] == " *"
+
+    def test_a_stray_closing_bracket_before_pos_does_not_underflow_the_stack(
+        self,
+    ) -> None:
+        """A ')' with no matching '(' anywhere before *pos* (malformed/
+        adversarial rendered text) must not raise or pop an empty stack --
+        defensive floor, mirroring `iter_top_level_chars`'s own."""
+        assert enclosing_close_positions(")Handle", 7) == []

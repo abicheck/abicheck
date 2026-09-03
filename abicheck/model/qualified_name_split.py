@@ -73,6 +73,7 @@ import re as _re
 from collections.abc import Iterator as _Iterator
 
 __all__ = [
+    "enclosing_close_positions",
     "is_inline_abi_namespace_segment",
     "iter_top_level_chars",
     "skip_template_arguments",
@@ -173,8 +174,8 @@ def split_top_level_scopes(qualified: str) -> list[str]:
 
 def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
     """Yield ``(index, char)`` for every character of *text* sitting at
-    true top level -- outside any ``(...)``/``[...]``/``<...>`` bracket
-    nesting and outside any quoted string/character literal.
+    true top level -- outside any ``(...)``/``[...]``/``{...}``/``<...>``
+    bracket nesting and outside any quoted string/character literal.
 
     Tracks a bracket-KIND-aware STACK, not a flat depth counter, mirroring
     ``extract.semantic_normalizer_artifacts.has_unresolved_component``'s
@@ -189,7 +190,12 @@ def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
     yielded, a caller never sees them directly; it only ever learns where
     the *other* top-level characters are (``::``, ``*``, ``&``, ...),
     which is all :func:`~abicheck.diff_helpers.depth_aware_bare_name` and
-    :func:`~abicheck.compare.opaque_types._is_indirect_spelling` need.
+    :func:`~abicheck.compare.opaque_types._occurrence_is_indirect` need.
+    ``{...}`` -- a C++20 structural non-type template argument's own
+    braced initializer, which clang can render verbatim (``S<A{1 < 2}>``)
+    -- is tracked the same way ``(...)``/``[...]`` are, so a comparison
+    ``<`` inside one isn't mistaken for a template opener either (Codex
+    review on PR #1041).
 
     Adds quote handling on top of that shared design (not needed by
     ``has_unresolved_component``'s own castxml-sentinel search, needed by
@@ -211,13 +217,13 @@ def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
                 quote = ""
         elif ch in "'\"":
             quote = ch
-        elif ch in "([":
+        elif ch in "([{":
             stack.append(ch)
-        elif ch in ")]":
+        elif ch in ")]}":
             if stack:
                 stack.pop()
         elif ch == "<":
-            if not stack or stack[-1] not in "([":
+            if not stack or stack[-1] not in "([{":
                 stack.append(ch)
         elif ch == ">":
             if stack and stack[-1] == "<":
@@ -246,7 +252,10 @@ def skip_template_arguments(text: str, pos: int) -> int:
     one immediately after the type name's bare identifier: ``"Box<void
     (*)()> *"``'s trailing ``*`` genuinely makes ``Box`` a pointer, but it
     sits only after the whole ``<void (*)()>`` closes, not right after
-    ``"Box"`` itself (Codex review on PR #1041).
+    ``"Box"`` itself (Codex review on PR #1041). Tracks ``{...}`` the same
+    way as ``(...)``/``[...]`` -- a C++20 structural non-type argument's
+    braced initializer (``S<A{1 < 2}>``) is a bracket group too, not a
+    template opener (Codex review on PR #1041, follow-up round).
     """
     if pos >= len(text) or text[pos] != "<":
         return pos
@@ -263,15 +272,71 @@ def skip_template_arguments(text: str, pos: int) -> int:
                 quote = ""
         elif ch in "'\"":
             quote = ch
-        elif ch in "([":
+        elif ch in "([{":
             stack.append(ch)
-        elif ch in ")]":
+        elif ch in ")]}":
             stack.pop()
         elif ch == "<":
-            if stack[-1] not in "([":
+            if stack[-1] not in "([{":
                 stack.append("<")
         elif ch == ">":
             if stack[-1] == "<":
                 stack.pop()
         i += 1
     return i
+
+
+def enclosing_close_positions(text: str, pos: int) -> list[int]:
+    """The index just after each bracket's own matching close, one entry
+    per ``(``/``[``/``{``/``<`` bracket that encloses *pos* in *text*,
+    ordered innermost first -- empty when *pos* sits at true top level.
+
+    One forward scan of *text* (the identical bracket-KIND-aware,
+    quote-aware stack :func:`iter_top_level_chars`/
+    :func:`skip_template_arguments` use), snapshotting which brackets are
+    still open at the moment the scan reaches *pos*, then resolving each
+    of those brackets' own eventual close position from the same pass.
+
+    For a caller asking "is the type-name occurrence ending at *pos*
+    exposed by value", the occurrence's own immediate declarator sigil is
+    only the *innermost* answer -- ``Pair<Handle>*``'s ``Handle`` is
+    followed by ``>``, not a sigil, but the *enclosing* ``Pair<...>``'s
+    own trailing ``*`` means a consumer of that pointer never needs
+    ``Handle``'s layout either (Codex review on PR #1041, follow-up
+    round). Checking every enclosing close position outward, not just the
+    occurrence's own, is what answers that.
+    """
+    stack: list[tuple[str, int]] = []
+    quote = ""
+    closes: dict[int, int] = {}
+    enclosing_at_pos: list[int] | None = None
+    i, n = 0, len(text)
+    while i < n:
+        if enclosing_at_pos is None and i >= pos:
+            enclosing_at_pos = [start for _, start in reversed(stack)]
+        ch = text[i]
+        if quote:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "([{":
+            stack.append((ch, i))
+        elif ch in ")]}":
+            if stack:
+                _, start = stack.pop()
+                closes[start] = i + 1
+        elif ch == "<":
+            if not stack or stack[-1][0] not in "([{":
+                stack.append((ch, i))
+        elif ch == ">":
+            if stack and stack[-1][0] == "<":
+                _, start = stack.pop()
+                closes[start] = i + 1
+        i += 1
+    if enclosing_at_pos is None:
+        enclosing_at_pos = [start for _, start in reversed(stack)]
+    return [closes[start] for start in enclosing_at_pos if start in closes]
