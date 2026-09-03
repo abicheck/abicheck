@@ -195,6 +195,108 @@ class TestCompareRequestGateOptions:
         assert explicit_none.exit_decision.code == omitted.exit_decision.code == 4
 
 
+class TestCompareRequestContractContextGateReceipt:
+    """Round-6 review (Codex, fresh evidence, PR #1032): `classify_compare_
+    pair` scored `CompareResult.exit_decision` from the request's
+    `severity_preset`/`exit_code_scheme`, but never installed the same gate
+    onto `result.diff.contract_context.evaluation_context.resolved_config`
+    -- so a `contract_evaluation=True` request combined with a non-default
+    gate persisted a context whose resolved config still described
+    `checker.compare`'s own built-in defaults, disagreeing with the exit
+    decision actually computed. Regression proves the receipt now reflects
+    the request's real gate, not just that the exit code changed (that half
+    was already covered by `TestCompareRequestGateOptions` above)."""
+
+    def _run(self, old: Path, new: Path, **kwargs):
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        return run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old),
+                new=InputSpec(path=new),
+                contract_evaluation=True,
+                **kwargs,
+            )
+        )
+
+    def test_resolved_config_reflects_the_requests_own_gate(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+        )
+        ctx = result.diff.contract_context
+        assert ctx is not None
+        cfg = ctx.evaluation_context.resolved_config
+        assert cfg.gate.exit_code_scheme == "severity"
+        assert cfg.gate.preset is not None
+        assert cfg.gate.preset.id == "info-only"
+        # The receipt's severity config must be the one that actually
+        # demoted the exit code, not a coincidentally-matching default.
+        from abicheck.policy.severity import SeverityLevel
+
+        assert cfg.gate.severity.abi_breaking == SeverityLevel.INFO
+        # And it must agree with the compatibility contribution the same
+        # gate actually scored (the run's overall exit code also carries an
+        # orthogonal contract-coverage contribution here, since no
+        # `--contract` domain was selected -- see `ExitDecision.
+        # compatibility_contribution`, the axis this gate controls).
+        assert result.exit_decision.compatibility_contribution == 0
+
+    def test_resolved_config_disagrees_between_two_different_gates(
+        self, tmp_path: Path
+    ) -> None:
+        """A second regression angle: two requests differing only in
+        `severity_preset` must persist two different receipts, not the same
+        default both times (which a no-op fix could still pass if the
+        default preset happened to match one of the two)."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        info_only = self._run(
+            old, new, exit_code_scheme="severity", severity_preset="info-only"
+        )
+        strict = self._run(
+            old, new, exit_code_scheme="severity", severity_preset="strict"
+        )
+        info_cfg = info_only.diff.contract_context.evaluation_context.resolved_config
+        strict_cfg = strict.diff.contract_context.evaluation_context.resolved_config
+        assert info_cfg.gate.preset.id == "info-only"
+        assert strict_cfg.gate.preset.id == "strict"
+        assert info_cfg.gate.severity != strict_cfg.gate.severity
+
+    def test_legacy_scheme_still_persists_a_real_severity_config(
+        self, tmp_path: Path
+    ) -> None:
+        """An explicit `exit_code_scheme="legacy"` clears `GateOptions.
+        severity` to `None` (`resolve_release_gate_options`'s own
+        contract) -- `with_resolved_gate` requires a real `SeverityConfig`
+        regardless, so the receipt must not crash or silently omit one."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(old, new, exit_code_scheme="legacy")
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.gate.exit_code_scheme == "legacy"
+        from abicheck.severity import SeverityConfig
+
+        assert isinstance(cfg.gate.severity, SeverityConfig)
+
+    def test_default_request_leaves_the_default_receipt_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        """No severity/exit_code_scheme fields set -> the receipt still
+        resolves (this fix runs unconditionally), and reports the same
+        legacy default the pre-fix built-in-default context also claimed --
+        so the fix is invisible for every pre-existing `--contract`-only
+        caller."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(old, new)
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.gate.exit_code_scheme == "legacy"
+
+
 class TestScanRequestGateOptions:
     """`ScanRequest.severity_preset`/`exit_code_scheme` -> `run_scan`'s
     `sev_config`/`exit_code_scheme` forward into `run_scan_core` (only

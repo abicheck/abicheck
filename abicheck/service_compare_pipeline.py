@@ -615,6 +615,16 @@ def classify_compare_pair(
         "severity" if gate.severity is not None else "legacy",
     )
 
+    # Round-6 review (Codex, fresh evidence): the gate resolved just above
+    # scores `exit_decision`, but was never installed onto
+    # `result.contract_context.evaluation_context.resolved_config` -- see
+    # `workflows.compare_gate_receipt.install_resolved_gate_receipt`'s own
+    # module docstring for the full account (split out to stay under this
+    # file's line cap).
+    from .workflows.compare_gate_receipt import install_resolved_gate_receipt
+
+    install_resolved_gate_receipt(result, request, gate, pf)
+
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
     # list this call already resolved instead of loading it a second time.
