@@ -104,6 +104,7 @@ RELATED_RULES: dict[str, list[str]] = {
     # -- oneTBB case studies --
     "case78_task_arena_attach_tag": [
         "compat-addition",
+        "compatible-type-added",
         "exported-function-removed",
         "exported-type-removed",
     ],
@@ -118,12 +119,14 @@ RELATED_RULES: dict[str, list[str]] = {
         "exported-type-removed",
     ],
     "case108_task_class_removed": [
+        "compatible-type-added",
         "exported-function-removed",
         "exported-type-removed",
         "var-removed",
         "virtual-dispatch-contract-removed",
     ],
     "case109_flow_graph_policy_renames": [
+        "compatible-type-added",
         "public-typedef-removed",
         "tag-struct-renamed",
     ],
@@ -174,6 +177,7 @@ RELATED_RULES: dict[str, list[str]] = {
     "case151_xcheck_provider_matrix": ["audit-private-header-leak"],
     # -- call-graph / header-graph reconciliation capability scenarios --
     "case191_header_only_graph_field_type": [
+        "compatible-type-added",
         "embedded-type-size-increased",
         "public-api-gains-internal-dependency",
         "type-field-added-compatible",

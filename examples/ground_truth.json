@@ -4216,6 +4216,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compatible-type-added",
     "exported-function-removed",
     "exported-type-removed",
     "var-removed",
@@ -4238,6 +4239,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compatible-type-added",
     "public-typedef-removed",
     "tag-struct-renamed"
    ],
@@ -5747,6 +5749,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compatible-type-added",
     "embedded-type-size-increased",
     "public-api-gains-internal-dependency",
     "type-field-added-compatible"
@@ -6811,6 +6814,7 @@
    "validation_owner": "compiler-pair",
    "related_rules": [
     "compat-addition",
+    "compatible-type-added",
     "exported-function-removed",
     "exported-type-removed"
    ],
