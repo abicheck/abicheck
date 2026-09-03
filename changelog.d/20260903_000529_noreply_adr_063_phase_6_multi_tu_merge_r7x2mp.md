@@ -18,4 +18,14 @@
   occurrences; the far more common case — many TUs `#include` the
   identical, unmodified header — reports the identical `file:line` from
   every including TU and correctly collapses to one. Verified end-to-end
-  against real clang output for both cases.
+  against real clang output for both cases. Two follow-up review findings
+  closed the same fix's remaining gaps: disambiguation now applies only to
+  an `EntityId` that genuinely has more than one distinct `source_location`
+  across the contributing fragments, so a single-TU manifest's occurrence
+  IDs stay canonical (identical to a non-manifest normalization's) instead
+  of always gaining a nonempty disambiguator; and a TU-local (`static`/
+  anonymous-namespace) function or variable — a genuinely distinct
+  declaration in every TU that defines one, even from an identical shared
+  header at an identical location — is now disambiguated by its own
+  `tu_name` unconditionally, mirroring `tu_merge._function_key`'s existing
+  internal-linkage scoping.

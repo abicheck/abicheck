@@ -37,6 +37,7 @@ import pytest
 from abicheck.dump_manifest import TranslationUnit
 from abicheck.dumper_manifest import run_tu_loop
 from abicheck.model.fact import FactStatus
+from abicheck.model.occurrence import canonical_key
 from abicheck.tu_fragment import MergedTuFragments
 
 
@@ -126,7 +127,14 @@ def test_redundant_shared_header_observation_collapses_to_one_occurrence(
 def test_single_tu_manifest_semantic_ir_matches_legacy_shape(tmp_path: Path) -> None:
     """A one-TU manifest is the degenerate case: nothing to fold across
     TUs, so exactly one occurrence must reach the IR, with the identical
-    canonical payload a single-header (non-manifest) dump would produce."""
+    canonical payload a single-header (non-manifest) dump would produce.
+
+    Codex review, second round: the *occurrence ID itself* must match too,
+    not just the payload -- a nonempty, path-derived disambiguator stamped
+    onto every occurrence purely because ``--dump-manifest`` was used would
+    silently fork every persisted ID and ``canonical_key()`` value from the
+    equivalent non-manifest normalization's, even with only one TU and
+    therefore nothing to disambiguate."""
     _requires_clang()
     header = tmp_path / "solo.h"
     header.write_text("struct Solo { int a; };\n")
@@ -137,6 +145,65 @@ def test_single_tu_manifest_semantic_ir_matches_legacy_shape(tmp_path: Path) -> 
     (solo_type,) = [t for t in merged.types if t.name == "Solo"]
     assert solo_type.entity_id is not None
     (occ_id,) = merged.semantic_ir.occurrences_for(solo_type.entity_id)
+    assert occ_id.disambiguator == ""
+    assert canonical_key(occ_id) == solo_type.entity_id.key
     entity = merged.semantic_ir.occurrences[occ_id]
     assert entity.canonical_spelling.status is FactStatus.PRESENT
     assert entity.canonical_spelling.value == "Solo"
+
+
+def test_internal_linkage_function_keeps_a_distinct_occurrence_per_tu(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: a `static` function declared in a
+    header shared by multiple TUs is a genuinely distinct, TU-scoped
+    declaration in each one -- not a redundant observation of "the same"
+    function -- even though its `EntityId` (mangled-name-derived) and its
+    `source_location` are identical in every including TU, so neither of
+    this module's other two disambiguation signals can tell them apart.
+    `tu_merge._function_key` already keys a TU-local function by `tu_name`
+    for exactly this reason; this asserts the IR does the same."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("static int helper() { return 1; }\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    helper_fns = [f for f in merged.functions if f.name == "helper"]
+    assert len(helper_fns) == 2, "tu_merge already keeps two TU-local declarations"
+    entity_ids = {fn.entity_id for fn in helper_fns}
+    assert None not in entity_ids
+    (entity_id,) = entity_ids  # same mangled name -> same EntityId in both TUs
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 2
+    disambiguators = {occ.disambiguator for occ in occurrences}
+    assert disambiguators == {"tu_a", "tu_b"}
+
+
+def test_external_linkage_function_in_a_shared_header_still_collapses(
+    tmp_path: Path,
+) -> None:
+    """Negative control for the internal-linkage fix: an ordinary,
+    externally-linked function declared in a header shared by multiple TUs
+    is still the same one declaration and must still collapse to a single
+    occurrence -- the TU-local disambiguator must not fire for it."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("int helper();\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    (helper_fn,) = [f for f in merged.functions if f.name == "helper"]
+    assert helper_fn.entity_id is not None
+    occurrences = merged.semantic_ir.occurrences_for(helper_fn.entity_id)
+    assert len(occurrences) == 1
