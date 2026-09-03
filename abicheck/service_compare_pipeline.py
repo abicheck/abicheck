@@ -688,7 +688,6 @@ def run_compare(
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
-    *,
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
@@ -698,6 +697,7 @@ def run_compare(
     pack_internal_namespaces: tuple[str, ...] | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    *,
     severity_preset: str | None = None,
     exit_code_scheme: str | None = None,
 ) -> CompareResult:
@@ -707,16 +707,16 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
-    Trailing keyword-only params (``debuginfod_url`` onward, now enforced by
-    a ``*`` separator -- CodeRabbit review, PR #1032: ``severity_preset``/
-    ``exit_code_scheme`` were added under this claim without one, silently
-    still accepting positional binding) are appended after every
-    pre-existing one, never alongside a thematically-closer neighbor, so a
-    positional caller keeps binding each argument to the same parameter it
-    always did (Codex review, PR #551); every real caller already uses
-    keywords, so this changes no call site. ``include_dependencies``
-    applies to *both* sides — build a ``CompareRequest`` for a per-side
-    override.
+    Trailing params (``debuginfod_url`` onward) are appended after every
+    pre-existing one, so a positional caller keeps binding each argument to
+    the same parameter it always did (Codex review, PR #551). Only
+    ``severity_preset``/``exit_code_scheme`` (the two newest, never
+    previously released) are actually ``*``-enforced keyword-only --
+    enforcing it retroactively for the older ones too would reject a real
+    caller still passing one positionally, the public-API break that
+    "keeps binding positionally" promise forbids (Codex review, fresh
+    evidence, PR #1032). ``include_dependencies`` applies to *both* sides —
+    build a ``CompareRequest`` for a per-side override.
 
     ``pack_policy_overrides``/``pack_internal_namespaces``: an already-
     resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``

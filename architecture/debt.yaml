@@ -2093,12 +2093,12 @@
     },
     {
       "path": "tests/test_service_unit.py",
-      "baseline_lines": 5578,
+      "baseline_lines": 5593,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 5554 -> 5558 (2026-09-03): TestContractEvaluationThreading.test_contract_evaluation_appended_last_preserves_positional_order updated for run_compare's two new trailing severity_preset/exit_code_scheme parameters (Codex review, PR #1032: run_compare had no way to forward CompareRequest's ADR-064/PR G2 gate fields). Raised 5558 -> 5578 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): added test_trailing_params_are_actually_keyword_only, a regression test for run_compare's `*` separator fix (severity_preset/exit_code_scheme silently accepted positional binding, contradicting the docstring's own \"keyword-only\" claim for every param from debuginfod_url onward).",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 5554 -> 5558 (2026-09-03): TestContractEvaluationThreading.test_contract_evaluation_appended_last_preserves_positional_order updated for run_compare's two new trailing severity_preset/exit_code_scheme parameters (Codex review, PR #1032: run_compare had no way to forward CompareRequest's ADR-064/PR G2 gate fields). Raised 5558 -> 5578 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): added test_trailing_params_are_actually_keyword_only, a regression test for run_compare's `*` separator fix (severity_preset/exit_code_scheme silently accepted positional binding, contradicting the docstring's own \"keyword-only\" claim for every param from debuginfod_url onward). Raised 5578 -> 5593 (2026-09-03, Codex P1 review, fresh evidence, PR #1032): that fix over-enforced -- the `*` landed before debuginfod_url, retroactively making every pre-existing param from there on keyword-only too, a public-API break for any real caller still passing one positionally. Renamed/rewrote the test as test_new_gate_params_are_keyword_only_without_breaking_older_ones: asserts severity_preset/exit_code_scheme are KEYWORD_ONLY and every older trailing param (debuginfod_url through depth) stays POSITIONAL_OR_KEYWORD.",
       "review_by": "2026-11-30"
     },
     {

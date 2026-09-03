@@ -488,7 +488,6 @@ Compare two ABI inputs and return the classified diff result.
 | `force_public_symbols` | `set[str] \| None` | `None` |
 | `pattern_verdicts` | `bool` | `False` |
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
-| *(keyword-only below)* | | |
 | `debuginfod_url` | `str \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
@@ -498,6 +497,7 @@ Compare two ABI inputs and return the classified diff result.
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `compile_context` | `CompileContext \| None` | `None` |
 | `depth` | `str \| None` | `None` |
+| *(keyword-only below)* | | |
 | `severity_preset` | `str \| None` | `None` |
 | `exit_code_scheme` | `str \| None` | `None` |
 

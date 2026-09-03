@@ -3245,25 +3245,40 @@ class TestContractEvaluationThreading:
         assert params[-9] == "contract_evaluation"
         assert params[-10] == "diagnostic_comparison"
 
-    def test_trailing_params_are_actually_keyword_only(self):
-        """CodeRabbit review, fresh evidence, PR #1032: this docstring has
-        claimed every param from `debuginfod_url` onward is "keyword-only"
-        since PR #551, but no `*` separator ever enforced it -- `severity_
-        preset`/`exit_code_scheme` (ADR-064/PR G2) were added under that
-        same claim and, like every param before them, still silently
-        accepted positional binding. Fixed by adding the `*` separator
-        before `debuginfod_url`; every real caller in this codebase already
-        passes these by keyword, so this changes no existing call site."""
+    def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
+        """CodeRabbit review, fresh evidence, PR #1032, then corrected by a
+        P1 Codex finding on the first fix: this docstring has claimed every
+        param from `debuginfod_url` onward is "keyword-only" since PR #551,
+        but no `*` separator ever enforced it -- `severity_preset`/
+        `exit_code_scheme` (ADR-064/PR G2) were added under that same claim
+        and, like every param before them, still silently accepted
+        positional binding. The first fix added `*` before `debuginfod_url`,
+        which closed the gap for the two new params but retroactively made
+        every *pre-existing* param from `debuginfod_url` onward (e.g.
+        `compile_context`, `depth`) keyword-only too -- a public-API break
+        for any real caller still passing one of them positionally, which
+        this same docstring's "keeps binding positionally" guarantee
+        forbids. Corrected by moving the `*` to right before
+        `severity_preset`: only the two newest, never-previously-released
+        params are actually enforced; every older param keeps accepting
+        positional binding exactly as before."""
         import inspect
 
         params = inspect.signature(run_compare).parameters
-        keyword_only_from = "debuginfod_url"
-        seen_marker = False
-        for name, param in params.items():
-            if name == keyword_only_from:
-                seen_marker = True
-            if seen_marker:
-                assert param.kind is inspect.Parameter.KEYWORD_ONLY, name
+        assert params["severity_preset"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["exit_code_scheme"].kind is inspect.Parameter.KEYWORD_ONLY
+        for name in (
+            "debuginfod_url",
+            "diagnostic_comparison",
+            "contract_evaluation",
+            "include_dependencies",
+            "contract_mode",
+            "pack_policy_overrides",
+            "pack_internal_namespaces",
+            "compile_context",
+            "depth",
+        ):
+            assert params[name].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into
