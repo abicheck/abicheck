@@ -17,7 +17,7 @@ A tiny shared library, `mathutils`, ships two releases:
 |---|---|---|
 | `mathutils.h` | `add`, `subtract`, `multiply` | `add`, `multiply` — **`subtract` removed** |
 
-```
+```text
 v1/mathutils.h   v1/mathutils.c
 v2/mathutils.h   v2/mathutils.c
 ```
