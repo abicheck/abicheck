@@ -54,7 +54,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 
 ## What a report looks like
 
-The run below compares two builds where a struct gained a field in the middle, two enum values swapped, a parameter changed type, and a function disappeared. Markdown is the default; the same content is available as JSON, SARIF, HTML, and JUnit. Abridged from real output.
+The run below compares two builds where a struct gained a field in the middle, two enum values swapped, and a function disappeared. Markdown is the default; the same content is available as JSON, SARIF, HTML, and JUnit. Abridged from real output.
 
 ```text
 $ abicheck compare v1/libfoo.so.1 v2/libfoo.so.2 --header old=v1/foo.h --header new=v2/foo.h
@@ -76,10 +76,19 @@ Checks enabled for this scan (and why others are not):
 ```markdown
 # ABI Report: libfoo.so.1
 
-| **Verdict** | ❌ `BREAKING` |  Breaking changes: 5 · Compatible changes: 1 |
+| | |
+|---|---|
+| **Verdict** | ❌ `BREAKING` |
+| Breaking changes | 5 |
+| Source-level breaks | 0 |
+| Compatible changes | 1 |
 
 ## Release Recommendation
-| Version bump | 🔴 **MAJOR** |   SONAME action: `bump_required`
+
+| Field | Value |
+|---|---|
+| Version bump | 🔴 **MAJOR** |
+| SONAME action | `bump_required` |
 
 ## ❌ Breaking Changes
 
@@ -89,6 +98,8 @@ Checks enabled for this scan (and why others are not):
 - **type_field_offset_changed**: Field offset changed: point::y (32 → 64 bits) — `include/foo.h:2`
   > Old code reads/writes fields at stale offsets; silent data corruption.
 - **enum_member_value_changed**: Enum member value changed: color::GREEN (`1` → `2`)
+  > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
+- **enum_member_value_changed**: Enum member value changed: color::BLUE (`2` → `1`)
   > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
 - **func_removed**: Public function removed: legacy_helper — `include/foo.h:6`
   > Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.
@@ -117,7 +128,7 @@ With less input abicheck degrades gracefully instead of failing. `abicheck dump 
 
 ### What each layer buys
 
-Measured on the [`examples/`](examples/README.md) catalog: the cumulative share of compare-style cases whose *every* expected change kind is discovered once a layer is present (185 scored cases).
+Measured on the [`examples/`](examples/README.md) catalog, which holds 197 cases today: 185 of them are compare-style cases with a minimum-evidence label, and the table shows the cumulative share of those whose *every* expected change kind is discovered once a layer is present.
 
 | Evidence available | Cases fully covered |
 |--------------------|:-------------------:|
@@ -143,7 +154,7 @@ This is a discoverability floor, not an accuracy score; the [tool comparison pag
 | Distinct `API_BREAK` verdict (source break, binary still works) | ✅ | ❌ | ❌ |
 | Reports which checks it could *not* run | ✅ | ❌ | ❌ |
 
-Full-catalog benchmark, 193 cases, every tool pointed at the whole catalog blind. A crash, hang, or "no mode for this case" counts as a miss, same as a wrong verdict.
+Full-catalog benchmark from 2026-07-18, when the catalog held 193 cases, every tool pointed at the whole catalog blind. A crash, hang, or "no mode for this case" counts as a miss, same as a wrong verdict.
 
 | Tool | Accuracy | False positives | False negatives |
 |------|:---:|:---:|:---:|
@@ -153,7 +164,7 @@ Full-catalog benchmark, 193 cases, every tool pointed at the whole catalog blind
 | ABICC (abi-dumper mode) | 44.6% | 8 | 99 |
 | ABICC (xml/legacy mode) | 40.4% | 7 | 108 |
 
-Run on 2026-07-18 against abicheck 0.5.0, castxml 0.6.3, libabigail 2.4.0, ABICC 2.3. The table is pinned to commit `ffa860c` and the 193-case catalog of that date; the exact reproduction procedure, ground-truth digest, per-case matrix, and the pinned cross-tool subset used for release-to-release tracking are in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases). `python scripts/benchmark_comparison.py --suite all` reruns the *current* catalog against the current checkout rather than reproducing that historical run.
+Run against abicheck 0.5.0, libabigail 2.4.0, and ABICC 2.3. The table is pinned to commit `ffa860c` and the 193-case catalog of that date; the exact reproduction procedure, ground-truth digest, per-case matrix, and the pinned cross-tool subset used for release-to-release tracking are in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases). `python scripts/benchmark_comparison.py --suite all` reruns the *current* catalog against the current checkout rather than reproducing that historical run.
 
 `abidiff` is still the right choice for a sub-second, symbols-only sanity check. For anything you gate a release on, the numbers above are the argument.
 
@@ -246,7 +257,7 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 | `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | Safe. No binary ABI break |
 | `2` | `API_BREAK` | Source-level break. Consumers must recompile; existing binaries still run |
 | `4` | `BREAKING` | Binary ABI break. Existing binaries will crash or misbehave |
-| `8` | `REMOVED_LIBRARY` | A library vanished from a multi-library release (`--fail-on-removed-library`) |
+| `8` | any | A library vanished from a multi-library release and `--fail-on-removed-library` is set |
 | `64` | usage error | Bad flags or inputs |
 
 A `--severity-*` flag or a `severity:` config block switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `scan`, `deps compare`, and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).

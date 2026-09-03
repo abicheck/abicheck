@@ -454,9 +454,8 @@ declarative topology, confirm none of these apply to you:
   a bundle-level check needs header-scope evidence, it can't run through a
   `bundles:` entry today.
 - **Per-target `public_headers:` is not honored for a `kind: bundle`
-  member** — it is projected into a standalone target's own run-plan cell
-  (see the `targets:` field table above), but no per-bundle-member header
-  staging exists.
+  member** — see the `public_headers` row of the `targets:` field table
+  above for the one authoritative statement of that gap.
 - **Stored-facts bundle comparison (`BundleFacts`) has no run-plan /
   composite-Action / `check-project.yml` wiring** — it is reachable from
   the Python API and from `compare --old-bundle-facts`, not from the
