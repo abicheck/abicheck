@@ -133,6 +133,52 @@ whenever it lands with real fixture verification, would apply equally to
 any other PDB-sourced qualified name this module already builds an
 ``EntityId`` from.
 
+**Inline namespaces are indistinguishable from ordinary namespaces here, and
+this module always emits :class:`~abicheck.model.identity.Namespace`, never
+:class:`~abicheck.model.identity.InlineNamespace` (Codex review, PR #1025,
+carried over from a prior review round).** DWARF has ``DW_AT_export_symbols``
+and Clang's AST has its own ``isInline`` flag on ``NamespaceDecl``
+(``extract/dwarf_scope.py``'s ``namespace_scope_segment``,
+``extract/headers/clang/scope.py``) — both real, source-derived signals this
+module's two sibling scope-builders read directly. CodeView has no
+equivalent available from what this module works from: **the input here is
+not a symbol/DIE tree with per-scope attributes at all, but TPI's already-
+flattened, fully-qualified name strings** (this module's own opening
+paragraph), and the C++ ``inline`` keyword on a namespace is a source-level,
+compile-time-only annotation that changes name *lookup*, not name
+*mangling* or *spelling* — unlike libc++/libstdc++'s ABI-tag inline
+namespaces (``__1``, ``__cxx11``), which are recognizable from the qualified
+name text alone by convention
+(``model.qualified_name_split.is_inline_abi_namespace_segment``),
+a user's own ``inline namespace v1 { … }`` produces the byte-for-byte same
+qualified spelling, ``api::v1::Widget``, whether or not it is declared
+``inline`` — there is no CodeView bit or naming convention left to recover
+that distinction from post hoc, the same way ``castxml``'s own scope module
+documents itself as structurally incapable of producing
+:class:`~abicheck.model.identity.InlineNamespace` at all
+(``extract/headers/castxml/scope.py``). This is a **live**, not purely
+theoretical, cross-backend mismatch: :class:`~abicheck.model.identity.
+EntityId`'s ``_segment_key`` tags a ``Namespace`` segment ``"ns"`` and an
+``InlineNamespace`` segment ``"ins"`` (plus ``InlineNamespace.version_tag`` as
+additional identity), so any declaration nested inside a user-declared
+inline namespace gets a different ``EntityId`` when observed via PDB than
+via a header-AST backend, breaking the exact cross-backend reconciliation
+this ADR-063 slice exists to establish. **Not fixed here**: inventing a
+heuristic (e.g. treating every namespace segment as inline, or guessing from
+naming conventions beyond the already-established ABI-tag family) would be
+exactly the kind of unverified guess this module's own namespace-vs-record
+and function-local limitations above already decline to make, and this
+environment has no MSVC/``cl.exe``/real PDB sample to check a candidate
+signal against (see the module docstring's opening caveat). What would
+resolve it: a real MSVC-produced PDB confirming CodeView genuinely carries
+no per-namespace debug record at all (only TPI's flat UDT names, as already
+observed) — at which point the gap is permanent and structural, matching
+castxml's — or, if some CodeView symbol stream this module does not parse
+today (the DBI module-symbol stream, not TPI) turns out to carry a distinct
+namespace-scope record with a source-level ``inline`` marker, a real fix
+built from that evidence rather than from this string-splitting module
+alone.
+
 Leaf module: depends on ``model`` (allowed: ``extract -> model``, ADR-061),
 ``model.qualified_name_split`` (the shared, dependency-free ``"::"``-
 splitting primitive; see that module's own docstring for why it lives in

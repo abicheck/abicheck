@@ -13,39 +13,109 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Template-nesting-aware ``"::"`` splitting for a fully-qualified C++ name
--- the one primitive both ``qualified_name_segments.py`` (the ``compare``
-layer's own namespace-segment splitter) and a producer building a typed
-``ScopePath`` straight from a flat qualified-name STRING (rather than
-walking a tree/AST that already carries scope structure, as DWARF's DIE
-walk and the two header-AST backends' own AST walks do) need.
+"""Template-nesting-aware ``"::"`` splitting, plus versioned/ABI-tag
+inline-namespace *segment recognition*, for a fully-qualified C++ name --
+primitives both ``qualified_name_segments.py`` (the ``compare`` layer's own
+namespace-segment splitter) and a producer building a typed ``ScopePath``
+straight from a flat qualified-name STRING (rather than walking a tree/AST
+that already carries scope structure, as DWARF's DIE walk and the two
+header-AST backends' own AST walks do) need.
 
 Lives in ``model/`` rather than at the package root specifically so
 ``extract`` may depend on it (``extract -> model``, ADR-061) --
 ``qualified_name_segments.py`` itself belongs to the ``compare`` layer, which
 ``extract`` may not import (confirmed by ``scripts/check_architecture.py``
-failing on exactly that edge; see ``extract/headers/scope_segments.py``'s own
-docstring for the identical constraint on that module's ``version_suffix``
-case). Splitting a fully-qualified name back into segments is pure text
-processing with no ``compare``-specific knowledge in it at all -- unlike
-``version_suffix``'s inline-namespace-version *interpretation*, which
-legitimately belongs to ``compare`` -- so extracting just this primitive
-down to a leaf module both layers can share is a mechanical move, not a
-compare-layer migration.
+failing on exactly that edge). Splitting a fully-qualified name back into
+segments, and recognizing whether one already-split segment's *spelling*
+matches a versioned (``v1``, ``__1``, ...) or named-toolchain-tag
+(``__cxx11``, ``__ndk1``) inline namespace, are both pure text
+classification with no ``compare``-specific *decision* in them: unlike
+:func:`~abicheck.qualified_name_segments.version_strip_segments`/
+:func:`~abicheck.qualified_name_segments.strip_inline_abi_namespaces`
+(which decide that two differently-spelled qualified names identify the
+*same* declaration for diffing purposes -- a real compare-layer judgement,
+and rightly left there), :func:`version_suffix` and
+:func:`is_inline_abi_namespace_segment` only label one segment string; they
+merge nothing and compare no two names against each other.
 
-``qualified_name_segments.raw_segments`` now delegates here rather than
-keeping its own independent copy of this loop -- two copies of the same
-bracket-depth-aware splitting logic is exactly the "two independently
-constructible representations of the same fact" shape this codebase's own
-governing invariant (ADR-063) exists to forbid elsewhere; there is no reason
-identity's namesake splitting primitive should be an exception.
+That distinction is why this pair moved down from ``qualified_name_segments.py``
+after this module first shipped only :func:`split_top_level_scopes` (Codex
+review, PR #1025): ``extract/headers/scope_segments.py``'s ``namespace_segment``
+already documented -- correctly, at the time -- that it could not read
+``qualified_name_segments.version_suffix`` to populate
+``InlineNamespace.version_tag`` without crossing the same forbidden
+``extract -> compare`` edge, and left the field empty rather than importing
+across it or duplicating the regex. A second, independent
+``extract``-adjacent need for the identical *recognition* (not merging) --
+PDB's own ``pdb_metadata._is_user_visible``, which must NOT drop a
+declaration nested under libc++'s ``std::__1`` or libstdc++'s
+``std::__cxx11`` the way it correctly drops one under a genuinely
+compiler-internal ``__``-prefixed segment -- is what tips this from "leave
+the gap, don't drive-by migrate" (that module's own stated policy) to a real,
+now-doubly-motivated move: two independently constructible copies of the same
+recognition regex is exactly the shape ADR-063's governing invariant exists
+to forbid, the identical reasoning that already moved
+:func:`split_top_level_scopes` down here. ``qualified_name_segments.py``
+re-exports both names unchanged for every existing
+``from .qualified_name_segments import version_suffix`` (or
+``is_inline_abi_namespace_segment``) call site.
+
+``qualified_name_segments.raw_segments`` also delegates here rather than
+keeping its own independent copy of the splitting loop -- the same
+"no duplicate representation" reasoning as above.
 
 Leaf module: no imports beyond the stdlib.
 """
 
 from __future__ import annotations
 
-__all__ = ["split_top_level_scopes"]
+import re as _re
+
+__all__ = [
+    "is_inline_abi_namespace_segment",
+    "split_top_level_scopes",
+    "version_suffix",
+]
+
+# Matches segment-name shapes commonly used as a versioned inline
+# namespace: ``_V1``, ``__v2``, ``v3``, ``__1``. Anchored to whole
+# segment match (caller passes a single segment string). Captures the
+# integer suffix for ordering checks.
+_VERSION_NS_RE = _re.compile(r"^_{0,2}[Vv]?(\d+)$")
+
+#: Toolchain *ABI-tag* inline namespaces that are not version-number-shaped
+#: and therefore invisible to :func:`version_suffix`: libstdc++'s dual-ABI
+#: ``std::__cxx11`` and the Android NDK's ``std::__ndk1``. Both are inline
+#: namespaces — transparent for name lookup — so a declaration gaining or
+#: losing one is the *same* entity spelled two ways, exactly like the
+#: ``v1``/``__1`` family ``version_suffix`` already recognizes.
+_ABI_TAG_NS_RE = _re.compile(r"^__(?:cxx|ndk)\d+$")
+
+
+def version_suffix(segment: str) -> int | None:
+    """Return the integer suffix if *segment* looks like a versioned
+    inline-namespace tag (``_V1``, ``__1``, ``v2``, ...); else ``None``.
+    """
+    m = _VERSION_NS_RE.match(segment)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
+
+
+def is_inline_abi_namespace_segment(segment: str) -> bool:
+    """True when *segment* names an inline namespace used as an ABI tag.
+
+    Union of the version-number family (``v1``, ``__1``, ``_V2`` — see
+    :func:`version_suffix`) and the named toolchain tags (``__cxx11``,
+    ``__ndk1``). Deliberately not a general "looks like an implementation
+    detail" test: a segment such as ``detail``, ``impl`` or oneTBB's ``d1``
+    is an *ordinary* namespace whose rename is a real move of the
+    declarations inside it, so it must not be stripped.
+    """
+    return version_suffix(segment) is not None or bool(_ABI_TAG_NS_RE.match(segment))
 
 
 def split_top_level_scopes(qualified: str) -> list[str]:

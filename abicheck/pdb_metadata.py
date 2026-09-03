@@ -47,7 +47,10 @@ from .model.dwarf_facts import (
     StructLayout,
     ToolchainInfo,
 )
-from .model.qualified_name_split import split_top_level_scopes
+from .model.qualified_name_split import (
+    is_inline_abi_namespace_segment,
+    split_top_level_scopes,
+)
 from .pdb_parser import (
     CvEnumerator,
     CvMember,
@@ -95,13 +98,28 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     handed to `extract/pdb_scope.py` as a plain leaf, disagreeing with the
     ``Anonymous`` identity another producer would give the same
     declaration.
+
+    A ``__``-prefixed segment is compiler-internal (e.g. MSVC's
+    ``__vc_attributes``) UNLESS it is a recognized ABI-tag inline namespace
+    (libc++'s ``__1``, libstdc++'s ``__cxx11``) --
+    :func:`~abicheck.model.qualified_name_split.is_inline_abi_namespace_segment`
+    is the same recognizer ``diff_namespaces.py``/``diff_abi_tags.py`` treat
+    as a legitimate, transparent scope elsewhere in the pipeline (imported
+    from ``model``, not from the ``compare``-layer ``qualified_name_segments``
+    module this ``extract``-adjacent code may not depend on -- see that
+    ``model`` module's own docstring). Without this exemption, a per-segment
+    ``__`` check drops a real user-visible type entirely (e.g.
+    ``std::__1::vector<int>``, ``std::__cxx11::basic_string<char>``), losing
+    its layout facts, entity ID, and SemanticIR occurrence rather than merely
+    stripping the tag (Codex review, PR #1025).
     """
     if is_forward_ref:
         return False
     if not name:
         return False
     if any(
-        segment.startswith("<") or segment.startswith("__")
+        segment.startswith("<")
+        or (segment.startswith("__") and not is_inline_abi_namespace_segment(segment))
         for segment in split_top_level_scopes(name)
     ):
         return False

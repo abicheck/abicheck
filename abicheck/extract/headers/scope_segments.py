@@ -92,24 +92,32 @@ def namespace_segment(name: str, *, is_inline: bool = False) -> ScopeSegment:
     lookup but *not* to mangling, which is exactly the distinction a flat
     ``"::"``-joined spelling cannot express.
 
-    ``version_tag`` is deliberately left empty by this slice, and that is a
-    scope boundary rather than an oversight. This repository has exactly one
-    definition of "what an inline-namespace version tag is" —
-    :func:`abicheck.qualified_name_segments.version_suffix`, the signal
+    ``version_tag`` is deliberately left empty by this slice -- still true,
+    but no longer for the reason first written here. This repository has
+    exactly one definition of "what an inline-namespace version tag is" —
+    :func:`abicheck.model.qualified_name_split.version_suffix`, the signal
     ADR-025's versioned-inline-namespace-alias handling
     (``diff_namespaces.detect_inline_namespace_version_bump``) already keys
-    on — and that module belongs to the ``compare`` layer, which ``extract``
-    may not import under ADR-061's dependency direction (confirmed by
-    ``scripts/check_architecture.py`` failing on exactly that edge). The two
-    ways to fill the field today would each be worse than leaving it empty:
-    re-deriving the rule here creates a second, independently-drifting
-    notion of a version tag, and relocating the existing one into ``model``
-    is a real ``compare``-layer migration of its own, not a drive-by. No
-    discriminating power is lost meanwhile —
-    :class:`~abicheck.model.identity.InlineNamespace` is identity on
-    ``name`` too, so ``v1`` and ``v2`` are already distinct segments; the
-    tag is a convenience payload a later slice can populate once the signal
-    lives somewhere ``extract`` may read.
+    on. It originally lived in the ``compare``-layer
+    ``qualified_name_segments`` module, which ``extract`` may not import
+    under ADR-061's dependency direction (confirmed by
+    ``scripts/check_architecture.py`` failing on exactly that edge) — that
+    barrier is what this docstring used to cite. A second, independent
+    ``extract``-adjacent need for the identical recognition --
+    ``pdb_metadata._is_user_visible``, PDB's own struct/enum visibility
+    filter, which feeds ``extract/pdb_scope.py``'s ``ScopePath``
+    construction -- motivated moving :func:`version_suffix` (and
+    its sibling :func:`~abicheck.model.qualified_name_split.
+    is_inline_abi_namespace_segment`) down into ``model/qualified_name_split.py``
+    (Codex review, PR #1025) — see that module's own docstring — so the
+    signal now genuinely lives somewhere ``extract`` may read. Wiring it up
+    here is nonetheless left for separate follow-up, not attempted as a
+    drive-by alongside that move: no consumer of
+    :class:`~abicheck.model.identity.InlineNamespace`'s ``version_tag`` field
+    from a header-AST producer exists yet, and no discriminating power is
+    lost meanwhile — ``InlineNamespace`` is identity on ``name`` too, so
+    ``v1`` and ``v2`` are already distinct segments regardless of
+    ``version_tag``.
 
     >>> namespace_segment("inner")
     Namespace(name='inner')

@@ -398,6 +398,39 @@ class TestIsUserVisible:
             _is_user_visible("N::<unnamed-tag>::Inner", is_forward_ref=False) is False
         )
 
+    def test_compiler_internal_middle_segment_still_rejected(self) -> None:
+        """A genuinely compiler-internal ``__``-prefixed segment (MSVC's own
+        ``__vc_attributes``, not a recognized ABI-tag inline namespace) must
+        still be rejected wherever it appears, including a middle segment --
+        this is exactly what the per-segment ``__`` check exists to catch,
+        and narrowing it for ABI-tag namespaces (below) must not widen it."""
+        assert (
+            _is_user_visible("N::__vc_attributes::Inner", is_forward_ref=False) is False
+        )
+
+    def test_libcxx_abi_inline_namespace_preserved(self) -> None:
+        """libc++'s ``std::__1`` ABI-tag inline namespace must NOT be treated
+        as compiler-internal: ``std::__1::vector<int>`` is a real,
+        user-visible type whose layout facts/entity ID/SemanticIR occurrence
+        would otherwise be silently dropped (Codex review, PR #1025)."""
+        assert _is_user_visible("std::__1::vector<int>", is_forward_ref=False) is True
+
+    def test_libstdcxx_abi_inline_namespace_preserved(self) -> None:
+        """libstdc++'s ``std::__cxx11`` dual-ABI inline namespace must NOT be
+        treated as compiler-internal, for the same reason as libc++'s
+        ``__1`` above."""
+        assert (
+            _is_user_visible("std::__cxx11::basic_string<char>", is_forward_ref=False)
+            is True
+        )
+
+    def test_abi_inline_namespace_leaf_name_still_checked(self) -> None:
+        """A recognized ABI-tag namespace segment does not exempt an
+        otherwise-anonymous leaf nested inside it."""
+        assert (
+            _is_user_visible("std::__1::<unnamed-tag>", is_forward_ref=False) is False
+        )
+
 
 # ---------------------------------------------------------------------------
 # Data model structural consistency

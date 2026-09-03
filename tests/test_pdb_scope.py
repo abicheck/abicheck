@@ -25,12 +25,13 @@ than raw TPI bytes).
 
 from __future__ import annotations
 
+from abicheck.extract.headers.scope_segments import namespace_segment
 from abicheck.extract.pdb_scope import (
     enum_entity_id,
     record_entity_id,
     scope_path_for_qualified_name,
 )
-from abicheck.model.identity import EntityKind, Namespace, Record
+from abicheck.model.identity import EntityKind, Namespace, Record, entity_id_for_type
 
 
 def test_bare_name_has_no_scope() -> None:
@@ -112,3 +113,48 @@ def test_record_and_enum_of_the_same_qualified_name_get_distinct_entity_ids() ->
     enum_id = enum_entity_id("NS::Thing", frozenset())
     assert record_id != enum_id
     assert record_id.kind is not enum_id.kind
+
+
+# ---------------------------------------------------------------------------
+# Known, accepted limitation (module docstring's 4th documented gap,
+# carried over from a prior Codex review round on PR #1025): CodeView's
+# flat, already-qualified TPI names carry no signal distinguishing a
+# user-declared `inline namespace` from an ordinary one, unlike DWARF's
+# `DW_AT_export_symbols` or Clang's `isInline`. This module therefore
+# always emits an ordinary Namespace segment. Pinned here as an executable
+# regression guard (not merely prose) and to demonstrate the mismatch is
+# LIVE, not theoretical: EntityId genuinely disagrees between a PDB-sourced
+# occurrence and a header-AST-sourced occurrence of the identical
+# declaration nested inside a real inline namespace.
+# ---------------------------------------------------------------------------
+
+
+def test_inline_looking_namespace_segment_still_classified_as_ordinary() -> None:
+    """``api::v1::Widget`` is exactly the shape a real ``inline namespace
+    v1`` would produce, but this module has no way to tell that apart from
+    an ordinary nested namespace named ``v1`` -- see the module docstring's
+    4th documented limitation."""
+    scope, leaf = scope_path_for_qualified_name("api::v1::Widget", frozenset())
+    assert scope == (Namespace("api"), Namespace("v1"))
+    assert leaf == "Widget"
+
+
+def test_pdb_inline_namespace_gap_produces_a_live_entity_id_mismatch() -> None:
+    """The PDB-sourced EntityId for a declaration nested inside a real
+    inline namespace disagrees with the EntityId a header-AST backend
+    (which DOES resolve ``InlineNamespace`` -- see
+    ``extract/headers/clang/scope.py``) would assign to the identical
+    declaration, breaking cross-backend reconciliation for this case. This
+    is the concrete, executable version of the module docstring's claim
+    that the gap is live rather than purely theoretical."""
+    pdb_scope, pdb_leaf = scope_path_for_qualified_name("api::v1::Widget", frozenset())
+    pdb_entity_id = entity_id_for_type(pdb_scope, pdb_leaf)
+
+    header_ast_scope = (
+        namespace_segment("api"),
+        namespace_segment("v1", is_inline=True),
+    )
+    header_ast_entity_id = entity_id_for_type(header_ast_scope, "Widget")
+
+    assert pdb_entity_id != header_ast_entity_id
+    assert pdb_entity_id.key != header_ast_entity_id.key

@@ -86,7 +86,17 @@ concepts:
       now populates entity_id for RecordType/EnumType (types only,
       2026-09-03) via an unverified-against-real-MSVC namespace-vs-record
       heuristic (no MSVC toolchain available to check it against); PDB
-      function/variable identity remains unimplemented.
+      function/variable identity remains unimplemented. PDB also cannot
+      distinguish a user-declared inline namespace from an ordinary one
+      (CodeView's flat TPI names carry no source-level `inline` marker,
+      unlike DWARF's DW_AT_export_symbols or Clang's isInline) and always
+      emits a plain Namespace segment, a live EntityId mismatch against a
+      header-AST backend's InlineNamespace for any declaration nested
+      inside one -- a structural, accepted gap (matching castxml's own
+      documented inability to produce InlineNamespace at all), documented
+      as extract/pdb_scope.py's 4th limitation, not expected to close
+      without new evidence of a CodeView record this module does not
+      parse today.
 
   semantic_ir:
     primitive: complete
