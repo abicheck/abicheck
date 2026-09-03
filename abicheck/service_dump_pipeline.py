@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "DumpResult",
@@ -133,6 +134,30 @@ class ResolvedDumpRequest:
     instance -- silently breaking equality-based comparison or caching for
     every existing and future caller of this frozen dataclass, over a field
     that is itself inert today.
+
+    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B
+    -- ``dump``'s own slice of the gap
+    :class:`~abicheck.service_compare_pipeline.ResolvedComparePair`'s
+    identically-named field already closed for ``compare``): the
+    :class:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext` built from this same call's own, otherwise-
+    discarded :class:`~abicheck.workflows.plan.AnalysisPlan`
+    (:func:`resolve_dump_request` already calls ``AnalysisPlanner.resolve``
+    for its ADR-063 Phase 4 pre-flight check -- this is not a second
+    resolution). ``operation`` reads ``"dump"`` off the plan; ``evidence``
+    carries only ``requested_depth``/``available_depths`` at this point --
+    the pre-execution view, via :meth:`~abicheck.workflows.
+    resolved_execution_context.ResolvedExecutionContext.from_plan` with no
+    *assurance*. Optional and additive: excluded from ``compare=False`` for
+    the same reason ``artifact_plan`` is -- a fresh, distinct
+    ``ResolvedExecutionContext`` instance must not make two structurally
+    identical resolutions compare unequal. Carries no ``evaluation_config``/
+    ``compile_contexts`` yet, for the identical reason
+    ``ResolvedComparePair.resolved_execution_context`` does not: neither
+    resolves at this seam. See :func:`execute_dump_request` for the
+    post-execution counterpart, attached via
+    :meth:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext.with_assurance`.
     """
 
     request: DumpRequest
@@ -170,6 +195,9 @@ class ResolvedDumpRequest:
     public_headers: tuple[Path, ...]
     public_header_dirs: tuple[Path, ...]
     artifact_plan: ResolvedArtifactPlan | None = field(default=None, compare=False)
+    resolved_execution_context: ResolvedExecutionContext | None = field(
+        default=None, compare=False
+    )
 
     @property
     def collect_mode(self) -> str:
@@ -239,6 +267,25 @@ class DumpResult:
     is exactly the sort of pair-aware/lifetime redesign PR 3A's "Known gaps"
     entry already scopes as its own follow-up, not settled by exposing these
     fields alone.
+
+    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase
+    4B): ``resolved.resolved_execution_context`` (the pre-execution view),
+    completed via
+    :meth:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext.with_assurance` once this object's own
+    ``effective_depth`` -- the one fact ``dump`` can compute that ``compare``
+    computes via a real
+    :class:`~abicheck.analysis_assurance.AnalysisAssurance` -- is known.
+    ``dump`` has no comparison pair, so there is no real ``AnalysisAssurance``
+    to attach; :func:`execute_dump_request` instead builds
+    :class:`_DumpAssuranceView`, a minimal object carrying exactly the three
+    attributes :meth:`~abicheck.workflows.resolved_execution_context.
+    EvidenceView.from_assurance` reads (``requested_depth``,
+    ``effective_depth``, ``depth_satisfied``) -- see that class for why this
+    is a real post-execution fact, not a synthesized stand-in. ``None`` only
+    when ``resolved.resolved_execution_context`` was itself ``None`` (a
+    caller that hand-built a ``ResolvedDumpRequest`` bypassing
+    :func:`resolve_dump_request`).
     """
 
     resolved: ResolvedDumpRequest
@@ -246,6 +293,7 @@ class DumpResult:
     effective_depth: str
     effective_includes: tuple[Path, ...] = ()
     effective_compile_context: CompileContext | None = None
+    resolved_execution_context: ResolvedExecutionContext | None = None
 
 
 def _reject_unsupported_frontends(
@@ -344,8 +392,10 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     # combination can satisfy before any extraction runs (PlanningError),
     # rather than discovering the gap mid-run or not at all. See
     # `abicheck.workflows.plan`'s own module docstring for exactly what this
-    # does and does not check.
-    AnalysisPlanner.resolve(request)
+    # does and does not check. The returned `AnalysisPlan` is also what
+    # feeds `ResolvedExecutionContext.from_plan` below (One Semantic
+    # Pipeline plan, sub-phase 4B) -- not a second resolution.
+    plan = AnalysisPlanner.resolve(request)
     # validate() accepts lang case-insensitively; the ELF dump path does
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.
@@ -432,6 +482,8 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
     )
+    from .workflows.resolved_execution_context import ResolvedExecutionContext
+
     return ResolvedDumpRequest(
         request=request,
         lang=lang,
@@ -445,7 +497,34 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
         artifact_plan=artifact_plan,
+        resolved_execution_context=ResolvedExecutionContext.from_plan(plan),
     )
+
+
+@dataclass(frozen=True)
+class _DumpAssuranceView:
+    """The minimal shape :meth:`~abicheck.workflows.resolved_execution_context.
+    EvidenceView.from_assurance` reads via ``getattr`` -- ``requested_depth``/
+    ``effective_depth``/``depth_satisfied`` -- built from a completed
+    :class:`DumpResult`'s own facts rather than a real
+    :class:`~abicheck.analysis_assurance.AnalysisAssurance`.
+
+    ``AnalysisAssurance`` is comparison-shaped: pair symmetry (L0/header/DWARF
+    context drift between two sides), target/TU/export accounting, fact-set
+    comparability -- none of it meaningful for a single ``dump`` with no other
+    side to compare against. But the one axis ``AnalysisAssurance`` and a
+    single dump genuinely share -- "did the requested ``--depth`` get
+    reached" -- *is* knowable here, from :func:`execute_dump_request`'s own
+    already-computed ``effective_depth`` (a real post-execution fact, the
+    identical value :class:`DumpResult` itself carries), so this class states
+    exactly that axis rather than leaving :meth:`~abicheck.workflows.
+    resolved_execution_context.ResolvedExecutionContext.with_assurance`
+    fully unwired for ``dump``.
+    """
+
+    requested_depth: str | None
+    effective_depth: str | None
+    depth_satisfied: bool | None
 
 
 def execute_dump_request(
@@ -532,7 +611,7 @@ def execute_dump_request(
         SnapshotError: If the input cannot be loaded.
     """
     from .dependency_info import populate_side_dependency_info
-    from .evidence_depth import gated_source_label
+    from .evidence_depth import depth_rank, gated_source_label
 
     request = resolved.request
     side = request.input
@@ -615,10 +694,37 @@ def execute_dump_request(
         effective_depth = gated_source_label(snap.build_source, snap)
     except (TypeError, ValueError, OverflowError):
         effective_depth = "headers" if snap.from_headers else "binary"
+
+    # One Semantic Pipeline plan, sub-phase 4B: the real post-execution
+    # `with_assurance()` caller `resolve_dump_request`'s own docstring named
+    # as the still-open half. `resolved.requested_depth` is lower-cased
+    # first, matching `ResolvedExecutionContext.from_plan`'s own
+    # case-normalization (see that method's docstring) -- `DumpRequest.depth`
+    # is not itself normalized, and both `depth_rank` and the ladder
+    # `EvidenceView.available_depths` states are case-sensitive.
+    resolved_execution_context = None
+    if resolved.resolved_execution_context is not None:
+        requested_depth = (
+            resolved.requested_depth.lower()
+            if resolved.requested_depth is not None
+            else None
+        )
+        resolved_execution_context = resolved.resolved_execution_context.with_assurance(
+            _DumpAssuranceView(
+                requested_depth=requested_depth,
+                effective_depth=effective_depth,
+                depth_satisfied=(
+                    None
+                    if requested_depth is None
+                    else depth_rank(effective_depth) >= depth_rank(requested_depth)
+                ),
+            )
+        )
     return DumpResult(
         resolved=resolved,
         snapshot=snap,
         effective_depth=effective_depth,
         effective_includes=resolution.effective_includes,
         effective_compile_context=resolution.effective_compile_context,
+        resolved_execution_context=resolved_execution_context,
     )
