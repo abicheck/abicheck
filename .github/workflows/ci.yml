@@ -290,10 +290,27 @@ jobs:
         # dedicated job already runs both files together the identical
         # serial way on its own schedule; this invocation is this job's
         # copy, for every PR.
+        #
+        # No --cov on that second invocation, matching performance.yml's own
+        # (uninstrumented) "Run slow perf tests" step -- fresh evidence
+        # (this same PR): coverage.py fell back from the sysmon core to the
+        # much slower trace-based one for this specific invocation ("Can't
+        # use core=sysmon: sys.monitoring can't measure branches in this
+        # version"), which alone pushed
+        # test_serialization_roundtrip_under_2_seconds from its normal
+        # well-under-budget time to 6.70s against a hard 2s ceiling -- a
+        # confirmed pre-existing flake (reproduced identically on PR #1033's
+        # CI before this PR existed), not scheduler contention this time.
+        # Instrumentation overhead corrupting the very wall-clock
+        # measurement a test asserts on is exactly why performance.yml never
+        # instruments this file either; --cov-append here would only add a
+        # few small test files' worth of informational coverage to
+        # coverage-slow.xml, not gate anything (no --cov-fail-under in this
+        # step).
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
           pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_perf_binary_scan.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
-          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m "slow"
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner
