@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .policy.exit_decision import ExitDecision
+    from .policy.severity import SeverityConfig
     from .suppression import SuppressionList
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
@@ -1026,6 +1027,14 @@ class CompareResult:
     suppression: SuppressionList | None = None
     # ADR-064/PR G2, see classify_compare_pair.
     exit_decision: ExitDecision | None = None
+    # ADR-064/PR G2 rendering parity (Codex review): the same resolved
+    # `GateOptions.severity` `exit_decision` above was scored under, so a
+    # caller can pass `severity_config=result.severity_config` into
+    # `reporter.render_output`/`to_json` and get a rendered `severity` block
+    # and exit code that agree with `exit_decision`, instead of silently
+    # recomputing a `None`-severity legacy exit that contradicts it. `None`
+    # under the legacy scheme, where there is nothing to disagree with.
+    severity_config: SeverityConfig | None = None
 
     def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
         """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.

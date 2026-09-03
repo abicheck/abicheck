@@ -629,6 +629,7 @@ def classify_compare_pair(
         new_snapshot=new,
         suppression=suppression,
         exit_decision=exit_decision,
+        severity_config=gate.severity,
     )
 
 

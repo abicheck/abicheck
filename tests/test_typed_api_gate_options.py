@@ -389,6 +389,91 @@ class TestCompareRequestContractContextGateReceipt:
         assert cfg.policy.base.id == "sdk_vendor"
 
 
+class TestCompareResultSeverityConfigRenderingParity:
+    """Codex review, fresh evidence (PR #1032, commit 72fdf5b, file:line
+    `service_compare_pipeline.py:618`): `classify_compare_pair` resolved
+    `CompareResult.exit_decision` from the request's own gate, but the typed
+    result carried no way for a caller to render a report that agrees with
+    it -- `reporter.to_json`/`render_output` default their own
+    `severity_config` argument to `None`, silently recomputing a *different*,
+    legacy-scheme exit that contradicted `result.exit_decision`. Regression
+    proves both that `CompareResult.severity_config` is the same object that
+    scored `exit_decision` (not a default that happens to be present), and
+    that passing it into `to_json` actually closes the disagreement a caller
+    omitting it would still hit."""
+
+    def _run(self, old: Path, new: Path, **kwargs):
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        return run_compare_request(
+            CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new), **kwargs)
+        )
+
+    def test_severity_config_is_the_gate_that_scored_exit_decision(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+        )
+        assert result.severity_config is not None
+        from abicheck.policy.severity import SeverityLevel
+
+        assert result.severity_config.abi_breaking == SeverityLevel.INFO
+        assert result.exit_decision.code == 0
+
+    def test_default_legacy_request_leaves_severity_config_none(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(old, new)
+        assert result.severity_config is None
+        assert result.exit_decision.code == 4
+
+    def test_omitting_severity_config_from_to_json_would_disagree(
+        self, tmp_path: Path
+    ) -> None:
+        """The bug itself: a caller forwarding nothing (the pre-fix default
+        every renderer already had) gets a report that contradicts
+        `exit_decision` -- this is what makes the next test's fix a real
+        fix, not a no-op the same JSON would've produced anyway."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+        )
+        assert result.exit_decision.code == 0
+        from abicheck.reporter import to_json
+
+        report = json.loads(to_json(result.diff))
+        assert report["exit"]["code"] == 4
+        assert report["exit"]["code"] != result.exit_decision.code
+
+    def test_passing_severity_config_into_to_json_agrees_with_exit_decision(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+        )
+        from abicheck.reporter import to_json
+
+        report = json.loads(
+            to_json(result.diff, severity_config=result.severity_config)
+        )
+        assert report["exit"]["code"] == result.exit_decision.code == 0
+        assert "severity" in report
+
+
 class TestScanRequestGateOptions:
     """`ScanRequest.severity_preset`/`exit_code_scheme` -> `run_scan`'s
     `sev_config`/`exit_code_scheme` forward into `run_scan_core` (only
