@@ -30,8 +30,7 @@ import pytest
 
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
 _REPO_DIR = Path(__file__).resolve().parent.parent
-if str(_REPO_DIR / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+sys.path.insert(0, str(_REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
 from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
