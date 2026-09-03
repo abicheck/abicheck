@@ -571,13 +571,13 @@
   separately-justified extension beyond the availability-bearing subset
   this phase (and D7's initial realization) actually covers.
 - **Phase 6** (one canonical `SemanticIR` between the backends and the
-  checker) has landed six slices — the IR itself and its persistence, the
+  checker) has landed seven slices — the IR itself and its persistence, the
   header-AST normalizer for records/enums/typedefs, functions and
   variables, and constants across every header-AST-backed platform
   (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included), DWARF
-  (the first non-header-AST producer), and now `CanonicalEntity.
-  template_arguments` for records; it is
-  **not yet complete**: the PDB/BTF/CTF backends still produce no IR at all,
+  (the first non-header-AST producer), `CanonicalEntity.
+  template_arguments` for records, and now BTF/CTF (types only); it is
+  **not yet complete**: the PDB backend still produces no IR at all,
   clang produces no occurrence at all for a concrete template
   specialization (so `template_arguments` cross-backend agreement remains
   unexercised there), a function template's own argument list is unattempted,
@@ -762,9 +762,40 @@
   the Itanium-MANGLED name carries it, needing a real demangler to decode
   back into argument spellings, a materially larger, separately-scoped
   project this slice does not attempt).
+  **Seventh slice landed: BTF/CTF, types only.**
+  `extract/debug_layout_semantic_ir.py` bridges the shared
+  `DwarfMetadata` shape both `btf_metadata.parse_btf_metadata`'s and
+  `ctf_metadata.parse_ctf_metadata`'s own `to_dwarf_metadata()` conversion
+  reduce to into transient `RecordType`/`EnumType` objects carrying a real
+  `entity_id`, then feeds them through the same `normalize_header_ast` every
+  other producer uses. Unlike PDB, no scope-resolution heuristic applies at
+  all: BTF (the Linux kernel's BPF Type Format) and CTF (illumos/Solaris's
+  Compact C Type Format) are both pure-C debug formats with no namespace/
+  class nesting whatsoever, so every `ScopePath` this slice builds is
+  unconditionally empty — none of PDB's own documented heuristic
+  limitations (namespace-vs-record ambiguity, function-local scopes,
+  nested anonymous aggregates) have a BTF/CTF analogue. Wired into the
+  ELF headerless (symbol-only) fallback path
+  (`dumper_elf_fallback._build_symbol_only_snapshot`), the only place a
+  BTF/CTF-resolved `dumper.py` run reaches (a real DWARF resolution instead
+  goes through `dwarf_snapshot.build_snapshot_from_dwarf`, which has built
+  `entity_id`-bearing types since Phase 2 already). Deliberately leaves
+  `AbiSnapshot.types`/`.enums` untouched for a BTF/CTF-sourced snapshot —
+  unlike every other Phase 6 slice, which only ever added `entity_id`/
+  `SemanticIR` normalization on top of a model-type bridge that already
+  existed independently of Phase 6 (DWARF's DIE-walk builder, PDB's own
+  `pdb_model.py`), BTF/CTF never had such a bridge at all; building one that
+  newly feeds `.types`/`.enums` would newly expose BTF/CTF structs to every
+  other `.types`-consuming detector (vtable/internal-leak/public-surface
+  scoping) — a materially larger, separately-scoped design question this
+  slice does not attempt. Function/variable/typedef identity is a further,
+  unattempted gap: neither format's own richer parse carries that evidence
+  across its own `to_dwarf_metadata()` conversion at all (see that method's
+  own docstring).
   **Still not landed, and therefore this phase is not yet complete**: the
-  PDB/BTF/CTF backends still produce no `entity_id` at all, so
-  extending the normalizer to them is gated on giving each the Phase 2
+  PDB backend still produces no `entity_id` at all (BTF/CTF now do, types
+  only — see this bullet's own account of that slice above), so
+  extending the normalizer to it is gated on giving it the Phase 2
   `EntityId` treatment first (the same scale of work Phase 2 did for
   ELF/PE/Mach-O, the header-AST backends, and now DWARF, redone per debug
   format); clang producing no occurrence at all for a concrete template

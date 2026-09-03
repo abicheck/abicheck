@@ -1548,6 +1548,7 @@ def _dump_elf(
                 exported_dynamic_tls,
                 dwarf_only_types,
                 profile_hint,
+                resolved_debug_format,
             )
         # Built here (session open): "auto" can fall back to clang (G16), so
         # ast_result.is_clang is the only reliable signal (Codex review).

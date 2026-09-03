@@ -235,8 +235,22 @@ Core pipeline (in order of data flow):
    `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
    identifier spellings a castxml `init` text could genuinely carry
    verbatim, so the exception applies only to clang's own artifact, not to
-   every occurrence of those two strings. BTF/CTF/PDB remain fully
-   unmigrated: those backends do not populate `entity_id` at all yet.
+   every occurrence of those two strings. PDB remains fully unmigrated: it
+   does not populate `entity_id` at all yet. **BTF/CTF's own slice landed,
+   types only:** `extract/debug_layout_semantic_ir.py` bridges the shared
+   `DwarfMetadata` shape both formats reduce to
+   (`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) into
+   transient, `entity_id`-bearing `RecordType`/`EnumType` objects — no
+   scope heuristic needed at all (both are pure-C formats with no
+   namespace/class nesting, so every `ScopePath` is unconditionally empty,
+   unlike PDB's own unverified namespace-vs-record heuristic). Wired into
+   the ELF headerless fallback path; deliberately leaves
+   `AbiSnapshot.types`/`.enums` untouched for a BTF/CTF-sourced snapshot
+   (only `semantic_ir` gains occurrences) — widening what other
+   `.types`-consuming detectors see is a separate, larger design question
+   this slice does not attempt. Function/variable/typedef identity remains
+   unimplemented (neither format's own richer parse carries that evidence
+   across its own `to_dwarf_metadata()` conversion at all).
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

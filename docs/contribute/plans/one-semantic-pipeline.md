@@ -13617,14 +13617,69 @@ mangled-name argument decoder, not a compound-spelling text split) than
 this slice attempted. An enum/typedef/variable can never itself be a
 template entity at all in the vocabulary this codebase's model tracks.
 
-**Still not landed, and therefore this phase is not complete:**
-PDB/BTF/CTF backends produce no IR at all (none of them populate
-`entity_id` yet -- this normalizer canonicalizes evidence a backend already
-resolved identity for, it does not resolve identity itself, so extending it
-to these backends is gated on giving each of them the Phase 2 `EntityId`
-treatment first, the identical prerequisite DWARF's own fifth slice just
-closed); `service.py`'s BTF/CTF dispatch and PDB path (a fourth and
-fifth production assembler this phase's own Files list names) remain
+**Seventh slice landed: BTF/CTF, types only.** Both `btf_metadata.
+parse_btf_metadata` and `ctf_metadata.parse_ctf_metadata` reduce their own
+richer, format-specific parse to the shared `DwarfMetadata` shape (via
+`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) purely so
+the checker's pre-existing `_diff_dwarf`/`_diff_advanced_dwarf` detectors
+work against any of the three debug formats unmodified -- but that
+conversion carries only flat, name-keyed `StructLayout`/`EnumInfo` dicts,
+never a `RecordType`/`EnumType` model object, so nothing along that path
+had ever had an `entity_id` to build an occurrence from. New
+`extract/debug_layout_semantic_ir.py` bridges that shared shape into
+transient `RecordType`/`EnumType` objects carrying a real `entity_id`, then
+feeds them through the same `normalize_header_ast` every other producer
+uses. Wired into the ELF headerless (symbol-only) fallback path
+(`dumper_elf_fallback._build_symbol_only_snapshot`, the only place a
+BTF/CTF-resolved `dumper.py` run reaches -- a real DWARF resolution instead
+goes through `dwarf_snapshot.build_snapshot_from_dwarf`, whose own
+`entity_id`-bearing types have existed since Phase 2).
+
+No PDB-style scope-resolution heuristic applies at all: BTF (the Linux
+kernel's BPF Type Format) and CTF (illumos/Solaris's Compact C Type
+Format) are both pure-C debug formats with no namespace/class nesting
+whatsoever, so every `ScopePath` this slice builds is unconditionally
+empty -- none of PDB's own documented limitations (namespace-vs-record
+ambiguity, forward-declared enclosing classes, function-local scopes,
+nested anonymous aggregates) have a BTF/CTF analogue, and none needed
+inventing here.
+
+**Deliberately does not widen `AbiSnapshot.types`/`.enums`.** Every prior
+Phase 6 slice (DWARF, and PDB once it lands) only ever adds `entity_id`/
+`SemanticIR` normalization on top of a model-type bridge that already
+existed *independently* of Phase 6, for other reasons (DWARF's own
+DIE-walk builder predates this phase entirely; PDB's own `pdb_model.py`
+bridge, wired into the PE header-scoping fallback so those types reach
+`AbiSnapshot.types`/`.enums` and, from there, `surface.py`/vtable/
+internal-leak detection, likewise predates this phase). BTF/CTF never had
+such a bridge at all, so building one that newly feeds `.types`/`.enums`
+would be a genuinely new, larger change -- newly exposing BTF/CTF structs
+to every other `.types`-consuming detector for the first time, a
+materially larger, separately-scoped design question this slice does not
+attempt. This slice's own `RecordType`/`EnumType` values are therefore
+transient: consumed only by `normalize_header_ast` and discarded
+immediately after, with `AbiSnapshot.types`/`.enums` left exactly as they
+already are for a BTF/CTF-sourced snapshot (empty, on the current
+headerless fallback path). A future slice giving BTF/CTF real model-type
+population (mirroring what PDB's own PE-fallback wiring already does) can
+reuse this same `entity_id` assignment without redoing it.
+
+Function/variable/typedef identity is a further, unattempted gap:
+`BtfMetadata`/`CtfMetadata`'s own `func_protos`/`typedefs` fields are not
+even carried across either format's own `to_dwarf_metadata()` conversion
+(see that method's own docstring) -- there is no *matching*
+`EntityId`-bearing evidence reaching the normalizer for those kinds at
+all, not a case this slice silently drops.
+
+**BTF/CTF landed a "types only" slice (above); still not
+landed, and therefore this phase is not complete:** the PDB backend
+produces no IR at all (does not populate `entity_id` yet -- this
+normalizer canonicalizes evidence a backend already resolved identity
+for, it does not resolve identity itself, so extending it to PDB is
+gated on giving it the Phase 2 `EntityId` treatment first, the identical
+prerequisite DWARF's own fifth slice and BTF/CTF's own seventh slice each
+closed for their own producer); `service.py`'s PDB path (a fifth
+production assembler this phase's own Files list names) remains
 unwired for the same reason; and the phase's own acceptance criteria (a
 closure-parameterized template fixture) remain only PARTIALLY met --
 castxml's own occurrence now really does decompose and canonicalize a

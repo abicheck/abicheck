@@ -618,6 +618,7 @@ _ALLOWED_RESOLVER_CALLERS = (
     "dwarf_snapshot.py",
     "extract/dwarf_scope.py",
     "extract/export_symbol_identity.py",
+    "extract/debug_layout_semantic_ir.py",  # BTF/CTF: flat, no ScopePath.
 )
 
 _RESOLVER_NAMES = frozenset(
