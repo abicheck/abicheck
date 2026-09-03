@@ -757,18 +757,18 @@ def execute_dump_request(
         # wrong (`"host"`) toolchain, so this case is excluded rather than
         # reconstructed (a documented gap; the manifest path already carries
         # no `evaluation_config`/other resolved fields either).
-        parsed_fmt = None
-        if side.path is not None:
-            parsed_fmt = service.detect_binary_format(side.path)
-            if parsed_fmt is None and service.sniff_text_format(side.path) not in (
-                "json",
-                "perl",
-            ):
-                from .binary_utils import resolve_linker_script_chain
+        # `side.path` is guaranteed non-None here -- the `is None` branch
+        # above already raised before this point.
+        parsed_fmt = service.detect_binary_format(side.path)
+        if parsed_fmt is None and service.sniff_text_format(side.path) not in (
+            "json",
+            "perl",
+        ):
+            from .binary_utils import resolve_linker_script_chain
 
-                parsed_fmt = service.detect_binary_format(
-                    resolve_linker_script_chain(side.path)
-                )
+            parsed_fmt = service.detect_binary_format(
+                resolve_linker_script_chain(side.path)
+            )
         if (
             resolution.effective_compile_context is not None
             and snap.from_headers

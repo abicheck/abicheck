@@ -426,3 +426,71 @@ class TestExecuteDumpRequestWithAssurance:
 
         assert result.effective_compile_context == fake_ctx
         assert dict(result.resolved_execution_context.compile_contexts) == {}
+
+    def test_compile_context_excluded_for_an_abicc_perl_dump(
+        self, tmp_path, monkeypatch
+    ):
+        """The other verbatim-load format `sniff_text_format` must rule out
+        before the linker-script probe runs (mirroring `resolve_input`'s own
+        dispatch order): an ABICC Perl dump (`$VAR1` prefix) is imported
+        directly, with no header-AST parse."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        dump_p = tmp_path / "dump.perl.txt"
+        dump_p.write_text("$VAR1 = {};\n", encoding="utf-8")
+
+        request = DumpRequest(input=InputSpec(path=dump_p))
+        resolved = resolve_dump_request(request)
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(from_headers=True),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {}
+
+    def test_compile_context_excluded_when_target_is_not_a_binary_format(
+        self, tmp_path, monkeypatch
+    ):
+        """Neither `resolved.fmt`'s own magic-byte check nor the
+        linker-script probe resolves a real binary format for arbitrary,
+        unrecognized text -- `parsed_fmt` stays `None` and the compile
+        context is excluded, the same as for every other non-parse path."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        garbage_p = tmp_path / "notes.txt"
+        garbage_p.write_text("just some notes, not a linker script\n", encoding="utf-8")
+
+        request = DumpRequest(input=InputSpec(path=garbage_p))
+        resolved = resolve_dump_request(request)
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(from_headers=True),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {}
