@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from ..api_types import CompareRequest
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
+    from ..suppression import SuppressionList
 
 
 def install_resolved_gate_receipt(
@@ -57,8 +58,24 @@ def install_resolved_gate_receipt(
     request: CompareRequest,
     gate: GateOptions,
     policy_file: PolicyFile | None,
+    suppression: SuppressionList | None,
+    effective_scheme: str,
 ) -> None:
     """Install *request*'s resolved gate onto *result* in place.
+
+    *effective_scheme* is the exact ``"severity"``/``"legacy"`` string the
+    caller already resolved and scored ``exit_decision`` with (never
+    ``gate.exit_code_scheme`` itself, which can still be the unresolved
+    ``"auto"`` -- `GateConfig` only accepts ``"legacy"``/``"severity"``, so
+    installing the raw value here raised `ValueError` for a valid `auto`
+    request after the comparison had already completed, Codex review, fresh
+    evidence).
+
+    *suppression* is the already-loaded `SuppressionList` `classify_compare_
+    pair` scored the comparison with -- passed through rather than left for
+    this adapter to re-read `request.suppress` a second time, which could
+    digest a different file than the one that actually scored the findings
+    if it changed between the two reads (Codex review, fresh evidence).
 
     Always stamps ``result.evaluation_config`` (a request with no
     ``--contract`` equivalent never builds a ``PersistedContractContext``,
@@ -71,16 +88,15 @@ def install_resolved_gate_receipt(
     from ..compatibility_evaluation_frontend import (
         EXIT_CODE_SCHEME_FIELD,
         SEVERITY_CATEGORY_FIELDS,
+        SuppressionSource,
         compatibility_config_from_compare_request,
     )
 
-    # `suppression` isn't threaded through here: this adapter re-loads
-    # `request.suppress` itself (a second, cheap read of the same file)
-    # rather than being handed an already-loaded value of the wrong type
-    # (`classify_compare_pair` loads a `SuppressionList`, not the
-    # `SuppressionSource` this adapter expects); `policy_file` still avoids
-    # the equivalent duplicate read for the policy file, whose type matches.
-    config = compatibility_config_from_compare_request(request, policy_file=policy_file)
+    config = compatibility_config_from_compare_request(
+        request,
+        policy_file=policy_file,
+        suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
+    )
     result.evaluation_config = config
 
     # `DiffResult.contract_context` is deliberately typed `object | None`
@@ -117,7 +133,7 @@ def install_resolved_gate_receipt(
     )
     result.contract_context = with_resolved_gate(
         ctx,
-        exit_code_scheme=gate.exit_code_scheme or "legacy",
+        exit_code_scheme=effective_scheme,
         severity=severity_for_receipt,
         scheme_provenance=config.provenance[EXIT_CODE_SCHEME_FIELD],
         severity_provenance={

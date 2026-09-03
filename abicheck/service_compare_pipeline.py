@@ -609,21 +609,21 @@ def classify_compare_pair(
         severity_quality_issues=None,
         severity_addition=None,
     )
+    # The one resolved scheme both exit_decision and the receipt below are
+    # scored with -- never gate.exit_code_scheme itself, still "auto" here
+    # (Codex review, Round 8: that raised inside with_resolved_gate).
+    effective_scheme = "severity" if gate.severity is not None else "legacy"
     exit_decision = resolve_compare_exit_decision(
-        result,
-        gate.severity,
-        "severity" if gate.severity is not None else "legacy",
+        result, gate.severity, effective_scheme
     )
 
-    # Round-6 review (Codex, fresh evidence): the gate resolved just above
-    # scores `exit_decision`, but was never installed onto
-    # `result.contract_context.evaluation_context.resolved_config` -- see
-    # `workflows.compare_gate_receipt.install_resolved_gate_receipt`'s own
-    # module docstring for the full account (split out to stay under this
-    # file's line cap).
+    # Installs the same gate onto result.contract_context (Round-6 review) --
+    # see workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(result, request, gate, pf)
+    install_resolved_gate_receipt(
+        result, request, gate, pf, suppression, effective_scheme
+    )
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the

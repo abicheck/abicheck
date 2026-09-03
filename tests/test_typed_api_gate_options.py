@@ -296,6 +296,72 @@ class TestCompareRequestContractContextGateReceipt:
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.gate.exit_code_scheme == "legacy"
 
+    @pytest.mark.parametrize(
+        "severity_preset,expected_scheme",
+        [
+            (None, "legacy"),  # no severity in effect -> resolves to legacy
+            ("info-only", "severity"),  # a real preset -> resolves to severity
+        ],
+    )
+    def test_auto_scheme_resolves_without_crashing_the_receipt(
+        self, tmp_path: Path, severity_preset: str | None, expected_scheme: str
+    ) -> None:
+        """Round-8 review (Codex, fresh evidence): `exit_code_scheme="auto"`
+        is a real, valid value (`GateOptions` resolves it to `legacy`/
+        `severity` per whether a severity setting is actually in effect) --
+        but an earlier revision of the fix installed `gate.exit_code_scheme`
+        itself onto the receipt, still `"auto"` at that point, and
+        `with_resolved_gate`'s own `GateConfig` only accepts `"legacy"`/
+        `"severity"`. A valid `auto` request raised `ValueError` from
+        *inside* the receipt-install step, after the comparison had already
+        completed. Must resolve cleanly to the same value `exit_decision`
+        itself was scored with, for both the no-severity-in-effect and a
+        real-preset case."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old, new, exit_code_scheme="auto", severity_preset=severity_preset
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.gate.exit_code_scheme == expected_scheme
+
+    def test_receipt_reuses_the_suppression_that_scored_the_comparison(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Round-8 review (Codex, fresh evidence): the gate-receipt adapter
+        must not re-read `request.suppress` from disk a second time -- the
+        digest could then describe different content than what actually
+        scored the findings if the file changed between the two reads (or
+        simply waste a redundant read every time). Proven by making a
+        second read fail outright: `SuppressionSource.from_file` is
+        monkeypatched to raise, so this only passes if the receipt path
+        builds its `SuppressionSource` from the already-loaded
+        `SuppressionList` (`.from_loaded`) instead."""
+        from abicheck.compatibility_evaluation_frontend import SuppressionSource
+
+        def _boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError(
+                "SuppressionSource.from_file called -- the gate-receipt "
+                "adapter re-read the suppression file instead of reusing "
+                "the SuppressionList that already scored the comparison"
+            )
+
+        monkeypatch.setattr(SuppressionSource, "from_file", _boom)
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        suppress_path = tmp_path / "suppress.yml"
+        suppress_path.write_text("version: 1\n", encoding="utf-8")
+
+        result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+            suppress=suppress_path,
+        )
+        # Must still resolve a real receipt, not merely avoid crashing.
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.gate.exit_code_scheme == "severity"
+
 
 class TestScanRequestGateOptions:
     """`ScanRequest.severity_preset`/`exit_code_scheme` -> `run_scan`'s
