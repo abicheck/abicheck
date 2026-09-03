@@ -28,6 +28,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..diff_helpers import depth_aware_bare_name
 from ..diff_symbols import _PUBLIC_VIS
 from ..model.identity_tiers import (
     SnapshotLocalIdentity,
@@ -244,9 +245,14 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     with no spelling mismatch left to (accidentally) save it.
 
     The full name is checked via :func:`_references_type_token`; an
-    unqualified leaf spelling (the segment after the last ``"::"``, tried
-    only when it differs from the full name -- an already-bare name gets no
-    second candidate) is checked via the *stricter*
+    unqualified leaf spelling (the segment after the last *depth-zero*
+    ``"::"`` -- see :func:`~abicheck.diff_helpers.depth_aware_bare_name`,
+    since a naive ``rsplit("::", 1)`` would cut inside a qualified template
+    argument instead of at the real scope boundary, e.g. extracting
+    ``"Tag>"`` out of ``"api::Wrapper<dep::Tag>"`` rather than
+    ``"Wrapper<dep::Tag>"`` -- Codex review on PR #1041, follow-up round;
+    tried only when the leaf differs from the full name -- an already-bare
+    name gets no second candidate) is checked via the *stricter*
     :func:`_references_unqualified_type_token`, which additionally refuses a
     match immediately preceded by ``::`` -- otherwise the leaf widening
     would treat a real, separately-scoped ``other::Handle`` reference as
@@ -272,7 +278,7 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
         return True
     if "::" not in tname:
         return False
-    leaf = tname.rsplit("::", 1)[-1]
+    leaf = depth_aware_bare_name(tname)
     if not leaf or leaf == tname:
         return False
     return _references_unqualified_type_token(leaf, text)
@@ -306,9 +312,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if _type_is_by_value_referenced(tname, rt) and not _is_pointer_spelling(
-                rt
-            ):
+            if _type_is_by_value_referenced(tname, rt) and not _is_pointer_spelling(rt):
                 by_value_types.add(tname)
         for param in func.params:
             pt = param.type.strip()
@@ -329,8 +333,6 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if _type_is_by_value_referenced(tname, vt) and not _is_pointer_spelling(
-                vt
-            ):
+            if _type_is_by_value_referenced(tname, vt) and not _is_pointer_spelling(vt):
                 by_value_types.add(tname)
     return by_value_types

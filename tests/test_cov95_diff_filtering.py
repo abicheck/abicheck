@@ -601,6 +601,29 @@ def test_find_by_value_types_leaf_widening_ignores_a_real_scope_collision():
     assert _find_by_value_types(snap, opaque) == set()
 
 
+def test_find_by_value_types_leaf_widening_splits_at_depth_zero_only():
+    """Regression for the third-round Codex review on PR #1041: the leaf
+    spelling must be extracted with a *depth-aware* split
+    (``diff_helpers.depth_aware_bare_name``), not a naive
+    ``rsplit("::", 1)``. For ``"api::Wrapper<dep::Tag>"``, a naive rsplit
+    lands inside the qualified template argument and extracts ``"Tag>"``
+    instead of the real leaf ``"Wrapper<dep::Tag>"`` -- missing a genuine
+    by-value exposure rendered exactly that way, leaving the type wrongly
+    ``opaque`` and letting the stable tier suppress a real layout change."""
+    opaque = {"api::Wrapper<dep::Tag>"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="w", type="Wrapper<dep::Tag>", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"api::Wrapper<dep::Tag>"}
+
+
 def test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap():
     """**Documented, still-open** (Codex review on PR #1041, follow-up
     round; see ``_type_is_by_value_referenced``'s own docstring): the leaf
@@ -994,21 +1017,39 @@ def test_opaque_usage_index_matches_per_candidate_oracle():
     rng = random.Random(99)
     names = ["Foo", "Bar", "Ctx", "SSLCtx", "ns::Foo", "Handle", "T"]
     typestrs = [
-        "Foo *", "Foo", "const Foo &", "ns::Foo", "ns::Foo *", "SSLCtx *",
-        "Ctx", "Bar, Foo", "std::vector<Foo>", "Handle*", "const Ctx &", "T *", "",
+        "Foo *",
+        "Foo",
+        "const Foo &",
+        "ns::Foo",
+        "ns::Foo *",
+        "SSLCtx *",
+        "Ctx",
+        "Bar, Foo",
+        "std::vector<Foo>",
+        "Handle*",
+        "const Ctx &",
+        "T *",
+        "",
     ]
     for _ in range(800):
         funcs = [
             Function(
-                name=f"f{i}", mangled=f"f{i}", return_type=rng.choice(typestrs),
-                params=[Param(name="p", type=rng.choice(typestrs)) for _ in range(rng.randint(0, 2))],
+                name=f"f{i}",
+                mangled=f"f{i}",
+                return_type=rng.choice(typestrs),
+                params=[
+                    Param(name="p", type=rng.choice(typestrs))
+                    for _ in range(rng.randint(0, 2))
+                ],
                 visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
             )
             for i in range(rng.randint(0, 5))
         ]
         varz = [
             Variable(
-                name=f"v{i}", mangled=f"v{i}", type=rng.choice(typestrs),
+                name=f"v{i}",
+                mangled=f"v{i}",
+                type=rng.choice(typestrs),
                 visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
             )
             for i in range(rng.randint(0, 3))
