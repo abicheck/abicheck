@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .change_registry_types import Verdict
-from .checker_policy import ChangeKind
+from .checker_policy import VALID_BASE_POLICIES, ChangeKind
 from .errors import ValidationError
 
 if TYPE_CHECKING:
@@ -753,6 +753,17 @@ class CompareRequest:
         errors += _debug_format_errors(self.debug_format)
         if not self.policy:
             errors.append("policy profile name must not be empty")
+        elif self.policy_file_path is None and self.policy not in VALID_BASE_POLICIES:
+            # Only checked with no policy_file_path (Codex review, Round 11):
+            # a file overrides the base name -- stated_policy_base's own
+            # logic, applied here too -- so an unknown name paired with a
+            # valid file is a legitimate request the file already resolves
+            # for; only a name with nothing to override it is a real error,
+            # and needs to fail here before any extraction runs.
+            errors.append(
+                f"unknown policy {self.policy!r}: choose from "
+                f"{sorted(VALID_BASE_POLICIES)}"
+            )
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
         # here (Tier 2), so CLI and MCP surface the same message before any work.
         if (

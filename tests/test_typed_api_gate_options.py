@@ -640,3 +640,33 @@ class TestInvalidExitCodeScheme:
                     severity_preset="strcit",
                 )
             )
+
+    def test_compare_request_rejects_bad_policy_before_extraction_runs(
+        self,
+    ) -> None:
+        """Round-11 review (Codex, fresh evidence): the policy_file_path
+        override fix (`stated_policy_base`) only covers the case where a
+        file overrides an unknown `policy` name -- a `CompareRequest`
+        naming an unknown policy with *no* `policy_file_path` at all still
+        only failed later, inside `builtin_policy_identity`, after
+        extraction had already run. Same proof structure as the sibling
+        tests above: a nonexistent path would raise a filesystem error if
+        extraction ran first, so seeing `ValidationError` instead is direct
+        evidence the check now runs before it."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.abi.json")
+        missing_new = Path("/nonexistent/new.abi.json")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="unknown policy"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    policy="not_a_policy",
+                )
+            )
