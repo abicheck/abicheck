@@ -32,6 +32,7 @@ from abicheck.compatibility_evaluation_config import (
     EvidenceConfig,
     GateConfig,
     ImmutableIdentity,
+    ScopedGateSelection,
     SurfaceConfig,
     ValueProvenance,
 )
@@ -220,6 +221,38 @@ class TestResolutionDigest:
         assert empty_string.evidence.requested_depth == ""
         assert none.evidence.requested_depth is None
         assert empty_string.resolution_digest() != none.resolution_digest()
+
+    def test_scoped_gate_targets_order_does_not_affect_the_digest(self):
+        """Codex review, PR #1027, seventh round: `ScopedGateSelection`'s
+        own docstring says its `targets` order is preserved in the
+        *stored* object but must be sorted by a digest consumer (the same
+        way `effective_config_digest._gate_scope_str()` already does) --
+        two runs selecting the same `--used-by` apps in a different
+        argument order must hash identically."""
+        cfg_ab = _evaluation_config(
+            gate=GateConfig(
+                scope=ScopedGateSelection(kind="used_by", targets=("app_a", "app_b"))
+            )
+        )
+        cfg_ba = _evaluation_config(
+            gate=GateConfig(
+                scope=ScopedGateSelection(kind="used_by", targets=("app_b", "app_a"))
+            )
+        )
+        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ab)
+        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
+        assert a.resolution_digest() == b.resolution_digest()
+
+    def test_scoped_gate_targets_content_difference_still_changes_the_digest(self):
+        cfg_with = _evaluation_config(
+            gate=GateConfig(
+                scope=ScopedGateSelection(kind="used_by", targets=("app_a",))
+            )
+        )
+        cfg_without = _evaluation_config(gate=GateConfig(scope=None))
+        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_with)
+        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_without)
+        assert a.resolution_digest() != b.resolution_digest()
 
     def test_unaffected_by_effective_depth_alone(self):
         """`resolution_digest()` fingerprints the resolved *input*

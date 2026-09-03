@@ -104,6 +104,7 @@ from ..evidence_depth import DEPTH_RANK
 if TYPE_CHECKING:
     from ..compatibility_evaluation_config import (
         CompatibilityEvaluationConfig,
+        GateConfig,
         ValueProvenance,
     )
     from ..compile_context import CompileContext
@@ -197,9 +198,36 @@ def _evaluation_config_value_repr(cfg: CompatibilityEvaluationConfig | None) -> 
             cfg.surface,
             cfg.assurance,
             cfg.policy,
-            cfg.gate,
+            _gate_config_value(cfg.gate),
             cfg.suppressions,
         )
+    )
+
+
+def _gate_config_value(gate: GateConfig) -> tuple[object, ...]:
+    """*gate* as a plain tuple, with ``scope.targets`` sorted -- not the
+    object itself (Codex review, PR #1027, seventh round). :class:`~abicheck.
+    compatibility_evaluation_config.ScopedGateSelection`'s own docstring
+    states this explicitly: it deliberately preserves caller order in the
+    *stored* object ("not canonicalized/sorted the way ``GateConfig.packs``
+    is") and requires a digest consumer to sort at digest-computation time
+    instead, the same way
+    :func:`abicheck.effective_config_digest._gate_scope_str` already does.
+    :func:`_canonical_repr`'s own tuple/list handling preserves order
+    uniformly (correct for e.g. ``ContractConfig.overlays``, where order is
+    part of the value), so ``scope.targets`` needs this one field-specific
+    normalization rather than a blanket rule -- two runs selecting the same
+    ``--used-by`` apps/required symbols in a different argument order must
+    hash identically."""
+    scope = gate.scope
+    scope_value = None if scope is None else (scope.kind, tuple(sorted(scope.targets)))
+    return (
+        gate.exit_code_scheme,
+        gate.preset,
+        gate.packs,
+        gate.severity,
+        gate.require_complete_analysis,
+        scope_value,
     )
 
 
