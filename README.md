@@ -41,9 +41,9 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 
 ## What a report looks like
 
-The run below compares two builds where a struct gained a field in the middle, two enum values swapped, and a function disappeared. The HTML report, rendered from real output:
+The run below compares two builds where version 2 only grows the ABI surface: two new functions, a new exported variable, and a new enum member. The HTML report, rendered from real output:
 
-<p align="center"><img src="docs/assets/readme/report-html.png" alt="abicheck HTML report: verdict BREAKING, analysis confidence table, change summary, removed and changed symbols" width="900"></p>
+<p align="center"><img src="docs/assets/readme/report-html.png" alt="abicheck HTML report: verdict COMPATIBLE, analysis confidence table, change summary, four added symbols" width="900"></p>
 
 The same content ships as Markdown (the default, and what the [GitHub Action](#github-action) posts as a PR comment), JSON, SARIF, and JUnit. Before the report, a CLI run prints which checks were on and which were off for the evidence you supplied:
 
@@ -74,44 +74,57 @@ Checks enabled for this scan (and why others are not):
 
 | | |
 |---|---|
-| **Verdict** | ❌ `BREAKING` |
-| Breaking changes | 5 |
+| **Old version** | `old` |
+| **New version** | `new` |
+| **Verdict** | ✅ `COMPATIBLE` |
+| Breaking changes | 0 |
 | Source-level breaks | 0 |
-| Compatible changes | 1 |
+| Deployment risk changes | 0 |
+| Compatible changes | 4 |
+
+## Analysis Confidence
+
+| Field | Value |
+|---|---|
+| Confidence | HIGH |
+| Evidence tier | `header_aware` |
+| Evidence tiers | `elf`, `dwarf`, `dwarf_advanced`, `header` |
+| Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
+| Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
+| Coverage gap | Detector 'pe' disabled: missing PE metadata |
+| Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
+| Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
+| Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
+| Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
+
+> **Policy**: `strict_abi`
 
 ## Release Recommendation
 
 | Field | Value |
 |---|---|
-| Version bump | 🔴 **MAJOR** |
-| SONAME action | `bump_required` |
+| Version bump | 🟢 **MINOR** |
+| SONAME action | `no_bump_needed` |
+| Recommendation state | `actionable` |
 
-## ❌ Breaking Changes
-
-- **type_size_changed**: Size changed: point (64 → 96 bits) (`64` → `96`) — `v1/foo.h:2`
-  > Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.
-  > 1 derived change(s) collapsed
-  > Affected symbols: `point_area`, `point_scale`
-- **type_field_offset_changed**: Field offset changed: point::y (32 → 64 bits) (`32` → `64`) — `v1/foo.h:2`
-  > Old code reads/writes fields at stale offsets; silent data corruption.
-- **enum_member_value_changed**: Enum member value changed: color::GREEN (1 → 2) (`1` → `2`)
-  > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
-- **enum_member_value_changed**: Enum member value changed: color::BLUE (2 → 1) (`2` → `1`)
-  > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
-- **func_removed**: Public function removed: legacy_helper (`legacy_helper`) — `v1/foo.h:6`
-  > Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.
+Backward-compatible additions to the public API — release a new MINOR version.
 
 ## ✅ Additions
 
-- **type_field_added_compatible**: Field added: point::z — `v1/foo.h:2`
-  > Field appended without changing existing offsets; old code works but won't initialize the new field.
-
-> ℹ️ 1 redundant change(s) hidden (derived from root type changes).
+- **enum_member_added**: Enum member added: color::ALPHA (`3`)
+  > New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case.
+- **func_added**: New public function: point_translate (`point_translate`) — `v2/foo.h:7`
+  > New function available; existing binaries are unaffected.
+- **func_added**: New public function: color_name (`color_name`) — `v2/foo.h:8`
+  > New function available; existing binaries are unaffected.
+- **var_added**: New public variable: point_api_version — `v2/foo.h:9`
+  > New variable available; existing binaries are unaffected.
 ```
 
 </details>
 
-Exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches. Findings derived from a root cause (here, the `point_scale` signature change that follows from the struct change) are folded into it and counted as hidden, so the report stays readable.
+Exit code `0`, with a `MINOR` version-bump recommendation and no SONAME change. Had a struct field moved or a function vanished, the verdict would be `BREAKING`, the recommendation `MAJOR` with an SONAME bump, and the exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches.
 
 ## How it works: five layers of evidence
 
