@@ -12,7 +12,7 @@ from __future__ import annotations
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.diff_cxx_rules import _owner_descends_from, vtable_slot_is_override_reuse
-from abicheck.model import AbiSnapshot, Function, Param, RecordType
+from abicheck.model import AbiSnapshot, Fact, Function, Param, RecordType
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
@@ -179,6 +179,47 @@ class TestVtableOverrideSlotReuse:
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_VTABLE_CHANGED not in kinds
+
+    def test_partial_bases_evidence_still_recognises_override_reuse(self) -> None:
+        """ADR-063 Phase 5B (Codex review on the same PR): the exact scenario
+        the review flagged -- a `PARTIAL` (not `NOT_COLLECTED`) `bases_fact`
+        that still carries its one known entry (`["Base"]`) must resolve
+        through `vtable_slot_is_override_reuse` exactly as a `PRESENT` one
+        would, at the real `vtable_slot_is_override_reuse` call site rather
+        than only at `_owner_descends_from` directly."""
+        old_funcs = {
+            "_ZN4Base5paintEi": Function(
+                name="Base::paint",
+                mangled="_ZN4Base5paintEi",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
+        new_funcs = {
+            "_ZN7Derived5paintEi": Function(
+                name="Derived::paint",
+                mangled="_ZN7Derived5paintEi",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )
+        }
+        new_types = {
+            "Derived": RecordType(
+                name="Derived",
+                kind="class",
+                bases_fact=Fact.partial(["Base"]),
+            )
+        }
+        assert vtable_slot_is_override_reuse(
+            "_ZN4Base5paintEi",
+            "_ZN7Derived5paintEi",
+            old_funcs,
+            new_funcs,
+            {},
+            new_types,
+        )
 
     def test_different_signature_same_name_still_fires(self) -> None:
         """The negative twin: same method name but a different parameter
@@ -424,6 +465,26 @@ class TestOwnerDescendsFrom:
         types = {
             "ns::Derived": RecordType(
                 name="ns::Derived", kind="class", bases=["ns::Base"]
+            ),
+        }
+        assert _owner_descends_from("ns::Derived", "ns::Base", types)
+
+    def test_partial_bases_evidence_is_still_trusted_for_a_known_entry(self) -> None:
+        """ADR-063 Phase 5B (Codex review on the same PR): `_owner_descends_from`
+        reads `_transitive_bases`'s *set* of names only and discards its
+        completeness flag entirely -- its own evidence-gap handling is
+        scoped to the separate vtable/vptr_offset_bits slice. A `PARTIAL`
+        `bases_fact` still carries real, known entries (the uncovered part
+        of the scope is merely *unknown*, not the covered part being wrong),
+        so a `PARTIAL`-evidenced `Derived -> Base` relationship must resolve
+        here exactly as a `PRESENT` one would -- losing it would make
+        `vtable_slot_is_override_reuse` (this function's own caller) return
+        `False` for a real override and fabricate a `TYPE_VTABLE_CHANGED`."""
+        types = {
+            "ns::Derived": RecordType(
+                name="ns::Derived",
+                kind="class",
+                bases_fact=Fact.partial(["ns::Base"]),
             ),
         }
         assert _owner_descends_from("ns::Derived", "ns::Base", types)

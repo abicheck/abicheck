@@ -1037,19 +1037,34 @@ def _fact_str_list_confirmed(fact: Fact[list[str]] | None) -> tuple[list[str], b
     """Like :func:`_fact_str_list`, plus whether the value is safe to treat
     as the *complete* base-class list (ADR-063 Phase 5B).
 
-    Only a ``PRESENT`` status earns ``True`` — ``PARTIAL`` is deliberately
-    excluded, the same discipline :func:`abicheck.compare.base_class_diff.
-    diff_bases` applies to this identical field pair: this is a full-list
-    *membership* question (does some transitive base declare a matching
-    virtual signature?), and a ``PARTIAL`` fact's uncovered remainder could
-    hold exactly the base that would have proven an override. Reading it as
-    "no more bases here" would be the same fabrication risk ``diff_bases``
-    already declines for the direct-comparison case.
+    The value itself is preserved for both ``PRESENT`` and ``PARTIAL`` —
+    exactly :func:`_fact_str_list`'s own value-preserving read — since
+    :func:`_owner_descends_from` also calls :func:`_transitive_bases` and
+    only ever reads this function's *set* of names, discarding the
+    completeness flag entirely (that call site's own evidence-gap handling
+    is scoped to the separate vtable/vptr_offset_bits slice). Dropping a
+    ``PARTIAL`` fact's known entries here, rather than just refusing to
+    call them *complete*, would silently lose a real ``Derived -> Base``
+    relationship `_owner_descends_from` used to see via `_fact_str_list`
+    before this function existed (Codex review on this PR: a same-signature
+    override slot rename with `PARTIAL` `bases_fact` evidence stopped
+    resolving through `vtable_slot_is_override_reuse`, fabricating a
+    `TYPE_VTABLE_CHANGED` for what may be a compatible override).
+
+    Only the completeness flag treats ``PARTIAL`` as unsafe, and only a
+    ``PRESENT`` status earns ``True`` there — the same discipline
+    :func:`abicheck.compare.base_class_diff.diff_bases` applies to this
+    identical field pair: this is a full-list *membership* question (does
+    some transitive base declare a matching virtual signature?), and a
+    ``PARTIAL`` fact's uncovered remainder could hold exactly the base that
+    would have proven an override. :func:`virtual_method_addition` — the
+    one caller that actually reads this flag — declines to trust the walk
+    when it is ``False``, rather than trusting a truncated value; it does
+    not need this function to also truncate the value for it.
     """
     assert fact is not None
-    if fact.status is not FactStatus.PRESENT:
-        return [], False
-    return (fact.value or []), True
+    value = fact.value if fact.is_present else []
+    return (value or []), fact.status is FactStatus.PRESENT
 
 
 def _transitive_bases(
