@@ -240,14 +240,36 @@ def _check_vptr_introduced(
     ``PRESENT`` for it too would make this whole detector permanently inert
     for every clang-header-AST-sourced comparison, since that backend never
     emits anything but ``PARTIAL`` for this field.
+
+    A confirmed ``is_standard_layout=True`` is a third, independent way to
+    establish "old side non-polymorphic" (Codex review, fresh evidence): the
+    C++ standard-layout requirement excludes virtual functions and virtual
+    base classes transitively -- a class "has" a virtual function inherited
+    from any base, not just one it declares itself, so a standard-layout
+    class owns no vtable/vptr anywhere in its hierarchy. This is a
+    genuinely different signal from ``old_vtable_fact``/``old_vptr_fact``
+    (a separate clang-only trait, not a relaxed threshold on either of
+    them), so it's checked as an alternate route to the same conclusion
+    rather than folded into the pair above: when it holds, this detector
+    proceeds even though the primary pair wasn't independently confirmed.
     """
     if not vtable_facts_reliable:
         return []
     old_vtable_fact = old_rec.vtable_fact
     old_vptr_fact = old_rec.vptr_offset_bits_fact
-    if (
-        old_vtable_fact is not None and old_vtable_fact.status is not FactStatus.PRESENT
-    ) or (old_vptr_fact is not None and not old_vptr_fact.is_present):
+    old_standard_layout_fact = old_rec.is_standard_layout_fact
+    old_confirmed_non_polymorphic_by_standard_layout = (
+        old_standard_layout_fact is not None
+        and old_standard_layout_fact.status is FactStatus.PRESENT
+        and old_standard_layout_fact.value is True
+    )
+    if not old_confirmed_non_polymorphic_by_standard_layout and (
+        (
+            old_vtable_fact is not None
+            and old_vtable_fact.status is not FactStatus.PRESENT
+        )
+        or (old_vptr_fact is not None and not old_vptr_fact.is_present)
+    ):
         return []
     old_vtable = resolved_fact_value(old_rec.vtable_fact, [])
     new_vtable = resolved_fact_value(new_rec.vtable_fact, [])

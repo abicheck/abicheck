@@ -190,6 +190,72 @@ class TestLayoutDescriptorDiff:
         new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
         assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
 
+    def test_vptr_flagged_via_confirmed_standard_layout_despite_uncollected_vtable(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a confirmed ``is_standard_layout=True``
+        is independent affirmative evidence the old side owned no vtable
+        anywhere in its hierarchy (the standard-layout requirement excludes
+        virtual functions/bases transitively), so it can substitute for an
+        uncollected ``vtable_fact``/``vptr_offset_bits_fact`` pair rather than
+        this detector declining outright.
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_standard_layout=True,
+                    is_standard_layout_fact=Fact.present(True),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_standard_layout_fact_uncollected_too(self) -> None:
+        # The fallback only applies when is_standard_layout is *itself*
+        # confirmed -- an uncollected is_standard_layout_fact provides no
+        # evidence at all, so the detector still declines.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_standard_layout_confirmed_false(self) -> None:
+        # A confirmed is_standard_layout=False says nothing about
+        # polymorphism either way (plenty of non-standard-layout classes are
+        # still non-polymorphic, e.g. mixed access control) -- must not be
+        # treated as the fallback signal, so the primary pair's own
+        # uncollected status still governs.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_standard_layout=False,
+                    is_standard_layout_fact=Fact.present(False),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
     def test_trivially_copyable_lost(self) -> None:
         old = _snap("1", types=[_rec(is_trivially_copyable=True)])
         new = _snap("2", types=[_rec(is_trivially_copyable=False)])
