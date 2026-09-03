@@ -688,6 +688,7 @@ def run_compare(
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
+    *,
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
@@ -706,11 +707,16 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
-    Trailing keyword-only params (``debuginfod_url`` onward) are appended
-    after every pre-existing one, never alongside a thematically-closer
-    neighbor, so a positional caller keeps binding each argument to the same
-    parameter it always did (Codex review, PR #551). ``include_dependencies``
-    applies to *both* sides — build a ``CompareRequest`` for a per-side override.
+    Trailing keyword-only params (``debuginfod_url`` onward, now enforced by
+    a ``*`` separator -- CodeRabbit review, PR #1032: ``severity_preset``/
+    ``exit_code_scheme`` were added under this claim without one, silently
+    still accepting positional binding) are appended after every
+    pre-existing one, never alongside a thematically-closer neighbor, so a
+    positional caller keeps binding each argument to the same parameter it
+    always did (Codex review, PR #551); every real caller already uses
+    keywords, so this changes no call site. ``include_dependencies``
+    applies to *both* sides — build a ``CompareRequest`` for a per-side
+    override.
 
     ``pack_policy_overrides``/``pack_internal_namespaces``: an already-
     resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
@@ -728,13 +734,11 @@ def run_compare(
     no-op, matching every pre-existing caller.
 
     ``depth`` forwards straight onto :class:`CompareRequest.depth` -- the
-    same evidence-depth dial the native ``compare`` CLI resolves (the
     release fan-out's ``_run_compare_pair`` needed a way to forward its own
-    resolved ``--depth binary`` per pair; every other caller passes ``None``).
+    resolved ``--depth binary`` per pair; every other caller passes ``None``.
 
     ``severity_preset``/``exit_code_scheme`` (Codex review): forward onto
-    ``CompareRequest``'s identically-named fields -- this *supported* entry
-    point had no way to select the severity-aware gate. ``None`` is a no-op.
+    ``CompareRequest``'s identically-named fields; ``None`` is a no-op.
 
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare

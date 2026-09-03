@@ -61,16 +61,32 @@ from typing import TYPE_CHECKING, Any
 
 from .change_registry_types import Verdict
 from .checker_policy import VALID_BASE_POLICIES, ChangeKind
+from .checker_types import DiffResult
 from .errors import ValidationError
+from .model import AbiSnapshot
+from .policy.exit_decision import ExitDecision
+from .policy.severity import SeverityConfig
+from .suppression import SuppressionList
 
 if TYPE_CHECKING:
-    from .checker_types import DiffResult
+    # ``CompileContext``/``DumpManifest`` are used only by ``InputSpec``,
+    # never referenced by ``CompareResult`` -- unlike the five imports above,
+    # nothing here needs them resolvable at runtime by ``typing.get_type_
+    # hints()`` (CodeRabbit review, fresh evidence, PR #1032: that call
+    # raised ``NameError`` for ``CompareResult`` because its own fields --
+    # ``diff: DiffResult``, ``old_snapshot``/``new_snapshot: AbiSnapshot``,
+    # ``suppression: SuppressionList | None``, ``exit_decision:
+    # ExitDecision | None``, ``severity_config: SeverityConfig | None`` --
+    # directly reference six of what were seven ``TYPE_CHECKING``-only
+    # names; importing only ``DiffResult``, as first suggested, would have
+    # just moved the same failure to the next unresolved name. No import
+    # cycle: none of ``checker_types``/``model``/``suppression``/
+    # ``policy.exit_decision``/``policy.severity`` imports this module,
+    # directly or transitively -- the same check
+    # ``TestCompareRequestRuntimeResolvableAnnotations`` already documents
+    # for ``CompareRequest``'s own two runtime imports below).
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
-    from .model import AbiSnapshot
-    from .policy.exit_decision import ExitDecision
-    from .policy.severity import SeverityConfig
-    from .suppression import SuppressionList
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})

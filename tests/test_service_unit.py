@@ -3245,6 +3245,26 @@ class TestContractEvaluationThreading:
         assert params[-9] == "contract_evaluation"
         assert params[-10] == "diagnostic_comparison"
 
+    def test_trailing_params_are_actually_keyword_only(self):
+        """CodeRabbit review, fresh evidence, PR #1032: this docstring has
+        claimed every param from `debuginfod_url` onward is "keyword-only"
+        since PR #551, but no `*` separator ever enforced it -- `severity_
+        preset`/`exit_code_scheme` (ADR-064/PR G2) were added under that
+        same claim and, like every param before them, still silently
+        accepted positional binding. Fixed by adding the `*` separator
+        before `debuginfod_url`; every real caller in this codebase already
+        passes these by keyword, so this changes no existing call site."""
+        import inspect
+
+        params = inspect.signature(run_compare).parameters
+        keyword_only_from = "debuginfod_url"
+        seen_marker = False
+        for name, param in params.items():
+            if name == keyword_only_from:
+                seen_marker = True
+            if seen_marker:
+                assert param.kind is inspect.Parameter.KEYWORD_ONLY, name
+
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into
         `service_compare_pipeline.py` in this same PR, and `Path` was only
