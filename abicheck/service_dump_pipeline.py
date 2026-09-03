@@ -44,6 +44,7 @@ import cycle.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -720,6 +721,20 @@ def execute_dump_request(
                 ),
             )
         )
+        # Codex review, PR #1037: `with_assurance()` alone leaves
+        # `compile_contexts` at the empty mapping `resolve_dump_request` built
+        # it with (nothing is knowable pre-execution -- see that field's own
+        # docstring on `ResolvedDumpRequest`). This resolution's own
+        # `effective_compile_context`, when the P0.3 fold produced one, is
+        # exactly the resolved L2 compile-context input the field exists to
+        # carry, under the one label a dump has (mirroring
+        # `ResolvedComparePair.resolved_execution_context`'s `"old"`/`"new"`
+        # side labels with `dump`'s own single side).
+        if resolution.effective_compile_context is not None:
+            resolved_execution_context = dataclasses.replace(
+                resolved_execution_context,
+                compile_contexts={"input": resolution.effective_compile_context},
+            )
     return DumpResult(
         resolved=resolved,
         snapshot=snap,

@@ -169,3 +169,36 @@ class TestExecuteDumpRequestWithAssurance:
         result = execute_dump_request(bare)
 
         assert result.resolved_execution_context is None
+
+    def test_result_carries_the_resolved_compile_context(self, snap_path, monkeypatch):
+        """Codex review, PR #1037: `with_assurance()` alone leaves
+        `compile_contexts` empty even when the P0.3 fold produced a real
+        `effective_compile_context` -- `DumpResult.resolved_execution_context`
+        must carry it too, under the `"input"` label, so a consumer reading
+        through the unified context sees the same toolchain
+        `DumpResult.effective_compile_context` itself exposes."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        resolved = resolve_dump_request(request)
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {
+            "input": fake_ctx
+        }
