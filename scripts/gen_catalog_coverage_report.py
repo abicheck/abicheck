@@ -16,18 +16,23 @@ instead:
                             rules the catalog demonstrates (by `rule_slug`,
                             deduplicated -- a rule and its variant(s) count
                             once)
-    variant coverage     -- how many of those rules have more than one
-                            demonstrated variant, and how many total variant
-                            cases that represents
+    variant coverage     -- how many of those rules have a demonstrated
+                            variant beyond their canonical case, and how
+                            many variant cases that represents (canonical
+                            and variant cases reported separately -- a
+                            2-case family has exactly 1 variant, not "more
+                            than one")
     scenario coverage    -- scenario-entity cases broken down by
                             `scenario_kind` (case-study / project-topology /
                             capability)
     ecosystem coverage   -- every case (rule or scenario) broken down by
                             `ecosystem`
     workflow coverage    -- user-facing task-oriented workflow examples;
-                            zero until Phase 5 rebuilds `examples/` as that
-                            curated set (see the plan doc's Phase 5 row) --
-                            reported honestly as pending, not omitted
+                            derived from `examples/workflows/`'s real
+                            subdirectory count (see the plan doc's Phase 5
+                            row for the target set and progress against it)
+                            rather than a static placeholder, so this
+                            dimension can't go stale against Phase 5
 
 This is a report, not a gate: it doesn't change what any existing check
 counts, and it doesn't touch `examples/README.md`'s own headline/verdict

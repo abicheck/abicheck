@@ -6878,6 +6878,7 @@
    "validation_owner": "compiler-pair",
    "related_rules": [
     "exported-function-removed",
+    "exported-type-removed",
     "overload-set-removed"
    ],
    "rule_slug": null,
@@ -7058,6 +7059,7 @@
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
    "related_rules": [
+    "exported-function-removed",
     "symbol-source-owner-changed"
    ],
    "rule_slug": null,
@@ -7077,6 +7079,7 @@
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
    "related_rules": [
+    "exported-function-removed",
     "missing-template-instantiation"
    ],
    "rule_slug": null,

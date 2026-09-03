@@ -125,6 +125,7 @@ RELATED_RULES: dict[str, list[str]] = {
     # -- SYCL case studies --
     "case82_sycl_overload_set_removed": [
         "exported-function-removed",
+        "exported-type-removed",
         "overload-set-removed",
     ],
     "case126_sycl_device_impl_ptr": ["public-class-representation-changed"],
@@ -141,8 +142,14 @@ RELATED_RULES: dict[str, list[str]] = {
     "case84_bundle_soname_skew": ["soname-inconsistent"],
     "case90_bundle_intra_dep_removed": ["exported-function-removed"],
     "case91_bundle_intra_signature_drift": ["param-type-change", "return-type"],
-    "case92_bundle_provider_changed": ["symbol-source-owner-changed"],
-    "case93_bundle_manifest_drift": ["missing-template-instantiation"],
+    "case92_bundle_provider_changed": [
+        "exported-function-removed",
+        "symbol-source-owner-changed",
+    ],
+    "case93_bundle_manifest_drift": [
+        "exported-function-removed",
+        "missing-template-instantiation",
+    ],
     # -- G20 capability/audit scenarios --
     "case147_scan_depth_ladder": ["audit-private-header-leak"],
     "case148_xcheck_header_build_mismatch": ["header-build-context-mismatch"],
