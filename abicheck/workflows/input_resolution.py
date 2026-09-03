@@ -255,6 +255,7 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     """
     from ..btf_metadata import BTF_MAGIC, parse_btf_from_bytes
     from ..ctf_metadata import CTF_MAGIC, parse_ctf_from_bytes
+    from ..extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
 
     try:
         with open(path, "rb") as f:
@@ -282,27 +283,37 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
             if not btf.has_btf or btf.type_count <= 0:
                 _logger.warning("raw BTF blob %s has no type records; ignoring", path)
                 return None
+            btf_dwarf_meta = btf.to_dwarf_metadata()
             return AbiSnapshot(
                 library=path.name,
                 version=version,
-                dwarf=btf.to_dwarf_metadata(),
+                dwarf=btf_dwarf_meta,
                 # Bridge the full BTF surface: prototypes feed the function
                 # detectors (FUNC_PARAMS_CHANGED, ...) and typedef targets feed
                 # TYPEDEF_BASE_CHANGED — previously dropped at this boundary.
                 functions=_typeinfo_functions(btf.func_protos),
                 typedefs=dict(btf.typedefs),
+                # ADR-063 Phase 6, BTF/CTF slice (Codex review, fresh evidence):
+                # this raw-blob assembler is a second production call site
+                # alongside dumper_elf_fallback.py's own -- narrowing the
+                # BTF/CTF backends to raw-fact production would leave this one
+                # unwired too, so it gets the identical treatment directly
+                # rather than waiting for a shared choke point.
+                semantic_ir=semantic_ir_from_debug_metadata(btf_dwarf_meta, "btf"),
             )
         if magic_le == CTF_MAGIC:
             ctf = parse_ctf_from_bytes(data)
             if not ctf.has_ctf or ctf.type_count <= 0:
                 _logger.warning("raw CTF blob %s has no type records; ignoring", path)
                 return None
+            ctf_dwarf_meta = ctf.to_dwarf_metadata()
             return AbiSnapshot(
                 library=path.name,
                 version=version,
-                dwarf=ctf.to_dwarf_metadata(),
+                dwarf=ctf_dwarf_meta,
                 functions=_typeinfo_functions(ctf.func_protos),
                 typedefs=dict(ctf.typedefs),
+                semantic_ir=semantic_ir_from_debug_metadata(ctf_dwarf_meta, "ctf"),
             )
     except (ValueError, OSError) as exc:
         _logger.warning("failed to parse raw type-info blob %s: %s", path, exc)

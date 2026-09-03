@@ -612,12 +612,12 @@ _ALLOWED_RESOLVER_CALLERS = (
     "dumper_castxml.py",
     "extract/headers/",
     # ADR-063 Phase 2: dwarf_snapshot.py/extract/dwarf_scope.py build a typed
-    # ScopePath like the two header-AST backends. extract/
-    # export_symbol_identity.py is the shared export-table-only builder for
-    # ELF/Mach-O/PE fallback construction -- scope-free branches only.
+    # ScopePath like the two header-AST backends. extract/export_symbol_identity.py
+    # is the shared export-table-only builder for ELF/Mach-O/PE fallback construction -- scope-free branches only.
     "dwarf_snapshot.py",
     "extract/dwarf_scope.py",
     "extract/export_symbol_identity.py",
+    "extract/debug_layout_semantic_ir.py",  # BTF/CTF: flat, no ScopePath.
     "extract/pdb_scope.py",  # ADR-063 Phase 6: same, from a flat CodeView name.
 )
 
