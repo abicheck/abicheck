@@ -51,8 +51,8 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: bb14e8e
-as_of_date: "2026-09-02"
+as_of_commit: e254a9e
+as_of_date: "2026-09-03"
 
 concepts:
   facts:
@@ -127,7 +127,13 @@ concepts:
       Phase 4B (resolved-execution-context): a ResolvedExecutionContext
       built for real (non-dry-run) execution, carrying resolved
       policy/pack/contract/evidence-depth state so downstream code stops
-      independently re-resolving each of them per call site.
+      independently re-resolving each of them per call site. A first real
+      call site landed 2026-09-03: service_compare_pipeline.
+      resolve_compare_request builds one from its own already-resolved
+      AnalysisPlan and attaches it on ResolvedComparePair, additive and
+      unread by any consumer -- resolve_dump_request remains unwired, and
+      no evaluation_config/compile_contexts/with_assurance() caller exists
+      yet, so this gate stays open.
 
   run_outcome:
     primitive: complete
