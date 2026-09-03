@@ -20,7 +20,10 @@ paired `v1`/`v2` sources and headers; the L3/L4/L5 build/source-only cases
 (152–164) ship hand-built evidence-model fixture pairs; bundle/release-level
 cases use release-style layouts.
 Browse the generated single-library pages in the
-[Examples & Case Encyclopedia](../reference/examples/index.md), or pick one and run it locally:
+[Examples & Case Encyclopedia](../reference/examples/index.md), or pick one and run it locally
+(`examples/workflows/compare-release/` walks through the exact steps below
+against a small, purpose-built project instead of a calibration case, if
+you'd rather start there):
 
 ```bash
 cd examples/case01_symbol_removal
