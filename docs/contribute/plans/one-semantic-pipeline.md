@@ -10886,6 +10886,91 @@ gate OK.
 
 ---
 
+**Landed (2026-09-03): Phase 6B's second checker cutover — the constant
+family, reusing the typedef cohort's adapter and gate shape unchanged.**
+
+*Why constants.* The typedef cohort's own reasoning already ruled out
+records (layout facts the IR does not yet model) and functions (a canonical
+signature spelling whose cross-backend agreement is its own open question)
+as the next cohort. Constants are what's left of the "IR already covers
+this completely" set: `extract/semantic_normalizer.py`'s fourth slice
+already gave every public constant a real `EntityId`
+(`parse_constant_entity_ids()`, Phase 2) plus exactly one payload fact —
+its raw, deliberately-uncanonicalized value text
+(`CanonicalEntity.canonical_spelling`, matching `diff_symbols.
+_diff_constants`'s own long-standing raw-string `!=` comparison) — so, like
+typedefs, migrating this family is a real read-path change, not extraction
+work in disguise.
+
+*The shape, reused rather than re-derived.* `abicheck/compare/constants.py`
+is `compare/typedefs.py`'s design with the constant collections substituted:
+index-only reads (`diff_constants`), a fidelity-gated selector
+(`constant_index_pair`) requiring the IR's rendered names/values/identities
+to exactly reproduce `AbiSnapshot.constants` on both sides before trusting
+it, both-or-neither on any divergence. `abicheck/model/
+semantic_ir_legacy_adapter.py` gained one sibling function,
+`legacy_constant_ir`, reusing `render_display_name`/`producer_entity_id`/
+`SYNTHETIC_IDENTITY_EXTRA` unchanged — a constant's qualified name has the
+same flat-spelling shape a typedef's alias does, so nothing about the
+rendering or synthetic-identity story differs between the two families.
+
+*The one real difference: an injected reliability predicate, not a
+snapshot-blind detector reading a new fact directly.* Constants carry one
+comparison-level suppression typedefs don't:
+`diff_default_value_reliability.
+constant_value_fingerprint_comparison_unreliable` declines a `CONSTANT_
+CHANGED` verdict when either side's value is a pre-stabilization
+direct-clang fingerprint that can't be trusted against a fresh one. That
+function reads `AbiSnapshot.ast_producer`/`clang_field_initializer_facts_
+reliable` — snapshot fields the migrated cohort is not forbidden from
+reading — but keeping `compare/constants.py` snapshot-blind (matching
+`compare/typedefs.py`'s own discipline of taking only indexes and plain
+values) meant injecting it as a predicate closed over both snapshots by the
+caller (`diff_symbols._diff_constants`), the same reasoning that already
+motivated `diff_typedefs`'s own `is_non_abi_surface_type` injection.
+
+*A defensive floor with no reachable legacy sentinel.* A typedef's
+unresolved-chain placeholder (`"?"`) is a real string both backends agree
+on, so `compare/typedefs._underlying` can fall back to it defensively. A
+constant's `Fact.unsupported()` occurrence (a clang compound-initializer
+fingerprint or Python-bool-derived literal spelling) carries no such
+placeholder — the raw fingerprint text isn't retained on the fact at all —
+so `compare/constants._value` returns `None` instead. This is never reached
+through the real `constant_index_pair` gate in practice: a `None`
+projection can never equal the legacy raw string the fidelity gate compares
+against, so any entity in this state already forces a fallback to the
+adapter for both sides before a detector would iterate it. Exercised
+directly in `tests/test_constant_cutover.py` as the defensive floor, not
+the mechanism.
+
+*The closing gate.* One more `MIGRATED_COHORTS` entry in
+`scripts/semantic_ir_cutover.py` (`constants`, forbidding
+`AbiSnapshot.constants`/`constant_entity_ids` reads from
+`abicheck/compare/constants.py`) — no changes to the check itself, since the
+same real AST scan already generalizes across cohorts by construction.
+
+*What remains open, explicitly.* Same as the typedef cohort: bare-name-
+collision narrowing and promoting the `entity:` alias into a real match
+tier are both still out of scope, needing their own sign-off/completeness
+work first (see the identity concept's own removal_gate in the status
+ledger). Every family beyond typedefs and constants remains unmigrated.
+
+*Verification.* `tests/test_constant_cutover.py` states the identical
+Hypothesis equivalence property `test_typedef_cutover.py` does, substituted
+for constants (add/remove/change/unchanged across five qualified-name
+shapes and five value spellings) — the same comparison run through a real
+`SemanticIR` and through the adapter must produce identical findings, with
+the adapter path as the oracle — plus the gate-exercise tests proving
+`semantic_ir_cutover.py`'s scan actually fires on every forbidden read
+shape for the new cohort. Plus `TestLegacyConstantIr` in
+`tests/test_semantic_ir_legacy_adapter.py`, mirroring the typedef adapter's
+own round-trip/fallback/sidecar-mismatch coverage. Full fast unit lane
+green; `ruff check`/`mypy abicheck/` clean; `check_architecture.py` 0
+errors; `check_ai_readiness.py` 0 errors; `check_docs_contract.py` 0
+errors.
+
+---
+
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
 
 **Landed (thirteen slices, 2026-08-31): the plumbing, not the traversal

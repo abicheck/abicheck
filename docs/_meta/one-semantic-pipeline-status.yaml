@@ -38,12 +38,14 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of merge commit 62679b1 (PR #1041, the typedef family's SemanticIR
-# cutover -- Phase 6B's first detector cohort), which itself carries
-# forward fd197d59 (PR #1025, the PDB EntityId/SemanticIR slice), b2d8eaaf
-# (PR #1024, the multi-TU manifest occurrence-detail fix), bb14e8e
-# (PR #1021), and PR #1019's own status-sync fixes. Update this file in
-# the same PR that changes a concept's landed status.
+# as of base commit 2a88a5bd (the constant family's SemanticIR cutover --
+# Phase 6B's second detector cohort -- was built on and merges this
+# content forward), which itself carries forward 62679b1 (PR #1041, the
+# typedef family's SemanticIR cutover -- Phase 6B's first detector
+# cohort), fd197d59 (PR #1025, the PDB EntityId/SemanticIR slice),
+# b2d8eaaf (PR #1024, the multi-TU manifest occurrence-detail fix),
+# bb14e8e (PR #1021), and PR #1019's own status-sync fixes. Update this
+# file in the same PR that changes a concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -54,7 +56,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: 62679b1
+as_of_commit: 2a88a5bd
 as_of_date: "2026-09-03"
 
 concepts:
@@ -152,26 +154,38 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Phase 6B (semantic-ir-checker-cutover), first cohort landed
-      2026-09-03: the TYPEDEF family now reads SemanticIR through
-      SemanticIRIndex (abicheck/compare/typedefs.py), with a
+      Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
+      First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
+      through SemanticIRIndex (abicheck/compare/typedefs.py). Second
+      cohort (2026-09-03): the CONSTANT family too
+      (abicheck/compare/constants.py), the next-simplest per this phase's
+      own reasoning -- records carry layout facts the IR does not yet
+      model, and functions need cross-backend signature-spelling
+      agreement worked out first. Both share one
       legacy-flat-snapshot adapter
       (abicheck/model/semantic_ir_legacy_adapter.py) producing the same
-      read shape for a snapshot carrying no SemanticIR, and a new
-      semantic-ir-cutover AI-readiness check (scripts/semantic_ir_cutover.py,
-      a real AST scan, no allowlist) forbidding that module from reading
-      AbiSnapshot.typedefs/typedefs_qualified/typedef_entity_ids. Which
-      backing is used is decided by a fidelity gate requiring the IR's own
-      rendered display names to reproduce the comparison's alias maps
-      exactly on BOTH sides, so the cutover is behavior-preserving by
+      read shape for a snapshot carrying no SemanticIR, and both are
+      forbidden -- by MIGRATED_COHORTS entries in the same
+      semantic-ir-cutover AI-readiness check
+      (scripts/semantic_ir_cutover.py, a real AST scan, no allowlist) --
+      from reading AbiSnapshot.typedefs/typedefs_qualified/
+      typedef_entity_ids and AbiSnapshot.constants/constant_entity_ids
+      respectively. Which backing is used is decided per cohort by a
+      fidelity gate requiring the IR's own rendered display
+      names/values/identities to reproduce the comparison's legacy maps
+      exactly on BOTH sides, so each cutover is behavior-preserving by
       construction. EVERY OTHER detector family remains unmigrated and
       still reads the legacy collections directly -- deliberately, per
       this phase's own non-goal of not widening coverage until one full
       vertical slice is proven; each further cohort needs its own
-      MIGRATED_COHORTS entry. SemanticIRIndex.references() is still
+      MIGRATED_COHORTS entry. Not attempted by either cohort, and
+      explicitly flagged as needing separate sign-off/completeness work
+      first: narrowing a bare-name identity collision, and promoting the
+      entity: alias into a real match tier (see the identity concept's
+      own removal_gate). SemanticIRIndex.references() is still
       unimplemented (it names a graph traversal belonging with the
-      public-surface reference index, ADR-063 D5 / plan Phase 3), so the
-      typedef cohort does not use it.
+      public-surface reference index, ADR-063 D5 / plan Phase 3), so
+      neither cohort uses it.
       Producers remain partial regardless (CanonicalEntity.template_arguments
       is populated for records but not for function templates, and clang
       produces no occurrence at all for a template specialization).
