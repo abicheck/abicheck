@@ -547,16 +547,20 @@ STEPS: tuple[Step, ...] = (
     Step(
         "slow",
         # -n auto --dist worksteal, matching ci.yml's "Run slow tests" step:
-        # the `slow`-marked tests here are independent (Hypothesis/property-
+        # most `slow`-marked tests here are independent (Hypothesis/property-
         # based suites plus the production-scale snapshot-compression round
         # trips), so a serial run was pure wasted wall time on a multi-core
         # runner/machine and left this local step unable to reproduce CI's
         # actual timing behavior (Codex review, PR #1036).
+        # tests/test_performance.py is excluded here and covered by the
+        # separate "slow-perf" step below, run serially — see that step's
+        # own comment for why (Codex review, same PR).
         _py(
             "pytest",
             "tests/",
             "-m",
             "slow",
+            "--ignore=tests/test_performance.py",
             "--tb=short",
             "-n",
             "auto",
@@ -564,7 +568,22 @@ STEPS: tuple[Step, ...] = (
             "worksteal",
         ),
         frozenset({FULL}),
-        description="Hypothesis / perf-benchmark tests",
+        description="Hypothesis / perf-benchmark tests (parallel; excludes wall-clock-timed tests)",
+    ),
+    Step(
+        "slow-perf",
+        # Deliberately NOT parallelized, unlike "slow" above: every test in
+        # tests/test_performance.py (whole-file `pytestmark = pytest.mark.
+        # slow`) measures real wall-clock time against a fixed budget
+        # (2s/5s/30s ceilings) or fits a scaling exponent -- running them
+        # concurrently with other CPU-heavy tests makes scheduler contention
+        # part of the measurement, which can fail (or distort) the gate with
+        # no actual product regression. ci.yml's "Run slow tests" step and
+        # performance.yml's own dedicated job both keep this file serial for
+        # the identical reason (Codex review, PR #1036).
+        _py("pytest", "tests/test_performance.py", "-m", "slow", "--tb=short"),
+        frozenset({FULL}),
+        description='Wall-clock-timed perf-benchmark tests (serial, unlike "slow")',
     ),
     Step(
         # Report-only (no --baseline): a single-checkout, single-Step run has
