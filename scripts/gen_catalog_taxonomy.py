@@ -144,7 +144,10 @@ RELATED_RULES: dict[str, list[str]] = {
         "exported-type-removed",
         "overload-set-removed",
     ],
-    "case126_sycl_device_impl_ptr": ["public-class-representation-changed"],
+    "case126_sycl_device_impl_ptr": [
+        "public-class-representation-changed",
+        "public-struct-private-field-type",
+    ],
     # -- oneMKL case study --
     "case112_lp64_ilp64": [
         "public-integer-model-width-changed",
