@@ -3399,9 +3399,11 @@ pipelines a fourth time.
   > 3C's own "all three resolvers" ordering rule below — see that rule's
   > own text for what (if anything) it still needs. Root `AGENTS.md`'s own
   > PR C entry, `docs/contribute/known-gaps.md`'s "PR C" entry, and
-  > `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 1 status
-  > bullet are all updated to match (Codex review on PR #980 caught this
-  > section's own conclusion left stale after that PR's initial push).
+  > `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 1 "Landed"
+  > notes (ADR-063 itself no longer carries a per-phase status bullet, its
+  > duplicated status block having been removed by PR 0, 2026-09-02) are
+  > all updated to match (Codex review on PR #980 caught this section's own
+  > conclusion left stale after that PR's initial push).
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI

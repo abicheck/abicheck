@@ -114,10 +114,12 @@ looked like the obvious fix and wasn't.
   "has always" — other `ValidationError`s reaching it likely already rely
   on the flattened exit 1) and was not attempted here. See
   `abicheck/workflows/plan.py`'s own module docstring and
-  `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
-  for what changed and what this fix deliberately does not attempt (option 1
-  below, teaching the adapter to filter an already-parsed graph, remains
-  unimplemented).
+  `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 4 "Landed"/
+  "Still not landed" notes (ADR-063 itself no longer carries a per-phase
+  status entry — its duplicated status block was removed by PR 0,
+  2026-09-02) for what changed and what this fix deliberately does not
+  attempt (option 1 below, teaching the adapter to filter an already-parsed
+  graph, remains unimplemented).
   **A third Codex review round found a remaining dry-run/execution parity
   gap for this same `.abicheck.yml` case, investigated and deliberately left
   open rather than fixed reactively.** `dump --dry-run` (`cli_dump_helpers.
@@ -194,9 +196,10 @@ looked like the obvious fix and wasn't.
   call needed to forward `sources=`/`build_config=` too, landing at a new,
   lowered `architecture/debt.yaml` baseline (2000 → 1933) rather than
   exactly at the hard cap. See
-  `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
-  ("Second slice" / "Third slice") and `docs/contribute/plans/one-semantic-pipeline.md`'s
-  matching Phase 4 update for the full accounting, and
+  `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 4 "Landed"
+  notes ("Second slice" / "Third slice" — ADR-063 itself no longer carries
+  a per-phase status entry, its duplicated status block having been
+  removed by PR 0, 2026-09-02) for the full accounting, and
   `tests/test_analysis_plan.py::TestBazelBuildTargetScoping`/`tests/
   test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`/
   `tests/test_bazel_root_targets_scan.py::
