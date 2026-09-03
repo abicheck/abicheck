@@ -530,6 +530,23 @@ pytest_add_cli_args = [
     # `scripts.check_ai_readiness`/`scripts.fact_field_readers`, matching
     # this file's own "costs no measurement" rule for every entry above.
     "--ignore=tests/test_fact_field_readers.py",
+    # Same "reads the real repository" class as the entry immediately
+    # above, one file over: `test_no_violation_in_real_repo` calls
+    # `check_fact_detector_misuse()`, which does its own full
+    # `abicheck/**/*.py` AST walk rooted at `_REPO_ROOT = Path(__file__).
+    # resolve().parent.parent` to assert the real repository has no
+    # unlisted `fact-detector-misuse` violation. A normal run completes
+    # this in well under a minute (~52s observed); discovered here because
+    # under `mutmut run`'s baseline collection specifically it instead ran
+    # past pytest-timeout's 600s ceiling and aborted the whole lane with
+    # `-x` before a single mutant was measured (PR #1036) -- consistent
+    # with this same class of test being unsuited to mutmut's clean-test
+    # phase, not a defect in the scan itself (every other lane exercising
+    # it stays fast). No mutation-kill cost: it imports no `only_mutate`
+    # module (confirmed by grep), only `scripts.check_ai_readiness`/
+    # `scripts.fact_detector_misuse`, matching this file's own "costs no
+    # measurement" rule for every entry above.
+    "--ignore=tests/test_fact_detector_misuse.py",
     # Same class again, a fourth independent trigger site (PR #1016, this
     # PR's own diff -- discovered the same way as the `test_action_check_
     # target*`/`test_action_collect_facts.py` entries above: this PR's diff
