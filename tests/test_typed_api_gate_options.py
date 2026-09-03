@@ -520,3 +520,31 @@ class TestInvalidExitCodeScheme:
                     exit_code_scheme="legacy ",
                 )
             )
+
+    def test_compare_request_rejects_bad_preset_before_extraction_runs(self) -> None:
+        """CodeRabbit review, fresh evidence: the fix above validated
+        `exit_code_scheme` but left its sibling field, `severity_preset`,
+        unchecked -- a misspelled preset (e.g. `"strcit"`) still only failed
+        later, inside `classify_compare_pair`'s `resolve_release_gate_
+        options` call, once extraction had already run. Same proof
+        structure as the sibling test above: a nonexistent path would raise
+        a filesystem error if extraction ran first, so seeing
+        `ValidationError` instead is direct evidence the check now runs
+        before it."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.abi.json")
+        missing_new = Path("/nonexistent/new.abi.json")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="severity_preset"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    severity_preset="strcit",
+                )
+            )

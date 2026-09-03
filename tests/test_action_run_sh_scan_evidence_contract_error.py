@@ -219,8 +219,13 @@ def test_exit_1_plain_cli_error_still_maps_to_error():
 def test_exit_1_severity_error_unaffected():
     """A severity-scheme gate at exit 1 (no CLI error) must still classify
     as SEVERITY_ERROR, unaffected by evidence-contract-error moving off
-    exit 1 entirely."""
-    result = _run_exit_mapping(1, is_cli_error=False, severity_exit="2")
+    exit 1 entirely. `severity_exit="1"` is `compute_exit_code`'s own value
+    for an error-level `addition`/`quality_issues` finding -- `"2"` is
+    `potential_breaking`'s code, a different category this docstring does
+    not claim to model (CodeRabbit review, fresh evidence: the mismatch
+    meant this test never actually validated the addition/quality-error
+    exit-decision contract it describes)."""
+    result = _run_exit_mapping(1, is_cli_error=False, severity_exit="1")
     assert result.returncode == 0, result.stderr
     assert "VERDICT=SEVERITY_ERROR" in result.stdout
 

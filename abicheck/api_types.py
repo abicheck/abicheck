@@ -802,6 +802,23 @@ class CompareRequest:
                     f"invalid exit_code_scheme {self.exit_code_scheme!r}; "
                     f"must be one of {_VALID_EXIT_CODE_SCHEMES} or None"
                 )
+        # Same fail-fast reasoning, same round (Codex review, fresh
+        # evidence): the `exit_code_scheme` check above left this sibling
+        # field unchecked, so a misspelled `severity_preset` (e.g.
+        # `"strcit"`) still reached `resolve_release_gate_options` only
+        # after `resolve_compare_request` had already extracted both
+        # sides -- `SEVERITY_PRESETS` is `resolve_severity_config`'s own
+        # lookup table, checked here without calling it (this method must
+        # stay side-effect-free; resolving would also require a real
+        # `SeverityConfig` this validation has no use for).
+        if self.severity_preset is not None:
+            from .policy.severity import SEVERITY_PRESETS
+
+            if self.severity_preset not in SEVERITY_PRESETS:
+                errors.append(
+                    f"invalid severity_preset {self.severity_preset!r}; "
+                    f"must be one of {sorted(SEVERITY_PRESETS)} or None"
+                )
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
