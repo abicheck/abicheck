@@ -20,13 +20,17 @@ from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import (
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
+    TYPES_SECTION_KIND,
     SectionDTO,
     legacy_section_from_dto,
     legacy_section_to_dto,
     migrate_section_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
+    types_from_dto,
+    types_to_dto,
 )
+from abicheck.storage.types_section_codec import TypesSection
 
 
 class TestSectionDTO:
@@ -279,3 +283,54 @@ class TestLegacySectionDTO:
         assert canonical_json(dto_forward.to_dict()) == canonical_json(
             dto_backward.to_dict()
         )
+
+
+class TestTypesSectionDTO:
+    """ADR-063 Track 4 (8B): `TypesSection`, the `"types"` D8 legacy
+    section's own typed DTO."""
+
+    def test_round_trips_through_a_dict_document(self) -> None:
+        section = TypesSection(types=({"kind": "record", "name": "Foo"},))
+        dto = types_to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = types_from_dto(reloaded)
+        assert section2 == section
+
+    def test_wrong_section_kind_is_refused(self) -> None:
+        dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
+        with pytest.raises(ValueError):
+            types_from_dto(dto)
+
+    def test_nested_lists_are_deep_unfrozen_not_left_as_tuples(self) -> None:
+        """Codex review, fresh evidence: `SectionDTO.payload` freezes every
+        nested mapping/list recursively (`_freeze`) — `types_from_dto` must
+        read back through `to_dict()`'s own deep `_unfreeze`, not the frozen
+        `payload` attribute directly, or a type entry's own nested list
+        (e.g. a `RecordType`'s `bases`) would round-trip as a `tuple` while
+        a freshly-dumped comparison side holds a plain `list`, producing a
+        spurious mismatch a downstream detector reads as a real change."""
+        section = TypesSection(types=({"name": "Foo", "bases": ["Base"]},))
+        dto = types_to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = types_from_dto(reloaded)
+        entry = section2.types[0]
+        assert isinstance(entry, dict)
+        assert isinstance(entry["bases"], list)
+        # json.dumps must accept the reconstructed document -- a leftover
+        # MappingProxyType/tuple would raise.
+        import json
+
+        json.dumps(section2.to_document())
+
+    def test_legacy_section_to_dto_refuses_the_types_kind(self) -> None:
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto(TYPES_SECTION_KIND, {"types": []})
+
+    def test_legacy_section_from_dto_refuses_a_types_kind_dto(self) -> None:
+        dto = SectionDTO(
+            section_kind=TYPES_SECTION_KIND,
+            section_schema_version=SECTION_SCHEMA_VERSIONS[TYPES_SECTION_KIND],
+            payload={"types": []},
+        )
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_from_dto(dto)

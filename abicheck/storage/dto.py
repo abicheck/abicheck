@@ -403,10 +403,28 @@ def types_to_dto(section: TypesSection) -> SectionDTO:
 
 def types_from_dto(dto: SectionDTO) -> TypesSection:
     """The inverse of `types_to_dto` — migrates *dto* to the current version
-    first, then decodes via `TypesSection.from_document`."""
+    first, then decodes via `TypesSection.from_document`.
+
+    Reads `current.to_dict()["payload"]`, never `current.payload` directly
+    (Codex review, fresh evidence): `SectionDTO.payload` is *recursively*
+    frozen (`_freeze` turns every nested mapping into a `MappingProxyType`
+    and every nested list into a `tuple`, all the way down -- see that
+    function's own docstring), so a `types` entry's own nested lists (e.g. a
+    `RecordType`'s `bases`) would otherwise stay tuples after a round trip
+    through this DTO while a freshly-dumped comparison side holds plain
+    lists -- silently producing a `('Base',) != ['Base']` mismatch a
+    downstream detector reads as a real change, and leaving the
+    `MappingProxyType`s unable to `json.dumps`. `to_dict()`'s own
+    `_unfreeze` is the one place this DTO already reverses that recursively;
+    `legacy_section_from_dto` already reads through it for the identical
+    reason, so this mirrors that rather than introducing a second,
+    shallower unwrap.
+    """
     if dto.section_kind != TYPES_SECTION_KIND:
         raise ValueError(
             f"expected section kind {TYPES_SECTION_KIND!r}, got {dto.section_kind!r}"
         )
     current = migrate_section_dto(dto)
-    return TypesSection.from_document(current.payload)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return TypesSection.from_document(payload)
