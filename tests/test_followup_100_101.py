@@ -445,7 +445,7 @@ class TestCliPolicy:
         from click.testing import CliRunner
 
         from abicheck.cli import main
-        from abicheck.cli_params import BUILTIN_POLICY_PROFILES
+        from abicheck.frontends.cli.options.params import BUILTIN_POLICY_PROFILES
 
         result = CliRunner().invoke(main, ["compare", "--help"])
         assert result.exit_code == 0

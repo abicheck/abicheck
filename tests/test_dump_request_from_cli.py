@@ -313,3 +313,240 @@ def _request(
         ld_library_path="",
         include_labels=None,
     )
+
+
+class TestExecutionConsumesTheResolvedPlan:
+    """ADR-061 Phase 3: ``--dry-run`` and the real run read the *same* object.
+
+    The sibling class above pins the resolved values *equal* to ``dump_cmd``'s
+    own locals. That was the right guard while the two were separate
+    derivations kept in sync by test. They are no longer separate: ``dump_cmd``
+    resolves one :class:`ResolvedDumpRequest` above the ``if dry_run:`` branch
+    and both branches read their inputs off it.
+
+    These tests state that as an executable fact rather than a comment. A
+    future edit that reintroduces a parallel local -- passing ``lang`` where it
+    now passes ``_resolved.lang``, say -- fails here, because the spy sees a
+    value only the resolved plan could have supplied.
+
+    Why a spy on the execution entry point rather than an end-to-end dump: the
+    property under test is *which object supplied the argument*, which is
+    invisible in a snapshot (the two agreed, which is exactly why the drift
+    would be silent). Reaching into the call is the only place the distinction
+    exists.
+    """
+
+    def _spy(self, monkeypatch):
+        # CLI cleanup phase two, PR C: the real ELF run now executes through
+        # `execute_dump_request` (imported fresh, module-attribute lookup, at
+        # each `dump_cmd` invocation), not `perform_elf_dump` -- patch the
+        # module attribute the same way, so the local import inside
+        # `dump_cmd` picks up the fake.
+        from abicheck import service_dump_pipeline
+
+        seen: dict[str, object] = {}
+
+        def _fake_execute_dump_request(resolved, **kwargs):
+            seen["resolved"] = resolved
+            seen.update(kwargs)
+            from abicheck.model import AbiSnapshot
+            from abicheck.service_dump_pipeline import DumpResult
+
+            side = resolved.request.input
+            snap = AbiSnapshot(
+                library=side.path.name if side.path is not None else "lib",
+                version=resolved.request.input.version,
+            )
+            return DumpResult(resolved=resolved, snapshot=snap, effective_depth="binary")
+
+        monkeypatch.setattr(
+            service_dump_pipeline, "execute_dump_request", _fake_execute_dump_request
+        )
+        # `perform_elf_dump` used to do extraction AND writing in one call
+        # (via its own `write_snapshot_output` DI parameter), so faking it
+        # alone intercepted everything downstream. Now the two are separate
+        # steps at the `dump_cmd` level -- fake the write step too, so this
+        # resolution-only test doesn't also exercise a real embed/write
+        # against the fake snapshot above.
+        from abicheck import cli_buildsource
+
+        def _fake_write_snapshot_output(*_args, **kwargs):
+            seen["write_depth"] = kwargs.get("depth")
+
+        monkeypatch.setattr(
+            cli_buildsource, "_write_snapshot_output", _fake_write_snapshot_output
+        )
+        return seen
+
+    def test_elf_run_reads_its_plan_fields_off_the_resolved_request(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.cli_buildsource import resolve_dump_request_for_cli
+        from abicheck.cli_dump_request import build_dump_request
+
+        header, sources, compile_db = _project(tmp_path)
+        so_path = _binary(tmp_path)
+
+        captured: dict[str, object] = {}
+        real_build = build_dump_request
+
+        def _spy_build(**kwargs):
+            request = real_build(**kwargs)
+            captured["resolved"] = resolve_dump_request_for_cli(request)
+            return request
+
+        monkeypatch.setattr(
+            "abicheck.cli_dump_request.build_dump_request", _spy_build
+        )
+        seen = self._spy(monkeypatch)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path),
+                "-H", str(header),
+                "--sources", str(sources),
+                "--build-info", str(compile_db),
+                "--depth", "headers",
+                "-o", str(tmp_path / "out.abi.json"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert seen, "execute_dump_request was never reached"
+
+        resolved = captured["resolved"]
+        exec_resolved = seen["resolved"]
+        # Each of these is a field the resolved plan owns. Reading them off
+        # `exec_resolved` (the object `execute_dump_request` itself received)
+        # is the whole point: if `dump_cmd` went back to passing its own
+        # local, these would still *pass* whenever the two agree -- so the
+        # value is only half the assertion. The other half is that
+        # `dump_cmd` no longer computes a second copy at all, which
+        # `test_no_parallel_public_header_derivation` below checks directly.
+        assert exec_resolved.headers == resolved.headers
+        assert exec_resolved.lang == resolved.lang
+        assert exec_resolved.lang_explicit == resolved.lang_explicit
+        assert exec_resolved.header_backend == resolved.header_backend
+        assert exec_resolved.collect_mode == resolved.collect_mode
+        assert exec_resolved.public_headers == resolved.public_headers
+        assert exec_resolved.public_header_dirs == resolved.public_header_dirs
+        # `requested_depth` is the one field the execution-only copy
+        # deliberately does *not* carry through to `execute_dump_request`
+        # (see the real call site's own comment): its own depth gate would
+        # otherwise raise a differently-worded error than
+        # `DumpDepthNotSatisfiedError` for the identical condition. The
+        # dry-run-resolved plan's own `requested_depth` still reaches the
+        # real run -- just at the `_write_snapshot_output` call instead,
+        # which is the sole enforcement point for this case.
+        assert exec_resolved.requested_depth is None
+        assert seen["write_depth"] == resolved.requested_depth
+        # Codex review (two real regressions the initial ELF migration
+        # introduced, both plain dropped kwargs -- `execute_dump_request`
+        # already had `seed_collect_mode`/`source_frontend_from_folded_
+        # context` parameters for `scan`'s own candidate resolution, but
+        # `dump_cmd`'s call site never passed either): `perform_elf_dump`
+        # always forwarded its own resolved collect mode to the L2 seed
+        # (unconditionally running a zero-config inferred build query for a
+        # `--sources` tree with no compile database) and always replayed L4
+        # source through the L3 fold's own compiler once it applied. Both
+        # must reach `execute_dump_request` unchanged, or the seed silently
+        # pins to "off" and L4 replay silently uses the pre-fold compiler.
+        assert seen["seed_collect_mode"] == resolved.collect_mode
+        assert seen["source_frontend_from_folded_context"] is True
+        # Codex review, third real regression: `dump_cmd`'s own
+        # `allow_build_query` local is the deprecated, always-False no-op
+        # `--allow-build-query` flag -- not the trust signal for this
+        # execution step. This invocation passes no `--allow-build-query`,
+        # so `allow_build_query` (the CLI local) is False; `seen`'s value
+        # must be True regardless, or an explicit `--config`/`--build-query`
+        # given on this exact command line would be silently nulled by
+        # `_gated_build_query_inputs` for the execution step alone -- see
+        # `execute_dump_cli_run`'s own docstring for the full contract.
+        assert seen["allow_build_query"] is True
+
+    def test_no_parallel_public_header_derivation(self) -> None:
+        """``dump_cmd`` must not re-derive the public-header split itself.
+
+        This is the half a value-equality assertion cannot cover: two
+        derivations that agree today are exactly the shape that drifts
+        silently later. The public-header split had its own hard-won
+        ``--depth binary`` ordering rule (see ``resolve_dump_request``), and
+        keeping a second copy of it in the CLI is what this forbids.
+        """
+        import inspect
+
+        # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` is a
+        # registration facade now; a `setattr` there rebinds nothing the
+        # caller reads -- and `raising=False` below would have hidden that.
+        from abicheck.frontends.cli.commands import dump as cli_mod
+
+        # `dump_cmd` is a Click RichCommand at module level; the
+        # undecorated function is on `.callback`.
+        source = inspect.getsource(cli_mod.dump_cmd.callback)
+        assert "split_public_header_inputs(" not in source
+
+
+def _pe_binary(tmp_path: Path) -> Path:
+    """A minimal PE binary (MZ header + PE signature + COFF header)."""
+    import struct
+
+    dos_header = bytearray(64)
+    dos_header[0:2] = b"MZ"
+    pe_offset = 64
+    struct.pack_into("<I", dos_header, 0x3C, pe_offset)
+    pe_sig = b"PE\x00\x00"
+    coff_header = struct.pack("<HHIIIHH", 0x8664, 0, 0, 0, 0, 0, 0x2000)
+    pe_path = tmp_path / "foo.dll"
+    pe_path.write_bytes(bytes(dos_header) + pe_sig + coff_header)
+    return pe_path
+
+
+class TestValidationErrorExitsAsUsageError:
+    """CodeRabbit/Codex review on PR #980 (ADR-063 Phase 1).
+
+    ``cli_resolve._dump_native_binary`` -- the function
+    ``perform_elf_dump``/``handle_non_elf_dump`` both called before this
+    migration -- specifically translated a ``ValidationError`` into
+    :class:`click.UsageError` (exit 64), never the plain
+    :class:`click.ClickException` (exit 1) it used for every other
+    extraction failure (see that function's own docstring). The shared
+    ``execute_dump_cli_run`` (``frontends.cli.dump_execute``) both formats
+    now route through had no such special case -- a real ``ValidationError``
+    from ``execute_dump_request`` (unmatched exports, a bad include
+    directory, ...) silently exited 1 instead of the documented usage-error
+    convention (root ``AGENTS.md``: "64 = usage error ... applies across
+    commands"), for ELF and PE/Mach-O alike, since both share this one
+    execution entry point. Exercised for both binary formats: whichever one
+    a future edit only fixes for is exactly the sibling case a single-format
+    regression test would miss.
+    """
+
+    def _fake_execute_dump_request_raises(self, monkeypatch) -> None:
+        from abicheck import service_dump_pipeline
+        from abicheck.errors import ValidationError
+
+        def _raise(*_args: object, **_kwargs: object):
+            raise ValidationError("no exported symbols matched the given headers")
+
+        monkeypatch.setattr(service_dump_pipeline, "execute_dump_request", _raise)
+
+    def test_elf_validation_error_exits_64(self, tmp_path: Path, monkeypatch) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        self._fake_execute_dump_request_raises(monkeypatch)
+        result = CliRunner().invoke(main, ["dump", str(_binary(tmp_path))])
+        assert result.exit_code == 64, result.output
+
+    def test_pe_validation_error_exits_64(self, tmp_path: Path, monkeypatch) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        self._fake_execute_dump_request_raises(monkeypatch)
+        result = CliRunner().invoke(main, ["dump", str(_pe_binary(tmp_path))])
+        assert result.exit_code == 64, result.output

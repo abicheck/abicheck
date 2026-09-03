@@ -22,65 +22,23 @@ from __future__ import annotations
 import logging
 import os
 import stat
-from dataclasses import dataclass, field
-from enum import Enum
-from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import pefile  # type: ignore[import-untyped]
 
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# parses into them and re-exports them so the historical
+# ``from abicheck.pe_metadata import PeExport`` spelling keeps resolving.
+from .model.fact import sync_present_facts
+from .model.pe_facts import (
+    PeExport as PeExport,
+    PeMetadata as PeMetadata,
+    PeSymbolType as PeSymbolType,
+)
+
 log = logging.getLogger(__name__)
 
-
-class PeSymbolType(str, Enum):
-    EXPORTED = "exported"       # ordinal / name in export table
-    FORWARDED = "forwarded"     # forwarded to another DLL
-    OTHER = "other"
-
-
-@dataclass
-class PeExport:
-    """A single exported symbol from a PE export directory."""
-    name: str
-    ordinal: int = 0
-    sym_type: PeSymbolType = PeSymbolType.EXPORTED
-    forwarder: str = ""         # e.g. "NTDLL.RtlAllocateHeap" for forwarded exports
-
-
-@dataclass
-class PeMetadata:
-    """PE metadata from a Windows DLL.
-
-    NOTE: Do NOT add ``frozen=True`` — ``@cached_property`` requires a
-    writable ``__dict__``.
-    """
-    # DLL characteristics
-    machine: str = ""                   # e.g. "IMAGE_FILE_MACHINE_AMD64"
-    characteristics: int = 0            # IMAGE_FILE_HEADER.Characteristics
-    dll_characteristics: int = 0        # IMAGE_OPTIONAL_HEADER.DllCharacteristics
-
-    # Imports and exports
-    exports: list[PeExport] = field(default_factory=list)
-    imports: dict[str, list[str]] = field(default_factory=dict)  # dll_name → [func_names]
-    # Delay-loaded imports (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT): resolved on
-    # first call rather than at load time, so a missing DLL fails late.
-    # Tri-state: None = not captured (legacy snapshot written before this
-    # field existed); {} = parsed PE with no delay-load directory.
-    delay_imports: dict[str, list[str]] | None = None
-
-    # Version resource (VS_FIXEDFILEINFO)
-    file_version: str = ""      # e.g. "10.0.19041.1"
-    product_version: str = ""   # e.g. "10.0.19041.1"
-
-    # Minimum OS floor: OPTIONAL_HEADER.MajorSubsystemVersion.MinorSubsystemVersion
-    # (e.g. "6.1" = Windows 7). "" = not captured (legacy snapshot).
-    subsystem_version: str = ""
-
-    @cached_property
-    def export_map(self) -> dict[str, PeExport]:
-        """Name → PeExport mapping (built once, cached on first access)."""
-        return {e.name: e for e in self.exports if e.name}
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +214,10 @@ def _parse(dll_path: Path) -> PeMetadata:
         _parse_pe_imports(pe, meta)
         _parse_pe_delay_imports(pe, meta)
         _parse_pe_version_resource(pe, meta)
+
+        # Plain attribute assignment never re-runs __post_init__ (ADR-063
+        # Phase 5 -- see elf_metadata.py's identical fix).
+        sync_present_facts(meta, "delay_imports")
 
         return meta
     finally:

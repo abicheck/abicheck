@@ -324,4 +324,32 @@ def _attach_header_graph(
         ),
     ]
     snap.build_source = pack
+    # ADR-063 Phase 3 (D5): one shared SourceGraphSummary instance for both
+    # the L5 builder above (`graph`, already `pack.source_graph`) and the
+    # public-surface evidence graph -- never two independently-constructed
+    # summary objects that happen to agree, which is exactly the drift this
+    # phase's shared-assembly design exists to rule out. `snap.surface_graph`
+    # is the same object `pack.source_graph` already holds; the codec (
+    # `storage/surface_graph_codec.py`) relies on that identity to dedup the
+    # embedded copy on encode and restore it on decode.
+    #
+    # Deliberately NOT populated with compare/surface_graph.py's own
+    # declaration/type/header/symbol facts here: `_attach_header_graph` runs
+    # unconditionally on essentially every real dump (G31 Phase A). Paying
+    # `build_public_surface_facts`'s per-declaration walk on every dump
+    # regressed the header-graph attach-cost perf gate by 47-96% at
+    # realistic sizes (caught by CI on this phase's own PR). An earlier
+    # revision of ADR-063 Phase 3 D5's traversal migration deferred that
+    # populate step to a later enrichment call instead, keyed off this same
+    # graph object -- but a further review round found the graph's own
+    # cross-producer evidence-merge precedence could let a stale or
+    # adversarial persisted fact outrank a fresh recomputation, so the final
+    # design (`policy.public_surface_closure.py`'s
+    # `_resolve_public_surface_from_snapshot`) does not read or enrich this
+    # graph at all: it calls `compare/surface_graph.py`'s
+    # `referenced_identifiers_by_node()`, a pure function of the snapshot's
+    # own current declarations, computed fresh on every public/export-domain
+    # surface query (Codex review, PR #979) -- see that module's own
+    # docstring for the full security history.
+    snap.surface_graph = graph
     return snap

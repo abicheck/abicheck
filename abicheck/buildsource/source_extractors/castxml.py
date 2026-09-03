@@ -73,7 +73,14 @@ from .base import SourceExtractionError, assemble_source_tu
 #: first collapsed away, corrupting the real last-flag-wins state this
 #: extractor replays; bumped so a pre-0.3 cached/persisted entry for the
 #: same TU is never treated as comparable to a fresh, correctly-replayed one.
-CASTXML_EXTRACTOR_VERSION = "0.3"
+#: 0.4 (Codex review, PR #930): ``base.entity_from_function`` now excludes a
+#: confirmed compiler-generated declaration (``Function.is_compiler_
+#: generated``, read from castxml's own ``artificial="1"`` marker) from
+#: ``api_relevant`` -- the identical TU input now produces a different
+#: ``SourceAbiTu``/linked surface than before, so a warm cache entry from
+#: before this fix would keep replaying the old, phantom-member-inclusive
+#: surface instead of picking up the fix.
+CASTXML_EXTRACTOR_VERSION = "0.4"
 
 #: Backwards-compatible aliases — the compile-context → argv helpers now live in
 #: the shared ``_argv`` module (reused by the clang backend, phase 5) but are

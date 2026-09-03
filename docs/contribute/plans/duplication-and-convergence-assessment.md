@@ -19,7 +19,15 @@ contract), [ADR-049](../adr/049-contract-relevance-and-compatibility-configurati
 (comparability contract), [ADR-054](../adr/054-cli-project-integration-surface-consolidation.md)
 (root-surface admission), [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
 (typed request/result completeness), [ADR-056](../adr/056-multi-artifact-library-set-scan.md)
-(`scan --artifact-set`)
+(`scan --artifact-set`), [ADR-061](../adr/061-responsibility-package-architecture.md)
+Phase 2 (`ReportDocument` — this plan's `ReportEnvelope` in "Phase 4 —
+Introduce the canonical report model" below is the generalization of the
+same target; ADR-061 Phase 2's own "not met yet" gaps — the Markdown/HTML
+prose rewrite and the per-finding verdict consolidation — are this plan's
+Phase 4 items 3 and 1 respectively, and its item 5 (post-render mutation)
+is this plan's P1 "Reporting composes too late" finding below, almost
+word-for-word; the two documents converged on the same diagnosis
+independently and should be read together rather than as competing plans)
 **Effort:** XL (five phases, each independently landable; Phase 1 alone spans
 several PRs) · **Risk:** high for Phase 1 (touches every extraction call
 site — `dump`, both `compare` operands, `scan` candidate and baseline,
@@ -1440,6 +1448,51 @@ performance duplication (redundant inferred build queries).
 3. Migrate SARIF, JUnit, Markdown, review, and HTML.
 4. Remove the "render → parse → patch → render" functions this obsoletes.
 5. Make release and aggregate consume or embed the same envelope.
+
+**Item 1's per-finding verdict is not a fresh design question — ADR-061
+Phase 2 already scoped it and flagged the one real hazard.** Today,
+`junit_report.py`/`html_report.py`/`reporter_markdown.py` each independently
+resolve a per-change verdict via `effective_verdict_for_change`/
+`DiffResult._effective_verdict_for_change` at their own call sites (some,
+like `junit_report.py`, call it twice for the same `Change` from
+`_is_failure` and `_failure_type`). `ReportFinding` (the sketch above) is the
+right place to hold that verdict pre-resolved, exactly as this phase's item 1
+already says — but the one implementation hazard the ADR names is real and
+applies here unchanged: `Change` is a mutable dataclass and is not hashable
+(its own `__hash__` is `None`), so a naive "cache resolved verdicts in a
+dict keyed by `Change`" design type-checks fine but raises `TypeError` the
+first time a real `Change` instance is used as a key — `mypy` does not
+enforce `Hashable` on `dict`'s key type, so this is a runtime failure, not
+a caught-at-review-time one. A `ReportFinding` built once per `Change`
+during envelope construction (rather
+than a separate cache keyed off identity) sidesteps the problem entirely —
+build the tuple of `ReportFinding` by iterating `DiffResult.changes` once,
+resolving each verdict inline, with no separate cache/index structure
+needed. `DiffResult`'s own public `breaking`/`source_breaks`/`compatible`/
+`risk` properties are unaffected either way (ADR-061 already ruled out
+touching them — a breaking change to the documented public Python API) and
+should stay computed the way they are today; `ReportFinding.verdict` is a
+new, additional field, not a replacement for them.
+
+**A bare `verdict` field is not enough by itself — a Codex review round on
+this same PR caught that a pre-resolved `Verdict` alone still leaves
+`junit_report.py` unable to become a pure projection.** When a
+`SeverityConfig` is active, `_is_failure`/`_failure_type` decide pass/fail
+and the reported failure `type` from `classify_effective_change`'s
+`IssueCategory` — a distinct axis from `Verdict` (it separately
+distinguishes, e.g., a compatible addition from a compatible quality issue,
+and a demoted preset can make even a BREAKING/API_BREAK verdict pass) — not
+from `effective_verdict_for_change`'s `Verdict` alone. A `ReportFinding`
+carrying only `verdict` would still force JUnit to call
+`classify_effective_change` itself under a `SeverityConfig`, which is
+exactly the per-renderer re-resolution this envelope exists to eliminate,
+and risks the renderer's own category resolution silently disagreeing with
+whatever the envelope's `verdict` implies. `ReportFinding` therefore needs a
+second field alongside `verdict` — the resolved `IssueCategory` (or
+equivalently, both branches' final failure classification) — computed the
+same way, once per `Change`, in the same envelope-construction pass; every
+renderer reads both pre-resolved fields instead of any one of them
+re-deriving the other.
 
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 

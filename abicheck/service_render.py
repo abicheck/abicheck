@@ -30,7 +30,14 @@ from .reporter import to_json, to_markdown, to_stat, to_stat_json
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
-    from .severity import SeverityConfig
+
+    # ADR-061: this module is classified `frontends`, which may not import
+    # `policy` (where `severity.py`/`SeverityConfig` now physically live,
+    # `abicheck/policy/severity.py`) directly -- `workflows.gate` is the
+    # existing re-export facade `frontends`-classified callers already
+    # route policy-owned exit-decision types through (its own docstring:
+    # "the one place a frontend gets its process response").
+    from .workflows.gate import SeverityConfig
 
 #: Internal-only ``fmt`` value for :func:`render_output` — a one-line human
 #: summary, not exposed as a public ``--format`` choice (CLI cleanup phase
@@ -67,9 +74,12 @@ def render_output(
     ``'junit'``, ``'review'``. Plus :data:`ONELINE_FORMAT`, an internal-only
     value not exposed on the public ``--format`` CLI choice.
 
-    ``demangle`` only affects human-facing formats (markdown, review); machine
-    formats (json/sarif/junit) always keep raw mangled symbols so downstream
-    tooling can match on them.
+    ``demangle`` only affects human-facing formats (markdown, review, html);
+    machine formats (json/sarif/junit) always keep raw mangled symbols so
+    downstream tooling can match on them. This function's own default
+    (``False``) is for a direct Tier-2 caller with no CLI in front of it;
+    the CLI itself resolves the per-format default via
+    ``cli_compare_options._resolve_demangle`` before calling here.
 
     The release recommendation is unconditionally included in every
     human-facing format (markdown/review) and in JSON's own ``summary``
@@ -124,6 +134,8 @@ def render_output(
             result,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
+            show_only=show_only,
+            contract_evaluation=contract_evaluation,
         )
 
     if (stat and fmt != "junit") or fmt == ONELINE_FORMAT:
@@ -140,6 +152,7 @@ def render_output(
             show_impact=show_impact,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
         )
 
     if fmt == "sarif":
@@ -164,6 +177,7 @@ def render_output(
             show_only=show_only,
             show_impact=show_impact,
             severity_config=severity_config,
+            demangle=demangle,
         )
 
     if fmt == "junit":
@@ -235,6 +249,7 @@ def _render_json_output(
     show_impact: bool,
     severity_config: SeverityConfig | None,
     require_complete_analysis: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result as JSON, optionally including dependency info."""
     base = to_json(
@@ -244,6 +259,7 @@ def _render_json_output(
         show_impact=show_impact,
         severity_config=severity_config,
         require_complete_analysis=require_complete_analysis,
+        contract_evaluation=contract_evaluation,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         import json

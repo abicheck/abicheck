@@ -62,6 +62,10 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
     "pytest-xdist>=3.0",
+    # Per-test hang safety valve (see [tool.pytest.ini_options]'s `timeout`
+    # below) -- not a perf gate, see that setting's own comment for the
+    # distinction.
+    "pytest-timeout>=2.3",
     "filelock>=3.0",
     "hypothesis>=6.0",
     # Pinned exactly, and kept in lockstep with .pre-commit-config.yaml's
@@ -161,6 +165,17 @@ module = [
     "abicheck.cli_aggregate",
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
+    # `cli_compare_release_matrix`/`cli_compare_release_pairwise` (G38 Phase
+    # 15 file-split prerequisite) declare no Click decorator of their own --
+    # unlike every other entry in this override, they need it only because
+    # they call `.cli`'s own helpers (`_normalize_binary_input`,
+    # `_safe_write_output`, ...), whose return types are themselves Any
+    # under `cli`'s identical override; without the same relaxation here,
+    # mypy reports `Any? not callable` (`misc`) at each call site (CodeRabbit
+    # review on PR #973 questioned this entry; reproduced by removing it and
+    # re-running mypy before restoring it).
+    "abicheck.cli_compare_release_matrix",
+    "abicheck.cli_compare_release_pairwise",
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
@@ -174,6 +189,11 @@ module = [
     "abicheck.cli_suggest",
     "abicheck.cli_surface",
     "abicheck.compat.cli",
+    # ADR-061 Phase 4 moved `cli.py`'s command bodies and shared runtime here;
+    # they carry the same click-decorator surface `cli` itself did.
+    "abicheck.frontends.cli.commands.compare",
+    "abicheck.frontends.cli.commands.dump",
+    "abicheck.frontends.cli.runtime",
 ]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc"]
@@ -196,12 +216,12 @@ disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "import-untyped"]
 
 [[tool.mypy.overrides]]
-# ``cli_params.PolicyFileParam`` subclasses ``click.ParamType``. Depending on
+# ``PolicyFileParam`` subclasses ``click.ParamType``. Depending on
 # the installed click's type stubs, mypy treats the base either as ``Any``
 # (-> ``misc``: "cannot subclass Any") or as a generic needing a type argument
 # (-> ``type-arg``). Suppress both so the module stays portable across click /
 # mypy versions without a runtime ``ParamType[...]`` subscription.
-module = ["abicheck.cli_params"]
+module = ["abicheck.frontends.cli.options.params"]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "type-arg"]
 
@@ -222,6 +242,10 @@ module = [
     "abicheck.buildsource.project_targets",
     "abicheck.buildsource.toolchain_bindings",
     "abicheck.cli_compare_receipt",
+    # ADR-061 Phase 4 moved this out of the flat root into `workflows/`; the
+    # override did not follow it, so `mypy abicheck/` reports one error on a
+    # clean `main` in any environment where the stubs are not visible.
+    "abicheck.workflows.scan_config",
 ]
 disable_error_code = ["import-untyped"]
 
@@ -253,6 +277,24 @@ markers = [
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
 ]
+# Global per-test hang safety valve (pytest-timeout), not a perf regression
+# gate -- CI's own "Test-time report" step already says a *hard* wall-time
+# gate would be flaky given CI-runner variance, and this isn't one: 600s is
+# ~3x the slowest legitimate test observed in this suite (the production-
+# scale snapshot-compression round trips in
+# tests/test_snapshot_compression_public_api_scale.py, ~90-195s each), so it
+# should never fire on ordinary CI variance. What it exists to catch is a
+# genuine stuck test -- e.g. the real incident this was added for, where a
+# macOS unit-tests leg sat inside a single non-`slow` compression test for
+# ~20 minutes with no progress until the whole 30-minute job was cancelled,
+# producing zero diagnostic signal about which test or why. pytest-timeout
+# kills (or, under `-n`/xdist, reports and moves past) just that one test and
+# dumps its stack, so the job's other tests still run and the log names the
+# actual offender instead of a bare "operation was canceled". Uses
+# pytest-timeout's own platform default `timeout_method` (`signal` on
+# Linux/macOS -- the two platforms that actually hit this -- `thread` on
+# Windows) rather than forcing one globally.
+timeout = 600
 
 [tool.setuptools.packages.find]
 include = ["abicheck*"]
@@ -260,6 +302,12 @@ include = ["abicheck*"]
 [tool.setuptools.package-data]
 "abicheck.schemas" = ["*.json"]
 "abicheck.policies" = ["*.yaml"]
+# kinds.pyi (the ChangeKind mypy stub -- see kinds.py's own docstring) needs
+# an explicit entry: automatic .pyi inclusion was only added in setuptools 69,
+# while build-system.requires above still permits setuptools>=68. Without
+# this, a wheel built with 68 would silently omit the stub, leaving every
+# ChangeKind.FOO access unresolved for anyone installing from that wheel.
+"abicheck.model.change_catalog" = ["*.pyi"]
 
 [tool.coverage.run]
 branch = true
@@ -366,6 +414,8 @@ only_mutate = [
     "abicheck/finding_identity.py",  # canonical/normalized finding identity
     "abicheck/name_classification.py",  # internal/public name classification
     "abicheck/suppression.py",  # suppression rule matching
+    "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)
+    "abicheck/policy/selectors_namespace_glob.py",  # namespace-glob compile/match (moved out of suppression.py)
     "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
     "abicheck/serialization.py",  # snapshot (de)serialization
 ]
@@ -399,6 +449,16 @@ pytest_add_cli_args = [
     "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
     "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
     "--ignore=tests/test_action_check_target.py",
+    # Split out of the file directly above for a `no_growth` file-size
+    # reason (its own docstring), inheriting the identical re-entrant-
+    # subprocess class via a shared `_run_finalize` helper imported from
+    # it -- the split predates this entry and was never added alongside
+    # it (Codex review, PR #1016, discovered because this PR's diff
+    # touches enough tests/ paths to trip --scope-run-to-diff's own
+    # "refuse to scope" fallback to a full, unscoped run, exercising this
+    # gap for the first time; not caused by anything this PR's own diff
+    # changed).
+    "--ignore=tests/test_action_check_target_explicit_id.py",
     "--ignore=tests/test_action_collect_facts.py",
     # Same "subprocess re-enters the mutated tree with no mutmut config"
     # failure as the two entries above, discovered via this repo's own G38
@@ -427,9 +487,85 @@ pytest_add_cli_args = [
     "--ignore=tests/test_publish_baseline_upload_step_generation.py",
     "--ignore=tests/test_restore_git_mtimes.py",
     "--ignore=tests/test_reusable_workflows.py",
+    # Same re-entrant-subprocess class as `test_reusable_workflows.py`
+    # immediately above and `test_reusable_workflows_project_evidence.py`
+    # below -- `test_precheck_script_threads_explicit_id_into_check_id`
+    # drives check-project.yml's "Synthesize pre-check operational-error
+    # report" step via a real `subprocess.run(["bash", "-c", script],
+    # cwd=tmp_path, env={**os.environ, ...})`, so it inherits mutmut's own
+    # PYTHONPATH into that scratch cwd the identical way. First surfaced by
+    # PR #1033 (this PR touched enough `tests/` paths to trip
+    # `--scope-run-to-diff`'s "refuse to scope" fallback to a full,
+    # unscoped run, same discovery path as the `test_agent_evals.py` entry
+    # below) as a bare `KeyError: 'check-id'` aborting `mutmut run`'s
+    # baseline collection before a single mutant was measured -- this file
+    # was simply added after its two siblings and missed here. Free
+    # exclusion, no `_ACCEPTED_KILL_LOSS` entry needed: it imports no
+    # `only_mutate` module, directly or via `test_reusable_workflows`
+    # (confirmed by grep), the same as the sibling immediately above.
+    "--ignore=tests/test_reusable_workflows_explicit_id.py",
+    # Fourth member of the same re-entrant-subprocess class as the three
+    # entries above: test_resolver_selects_only_the_current_targets_evidence
+    # runs check-project.yml's "Resolve candidate binary/binaries" step
+    # from a scratch cwd, and that step's own child imports `abicheck` --
+    # resolved to the mutant tree through the inherited PYTHONPATH, so a
+    # mutated module's trampoline pulls in `mutmut.__main__`, whose config
+    # load cannot find `[tool.mutmut]` from that cwd and raises
+    # FileNotFoundError. Reproduce in one line, without mutmut:
+    #   PYTHONPATH=<mutants dir> python -m pytest \
+    #     tests/test_reusable_workflows_project_evidence.py -k resolver_selects
+    # The test is sound and keeps running in every unit lane; only
+    # mutmut's clean-test phase cannot host it. Its kill cost is recorded
+    # in tests/test_mutation_workflow_contract.py::_ACCEPTED_KILL_LOSS.
+    "--ignore=tests/test_reusable_workflows_project_evidence.py",
     "--ignore=tests/test_skill_eval_pack.py",
     "--ignore=tests/test_skill_eval_scenarios.py",
     "--ignore=tests/test_verify_profiles.py",
+    # Same "reads the real repository" class as the entries above: its
+    # `_repo_reader_scan` fixture does one full `abicheck/**/*.py` AST walk
+    # rooted at `Path(__file__).resolve().parent.parent`, asserting the real
+    # repository has no unlisted `fact-field-readers` violation — not
+    # something a `mutants/` copy can answer for itself. No mutation-kill
+    # cost: it imports no `only_mutate` module (confirmed by grep), only
+    # `scripts.check_ai_readiness`/`scripts.fact_field_readers`, matching
+    # this file's own "costs no measurement" rule for every entry above.
+    "--ignore=tests/test_fact_field_readers.py",
+    # Same "reads the real repository" class as the entry immediately
+    # above, one file over: `test_no_violation_in_real_repo` calls
+    # `check_fact_detector_misuse()`, which does its own full
+    # `abicheck/**/*.py` AST walk rooted at `_REPO_ROOT = Path(__file__).
+    # resolve().parent.parent` to assert the real repository has no
+    # unlisted `fact-detector-misuse` violation. A normal run completes
+    # this in well under a minute (~52s observed); discovered here because
+    # under `mutmut run`'s baseline collection specifically it instead ran
+    # past pytest-timeout's 600s ceiling and aborted the whole lane with
+    # `-x` before a single mutant was measured (PR #1036) -- consistent
+    # with this same class of test being unsuited to mutmut's clean-test
+    # phase, not a defect in the scan itself (every other lane exercising
+    # it stays fast). No mutation-kill cost: it imports no `only_mutate`
+    # module (confirmed by grep), only `scripts.check_ai_readiness`/
+    # `scripts.fact_detector_misuse`, matching this file's own "costs no
+    # measurement" rule for every entry above.
+    "--ignore=tests/test_fact_detector_misuse.py",
+    # Same class again, a fourth independent trigger site (PR #1016, this
+    # PR's own diff -- discovered the same way as the `test_action_check_
+    # target*`/`test_action_collect_facts.py` entries above: this PR's diff
+    # touches enough `tests/` paths to trip `--scope-run-to-diff`'s "refuse
+    # to scope" fallback to a full, unscoped run, exercising a pre-existing
+    # gap this PR's own changes did not create). `test_manifest_base_commit_
+    # exists_in_history` shells out to a real `git cat-file -e <sha>`
+    # against `ROOT = Path(__file__).resolve().parent.parent` to confirm
+    # each agent-eval task manifest's `base_commit` is a real, known commit;
+    # it already tolerates a *shallow* checkout (skips rather than fails),
+    # but mutmut's clean-test phase runs from a context where `git
+    # rev-parse --is-shallow-repository` doesn't report "true" either (it's
+    # not a shallow clone of this repo at all), so the shallow-fallback
+    # never engages and the hard `assert proc.returncode == 0` fires for a
+    # commit this context simply can't see. No mutation-kill cost: this
+    # file imports no `only_mutate` module (confirmed by grep) -- only
+    # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
+    # by path, none of which is mutated.
+    "--ignore=tests/test_agent_evals.py",
 ]
 
 # ---------------------------------------------------------------------------

@@ -57,8 +57,12 @@ def test_non_elf_dump_seeds_includes_and_runs_cleanup(monkeypatch, tmp_path):
         captured["includes"] = includes
         return AbiSnapshot(library="l", version=version)
 
+    # ADR-061 Phase 4: the CLI dump path reaches this through
+    # `workflows.extraction` (a frontend may not import the `extract` ring
+    # directly), and a re-export binds the name there at import time -- so
+    # that module is where this call resolves. See its own docstring.
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
 
@@ -123,7 +127,7 @@ def test_non_elf_dump_forwards_only_explicit_includes_as_public_include_search_d
         return AbiSnapshot(library="l", version=version)
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
 
@@ -219,7 +223,7 @@ def test_non_elf_dump_gates_inferred_query_for_l2_only(monkeypatch, tmp_path):
         return list(kwargs["includes"]), False, explicit_ctx, ()
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
 
@@ -435,7 +439,7 @@ def test_perform_elf_dump_keeps_deferred_inferred_root_below_l3_derived_includes
         return list(kwargs["includes"]), True, merged, (generated_inc,)
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -499,7 +503,7 @@ def _write_compile_db(tmp_path, src, extra_args):
 
 def _write_corrupt_pack(pack_dir):
     """A directory ``is_pack_dir()`` recognizes as a (corrupt) pack -- a
-    ``manifest.json`` present but unparseable, so ``BuildSourcePack.load()``
+    ``manifest.json`` present but unparseable, so ``pack_io.load()``
     raises decoding it."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     (pack_dir / "manifest.json").write_text("{not valid json", encoding="utf-8")
@@ -600,7 +604,7 @@ def _perform_elf_dump_capturing_fold_options(
         return list(kwargs["includes"]), False, explicit, ()
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr(

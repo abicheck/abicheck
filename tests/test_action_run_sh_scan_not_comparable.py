@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -87,6 +88,46 @@ def _final_exit_scan_fragment() -> str:
     return "if " + fragment[len("elif ") :]
 
 
+def _run_bash_script(
+    script: str, *, timeout: float = 30
+) -> subprocess.CompletedProcess:
+    """Run *script* via a real bash, from a temp file rather than an inline
+    ``-c`` argument.
+
+    This module's own dispatch scripts (the extracted run.sh ``case ...
+    esac`` fragment plus this file's own harness text) run to several KB
+    with many nested double quotes. Passed as a single subprocess argv
+    string, Windows reconstructs that argv via ``list2cmdline`` (MSVCRT
+    backslash/quote escaping rules) and Git Bash's own MSYS runtime then
+    re-parses the resulting command line with its own, not-quite-identical
+    rules -- the two disagree on a large, quote-heavy argument and can
+    corrupt it, observed on windows-latest CI as a bash parse error
+    ("unexpected end of file from `case' command") once this PR's edits to
+    run.sh's scan exit-code dispatch (adding the exit-7 arm, restructuring
+    the exit-1 arm) grew the extracted fragment past whatever threshold the
+    prior, shorter version stayed under -- a script that is valid bash and
+    passes identically on every other platform. This is exactly the
+    established fix for that class of gap in this file's own siblings
+    (``test_action_run_sh_helpers.py``'s ``_run_harness``,
+    ``test_action_run_sh_scan_evidence_contract_error.py``'s own identical
+    ``_run_bash_script``): a file on disk needs no argv reconstruction at
+    all, since bash reads its own content directly."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 def _run_exit_mapping(abicheck_exit: int) -> subprocess.CompletedProcess:
     # Stub every helper the extracted case-block calls -- this test is
     # scoped to the mapping itself (see the fuller sticky-comment/CI
@@ -106,12 +147,7 @@ _escalate_verdict_to_report() { :; }
         + _exit_case_fragment()
         + '\necho "VERDICT=$VERDICT"\n'
     )
-    return subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    return _run_bash_script(script)
 
 
 def test_exit_6_maps_to_not_comparable_not_error():
@@ -146,11 +182,6 @@ def test_not_comparable_still_fails_the_step():
         "FINAL_EXIT=0\n"
         + script
     )
-    result = subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
     assert "FINAL_EXIT=1" in result.stdout

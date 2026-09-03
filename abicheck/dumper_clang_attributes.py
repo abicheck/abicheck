@@ -119,10 +119,16 @@ def _target_default_abi_attribute(target_triple: str | None) -> str | None:
     return None
 
 
-def _clang_contract_attributes(
+def clang_contract_attributes(
     node: dict[str, Any], *, target_triple: str | None = None
 ) -> list[str]:
-    """Normalize Clang function contract/calling-convention attributes."""
+    """Normalize Clang function contract/calling-convention attributes.
+
+    Public (no leading underscore) since ``extract.headers.clang.functions``
+    reads it across the module boundary -- ``_clang_contract_attributes``
+    below is kept as a back-compat alias for every existing caller spelling
+    the old private name (Codex review, PR #940).
+    """
     tokens: set[str] = set()
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
@@ -151,3 +157,7 @@ def _clang_contract_attributes(
     if default_abi is not None:
         tokens.discard(default_abi)
     return sorted(tokens)
+
+
+#: Back-compat alias -- see :func:`clang_contract_attributes`'s own docstring.
+_clang_contract_attributes = clang_contract_attributes

@@ -71,13 +71,16 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutation_results import (  # noqa: E402
-    MODULE_SCOPE,
+    # Re-exported for tests/test_mutation_score_gate.py, which reads it as
+    # `gate.MODULE_SCOPE`; `as` keeps `ruff --fix` from stripping it as unused.
+    MODULE_SCOPE as MODULE_SCOPE,
     MutantRecord,
     count_unresolved,
     functions_covering_lines,
@@ -107,8 +110,560 @@ SURVIVOR_BASELINE: int | None = None
 #: Default per-module baseline, committed alongside the code.
 DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 
+# Bounded by, but deliberately below, the 355-minute GitHub Actions job
+# limit in mutation.yml. The subprocess cap formerly stayed at 7,200
+# seconds, silently aborting the run at 120 minutes even after the job
+# itself was given more time -- but setting it to *exactly* the job's own
+# ceiling reintroduces a different version of the same failure: the job's
+# checkout/dependency-install/parser-verification steps run *before* this
+# subprocess call and its own "Save mutmut results"/"Upload mutmut results"
+# steps run *after*, so a subprocess timeout equal to the full job budget
+# leaves no room for any of that -- GitHub kills the whole job at its own
+# timeout mid-subprocess, before the surrounding steps can produce a
+# receipt or upload anything, which is exactly the "cancelled, no receipt"
+# failure this constant exists to prevent (Codex review). 10 minutes of
+# headroom (comfortably more than the ~1 minute those surrounding steps
+# have taken in practice) keeps the cap close to the job's real ceiling
+# without eating into it.
+MUTMUT_RUN_TIMEOUT_SECONDS = 20_700
+
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+#: ``Binary files a/<path> and b/<path> differ`` — GNU diffutils' own binary
+#: marker, emitted by plain ``diff``/``diff -u`` (not just ``git diff``) with
+#: no ``diff --git`` header at all. The two path forms it's used against
+#: (git's ``a/``/``b/``-prefixed style, and diffutils' own bare-path style
+#: from ``diff file1 file2``) are both matched, greedily-but-anchored so a
+#: literal " and " inside a filename doesn't split it wrong more often than
+#: necessary — deliberately permissive, since over-matching here only ever
+#: widens what `diff_lacks_git_headers_for_its_hunks` treats as needing a
+#: header, never narrows it.
+_BINARY_MARKER = re.compile(r"^Binary files (.+) and (.+) differ$")
+
+#: ``Only in <dir>: <name>`` — GNU diffutils' own marker for a one-sided file
+#: under recursive comparison (``diff -r``/``diff -ur dir1 dir2``), naming a
+#: file present on only one side with no hunk, no binary marker, and no
+#: ``diff --git`` header at all.
+_ONLY_IN_MARKER = re.compile(r"^Only in (.+): (.+)$")
+
+#: Line-start prefixes for git's own per-entry metadata — present only
+#: between a ``diff --git`` line and that entry's ``--- ``/``+++ ``/hunk
+#: content, never meaningful on their own and never carrying a path this
+#: module needs to resolve (the owning ``diff --git`` header already named
+#: it). Recognized by `diff_has_unrecognized_content` purely so a real git
+#: diff entry carrying one of these doesn't itself read as "unrecognized".
+_GIT_ENTRY_METADATA_PREFIXES = (
+    "index ",
+    "old mode ",
+    "new mode ",
+    "deleted file mode ",
+    "new file mode ",
+    "similarity index ",
+    "dissimilarity index ",
+    "rename from ",
+    "rename to ",
+    "copy from ",
+    "copy to ",
+)
+
+#: A hunk *body* line's leading character — context, addition, removal, or
+#: the "\\ No newline at end of file" marker. Only trusted while a hunk is
+#: actually open (`diff_has_unrecognized_content` tracks that itself); an
+#: empty line is never one of these, since a real diff always carries at
+#: least the one prefix character even for a blank context/added/removed
+#: source line.
+_HUNK_BODY_PREFIXES = (" ", "+", "-", "\\")
+
+#: ``diff --git a/<path> b/<path>`` — present on *every* diff entry regardless
+#: of what follows (a hunk, a binary-file marker, a rename with no content
+#: change, a mode-only change). Deliberately not anchored past the two
+#: capture groups: an unusual filename (spaces, a literal `` b/`` substring)
+#: can defeat this the same way it can any line-based diff parser, and
+#: over-matching here only ever makes `diff_touches_outside_only_mutate`
+#: *more* conservative, never less — the safe direction to err in.
+_DIFF_GIT_HEADER = re.compile(r"^diff --git a/(.+) b/(.+)$")
+
+PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+
+
+# ---------------------------------------------------------------------------
+# Run-scoping — restrict *which mutants get test-executed*, not just gated
+# ---------------------------------------------------------------------------
+#
+# `mutmut run` always *generates* mutants for every file `[tool.mutmut]`'s
+# `only_mutate` names (cheap: an AST pass per file) — that part cannot be
+# scoped per invocation, since mutmut reads its config fresh from
+# pyproject.toml on every run and has no CLI/env override for it. But the
+# *expensive* part — re-running the test suite once per mutant — is scoped by
+# `mutmut run`'s own optional positional `MUTANT_NAMES` argument: verified
+# directly against mutmut 3.7.0's source
+# (`collect_source_file_mutation_data`), a name there is matched against every
+# mutant key via `fnmatch`, and the tests actually executed
+# (`tests_for_mutant_names(mutant_names)`) are filtered to that set — nothing
+# to do with `mutmut show`/`mutmut run <id>` "re-run one already-generated
+# mutant", which is a different, narrower use of the same argument covered
+# in mutmut's own docs. This is what lets a PR that only touched
+# `diff_symbols.py` skip paying for `diff_types.py`/`checker_policy.py`/…'s
+# entire test-suite-per-mutant cost, without touching `only_mutate` itself.
+#
+# Deliberately conservative: this only ever *narrows* which mutants get
+# tested, and only when every touched, `only_mutate`-scoped module can be
+# named — any uncertainty (can't read the diff, can't read pyproject.toml,
+# every module touched) falls back to the unscoped, unconditionally-correct
+# full run rather than guessing.
+
+
+def load_only_mutate_globs(pyproject_path: Path | None = None) -> list[str] | None:
+    """``[tool.mutmut].only_mutate`` from pyproject.toml, or ``None`` if unreadable.
+
+    *pyproject_path* defaults to ``REPO_ROOT / "pyproject.toml"`` resolved at
+    *call* time (not a frozen default argument) so a test that monkeypatches
+    ``gate.REPO_ROOT`` — the established pattern in
+    tests/test_mutation_score_gate.py — affects this too.
+
+    A local import: this module runs on any supported Python (3.10+), but the
+    ``--run`` scoping path this feeds only ever executes inside the mutation
+    CI lane, which pins Python 3.13 (``tomllib`` is stdlib since 3.11). A
+    stale-tomllib environment simply gets no scoping — the safe direction to
+    fail in — rather than an import error on every other invocation of this
+    script.
+    """
+    try:
+        import tomllib
+    except ImportError:
+        return None
+    path = (
+        pyproject_path if pyproject_path is not None else REPO_ROOT / "pyproject.toml"
+    )
+    try:
+        with open(path, "rb") as fh:
+            doc = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    only_mutate = doc.get("tool", {}).get("mutmut", {}).get("only_mutate")
+    if not isinstance(only_mutate, list) or not all(
+        isinstance(p, str) for p in only_mutate
+    ):
+        return None
+    return only_mutate
+
+
+def mutant_scope_pattern(module_path: str) -> str:
+    """``"abicheck/diff_symbols.py"`` -> ``"abicheck.diff_symbols.*"``.
+
+    Matches mutmut's own dotted-module mutant-key prefix (`mutation_results.
+    parse_mutant_module_and_function`'s ``pkg.gamma`` half of ``pkg.gamma.
+    xǁWidgetǁarea__mutmut_1``) — an ``fnmatch`` pattern against the full key,
+    so the trailing ``.*`` covers every function, nested class, and mutant
+    number in that one module without needing to know any of them in advance.
+    """
+    dotted = module_path[: -len(".py")] if module_path.endswith(".py") else module_path
+    return dotted.replace("/", ".") + ".*"
+
+
+def diff_touched_only_mutate_modules(
+    diff_text: str, only_mutate: list[str]
+) -> set[str]:
+    """Which ``only_mutate`` modules this diff added, modified, or removed lines in.
+
+    File granularity only — `only_mutate` itself has no finer scope, so there
+    is nothing function-level to gain here that `check_diff_scoped`'s
+    post-run gating does not already do. Both added/modified (new-side) and
+    removed (old-side) lines count: a module whose only edit in this diff is
+    a deleted guard still needs its mutants test-executed, or a survivor
+    `check_diff_scoped` would have reported is silently never measured.
+    """
+    only_mutate_set = set(only_mutate)
+    touched = set(parse_changed_lines(diff_text)) | set(parse_removed_lines(diff_text))
+    return touched & only_mutate_set
+
+
+def diff_touched_paths(diff_text: str) -> set[str]:
+    """Every path named by a ``diff --git a/... b/...`` header, either side.
+
+    The authoritative "did this diff touch this path at all" — unlike
+    `parse_changed_lines`/`parse_removed_lines` (built on `_hunks()`, i.e.
+    on ``@@`` hunks), this also sees a binary-file diff, a pure rename with
+    no content change, and a mode-only change, none of which produce a
+    hunk at all. A diff-scoping safety check built on the hunk-based
+    readers alone stayed blind to exactly those three shapes — reported
+    against the fourth revision of `diff_touches_outside_only_mutate`,
+    which by then had *no allowlist left to narrow* (Codex review, PR
+    #877): the gap was never in what counted as "outside `only_mutate`",
+    it was in what this function's *inputs* could see in the first place.
+    """
+    touched: set[str] = set()
+    for line in diff_text.splitlines():
+        m = _DIFF_GIT_HEADER.match(line)
+        if m:
+            touched.add(m.group(1))
+            touched.add(m.group(2))
+    return touched
+
+
+def diff_has_unparseable_git_header(diff_text: str) -> bool:
+    """Any ``diff --git`` line `_DIFF_GIT_HEADER`'s plain ``a/... b/...``
+    form can't parse.
+
+    Most commonly a git-quoted path: `core.quotepath` (on by default) makes
+    git wrap the *whole* header in double quotes and C-style-escape it the
+    moment a path needs it — a space, a non-ASCII byte, an embedded quote,
+    backslash, tab, or control character — e.g. ``diff --git "a/caf\\303\\251"
+    "b/caf\\303\\251"``. `diff_touched_paths` silently drops such an entry
+    (Codex review, PR #877, fifth round on this same predicate — the fourth
+    round's fix moved detection off `_hunks()` and onto `diff --git`
+    headers, and this is a gap in *that* parser rather than a case it
+    already covered). Decoding git's own quoting/escaping correctly is a
+    real, if narrow, parser in its own right; conservatively treating any
+    unparseable header as "touches something outside `only_mutate`" is
+    simpler and can only ever make scoping more cautious, never less.
+    """
+    return any(
+        line.startswith("diff --git ") and not _DIFF_GIT_HEADER.match(line)
+        for line in diff_text.splitlines()
+    )
+
+
+def _binary_marker_paths(diff_text: str) -> set[str]:
+    """Paths named by a GNU-diffutils/git ``Binary files ... differ`` line.
+
+    Unlike a rename (``rename from``/``rename to``) or a mode-only change
+    (``old mode``/``new mode``), which are pure ``git diff`` vocabulary that
+    never appears without a preceding ``diff --git`` header, this one line
+    shape is also emitted by plain ``diff``/``diff -u`` comparing two binary
+    files directly — a real, reachable headerless source, not a hypothetical
+    one (Codex review, PR #877, eighth round on this same predicate).
+    """
+    paths: set[str] = set()
+    for line in diff_text.splitlines():
+        m = _BINARY_MARKER.match(line)
+        if not m:
+            continue
+        for group in m.group(1), m.group(2):
+            paths.add(group[2:] if group.startswith(("a/", "b/")) else group)
+    return paths
+
+
+def _only_in_marker_paths(diff_text: str) -> set[str]:
+    """Paths named by a GNU-diffutils ``Only in <dir>: <name>`` marker.
+
+    ``diff -r``/``diff -ur dir1 dir2`` reports a file present on only one
+    side this way — no hunk, no binary marker, no ``diff --git`` header —
+    so it was invisible to every path source `diff_lacks_git_headers_for_
+    its_hunks` checked before this one (Codex review, PR #877, tenth round
+    on this same predicate). The directory and name combine into one path
+    (``examples`` + ``oracle.json`` -> ``examples/oracle.json``), stripping
+    a leading ``a/``/``b/`` from the directory half if git's own recursive
+    ``diff --git ... -r`` invocation put one there.
+    """
+    paths: set[str] = set()
+    for line in diff_text.splitlines():
+        m = _ONLY_IN_MARKER.match(line)
+        if not m:
+            continue
+        directory, name = m.group(1), m.group(2)
+        if directory.startswith(("a/", "b/")):
+            directory = directory[2:]
+        paths.add(f"{directory}/{name}" if directory else name)
+    return paths
+
+
+def _hunk_file_targets(diff_text: str) -> set[str]:
+    """Every ``--- ``/``+++ `` hunk-header target this diff names, whether or
+    not it carries git's own ``a/``/``b/`` prefix.
+
+    `_hunks()` deliberately requires the ``a/``/``b/`` prefix before trusting
+    a ``--- ``/``+++ `` line as naming a real path — correct for its own
+    job (feeding `parse_changed_lines`/`parse_removed_lines`'s per-line
+    attribution, where a bare, unprefixed target would be genuinely
+    ambiguous to resolve against the repo tree) — but that means a bare-path
+    unified-diff header (``--- file.py`` / ``+++ file.py``, with no ``a/``/
+    ``b/`` at all — real output of plain ``diff -u file1 file2``, or of
+    ``git diff --no-prefix``) yields *nothing* from `_hunks()`: both sides
+    read `None`, and the line-635 guard skips the hunk entirely (Codex
+    review, PR #877, ninth round on this same predicate — the eighth
+    round's fix covered a headerless *binary* marker; this is a headerless
+    *text* hunk whose header shape itself, not its absence, is what defeats
+    `_hunks()`). This function exists purely to answer "is there a file
+    identity here at all" for `diff_lacks_git_headers_for_its_hunks`'s own
+    safety comparison, not to resolve one precisely, so it accepts the bare
+    form too — stripping a leading ``a/``/``b/`` when present, keeping the
+    bare path otherwise, and (matching real GNU diff output) trimming a
+    trailing ``\\t<timestamp>`` some ``--- ``/``+++ `` lines carry.
+    """
+    old_target: str | None = None
+    new_target: str | None = None
+    targets: set[str] = set()
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            old_target = new_target = None
+            continue
+        if line.startswith("--- "):
+            raw = line[4:].split("\t", 1)[0].strip()
+            old_target = None if raw == "/dev/null" else raw
+            continue
+        if line.startswith("+++ "):
+            raw = line[4:].split("\t", 1)[0].strip()
+            new_target = None if raw == "/dev/null" else raw
+            continue
+        if old_target is None and new_target is None:
+            continue
+        if _HUNK.match(line):
+            for target in (old_target, new_target):
+                if target is not None:
+                    prefix = target[:2]
+                    targets.add(target[2:] if prefix in ("a/", "b/") else target)
+    return targets
+
+
+def diff_has_unrecognized_content(diff_text: str) -> bool:
+    """True when the diff has a non-blank line that isn't one of the content
+    shapes this module already understands.
+
+    Ten rounds of review each found one more real diff-tool output shape
+    this predicate's path-comparison approach didn't have a dedicated
+    reader for — a git-quoted header, a headerless hunk, a headerless
+    binary marker, a bare-path header, a recursive-diff ``Only in`` marker,
+    and (the finding that prompted this function) GNU diffutils' ``-q``/
+    ``--brief`` ``Files X and Y differ`` form. Each fix so far added one
+    more marker-specific path extractor to the union
+    `diff_lacks_git_headers_for_its_hunks` compares against
+    `diff_touched_paths()` — sound for the shape it targets, but leaves an
+    *eleventh*, still-undiscovered shape exactly as invisible as the tenth
+    was before this round.
+
+    This function closes that class generically instead of naming a
+    twelfth marker: rather than asking "does this line carry a path we can
+    extract", it asks "is this line one of the small, closed set of shapes
+    a real ``diff``/``git diff`` invocation can ever emit at all" — a
+    ``diff --git`` header, one of git's own per-entry metadata lines
+    (`_GIT_ENTRY_METADATA_PREFIXES`), a ``--- ``/``+++ `` header, a hunk
+    header or body line, or one of the two marker shapes this module
+    already extracts a path from (binary, ``Only in``). Deliberately
+    *not* recognizing GNU diffutils' ``-q``/``--brief`` ``Files X and Y
+    differ`` form (the finding that prompted writing this function) —
+    unlike the binary/``Only in`` markers, nothing extracts a path from it
+    into `diff_lacks_git_headers_for_its_hunks`'s own comparison, so
+    treating it as "recognized" here would make the line invisible to
+    *both* checks at once rather than caught by this one. A line that
+    fits none of the recognized shapes — including a marker format no
+    round of review has reported yet — is flagged directly, with no path
+    extraction needed to prove the diff unsafe to scope. This still isn't
+    a full grammar validator (it doesn't check that a ``--- ``/``+++ ``/
+    marker's own path matches its governing ``diff --git`` header —
+    `diff_lacks_git_headers_for_its_hunks`'s existing path-set comparison,
+    kept unchanged alongside this function, is what catches that), but it
+    does mean a wholly new content shape disables scoping on sight rather
+    than needing its own review round and its own extractor before it's
+    caught — provided nobody ever adds it to this function's own
+    recognized set without also giving it a path extractor, exactly the
+    mistake this docstring exists to warn the next round away from.
+
+    That mistake is exactly what the first version of this function made
+    for `_GIT_ENTRY_METADATA_PREFIXES`: those lines carry no path extractor
+    anywhere in this module (the owning ``diff --git`` header already
+    names the path; a rename/mode/index line never needs its own), so
+    recognizing one unconditionally — in *any* parser state, not only
+    immediately after the ``diff --git`` line that makes it legitimate —
+    left a headerless ``rename from``/``rename to`` pair (pasted after an
+    already-open, properly-headed hunk, say) invisible to *both* checks at
+    once: not path-extracted, and now also not flagged as unrecognized
+    (Codex review, PR #877, thirteenth round on this same predicate — the
+    same class of self-inflicted gap the eleventh round's fix already
+    warned future rounds away from, reproduced anyway one round later, this
+    time by this function's own first draft rather than by the code it was
+    meant to guard). Fixed with an explicit ``in_entry_metadata_zone``
+    flag: metadata prefixes are only recognized immediately after a
+    ``diff --git`` line (or after another recognized metadata line in that
+    same run), and the zone closes — same as `in_hunk` — the moment any
+    other recognized content type appears, so a metadata-shaped line
+    anywhere else falls straight through to the unrecognized-content
+    fallback instead of being waved through by a prefix match alone.
+    """
+    in_hunk = False
+    in_entry_metadata_zone = False
+    for line in diff_text.splitlines():
+        if not line:
+            return True
+        if line.startswith("diff --git "):
+            in_hunk = False
+            in_entry_metadata_zone = True
+            continue
+        if in_entry_metadata_zone and line.startswith(_GIT_ENTRY_METADATA_PREFIXES):
+            continue
+        if line.startswith(("--- ", "+++ ")):
+            in_hunk = False
+            in_entry_metadata_zone = False
+            continue
+        if _HUNK.match(line):
+            in_hunk = True
+            in_entry_metadata_zone = False
+            continue
+        if _BINARY_MARKER.match(line) or _ONLY_IN_MARKER.match(line):
+            in_hunk = False
+            in_entry_metadata_zone = False
+            continue
+        if in_hunk and line.startswith(_HUNK_BODY_PREFIXES):
+            continue
+        return True
+    return False
+
+
+def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
+    """True when some hunk's (or binary marker's) file isn't named by any
+    ``diff --git`` header.
+
+    A "headerless" unified diff — e.g. produced by plain ``diff -u`` rather
+    than ``git diff``, or a hand-assembled/stripped patch file passed via
+    ``--diff-file`` — still parses fine under `_hunk_file_targets()` (which
+    keys off the ``--- ``/``+++ `` file markers, not ``diff --git``), so
+    `diff_touched_only_mutate_modules` can still name a touched
+    ``only_mutate`` module from it. But `diff_touched_paths` (and
+    `diff_has_unparseable_git_header`) can only ever see a path named by a
+    ``diff --git`` header. Checking merely "does *any* `diff --git` line
+    exist anywhere in the text" (the first version of this check) is not
+    enough: a diff that concatenates one ordinary `diff --git`-headed entry
+    with a second, headerless unified-diff section (e.g. two files pasted
+    together, or a hand-assembled `--diff-file`) has a header *somewhere*,
+    so that version read the whole diff as headered and never looked at
+    whether the headerless section's own file was actually covered by one
+    (Codex review, PR #877, seventh round on this same predicate — the
+    sixth round's fix closed a diff with *zero* headers; this is a diff
+    with *some*, just not covering every hunk). Fixed by comparing the
+    file set each reader actually sees: every path a real hunk names must
+    also appear in `diff_touched_paths()`'s header-derived set, or a real
+    hunk exists that the header-based reader — and therefore
+    `diff_touches_outside_only_mutate` — cannot see at all. A hunk isn't
+    the only content shape carrying file identity, though: a headerless
+    binary-file diff has no ``@@`` hunk either, so `_binary_marker_paths`
+    is folded into the same comparison (eighth round); nor is git's own
+    ``a/``/``b/``-prefixed hunk-header spelling the only shape a real hunk
+    can carry, so this reads targets via `_hunk_file_targets` rather than
+    `_hunks()` directly, to also catch a bare-path header (ninth round);
+    nor is a hunk or a binary marker the only shape a one-sided file can
+    take at all — GNU diffutils' recursive ``diff -r``/``diff -ur`` mode
+    reports a file present on only one side as a hunkless, markerless
+    ``Only in <dir>: <name>`` line, folded in via `_only_in_marker_paths`
+    (tenth round).
+
+    Ten rounds of enumerating one more content shape at a time (an
+    eleventh — GNU diffutils' ``-q``/``--brief`` ``Files X and Y differ``
+    form — arrived the same session this docstring was last revised) is
+    what motivated `diff_has_unrecognized_content`: rather than a
+    thirteenth marker-specific path extractor, that function closes the
+    *class* by flagging any line that isn't one of the small, closed set
+    of shapes a real diff tool can emit at all, catching a still-
+    undiscovered twelfth shape by construction instead of needing its own
+    review round first. It's checked here alongside the path-set
+    comparison — not in place of it, since recognizing a shape and
+    verifying its path against the diff's own headers are different
+    questions (see that function's own docstring for why neither
+    subsumes the other).
+    """
+    hunk_paths = _hunk_file_targets(diff_text)
+    hunk_paths |= _binary_marker_paths(diff_text)
+    hunk_paths |= _only_in_marker_paths(diff_text)
+    if hunk_paths and not hunk_paths <= diff_touched_paths(diff_text):
+        return True
+    return diff_has_unrecognized_content(diff_text)
+
+
+def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
+    """Any path this diff touches — of *any* kind — that isn't itself in ``only_mutate``.
+
+    Five widening review rounds on this same predicate (Codex + CodeRabbit,
+    PR #877) each found the previous version still let something through
+    that could change an *untouched* module's behavior under mutation
+    without touching that module's own file: "any `tests/` path" (a shared
+    fixture), then "any `.py` file, of any kind" (a shared production
+    helper an untouched module imports), then a non-Python `also_copy`
+    input (`examples/**/*.json` and the like — read as fixture/oracle data
+    by tests that exercise mutated modules), then a class of change
+    invisible to the *diff-line* readers entirely (a binary-file diff, a
+    pure rename, or a mode-only change, none of which contain a ``@@``
+    hunk — fixed by reading `diff --git` headers directly instead), and
+    then a header this new reader still couldn't parse: a git-quoted
+    path (`diff --git "a/..." "b/..."`, the form `core.quotepath`
+    produces for a non-ASCII/space/special-character path), silently
+    dropped by `diff_touched_paths` rather than raising, and finally a
+    diff with *no* `diff --git` headers at all (a headerless unified diff
+    from plain `diff -u` or a hand-assembled `--diff-file`), which is
+    invisible to the header-based reader regardless of content even
+    though the hunk-based reader still sees it fine, and — a diff mixing
+    an ordinary `diff --git`-headed entry with a *second*, headerless
+    section, whose own file a naive "does any header exist at all" check
+    still misses (`diff_lacks_git_headers_for_its_hunks`, which instead
+    compares the two readers' own file sets directly). The first three
+    rounds each narrowed what counted as "outside `only_mutate`"; the
+    last four each showed that no such narrowing could have helped, since
+    the affected path was never in the detected set at all — fixed at the
+    detection layer each time: first by moving off `_hunks()` onto
+    `diff --git` headers (`diff_touched_paths`), then by treating any
+    header that reader still can't parse as itself a signal to disable
+    scoping (`diff_has_unparseable_git_header`) rather than writing a
+    git-quote/octal-escape decoder, then by comparing what the hunk-based
+    and header-based readers each see and falling back whenever a hunk's
+    file isn't covered by any header at all — whether because the diff
+    has none, or because one section of it does and another doesn't.
+
+    Every mutant, however scoped, is tested against the diff's *entire*
+    current tree — mutmut's own `copy_src_dir`/`copy_also_copy_files` copy
+    every source file *and* every `also_copy` path (which, per
+    pyproject.toml's own comment, is deliberately generous rather than
+    minimal: `docs`, `examples`, `scripts`, `.github`, lockfiles, ...) fresh
+    from what's checked out. Given that surface, trying to name every
+    input a test *might* read as fixture/oracle data and enumerate it as
+    "safe" is exactly the reactive whack-a-mole this repository's own
+    "Known gaps" convention (AGENTS.md) warns against repeating. The only
+    version of this check immune to a further round is the one with no
+    allowlist at all: if literally nothing outside `only_mutate` changed —
+    checked the one way that can't miss a hunkless diff entry — no other
+    path's content, read by any test in any way this function does not
+    have to know about, differs from what any other measurement (a prior
+    baseline, a full run) already reflects.
+
+    Costs real applicability: this repo's own changelog-fragment
+    convention (a `changelog.d/*.md` addition, required for most
+    `abicheck/**/*.py` changes) means a real `fix:`/`perf:`/`security:` PR
+    touching one `only_mutate` module will usually also touch a changelog
+    fragment, and this predicate treats that the same as anything else —
+    disabling scoping for it. A reviewed, narrow allowlist for a handful
+    of paths verified never to be read as test fixture/oracle content
+    (`changelog.d/`, say) is a real, separate improvement, not attempted
+    here after four consecutive rounds on the same check.
+    """
+    if diff_has_unparseable_git_header(diff_text):
+        return True
+    if diff_lacks_git_headers_for_its_hunks(diff_text):
+        return True
+    touched = diff_touched_paths(diff_text)
+    only_mutate_set = set(only_mutate)
+    return any(p not in only_mutate_set for p in touched)
+
+
+def mutant_run_scope(
+    diff_text: str | None, only_mutate: list[str] | None
+) -> list[str] | None:
+    """``MUTANT_NAMES`` patterns to pass to ``mutmut run``, or ``None`` for "full run".
+
+    ``None`` — not scoping — is the answer whenever scoping cannot be proven
+    safe: no diff, no readable ``only_mutate``, no ``only_mutate`` module
+    touched (the diff may still be real — e.g. only this lane's own
+    infrastructure changed — just not one this function can attribute to a
+    mutated module), every ``only_mutate`` module touched (scoping would
+    filter nothing, so it's not worth the extra mutmut invocation shape),
+    or the diff touches *anything at all* outside ``only_mutate`` (see
+    `diff_touches_outside_only_mutate`).
+    """
+    if diff_text is None or not only_mutate:
+        return None
+    if diff_touches_outside_only_mutate(diff_text, only_mutate):
+        return None
+    touched = diff_touched_only_mutate_modules(diff_text, only_mutate)
+    if not touched or touched >= set(only_mutate):
+        return None
+    return sorted(mutant_scope_pattern(m) for m in touched)
 
 
 def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
@@ -126,7 +681,7 @@ def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     and let the gate pass on stale results (Codex review).
     """
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, capture_output=True, text=True, timeout=7200
+        cmd, capture_output=True, text=True, timeout=MUTMUT_RUN_TIMEOUT_SECONDS
     )
     return proc.stdout + proc.stderr, proc.returncode
 
@@ -147,6 +702,11 @@ def render_baseline(records: list[MutantRecord]) -> dict[str, object]:
     can see which mutants were accepted.
     """
     by_module = survivors_by_module(records)
+    functions: dict[str, dict[str, int]] = {}
+    for record in records:
+        if record.is_survivor:
+            functions.setdefault(record.module_path, {}).setdefault(record.function, 0)
+            functions[record.module_path][record.function] += 1
     return {
         "_comment": (
             "Per-module surviving-mutant baseline. Regenerate with "
@@ -156,7 +716,14 @@ def render_baseline(records: list[MutantRecord]) -> dict[str, object]:
         ),
         "total_survivors": sum(len(v) for v in by_module.values()),
         "modules": {
-            module: {"survivors": len(keys), "keys": keys}
+            module: {
+                "survivors": len(keys),
+                "keys": keys,
+                # Counts, rather than mutant keys: mutmut renumbers a function
+                # when it is edited. This is the baseline needed to score a
+                # changed legacy function for *new* survivors only.
+                "functions": functions.get(module, {}),
+            }
             for module, keys in by_module.items()
         },
     }
@@ -181,18 +748,73 @@ def load_baseline(path: Path) -> dict[str, int] | None:
     return out
 
 
+def load_function_baseline(path: Path) -> dict[tuple[str, str], int]:
+    """Read per-function survivor counts from a current baseline document.
+
+    Old baselines intentionally yield no entries: treating their module total
+    as a function total would hide a regression in one function paid for by an
+    improvement in another.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    modules = doc.get("modules") if isinstance(doc, dict) else None
+    if not isinstance(modules, dict):
+        return {}
+    out: dict[tuple[str, str], int] = {}
+    for module, entry in modules.items():
+        funcs = entry.get("functions") if isinstance(entry, dict) else None
+        if not isinstance(funcs, dict):
+            continue
+        for function, survivors in funcs.items():
+            if isinstance(function, str) and isinstance(survivors, int):
+                out[(module, function)] = survivors
+    return out
+
+
 def check_per_module(
-    records: list[MutantRecord], baseline: dict[str, int]
-) -> list[str]:
-    """Modules whose survivor count rose above their own recorded number."""
+    records: list[MutantRecord],
+    baseline: dict[str, int],
+    scope_modules: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Modules whose survivor count rose above their own recorded number.
+
+    Returns ``(failures, skipped)``. ``skipped`` is every baseline module this
+    call declined to compare because it was outside ``scope_modules`` — never
+    silently folded into "no failures".
+
+    A scoped run's own mutant *test-execution* never touches a module outside
+    ``scope_modules`` (see ``--scope-run-to-diff``'s own docstring): every
+    mutant there reads ``not checked``, so `survivors_by_module` reports zero
+    survivors for it regardless of the module's true state. Comparing that
+    unconditionally against `baseline` would read as "still within baseline"
+    for a module this run never measured at all — a false "OK" the caller
+    could print unchallenged, exactly the "false 'safe to scope' is a
+    correctness bug" failure mode this file's own diff-parsing predicates are
+    built to avoid elsewhere (Codex review: modules in `only_mutate` can
+    import each other, e.g. ``diff_types.py`` imports ``diff_symbols``, so a
+    diff touching only one can change what an *omitted* module's mutants
+    would report without ever touching a path the scoping predicate would
+    reject). So when `scope_modules` is given and non-empty, comparison is
+    restricted to it — mirroring `unresolved_for_gate`'s identical scoping in
+    `main()` — and every other baseline module is reported as skipped rather
+    than silently scored as unchanged.
+    """
     current = {m: len(k) for m, k in survivors_by_module(records).items()}
+    universe = set(current) | set(baseline)
+    skipped: list[str] = []
+    if scope_modules:
+        skipped = sorted(m for m in universe if m not in scope_modules)
+        universe = {m for m in universe if m in scope_modules}
     failures = []
-    for module in sorted(set(current) | set(baseline)):
+    for module in sorted(universe):
         now = current.get(module, 0)
         was = baseline.get(module, 0)
         if now > was:
             failures.append(f"  {module}: {was} -> {now} (+{now - was})")
-    return failures
+    return failures, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -407,24 +1029,32 @@ def _base_reader(base_ref: str) -> Callable[[str], str | None] | None:
 
 
 def check_diff_scoped(
-    records: list[MutantRecord], touched: dict[str, set[str]]
+    records: list[MutantRecord],
+    touched: dict[str, set[str]],
+    baseline: dict[tuple[str, str], int] | None = None,
 ) -> list[str]:
     """Survivors living in a function this branch changed.
 
-    Absolute: there is no baseline to be under. If you edited a function and a
-    mutation of it still passes the suite, the edit is not verified.
+    A function recorded in a baseline is delta-scored: existing survivor debt
+    must not make every edit impossible, but its count may not rise. Functions
+    without a recorded baseline remain absolute. Module-scope edits are scored
+    by the per-module drift gate below; mutmut has no module-scope mutant to
+    attribute precisely.
     """
+    baseline = baseline or {}
+    current: dict[tuple[str, str], list[str]] = {}
+    for r in records:
+        if r.is_survivor and r.function in touched.get(r.module_path, set()):
+            current.setdefault((r.module_path, r.function), []).append(r.key)
     failures = []
-    for r in sorted(records, key=lambda r: r.key):
-        if not r.is_survivor:
-            continue
-        module_touched = touched.get(r.module_path, set())
-        if MODULE_SCOPE in module_touched:
+    for (module, function), keys in sorted(current.items()):
+        was = baseline.get((module, function))
+        if was is None:
+            failures.extend(f"  {module}::{function}  [{key}]" for key in sorted(keys))
+        elif len(keys) > was:
             failures.append(
-                f"  {r.module_path}::{r.function}  [{r.key}]  (module-scope change)"
+                f"  {module}::{function}: {was} -> {len(keys)} (+{len(keys) - was})"
             )
-        elif r.function in module_touched:
-            failures.append(f"  {r.module_path}::{r.function}  [{r.key}]")
     return failures
 
 
@@ -433,13 +1063,20 @@ def check_diff_scoped(
 # ---------------------------------------------------------------------------
 
 
-def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None]:
+def _gather(
+    args: argparse.Namespace, mutant_name_patterns: list[str] | None = None
+) -> tuple[str | None, dict[str, int] | None]:
     """Return ``(results_text, cicd_stats)``.
 
     ``mutmut run``'s own stdout is deliberately **not** folded into the text
     used for counting — see the module docstring. It is still executed (and its
     output shown) under ``--run``; only the *measurement* comes from ``mutmut
     results`` plus the exported stats.
+
+    *mutant_name_patterns*, when given, are passed as ``mutmut run``'s own
+    ``MUTANT_NAMES`` positional argument — see ``mutant_run_scope``'s
+    docstring for what that actually scopes (test execution, not mutant
+    generation) and why that is still the dominant cost.
     """
     if args.results_file:
         if args.results_file == "-":
@@ -456,8 +1093,16 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
         return None, None
 
     if args.run:
-        print("mutation-score: running `mutmut run` (this is slow)…")
-        run_out, run_rc = _run_mutmut(["mutmut", "run"])
+        run_cmd = ["mutmut", "run", *(mutant_name_patterns or [])]
+        if mutant_name_patterns:
+            print(
+                "mutation-score: running `mutmut run` scoped to "
+                f"{len(mutant_name_patterns)} changed module(s) (this is still "
+                "slow, just less of it)…"
+            )
+        else:
+            print("mutation-score: running `mutmut run` (this is slow)…")
+        run_out, run_rc = _run_mutmut(run_cmd)
         tail = "\n".join(run_out.splitlines()[-5:])
         print(f"mutation-score: mutmut run tail:\n{tail}")
         if run_rc != 0:
@@ -484,6 +1129,41 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
         )
         return None, None
     return results_out, load_cicd_stats(Path(args.mutants_dir))
+
+
+def _load_diff_text(args: argparse.Namespace) -> tuple[str | None, int | None]:
+    """``(diff_text, None)`` on success, ``(None, exit_code)`` on failure.
+
+    Factored out of the diff-scoped gating block so it can also run *before*
+    ``--run``, for run-scoping: fetching it once and reusing it there too
+    avoids a second ``git diff`` invocation, and — a genuine side benefit,
+    not just tidiness — a bad ``--base-ref`` now fails before paying for a
+    multi-hour mutmut run instead of after (previously: the diff was only
+    ever fetched post-run, so a typo here wasted the entire run before
+    reporting the same error it reports now up front).
+    """
+    if args.diff_file:
+        return Path(args.diff_file).read_text(encoding="utf-8"), None
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if proc.returncode != 0:
+        # Without this the fatal stderr is parsed as a diff, yielding zero
+        # changed functions — so the diff-scoped gate reports OK with
+        # survivors present. A typo in --base-ref silently disables the gate
+        # (reproduced with `--base-ref does-not-exist`, Codex review).
+        print(
+            f"ERROR: `git diff {args.base_ref}...HEAD` failed "
+            f"(exit {proc.returncode}): {proc.stderr.strip()}\n"
+            "Cannot determine which functions this branch changed, so the "
+            "diff-scoped gate would pass vacuously."
+        )
+        return None, 1
+    return proc.stdout, None
 
 
 def _run_reached_its_end(text: str, stats: dict[str, int] | None) -> bool:
@@ -572,6 +1252,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--diff-file", help="Read the diff from a file instead of git.")
     parser.add_argument(
+        "--scope-run-to-diff",
+        action="store_true",
+        help=(
+            "With --run --diff-scoped (and not --require-baseline): pass "
+            "mutmut run the MUTANT_NAMES of only the only_mutate module(s) "
+            "this diff touches, so the expensive test-execution phase runs "
+            "against a fraction of the mutant population instead of all of "
+            "[tool.mutmut].only_mutate every time. Falls back to an "
+            "unscoped (full) run whenever the scope cannot be established "
+            "as safe — never widens the gate, only ever the amount of work "
+            "it costs to satisfy it."
+        ),
+    )
+    parser.add_argument(
         "--require-baseline",
         action="store_true",
         help=(
@@ -582,7 +1276,91 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", help="Write a machine-readable receipt here.")
     args = parser.parse_args(argv)
 
-    text, stats = _gather(args)
+    # Fetched once, up front, whenever it will be needed at all: by run-scoping
+    # below (if requested) and, either way, by the diff-scoped gate further
+    # down. See _load_diff_text's own docstring for why this also has to
+    # happen before --run, not just before gating.
+    #
+    # Not fetched at all under --write-baseline, even with --diff-scoped also
+    # given: that branch returns before the diff-scoped gate below ever runs
+    # (records the *whole* population, unconditionally), and run-scoping is
+    # separately disabled under --write-baseline already (`and not
+    # args.write_baseline` a few lines down) -- so nothing downstream ever
+    # reads diff_text in this mode. Loading it anyway meant an offline
+    # checkout with no origin/main, a stale --base-ref, or an unreadable
+    # --diff-file could fail a baseline-recording run before the multi-hour
+    # mutmut invocation it exists to protect even started -- exactly the
+    # "fails before paying for the run" case _load_diff_text's own docstring
+    # argues for elsewhere, but here failing the thing that doesn't need the
+    # diff at all (Codex review).
+    diff_text: str | None = None
+    if args.diff_scoped and not args.write_baseline:
+        diff_text, err = _load_diff_text(args)
+        if diff_text is None:
+            return err if err is not None else 1
+
+    # Read early (cheap, side-effect-free) so the scoping decision below can
+    # see them: whether a per-module baseline exists changes whether scoping
+    # is safe at all, not just how a later gate reads. Reused verbatim by the
+    # baseline-comparison block further down instead of re-reading.
+    baseline_modules = load_baseline(Path(args.baseline_file))
+    function_baseline = load_function_baseline(Path(args.baseline_file))
+    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+
+    scope_patterns: list[str] | None = None
+    scope_modules: set[str] = set()
+    if (
+        args.run
+        # _gather() checks --results-file *before* --run and returns those
+        # saved results unconditionally when both are given (a pre-existing
+        # quirk, unchanged here) — so --run alone does not mean mutmut is
+        # about to be re-executed. Scoping (and the scope-aware unresolved
+        # gate below, which depends on it) must not activate over a saved
+        # results file: nothing there is guaranteed to reflect a scoped run,
+        # and treating its out-of-scope "not checked"/timeout/etc. records as
+        # exempt could mask a real gap in what was actually measured (Codex
+        # review).
+        and not args.results_file
+        and args.diff_scoped
+        and args.scope_run_to_diff
+        and not args.require_baseline
+        and not args.write_baseline
+        # A module-scope edit (one outside every function) has no mutant of
+        # its own for check_diff_scoped() to attribute — by design, it is
+        # "scored by the per-module drift gate below" instead (that
+        # function's own docstring). check_per_module() is the only thing
+        # that can catch it under scoping (the global-total gate now skips
+        # itself for a scoped run, on purpose — see that block's own
+        # comment for why comparing a scoped population against a
+        # whole-repository total is unsound). Without a per-module baseline
+        # to run check_per_module() against, a scoped run with only the
+        # legacy global total configured would have *no* gate left standing
+        # for such an edit at all: check_diff_scoped() can't attribute it,
+        # check_per_module() doesn't run (no baseline_modules), and the
+        # global-total check now declines to score a partial population
+        # (Codex review). Falls back to a full run instead — the same
+        # "when in doubt, pay for the full population" answer this predicate
+        # family already gives for every other case it can't establish as
+        # safe, not a new heuristic.
+        and not (total_baseline is not None and baseline_modules is None)
+    ):
+        # Guaranteed non-None: this branch requires args.diff_scoped, which is
+        # exactly the condition under which the block above either set
+        # diff_text or already returned.
+        assert diff_text is not None
+        only_mutate = load_only_mutate_globs()
+        scope_patterns = mutant_run_scope(diff_text, only_mutate)
+        if scope_patterns is not None and only_mutate is not None:
+            scope_modules = diff_touched_only_mutate_modules(diff_text, only_mutate)
+            print(
+                "mutation-score: scoping this run to "
+                f"{len(scope_modules)}/{len(only_mutate)} only_mutate module(s): "
+                + ", ".join(sorted(scope_modules))
+            )
+
+    gather_started = time.monotonic()
+    text, stats = _gather(args, scope_patterns)
+    gather_seconds = time.monotonic() - gather_started
     if text is None:
         if args.run:
             print(
@@ -626,6 +1404,19 @@ def main(argv: list[str] | None = None) -> int:
     else:
         survivors = parse_survivors(text) or 0
     unresolved = count_unresolved(text)
+    # A scoped run deliberately never test-executes mutants outside
+    # `scope_modules` — every one of them reads "not checked", which
+    # `count_unresolved`/`MutantRecord.is_unresolved` correctly treat as an
+    # unresolved measurement (as they must for a *genuinely* interrupted run).
+    # Gating on the unscoped total here would fail every scoped run on the
+    # out-of-scope population it deliberately never measured. `unresolved`
+    # itself (the informational, whole-population figure printed below and
+    # written to the receipt) is untouched.
+    unresolved_for_gate = (
+        sum(1 for r in records if r.is_unresolved and r.module_path in scope_modules)
+        if scope_modules
+        else unresolved
+    )
     by_module = survivors_by_module(records)
 
     # Two independent sources must agree. `mutmut results`' per-mutant listing
@@ -678,8 +1469,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {module}: {len(keys)}")
 
     exit_code = 0
-    baseline_modules = load_baseline(Path(args.baseline_file))
-    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+    # baseline_modules / function_baseline / total_baseline: read early, above
+    # the run-scoping decision — reused as-is here.
     #: Is there a *drift* reference — the only thing that can answer "did the
     #: survivor set grow", for any function, changed or not?
     baseline_available = baseline_modules is not None or total_baseline is not None
@@ -724,11 +1515,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    if unresolved and (gating_active or args.write_baseline):
+    if unresolved_for_gate and (gating_active or args.write_baseline):
         print(
-            f"ERROR: {unresolved} mutant(s) did not resolve (timeout/suspicious/"
-            "no-tests/segfault) — the measurement is incomplete; fix or silence "
-            "them so the survivor count is trustworthy."
+            f"ERROR: {unresolved_for_gate} mutant(s) did not resolve (timeout/"
+            "suspicious/no-tests/segfault) — the measurement is incomplete; fix "
+            "or silence them so the survivor count is trustworthy."
         )
         exit_code = 1
         if args.write_baseline:
@@ -766,30 +1557,9 @@ def main(argv: list[str] | None = None) -> int:
         return exit_code
 
     if args.diff_scoped:
-        if args.diff_file:
-            diff_text = Path(args.diff_file).read_text(encoding="utf-8")
-        else:
-            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-                ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if proc.returncode != 0:
-                # Without this the fatal stderr is parsed as a diff, yielding
-                # zero changed functions — so the diff-scoped gate reports OK
-                # with survivors present. A typo in --base-ref silently
-                # disables the gate (reproduced with `--base-ref
-                # does-not-exist`, Codex review).
-                print(
-                    f"ERROR: `git diff {args.base_ref}...HEAD` failed "
-                    f"(exit {proc.returncode}): {proc.stderr.strip()}\n"
-                    "Cannot determine which functions this branch changed, so "
-                    "the diff-scoped gate would pass vacuously."
-                )
-                return 1
-            diff_text = proc.stdout
+        # Fetched once, at the top of main() (before --run, for run-scoping);
+        # reused here rather than fetched a second time.
+        assert diff_text is not None, "args.diff_scoped implies diff_text was fetched"
         removed = parse_removed_lines(diff_text)
         read_base = _base_reader(args.base_ref)
         touched = changed_functions(
@@ -844,7 +1614,7 @@ def main(argv: list[str] | None = None) -> int:
             # survivors — so this is set before the pass/fail split, not
             # inside the "no survivors" arm.
             gated = True
-        failures = check_diff_scoped(records, touched)
+        failures = check_diff_scoped(records, touched, function_baseline)
         if failures:
             print(
                 "ERROR: surviving mutants in functions this branch changed — a "
@@ -872,7 +1642,21 @@ def main(argv: list[str] | None = None) -> int:
             print("mutation-score: diff-scoped OK (no survivors in changed functions)")
 
     if baseline_modules is not None:
-        failures = check_per_module(records, baseline_modules)
+        failures, skipped_modules = check_per_module(
+            records, baseline_modules, scope_modules
+        )
+        if skipped_modules:
+            # A scoped run's own mutant test-execution never touched these
+            # modules (see check_per_module's own docstring) — say so rather
+            # than letting the "OK" below imply they were re-verified this
+            # run. Their baseline counts stand unchanged until a full
+            # (unscoped) run measures them again.
+            print(
+                "mutation-score: per-module baseline check skipped "
+                f"{len(skipped_modules)} module(s) this scoped run did not "
+                "test-execute (their baseline count was not re-verified): "
+                + ", ".join(skipped_modules)
+            )
         if failures:
             print(
                 "ERROR: per-module survivor count rose above baseline — a test "
@@ -880,6 +1664,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("\n".join(failures))
             exit_code = 1
+        elif scope_modules:
+            print(
+                "mutation-score: per-module baseline OK for the scoped "
+                f"module(s): {', '.join(sorted(scope_modules))}"
+            )
         else:
             print("mutation-score: per-module baseline OK")
     else:
@@ -893,6 +1682,28 @@ def main(argv: list[str] | None = None) -> int:
             "mutation-score: global-total baseline not set — report-only. The "
             "per-module baseline file is the preferred gate."
         )
+    elif scope_modules:
+        # The identical blind spot check_per_module() had (Codex review,
+        # round 14) applies here too, one level flatter: `survivors` is the
+        # *whole-records* survivor count, but a scoped run never
+        # test-executes a mutant outside `scope_modules` — every one of
+        # those reads "not checked", never "survived" — so `survivors` here
+        # is really only the scoped module(s)' own count, not the whole
+        # population's. Comparing it against a baseline established from a
+        # full run is meaningless in both directions: a real out-of-scope
+        # regression would silently read as "improved, please lower the
+        # baseline", and there's no partial baseline to fall back to the way
+        # check_per_module() has one per module — a "total" has no narrower
+        # population to restrict to, so the only sound answer is to skip the
+        # comparison outright rather than score it against the wrong
+        # population (Codex review).
+        print(
+            "mutation-score: global-total baseline check skipped — this run "
+            f"was scoped to {len(scope_modules)} module(s), so its "
+            f"{survivors} surviving mutant(s) is not the whole population's "
+            f"count and cannot be compared against the recorded baseline of "
+            f"{total_baseline}."
+        )
     elif survivors > total_baseline:
         print(f"ERROR: surviving mutants {survivors} exceed baseline {total_baseline}.")
         exit_code = 1
@@ -905,15 +1716,91 @@ def main(argv: list[str] | None = None) -> int:
         print(f"mutation-score: OK ({survivors} == baseline {total_baseline})")
 
     if args.json:
+        mutants_measured = None
+        mutants_per_second = None
+        # These are budget/efficiency metrics for *this invocation's own*
+        # measurement, not a report of whatever the local mutmut database
+        # happens to currently hold — so both require the same
+        # `args.run and not args.results_file` provenance bar run_seconds
+        # already holds itself to (that combination genuinely executes
+        # mutmut; --run alone does not, since --results-file wins and
+        # returns saved results unconditionally when both are given — see
+        # this same condition a few lines above `_gather()`'s own call).
+        # Without the bare-database-read case excluded too, a bare `mutmut
+        # results` read (no --run, no --results-file) would publish a
+        # fresh-looking mutants_measured from a database that could be
+        # arbitrarily old or itself the product of an earlier *scoped*
+        # run — self-consistent with `results_out` (both come from the same
+        # local mutants_dir at read time), but not evidence this invocation
+        # measured anything at all (Codex review). --results-file is the
+        # sibling, narrower case already fixed above: there `stats` isn't
+        # even self-consistent with `results_out`, since the latter is an
+        # arbitrary externally-supplied file with no relationship to
+        # whatever happens to be sitting in args.mutants_dir locally.
+        if stats is not None and args.run and not args.results_file:
+            not_checked = stats.get("not_checked", 0)
+            mutants_measured = max(stats.get("total", 0) - not_checked, 0)
+            if gather_seconds > 0:
+                mutants_per_second = round(mutants_measured / gather_seconds, 3)
         Path(args.json).write_text(
             json.dumps(
                 {
                     "survivors": survivors,
                     "unresolved": unresolved,
+                    "unresolved_in_scope": unresolved_for_gate,
                     "stats": stats,
                     "by_module": by_module,
                     "gated": gated,
                     "exit_code": exit_code,
+                    #: Budget/efficiency metrics (only meaningful for a real
+                    #: --run that actually invoked mutmut): how long
+                    #: `_gather` took, how many mutants were actually
+                    #: test-executed and at what rate, and whether this run
+                    #: scoped the expensive phase to a subset of
+                    #: `only_mutate` or fell back to the full population.
+                    #: `_gather()` checks --results-file *before* --run and
+                    #: returns those saved results unconditionally when both
+                    #: are given, without ever invoking mutmut — so
+                    #: `run_seconds` under that combination would otherwise
+                    #: be a near-zero file-read duration, not a real run
+                    #: time, and `mutants_per_second` derived from it would
+                    #: read as an implausibly fast "live" rate to anything
+                    #: consuming this receipt (Codex review).
+                    "run_seconds": (
+                        round(gather_seconds, 3)
+                        if args.run and not args.results_file
+                        else None
+                    ),
+                    "mutants_measured": mutants_measured,
+                    "mutants_per_second": mutants_per_second,
+                    #: "unknown" rather than "full" whenever this invocation
+                    #: didn't itself execute an unscoped `mutmut run` — a
+                    #: saved --results-file, or (Codex review, PR #877,
+                    #: twelfth round on this finding) a bare `--json` with
+                    #: neither --run nor --results-file, which reads the
+                    #: existing mutmut database as-is (the `mutmut results`
+                    #: path). Either way the measurement's own provenance
+                    #: carries no record of whether the run that produced it
+                    #: was itself scoped, so labeling it "full" would assert
+                    #: a fact this invocation cannot see — misleading trend/
+                    #: budget tooling that trusts this field the same way
+                    #: "full" is otherwise never a guess. Reuses the exact
+                    #: `args.run and not args.results_file` predicate
+                    #: `run_seconds` above already uses for "did this
+                    #: invocation actually invoke mutmut itself".
+                    "run_scope": {
+                        "mode": (
+                            "diff"
+                            if scope_modules
+                            else (
+                                "full"
+                                if args.run and not args.results_file
+                                else "unknown"
+                            )
+                        ),
+                        "modules": sorted(scope_modules),
+                        "requested": bool(args.scope_run_to_diff),
+                    },
                 },
                 indent=2,
             )

@@ -1,12 +1,13 @@
 # CLAUDE.md — `abicheck/` package
 
-This is the main Python package. See the repository-root [`CLAUDE.md`](../CLAUDE.md)
-for the authoritative module map, key types, conventions, and quick-reference
-commands, and this directory's own [`AGENTS.md`](AGENTS.md) for the canonical
-(vendor-neutral) task-routing table and dependency-direction rules the
-bounded-module migration introduced — this file is scoped, per-area context
-for Claude Code sessions rooted here, not an adapter that just points
-elsewhere (root `CLAUDE.md`'s "Claude Code-specific notes" section).
+This is the main Python package. See the repository-root [`CLAUDE.md`](../CLAUDE.md)/[`AGENTS.md`](../AGENTS.md)
+for the authoritative module map, key types, conventions, quick-reference
+commands, and the canonical ADR-061 task-routing table/dependency-direction
+rule. This directory's own [`AGENTS.md`](AGENTS.md) adds task recipes and
+migration bookkeeping specific to `abicheck/` without repeating that table —
+this file is scoped, per-area context for Claude Code sessions rooted here,
+not an adapter that just points elsewhere (root `CLAUDE.md`'s "Claude
+Code-specific notes" section).
 
 ## Quick orientation
 
@@ -34,13 +35,13 @@ Pipeline order (data flow):
   legacy files, not a design precedent (see this directory's `AGENTS.md`
   "Working with legacy large modules": debt may shrink, may not grow).
 - **New code goes to its ADR-061 target owner, not the flat legacy
-  namespace.** Check this directory's `AGENTS.md` "Route work by
-  responsibility" table before adding a new top-level `cli_*`, `service_*`,
+  namespace.** Check the root `AGENTS.md`'s "Task routing and dependency
+  direction" table before adding a new top-level `cli_*`, `service_*`,
   `dumper_*`, `diff_*`, `reporter_*`, `bundle_*`, or `contract_*` sibling —
-  the migration targets are `domain/`, `evidence/`, `compare/`, `evaluate/`,
-  `storage/`, `workflows/`, `report/`, `interfaces/`, and
-  `scripts/module_architecture.py` gates new/growing files and cross-layer
-  imports against `architecture/module-boundaries.json`.
+  the migration targets are `model/`, `storage/`, `extract/`, `compare/`,
+  `policy/`, `workflows/`, `report/`, `frontends/`, and
+  `scripts/check_architecture.py` gates new/growing files and cross-layer
+  imports against `architecture/modules.yaml`/`debt.yaml`.
 - New `ChangeKind` values: follow the five-step procedure in the root
   `AGENTS.md` ("Adding a new ChangeKind").
 - Every module must start with `from __future__ import annotations`
@@ -54,5 +55,5 @@ Pipeline order (data flow):
 Unit tests sit in `/tests/`. The default fast run command (see the root
 `CLAUDE.md`/`AGENTS.md`) excludes integration, libabigail, abicc, slow, and
 golden markers — use it. `python scripts/verify.py --profile pr --only
-module-architecture-tests,module-architecture` reproduces the bounded-module
-gate locally before it runs in CI.
+architecture` reproduces the bounded-module gate (ADR-061) locally before it
+runs in CI.

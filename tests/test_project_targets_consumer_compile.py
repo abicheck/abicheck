@@ -112,6 +112,57 @@ def test_profile_consumer_compile_overlay_not_a_mapping_raises() -> None:
         )
 
 
+def test_profile_consumer_compile_overlay_explicit_null_raises() -> None:
+    """A bare ``consumer_compile:`` key with nothing under it (YAML parses
+    this as ``None``, a real, plausible typo when a user means to leave the
+    block for later) is REJECTED at the public boundary -- the same
+    ``not-a-mapping`` guard above, exercised for the one shape that isn't a
+    string. Per bug-class-regression-testing.md Phase 6's own invariant
+    ("reaches every consumer with identical semantics, or is rejected at
+    the boundary -- no third state"): silently treating ``None`` as
+    "absent" here would create exactly that third state, since ``None`` is
+    not the same value ``ProfileSpec.from_dict`` uses to mean "no overlay"
+    (a missing dict key)."""
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"consumer_compile": None}}}
+        )
+
+
+def test_profile_consumer_compile_overlay_explicit_empty_mapping_is_indistinguishable_from_absent() -> (
+    None
+):
+    """``consumer_compile: {}`` (present, explicitly empty) is a distinct
+    *input* shape from an omitted key, but per ``ProfileCompileSpec``'s own
+    ``is_empty``-based design (see its docstring) the two must resolve to
+    identical downstream behavior -- both `to_dict()`-omitted and both
+    treated as "no overlay" for run-plan projection. Genuinely different
+    from ``test_profile_without_consumer_compile_overlay_is_none`` at the
+    Python-object level (``consumer_compile`` is a real, present
+    ``ProfileCompileSpec()`` here, not ``None``) even though the two must
+    behave the same everywhere a consumer reads them."""
+    omitted = ProjectTargetsConfig.from_dict(
+        {"profiles": {"linux": {"compile": {"compiler_family": "gcc"}}}}
+    ).profiles["linux"]
+    explicit_empty = ProjectTargetsConfig.from_dict(
+        {
+            "profiles": {
+                "linux": {"compile": {"compiler_family": "gcc"}, "consumer_compile": {}}
+            }
+        }
+    ).profiles["linux"]
+
+    assert omitted.consumer_compile is None
+    assert explicit_empty.consumer_compile is not None
+    assert explicit_empty.consumer_compile.is_empty
+
+    # Both project identically downstream, per to_dict() -- the shape this
+    # module's own consumer (run_plan.py) and the "at least equal" bar
+    # AGENTS.md sets for a should-be-inert distinction.
+    assert "consumer_compile" not in omitted.to_dict()
+    assert "consumer_compile" not in explicit_empty.to_dict()
+
+
 def test_profile_unknown_top_level_key_still_rejects_consumer_compile_typo() -> None:
     """A typo'd key at the profile level (not inside consumer_compile:
     itself) is still caught by the existing unknown-key guard, now that

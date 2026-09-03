@@ -45,7 +45,45 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "19"
+_SNAPSHOT_CACHE_VERSION: str = "30"
+# v30: a BTF/CTF-sourced, headerless ELF snapshot now also populates
+# AbiSnapshot.semantic_ir for its struct/enum types (ADR-063 Phase 6,
+# BTF/CTF slice). An auto-detected BTF/CTF dump's cache-key inputs
+# (headers/includes/version/lang/extra) are unaffected by this change --
+# debug_format stays None for the auto-detect path -- so a snapshot cached
+# by an older abicheck build would otherwise silently keep serving
+# semantic_ir=None forever for identical cache-key inputs.
+# v29: PDB record/enum types now get a real entity_id and populate
+# AbiSnapshot.semantic_ir (ADR-063 Phase 6, PDB slice) via the PE
+# header-scoping fallback path in service_dump_native_pe.py. That path is
+# cacheable, so a snapshot cached by an older abicheck build for the
+# identical cache-key inputs (headers/includes/version/lang/``extra``)
+# would otherwise keep serving PDB model types with no entity_id and
+# semantic_ir=None forever (Codex review, PR #1025, fresh evidence).
+# v28: AbiSnapshot.semantic_ir's record occurrences now also carry
+# CanonicalEntity.template_arguments (ADR-063 Phase 6, sixth slice). A
+# snapshot cached by an older abicheck build would otherwise silently keep
+# serving Fact.not_collected() for this field forever for identical
+# cache-key inputs.
+# v27: a DWARF-only snapshot (no headers provided) now also populates
+# AbiSnapshot.semantic_ir (ADR-063 Phase 6, fifth slice). A snapshot cached
+# by an older abicheck build would otherwise silently keep serving
+# semantic_ir=None forever for identical cache-key inputs.
+# v26: AbiSnapshot.semantic_ir now also carries constant occurrences
+# (ADR-063 Phase 6, fourth slice). A snapshot cached by an older abicheck
+# build would otherwise silently keep serving a semantic_ir with no
+# constant occurrences forever for identical cache-key inputs.
+# v25: AbiSnapshot.semantic_ir now also canonicalizes functions/variables,
+# and PE/Mach-O header-AST dumps populate it too (ADR-063 Phase 6, third
+# slice). A snapshot cached by an older abicheck build would otherwise
+# silently keep serving the records/enums/typedefs-only (or, for PE/Mach-O,
+# entirely absent) semantic_ir forever for identical cache-key inputs.
+# v24: AbiSnapshot.semantic_ir is now genuinely populated for a real ELF
+# header-AST dump (ADR-063 Phase 6, second slice -- extract/
+# semantic_normalizer.py wired through dumper_manifest.resolve_header_ast_
+# result). A snapshot cached by an older abicheck would silently keep
+# semantic_ir=None/empty forever, even though a fresh dump of the identical
+# inputs now populates it.
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -256,6 +294,48 @@ _SNAPSHOT_CACHE_VERSION: str = "19"
 # would keep making a real abstractness transition on a namespaced
 # clang-only type undetectable even after upgrading to the fix. Bumped so
 # the upgrade forces re-extraction instead of replaying the inert stamp.
+#
+# v20 (ADR-063 Phase 0, Codex review on #909): castxml/direct-clang started
+# constructing ``vptr_offset_bits_fact``/``is_va_list_fact`` as
+# ``Fact.partial(...)`` instead of ``Fact.present(...)`` for the
+# already-documented heuristic/target-scoped values -- a real change to
+# snapshot content with no change to any caller-supplied cache-key input.
+# A warm cache from before this fix would keep serving the overclaimed
+# ``PRESENT`` status this fix exists to correct. Bumped so upgrading forces
+# re-extraction instead of silently replaying the stale status.
+#
+# v22 (ADR-063 Phase 2 (c1), Codex review on PR #949): the entity_id carrier
+# (schema v28) is now persisted through this cache too, since store_key/
+# lookup_key round-trip through write_snapshot/load_snapshot -- a real
+# on-disk JSON serialization, not an in-memory object cache. A warm cache
+# entry written before this change has entity_id=None for every declaration
+# (the field genuinely didn't survive serialization then), and re-saving
+# that loaded snapshot stamps it with the CURRENT SCHEMA_VERSION (28)
+# regardless of what schema_version it was loaded from -- so a stale v21
+# cache entry would silently masquerade as a genuine v28 extraction that
+# happens to have resolved no identities, rather than one that never had
+# the chance to. Bumped for the identical reason v21 above was: the same TU
+# inputs now produce a different AbiSnapshot, with no change to any
+# caller-supplied cache-key input.
+#
+# v23 (ADR-063 Phase 2 closing slice): both header backends now also
+# populate ``AbiSnapshot.typedef_entity_ids``/``constant_entity_ids``
+# (schema v31) -- the same TU inputs produce a different snapshot, with no
+# change to any caller-supplied cache-key input, so a warm pre-v23 entry
+# would keep replaying empty sidecars and identity-less typedef/constant
+# findings. Bumped for the identical reason v22/v21 below were.
+#
+# v21 (PR C item 3, Codex review): castxml/direct-clang started stamping
+# ``Function.is_compiler_generated`` (schema v27) from castxml's own
+# ``artificial="1"`` attribute / clang's implicit-node-skipping guarantee --
+# the same TU inputs now produce a different ``AbiSnapshot``, with no change
+# to any caller-supplied cache-key input. A warm whole-snapshot cache entry
+# from before this fix would keep replaying ``is_compiler_generated=None``
+# on every declaration (silently masking the phantom-implicit-member L4
+# link fix this same change makes) even after re-serializing under schema
+# v27, since ``SCHEMA_VERSION`` gates the on-disk snapshot JSON format only,
+# not this separate whole-process disk cache. Bumped so upgrading forces
+# re-extraction instead of silently replaying the stale, unstamped facts.
 
 
 def _get_cache_dir() -> Path:

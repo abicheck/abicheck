@@ -1,3 +1,11 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+lifecycle: active
+generated: false
+---
 # ABI in Five Minutes
 
 > **New to the series?** This is the gentlest door. When you're ready for the
@@ -84,6 +92,9 @@ sort every change into one of those buckets — *before* you ship the new one.
 You now have the one idea the whole series builds on: **the compiler bakes the
 library's promises into the caller and never re-checks them.**
 
+- **[How a Break Shows Up](../how-a-break-shows-up.md)** — the next page on
+  the ladder: the eight ways a break reaches you, and which evidence first
+  reveals each.
 - **[Part 0 — Compatibility as a Product Contract](00-product-contract.md)** —
   why "is this a break?" depends on what you *promised*, not just what changed.
   Start here if you like framing before mechanism.
@@ -92,3 +103,7 @@ library's promises into the caller and never re-checks them.**
   the mechanics first.
 - **[ABI Cheat Sheet](../abi-cheat-sheet.md)** — the one-screen summary of
   verdicts and common changes, to keep open while you read.
+
+---
+
+**Ladder:** ← [Series overview](../abi-api-handling.md) · Step 1 · Start Here · [How a Break Shows Up](../how-a-break-shows-up.md) →

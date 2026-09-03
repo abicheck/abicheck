@@ -1,0 +1,267 @@
+# Machine-readable authority ledger for ADR-063 ("One Semantic Pipeline").
+#
+# Not published as a site page (docs/_meta/ holds machine-only registries,
+# per docs/AGENTS.md's "Layout" section). Structurally validated by
+# scripts/pipeline_status_ledger.py's `check_pipeline_status_ledger`
+# (imported and called by scripts/check_docs_contract.py, which does not
+# define it itself) — parses, required fields present, status/authority
+# values from the declared enums, no unknown fields — a real, non-generated
+# `docs/_meta/` registry has to
+# be at least checked, not merely formatted as YAML (a review finding on
+# PR #1019 caught the first version of this file claiming otherwise). It
+# exists so a concept's status is recorded once, in one shape, instead of
+# re-derived by hand into the ADR's prose and the plan's own per-phase
+# "Landed"/"Still not landed" notes each time something changes. The
+# *content* — which status/authority value is actually true for a concept
+# — is still hand-maintained: no generator derives it from the codebase,
+# so update it in the same PR that changes a concept's status, the same
+# discipline `topics.yaml`/`terminology.yaml` rely on for their own
+# hand-maintained content.
+#
+# Per concept:
+#   primitive   — is the type/module itself defined and tested?
+#   producers   — do extraction/construction sites populate it?
+#   consumers   — does anything downstream (detector, checker, exit-code
+#                 path, renderer) *read* it as its input, rather than the
+#                 legacy representation it was meant to replace?
+#   authority   — which representation actually decides behavior today:
+#                 `self` (this concept is authoritative), `legacy` (the
+#                 pre-existing representation still decides, this concept
+#                 is additive), or `mixed` (some call sites migrated, most
+#                 have not).
+#   removal_gate — the condition (an AI-readiness/architecture check, a
+#                 named future phase, or a specific still-open blocker)
+#                 that has to hold before the legacy representation this
+#                 concept replaces can be deleted.
+#
+# Status values: not_started | partial | complete.
+#
+# Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
+# and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
+# as of merge commit fd197d59 (PR #1025, the PDB EntityId/SemanticIR
+# slice), which itself carries forward b2d8eaaf (PR #1024, the multi-TU
+# manifest occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
+# status-sync fixes. Update this file in the same PR that changes a
+# concept's landed status.
+#
+# as_of_commit names a commit on the default branch, the same convention
+# adr/index.md's `**Verified:**` receipt uses and for the identical reason:
+# a PR-branch commit stops existing once the branch is squash-merged and
+# deleted, so a receipt anchored to one is unresolvable in a clean checkout
+# of retained history (a real review finding on PR #1019). Point it at the
+# base commit this change built on (or a later reachable main commit, once
+# merged) — never at a same-PR branch commit.
+
+schema_version: 1
+as_of_commit: fd197d59
+as_of_date: "2026-09-03"
+
+concepts:
+  facts:
+    primitive: complete
+    producers: complete
+    persistence: complete
+    consumers: partial
+    authority: legacy
+    removal_gate: >-
+      Phase 5B (fact-semantic-consumption): every detector reading an
+      availability-bearing fact must branch on FactStatus instead of
+      resolved_fact_value()'s uniform legacy-default collapse, for at
+      least one full fact family, before FactLifecycle.CONSUMED is used
+      anywhere in the registry. First slice landed 2026-09-03: the shared
+      compare_facts()/FactComparison primitive, wired into two of the five
+      named fields' primary finding-emitting call sites (bases/
+      virtual_bases in diff_types._diff_type_bases, is_va_list in
+      diff_param_qualifiers.param_va_list_changes). Second slice landed
+      2026-09-03 (the "lower-risk batch"): every *other* bases/
+      virtual_bases-reading call site was audited — diff_cxx_rules.py's
+      _transitive_bases (the one genuine old/new pairwise fabrication risk
+      among them, feeding virtual_method_addition's override check) is now
+      evidence-completeness-gated the same way; diff_stdlib_impl.py,
+      diff_time64.py, idioms.py, buildsource/header_graph.py, and
+      surface_graph.py (already gated) are single-snapshot reachability/
+      classification aids with no old/new pair to gate — each now carries
+      an explicit ADR-063 Phase 5B docstring note recording why the plain
+      resolved_fact_value() collapse is safe there (an evidence gap only
+      narrows a closure or omits a graph edge, it cannot fabricate a
+      finding). is_va_list has no other readers. Not yet closed: vtable/
+      vptr_offset_bits (diff_types_vtable.py/diff_layout.py/
+      diff_vtable_layout.py's own pre-existing, individually-reasoned
+      evidence-gap heuristics, plus their downstream readers in
+      diff_cxx_rules.py's own vtable comparison, idioms.py, and
+      diff_cpp_patterns.py — deliberately left alone pending their own
+      dedicated slice, per the plan's own 5B note).
+
+  identity:
+    primitive: complete
+    producers: partial
+    consumers: partial
+    authority: mixed
+    removal_gate: >-
+      Phase 2B (identity-consumer-migration), partial as of 2026-09-03:
+      the StableEntityId/SnapshotLocalIdentity split landed
+      (abicheck/model/identity_tiers.py), and two post-parse consumers
+      migrated onto it -- diff_filtering.py's opaque-type suppression
+      (now compare/opaque_types.OpaqueTypeIndex, matching on
+      StableEntityId first and the RecordType.name spelling second) and
+      type_reachability.py's closure-walk record-tracking keys (now
+      SnapshotLocalIdentity rather than bare str). Still open: the
+      opaque-type index does not yet NARROW -- the bare-RecordType.name
+      collision remains reachable through its spelling tier, because
+      making the stable tier authoritative would drop a real suppression
+      whenever two sides' producers disagree about whether an identity
+      was resolved; that needs stable-tier completeness on both sides
+      first. type_reachability.py's own spelling-matching machinery
+      (_spelling_index/_stripped_signature_spelling/
+      _non_stdlib_signature_spellings and _record_identity's three call
+      sites) is deliberately NOT migrated: those strings are spellings
+      that must appear inside a rendered Function.return_type/Param.type,
+      not opaque identities -- the same conclusion Phase 2's ninth slice
+      reached and recorded. And the entity: alias is still not promoted
+      into a real match tier: StableEntityId makes the gate
+      un-forgettable but does not by itself establish that changing what
+      report_canonical_finding_id hashes is safe for already-stored
+      suppression rules, which needs explicit maintainer sign-off.
+      Separately, producers remain partial: both
+      PDB and BTF/CTF now populate entity_id for struct/enum types only
+      (types only, 2026-09-03) -- PDB via extract/pdb_scope.py (an
+      unverified-against-real-MSVC namespace-vs-record heuristic; no MSVC
+      toolchain available to check it against), BTF/CTF via
+      extract/debug_layout_semantic_ir.py (no scope heuristic needed at
+      all, since both are pure-C formats with no namespace/class
+      nesting). Function/variable/typedef identity remains unimplemented
+      for all three backends (neither BTF's nor CTF's own richer parse
+      carries that evidence across its own to_dwarf_metadata()
+      conversion; PDB's own DBI module-symbol-stream parsing prerequisite
+      is not attempted here). PDB also cannot distinguish a user-declared
+      inline namespace from an ordinary one (CodeView's flat TPI names
+      carry no source-level `inline` marker, unlike DWARF's
+      DW_AT_export_symbols or Clang's isInline) and always emits a plain
+      Namespace segment, a live EntityId mismatch against a header-AST
+      backend's InlineNamespace for any declaration nested inside one --
+      a structural, accepted gap (matching castxml's own documented
+      inability to produce InlineNamespace at all), documented as
+      extract/pdb_scope.py's 4th limitation, not expected to close
+      without new evidence of a CodeView record this module does not
+      parse today.
+
+  semantic_ir:
+    primitive: complete
+    producers: partial
+    consumers: partial
+    authority: mixed
+    removal_gate: >-
+      Phase 6B (semantic-ir-checker-cutover), first cohort landed
+      2026-09-03: the TYPEDEF family now reads SemanticIR through
+      SemanticIRIndex (abicheck/compare/typedefs.py), with a
+      legacy-flat-snapshot adapter
+      (abicheck/model/semantic_ir_legacy_adapter.py) producing the same
+      read shape for a snapshot carrying no SemanticIR, and a new
+      semantic-ir-cutover AI-readiness check (scripts/semantic_ir_cutover.py,
+      a real AST scan, no allowlist) forbidding that module from reading
+      AbiSnapshot.typedefs/typedefs_qualified/typedef_entity_ids. Which
+      backing is used is decided by a fidelity gate requiring the IR's own
+      rendered display names to reproduce the comparison's alias maps
+      exactly on BOTH sides, so the cutover is behavior-preserving by
+      construction. EVERY OTHER detector family remains unmigrated and
+      still reads the legacy collections directly -- deliberately, per
+      this phase's own non-goal of not widening coverage until one full
+      vertical slice is proven; each further cohort needs its own
+      MIGRATED_COHORTS entry. SemanticIRIndex.references() is still
+      unimplemented (it names a graph traversal belonging with the
+      public-surface reference index, ADR-063 D5 / plan Phase 3), so the
+      typedef cohort does not use it.
+      Producers remain partial regardless (CanonicalEntity.template_arguments
+      is populated for records but not for function templates, and clang
+      produces no occurrence at all for a template specialization).
+      DWARF's own SemanticIR gap closed 2026-09-02 (Phase 6's fifth
+      slice), the first non-header-AST producer to reach it.
+      --dump-manifest's own occurrence-detail loss closed 2026-09-03: each
+      contributing TU's raw, pre-merge fragment is now normalized
+      independently and disambiguated by cross-fragment source-location
+      variance and TU-local (internal) linkage, rather than reading
+      tu_merge.merge_fragments's already-folded output. PDB's own
+      SemanticIR gap closed 2026-09-03 (Phase 6's seventh slice, types
+      only) via the new extract/pdb_scope.py -- PDB function/variable
+      identity remains unimplemented (needs new DBI module-symbol-stream
+      parsing). BTF/CTF's own SemanticIR gap closed 2026-09-03 (Phase 6's
+      ninth slice, types only, via the new
+      extract/debug_layout_semantic_ir.py) -- deliberately does not widen
+      AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
+      function/variable/typedef identity remains unimplemented for both
+      formats.
+
+  public_surface:
+    primitive: complete
+    producers: complete
+    consumers: complete
+    authority: self
+    removal_gate: >-
+      None outstanding for the shipped design (a deterministic closure
+      walk over snapshot declarations). D5's own literal "traversal over
+      one authoritative mergeable graph" text remains unfulfilled by
+      design (see Phase 3 (D5) amendment) rather than by an open gap;
+      AbiSnapshot.surface_graph itself still has no production reader.
+
+  analysis_plan:
+    primitive: complete
+    producers: complete
+    consumers: partial
+    authority: mixed
+    removal_gate: >-
+      Phase 4B (resolved-execution-context): a ResolvedExecutionContext
+      built for real (non-dry-run) execution, carrying resolved
+      policy/pack/contract/evidence-depth state so downstream code stops
+      independently re-resolving each of them per call site. A first real
+      call site landed 2026-09-03: service_compare_pipeline.
+      resolve_compare_request builds one from its own already-resolved
+      AnalysisPlan and attaches it on ResolvedComparePair, additive and
+      unread by any consumer -- resolve_dump_request remains unwired, and
+      no evaluation_config/compile_contexts/with_assurance() caller exists
+      yet, so this gate stays open.
+
+  run_outcome:
+    primitive: complete
+    producers: complete
+    consumers: partial
+    authority: mixed
+    removal_gate: >-
+      Phase 7B (boundary-consumer-migration): action/run.sh reads
+      run_outcome/exit from the machine report instead of decoding the
+      raw process exit code and stderr text itself.
+
+  sectioned_storage:
+    primitive: complete
+    producers: complete
+    consumers: partial
+    authority: mixed
+    removal_gate: >-
+      Phase 8B (multi-artifact-canonical-storage): typed DTOs for every
+      section beyond semantic_ir, multi-artifact ProjectSnapshot
+      packages, and baseline-set/BundleFacts folded into sections.
+
+  report_document:
+    primitive: complete
+    producers: complete
+    consumers: complete
+    authority: self
+    removal_gate: >-
+      None outstanding. Markdown's leaf/root-cause render modes have
+      since converged onto ReportDocument too
+      (report/render_markdown_alternate.py's build_leaf_document/
+      build_root_cause_document, reached from reporter_markdown.py's
+      _to_markdown_leaf/_to_markdown_root_cause) -- ADR-061's own item 1
+      is now closed for every renderer/format (JSON/SARIF/JUnit/--stat,
+      HTML, and every Markdown mode). Not currently assigned to a
+      numbered ADR-063 phase.
+
+  l5_source_graph_identity:
+    primitive: complete
+    producers: complete
+    consumers: complete
+    authority: self
+    removal_gate: >-
+      Out of ADR-063's stated scope by design (Phase 2's own named
+      boundary) — buildsource/entity_identity.py's CanonicalIdentity
+      stays a second, permanently separate identity system unless a
+      future, separately-justified phase bridges or reclassifies it.

@@ -27,13 +27,13 @@ from __future__ import annotations
 
 from abicheck.buildsource.graph_facts import GraphNode
 from abicheck.buildsource.source_graph import SourceGraphSummary
-from abicheck.buildsource.template_graph import (
+from abicheck.buildsource.template_graph import parse_clang_ast_templates
+from abicheck.buildsource.template_graph_fold import (
     EDGE_DECL_INSTANTIATES_TEMPLATE,
     EDGE_INSTANTIATION_EMITS_SYMBOL,
     NODE_TEMPLATE_DECL,
     NODE_TEMPLATE_INSTANTIATION,
     augment_graph_with_templates,
-    parse_clang_ast_templates,
 )
 
 

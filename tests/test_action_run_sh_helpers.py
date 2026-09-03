@@ -30,15 +30,30 @@ Codex/report finding, P2.2). The fix prefers newline-separated items (a YAML
 block-scalar Action input, e.g. ``headers: |``), which preserves embedded
 spaces, and falls back to legacy whitespace-splitting only for a single-line
 value (the documented back-compat form).
+
+``TestAddFlagHostileScalarCorpus`` below closes a second, more severe
+instance of that same unquoted-expansion class (bug-class-regression-
+testing.md Phase 8, Codex review PR #919): unquoted ``for item in $value``
+performs pathname expansion (globbing) as well as word-splitting, so a
+caller-controlled single-line value of exactly ``"*"`` silently expanded to
+every file in the runner's own working directory instead of staying
+literal -- confirmed by direct execution before the fix in ``action/run.sh``
+(``_split_legacy_value``'s ``set -f``). This module's own hostile corpus is
+shared with the workflow-execution harness's (``tests/_workflow_exec.py``'s
+``HOSTILE_SCALAR_CORPUS``) rather than kept as a second, independently-
+drifting copy.
 """
+
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import HOSTILE_SCALAR_CORPUS
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _MARKER = "# Build the abicheck command"
@@ -76,8 +91,8 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run_harness(harness: str) -> str:
-    """Source the real helper functions + *harness*, return CMD joined by '\\x1f'.
+def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
+    """Source the real helper functions + *harness*, return CMD joined by NUL.
 
     Writes the assembled script to a real file (UTF-8, explicit ``\\n`` line
     endings) and runs ``bash <path>`` rather than ``bash -c <string>``: passing
@@ -85,6 +100,30 @@ def _run_harness(harness: str) -> str:
     as a subprocess argv string hits Windows console/argv-encoding mangling
     and was flaky under macOS's stock bash 3.2 (exit 127) — a file sidesteps
     both, and matches how run.sh is actually invoked in production.
+
+    ``cwd`` lets a caller control the working directory the harness runs in
+    — needed to prove a value like ``"*"`` stays literal regardless of what
+    files happen to exist there, rather than relying on whatever the pytest
+    process's own cwd contains.
+
+    Two byte-fidelity fixes over an earlier revision of this helper (Codex
+    review, PR #919, fresh evidence -- found by actually deriving an
+    independent expected-argv oracle for the hostile corpus and discovering
+    two cases where the *harness itself*, not add_flag()/add_sided_flag(),
+    silently altered what the test observed):
+
+    - The item separator was ``\\x1f`` (unit separator), which collides with
+      ``HOSTILE_SCALAR_CORPUS``'s own ``"unit-separator"`` entry -- a CMD
+      item genuinely containing that byte was indistinguishable from a
+      record boundary, truncating the observed item at the embedded byte.
+      NUL (``\\0``) cannot appear in a bash string at all (the C string ABI
+      bash variables are built on has no representation for it), so it is
+      the only byte no corpus value could ever collide with.
+    - ``subprocess.run(..., text=True)`` decodes stdout via a universal-
+      newlines text wrapper, which silently rewrites a lone ``\\r`` (the
+      corpus's own ``"carriage-return"`` entry) to ``\\n`` before the test
+      ever sees it. Capturing raw bytes and decoding them directly (no
+      ``text=True``) preserves every byte exactly.
     """
     script = (
         _helpers_region()
@@ -94,31 +133,76 @@ def _run_harness(harness: str) -> str:
         # stock 3.2 included — treats an empty array subscripted with [@]
         # under `set -u` as an unbound-variable error and aborts the script
         # (the same bug run.sh itself works around at its PR-comment loop).
-        + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
+        + "\nprintf '%s\\0' ${CMD[@]+\"${CMD[@]}\"}\n"
     )
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True,
+            cwd=str(cwd) if cwd is not None else None,
         )
     finally:
         os.unlink(script_path)
     if result.returncode != 0:
         raise AssertionError(
             f"harness script failed (exit {result.returncode})\n"
-            f"--- stdout ---\n{result.stdout}\n"
-            f"--- stderr ---\n{result.stderr}"
+            f"--- stdout ---\n{result.stdout!r}\n"
+            f"--- stderr ---\n{result.stderr!r}"
         )
-    return result.stdout
+    return result.stdout.decode("utf-8")
 
 
 def _cmd_items(stdout: str) -> list[str]:
-    return [item for item in stdout.split("\x1f") if item]
+    return [item for item in stdout.split("\0") if item]
+
+
+def _expected_legacy_split_items(value: str) -> list[str]:
+    """Independently derive what add_flag()'s/add_sided_flag()'s legacy
+    single-line path SHOULD produce for *value*, without calling into
+    real.sh at all -- so a test comparing the real output against this
+    can't pass merely because both sides share the same (possibly buggy)
+    formula (Codex review, PR #919, fresh evidence: an earlier revision of
+    this test only checked that a decoy filename was absent, which would
+    still pass if add_flag() dropped, mutated, or reordered a value).
+
+    Reproduces bash's *default-IFS* (``<space><tab><newline>``) word-
+    splitting exactly -- not Python's ``str.split()``, which also treats
+    ``\\r`` and other whitespace bash's default IFS does not as a
+    separator (verified against real bash: a lone ``\\r`` with no
+    space/tab/newline present does NOT split). A value containing an
+    embedded newline never reaches this path at all -- add_flag() routes
+    it through the newline-preserving branch instead, one line per item.
+    """
+    if "\n" in value:
+        return [line for line in value.split("\n") if line != ""]
+    return re.findall(r"[^ \t\n]+", value)
+
+
+def _bash_ansi_c_quote(value: str) -> str:
+    """Render *value* as a bash ``$'...'`` (ANSI-C quoted) literal, safe for
+    any byte ``HOSTILE_SCALAR_CORPUS`` carries -- backslash and single-quote
+    are escaped, and every control character is rendered as ``\\xHH`` so the
+    resulting literal is unambiguous regardless of the corpus entry."""
+    out = []
+    for ch in value:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == "'":
+            out.append("\\'")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return "$'" + "".join(out) + "'"
 
 
 def _run_predicate(call: str) -> bool:
@@ -127,14 +211,20 @@ def _run_predicate(call: str) -> bool:
     whether it exited zero (true) or non-zero (false)."""
     script = _helpers_region() + f"\nif {call}; then exit 0; else exit 1; fi\n"
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
     finally:
         os.unlink(script_path)
@@ -151,9 +241,14 @@ class TestAddFlagSplitting:
     def test_newline_separated_preserves_spaces(self) -> None:
         # A YAML block scalar (`headers: |`) input — one path per line,
         # including a path containing a space.
-        out = _run_harness('add_flag "-H" $\'inc/a\\npath with spaces/inc\\ninc/c\'')
+        out = _run_harness("add_flag \"-H\" $'inc/a\\npath with spaces/inc\\ninc/c'")
         assert _cmd_items(out) == [
-            "-H", "inc/a", "-H", "path with spaces/inc", "-H", "inc/c",
+            "-H",
+            "inc/a",
+            "-H",
+            "path with spaces/inc",
+            "-H",
+            "inc/c",
         ]
 
     def test_empty_value_adds_nothing(self) -> None:
@@ -166,11 +261,57 @@ class TestAddFlagSplitting:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAddFlagHostileScalarCorpus:
+    """``add_flag``'s legacy single-line path against the shared hostile
+    corpus (bug-class-regression-testing.md Phase 8, Codex review PR #919).
+
+    Run with real decoy files present in the harness's own working
+    directory, so an unfixed regression shows up as an extra CMD entry
+    (the decoy's filename), not merely as a passing test that never
+    actually exercised the vulnerable condition.
+    """
+
+    def test_a_glob_value_stays_literal(self, tmp_path) -> None:
+        """Direct regression pin for the fix: the legacy path's unquoted
+        ``for item in $value`` performed pathname expansion as well as
+        word-splitting, so a value of exactly ``"*"`` silently expanded to
+        every file in the runner's own working directory instead of
+        staying literal -- confirmed via direct execution against this
+        exact scenario before the fix."""
+        (tmp_path / "decoy_one.txt").write_text("x")
+        (tmp_path / "decoy_two.txt").write_text("x")
+        out = _run_harness('add_flag "-H" "*"', cwd=tmp_path)
+        assert _cmd_items(out) == ["-H", "*"]
+
+    @pytest.mark.parametrize("value", HOSTILE_SCALAR_CORPUS)
+    def test_argv_exactly_matches_the_independent_oracle(
+        self, tmp_path, value: str
+    ) -> None:
+        """Compares the *complete* captured CMD against an independently
+        derived expectation (Codex review, PR #919, fresh evidence: an
+        earlier revision only checked that a planted decoy filename was
+        absent, which would still pass if add_flag() dropped, mutated,
+        reordered, or added extra items for a non-glob value)."""
+        (tmp_path / "decoy_one.txt").write_text("x")
+        (tmp_path / "decoy_two.txt").write_text("x")
+        literal = _bash_ansi_c_quote(value)
+        out = _run_harness(f'add_flag "-H" {literal}', cwd=tmp_path)
+        items = _cmd_items(out)
+        expected: list[str] = []
+        for word in _expected_legacy_split_items(value):
+            expected += ["-H", word]
+        assert items == expected
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestAddSidedFlagSplitting:
     def test_legacy_space_separated_single_line(self) -> None:
         out = _run_harness('add_sided_flag "--header" "old" "inc/a inc/b"')
         assert _cmd_items(out) == [
-            "--header", "old=inc/a", "--header", "old=inc/b",
+            "--header",
+            "old=inc/a",
+            "--header",
+            "old=inc/b",
         ]
 
     def test_newline_separated_preserves_spaces(self) -> None:
@@ -178,8 +319,37 @@ class TestAddSidedFlagSplitting:
             'add_sided_flag "--header" "new" $\'inc/a\\npath with spaces/inc\''
         )
         assert _cmd_items(out) == [
-            "--header", "new=inc/a", "--header", "new=path with spaces/inc",
+            "--header",
+            "new=inc/a",
+            "--header",
+            "new=path with spaces/inc",
         ]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAddSidedFlagHostileScalarCorpus:
+    """``add_sided_flag``'s legacy single-line path against the shared
+    hostile corpus -- the sibling of ``TestAddFlagHostileScalarCorpus``
+    above, since it shares the identical unquoted-splitting helper."""
+
+    def test_a_glob_value_stays_literal(self, tmp_path) -> None:
+        (tmp_path / "decoy_one.txt").write_text("x")
+        out = _run_harness('add_sided_flag "--header" "old" "*"', cwd=tmp_path)
+        assert _cmd_items(out) == ["--header", "old=*"]
+
+    @pytest.mark.parametrize("value", HOSTILE_SCALAR_CORPUS)
+    def test_argv_exactly_matches_the_independent_oracle(
+        self, tmp_path, value: str
+    ) -> None:
+        (tmp_path / "decoy_one.txt").write_text("x")
+        (tmp_path / "decoy_two.txt").write_text("x")
+        literal = _bash_ansi_c_quote(value)
+        out = _run_harness(f'add_sided_flag "--header" "old" {literal}', cwd=tmp_path)
+        items = _cmd_items(out)
+        expected: list[str] = []
+        for word in _expected_legacy_split_items(value):
+            expected += ["--header", f"old={word}"]
+        assert items == expected
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -238,10 +408,21 @@ class TestIsReleaseStyleOperand:
         f.write_text("{}", encoding="utf-8")
         assert not _run_predicate(f'_is_release_style_operand "{f}"')
 
-    @pytest.mark.parametrize("suffix", [
-        ".rpm", ".deb", ".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst",
-        ".tgz", ".conda", ".whl",
-    ])
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            ".rpm",
+            ".deb",
+            ".tar",
+            ".tar.gz",
+            ".tar.xz",
+            ".tar.bz2",
+            ".tar.zst",
+            ".tgz",
+            ".conda",
+            ".whl",
+        ],
+    )
     def test_package_extensions_are_release_style(self, tmp_path, suffix) -> None:
         f = tmp_path / f"libfoo{suffix}"
         f.write_text("", encoding="utf-8")
@@ -297,7 +478,7 @@ class TestExtraArgsHasWriteFlag:
 
     def _predicate(self, extra_args: str) -> bool:
         return _run_predicate(
-            f'INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_write_flag'
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_write_flag"
         )
 
     def test_absent_extra_args(self) -> None:
@@ -351,3 +532,166 @@ class TestExtraArgsHasWriteFlag:
         # A flag merely containing "write" as a substring (not a real
         # standalone token) must not trip the detector.
         assert not self._predicate("--not-a-write-flag")
+
+
+def _run_value(call: str) -> str:
+    """Source the real helper functions and return a value-printing call's
+    stdout (e.g. an ``_effective_format`` invocation), stripped of the
+    trailing newline `echo`/`printf` conventions may or may not add."""
+    script = _helpers_region() + f"\n{call}\n"
+    with tempfile.NamedTemporaryFile(
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        result = subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    finally:
+        os.unlink(script_path)
+    return result.stdout
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestEffectiveFormat:
+    """ADR-064's "effective-format-override" gap: `extra-args: --format json`
+    under `format: text`/`markdown` makes the real `abicheck` invocation emit
+    JSON, since Click keeps only the *last* `--format` occurrence -- but every
+    JSON-detection site that checked the Action's own nominal `$FORMAT`
+    variable instead of what the command actually ran with silently missed
+    that override. `_effective_format` resolves the real value the same way
+    `_extra_args_has_write_flag`/`_extra_args_write_json_path` resolve their
+    own `extra-args` overrides: by splitting `INPUT_EXTRA_ARGS` the same way
+    the real command line is built and keeping the last match.
+    """
+
+    def _value(self, format_: str, extra_args: str) -> str:
+        return _run_value(
+            f"FORMAT={format_!r} INPUT_EXTRA_ARGS={extra_args!r} _effective_format"
+        )
+
+    def test_no_extra_args_falls_back_to_nominal_format(self) -> None:
+        assert self._value("text", "") == "text"
+        assert self._value("json", "") == "json"
+
+    def test_unrelated_extra_args_falls_back_to_nominal_format(self) -> None:
+        assert self._value("markdown", "--verbose --gate-api-break") == "markdown"
+
+    def test_extra_args_overrides_to_json_space_separated(self) -> None:
+        assert self._value("text", "--format json") == "json"
+
+    def test_extra_args_overrides_to_json_equals_form(self) -> None:
+        assert self._value("text", "--format=json") == "json"
+
+    def test_extra_args_overrides_away_from_json(self) -> None:
+        # The reverse direction matters too: a `format: json` step whose own
+        # extra-args forces text must not still be treated as JSON.
+        assert self._value("json", "--format text") == "text"
+
+    def test_last_format_occurrence_wins(self) -> None:
+        # Click keeps only the last repeated option -- this helper must
+        # agree, not the first.
+        assert self._value("text", "--format json --format markdown") == "markdown"
+
+    def test_format_after_a_newline(self) -> None:
+        # Same YAML-literal-block splitting concern as
+        # `_extra_args_has_write_flag`'s own newline test.
+        assert (
+            _run_value(
+                r"FORMAT=text INPUT_EXTRA_ARGS=$'--verbose\n--format json' "
+                r"_effective_format"
+            )
+            == "json"
+        )
+
+    def test_does_not_false_positive_on_a_substring(self) -> None:
+        assert self._value("text", "--not-a-format-flag") == "text"
+
+
+_TEXT_REPORT_CONTENT_MARKER = "_text_report_content() {"
+
+
+def _text_report_content_source() -> str:
+    """``_text_report_content`` is self-contained (no calls into any other
+    run.sh helper), so it is extracted directly by its own markers rather
+    than through ``_helpers_region()`` -- it is defined well after the
+    "Build the abicheck command" cutoff that function stops at."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_TEXT_REPORT_CONTENT_MARKER)
+    end = text.index("\n}\n", start) + len("\n}\n")
+    return text[start:end]
+
+
+def _run_text_report_content(env: dict[str, str]) -> str:
+    assignments = " ".join(f"{k}={v!r}" for k, v in env.items())
+    return _run_value(
+        f"{_text_report_content_source()}\n{assignments} _text_report_content"
+    )
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestTextReportContentEffectiveFormat:
+    """Codex review, PR #998, fresh evidence: `_text_report_content` is the
+    text-report counterpart of `_STDOUT_JSON_FILE`/`_json_report_src` and had
+    the identical effective-format-override defect -- it gated on the
+    nominal `$FORMAT` instead of `$_EFFECTIVE_FORMAT`, so a `format: json`
+    step whose own `extra-args` overrode to `--format text` (with
+    `output-file` set) wrote real text to `$OUTPUT_FILE` that this function
+    never read, silently losing the severity-gate line
+    (`_severity_gate_exit`/`_severity_gate_categories` both call through it)
+    and publishing the generic `ERROR` instead of `SEVERITY_ERROR`.
+    """
+
+    def test_reads_output_file_when_effective_format_overrides_away_from_json(
+        self, tmp_path
+    ) -> None:
+        output_file = tmp_path / "report.txt"
+        output_file.write_text("severity gate: exit 1 -- blocking: addition\n")
+        out = _run_text_report_content(
+            {
+                "FORMAT": "json",
+                "_EFFECTIVE_FORMAT": "text",
+                "OUTPUT_FILE": str(output_file),
+                "ABICHECK_OUTPUT": "",
+            }
+        )
+        assert "severity gate: exit 1" in out
+
+    def test_reads_stdout_when_effective_format_overrides_to_json(self) -> None:
+        # The reverse direction: nominal text/an output-file present, but the
+        # effective format is json -- the file must NOT be read as if it
+        # were the text report (it holds JSON), stdout is the real source.
+        out = _run_text_report_content(
+            {
+                "FORMAT": "text",
+                "_EFFECTIVE_FORMAT": "json",
+                "OUTPUT_FILE": "/nonexistent/should-not-be-read.txt",
+                "ABICHECK_OUTPUT": '{"severity": {"blocking_categories": []}}',
+            }
+        )
+        assert out == '{"severity": {"blocking_categories": []}}'
+
+    def test_falls_back_to_nominal_format_when_effective_format_unset(
+        self, tmp_path
+    ) -> None:
+        # Isolated callers that never assign `$_EFFECTIVE_FORMAT` (matching
+        # today's real script before this invocation's command-assembly
+        # section runs) must keep behaving exactly as before this fix.
+        output_file = tmp_path / "report.txt"
+        output_file.write_text("severity gate: exit 1 -- blocking: quality_issues\n")
+        out = _run_text_report_content(
+            {
+                "FORMAT": "text",
+                "OUTPUT_FILE": str(output_file),
+                "ABICHECK_OUTPUT": "",
+            }
+        )
+        assert "severity gate: exit 1" in out

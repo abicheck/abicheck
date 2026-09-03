@@ -58,7 +58,7 @@ class TestDumpVerbose:
         header.write_text("int foo();\n", encoding="utf-8")
         out = tmp_path / "snap.json"
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump",
+        monkeypatch.setattr("abicheck.dumper.dump",
                             lambda **_: AbiSnapshot(library="libfoo.so", version="1.0"))
 
         runner = CliRunner()
@@ -290,7 +290,7 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -311,7 +311,7 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -339,7 +339,7 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
@@ -350,17 +350,23 @@ class TestDumpLang:
 
     def test_implicit_root_defers_to_build_context(self, tmp_path, monkeypatch):
         # Codex review: a build-context include must keep priority over the
-        # inferred -H root. The build-context flag rides in (effective_)
-        # gcc_options (emitted first by dumper._castxml_cmd); the inferred
-        # root rides in gcc_option_tokens as an -isystem entry — searched
-        # after the build-context -I/-isystem dirs but above the standard
-        # system dirs — so the build context always wins. Build context now
-        # arrives only via --build-info (CLI audit PR 5/5 removed the
-        # --gcc-options flag this test previously drove it through directly,
-        # and the -p/--build-dir + --compile-db pair folded into
-        # --build-info; a real compile_commands.json is the one remaining
-        # CLI-reachable way to populate the scalar gcc_options field the
-        # ordering guard actually cares about).
+        # inferred -H root. CLI cleanup phase two, PR C: the real ELF `dump`
+        # run migrated onto `execute_dump_request`, and the legacy
+        # `-p`/`--compile-db` auto-match's derived flags now ride in
+        # `gcc_option_tokens` (ADR-063 Phase 1's `_fold_legacy_compile_db_
+        # tokens`) rather than being string-joined into `gcc_options` --
+        # split argv tokens with embedded whitespace no longer get
+        # corrupted by a join-then-resplit round trip. The precedence this
+        # test guards is unchanged: the legacy/build-context tokens are
+        # interleaved *first* (lowest index, highest search priority), the
+        # inferred `-isystem` root after -- both now live in the one
+        # `gcc_option_tokens` sequence instead of split across that tuple
+        # and the `gcc_options` string. Build context arrives only via
+        # --build-info (CLI audit PR 5/5 removed the --gcc-options flag this
+        # test previously drove it through directly, and the -p/--build-dir
+        # + --compile-db pair folded into --build-info; a real
+        # compile_commands.json is the one remaining CLI-reachable way to
+        # populate the legacy-derived tokens the ordering guard cares about).
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -391,19 +397,20 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header), "--build-info", str(compile_db),
         ])
         assert result.exit_code == 0, result.output
-        # build context stays in effective_gcc_options (emitted first);
-        # inferred root is an -isystem token — searched below it — so build
-        # context keeps priority.
-        assert f"-I {buildctx}" in (captured.get("gcc_options") or "")
+        # Build context's -I comes first in gcc_option_tokens (searched
+        # first); the inferred -isystem root for the -H umbrella comes after
+        # it, so build context keeps priority.
         tokens = list(captured.get("gcc_option_tokens", ()))
+        assert str(buildctx) in tokens
         assert str(root) in tokens
+        assert tokens.index(str(buildctx)) < tokens.index(str(root))
         assert tokens[tokens.index(str(root)) - 1] == "-isystem"
 
     def test_implicit_root_skips_user_provided_include(self, tmp_path, monkeypatch):
@@ -424,7 +431,7 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         # User passes the umbrella's parent (include/oneapi) explicitly via -I.
@@ -456,7 +463,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -477,7 +484,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -498,7 +505,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -521,7 +528,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -542,7 +549,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -562,7 +569,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -728,13 +735,29 @@ class TestCompareExitCodeDocs:
 # ── dump error handling uses ClickException ──────────────────────────────
 
 class TestDumpClickException:
-    def test_dump_error_exits_1_not_2(self, tmp_path):
-        """dump on non-ELF file should exit 1 (ClickException) not 2 (sys.exit)."""
+    def test_dump_error_exits_64_not_2(self, tmp_path):
+        """dump on an unrecognizable file exits 64 (UsageError), not 2 (sys.exit).
+
+        A file with no recognizable ELF/PE/Mach-O/JSON/ABICC-dump magic is
+        exactly the "unusable input" `ValidationError`'s own docstring
+        describes (`cli_resolve._dump_native_binary`), so the CLI's
+        documented exit-code contract (root `AGENTS.md`: "64 = usage error
+        ... applies across commands") puts it at 64, not the generic
+        `ClickException` exit 1 -- previously misrouted for both ELF and
+        PE/Mach-O by `execute_dump_cli_run`'s missing `ValidationError`
+        special case (CodeRabbit/Codex review on PR #980); see
+        `tests/test_dump_request_from_cli.py::TestValidationErrorExitsAsUsageError`
+        for the dedicated regression test covering both binary formats
+        directly against a forced `ValidationError`. This test's own job is
+        narrower and unchanged: prove the CLI still exits cleanly through
+        Click, not via an uncaught `sys.exit`/traceback, for this real,
+        naturally-occurring bad-input case.
+        """
         empty = tmp_path / "empty.so"
         empty.write_bytes(b"")
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(empty)])
-        assert result.exit_code == 1
+        assert result.exit_code == 64
         assert "Error:" in result.output
         assert "Traceback" not in result.output
 

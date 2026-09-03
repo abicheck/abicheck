@@ -168,7 +168,7 @@ _FAITHFULNESS_CASES = [
     (
         ChangeKind.FUNC_LOST_INLINE,
         {"name": "foo"},
-        "Function lost inline attribute (now has external linkage): foo",
+        "Function lost inline attribute: foo",
     ),
     (
         ChangeKind.HIDDEN_FRIEND_REMOVED,

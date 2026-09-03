@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.buildsource import BuildSourcePack, pack_io
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
-from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
@@ -1494,7 +1494,7 @@ class TestPrintDataSourcesDirect:
             targets=[Target(id="target://libtest", name="libtest")],
             compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
         )
-        pack.write()
+        pack_io.write(pack)
 
         from abicheck.cli_datasources import print_data_sources
 
@@ -1517,7 +1517,7 @@ class TestPrintDataSourcesDirect:
             targets=[Target(id="target://libtest", name="libtest")],
             compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
         )
-        build_pack.write()
+        pack_io.write(build_pack)
         source_pack = BuildSourcePack.empty(tmp_path / "source-pack")
         source_pack.source_abi = SourceAbiSurface(
             reachable_declarations=[
@@ -1527,7 +1527,7 @@ class TestPrintDataSourcesDirect:
         source_pack.source_graph = SourceGraphSummary(
             nodes=[GraphNode(id="file://lib.c", kind="file", label="lib.c")]
         )
-        source_pack.write()
+        pack_io.write(source_pack)
 
         from abicheck.cli_datasources import print_data_sources
 
@@ -1562,9 +1562,9 @@ class TestPrintDataSourcesDirect:
                 SourceEntity(id="source://bar", kind="function", qualified_name="bar")
             ]
         )
-        full_pack.write()
+        pack_io.write(full_pack)
         manifest_only = BuildSourcePack.empty(tmp_path / "manifest-only")
-        manifest_only.write()
+        pack_io.write(manifest_only)
 
         from abicheck.cli_datasources import print_data_sources
 
@@ -1721,3 +1721,70 @@ def test_build_function_reads_virtual_and_access_from_die():
     assert fn.vtable_index == 4
     assert fn.is_static is False
     assert fn.is_extern_c is False
+
+
+class TestDwarfExplicitFactEligibility:
+    """ADR-063 Phase 5 (Codex review, PR #982): DWARF's `_attr_bool` returns
+    ``False`` (never ``None``) for a missing ``DW_AT_explicit`` attribute, and
+    the compiler only ever emits that attribute on a ctor/conversion-operator
+    DIE in the first place — so a bare read can't tell "confirmed not
+    explicit" (a real, eligible declaration) apart from "explicit is
+    conceptually inapplicable" (an ordinary method/free function/destructor).
+    Eligibility must be derived from the mangled name's own Itanium encoding.
+    """
+
+    @staticmethod
+    def _build(mangled: str, *, explicit_attr: int | None = None):
+        from types import SimpleNamespace
+
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+
+        builder = _DwarfSnapshotBuilder.__new__(_DwarfSnapshotBuilder)
+        builder._referenced_type_names = set()
+
+        attributes = {}
+        if explicit_attr is not None:
+            attributes["DW_AT_explicit"] = SimpleNamespace(value=explicit_attr)
+        die = SimpleNamespace(attributes=attributes, iter_children=lambda: iter(()))
+        return builder._build_function(
+            die, CU=None, scope="Cls", name="m", mangled=mangled,
+            qualified_name="Cls::m", is_deleted=False,
+        )
+
+    def test_ordinary_method_is_explicit_not_applicable(self) -> None:
+        """A plain member function is never eligible for `explicit`."""
+        from abicheck.model import FactStatus
+
+        fn = self._build("_ZN3Cls1mEv")
+        assert fn.is_explicit is None
+        assert fn.is_explicit_fact.status == FactStatus.NOT_APPLICABLE
+
+    def test_free_function_is_explicit_not_applicable(self) -> None:
+        from abicheck.model import FactStatus
+
+        fn = self._build("do_thing")
+        assert fn.is_explicit is None
+        assert fn.is_explicit_fact.status == FactStatus.NOT_APPLICABLE
+
+    def test_constructor_without_attribute_is_present_false(self) -> None:
+        """An implicit (non-`explicit`) ctor: DW_AT_explicit absent, but the
+        ctor is eligible — False is a real, confirmed reading, not a gap."""
+        from abicheck.model import FactStatus
+
+        fn = self._build("_ZN3ClsC1Ev")
+        assert fn.is_explicit is False
+        assert fn.is_explicit_fact.status == FactStatus.PRESENT
+        assert fn.is_explicit_fact.value is False
+
+    def test_constructor_with_attribute_is_present_true(self) -> None:
+        fn = self._build("_ZN3ClsC1Ev", explicit_attr=1)
+        assert fn.is_explicit is True
+        assert fn.is_explicit_fact.value is True
+
+    def test_conversion_operator_without_attribute_is_present_false(self) -> None:
+        from abicheck.model import FactStatus
+
+        fn = self._build("_ZN3ClscviEv")  # operator int() const
+        assert fn.is_explicit is False
+        assert fn.is_explicit_fact.status == FactStatus.PRESENT
+        assert fn.is_explicit_fact.value is False

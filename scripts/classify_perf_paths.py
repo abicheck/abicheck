@@ -96,6 +96,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/sarif.py",
     "abicheck/junit_report.py",
     "abicheck/severity.py",
+    "abicheck/policy/severity.py",
     "abicheck/serialization.py",
     "abicheck/pe_metadata.py",
     "abicheck/macho_metadata.py",

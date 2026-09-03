@@ -19,11 +19,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
-from .diff_helpers import is_sentinel_enum_member, make_change
+from .diff_helpers import _normalize_type_name, is_sentinel_enum_member, make_change
 from .diff_platform_elf_dynamic import (
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
     _RELRO_RANK as _RELRO_RANK,
@@ -61,7 +60,6 @@ from .diff_platform_templates import (
 )
 from .diff_symbols import _public_functions, _should_filter_transitive_runtime_symbols
 from .diff_types import _RESERVED_FIELD_RE
-from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
@@ -70,12 +68,14 @@ from .model import (
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
+from .model.binary_naming import strip_vendor_hash
+from .model.elf_facts import SymbolType
 from .name_classification import RTTI_DATA_PREFIXES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Set as AbstractSet
 
-    from .dwarf_metadata import FieldInfo, StructLayout
+    from .model.dwarf_facts import FieldInfo, StructLayout
 
 
 def _pe_export_id(e: Any) -> str:
@@ -98,7 +98,7 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         detect_version_node_changes,
         detect_version_script_missing,
     )
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -127,7 +127,7 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 )
 def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """PE-specific detectors for Windows DLL ABI changes."""
-    from .pe_metadata import PeMetadata
+    from .model.pe_facts import PeMetadata
 
     o: PeMetadata = getattr(old, "pe", None) or PeMetadata()
     n: PeMetadata = getattr(new, "pe", None) or PeMetadata()
@@ -711,7 +711,7 @@ def _diff_macho_reexports(o: Any, n: Any) -> list[Change]:
 )
 def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Mach-O-specific detectors for macOS dylib ABI changes."""
-    from .macho_metadata import MachoMetadata
+    from .model.macho_facts import MachoMetadata
 
     o: MachoMetadata = getattr(old, "macho", None) or MachoMetadata()
     n: MachoMetadata = getattr(new, "macho", None) or MachoMetadata()
@@ -884,7 +884,7 @@ def _diff_macho_weak_exports(o: Any, n: Any) -> list[Change]:
 @registry.detector("tls_checks")
 def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect size changes for exported TLS (thread-local) symbols."""
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -920,7 +920,7 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     Function DEFAULT↔PROTECTED is already handled by func_visibility_protected_changed.
     This detector covers data/object symbols where the change can break copy relocations.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -966,7 +966,7 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
     without retaining the old version as a non-default alias, old binaries
     requesting the previous default may fail.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -1156,7 +1156,7 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     may get different mangled names or versions even though the class layout
     hasn't changed. This breaks cross-DSO RTTI and exception handling.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -1285,7 +1285,7 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     A large increase in exported symbols may indicate a lost -fvisibility=hidden.
     A large decrease may indicate an overly aggressive version script.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -1338,7 +1338,7 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     import logging as _logging
 
-    from .dwarf_metadata import DwarfMetadata
+    from .model.dwarf_facts import DwarfMetadata
 
     _log = _logging.getLogger(__name__)
 
@@ -1444,63 +1444,6 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-# Synthesized placeholder names for anonymous/unnamed aggregate member types,
-# which differ across DWARF / castxml / PDB readers (``<unnamed-tag>``,
-# ``<unnamed-type-u>``, ``<anonymous union>``, ``<unnamed struct at …>``, …).
-# The aggregate *kind* (when the placeholder names one) is captured so a real
-# union→struct change is preserved while the unstable identifier suffix is not.
-_ANON_TYPE_RE = re.compile(
-    r"<\s*(?:unnamed|anonymous)(?:\s+(union|struct|class|enum)\b)?", re.IGNORECASE
-)
-
-
-def _normalize_type_name(name: str) -> str:
-    """Normalize a C/C++ type name for stable DWARF↔castxml comparison.
-
-    Strips leading/trailing whitespace, CV-qualifiers, pointer/reference
-    decorations, and 'struct'/'class'/'union' tag keywords so that semantically
-    equivalent names compare equal regardless of DWARF vs castxml source:
-
-    Examples::
-
-        "struct Foo"     → "Foo"
-        "const struct Foo *" → "Foo"
-        "class Bar &"    → "Bar"
-        "union U"        → "U"
-        "int"            → "int"   (unchanged)
-
-    Note: this normalizer is intentionally lossy for comparison purposes only.
-    The original type names are still preserved in Change.old_value/new_value.
-    """
-    s = name.strip()
-    # Remove trailing pointer/reference decorators and CV-qualifiers
-    s = re.sub(r"[\s*&]+$", "", s).strip()
-    # Remove leading CV-qualifiers
-    s = re.sub(r"^(const|volatile)(\s+(const|volatile))?\s+", "", s).strip()
-    # Remove struct/class/union tag keyword, remembering it: for an anonymous
-    # placeholder spelled with a *leading* tag ("union <anonymous>") the tag
-    # carries the aggregate kind, which must survive the collapse below.
-    lead = re.match(r"^(struct|class|union)\s+", s)
-    lead_kind = lead.group(1) if lead else None
-    if lead:
-        s = s[lead.end() :].strip()
-    # Anonymous/unnamed member types have no stable *name* across DWARF / castxml
-    # / PDB extraction — the same anonymous union can be spelled "<unnamed-tag>"
-    # by one reader and "Parent::<unnamed-type-u>" by another (observed on the
-    # Windows SDK _TP_CALLBACK_ENVIRON_V3::u between two MSVC builds). Collapse
-    # those placeholders to a token keyed on the aggregate *kind* — taken from
-    # the placeholder itself ("<anonymous union>") or the leading tag ("union
-    # <anonymous>") — so the unstable identifier suffix no longer drives a false
-    # positive while a genuine kind change (anonymous union → anonymous struct)
-    # is still reported. Size drift remains caught by the separate byte_size
-    # comparison.
-    anon = _ANON_TYPE_RE.search(s)
-    if anon is not None:
-        kind = anon.group(1) or lead_kind
-        return f"<anonymous {kind.lower()}>" if kind else "<anonymous>"
-    return s
-
-
 def _diff_struct_layouts(o: object, n: object) -> list[Change]:
     old_structs: dict[str, StructLayout] = getattr(o, "structs", {})
     new_structs: dict[str, StructLayout] = getattr(n, "structs", {})
@@ -1579,12 +1522,11 @@ def _removed_field_changes(
         new_fields.keys() - old_fields.keys(), new_fields
     )
     reserved_matched: set[str] = set()
-    # Tracks candidates already consumed by a pure-rename match below, so
-    # a second removed field at the same offset (e.g. two overlapping
-    # anonymous-union members collapsing to one field) can't also claim
-    # it — without this, both would report FIELD_RENAMED to the same
-    # target and the fact that one of them was genuinely dropped would
-    # be silently hidden (caught in review).
+    # Tracks candidates already consumed by a pure-rename match below, so a
+    # second removed field at the same offset (overlapping anonymous-union
+    # members) can't also claim it -- otherwise both would report
+    # FIELD_RENAMED to the same target, hiding that one was genuinely
+    # dropped (caught in review).
     rename_matched: set[str] = set()
 
     for fname in removed_names:
@@ -1614,16 +1556,12 @@ def _removed_field_changes(
             # Pure rename: same offset, identical type, different name.
             # Report FIELD_RENAMED (API_BREAK) directly instead of a
             # STRUCT_FIELD_REMOVED that would falsely claim the field no
-            # longer exists — mirrors the rename-skip already done for
-            # enum members below (ENUM_MEMBER_RENAMED). This does not
-            # depend on `_diff_field_renames` (over AbiSnapshot.types, a
-            # different model with its own type-name strings) also firing
-            # for the same pair — relying on that would silently drop the
-            # finding entirely whenever the two independent extractors
-            # spell the type differently (caught in review). Emitting the
-            # same FIELD_RENAMED shape here is safe either way: the
-            # post-processing dedup pass collapses an exact duplicate if
-            # `_diff_field_renames` also matches.
+            # longer exists — mirrors the rename-skip for enum members below
+            # (ENUM_MEMBER_RENAMED). Doesn't depend on `_diff_field_renames`
+            # (a different model, its own type-name strings) also firing for
+            # the pair -- relying on that could silently drop the finding
+            # when the two extractors spell the type differently (caught in
+            # review); the post-processing dedup pass collapses a duplicate.
             # _normalize_type_name is lossy by design (it also strips
             # pointer/reference sigils to compare "struct Foo *" against
             # "Foo" for the *tag-spelling* case), so it alone would equate
@@ -1691,6 +1629,7 @@ def _removed_field_changes(
                 name=name,
                 detail=fname,
                 old_value=f"{old_fields[fname].type_name}",
+                field_name=fname,
             )
         )
     return changes
@@ -1715,6 +1654,7 @@ def _existing_field_changes(
                     detail=fname,
                     old=str(old_f.byte_offset),
                     new=str(new_f.byte_offset),
+                    field_name=fname,
                 )
             )
 
@@ -1748,13 +1688,14 @@ def _existing_field_changes(
                     new=f"{new_f.type_name}({new_f.byte_size}B)",
                     old_value=old_f.type_name,
                     new_value=new_f.type_name,
+                    field_name=fname,
                 )
             )
     return changes
 
 
 def _diff_enum_layouts(o: object, n: object) -> list[Change]:
-    from .dwarf_metadata import EnumInfo
+    from .model.dwarf_facts import EnumInfo
 
     old_enums: dict[str, EnumInfo] = getattr(o, "enums", {})
     new_enums: dict[str, EnumInfo] = getattr(n, "enums", {})
@@ -1919,9 +1860,8 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
                 # binding-scoped suppression rule must see this too, or it
                 # can never match here even though f_old already carries the
                 # captured binding.
-                symbol_binding=(
-                    f_old.elf_binding.value if f_old.elf_binding else None
-                ),
+                symbol_binding=(f_old.elf_binding.value if f_old.elf_binding else None),
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
 

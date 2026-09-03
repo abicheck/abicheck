@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`25`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`43`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 25,
+  "schema_version": 43,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -89,7 +89,107 @@ continued) that closes a bare-name collision between two member typedefs
 sharing a spelling in different classes/namespaces — needs no reliability
 flag, since an empty dict degrades identically to "no typedefs at all" for
 a pre-v25 snapshot, unlike the real-but-wrong scalar defaults v19-v23 above
-guard against.
+guard against, (v26) `Fact[T]` siblings for `RecordType.bases_fact`/
+`virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
+`Param.is_va_list_fact` (ADR-063 Phase 0, see `storage/fact_codec.py`),
+(v27) `Function.is_compiler_generated` — closes a castxml L4 extractor bug
+where a compiler-synthesized implicit special member leaked into the source
+graph as if it were genuine public API; needs no reliability flag, since
+`None` (a pre-v27 snapshot's default) degrades cleanly to today's inclusive
+behavior rather than being misread as "confirmed user-written", (v28) each
+declaration's `entity_id` carrier persisted through its own codec
+(`storage/entity_id_codec.py`), (v29) `AbiSnapshot.surface_graph` — the
+unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
+"Fields" below) persisted through its own `to_dict()` encoding, not
+`asdict()`'s naive recursion, and (v30) `RecordType.is_final_fact` — the
+fact/capability registry's (ADR-063 Phase 5 D7,
+`abicheck/model/fact_registry.py`) first registered `Fact[T]` conversion;
+needs no reliability flag, since `is_final`'s own `None` already
+unambiguously means "not captured", (v31) `EntityId` sidecars for
+typedefs and constants (`AbiSnapshot.typedef_entity_ids`/
+`constant_entity_ids`, ADR-063 Phase 2's closing slice) — additive twins of
+`typedefs_qualified`/`constants` carrying the structural identity both
+header-AST backends already resolve while walking their own intermediate
+representation, keyed identically to their partner dict; empty on a
+DWARF-only snapshot or one predating this field, and (v32)
+`RecordType.is_abstract_fact`/
+`data_size_bits_fact`/`is_standard_layout_fact`/`is_trivially_copyable_fact`/
+`qualified_name_fact`/`source_header_fact` — the same registry's next batch
+of case-(b) conversions (fields already `X | None`-typed, so the existing
+"`None` already unambiguously means not captured" bridge applies directly);
+`qualified_name_fact` is the one field in this batch both header backends
+construct as an explicit `Fact.present(...)` rather than relying on the
+generic bridge, since a `None` qualified name at global scope is itself a
+confirmed determination, not missing evidence, and (v33)
+`EnumType.qualified_name_fact`/`source_header_fact` — the identical
+case-(b) pattern applied to `EnumType`'s own twin fields, and (v34)
+`Variable.source_header_fact`/`alignment_bits_fact`/`elf_binding_fact` —
+the same case-(b) pattern applied to `Variable`'s own three fields;
+`elf_binding_fact`'s decoded value is reconstructed as a real
+`SymbolBinding` enum member rather than left as the bare JSON string
+(`storage/fact_codec.py`'s `decode_variable_facts`), since existing
+readers unconditionally access `.value` on it, and (v35)
+`Function.contract_attributes_fact`/`is_explicit_fact`/
+`is_hidden_friend_fact`/`source_header_fact`/`is_variadic_fact`/
+`exception_spec_fact`/`is_override_fact`/`hidden_friend_owner_fact`/
+`elf_binding_fact`/`is_compiler_generated_fact` — the same case-(b)
+pattern applied to `Function`'s own ten remaining fields, closing out
+this dataclass's ADR-063 Phase 5 conversion; `elf_binding_fact` gets the
+identical `SymbolBinding` reconstruction as `Variable.elf_binding_fact`,
+and (v36) `AbiSnapshot.ast_resolved_standard_fact` — the same case-(b)
+pattern applied to the last remaining case-(b) field outside the four
+declaration dataclasses, and (v37) `ElfMetadata.dynamic_flags_fact`/
+`has_init_fact`/`has_fini_fact`, `PeMetadata.delay_imports_fact`,
+`MachoMetadata.rpaths_fact` — the same case-(b) pattern applied to the
+three binary-format metadata blocks, schema-version-driven rather than
+backend-driven since each block is parsed by exactly one backend;
+`dynamic_flags_fact`'s decoded value is reconstructed as a real
+`frozenset` rather than left as the bare JSON list
+(`snapshot_platform_blocks.elf_from_dict`), the identical reconstruction
+`Variable.elf_binding_fact`/`Function.elf_binding_fact` already need for
+their own non-JSON-native value type, and (v38) `AbiSnapshot.semantic_ir`
+— ADR-063 Phase 6's canonical, backend-independent IR, plus its
+`semantic_ir_conflicts` sibling. Encoded by `storage/semantic_ir_codec.py`
+as a **list of `{"occurrence": …, "entity": …}` entries**, not a JSON
+object: the IR is keyed by an `OccurrenceId` dataclass, and rendering that
+key as a string would lose the typed `ScopePath` inside it exactly as v28's
+own `entity_id` encoding would have. Absent (the key is dropped, not
+written as `null`) for a snapshot whose extraction produced no IR, which is
+every snapshot written by a backend not yet narrowed onto the shared
+normalizer. `semantic_ir_conflicts` is sparse the same way, so for such a
+snapshot a v38 document differs from the v37 one only in the version
+stamp. Then (v39) `TypeField.is_const_fact`/
+`is_volatile_fact`/`is_mutable_fact` — ADR-063 Phase 5's first **case-(a)**
+conversion: unlike every `_fact` sibling above, these three fields' own
+values (a plain `False`) carry no availability signal at all, so the
+snapshot-level `header_cv_facts_reliable` flag is what a pre-v39 document's
+load consults (`storage/fact_codec.py`'s `apply_case_a_fact_backfill`)
+before a blanket `False` may be read as `Fact.present(False)` rather than
+`Fact.not_collected()`, and (v40) `Function.deprecated_fact`/
+`Variable.deprecated_fact`/`RecordType.deprecated_fact`/
+`EnumType.deprecated_fact` plus `EnumType.is_scoped_fact` — the rest of the
+case-(a) family `clang_deprecation_facts_reliable` guards, converted the
+same way (`TypeField.deprecated`'s own sibling landed one version earlier,
+with the rest of that dataclass's fields), and (v41) `Param.is_restrict_fact`
+and `Variable.access_fact` — the last two fields ADR-063 Phase 5's registry
+tracked as eligible-but-unconverted, closing that phase's field-by-field
+conversion. `access_fact`'s decoded value is rebuilt into a real
+`AccessLevel` member, the same reconstruction `elf_binding_fact` needs.
+
+Then (v42) the on-disk wire format itself changed, not just a field:
+ADR-062/063 Phase 8's redesign made `snapshot_to_json()` write
+`storage.sectioned_document`'s single-file sectioned envelope instead of a flat
+document. Bumped specifically so a pre-Phase-8 reader (whose own
+`SCHEMA_VERSION` was already 41) hits the hard-rejection path below instead of
+silently reading every top-level field as absent/empty — a same-numbered
+envelope change would have given that reader no signal at all. This build
+itself reads the envelope transparently regardless of version, per
+`snapshot_from_dict`'s own `is_sectioned_document` check. Finally (v43)
+`Variable.is_static` persisted — closes the plain-C/`extern "C"` same-named
+static-vs-external variable identity collision `tu_merge._variable_key`'s own
+docstring long documented as a known, accepted limitation; missing on a pre-v43
+snapshot loads as `False`, matching every prior reader's implicit assumption
+since the field did not exist.
 
 ### Forward / backward compatibility
 
@@ -100,7 +200,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 25`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 43`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -152,20 +252,34 @@ equivalent for writing. See [ADR-059](../contribute/adr/059-compressed-snapshot-
 for the full storage-envelope model (determinism, atomic writes,
 decompression limits, and what's still deferred).
 
+### Sectioned packaging (ADR-062/063 Phase 8)
+
+Orthogonal to compression, and likewise never changing anything below this
+line: the payload every `dump`/`write_snapshot` invocation actually writes
+today is this page's flat structure *packaged* into named, independently
+versioned sections (`binary`/`declarations`/`types`/`layout`/`debug`/
+`build`/`graph`/`provenance` — see
+[Project Snapshot Format](project-snapshot-format.md)), not the bare flat
+object shown below. `snapshot_from_dict`/`load_snapshot` unwrap this
+transparently before any of the fields below are read, and an older flat
+`.abi.json` a prior build wrote is still read exactly as it always was —
+this page's field-level contract is unaffected either way; only the
+outermost envelope differs.
+
 ---
 
 ## Top-level structure
 
 A snapshot is a single JSON object. The keys below are the ones written by the
 serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
-(`abicheck/model.py`). Optional keys are omitted or `null` when there is no data
+(`abicheck/model/snapshot.py`). Optional keys are omitted or `null` when there is no data
 (for example, a pure-ELF dump has no `dwarf` or `build_source`).
 
 ### Identity and provenance
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `25`). |
+| `schema_version` | int | Snapshot format version (currently `43`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -249,7 +363,9 @@ gets backfilled, only report on it.
 | `enums` | array | Enumerations with members and underlying type. |
 | `typedefs` | object | Typedef name → underlying type. Bare-name-keyed; two distinct member typedefs sharing a spelling in different classes/namespaces collide onto one key (see `typedefs_qualified`). |
 | `typedefs_qualified` | object | Fully-qualified-name-keyed twin of `typedefs` (schema v25) — collision-free. Empty for a pre-v25 snapshot or one produced without per-class qualified typedef scoping (e.g. DWARF-only). |
-| `constants` | object | Preprocessor/compile-time constants (name → value). |
+| `constants` | object | Preprocessor/compile-time constants (qualified name → value). |
+| `typedef_entity_ids` | object | `EntityId` sidecar for `typedefs_qualified` (schema v31), keyed identically — the typed `ScopePath`/kind/leaf-name identity a `dict[str, str]` cannot carry on a declaration object. Empty for a pre-v31 or DWARF-only snapshot. |
+| `constant_entity_ids` | object | `EntityId` sidecar for `constants` (schema v31), keyed identically. Empty for a pre-v31 or DWARF-only snapshot. |
 
 ### Evidence-tier and mode flags
 
@@ -279,6 +395,7 @@ gets backfilled, only report on it.
 |-----|------|---------|
 | `build_source_pack` | object \| null | Reference to an out-of-band build/source pack (ADR-028). Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
 | `build_source` | object \| null | Inline-embedded build/source facts for single-artifact workflows. Omitted when nothing was embedded. |
+| `surface_graph` | object \| omitted | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. |
 | `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database (ADR-039). Empty when no compile database was supplied. |
 | `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields` (ADR-039). Feeds the opt-in `--reconcile-build-context` diff pass; empty when no compile database was supplied at dump time. |
 
@@ -296,7 +413,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `25`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `43`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no
@@ -330,3 +447,21 @@ contract and its stability policy, see
 - [Baseline Management](../use/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
 - [Output Formats](../use/output-formats.md) — the comparison-report JSON and `report_schema_version`.
 - [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md) — the compressed storage envelope (plain/gzip/zstd).
+
+---
+
+## The build/source pack envelope
+
+- The pack is **content-addressed** and **versioned independently**
+  (`evidence_pack_version`) from the ABI snapshot schema, so it never bloats an
+  ordinary dump. The snapshot stores only a lightweight `evidence_pack`
+  reference (content hash + coverage summary); old readers ignore it.
+- Every extractor writes both a **raw** artifact (under `raw/`, for
+  provenance/debugging) and an abicheck-owned **normalized** fact model (e.g.
+  `build/build_evidence.json`). Only normalized facts feed comparison and the
+  content hash.
+- Command lines and paths are **redacted** (home prefixes, secret-looking
+  `-D` macros) before they are persisted.
+
+See ADR-028 (umbrella) and ADR-029 (build context) under
+[Development → ADRs](../contribute/adr/index.md) for the full design.

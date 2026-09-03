@@ -124,6 +124,14 @@ on:
         description: 'Evidence-depth this check asks for: binary, headers, build, or source -- required.'
         type: string
         required: true
+      explicit-id:
+        description: >
+          Forwarded to check-target's explicit-id input (G42 "Explicit
+          check identifiers") -- an optional project-owned logical id,
+          folded into check_id's '~<explicit_id>' tail. Omit (default) for
+          the pre-G42, unqualified check_id shape.
+        type: string
+        default: ''
       gate-mode:
         description: "'local' (default), 'deferred', or 'advisory'."
         type: string
@@ -459,6 +467,7 @@ jobs:
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
           allow-new-target: ${{ inputs.allow-new-target }}
           requested-depth: ${{ inputs.requested-depth }}
+          explicit-id: ${{ inputs.explicit-id }}
           gate-mode: ${{ inputs.gate-mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}

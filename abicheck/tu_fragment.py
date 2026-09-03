@@ -33,6 +33,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .model import EnumType, Function, RecordType, Variable
+from .model.identity import EntityId
+from .model.semantic_ir import SemanticIR
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,11 @@ class TuFragment:
     # folds ``typedefs`` itself.
     typedefs_qualified: dict[str, str] = field(default_factory=dict)
     constants: dict[str, str] = field(default_factory=dict)
+    # ``EntityId`` sidecars for the two dicts above (ADR-063 Phase 2, schema
+    # v31 — see ``AbiSnapshot.typedef_entity_ids``), carried per-fragment for
+    # the same reason ``typedefs_qualified`` is.
+    typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict)
+    constant_entity_ids: dict[str, EntityId] = field(default_factory=dict)
     ast_producer: str = "castxml"
     ast_toolchain: dict[str, str] = field(default_factory=dict)
     ast_fallback_reason: str | None = None
@@ -91,12 +98,23 @@ class MergedTuFragments:
     typedefs: dict[str, str]
     typedefs_qualified: dict[str, str]
     constants: dict[str, str]
+    typedef_entity_ids: dict[str, EntityId]
+    constant_entity_ids: dict[str, EntityId]
     ast_producer: str
     ast_toolchain: dict[str, str]
     ast_fallback_reason: str | None
     ast_toolchain_supported: bool | None
     ast_toolchain_unsupported_reasons: tuple[str, ...]
     frontend_context_kind: str | None
+    #: ADR-063 Phase 6 (multi-TU slice): built from the RAW, pre-merge
+    #: fragments themselves, not from the flat fields above -- see
+    #: ``dumper_manifest._manifest_semantic_ir``'s own docstring for why a
+    #: real cross-TU declaration split (public forward declaration, private
+    #: full definition) needs the per-fragment candidates
+    #: ``merge_fragments`` itself has already folded away by the time it
+    #: returns. ``None`` only for a caller that never sets it (there is
+    #: currently none -- ``run_tu_loop`` always populates this).
+    semantic_ir: SemanticIR | None = None
 
 
 def entity_key(kind: str, name: str) -> tuple[str, str]:

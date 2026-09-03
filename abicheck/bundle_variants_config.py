@@ -45,6 +45,21 @@ raw ``dict`` (whatever a caller's own YAML/JSON loader produced for the
 the schema/validation half of "a declarative ``bundle_variants:`` config
 block" this plan phase asks for, with the discovery half left as the
 documented, scoped gap the plan doc's own Phase 13 status note names.
+
+**Declared-vs-captured fingerprint verification (G38 Phase 13 follow-up).**
+:func:`run_bundle_variant_pairing` can now optionally verify a captured
+``BundleFacts.variant_fingerprint`` against what the declared
+:class:`BundleVariantSpec` for that same name would itself compute
+(``verify_fingerprints=True``) -- closing the gap this module's own
+docstring used to leave open. It stays opt-in, default ``False``: every
+*existing* caller (including this module's own test suite, which
+deliberately pairs specs against hand-picked sentinel fingerprints that
+have nothing to do with any real coordinates) is unaffected, and a facts
+file carrying the ``DEFAULT_VARIANT_FINGERPRINT`` sentinel -- what every
+capture ``--bundle-facts-out`` produces today, since no real capture
+pipeline can be told a variant name yet (see above) -- is never treated as
+a mismatch either way, since there is nothing for it to be verified
+against.
 """
 
 from __future__ import annotations
@@ -200,6 +215,8 @@ def run_bundle_variant_pairing(
     specs: dict[str, BundleVariantSpec],
     old_facts_by_variant: dict[str, BundleFacts],
     new_facts_by_variant: dict[str, BundleFacts],
+    *,
+    verify_fingerprints: bool = False,
 ) -> BundleVariantPairingResult:
     """Pair real, captured per-variant `BundleFacts` by fingerprint and apply
     each variant's declared `required:` gating.
@@ -214,17 +231,46 @@ def run_bundle_variant_pairing(
     fingerprints it was actually given -- the `required:` gate only ever
     escalates a real `OLD_ONLY` outcome `pair_variants` produced.
 
-    Deliberately does **not** verify a captured `BundleFacts.variant_
-    fingerprint` against what `specs[name].fingerprint()` would compute for
-    that same name -- a real capture pipeline (this plan's Phase 2
-    `--bundle-facts-out`) has no way to be told a variant name today (see
-    this module's own file docstring: `.abicheck.yml` discovery is not
-    wired), so there is no real producer yet whose output this check could
-    validate against without risking false-positive mismatches on
-    hand-constructed input. Left as a documented gap alongside the config-
-    discovery one.
+    *verify_fingerprints* (default `False`): when `True`, additionally
+    checks -- for every name present in both `specs` and one of the two
+    facts maps -- that the captured `BundleFacts.variant_fingerprint`
+    equals what `specs[name].fingerprint()` itself computes for the same
+    declared coordinates, raising `BundleVariantsConfigError` on a real
+    mismatch (a `name` key paired with the wrong file is exactly the class
+    of silent misconfiguration this check exists to catch: pairing would
+    otherwise proceed using whichever fingerprint the facts file actually
+    carries, silently ignoring that it disagrees with what was declared for
+    that name). A facts file carrying `DEFAULT_VARIANT_FINGERPRINT` -- what
+    every `--bundle-facts-out` capture produces today, since no real capture
+    pipeline can be told a variant name yet (see this module's own file
+    docstring) -- is never flagged as a mismatch, since it was never
+    captured against any declared coordinates to verify against. Default is
+    `False` because every *existing* caller (this module's own test suite
+    included) pairs specs against arbitrary sentinel fingerprints that have
+    nothing to do with any real coordinates -- turning this on
+    unconditionally would make every such caller a hard error.
     """
+    from .bundle_facts import DEFAULT_VARIANT_FINGERPRINT
     from .bundle_multibuild import coverage_regression_findings, pair_variants
+
+    if verify_fingerprints:
+        for facts_by_variant in (old_facts_by_variant, new_facts_by_variant):
+            for name, facts in facts_by_variant.items():
+                spec = specs.get(name)
+                if spec is None:
+                    continue
+                actual = facts.variant_fingerprint
+                if actual == DEFAULT_VARIANT_FINGERPRINT:
+                    continue
+                expected = spec.fingerprint()
+                if actual != expected:
+                    raise BundleVariantsConfigError(
+                        f"bundle_variants.{name}: declared identity "
+                        f"coordinates fingerprint to {expected!r}, but the "
+                        f"captured BundleFacts file's own variant_"
+                        f"fingerprint is {actual!r} -- this looks like the "
+                        f"wrong file was assigned to variant {name!r}"
+                    )
 
     comparisons = pair_variants(old_facts_by_variant, new_facts_by_variant)
     findings = coverage_regression_findings(comparisons)

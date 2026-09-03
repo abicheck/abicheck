@@ -1279,7 +1279,7 @@ def test_perform_elf_dump_header_graph_receives_seeded_includes(
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         _fake_seed_and_fold([seeded]),
     )
 
@@ -1471,7 +1471,7 @@ def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
         return AbiSnapshot(library="lib.so", version="1.0")
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1524,7 +1524,7 @@ def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
         return plain_snap
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1574,11 +1574,11 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
         raise AssertionError("_attach_header_graph must not be reached")
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
-    monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _raise_ext)
+    monkeypatch.setattr("abicheck.workflows.extraction.detect_python_extension", _raise_ext)
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
 
     _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -1623,7 +1623,7 @@ def test_perform_elf_dump_cleanup_still_runs_after_header_graph_with_no_flags(
         return plain_snap
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1660,13 +1660,13 @@ def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
     api_sentinel = object()
     numpy_sentinel = object()
     monkeypatch.setattr(
-        "abicheck.python_ext.detect_python_extension", lambda _s: ext_sentinel
+        "abicheck.workflows.extraction.detect_python_extension", lambda _s: ext_sentinel
     )
     monkeypatch.setattr(
-        "abicheck.python_api.detect_python_api", lambda _s: api_sentinel
+        "abicheck.workflows.extraction.detect_python_api", lambda _s: api_sentinel
     )
     monkeypatch.setattr(
-        "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: numpy_sentinel
+        "abicheck.workflows.extraction.extract_numpy_capi_surface", lambda _p: numpy_sentinel
     )
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -1736,9 +1736,9 @@ def test_perform_elf_dump_preserves_existing_python_metadata(
     def _boom(_s):  # noqa: ANN001, ANN202
         raise AssertionError("detection must not run when metadata is present")
 
-    monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _boom)
-    monkeypatch.setattr("abicheck.python_api.detect_python_api", _boom)
-    monkeypatch.setattr("abicheck.numpy_capi.extract_numpy_capi_surface", _boom)
+    monkeypatch.setattr("abicheck.workflows.extraction.detect_python_extension", _boom)
+    monkeypatch.setattr("abicheck.workflows.extraction.detect_python_api", _boom)
+    monkeypatch.setattr("abicheck.workflows.extraction.extract_numpy_capi_surface", _boom)
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
@@ -1854,7 +1854,7 @@ def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
         raise AbicheckError("castxml exploded")
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _raise)

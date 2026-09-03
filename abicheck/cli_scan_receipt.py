@@ -88,169 +88,27 @@ arrives here as data rather than this module reaching back for it.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
-from pathlib import Path
 from typing import Any
 
 #: The ``scan`` parameters that feed the resolver, in the spelling
-#: ``scan_cmd`` gives them. A caller passing a partial mapping is rejected
-#: rather than letting a dropped key resolve as "not stated" -- the same
-#: guard ``cli_compare_receipt.COMPARE_CONFIG_PARAMS`` carries, for the same
-#: reason: a renamed option should fail loudly, not silently change a
-#: receipt's meaning.
-SCAN_CONFIG_PARAMS: tuple[str, ...] = (
-    "policy",
-    "policy_file_path",
-    "suppress",
-    "scope_public_headers",
-    "contract_mode",
-    "pack_paths",
-    # CLI cleanup phase two, "PR B": needed so this resolver's D7 precedence
-    # can tell an explicit --severity-preset/--exit-code-scheme apart from
-    # "nothing stated" -- without them a selected gate pack looked unopposed
-    # here regardless of what the CLI actually gave, which let
-    # `pack_application.apply_to_compare_config` override an explicit value
-    # (see this module's own docstring for the reproduced repro and why
-    # this is safe for `scan` specifically).
-    "severity_preset",
-    "exit_code_scheme",
+# ADR-061 Phase 4: these describe the resolver's own input contract, so they
+# moved with it. Re-exported here for the existing import sites.
+from .workflows.scan_config import (  # noqa: E402
+    SCAN_CONFIG_PARAMS as SCAN_CONFIG_PARAMS,
+    SCAN_REQUEST_SPELLINGS as SCAN_REQUEST_SPELLINGS,
 )
 
-#: How a :class:`~abicheck.service_scan.ScanRequest` spells the inputs whose
-#: default API name comes from :class:`~abicheck.api_types.CompareRequest`.
-#: "The API" is not one namespace: resolving a ``ScanRequest`` at
-#: ``FrontEnd.API`` alone still recorded ``scope_public``/``policy_file_path``/
-#: ``suppress``, none of which that entity has, so a replay consumer could not
-#: identify the input that produced the value (Codex review).
-#:
-#: Only the three that actually differ are listed -- ``policy``,
-#: ``force_public_symbols``, and ``contract_mode`` are spelled identically on
-#: both requests, and an unmapped field keeps its default spelling.
-#: ``tests/test_scan_compare_parity.py`` pins every entry against
-#: ``ScanRequest``'s real fields, so a renamed field fails there rather than
-#: silently reintroducing a name nobody can replay.
-SCAN_REQUEST_SPELLINGS: Mapping[str, str] = {
-    "scope_public": "scope_to_public_surface",
-    "policy_file_path": "policy_file",
-    "suppress": "suppression",
-}
 
+def resolve_scan_config(*args: Any, **kwargs: Any) -> Any:
+    """Alias for ``workflows.scan_config.resolve_scan_config``.
 
-def resolve_scan_config(
-    params: Mapping[str, Any],
-    *,
-    typed: Collection[str],
-    project_cfg: Any = None,
-    project_path: Path | None = None,
-    project_sha256: str | None = None,
-    policy_file: Any = None,
-    suppression: Any = None,
-    suppress_path: Path | None = None,
-    symbols_list: Any = None,
-    front_end: Any = None,
-) -> Any:
-    """Resolve one :class:`CompatibilityEvaluationConfig` for this scan.
-
-    *params* is ``scan_cmd``'s own parameter mapping; *typed* names the
-    parameters Click reports the user actually typed, which matters for the
-    ones whose click default is indistinguishable from a stated value.
-
-    *front_end* defaults to the ``scan`` CLI. ``service_scan.run_scan``
-    passes :attr:`FrontEnd.API`, because a receipt may only name inputs its
-    caller really has: a ``ScanRequest`` sets ``policy`` and
-    ``scope_to_public_surface`` as typed fields, and recording those as
-    ``--policy``/``--scope-public-headers`` describes a command line nobody
-    ran, so the receipt could not identify the input that selected the
-    value (Codex review). Only the selector *spelling* and layer differ --
-    the normalization below is shared deliberately, see *params*.
-
-    The normalization itself is :func:`compare_cli_inputs`, **reused rather
-    than re-implemented**: ``scan``'s shared config surface deliberately uses
-    the same option destinations as ``compare``'s (``policy``,
-    ``policy_file_path``, ``suppress``, ``scope_public_headers``,
-    ``public_symbols``, ``public_symbols_list``, ``contract_mode``), because
-    §6.4's Gate is that the two commands agree -- and two front ends that
-    normalize the same flags through two functions is exactly how they would
-    stop agreeing. A second normalizer would also have to re-derive
-    :data:`DEFAULTED_COMPARE_PARAMETERS`' typed-vs-defaulted rule, the
-    load-once affordances for the policy file/suppression/symbols list, and
-    the union rule for ``--public-symbol``/``--public-symbols-list``.
-
-    *policy_file*/*suppression*/*symbols_list* are the same "pass what you
-    already loaded" affordance ``compare`` uses, and for the same reason: the
-    scan loaded all three long before configuration is resolved, so
-    re-reading here could pair a digest with content that did not score the
-    run, and a file deleted mid-scan would fail an otherwise-finished
-    comparison.
-
-    Raises whatever the canonical resolver raises (a D7 same-tier conflict,
-    a D8 pack conflict); mapping those to a ``click.UsageError`` is the
-    caller's job, exactly as it is for ``compare``.
+    Moved to the engine in ADR-061 Phase 4: ``service_scan`` resolves the same
+    config and had to import upward for it. This spelling stays for the CLI
+    call sites and tests that use it.
     """
-    from .compatibility_evaluation_frontend import (
-        FrontEnd,
-        ProjectCompatibilityInputs,
-        SuppressionSource,
-        compare_cli_inputs,
-        resolve_compatibility_evaluation_config,
-    )
+    from .workflows.scan_config import resolve_scan_config as _impl
 
-    missing = [name for name in SCAN_CONFIG_PARAMS if name not in params]
-    if missing:
-        raise KeyError(
-            "scan config params missing from the caller's mapping: "
-            f"{', '.join(sorted(missing))}. Every entry of SCAN_CONFIG_PARAMS "
-            "must be present, so a renamed option fails here rather than "
-            "silently resolving as 'not stated'."
-        )
-    # From the single load the comparison itself used, so the digest always
-    # describes the rules that scored the run -- and falling back to a
-    # content digest of the rules when the list carries none, which an
-    # in-memory `SuppressionList` always does (Codex review; the inline
-    # version here took `""` and failed the whole scan).
-    suppression_source = SuppressionSource.from_loaded(suppression, suppress_path)
-    project = None
-    if project_cfg is not None:
-        # No longer blanked (CLI cleanup phase two, "PR B" -- see this
-        # function's own former `_without_gate_settings` note, kept below as
-        # a comment rather than a dead function): `ProjectCompatibilityInputs.
-        # from_build_config` and `cli_helpers_compare.resolve_compare_config`
-        # -- the function that actually scores a scan's gate -- both read the
-        # identical six fields off the identical `project_cfg`/`cfg` object
-        # with the identical `explicit CLI > project config > built-in
-        # default` precedence, and `scan` has no `--profile` option (unlike
-        # `compare`) to introduce a tier the other resolver doesn't know
-        # about. So, for `scan` specifically, these two resolutions cannot
-        # disagree on a project-config-sourced severity/exit-code-scheme the
-        # way blanking here was written to guard against -- and leaving them
-        # blanked here left a real precedence bug in the *pack* fold: a
-        # selected gate pack folded onto the real `resolved_cfg`
-        # (`pack_application.apply_to_compare_config`, called from
-        # `cli_scan._resolve_scan_evaluation_config`) saw a project-config
-        # value as merely "unstated" and silently overrode it (the same class
-        # of bug Codex review found for the explicit-CLI tier on #801,
-        # reproduced here for the project-config tier by the identical
-        # mechanism).
-        project = ProjectCompatibilityInputs.from_build_config(
-            project_cfg,
-            path=str(project_path) if project_path is not None else None,
-            sha256=project_sha256,
-        )
-    resolved_front_end = front_end if front_end is not None else FrontEnd.CLI
-    return resolve_compatibility_evaluation_config(
-        front_end=resolved_front_end,
-        api_spellings=(
-            SCAN_REQUEST_SPELLINGS if resolved_front_end is FrontEnd.API else None
-        ),
-        explicit=compare_cli_inputs(
-            params,
-            explicit_parameters=typed,
-            policy_file=policy_file,
-            suppression=suppression_source,
-            public_symbols_list=symbols_list,
-        ),
-        project=project,
-    )
+    return _impl(*args, **kwargs)
 
 
 #: History note, not a live function: this module used to run every

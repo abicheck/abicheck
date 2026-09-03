@@ -21,8 +21,11 @@ def print_data_sources(
     sources_path: Path | None = None,
 ) -> None:
     """Print data source diagnostic information for a binary."""
-    from .binary_utils import detect_binary_format, normalize_binary_input
-    from .dwarf_snapshot import show_data_sources
+    from .workflows.extraction import (
+        detect_binary_format,
+        normalize_binary_input,
+        show_data_sources,
+    )
 
     normalized_path, binary_fmt = normalize_binary_input(so_path)
     if binary_fmt is None:
@@ -32,15 +35,13 @@ def print_data_sources(
     build_source_pack = None
 
     if binary_fmt == "elf":
-        from .dwarf_unified import parse_dwarf
-        from .elf_metadata import parse_elf_metadata
+        from .workflows.extraction import parse_dwarf, parse_elf_metadata
 
         elf_meta = parse_elf_metadata(normalized_path)
         dwarf_meta, _ = parse_dwarf(normalized_path)
 
     if build_source_path is not None or sources_path is not None:
-        from .buildsource.inline import is_pack_dir
-        from .buildsource.pack import BuildSourcePack
+        from .workflows.extraction import is_pack_dir, load_pack_or_raise
 
         def load_pack(path: Path, label: str) -> BuildSourcePack | None:
             """Load a build-source pack when the input is already collected."""
@@ -53,7 +54,7 @@ def print_data_sources(
                 )
                 return None
             try:
-                return BuildSourcePack.load(path)
+                return load_pack_or_raise(path)
             except Exception as exc:
                 raise click.ClickException(
                     f"Invalid {label} build-source pack: {exc}"

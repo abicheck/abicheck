@@ -457,14 +457,11 @@ class TestBundleChecks:
 
 
 class TestDuplicateCheckIdIsRejected:
-    """check_id (target@profile#baseline_channel@depth) is the id
-    to_aggregate_manifest() projects into aggregate --manifest's targets[]
-    -- ExpectedTargets.from_manifest_data() rejects a duplicate id there.
-    Two checks[] entries differing only in fields check_id doesn't carry
-    (required:/gate_mode:) but resolving to the same (profile, channel,
-    depth) must be rejected at generation time, not left to surface as a
-    late aggregate-projection failure after every matrix cell already ran
-    (Codex review)."""
+    """Two checks[] entries resolving to the same check_id (profile,
+
+    channel, depth) must be rejected at generation time, not left to
+    surface as a late aggregate-projection failure.
+    """
 
     def test_two_checks_entries_with_the_same_channel_and_depth_is_an_error(
         self,
@@ -913,6 +910,8 @@ class TestConsumerCompileOverlayProjection:
         assert check.consumer_compile_gcc_options == ""
         assert "consumer_compile_gcc_path" not in check.to_dict()
         assert "consumer_compile_gcc_options" not in check.to_dict()
+        assert check.consumer_compile_active is False
+        assert "consumer_compile_active" not in check.to_dict()
 
     def test_consumer_compile_overlay_projects_independently_of_producer(
         self,
@@ -1101,17 +1100,11 @@ class TestCompileFrontendOverlayProjection:
 
 
 class TestComposeGccOptionsNotFamilyAware:
-    """Regression guard for the revert documented in `_compose_gcc_options`'s
-    own docstring: a P0 audit round briefly dropped `-stdlib=`/`--target=`
-    for `compiler_family: gcc`, reasoning a real GCC binary rejects both
-    (true) -- but a later review round found the composed string is never
-    actually fed to a literal GCC binary anywhere in this pipeline (only
-    ever to Clang: castxml's internal frontend, or the direct-clang
-    backend's `_resolve_clang_bin`, which rejects a non-clang-family
-    `gcc-path` and falls back to host clang), and that dropping `--target=`
-    broke real cross-compilation-target correctness for the direct-clang
-    backend (no other signal steers it away from the host architecture).
-    Reverted; `compiler_family` must not affect this function's output."""
+    """Regression guard for `_compose_gcc_options`'s own reverted P0 audit
+
+    fix (see its docstring / AGENTS.md's "Toolchain-profile compiler-family
+    rendering"): `compiler_family` must not affect this function's output.
+    """
 
     _compose = staticmethod(_compose_gcc_options)
 

@@ -108,6 +108,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline-channel", required=True)
     parser.add_argument("--requested-depth", required=True)
     parser.add_argument(
+        "--explicit-id",
+        default="",
+        help=(
+            "This check's checks[].id (G42 'Explicit check identifiers'), "
+            "if the project declared one -- folded into check_id's "
+            "'~<explicit_id>' tail by build_check_id(). Empty (the "
+            "default) means no explicit id, the pre-G42 shape."
+        ),
+    )
+    parser.add_argument(
         "--gate-mode", default="local", choices=["local", "deferred", "advisory"]
     )
     parser.add_argument("--resolve-outcome", default="")
@@ -137,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     base_ref = args.base_ref or None
     action_version = args.action_version or None
     tool_version = args.tool_version or None
+    explicit_id = args.explicit_id or None
 
     operational_error = False
 
@@ -161,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             base_ref=base_ref,
             tool_version=tool_version,
             action_version=action_version,
+            explicit_id=explicit_id,
         )
         operational_error = True
     elif args.mode == "bootstrap":
@@ -175,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             base_ref=base_ref,
             tool_version=tool_version,
             action_version=action_version,
+            explicit_id=explicit_id,
         )
     elif args.mode == "new-target":
         report = build_new_target_report(
@@ -188,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             base_ref=base_ref,
             tool_version=tool_version,
             action_version=action_version,
+            explicit_id=explicit_id,
         )
     else:
         if not args.report_in:
@@ -223,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             base_ref=base_ref,
             action_version=action_version,
             analysis_exit_code=args.analysis_exit_code,
+            explicit_id=explicit_id,
         )
         # augment_report already classifies any non-compatibility verdict
         # (the literal "ERROR", or a scan guard sentinel like

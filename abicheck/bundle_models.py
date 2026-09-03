@@ -29,12 +29,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_category
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
-from .elf_metadata import ElfMetadata
 from .model import AbiSnapshot, Function, Variable
+from .model.elf_facts import ElfMetadata
+
+if TYPE_CHECKING:
+    from .policy_file import PolicyFile
 
 # Symbols imported by virtually every C/C++ shared library that are
 # provided by the system loader, not by the bundle. Resolution against the
@@ -62,6 +66,50 @@ DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset(
         "libz.so.1",
         "ld-linux-x86-64.so.2",
         "ld-linux-aarch64.so.1",
+        # oneTBB's own malloc/proxy shared libs -- distinct sonames from
+        # libtbb.so above, and commonly DT_NEEDED alongside it by a library
+        # that opts into TBB's scalable allocator (e.g. oneDAL). Given
+        # without an explicit major (`soname_matches_providers`'s stem-match
+        # rule -- see that function's own docstring) so any TBB major
+        # matches, matching how libtbb.so itself needs two explicit-major
+        # entries above only because it changed its own soname convention
+        # between the 2020.x and 2021.x/oneAPI release lines.
+        "libtbbmalloc",
+        "libtbbmalloc_proxy",
+        # Intel oneMKL's own runtime dispatch/threading-layer/compute-kernel
+        # libraries -- real, common DT_NEEDED edges for any library built
+        # against oneMKL (e.g. oneDAL). Not exhaustive over oneMKL's full
+        # kernel-library surface (dozens of per-ISA/per-precision libs), but
+        # covers the libraries an ordinary dynamic link against oneMKL pulls
+        # in regardless of which specific kernels are used. Given without an
+        # explicit major so any oneMKL release's own soname major matches.
+        "libmkl_core",
+        "libmkl_rt",
+        "libmkl_intel_lp64",
+        "libmkl_intel_ilp64",
+        "libmkl_intel_thread",
+        "libmkl_gnu_thread",
+        "libmkl_tbb_thread",
+        "libmkl_sequential",
+        "libmkl_def",
+        "libmkl_avx2",
+        "libmkl_avx512",
+        "libmkl_vml_avx2",
+        "libmkl_vml_avx512",
+        "libmkl_vml_def",
+        "libmkl_sycl",
+        # The Intel compiler/OpenMP runtime libraries a library built with
+        # icc/icx/icpx/dpcpp commonly links against, distinct from the
+        # GCC/LLVM runtime libraries already listed above.
+        "libiomp5",
+        "libimf",
+        "libirng",
+        "libsvml",
+        "libintlc",
+        # The oneAPI Level Zero loader -- the runtime a SYCL library
+        # dispatches to for a Level Zero (as opposed to OpenCL) backend,
+        # alongside libOpenCL.so.1 already listed above.
+        "libze_loader",
     }
 )
 
@@ -596,10 +644,21 @@ class BundleDiffResult:
     #: coverage ledger (mirroring `contract_coverage_ledger.py`) would add
     #: beyond this.
     analysis_errors: list[str] = field(default_factory=list)
+    #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
+    #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
+    #: findings were always scored under the bare *policy* name alone, even
+    #: when a caller supplied a policy file whose overrides/reclassify rules
+    #: it wanted applied everywhere (Codex review, fresh evidence: a
+    #: `policy_file` selecting `plugin_abi`-style downgrades for per-library
+    #: findings had no effect on `BUNDLE_*` findings). ``None`` (the
+    #: default): behavior is unchanged from before this field existed.
+    policy_file: PolicyFile | None = None
 
     @property
     def bundle_verdict(self) -> Verdict:
         changes = [f.to_change() for f in self.bundle_findings]
+        if self.policy_file is not None:
+            return self.policy_file.compute_verdict(changes)
         return compute_verdict(changes, policy=self.policy)
 
     @property

@@ -88,11 +88,11 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   ``InputSpec.sources``/``build_info`` are embedded before resolution ever
   returns -- there is no separate out-of-band pack to fold in on that path.
   ``effective_depth`` is always computed here, independent of that field,
-  from what each side's snapshot actually carries (mirrors
-  ``cli_dump_helpers.evidence_depth_label``'s logic, reimplemented locally
-  rather than imported -- importing a CLI-layer module from here would
-  reach back through ``cli.py`` into ``checker.py`` and grow the
-  CLI-registration import cycle the AI-readiness gate rejects).
+  from what each side's snapshot actually carries, via the shared
+  ``evidence_depth.depth_label_for``. That rule used to be reimplemented
+  here rather than imported, because importing it meant importing a
+  CLI-layer module and reaching back through ``cli.py`` into ``checker.py``;
+  ADR-061 Phase 3 moved it to a leaf, so this is a real delegation now.
 - ``target_accounting`` (expected vs. resolved Bazel targets) rolls up P0.2's
   root-target resolution (``BuildEvidence.target_scope``) now that it has
   landed -- ``requested``/``resolved`` stay ``None`` only when neither side
@@ -123,11 +123,12 @@ from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
 from .checker_policy import ChangeKind, EvidenceTier
 from .checker_types import DiffResult
+from .evidence_depth import DEPTH_RANK, depth_label_for, weaker_depth
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
-    from .buildsource.source_graph import SourceGraphSummary
+    from .model.source_graph import SourceGraphSummary
 
 __all__ = [
     "ANALYSIS_ASSURANCE_SCHEMA_VERSION",
@@ -156,10 +157,11 @@ ASSURANCE_STATUS_VALUES: frozenset[str] = frozenset(
     {"complete", "partial", "failed", "not_comparable", "not_requested"}
 )
 
-# Same ladder as ``cli_dump_helpers._DEPTH_RANK`` / EVIDENCE_DEPTH_VALUES,
-# duplicated rather than imported for the reason given in the module
-# docstring (avoiding a CLI-layer import from this leaf-ish module).
-_DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+# The ladder is owned by ``evidence_depth.DEPTH_RANK``, derived from
+# ``scan_levels.USER_DEPTHS``. It used to be duplicated here to avoid a
+# CLI-layer import; ADR-061 Phase 3 moved the vocabulary to a leaf, so the
+# copy is gone and this is an alias.
+_DEPTH_RANK = DEPTH_RANK
 
 #: The real ``ExtractorRecord.name`` families for L5 source-graph extractors,
 #: as actually constructed in ``buildsource/inline_graph_fold.py`` (grepped
@@ -416,35 +418,27 @@ class AnalysisAssurance:
 
 
 def _effective_depth_label(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
-    """One side's own effective depth -- mirrors
-    ``cli_dump_helpers.evidence_depth_label`` without importing it (see the
-    module docstring for why: that module reaches back into ``cli.py``,
-    which imports ``checker.py``).
+    """One side's own effective depth.
+
+    Delegates to :func:`abicheck.evidence_depth.depth_label_for`, which owns
+    the rule. This was a hand-copy of ``cli_dump_helpers.evidence_depth_label``
+    kept in sync by comment, because importing it would have pulled a CLI-layer
+    module (and through it ``cli.py``/``checker.py``) into this one; ADR-061
+    Phase 3 moved the rule to a leaf, so the copy is gone.
 
     *pack* is the caller-resolved ``BuildSourcePack`` for this side (see
     :func:`compute_analysis_assurance`'s own docstring for why this must not
     default to ``snap.build_source`` internally) -- ``None`` when this side
-    carries no pack at all, out-of-band or embedded.
+    carries no pack at all, out-of-band or embedded. The leaf takes its pack
+    explicitly for exactly that reason, so the no-defaulting rule is now
+    enforced by the shared signature rather than by two docstrings agreeing.
     """
-    if pack is not None:
-        sa = getattr(pack, "source_abi", None)
-        sg = getattr(pack, "source_graph", None)
-        l4_has_facts = sa is not None and any(sa.reachable_buckets().values())
-        l5_has_facts = sg is not None and bool(getattr(sg, "nodes", None))
-        if l4_has_facts or l5_has_facts:
-            return "source"
-        be = getattr(pack, "build_evidence", None)
-        if be is not None and (be.targets or be.compile_units):
-            return "build"
-    if getattr(snap, "parsed_with_build_context", False):
-        return "build"
-    if getattr(snap, "from_headers", False):
-        return "headers"
-    return "binary"
+    return depth_label_for(snap, pack)
 
 
 def _weaker_depth(a: str, b: str) -> str:
-    return a if _DEPTH_RANK.get(a, 0) <= _DEPTH_RANK.get(b, 0) else b
+    """Compatibility alias for :func:`abicheck.evidence_depth.weaker_depth`."""
+    return weaker_depth(a, b)
 
 
 def _surface_fact_set(sa: Any) -> dict[str, Any]:

@@ -20,13 +20,12 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    from .build_mode import BuildMode
     from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
-
+from . import qualified_name_segments
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
@@ -35,7 +34,6 @@ from .model import (
     ElfVisibility,
     EnumMember,
     EnumType,
-    ExtractionContract,
     Function,
     Param,
     ParamKind,
@@ -46,6 +44,50 @@ from .model import (
     Variable,
     Visibility,
 )
+from .snapshot_platform_blocks import (
+    dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
+    dwarf_from_dict as _dwarf_from_dict,
+    elf_from_dict as _elf_from_dict,
+    kabi_from_dict as _kabi_from_dict,
+    macho_from_dict as _macho_from_dict,
+    numpy_capi_from_dict as _numpy_capi_from_dict,
+    pe_from_dict as _pe_from_dict,
+    python_api_from_dict as _python_api_from_dict,
+    python_ext_from_dict as _python_ext_from_dict,
+    sycl_from_dict as _sycl_from_dict,
+)
+from .storage.entity_id_codec import (
+    decode_entity_ids,
+    decode_sidecar_entity_ids,
+    encode_entity_ids,
+    encode_sidecar_entity_ids,
+)
+from .storage.enum_codec import encode_platform_enums
+from .storage.fact_codec import (
+    apply_legacy_fact_backfill,
+    decode_enum_facts,
+    decode_field_facts,
+    decode_function_facts,
+    decode_param_facts,
+    decode_record_facts,
+    decode_snapshot_facts,
+    decode_variable_facts,
+    encode_fact_fields,
+    evidenced_producers,
+)
+from .storage.sectioned_document import (
+    from_sectioned_document,
+    is_sectioned_document,
+    to_sectioned_document,
+)
+from .storage.semantic_ir_codec import decode_semantic_ir, encode_semantic_ir
+from .storage.snapshot_load_normalization import (
+    backfill_missing_elf_binding,
+    build_mode_from_dict,
+    extraction_contract_from_dict,
+    normalize_anonymous_type_spellings_on_load,
+)
+from .storage.surface_graph_codec import decode_surface_graph, encode_surface_graph
 
 # Current schema version for snapshot serialization.
 # Increment this whenever the snapshot format changes in a backward-incompatible way.
@@ -280,6 +322,21 @@ from .model import (
 #     unqualified `typedefs` dict as the fallback source of truth, so
 #     "empty" degrades cleanly to "no extra qualified-identity data
 #     available" rather than being misread as a real fact.
+#   26 — ADR-063 Phase 0: `Fact[T]` siblings for `RecordType.bases_fact`/
+#     `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
+#     `Param.is_va_list_fact` — see `storage/fact_codec.py`.
+#   27 — `Function.is_compiler_generated`: closes the castxml L4 extractor
+#     bug documented in AGENTS.md's "PR C" known-gaps entry, where a
+#     compiler-synthesized implicit special member (or a synthesized
+#     `operator=`, which castxml gives a real-looking Itanium mangled name)
+#     leaked into the L4 source-ABI extractor's reachable declaration
+#     surface as if it were genuine public API. Needs no reliability flag,
+#     unlike v19-v23: `None` (a pre-v27 snapshot's default) is exactly
+#     "not captured", never a real-but-wrong scalar — `entity_from_
+#     function`'s own `api_relevant` exclusion only fires on a confirmed
+#     `True`, so an older snapshot degrades cleanly to today's (buggy)
+#     inclusive behavior rather than being misread as "confirmed
+#     user-written".
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -292,7 +349,7 @@ from .model import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 25
+SCHEMA_VERSION: int = 43  # v43: Variable.is_static persisted (PR #1024 review fix -- closes the plain-C/extern-"C" same-named static-vs-external variable identity collision `tu_merge._variable_key`'s own docstring long documented as a known, accepted limitation; missing on a pre-v43 snapshot loads as False, matching every prior reader's implicit assumption since the field did not exist); v42: ADR-062/063 Phase 8 (redesign) -- the on-disk wire format itself changed (snapshot_to_json() now writes storage.sectioned_document's single-file sectioned envelope instead of a flat document), not just a field. Bumped specifically so a pre-Phase-8 reader (whose own SCHEMA_VERSION was already 41) hits the ">SCHEMA_VERSION and >=_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION" hard-rejection path below instead of silently reading every top-level field as absent/empty -- a same-numbered envelope change would have given that reader no signal at all (Codex review, fresh evidence). This build itself reads the envelope transparently regardless of version, per snapshot_from_dict's own is_sectioned_document check; v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -353,20 +410,27 @@ def _sets_to_lists(obj: Any) -> Any:
 
 
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
-    # asdict() would recursively copy the lazy lookup caches too (wasted work,
-    # and they're dropped below anyway). Clear them for the duration of the
-    # call and restore afterward so this function stays pure from the
-    # caller's perspective — snapshot_to_dict(snap) must not mutate `snap`,
-    # or invalidate an index a caller built and is still holding a reference
-    # to via the object it passed in.
-    saved_caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    # asdict() would recursively copy the lazy lookup caches, and
+    # surface_graph's potentially-large nodes/edges, for nothing --
+    # encode_surface_graph() below unconditionally replaces the latter with
+    # its own to_dict(), never this recursion (Codex review, PR #962). Clear
+    # them for the call and restore after, so this stays pure from the caller.
+    caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    graph = snap.surface_graph
+    # ADR-063 Phase 6 (v38): asdict() recurses into a dict's KEYS, so an
+    # OccurrenceId-keyed mapping raises (unhashable dict key) inside asdict()
+    # itself -- encode_semantic_ir() below owns this field's encoding, from
+    # the still-typed object, exactly as surface_graph's codec does.
+    semantic_ir = snap.semantic_ir
     try:
-        snap._func_by_mangled = None
-        snap._var_by_mangled = None
-        snap._type_by_name = None
+        snap._func_by_mangled = snap._var_by_mangled = snap._type_by_name = None
+        snap.surface_graph = None
+        snap.semantic_ir = None
         d = asdict(snap)
     finally:
-        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = saved_caches
+        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = caches
+        snap.surface_graph = graph
+        snap.semantic_ir = semantic_ir
     d.pop("_func_by_mangled", None)
     d.pop("_var_by_mangled", None)
     d.pop("_type_by_name", None)
@@ -374,62 +438,22 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     d.pop("from_headers_inferred", None)
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
-    # so a reload re-runs the same inference and re-marks it inferred. Writing
-    # ``from_headers: true`` here would promote a guess to explicit header
-    # provenance on the next load, re-enabling source-level param-rename
-    # detection on DWARF-only baselines this is meant to suppress.
+    # so a reload re-runs the same inference and re-marks it inferred, rather
+    # than promoting a guess to explicit provenance and re-enabling source-level
+    # param-rename detection on DWARF-only baselines this is meant to suppress.
     if snap.from_headers_inferred:
         d.pop("from_headers", None)
 
-    # Serialize ElfMetadata enums to strings for JSON compatibility
-    if d.get("elf"):
-        elf = d["elf"]
-        for sym in elf.get("symbols", []):
-            sym["binding"] = (
-                sym["binding"]
-                if isinstance(sym["binding"], str)
-                else sym["binding"].value
-            )
-            sym["sym_type"] = (
-                sym["sym_type"]
-                if isinstance(sym["sym_type"], str)
-                else sym["sym_type"].value
-            )
-        for imp in elf.get("imports", []):
-            imp["binding"] = (
-                imp["binding"]
-                if isinstance(imp["binding"], str)
-                else imp["binding"].value
-            )
-            imp["sym_type"] = (
-                imp["sym_type"]
-                if isinstance(imp["sym_type"], str)
-                else imp["sym_type"].value
-            )
+    # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
+    encode_platform_enums(d)
 
-    # Serialize PeMetadata enums to strings
-    if d.get("pe"):
-        pe = d["pe"]
-        for exp in pe.get("exports", []):
-            exp["sym_type"] = (
-                exp["sym_type"]
-                if isinstance(exp["sym_type"], str)
-                else exp["sym_type"].value
-            )
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
+    encode_fact_fields(d)
 
-    # Serialize MachoMetadata enums to strings
-    if d.get("macho"):
-        macho = d["macho"]
-        for exp in macho.get("exports", []):
-            exp["sym_type"] = (
-                exp["sym_type"]
-                if isinstance(exp["sym_type"], str)
-                else exp["sym_type"].value
-            )
-
-    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs
-    # and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects)
-    converted: dict[str, Any] = _sets_to_lists(d)
+    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first encoded the ADR-063 Phase 2 (c1) `entity_id` carrier (storage/entity_id_codec.py).
+    converted: dict[str, Any] = _sets_to_lists(
+        encode_sidecar_entity_ids(encode_entity_ids(d, snap), snap)
+    )
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
     # them through as Enum instances rather than plain strings; normalize
@@ -442,13 +466,14 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
                 bm[k] = v.value if hasattr(v, "value") else str(v)
 
     # The inline embedded BuildSourcePack carries Path/enum/set-bearing nested
-    # models that asdict() cannot faithfully serialize; replace the raw asdict
-    # output with the pack's canonical inline form (single-artifact UX), or drop
-    # the key entirely when nothing was embedded.
+    # models asdict() cannot faithfully serialize; replace the raw asdict output
+    # with the pack's canonical inline form, or drop the key when nothing was embedded.
     if snap.build_source is not None:
         converted["build_source"] = snap.build_source.to_embedded_dict()
     else:
         converted.pop("build_source", None)
+    encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
+    encode_semantic_ir(converted, snap)  # storage/semantic_ir_codec.py (v38)
 
     # Embed schema version for forward-compatibility.
     # Placed at top level so loaders can inspect it without parsing the full snapshot.
@@ -468,7 +493,7 @@ def _scope_origin_or_unknown(raw: Any) -> ScopeOrigin:
         return ScopeOrigin.UNKNOWN
 
 
-def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
+def _enum_type_from_dict(e: dict[str, Any], schema_version: int) -> EnumType:
     return EnumType(
         name=e["name"],
         members=[
@@ -481,326 +506,24 @@ def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
         is_scoped=e.get("is_scoped"),
         deprecated=e.get("deprecated"),
         qualified_name=e.get("qualified_name"),
+        **decode_enum_facts(e, schema_version),
     )
 
 
 def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
-    return json.dumps(snapshot_to_dict(snap), indent=indent)
-
-
-def _elf_from_dict(e: dict[str, Any]) -> Any:
-    from .elf_metadata import (
-        ElfImport,
-        ElfMetadata,
-        ElfSymbol,
-        SymbolBinding,
-        SymbolType,
-    )
-
-    syms = [
-        ElfSymbol(
-            name=s["name"],
-            binding=SymbolBinding(s.get("binding", "global")),
-            sym_type=SymbolType(s.get("sym_type", "func")),
-            size=s.get("size", 0),
-            version=s.get("version", ""),
-            is_default=s.get("is_default", True),
-            visibility=s.get("visibility", "default"),
-            value_alignment=s.get("value_alignment", 0),
-        )
-        for s in e.get("symbols", [])
-    ]
-    imports = [
-        ElfImport(
-            name=i["name"],
-            binding=SymbolBinding(i.get("binding", "global")),
-            sym_type=SymbolType(i.get("sym_type", "notype")),
-            version=i.get("version", ""),
-            is_default=i.get("is_default", True),
-            version_soname=i.get("version_soname", ""),
-        )
-        for i in e.get("imports", [])
-    ]
-    return ElfMetadata(
-        soname=e.get("soname", ""),
-        needed=e.get("needed", []),
-        rpath=e.get("rpath", ""),
-        runpath=e.get("runpath", ""),
-        versions_defined=e.get("versions_defined", []),
-        versions_required=e.get("versions_required", {}),
-        symbols=syms,
-        imports=imports,
-        interpreter=e.get("interpreter", ""),
-        has_executable_stack=e.get("has_executable_stack", False),
-        relro=e.get("relro", "none"),
-        bind_now=e.get("bind_now", False),
-        is_pie=e.get("is_pie", False),
-        has_stack_canary=e.get("has_stack_canary", False),
-        has_fortify_source=e.get("has_fortify_source", False),
-        has_writable_executable_segment=e.get("has_writable_executable_segment", False),
-        is_symbolic=e.get("is_symbolic", False),
-        has_textrel=e.get("has_textrel", False),
-        pointer_size=e.get("pointer_size", 8),
-        machine=e.get("machine", ""),
-        # Legacy snapshots (written before elf_class existed) carry no class
-        # field; derive it from pointer_size (4→32, 8→64) rather than hard-coding
-        # 64, so a saved 32-bit baseline does not false-positive elf_class_changed.
-        elf_class=e.get("elf_class", 32 if e.get("pointer_size", 8) == 4 else 64),
-        osabi=e.get("osabi", ""),
-        e_flags=e.get("e_flags", 0),
-        abi_flags=frozenset(e.get("abi_flags", [])),
-        has_static_tls=e.get("has_static_tls", False),
-        has_tls_symbols=e.get("has_tls_symbols", False),
-        gnu_properties=frozenset(e.get("gnu_properties", [])),
-        has_dt_relr=e.get("has_dt_relr", False),
-        hash_styles=frozenset(e.get("hash_styles", [])),
-        ei_data=e.get("ei_data", ""),
-        min_kernel_version=e.get("min_kernel_version", ""),
-        # Tri-state loader-contract fields: absent key (legacy snapshot) must
-        # stay None ("not captured"), not default to a comparable value.
-        dynamic_flags=(
-            frozenset(e["dynamic_flags"])
-            if e.get("dynamic_flags") is not None
-            else None
+    # ADR-062/063 Phase 8 (redesign): the file this function's own callers
+    # (`write_snapshot`/`save_snapshot`) actually write to disk is now the
+    # single-file sectioned shape (`storage.sectioned_document`) by
+    # default -- `snapshot_to_dict()` itself keeps returning the flat shape
+    # unchanged for every other caller (tests, `canonical_form` comparisons,
+    # programmatic manipulation); only the JSON-file boundary changes.
+    # `snapshot_from_dict` transparently unwraps either shape, so an older
+    # flat `.abi.json` a prior build wrote stays fully readable.
+    return json.dumps(
+        to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
         ),
-        has_init=e.get("has_init"),
-        has_fini=e.get("has_fini"),
-    )
-
-
-def _pe_from_dict(e: dict[str, Any]) -> Any:
-    from .pe_metadata import PeExport, PeMetadata, PeSymbolType
-
-    exports = [
-        PeExport(
-            name=x["name"],
-            ordinal=x.get("ordinal", 0),
-            sym_type=PeSymbolType(x.get("sym_type", "exported")),
-            forwarder=x.get("forwarder", ""),
-        )
-        for x in e.get("exports", [])
-    ]
-    return PeMetadata(
-        machine=e.get("machine", ""),
-        characteristics=e.get("characteristics", 0),
-        dll_characteristics=e.get("dll_characteristics", 0),
-        exports=exports,
-        imports=e.get("imports", {}),
-        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
-        delay_imports=e.get("delay_imports"),
-        file_version=e.get("file_version", ""),
-        product_version=e.get("product_version", ""),
-        subsystem_version=e.get("subsystem_version", ""),
-    )
-
-
-def _macho_from_dict(e: dict[str, Any]) -> Any:
-    from .macho_metadata import MachoExport, MachoMetadata, MachoSymbolType
-
-    exports = [
-        MachoExport(
-            name=x["name"],
-            sym_type=MachoSymbolType(x.get("sym_type", "exported")),
-            is_weak=x.get("is_weak", False),
-        )
-        for x in e.get("exports", [])
-    ]
-    return MachoMetadata(
-        cpu_type=e.get("cpu_type", ""),
-        cpu_types=e.get("cpu_types", []),
-        filetype=e.get("filetype", ""),
-        flags=e.get("flags", 0),
-        install_name=e.get("install_name", ""),
-        dependent_libs=e.get("dependent_libs", []),
-        reexported_libs=e.get("reexported_libs", []),
-        exports=exports,
-        imported_symbols=e.get("imported_symbols", []),
-        current_version=e.get("current_version", ""),
-        compat_version=e.get("compat_version", ""),
-        min_os_version=e.get("min_os_version", ""),
-        # Tri-state: absent key (legacy snapshot) stays None ("not captured").
-        rpaths=e.get("rpaths"),
-    )
-
-
-def _dwarf_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-
-    structs = {
-        name: StructLayout(
-            name=s.get("name", name),
-            byte_size=s.get("byte_size", 0),
-            alignment=s.get("alignment", 0),
-            fields=[
-                FieldInfo(
-                    name=f.get("name", ""),
-                    type_name=f.get("type_name", "unknown"),
-                    byte_offset=f.get("byte_offset", 0),
-                    byte_size=f.get("byte_size", 0),
-                    bit_offset=f.get("bit_offset", 0),
-                    bit_size=f.get("bit_size", 0),
-                )
-                for f in s.get("fields", [])
-            ],
-            is_union=s.get("is_union", False),
-        )
-        for name, s in d.get("structs", {}).items()
-    }
-
-    enums = {
-        name: EnumInfo(
-            name=e.get("name", name),
-            underlying_byte_size=e.get("underlying_byte_size", 0),
-            members=e.get("members", {}),
-        )
-        for name, e in d.get("enums", {}).items()
-    }
-
-    return DwarfMetadata(
-        structs=structs,
-        enums=enums,
-        base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
-        has_dwarf=d.get("has_dwarf", False),
-    )
-
-
-def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
-
-    tc = d.get("toolchain", {})
-    toolchain = ToolchainInfo(
-        producer_string=tc.get("producer_string", ""),
-        compiler=tc.get("compiler", ""),
-        version=tc.get("version", ""),
-        abi_flags=set(tc.get("abi_flags", [])),
-        vector_abi_flags=set(tc.get("vector_abi_flags", [])),
-    )
-    return AdvancedDwarfMetadata(
-        has_dwarf=d.get("has_dwarf", False),
-        target_arch=d.get("target_arch", ""),
-        toolchain=toolchain,
-        calling_conventions=d.get("calling_conventions", {}),
-        value_abi_traits=d.get("value_abi_traits", {}),
-        return_value_sizes=d.get("return_value_sizes", {}),
-        return_memory_classified=set(d.get("return_memory_classified", [])),
-        packed_structs=set(d.get("packed_structs", [])),
-        all_struct_names=set(d.get("all_struct_names", [])),
-        frame_registers=d.get("frame_registers", {}),
-        callee_saved_regs={
-            k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()
-        },
-    )
-
-
-def _sycl_from_dict(d: dict[str, Any]) -> Any:
-    from .sycl_metadata import SyclMetadata, SyclPluginInfo
-
-    plugins = [
-        SyclPluginInfo(
-            name=p.get("name", ""),
-            library=p.get("library", ""),
-            interface_type=p.get("interface_type", "pi"),
-            pi_version=p.get("pi_version", ""),
-            entry_points=p.get("entry_points", []),
-            backend_type=p.get("backend_type", ""),
-            min_driver_version=p.get("min_driver_version"),
-        )
-        for p in d.get("plugins", [])
-    ]
-    return SyclMetadata(
-        implementation=d.get("implementation", ""),
-        runtime_version=d.get("runtime_version", ""),
-        pi_version=d.get("pi_version", ""),
-        plugins=plugins,
-        plugin_search_paths=d.get("plugin_search_paths", []),
-    )
-
-
-def _kabi_from_dict(d: dict[str, Any]) -> Any:
-    from .symvers_metadata import KabiEntry, KabiMetadata
-
-    entries = {
-        sym: KabiEntry(
-            crc=e.get("crc", ""),
-            symbol=e.get("symbol", sym),
-            module=e.get("module", ""),
-            export_type=e.get("export_type", ""),
-            namespace=e.get("namespace", ""),
-        )
-        for sym, e in (d.get("entries", {}) or {}).items()
-    }
-    return KabiMetadata(entries=entries)
-
-
-def _numpy_capi_from_dict(d: dict[str, Any]) -> Any:
-    from .numpy_capi import NumPyCapiSurface
-
-    return NumPyCapiSurface(
-        consumes_array_api=d.get("consumes_array_api", False),
-        consumes_ufunc_api=d.get("consumes_ufunc_api", False),
-        capi_target_version=d.get("capi_target_version"),
-    )
-
-
-def _python_ext_from_dict(d: dict[str, Any]) -> Any:
-    from .python_ext import PythonExtMetadata
-
-    declared = d.get("declared_abi3")
-    # JSON has no tuples: a persisted (major, minor) floor round-trips as a list.
-    declared_abi3 = (
-        (int(declared[0]), int(declared[1]))
-        if isinstance(declared, (list, tuple)) and len(declared) == 2
-        else None
-    )
-    return PythonExtMetadata(
-        module_name=d.get("module_name"),
-        init_symbol=d.get("init_symbol"),
-        python_major=d.get("python_major"),
-        soabi_tag=d.get("soabi_tag"),
-        limited_api=bool(d.get("limited_api", False)),
-        declared_abi3=declared_abi3,
-        free_threaded=bool(d.get("free_threaded", False)),
-        cpython_imports=list(d.get("cpython_imports", [])),
-        cpython_dlls=list(d.get("cpython_dlls", [])),
-    )
-
-
-def _python_api_from_dict(d: dict[str, Any]) -> Any:
-    from .python_api import PyClass, PyFunction, PyParameter, PythonApiSurface
-
-    def _param(p: dict[str, Any]) -> PyParameter:
-        return PyParameter(
-            name=p.get("name", ""),
-            kind=p.get("kind", "positional_or_keyword"),
-            has_default=bool(p.get("has_default", False)),
-            annotation=p.get("annotation"),
-        )
-
-    def _func(fn: dict[str, Any]) -> PyFunction:
-        return PyFunction(
-            name=fn.get("name", ""),
-            parameters=[_param(p) for p in fn.get("parameters", [])],
-            return_annotation=fn.get("return_annotation"),
-            is_async=bool(fn.get("is_async", False)),
-            descriptor=fn.get("descriptor", "function"),
-            overloads=[_func(v) for v in fn.get("overloads", [])],
-        )
-
-    functions = {name: _func(fn) for name, fn in (d.get("functions") or {}).items()}
-    classes = {
-        name: PyClass(
-            name=c.get("name", name),
-            methods={m: _func(fn) for m, fn in (c.get("methods") or {}).items()},
-        )
-        for name, c in (d.get("classes") or {}).items()
-    }
-    return PythonApiSurface(
-        module_name=d.get("module_name"),
-        source=d.get("source", "stub"),
-        source_path=d.get("source_path"),
-        functions=functions,
-        classes=classes,
-        parse_ok=bool(d.get("parse_ok", True)),
+        indent=indent,
     )
 
 
@@ -818,42 +541,17 @@ def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
     return parser(raw) if isinstance(raw, dict) else None
 
 
-def _backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
-    """Backfill Function/Variable.elf_binding from an already-loaded
-    ``elf.symbols`` for a snapshot serialized before this field existed
-    (Codex review, fresh evidence).
-
-    A pre-this-PR snapshot's own ``elf`` block already carries the exact
-    same fact ``dumper_elf_symbols._populate_elf_visibility`` reads it
-    from at dump time -- only the newer per-declaration ``elf_binding``
-    key was never written at serialization time, so loading it as ``None``
-    (the ordinary missing-key convention) would make a fresh ``binding:``
-    suppression selector fail closed against *every* already-archived
-    baseline, not just genuinely-unknown-binding cases, until each one is
-    regenerated -- which is not always possible for an archived release.
-    Only fills a ``None``: an explicitly serialized value from a v16+
-    writer is preserved untouched, never recomputed.
-
-    Deliberately scoped to ``elf_binding`` alone -- ``elf_visibility`` has
-    the identical legacy-backfill gap but predates this PR, is unrelated to
-    the field this PR adds, and is left as it already was.
-    """
-    if snap.elf is None:
-        return
-    sym_map = snap.elf.symbol_map
-    for func in snap.functions:
-        if func.elf_binding is None:
-            elf_sym = sym_map.get(func.mangled)
-            if elf_sym is not None:
-                func.elf_binding = elf_sym.binding
-    for var in snap.variables:
-        if var.elf_binding is None:
-            elf_sym = sym_map.get(var.mangled)
-            if elf_sym is not None:
-                var.elf_binding = elf_sym.binding
-
-
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
+    # ADR-062/063 Phase 8 (redesign): a document written as the single-file
+    # sectioned shape (`storage.sectioned_document`) is unwrapped into this
+    # function's own long-established flat shape *before* anything below
+    # runs -- every existing reliability-backfill/schema-version rule stays
+    # exactly as it was, now just fed a document `export_legacy_snapshot`
+    # reconstructed rather than one written flat. `is_sectioned_document`
+    # checks for a `"sections"` key, never a real `AbiSnapshot` field, so a
+    # flat document from any schema version cannot collide with it.
+    if is_sectioned_document(d):
+        d = from_sectioned_document(d)
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
@@ -903,6 +601,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     pointer_depth=p.get("pointer_depth", 0),
                     is_restrict=p.get("is_restrict", False),
                     is_va_list=p.get("is_va_list", False),
+                    **decode_param_facts(p, _schema_version),
                 )
                 for p in f.get("params", [])
             ],
@@ -958,6 +657,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             exception_spec=f.get("exception_spec"),
             deprecated=f.get("deprecated"),
             is_override=f.get("is_override"),
+            # Tri-state (v27) — missing on a pre-v27 snapshot loads as None.
+            is_compiler_generated=f.get("is_compiler_generated"),
+            **decode_function_facts(f, _schema_version),
         )
         for f in d.get("functions", [])
     ]
@@ -981,6 +683,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_binding=SymbolBinding(v["elf_binding"])
             if v.get("elf_binding")
             else None,
+            # Missing on a pre-v43 snapshot (predates this field) → False,
+            # matching every prior reader's implicit assumption (the field
+            # did not exist, so nothing distinguished a static variable
+            # anyway).
+            is_static=v.get("is_static", False),
+            **decode_variable_facts(v, _schema_version),
         )
         for v in d.get("variables", [])
     ]
@@ -1003,6 +711,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     access=AccessLevel(f.get("access", "public")),
                     default=f.get("default"),
                     deprecated=f.get("deprecated"),
+                    **decode_field_facts(f, _schema_version),
                 )
                 for f in t.get("fields", [])
             ],
@@ -1029,10 +738,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             qualified_name=t.get("qualified_name"),
             is_abstract=t.get("is_abstract"),
             deprecated=t.get("deprecated"),
+            **decode_record_facts(t, _schema_version),
         )
         for t in d.get("types", [])
     ]
-    enums = [_enum_type_from_dict(e) for e in d.get("enums", [])]
+    enums = [_enum_type_from_dict(e, _schema_version) for e in d.get("enums", [])]
+    decode_entity_ids(d, functions=funcs, variables=variables, types=types, enums=enums)
+    sidecar_entity_ids = decode_sidecar_entity_ids(d)
     typedefs: dict[str, str] = d.get("typedefs", {})
     typedefs_qualified: dict[str, str] = d.get("typedefs_qualified", {})
     elf_data = d.get("elf")
@@ -1041,9 +753,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     dwarf_data = d.get("dwarf")
     dwarf_adv_data = d.get("dwarf_advanced")
 
-    elf = _sub_block(_elf_from_dict, elf_data)
-    pe = _sub_block(_pe_from_dict, pe_data)
-    macho = _sub_block(_macho_from_dict, macho_data)
+    elf = _sub_block(lambda e: _elf_from_dict(e, _schema_version), elf_data)
+    pe = _sub_block(lambda e: _pe_from_dict(e, _schema_version), pe_data)
+    macho = _sub_block(lambda e: _macho_from_dict(e, _schema_version), macho_data)
     dwarf = _sub_block(_dwarf_from_dict, dwarf_data)
     dwarf_advanced = _sub_block(_dwarf_advanced_from_dict, dwarf_adv_data)
 
@@ -1083,14 +795,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 
     # Rehydrate BuildMode (schema v5). Missing key = older snapshot →
     # leave as None so build-mode-aware detectors fall back to "unknown".
-    build_mode = _build_mode_from_dict(d.get("build_mode"))
+    build_mode = build_mode_from_dict(d.get("build_mode"))
 
     # Build/source pack reference (schema v7, ADR-028). Optional: a missing key
-    # on an older snapshot loads as None. A malformed (non-dict) value is ignored
-    # rather than aborting the load, consistent with the rest of this loader.
-    # Back-compat: snapshots written before the evidence→buildsource rename store
-    # the ref under the legacy ``evidence_pack`` key. The ref shape is unchanged,
-    # so we fall back to it to keep existing ``.abi.json`` baselines readable.
+    # on an older snapshot loads as None; a malformed (non-dict) value is ignored
+    # rather than aborting the load. Back-compat: snapshots written before the
+    # evidence→buildsource rename store the (unchanged) ref shape under the
+    # legacy ``evidence_pack`` key, which this falls back to when present.
     ep_raw = d.get("build_source_pack")
     if ep_raw is None:
         ep_raw = d.get("evidence_pack")
@@ -1343,10 +1054,45 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS
         )
 
+    # ADR-063 Phase 0 (schema v26) and Phase 5's own case-(a) batches: see
+    # storage/fact_codec.py. One call, not one per converted field -- every
+    # rule it applies is "a document predating this field's own Fact[T]
+    # conversion carries a value its snapshot-level reliability flag says
+    # cannot be trusted", and every such flag is resolved by the time we get
+    # here -- which is why this call sits below every one of those flag
+    # computations rather than in the middle of them.
+    apply_legacy_fact_backfill(
+        d,
+        types,
+        funcs,
+        _schema_version,
+        clang_vtable_facts_reliable_value,
+        clang_va_list_facts_reliable_value,
+        ast_producer_value,
+        # Which producers this document actually evidences -- recorded (never
+        # inferred) header provenance, plus its own platform. A debug block
+        # names no producer (BTF/CTF/PDB all write into the DWARF blocks), so
+        # none is credited from one. See
+        # storage/fact_backfill.evidenced_producers for why "which backend
+        # could produce this fact" is the wrong question here.
+        evidenced=evidenced_producers(
+            header_provenance_confirmed=from_headers and not from_headers_inferred,
+            ast_producer=ast_producer_value,
+            platform=d.get("platform"),
+        ),
+        variables=variables,
+        enums=enums,
+        header_cv_facts_reliable_value=header_cv_facts_reliable_value,
+        clang_field_initializer_facts_reliable_value=clang_field_initializer_facts_reliable_value,
+        clang_deprecation_facts_reliable_value=clang_deprecation_facts_reliable_value,
+        clang_restrict_facts_reliable_value=clang_restrict_facts_reliable_value,
+        castxml_var_access_facts_reliable_value=castxml_var_access_facts_reliable_value,
+    )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
-    contract = _extraction_contract_from_dict(d.get("contract"))
+    contract = extraction_contract_from_dict(d.get("contract"))
     # ADR-050 D5 (G32 Phase D) — resolved SYCL/DPC++ "host"/"device" kind.
     # Missing key (every pre-Phase-D snapshot) loads as None (Codex review:
     # snapshot_to_dict already writes this field, but snapshot_from_dict
@@ -1396,6 +1142,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         enums=enums,
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
+        typedef_entity_ids=sidecar_entity_ids["typedef_entity_ids"],
+        constant_entity_ids=sidecar_entity_ids["constant_entity_ids"],
         elf=elf,
         pe=pe,
         macho=macho,
@@ -1423,6 +1171,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         frontend_context_kind=frontend_context_kind,
         dependency_scope=dependency_scope,
         ast_resolved_standard=ast_resolved_standard,
+        **decode_snapshot_facts(d, _schema_version),
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,
         ast_sysroot=ast_sysroot,
@@ -1495,6 +1244,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # ADR-050 D1 — extraction-contract fingerprints (v12).
         contract=contract,
     )
+    decode_surface_graph(d, snap)  # storage/surface_graph_codec.py (v29)
+    decode_semantic_ir(d, snap)  # storage/semantic_ir_codec.py (v38)
 
     # G14: derive the CPython extension surface for snapshots that predate the
     # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
@@ -1643,108 +1394,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             stacklevel=2,
         )
 
-    _backfill_missing_elf_binding(snap)
-    return snap
-
-
-def _extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
-    """Convert a serialized ExtractionContract dict (or None) back into the
-    typed dataclass (ADR-050 D1). Returns None when the field is missing
-    (every snapshot predating schema v12) or malformed."""
-    if not isinstance(raw, dict):
-        return None
-    profile_fingerprint = raw.get("profile_fingerprint")
-    scope_fingerprint = raw.get("scope_fingerprint")
-    profile_fields = raw.get("profile_fields")
-    scope_fields = raw.get("scope_fields")
-    return ExtractionContract(
-        profile_fingerprint=profile_fingerprint
-        if isinstance(profile_fingerprint, str)
-        else None,
-        scope_fingerprint=scope_fingerprint
-        if isinstance(scope_fingerprint, str)
-        else None,
-        profile_fields={str(k): str(v) for k, v in profile_fields.items()}
-        if isinstance(profile_fields, dict)
-        else {},
-        scope_fields={str(k): str(v) for k, v in scope_fields.items()}
-        if isinstance(scope_fields, dict)
-        else {},
-    )
-
-
-def _build_mode_from_dict(raw: Any) -> BuildMode | None:
-    """Convert a serialized BuildMode dict (or None) back into the
-    typed dataclass. Returns None when the field is missing (older
-    snapshots) or malformed."""
-    if not isinstance(raw, dict):
-        return None
-    from .build_mode import (
-        BuildMode,
-        BuildModeProvenance,
-        CompilerFamily,
-        CxxStandard,
-        GlibcxxDualAbi,
-        StdlibFamily,
-    )
-
-    def _enum_or(cls: type, value: Any, default: Any) -> Any:
-        if value is None:
-            return default
-        try:
-            return cls(value)
-        except (ValueError, KeyError):
-            return default
-
-    # Validate provenance shape: a malformed snapshot may carry a
-    # non-dict value (string/list from hand-edited JSON, or a partial
-    # corruption). Per the function contract, return None for
-    # malformed inputs rather than raising at .get().
-    prov_raw = raw.get("provenance")
-    if prov_raw is None:
-        prov_raw = {}
-    if not isinstance(prov_raw, dict):
-        return None
-    provenance = BuildModeProvenance(
-        raw_producer=prov_raw.get("raw_producer"),
-        raw_comment=prov_raw.get("raw_comment"),
-        compiler_version=prov_raw.get("compiler_version"),
-    )
-
-    # Coerce libcpp_abi_version: int passes through; numeric string
-    # (some YAML/JSON producers emit "1" instead of 1) coerces; anything
-    # else (bool wraps as 0/1 which would be misleading; lists/dicts)
-    # falls back to None.
-    libcpp_raw = raw.get("libcpp_abi_version")
-    if isinstance(libcpp_raw, bool):
-        libcpp_abi_version: int | None = None
-    elif isinstance(libcpp_raw, int):
-        libcpp_abi_version = libcpp_raw
-    elif isinstance(libcpp_raw, str) and libcpp_raw.isdigit():
-        libcpp_abi_version = int(libcpp_raw)
-    else:
-        libcpp_abi_version = None
-
-    return BuildMode(
-        compiler_family=_enum_or(
-            CompilerFamily,
-            raw.get("compiler_family"),
-            CompilerFamily.UNKNOWN,
-        ),
-        language_std=_enum_or(
-            CxxStandard,
-            raw.get("language_std"),
-            CxxStandard.UNKNOWN,
-        ),
-        stdlib=_enum_or(StdlibFamily, raw.get("stdlib"), StdlibFamily.UNKNOWN),
-        glibcxx_dual_abi=_enum_or(
-            GlibcxxDualAbi,
-            raw.get("glibcxx_dual_abi"),
-            GlibcxxDualAbi.NOT_APPLICABLE,
-        ),
-        libcpp_abi_version=libcpp_abi_version,
-        provenance=provenance,
-    )
+    backfill_missing_elf_binding(snap)
+    normalize_anonymous_type_spellings_on_load(snap)
+    return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 
 def load_snapshot(path: str | Path) -> AbiSnapshot:
@@ -1753,6 +1405,38 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
     from .snapshot_io import read_snapshot_text
 
     return snapshot_from_dict(json.loads(read_snapshot_text(path)))
+
+
+def load_snapshot_document(path: str | Path) -> dict[str, Any]:
+    """*path*'s flat, `snapshot_to_dict()`-shaped document — the raw dict,
+    not a typed `AbiSnapshot` (`load_snapshot`'s own return). For a
+    document-only key `AbiSnapshot` itself does not carry (e.g. a real
+    `dump`'s own `dump_provenance`, folded in by the CLI after
+    `snapshot_to_dict()` already ran) rather than any real snapshot field.
+
+    Transparently unwraps the single-file sectioned shape
+    (`storage.sectioned_document`, Phase 8 redesign) the same way
+    `snapshot_from_dict` does internally, so a caller never needs to know
+    which of the two on-disk shapes *path* actually is.
+    """
+    from .snapshot_io import read_snapshot_text
+
+    parsed: Any = json.loads(read_snapshot_text(path))
+    # json.loads() can return a list/str/number/bool/None for arbitrary
+    # JSON text -- this function's own dict[str, Any] contract (and
+    # is_sectioned_document's "sections" key lookup below) both assume a
+    # JSON object, so a non-dict root must fail loudly here rather than
+    # surface as a confusing downstream AttributeError/KeyError, or (for a
+    # list/str, where `in` is still syntactically valid but semantically
+    # wrong) silently misclassify as flat/sectioned (Codex review).
+    if not isinstance(parsed, dict):
+        raise SnapshotError(
+            f"{path}: expected a JSON object at the document root, got "
+            f"{type(parsed).__name__}"
+        )
+    if is_sectioned_document(parsed):
+        return from_sectioned_document(parsed)
+    return parsed
 
 
 def save_snapshot(
@@ -1795,192 +1479,73 @@ def write_snapshot(
     )
 
 
+# ADR-061: BundleFacts (de)serialization moved to bundle_facts_serialization.py
+# (classified `workflows`, alongside the `BundleFacts` it serializes) --
+# bundle_facts.py is itself at its own 800-line production cap, so this is a
+# new sibling rather than growing that module. Each wrapper below resolves
+# its implementation via `importlib.import_module` (a runtime call, not a
+# static `ast.Import`/`ast.ImportFrom` node) rather than a
+# `from .bundle_facts_serialization import ...` -- that module itself needs
+# `snapshot_to_dict`/`snapshot_from_dict` from *this* module, and a static
+# import in both directions is exactly the `serialization <->
+# bundle_facts_serialization` cycle `scripts/check_ai_readiness.py`'s
+# `import-cycle-growth` check flags via a full `ast.walk` (so even a
+# function-scoped `from ... import ...` counts) -- the same reason
+# `abicheck.cli`'s own `__getattr__` resolves its moved names through
+# `abicheck.frontends.cli.moved` instead of importing them back. Unlike that
+# facade, these are real typed `def`s rather than a blanket module
+# `__getattr__`: these four names are called with real argument/return types
+# by other first-party modules (`bundle_variants_config.py`,
+# `cli_compare_release_helpers.py`, ...), and `__getattr__(...) -> Any` would
+# silently erase that checking for every caller reaching them through this
+# module's documented `from abicheck.serialization import ...` path (Codex
+# review).
+def _bundle_facts_serialization() -> Any:
+    import importlib
+
+    return importlib.import_module(".bundle_facts_serialization", __package__)
+
+
 def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
-    JSON-able dict (G38 Phase 2) — lives here, not in ``bundle_facts.py``
-    itself, the same split :class:`AbiSnapshot`'s own serialization
-    already uses (the model/data-shape module stays a leaf; every
-    snapshot's to_dict/from_dict lives in this module instead). Putting it
-    in ``bundle_facts.py`` would create a real import cycle: this
-    function needs ``snapshot_to_dict`` from here, while this module's own
-    ``save_bundle_facts``/``load_bundle_facts`` need ``BundleFacts`` from
-    there.
-    """
-    from .bundle_manifest import manifest_to_dict
-
-    return {
-        "schema_version": facts.schema_version,
-        "variant_fingerprint": facts.variant_fingerprint,
-        "per_library_snapshots": {
-            name: snapshot_to_dict(snap)
-            for name, snap in facts.per_library_snapshots.items()
-        },
-        "filesystem_aliases": {
-            name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
-        },
-        "library_filenames": dict(facts.library_filenames),
-        "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
-    }
+    JSON-able dict (G38 Phase 2). See
+    :func:`abicheck.bundle_facts_serialization.bundle_facts_to_dict`."""
+    return cast(
+        "dict[str, Any]", _bundle_facts_serialization().bundle_facts_to_dict(facts)
+    )
 
 
 def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
-    """Inverse of :func:`bundle_facts_to_dict`.
+    """Inverse of :func:`bundle_facts_to_dict`. See
+    :func:`abicheck.bundle_facts_serialization.bundle_facts_from_dict`."""
+    return cast("BundleFacts", _bundle_facts_serialization().bundle_facts_from_dict(d))
 
-    Rejects a container ``schema_version`` newer than this reader's own
-    :data:`~abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION` outright,
-    mirroring :func:`snapshot_from_dict`'s hard rejection of a
-    too-new-to-read-safely snapshot. Unlike that function's own
-    warn-below/hard-reject-above-threshold split (justified there by many
-    already-shipped versions with a documented, field-by-field forward-
-    compatible history), ``BundleFacts`` has had exactly one shape so far
-    — there is no "this reader has no code path that looks for a field
-    introduced after some known-safe version" nuance to draw a softer line
-    at yet. Warn-and-continue would silently score a comparison against a
-    newer container whose fields (e.g. a future per-variant comparability
-    gate) this reader's ``compare_bundle_from_facts()`` doesn't know to
-    consult (Codex review).
-    """
-    from .bundle_facts import (
-        BUNDLE_FACTS_SCHEMA_VERSION,
-        DEFAULT_VARIANT_FINGERPRINT,
-        BundleFacts,
-    )
-    from .bundle_manifest import manifest_from_dict
 
-    schema_version = int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION))
-    if schema_version > BUNDLE_FACTS_SCHEMA_VERSION:
-        raise IncompatibleSnapshotSchemaError(
-            f"Bundle facts schema_version {schema_version} is newer than this "
-            f"abicheck (supports up to schema_version "
-            f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
-            "bundle facts file."
-        )
-    # "per_library_snapshots" is mandatory, not merely defaulted: a
-    # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
-    # must not silently load as a valid, current-schema *empty* bundle --
-    # a later compare_bundle_from_facts() would then score every new
-    # library against an invented empty baseline instead of the caller
-    # ever finding out the input was invalid (Codex review, fresh
-    # evidence). A present-but-wrong-shaped value (not a mapping) is
-    # rejected the same way, rather than raising an opaque AttributeError
-    # out of the dict comprehension below.
-    if "per_library_snapshots" not in d:
-        raise ValueError(
-            "bundle facts: missing required top-level 'per_library_snapshots' mapping"
-        )
-    raw_snapshots = d["per_library_snapshots"]
-    if not isinstance(raw_snapshots, dict):
-        raise ValueError(
-            "bundle facts: 'per_library_snapshots' must be a mapping, got "
-            f"{type(raw_snapshots).__name__}"
-        )
-    raw_manifest = d.get("manifest")
-    return BundleFacts(
-        schema_version=schema_version,
-        variant_fingerprint=str(
-            d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
+def load_bundle_facts(
+    path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None
+) -> BundleFacts:
+    """Load a BundleFacts. See
+    :func:`abicheck.bundle_facts_serialization.load_bundle_facts`."""
+    return cast(
+        "BundleFacts",
+        _bundle_facts_serialization().load_bundle_facts(
+            path, format=format, max_json_object_nodes=max_json_object_nodes
         ),
-        per_library_snapshots={
-            name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()
-        },
-        filesystem_aliases=_validated_alias_map(d.get("filesystem_aliases", {})),
-        library_filenames=_validated_filename_map(d.get("library_filenames", {})),
-        manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
-
-
-def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
-    """Validate and convert a persisted ``filesystem_aliases`` mapping.
-
-    ``tuple(aliases)`` on a *string* value (e.g. a hand-edited or corrupt
-    ``"libfoo.so": "libfoo.so.1"`` instead of the documented
-    ``"libfoo.so": ["libfoo.so.1"]``) silently iterates its characters
-    instead of raising -- reconstruction then indexes single-letter
-    aliases (``"l"``, ``"i"``, ...) rather than the real alias, so a real
-    ``DT_NEEDED`` edge quietly fails to resolve with no load-time error at
-    all (Codex review, fresh evidence). Rejects a non-mapping container, a
-    non-list value, and a list with a non-string element -- the last of
-    which ``tuple()`` alone would otherwise accept silently too.
-    """
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"bundle facts: 'filesystem_aliases' must be a mapping, got "
-            f"{type(raw).__name__}"
-        )
-    aliases: dict[str, tuple[str, ...]] = {}
-    for name, values in raw.items():
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise ValueError(
-                f"bundle facts: 'filesystem_aliases[{name!r}]' must be a list of "
-                f"strings, got {values!r}"
-            )
-        aliases[name] = tuple(values)
-    return aliases
-
-
-def _validated_filename_map(raw: object) -> dict[str, str]:
-    """Validate and convert a persisted ``library_filenames`` mapping.
-
-    A bare ``str(filename)`` coercion silently accepts a malformed value
-    (JSON ``null`` becomes the invented basename ``"None"``, a number
-    becomes its own string form) instead of rejecting the corrupt baseline
-    -- with a no-``DT_SONAME`` library and cohort checking enabled,
-    ``bundle._detect_soname_skew()``'s replay fallback would then derive a
-    SONAME major from that fabricated name, silently omitting or altering
-    a ``bundle_soname_skew`` finding rather than surfacing the invalid
-    input (Codex review, fresh evidence). Mirrors
-    :func:`_validated_alias_map`'s rejection shape.
-    """
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"bundle facts: 'library_filenames' must be a mapping, got "
-            f"{type(raw).__name__}"
-        )
-    filenames: dict[str, str] = {}
-    for name, filename in raw.items():
-        if not isinstance(filename, str):
-            raise ValueError(
-                f"bundle facts: 'library_filenames[{name!r}]' must be a string, "
-                f"got {filename!r}"
-            )
-        filenames[name] = filename
-    return filenames
-
-
-def load_bundle_facts(path: str | Path) -> BundleFacts:
-    """Load a :class:`~abicheck.bundle_facts.BundleFacts` from *path*,
-    transparently handling plain, gzip, and zstd storage (ADR-059,
-    detected from magic bytes) — the G38 Phase 2 counterpart to
-    :func:`load_snapshot`."""
-    from .snapshot_io import read_snapshot_text
-
-    return bundle_facts_from_dict(json.loads(read_snapshot_text(path)))
 
 
 def save_bundle_facts(
     facts: BundleFacts,
     path: str | Path,
     *,
+    format: str = "json",
     compression: str = "auto",
 ) -> SnapshotWriteResult:
-    """Save *facts* to *path* — the G38 Phase 2 counterpart to
-    :func:`write_snapshot`. Same *compression* contract (``"auto"``
-    inferred from *path*'s suffix, ``"none"``, ``"gzip"``, ``"zstd"``)."""
-    from .snapshot_io import SnapshotCompression, write_snapshot_text
-
-    # sort_keys=True (matching no other writer in this module -- see
-    # snapshot_to_json's own plain json.dumps) would recursively re-sort
-    # every dict's keys, including each manifest ManifestEntry's own
-    # instantiations dict -- whose iteration order IS the C++ template
-    # argument order (_expand_instantiations()'s own contract). Sorting it
-    # alphabetically corrupts a valid "T, U" contract into "T, U" reloading
-    # as "T, U" only by coincidence -- a real reorder (e.g. "Method,
-    # Precision" -> alphabetically "Method, Precision" already matches, but
-    # "Precision, Method" would sort back to "Method, Precision") produces
-    # a manifest entry that no longer matches any real symbol, a false
-    # bundle_manifest_instantiation_removed (Codex review, fresh evidence).
-    return write_snapshot_text(
-        json.dumps(bundle_facts_to_dict(facts), indent=2),
-        path,
-        compression=SnapshotCompression(compression),
+    """Save *facts*. See
+    :func:`abicheck.bundle_facts_serialization.save_bundle_facts`."""
+    return cast(
+        "SnapshotWriteResult",
+        _bundle_facts_serialization().save_bundle_facts(
+            facts, path, format=format, compression=compression
+        ),
     )

@@ -70,6 +70,7 @@ def check_hidden_friend_change(
         ),
         removed_values=("hidden friend", "non-friend"),
         caused_by_type=owner,
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -116,6 +117,7 @@ def diff_inline_hidden_friends(
                         symbol=mangled,
                         old=f_old.name,
                         caused_by_type=f_old.hidden_friend_owner,
+                        entity_id=f_old.entity_id,
                     )
                 )
             continue
@@ -132,6 +134,7 @@ def diff_inline_hidden_friends(
                     symbol=mangled,
                     new=f_new.name,
                     caused_by_type=f_new.hidden_friend_owner,
+                    entity_id=f_new.entity_id,
                 )
             )
     return changes

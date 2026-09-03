@@ -37,10 +37,17 @@ here because they all emit the same ``PyInit_*`` export and link ``libpython``.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import stable_abi
+
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# detects them and re-exports them so the historical
+# ``from abicheck.python_ext import PythonExtMetadata`` spelling keeps resolving.
+from .model.python_facts import (
+    PythonExtMetadata as PythonExtMetadata,
+)
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -60,16 +67,8 @@ _CP_ABI3_RE = re.compile(r"cp(\d)(\d+)-abi3")
 #: A bare ``abi3`` token anywhere in the name (``foo.abi3.so``, ``…-abi3-…``).
 _ABI3_TAG_RE = re.compile(r"(?:^|[._-])abi3(?:[._-]|$)")
 
-#: ``PyInit_<mod>`` (Py3) / ``init<mod>`` (Py2) module init export.
+#: ``PyInit_<mod>`` — the Python 3 module init export.
 _PYINIT3_RE = re.compile(r"^PyInit_(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
-_PYINIT2_RE = re.compile(r"^init(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
-
-#: The ONE version-neutral Windows CPython import library the Stable ABI links
-#: against. Every other CPython import DLL — ``python311.dll``, the free-threaded
-#: ``python313t.dll``, the debug ``python311_d.dll``, … — is version-specific and
-#: pins the module to one interpreter ABI, so for the abi3 contract anything but
-#: this exact name is a violation.
-_STABLE_PYTHON_DLL = "python3.dll"
 
 #: A CPython runtime import DLL, by name: ``python3.dll`` / ``python311.dll`` /
 #: ``python313t.dll`` / ``python311_d.dll``. Requires a digit right after
@@ -85,86 +84,6 @@ def _is_cpython_dll(name: str) -> bool:
     return bool(_CPYTHON_DLL_RE.match(name))
 
 
-@dataclass
-class PythonExtMetadata:
-    """CPython extension-module facts extracted from a snapshot.
-
-    Absent (``AbiSnapshot.python_ext is None``) when the library is not a
-    recognised extension module — the common case for a plain C/C++ library.
-    """
-
-    #: Module name recovered from the init export (``PyInit_foo`` → ``foo``).
-    module_name: str | None = None
-    #: The init export itself, e.g. ``PyInit_foo`` / ``initfoo``.
-    init_symbol: str | None = None
-    #: Python major the init export implies (3 for ``PyInit_*``, 2 for ``init*``).
-    python_major: int | None = None
-    #: Raw SOABI / suffix tag from the filename, e.g. ``cpython-311`` / ``abi3``.
-    soabi_tag: str | None = None
-    #: True when the module is a stable-ABI (``abi3`` / ``Py_LIMITED_API``) build
-    #: — inferred from an ``abi3`` token in the filename (``.abi3.`` or a
-    #: ``cpXY-abi3`` wheel tag). Such a module promises it uses only the Limited
-    #: API and must load on every interpreter at/above its floor. A tagless
-    #: ``foo.pyd`` cannot be recognised as abi3 from the file alone (see
-    #: :func:`_detect_soabi`).
-    limited_api: bool = False
-    #: Declared / inferred ``Py_LIMITED_API`` floor as ``(major, minor)`` when
-    #: known (e.g. an ``abi3`` tag pins the module to that minor). ``None`` when
-    #: undeclared.
-    declared_abi3: tuple[int, int] | None = None
-    #: True when this is a **free-threaded** (PEP 703, ``Py_GIL_DISABLED``) build
-    #: — a ``t``-suffixed interpreter tag (``cpython-313t`` / ``cp313t``). A
-    #: free-threaded build targets a *different* CPython ABI than the regular
-    #: (GIL) build of the same minor: the two are not interchangeable, and a
-    #: free-threaded build **cannot** be ``abi3`` (``Py_LIMITED_API`` is
-    #: incompatible with ``Py_GIL_DISABLED`` as of CPython 3.13–3.15), so
-    #: :attr:`limited_api` is always ``False`` when this is set.
-    free_threaded: bool = False
-    #: Imported CPython C-API symbols (``Py*`` / ``_Py*``), sorted & de-duped.
-    cpython_imports: list[str] = field(default_factory=list)
-    #: Windows import DLL(s) that provide the CPython C-API imports, e.g.
-    #: ``["python3.dll"]`` (Stable-ABI forwarder) or ``["python311.dll"]``
-    #: (version-specific). Populated from the PE import table only — ELF/Mach-O
-    #: resolve ``libpython`` at load time, not via a named import library — so it
-    #: is empty on those platforms. Lets the ``abi3`` check catch a PE module that
-    #: imports stable *symbol names* but links a version-specific ``pythonXY.dll``
-    #: (which would not load on another interpreter minor).
-    cpython_dlls: list[str] = field(default_factory=list)
-
-    @property
-    def is_extension(self) -> bool:
-        """True when this looks like a genuine CPython extension module."""
-        return self.init_symbol is not None or bool(self.cpython_imports)
-
-    @property
-    def is_version_specific(self) -> bool:
-        """True when the SOABI tag pins the module to one interpreter (not abi3).
-
-        A ``foo.cpython-311-…so`` / ``foo.cp311-win_amd64.pyd`` (or a free-threaded
-        ``cpython-313t``) carries a version-specific interpreter tag and loads
-        only on that one minor — it is not an ``abi3`` build and cannot satisfy a
-        ``Py_LIMITED_API`` floor no matter how stable its imported symbol *names*
-        are. A bare ``.abi3.`` build (``limited_api``) or a tagless artifact
-        (``soabi_tag is None``) is not version-specific.
-        """
-        return (
-            self.soabi_tag is not None
-            and self.soabi_tag != "abi3"
-            and not self.limited_api
-        )
-
-    @property
-    def version_specific_python_dlls(self) -> list[str]:
-        """CPython import DLLs that pin the module to one interpreter ABI.
-
-        The Stable ABI links against exactly ``python3.dll`` (the version-neutral
-        forwarder). Every other CPython import DLL is version-specific — a
-        numbered ``python311.dll``, the free-threaded ``python313t.dll``, the
-        debug ``python311_d.dll``, … — so any provider DLL whose name is not
-        exactly ``python3.dll`` is a violation for an ``abi3`` module: it cannot
-        load on another interpreter regardless of which symbol *names* it imports.
-        """
-        return [d for d in self.cpython_dlls if d.lower() != _STABLE_PYTHON_DLL]
 
 
 def _iter_exported_names(snap: AbiSnapshot) -> list[str]:
@@ -228,6 +147,10 @@ def _iter_cpython_dlls(snap: AbiSnapshot) -> list[str]:
     if snap.pe is None:
         return []
     return sorted({d for d in snap.pe.imports if d and _is_cpython_dll(d)})
+
+
+#: ``init<mod>`` — the legacy Python 2 module init export.
+_PYINIT2_RE = re.compile(r"^init(?P<mod>[A-Za-z_][A-Za-z0-9_]*)$")
 
 
 def _detect_init_export(names: list[str]) -> tuple[str | None, str | None, int | None]:
@@ -323,3 +246,80 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
         cpython_imports=cpython_imports,
         cpython_dlls=_iter_cpython_dlls(snap),
     )
+
+
+def abi3_precondition_message(abi3_floor: tuple[int, int], binary_name: str) -> str:
+    """The "not a recognisable extension module" message ``scan --abi3``'s
+    real precondition failure reports (:func:`abicheck.scan_engine.
+    _run_abi3_audit`'s ``_EvidenceContractError``) and both dry-run previews
+    of the identical precondition state -- one shared spelling so all three
+    callers describe the same failure identically rather than three
+    independently-drifting copies of the same sentence.
+    """
+    return (
+        f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+        f"'{binary_name}' is not a recognisable CPython extension module "
+        "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
+        "audit applies only to extension modules (Cython/pybind11/"
+        "nanobind/C)."
+    )
+
+
+def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
+    """Cheap, binary-container-only extension recognition for dry-run previews.
+
+    ``scan --abi3``'s real run requires the candidate to be a recognisable
+    CPython extension module (:func:`detect_python_extension` against the
+    real dump's snapshot) -- but neither ``scan --dry-run`` nor
+    ``scan --artifact-set --dry-run`` builds a snapshot at all, since a dry
+    run promises no compiler/frontend invocation. This applies the identical
+    recognition logic to a snapshot built from *only* the container facts a
+    plain binary read supplies (the export table on ELF/Mach-O, the export/
+    import directory on PE) -- no DWARF, no header/build parse -- which is
+    the same "binary export table parse" the L0_binary dry-run row already
+    prices as within the dry-run contract. ``None`` for an unrecognised
+    format or a binary that does not parse (mirrors the real parsers' own
+    "empty metadata on any parse error" contract), same as a genuine
+    non-extension library.
+
+    Binary-container recognition only -- deliberately does not fall back to
+    loading *path* as a serialized snapshot (a real, supported `scan
+    ARTIFACT` input shape too): that fallback needs `serialization.
+    load_snapshot`, which itself imports this module (for
+    `PythonExtMetadata`/`detect_python_extension`), so adding the reverse
+    edge here would create a real two-module import cycle (AI-readiness
+    `import-cycle-growth`, fresh evidence). See
+    :mod:`abicheck.scan_abi3_resolve`'s own resolver for the snapshot-aware
+    orchestration that combines this function with that fallback from a
+    module that can safely depend on both.
+    """
+    from . import binary_utils
+    from .model import AbiSnapshot
+
+    # A GNU ld linker script (a dev symlink stand-in like `libfoo.so` ->
+    # `libfoo.so.1`) is itself plain text with no container magic bytes --
+    # the real run follows it via `service.resolve_input`'s own recursive
+    # resolution, so this probe must too, or a script pointing at a genuine
+    # extension module misreports "not an extension" (Codex review). A no-op
+    # for every other input (including a JSON snapshot, whose content never
+    # matches the linker-script regex).
+    path = binary_utils.resolve_linker_script_chain(Path(path))
+    fmt = binary_utils.detect_binary_format(path)
+    snap = AbiSnapshot(library=Path(path).name, version="", source_path=str(path))
+    if fmt == "elf":
+        from .elf_metadata import parse_elf_metadata
+
+        snap.elf = parse_elf_metadata(Path(path))
+    elif fmt == "pe":
+        from .pe_metadata import parse_pe_metadata
+
+        snap.pe = parse_pe_metadata(Path(path))
+    elif fmt == "macho":
+        from .macho_metadata import parse_macho_metadata
+
+        snap.macho = parse_macho_metadata(Path(path))
+    else:
+        return None
+    return detect_python_extension(snap)
+
+

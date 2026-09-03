@@ -14,9 +14,17 @@ import sys
 from pathlib import Path
 
 import pytest
+from _canonical_lane import is_canonical_lane
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "check_ai_readiness.py"
+
+# Pure repo-tree structural analysis — platform/interpreter-independent, so
+# this only needs to run once, on the canonical Linux lane, not on all five
+# unit-test matrix legs. See tests/CLAUDE.md and tests/_canonical_lane.py.
+pytestmark = pytest.mark.skipif(
+    not is_canonical_lane(), reason="canonical Linux lane only — see tests/CLAUDE.md"
+)
 
 
 def _load_module():
@@ -379,12 +387,10 @@ def test_adr_index_nav_sync_accepts_indented_reference_definition(
 def test_adr_index_nav_sync_ignores_link_syntax_inside_fenced_code(
     car, tmp_path, monkeypatch
 ):
-    """A fenced code sample demonstrating Markdown link syntax (e.g. showing
-    an author how to add an index row) must not count as a real link to the
-    ADR it mentions -- MkDocs renders a code block verbatim, not as a
-    navigable link, so an ADR only "linked" from inside one is still
-    unreachable from the published index page (regression test for the gap
-    flagged in PR #619 review)."""
+    """A fenced code sample demonstrating Markdown link syntax must not count
+    as a real link to the ADR it mentions -- MkDocs renders a code block
+    verbatim, not as a navigable link, so an ADR only "linked" from inside
+    one is still unreachable (regression test for PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
     adr_dir = fake_docs / "contribute" / "adr"
@@ -575,12 +581,11 @@ def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
 def test_adr_index_nav_sync_catches_superseded_colon_without_replacement_link(
     car, tmp_path, monkeypatch
 ):
-    """ "Superseded:" (colon, no separating whitespace/dash before the rest
-    of the sentence) must still be recognized as a Superseded status -- the
-    leading-word split previously didn't treat ':' as a delimiter, leaving
-    the token "Superseded:" which never matched the plain "superseded"
-    comparison, silently skipping the replacement-link requirement
-    (regression test for the gap flagged in PR #619 review)."""
+    """ "Superseded:" (colon, no separating whitespace/dash) must still be
+    recognized as a Superseded status -- the leading-word split previously
+    didn't treat ':' as a delimiter, leaving "Superseded:" unmatched against
+    the plain "superseded" comparison and silently skipping the
+    replacement-link requirement (regression test for PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
     adr_dir = fake_docs / "contribute" / "adr"
@@ -1088,10 +1093,9 @@ def test_adr_named_modules_does_not_guess_family_shorthand(ass):
     """Shorthand (`_resolver.py` after `compatibility_evaluation_config.py`)
     is deliberately not resolved. Guessing it produced a different wrong
     answer in each of three review rounds — nested anchors lost their
-    directory, `source_graph.py` + `_findings.py` wants the family appended
-    where `graph_facts.py` + `_impact.py` wants it replaced, and an expanded
-    path could not survive deletion without also fabricating one from a bad
-    guess. A Status that wants a module watched names it in full."""
+    directory, family-appended vs. family-replaced disagreed, and an
+    expanded path could not survive deletion without fabricating one from a
+    bad guess. A Status that wants a module watched names it in full."""
     named = ass._adr_named_modules(
         "`abicheck/compatibility_evaluation_config.py` and `_resolver.py`"
     )
@@ -1487,17 +1491,13 @@ def test_no_hard_file_size_violations(car):
 def test_main_returns_zero_on_clean_tree(car, capsys):
     """End-to-end: running the script against the live tree should exit 0.
 
-    We skip the slowest whole-tree scans here to avoid re-running them:
-    - ``mypy-baseline`` needs mypy (exercised in the dedicated CI lane);
-    - ``import-cycle-growth`` and ``banned-imports`` each re-walk every
-      module's AST and are already asserted individually by
-      ``test_no_unapproved_import_cycle_growth`` and ``test_no_banned_imports``.
-      Running them again inside this end-to-end
-      check just doubled the cost (it was the dominant unit-lane offender at
-      ~14.6s under coverage) without adding coverage — ``scripts/`` isn't
-      measured, and the full gate already runs standalone in the
-      ``ai-readiness`` CI job. The remaining checks still verify that
-      ``main()`` wires up the run and exits 0.
+    Skips the slowest whole-tree scans to avoid re-running them: mypy-baseline
+    needs mypy (dedicated CI lane); import-cycle-growth/banned-imports each
+    re-walk every module's AST and are already asserted individually by
+    test_no_unapproved_import_cycle_growth/test_no_banned_imports (it was the
+    dominant unit-lane offender at ~14.6s under coverage, with no added
+    coverage since scripts/ isn't measured and the full gate already runs
+    standalone in the ai-readiness CI job). The rest still verify main() exits 0.
     """
     rc = car.main(
         [

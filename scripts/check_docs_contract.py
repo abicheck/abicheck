@@ -66,6 +66,11 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from findings_report import Findings as _SharedFindings  # noqa: E402
+from learning_ladder import check_learning_ladder  # noqa: E402
+from pipeline_status_ledger import (  # noqa: E402
+    check_pipeline_status_ledger,
+    load_pipeline_status,
+)
 
 DOCS = ROOT / "docs"
 #: The example-case tree whose per-case READMEs `gen_examples_docs.py`
@@ -1277,7 +1282,9 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "mcp-tools-reference.md",
             "abicheck[mcp]",
         ),
-        frozenset({"start/upgrading-to-0.6.md", "AGENTS.md"}),
+        frozenset(
+            {"start/upgrading-to-0.6.md", "AGENTS.md", "contribute/known-gaps.md"}
+        ),
     ),
     (
         "--source-abi / --source-graph (pre-ADR-043 `collect` command flags)",
@@ -1303,6 +1310,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(
             {
                 "AGENTS.md",
+                "contribute/known-gaps.md",
                 "use/github-action.md",
                 # Names the retired spellings once, to point a reader at the
                 # --compiler* replacements -- the page documenting the family.
@@ -1388,6 +1396,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(
             {
                 "AGENTS.md",
+                "contribute/known-gaps.md",
                 # A point-in-time design review: it inventories the surface
                 # as it was, in its own historical-record capacity.
                 "contribute/config-key-review.md",
@@ -1400,7 +1409,13 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " like 'security'; the Action's own `policy-file` input, without the"
         " leading dashes, is unaffected and still valid)",
         ("--policy-file",),
-        frozenset({"AGENTS.md", "reference/github-action-inputs.md"}),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "reference/github-action-inputs.md",
+            }
+        ),
     ),
     (
         "--secondary-format/--secondary-output (folded into --write"
@@ -1467,6 +1482,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(
             {
                 "AGENTS.md",
+                "contribute/known-gaps.md",
                 # Explicit migration notes naming the retired flags and
                 # their aggregate: gate: replacement in the same breath,
                 # same reasoning as the --stat/--recommend entry above.
@@ -1794,6 +1810,10 @@ def main() -> int:
     if terms is not None:
         _check_terminology_entries(f, terms)
         _check_duplicate_term_definitions(f, terms)
+    pipeline_status = load_pipeline_status(f)
+    if pipeline_status is not None:
+        check_pipeline_status_ledger(f, pipeline_status)
+    check_learning_ladder(f)
     _check_duplicate_paragraphs(f)
     _check_stale_process_language(f)
     _check_retired_surfaces(f)

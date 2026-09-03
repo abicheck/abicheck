@@ -20,9 +20,13 @@ dedicated ``except (ProfileMismatchError, ScopeMismatchError)`` branch in
 directly, bypassing ``CompareRequest``/``run_compare_request`` — see
 ``abicheck/comparability.py``'s module docstring). Mirrors
 ``tests/test_cli_coverage.py::TestCompareApiBreakExitCode``'s pattern of
-monkeypatching ``abicheck.service.load_snapshot``/``compare_snapshots``
+monkeypatching ``abicheck.workflows.input_resolution.load_snapshot``/``compare_snapshots``
 instead of driving a real dump, since the gate's own logic is already
-covered end-to-end by ``tests/test_checker_comparability_gate.py``."""
+covered end-to-end by ``tests/test_checker_comparability_gate.py``.
+
+``load_snapshot`` is patched via ``abicheck.workflows.input_resolution``
+(where ``resolve_input`` now lives); ``compare_snapshots`` stays patched via
+``abicheck.service`` (it did not move — see ADR-061 Phase 4)."""
 
 from __future__ import annotations
 
@@ -51,7 +55,7 @@ class TestNotComparableExitCode:
     def test_scope_mismatch_exits_16(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
 
         def _raise(*_a, **_kw):
             raise ScopeMismatchError(
@@ -69,7 +73,7 @@ class TestNotComparableExitCode:
     def test_profile_mismatch_exits_16(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile_fingerprint mismatch: dep.h changed")
@@ -110,7 +114,7 @@ class TestNotComparableExitCode:
     def test_json_format_emits_verdict_null_with_reason(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
 
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
@@ -133,7 +137,7 @@ class TestNotComparableExitCode:
     def test_sarif_format_emits_failed_invocation(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
 
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
@@ -156,7 +160,7 @@ class TestNotComparableExitCode:
     def test_junit_format_emits_errored_testcase(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("dep.h changed")
@@ -183,7 +187,7 @@ class TestNotComparableExitCode:
         this same function, per the G32 plan's own acceptance criteria)."""
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
 
         captured: dict[str, object] = {}
 
@@ -286,7 +290,7 @@ class TestNotComparableExitCode:
             return old_p, None, None
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_helpers._embed_inline_source_side", _fake_embed
+            "abicheck.frontends.cli.commands.compare._embed_inline_source_side", _fake_embed
         )
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
         monkeypatch.setattr(

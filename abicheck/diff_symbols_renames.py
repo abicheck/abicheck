@@ -19,12 +19,22 @@ ELF fingerprint-based rename detector.
 Leaf module (must not import from ``diff_symbols`` to avoid an import cycle).
 The symbol-level public surface re-exports these names back from
 ``diff_symbols`` so ``from abicheck.diff_symbols import ...`` keeps working.
+
+Namespace-move batch-rename detection (``find_namespace_move_groups``/
+``emit_namespace_move_batches``) lives in ``compare/namespace_move.py``
+instead, per ADR-061 -- this module owns prefix-rename detection and the ELF
+fingerprint-based rename detector only, and re-exports the two namespace-move
+entry points below purely so ``diff_symbols.py``'s own existing re-export
+block (and any external caller of ``abicheck.diff_symbols_renames``) keeps
+working unchanged.
 """
 
 from __future__ import annotations
 
+import bisect
 import logging
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 
 from .binary_fingerprint import (
@@ -34,12 +44,16 @@ from .binary_fingerprint import (
 )
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.namespace_move import (  # noqa: F401  (public-surface re-exports)
+    emit_namespace_move_batches as emit_namespace_move_batches,
+    find_namespace_move_groups as find_namespace_move_groups,
+)
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .model import AbiSnapshot, is_cxx_runtime_library
+from .model import AbiSnapshot, Function, is_cxx_runtime_library
+from .model.elf_facts import SymbolType
 
 _log = logging.getLogger(__name__)
 
@@ -678,3 +692,116 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
         )
 
     return changes
+
+
+# ── Batch rename / namespace-move roll-up (SYMBOL_RENAMED_BATCH) ──────────
+#
+# Moved here from ``diff_symbols`` (which sits at the 2000-line hard cap) so
+# both batch shapes live next to the rest of the rename machinery.
+
+
+def _is_destructor_leaf(name: str) -> bool:
+    """True when *name*'s own leaf component names a destructor.
+
+    Splitting on the *last* ``"::"`` is enough for this predicate: a
+    destructor's ``~`` is always the first character of the leaf component,
+    and any ``"::"`` inside a template argument only ever appears *before*
+    the leaf's ``~`` would, never between it and the end.
+    """
+    return name.rsplit("::", 1)[-1].startswith("~")
+
+
+def _prefix_ends_at_a_name_boundary(prefix: str) -> bool:
+    """True when *prefix* is a plausible *prepended* naming prefix.
+
+    A batch rename prepends a namespace or library prefix to an existing
+    leaf name, so the added text ends where a name legitimately starts: at a
+    scope separator (``ns::foo``) or an underscore (``mylib_foo``). Anything
+    else means the "prefix" cuts into the middle of an identifier or is a
+    declarator sigil rather than a name — the ``~`` of a destructor being the
+    case this rule exists for (``Wrapper`` -> ``~Wrapper`` is not a rename of
+    ``Wrapper``, it is a different declaration that happens to end with the
+    same spelling).
+    """
+    return prefix.endswith(("::", "_"))
+
+
+def find_prefix_rename_pairs(
+    removed: set[str],
+    added: set[str],
+    old_map: Mapping[str, Function],
+    new_map: Mapping[str, Function],
+) -> list[tuple[str, str]]:
+    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name.
+
+    The match condition is ``a_name.endswith(r_name)`` with ``a_name`` strictly
+    longer (a prefix was prepended). The old ``endswith("_" + r_name)`` branch
+    was redundant — any name ending with ``"_" + r_name`` already ends with
+    ``r_name``. To avoid the O(removed × added) cross-product, index the added
+    names *reversed* so the suffix test becomes a prefix lookup: a binary search
+    locates the contiguous block of reversed added names that start with the
+    reversed removed name. Both ``removed`` and the reversed index are iterated
+    in sorted order, so the result is deterministic.
+
+    Two gates keep the raw suffix test from manufacturing pairs out of
+    unrelated declarations that merely share a trailing spelling:
+
+    * the two names must agree on being a destructor
+      (:func:`_is_destructor_leaf`), and
+    * the prepended text must end at a name boundary
+      (:func:`_prefix_ends_at_a_name_boundary`).
+
+    Either one alone rejects the reported ``Wrapper`` -> ``~Wrapper`` /
+    ``graph`` -> ``~graph`` noise; both are kept because they state
+    independent facts. The destructor rule is about *what the two
+    declarations are* and holds no matter how the prefix is spelled (it also
+    rejects ``~Foo`` -> ``ns::Foo``, where the prefix is perfectly
+    well-formed); the boundary rule is about *where the added text stops*
+    and rejects mid-identifier cuts that have nothing to do with
+    destructors.
+    """
+    rev_index = sorted(
+        (new_map[a_sym].name[::-1], new_map[a_sym].name) for a_sym in added
+    )
+    rev_keys = [k for k, _ in rev_index]
+    pairs: list[tuple[str, str]] = []
+    for r_sym in sorted(removed):
+        r_name = old_map[r_sym].name
+        rk = r_name[::-1]
+        i = bisect.bisect_left(rev_keys, rk)
+        while i < len(rev_keys) and rev_keys[i].startswith(rk):
+            a_name = rev_index[i][1]
+            if len(a_name) > len(r_name):
+                prefix = a_name[: len(a_name) - len(r_name)]
+                if _is_destructor_leaf(a_name) == _is_destructor_leaf(
+                    r_name
+                ) and _prefix_ends_at_a_name_boundary(prefix):
+                    pairs.append((r_name, a_name))
+                break
+            i += 1
+    return pairs
+
+
+def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
+    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix."""
+    if len(rename_pairs) < 2:
+        return []
+    prefixes = {
+        new_name[: new_name.rfind(old_name)] for old_name, new_name in rename_pairs
+    }
+    if len(prefixes) != 1:
+        return []
+    prefix = prefixes.pop()
+    pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
+    if len(rename_pairs) > 5:
+        pair_desc += f", ... ({len(rename_pairs)} total)"
+    return [
+        make_change(
+            ChangeKind.SYMBOL_RENAMED_BATCH,
+            symbol=f"batch_rename:{prefix}*",
+            name=prefix,
+            detail=f"{len(rename_pairs)} symbols ({pair_desc})",
+            old_value=", ".join(o for o, _ in rename_pairs),
+            new_value=", ".join(n for _, n in rename_pairs),
+        )
+    ]

@@ -72,6 +72,34 @@ def test_type_node_id_strips_checkout_directory_from_bare_lambda_marker() -> Non
     assert other_header != old
 
 
+def test_type_node_id_strips_checkout_directory_from_bare_anonymous_marker() -> None:
+    # Reported: a real L5 graph node was observed spelled
+    # "anonymous union at <path>:<line>:<col>" -- the "anonymous <kind>"
+    # vocabulary, not the "unnamed <kind>" one _BARE_ANON_TYPE_LOCATION_RE's
+    # alternation originally covered. Before the fix the whole match failed
+    # and the checkout-dependent path survived into the node id, so two
+    # builds of the identical, unedited declaration produced two different
+    # ids -- a spurious declaration_renamed purely from directory taint.
+    old = _type_node_id(
+        "anonymous union at /tmp/abicheck-eval/pkgs/tbb-2021.13.0/"
+        "concurrent_hash_map.h:649:9"
+    )
+    new = _type_node_id(
+        "anonymous union at /mnt/pr-gate/tbb-inc/concurrent_hash_map.h:649:9"
+    )
+    assert old == new
+    # A genuinely different header (different basename) at the same
+    # coordinates must still stay distinct.
+    other_header = _type_node_id("anonymous union at /mnt/pr-gate/other.h:649:9")
+    assert other_header != old
+    # And a genuinely different anonymous-tag kind at the same coordinates
+    # in the same header must also stay distinct from the union case above.
+    other_kind = _type_node_id(
+        "anonymous struct at /mnt/pr-gate/tbb-inc/concurrent_hash_map.h:649:9"
+    )
+    assert other_kind != old
+
+
 def test_build_source_graph_type_node_label_and_id_are_directory_independent() -> None:
     # End-to-end: two SourceAbiSurfaces built from the "same" unedited lambda
     # closure declaration under two different checkout roots must reconcile
@@ -654,7 +682,7 @@ def test_template_instantiation_node_id_strips_checkout_directory_from_lambda_ar
     # (Codex review, fresh evidence, twelfth round) -- template_instantiation:// was
     # excluded from the normalization gate entirely, so two builds of the identical
     # instantiation under different checkout roots still produced different node ids.
-    from abicheck.buildsource.template_graph import template_instantiation_node_id
+    from abicheck.buildsource.template_graph_fold import template_instantiation_node_id
 
     old = template_instantiation_node_id(
         "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
@@ -675,7 +703,7 @@ def test_template_instantiation_node_id_strips_checkout_directory_from_lambda_ar
 def test_template_decl_node_id_strips_checkout_directory_from_default_argument() -> (
     None
 ):
-    from abicheck.buildsource.template_graph import template_decl_node_id
+    from abicheck.buildsource.template_graph_fold import template_decl_node_id
 
     old = template_decl_node_id(
         "Outer", "type-parameter-0-0 (lambda at /old/checkout/foo.cpp:2:20)"
@@ -696,7 +724,7 @@ def test_template_instantiation_node_loaded_from_persisted_pack_migrates_and_nor
     # (ensure_facts_and_resolve), the same choke points every other decl/type kind
     # already routes through.
     from abicheck.buildsource.graph_facts import GraphNode
-    from abicheck.buildsource.template_graph import template_instantiation_node_id
+    from abicheck.buildsource.template_graph_fold import template_instantiation_node_id
 
     raw_label = "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
     node = GraphNode.from_dict(

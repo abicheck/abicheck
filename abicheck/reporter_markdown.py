@@ -38,11 +38,16 @@ from .checker import (
 )
 from .checker_policy import (
     HasKind,
-    impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
+from .report import render_markdown as _rmd
+from .report.render_markdown import (
+    _contract_decision_text as _contract_decision_text,
+    _format_change_md as _format_change_md,
+    _format_change_md_oneline as _format_change_md_oneline,
+)
 from .report_correlation import (
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
 )
@@ -83,10 +88,21 @@ def to_stat(
     the verdict label alone could misreport whether the run actually blocks
     CI once severity configuration is in play.
     """
-    from .stat_line import format_stat_line
+    from .report.document import ReportDocument
+    from .report.render_text import render_stat_document
 
     summary = build_summary(result)
-    gate_note = ""
+    d: dict[str, object] = {
+        "verdict_label": _VERDICT_LABEL[result.verdict],
+        "summary": {
+            "breaking": summary.breaking,
+            "source_breaks": summary.source_breaks,
+            "risk_changes": summary.risk_count,
+            "compatible_additions": summary.compatible_additions,
+            "total_changes": summary.total_changes,
+        },
+        "redundant_count": result.redundant_count,
+    }
     if severity_config is not None:
         from .severity import compute_exit_code
 
@@ -97,19 +113,8 @@ def to_stat(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
-        gate_note = (
-            f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
-        )
-    return format_stat_line(
-        _VERDICT_LABEL[result.verdict],
-        breaking=summary.breaking,
-        source_breaks=summary.source_breaks,
-        risk_count=summary.risk_count,
-        compatible_additions=summary.compatible_additions,
-        total_changes=summary.total_changes,
-        redundant_count=result.redundant_count,
-        gate_note=gate_note,
-    )
+        d["severity"] = {"exit_code": exit_code}
+    return render_stat_document(ReportDocument.from_mapping(d))
 
 
 # ---------------------------------------------------------------------------
@@ -129,15 +134,7 @@ _REMOVED_SUFFIXES = (
     "_const_overload",
 )
 
-# Kinds whose name doesn't end in one of the suffixes above but still name a
-# concrete symbol/entity appearing or disappearing (Codex review on #557:
-# operation_for_kind() reported these as "modified"). Checked before the
-# suffix rule. Deliberately does NOT include kinds naming a *property*
-# gained/lost on an entity that still exists — e.g. the "*_lost_*" family
-# (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family
-# (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes
-# on a persisting entity, which is what "modified" means here, not an
-# addition/removal of the entity itself.
+# Kinds whose name doesn't end in one of the suffixes above but still name a concrete symbol/entity appearing or disappearing (Codex review on #557: operation_for_kind() reported these as "modified"). Checked before the suffix rule. Deliberately does NOT include kinds naming a *property* gained/lost on an entity that still exists — e.g. the "*_lost_*" family (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes on a persisting entity, which is what "modified" means here, not an addition/removal of the entity itself.
 _OPERATION_OVERRIDES: dict[str, str] = {
     # Ends in "_added_compat", not "_added"/"_added_compatible".
     "symbol_version_required_added_compat": "added",
@@ -440,11 +437,11 @@ def apply_show_only(
 # ---------------------------------------------------------------------------
 
 
-def _build_impact_table(
+def compute_impact_table(
     result: DiffResult,
     displayed_changes: list[Change] | None = None,
-) -> list[str]:
-    """Build impact summary table rows.
+) -> _rmd.ImpactTable | None:
+    """Build the impact summary table's structured intermediate.
 
     When *displayed_changes* is given (e.g. after ``--show-only`` filtering),
     only those changes are considered.  Interface counts use unique
@@ -458,13 +455,18 @@ def _build_impact_table(
     )
 
     # Collect root type changes with their impact
-    root_entries: list[tuple[str, str, int, int]] = []
+    root_entries: list[_rmd.ImpactRootEntry] = []
     for c in changes:
         if c.kind in _ROOT_TYPE_CHANGE_KINDS:
             affected_count = len(c.affected_symbols) if c.affected_symbols else 0
             if affected_count > 0 or c.caused_count > 0:
                 root_entries.append(
-                    (c.symbol, c.kind.value, affected_count, c.caused_count)
+                    _rmd.ImpactRootEntry(
+                        symbol=c.symbol,
+                        kind=c.kind.value,
+                        iface_count=affected_count,
+                        caused=c.caused_count,
+                    )
                 )
 
     # Count non-type direct changes
@@ -475,22 +477,18 @@ def _build_impact_table(
     )
 
     if not root_entries and direct_removals == 0:
-        return []
+        return None
 
-    lines = [
-        "## Impact Summary",
-        "",
-        "| Root Change | Kind | Affected Interfaces | Derived |",
-        "|-------------|------|---------------------|---------|",
-    ]
-    for symbol, kind, iface_count, caused in root_entries:
-        iface_str = f"{iface_count} functions" if iface_count > 0 else "—"
-        caused_str = f"+{caused} collapsed" if caused > 0 else "—"
-        lines.append(f"| {symbol} | {kind} | {iface_str} | {caused_str} |")
-    if direct_removals > 0:
-        lines.append(f"| — | removals ({direct_removals}) | direct | — |")
-    lines.append("")
-    return lines
+    return _rmd.ImpactTable(
+        root_entries=tuple(root_entries), direct_removals=direct_removals
+    )
+
+
+def _build_impact_table(
+    result: DiffResult,
+    displayed_changes: list[Change] | None = None,
+) -> list[str]:
+    return _rmd.render_impact_table(compute_impact_table(result, displayed_changes))
 
 
 # ---------------------------------------------------------------------------
@@ -498,52 +496,15 @@ def _build_impact_table(
 # ---------------------------------------------------------------------------
 
 
-def _contract_decision_text(
-    relevance: Any, reason_code: str | None, assurance: Any
-) -> str:
-    """Core ``<relevance> (<reason_code>), assurance: <level>`` text, shared
-    by every already-stamped-``Change`` rendering site in this module
-    (CodeRabbit review: the same tag-building pattern was duplicated at
-    several call sites). Deliberately excludes any ``Contract:``/``[contract:
-    ...]`` wrapper -- callers render in visibly different shapes (a leading
-    ``"Contract: "``, a bracketed ``"[contract: ...]"``), so each keeps its
-    own exact prefix/suffix and casing."""
-    tag = str(relevance.value)
-    if reason_code:
-        tag += f" ({reason_code})"
-    if assurance is not None:
-        tag += f", assurance: {assurance.value}"
-    return tag
-
-
 def _format_leaf_type_change(c: Change) -> list[str]:
     """Format a single leaf-mode type change entry."""
-    lines = [f"### {c.symbol} — {c.description}"]
-    if c.affected_symbols:
-        lines.append(f"\n**Affected interfaces ({len(c.affected_symbols)}):**")
-        for sym in c.affected_symbols[:10]:
-            lines.append(f"- `{sym}`")
-        if len(c.affected_symbols) > 10:
-            lines.append(f"- ... ({len(c.affected_symbols) - 10} more)")
-    if c.caused_count > 0:
-        lines.append(f"\n> {c.caused_count} derived change(s) collapsed")
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --report-mode leaf
-    # routes root TYPE_* changes through this function, never through
-    # _format_change_md -- unlike the full/root-cause views, a leaf-mode
-    # type finding's own contract decision (already stamped when
-    # --contract was requested) was silently dropped. Mirrors
-    # _format_change_md's own "no-op unless already stamped" idiom.
-    if c.contract_relevance is not None:
-        text = _contract_decision_text(
-            c.contract_relevance, c.contract_reason_code, c.contract_assurance
-        )
-        lines.append(f"\n> Contract: {text}")
-    lines.append("")
-    return lines
+    return _rmd._format_leaf_type_change(c)
 
 
-def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[str]:
-    """Build severity-grouped type-change sections for leaf-change view."""
+def compute_leaf_type_sections(
+    type_changes: list[Change], policy: str
+) -> _rmd.LeafTypeSectionsData:
+    """The structured intermediate for :func:`_build_leaf_type_sections`."""
     breaking_set, api_break_set, _, _ = _policy_kind_sets(policy)
     breaking_types = [c for c in type_changes if c.kind in breaking_set]
     api_break_types = [c for c in type_changes if c.kind in api_break_set]
@@ -553,18 +514,25 @@ def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[s
         if c.kind not in breaking_set and c.kind not in api_break_set
     ]
 
-    lines: list[str] = []
-    for section_label, section_changes in [
+    sections: list[_rmd.LeafTypeSection] = []
+    for heading, section_changes in [
         ("## Breaking Type Changes", breaking_types),
         ("## Source-Level Type Breaks", api_break_types),
         ("## Other Type Changes", other_types),
     ]:
         if not section_changes:
             continue
-        lines += [section_label, ""]
-        for c in section_changes:
-            lines += _format_leaf_type_change(c)
-    return lines
+        sections.append(
+            _rmd.LeafTypeSection(heading=heading, changes=tuple(section_changes))
+        )
+    return _rmd.LeafTypeSectionsData(sections=tuple(sections))
+
+
+def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[str]:
+    """Build severity-grouped type-change sections for leaf-change view."""
+    return _rmd.render_leaf_type_sections(
+        compute_leaf_type_sections(type_changes, policy)
+    )
 
 
 def _to_markdown_leaf(
@@ -578,76 +546,29 @@ def _to_markdown_leaf(
     """Leaf-change mode: root type changes with affected interface lists.
 
     *severity_config*, when given, adds the same "Severity Configuration"
-    summary section the full-mode report has (see
-    :func:`_build_severity_summary_md`) — without it, ``report_mode="leaf"``
-    returned before that section was ever built, so it silently had no
-    severity information even when a caller passed ``severity_config``
+    summary section the full-mode report has — without it, ``report_mode=
+    "leaf"`` returned before that section was ever built, so it silently had
+    no severity information even when a caller passed *severity_config*
     through :func:`to_markdown`.
-    """
-    from .checker import _ROOT_TYPE_CHANGE_KINDS
 
-    lines, changes = _view_preamble(
-        result,
-        "leaf-change view",
-        show_only=show_only,
-        show_recommendation=show_recommendation,
+    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
+    via ``report/render_markdown_alternate.py``, the same fact/formatting
+    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
+    """
+    from .report.render_markdown_alternate import (
+        build_leaf_document,
+        render_leaf_document,
     )
 
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
+    return render_leaf_document(
+        build_leaf_document(
+            result,
+            show_impact=show_impact,
+            show_only=show_only,
+            show_recommendation=show_recommendation,
+            severity_config=severity_config,
         )
-
-    # ADR-049 D1: leaf mode groups purely by ChangeKind, so without this a
-    # finding compatibility policy never scored still rendered under
-    # "Breaking Type Changes" beside a NO_CHANGE verdict -- the same
-    # contradiction the full-mode partition exists to prevent, reached by a
-    # different renderer (Codex review, fresh evidence). Partitioned before
-    # the kind grouping, and disclosed in its own non-verdict section below.
-    from .report_model import ReportModel
-
-    not_evaluated = ReportModel.classify_not_evaluated(changes)
-    # Identity, not equality: `Change` is a plain dataclass, so two distinct
-    # findings can compare equal and an `in`-based split would drop the wrong
-    # one (and cost O(n^2) doing it).
-    _excluded_ids = {id(c) for c in not_evaluated}
-    scored = [c for c in changes if id(c) not in _excluded_ids]
-
-    # Group root type changes by severity
-    type_changes = [c for c in scored if c.kind in _ROOT_TYPE_CHANGE_KINDS]
-    non_type_changes = [c for c in scored if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
-
-    if type_changes:
-        lines += _build_leaf_type_sections(type_changes, result.policy)
-
-    if non_type_changes:
-        lines += ["## Non-Type Changes", ""]
-        for c in non_type_changes:
-            lines.append(_format_change_md(c))
-        lines.append("")
-
-    lines += _build_not_evaluated_section(not_evaluated)
-
-    if not changes:
-        if show_only and result.changes:
-            lines.append("_No changes match the current filter._")
-        else:
-            lines.append("_No ABI changes detected._")
-
-    _append_redundancy_note(lines, result)
-    _append_suppression_note(lines, result)
-    _append_out_of_surface_note(lines, result)
-
-    if show_impact:
-        lines += _build_impact_table(result, displayed_changes=changes)
-
-    lines += _footer_lines()
-    return "\n".join(lines)
+    )
 
 
 #: The report's stable per-finding fingerprint. The implementation moved to
@@ -901,6 +822,103 @@ def _resolve_scoped_gate_findings(
     return scoped_only, missing_labels, blocks, missing_kind
 
 
+def compute_root_cause_section(
+    changes: list[Change],
+    scoped_only: list[Change],
+    missing_labels: list[str],
+    blocks: bool,
+    missing_kind: str,
+    *,
+    contract_evaluation: bool,
+) -> _rmd.RootCauseSectionData | None:
+    """The structured intermediate for ``--report-mode root-cause``'s
+    "## Root Causes" section.
+
+    Groups *changes* + *scoped_only* by root cause (:func:`_group_changes_by_root_cause`)
+    and merges each *missing_labels* entry into a matching group -- or starts
+    a new singleton group -- by the identical key
+    :func:`_root_cause_key_and_display` computes. Returns ``None`` (no
+    section at all) only when there is neither a real group nor a missing
+    label to show.
+    """
+    groups = _group_changes_by_root_cause(changes + scoped_only)
+    if not groups and not missing_labels:
+        return None
+
+    order: list[str] = []
+    root_by_key: dict[str, str] = {}
+    finding_lines_by_key: dict[str, list[str]] = {}
+    count_by_key: dict[str, int] = {}
+    for key, root_display, group_changes in groups:
+        order.append(key)
+        root_by_key[key] = root_display
+        finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
+        count_by_key[key] = len(group_changes)
+
+    if missing_labels:
+        referenced_causes = frozenset(
+            c.caused_by_type for c in changes + scoped_only if c.caused_by_type
+        )
+        severity_tag = "breaking" if blocks else "compatible"
+        for label in missing_labels:
+            key, root_display = _root_cause_key_and_display(
+                None,
+                label,
+                missing_kind,
+                label,
+                referenced_causes=referenced_causes,
+            )
+            line = (
+                f"- `{label}` is required but missing from the new "
+                f"library ({severity_tag})"
+            )
+            # ADR-049 Phase 3 (Codex review, fresh evidence): the
+            # non-root-cause markdown/text/review fold-in
+            # (cli_compare_fold._fold_scoped_compat_into_text) already
+            # tags a missing-contract label with its stamped decision;
+            # this root-cause path builds the identical label shape
+            # independently and was missing the same treatment, so
+            # --report-mode root-cause silently dropped the contract
+            # decision for this one finding shape. A missing-contract
+            # label has no Change object of its own to read an
+            # already-stamped decision off of (unlike scoped_only,
+            # rendered via _format_change_md above), so unlike every
+            # other contract-rendering site in this fix, this one
+            # genuinely needs the caller's own --contract
+            # intent threaded through explicitly.
+            if contract_evaluation:
+                from .contract_scoped_promotion import (
+                    stamp_explicit_scope_contract_evaluation,
+                )
+
+                label_decision: dict[str, object] = {}
+                stamp_explicit_scope_contract_evaluation(label_decision)
+                line += (
+                    f" [contract: {label_decision['contract_relevance']} "
+                    f"({label_decision['contract_reason_code']}), "
+                    f"assurance: {label_decision['contract_assurance']}]"
+                )
+            if key in finding_lines_by_key:
+                finding_lines_by_key[key].append(line)
+                count_by_key[key] += 1
+            else:
+                order.append(key)
+                root_by_key[key] = root_display
+                finding_lines_by_key[key] = [line]
+                count_by_key[key] = 1
+
+    return _rmd.RootCauseSectionData(
+        groups=tuple(
+            _rmd.RootCauseGroupData(
+                root_display=root_by_key[key],
+                count=count_by_key[key],
+                finding_lines=tuple(finding_lines_by_key[key]),
+            )
+            for key in order
+        )
+    )
+
+
 def _to_markdown_root_cause(
     result: DiffResult,
     show_only: str | None = None,
@@ -916,140 +934,26 @@ def _to_markdown_root_cause(
     severity-bucketed sections -- root-cause mode's point is "what's the
     minimal set of things that actually broke", not "what severity bucket
     does each finding independently fall into".
+
+    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
+    via ``report/render_markdown_alternate.py``, the same fact/formatting
+    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
     """
-    lines, changes = _view_preamble(
-        result,
-        "root-cause view",
-        show_only=show_only,
-        show_recommendation=show_recommendation,
+    from .report.render_markdown_alternate import (
+        build_root_cause_document,
+        render_root_cause_document,
     )
 
-    # G29 Phase 3 slice 3 follow-up (Codex review): a --used-by/
-    # --required-symbol scoped-only change or missing-contract label whose
-    # caused_by_type/symbol correlates with a change above must join that
-    # same root-cause group here, not only appear separately in
-    # cli_compare_fold.py's "## Additional scoped-gate findings" appendix --
-    # otherwise the grouped section under-reports finding_count and hides
-    # the correlation, unlike the JSON/SARIF paths (which fold these in).
-    # Real Change objects (scoped_only) can simply be grouped alongside
-    # `changes` in one pass; missing_labels have no Change to group with, so
-    # they're keyed and merged in separately below. Resolved before the
-    # severity table (Codex review, further follow-up) so a scoped run whose
-    # only gating issue is one of these can pass the scoped counts below
-    # instead of the table always reading the pre-scoped `result.changes`.
-    scoped_only, missing_labels, blocks, missing_kind = _resolve_scoped_gate_findings(
-        result,
-        severity_config,
-        show_only,
-    )
-
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-            scoped_counts=getattr(result, "scoped_severity_counts", None),
-            scoped_blocking_categories=getattr(
-                result, "scoped_blocking_categories", None
-            ),
+    return render_root_cause_document(
+        build_root_cause_document(
+            result,
+            show_only=show_only,
+            show_recommendation=show_recommendation,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            contract_evaluation=contract_evaluation,
         )
-    groups = _group_changes_by_root_cause(changes + scoped_only)
-    has_root_cause_entries = bool(groups or missing_labels)
-    if has_root_cause_entries:
-        order: list[str] = []
-        root_by_key: dict[str, str] = {}
-        finding_lines_by_key: dict[str, list[str]] = {}
-        count_by_key: dict[str, int] = {}
-        for key, root_display, group_changes in groups:
-            order.append(key)
-            root_by_key[key] = root_display
-            finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
-            count_by_key[key] = len(group_changes)
-
-        if missing_labels:
-            referenced_causes = frozenset(
-                c.caused_by_type for c in changes + scoped_only if c.caused_by_type
-            )
-            severity_tag = "breaking" if blocks else "compatible"
-            for label in missing_labels:
-                key, root_display = _root_cause_key_and_display(
-                    None,
-                    label,
-                    missing_kind,
-                    label,
-                    referenced_causes=referenced_causes,
-                )
-                line = (
-                    f"- `{label}` is required but missing from the new "
-                    f"library ({severity_tag})"
-                )
-                # ADR-049 Phase 3 (Codex review, fresh evidence): the
-                # non-root-cause markdown/text/review fold-in
-                # (cli_compare_fold._fold_scoped_compat_into_text) already
-                # tags a missing-contract label with its stamped decision;
-                # this root-cause path builds the identical label shape
-                # independently and was missing the same treatment, so
-                # --report-mode root-cause silently dropped the contract
-                # decision for this one finding shape. A missing-contract
-                # label has no Change object of its own to read an
-                # already-stamped decision off of (unlike scoped_only,
-                # rendered via _format_change_md above), so unlike every
-                # other contract-rendering site in this fix, this one
-                # genuinely needs the caller's own --contract
-                # intent threaded through explicitly.
-                if contract_evaluation:
-                    from .contract_scoped_promotion import (
-                        stamp_explicit_scope_contract_evaluation,
-                    )
-
-                    label_decision: dict[str, object] = {}
-                    stamp_explicit_scope_contract_evaluation(label_decision)
-                    line += (
-                        f" [contract: {label_decision['contract_relevance']} "
-                        f"({label_decision['contract_reason_code']}), "
-                        f"assurance: {label_decision['contract_assurance']}]"
-                    )
-                if key in finding_lines_by_key:
-                    finding_lines_by_key[key].append(line)
-                    count_by_key[key] += 1
-                else:
-                    order.append(key)
-                    root_by_key[key] = root_display
-                    finding_lines_by_key[key] = [line]
-                    count_by_key[key] = 1
-
-        lines += [f"## Root Causes ({len(order)})", ""]
-        for key in order:
-            n = count_by_key[key]
-            plural = "" if n == 1 else "s"
-            lines.append(f"### `{root_by_key[key]}` ({n} finding{plural})")
-            lines.append("")
-            lines.extend(finding_lines_by_key[key])
-            lines.append("")
-
-    # Codex review: a scoped-only change or missing-contract label can be the
-    # *only* displayed finding (result.changes itself empty/filtered out) --
-    # gating this purely on `changes` produced a contradictory report with a
-    # populated "## Root Causes" section immediately followed by "No ABI
-    # changes detected."
-    if not changes and not has_root_cause_entries:
-        if show_only and result.changes:
-            lines.append("_No changes match the current filter._")
-        else:
-            lines.append("_No ABI changes detected._")
-
-    _append_redundancy_note(lines, result)
-    _append_suppression_note(lines, result)
-    _append_out_of_surface_note(lines, result)
-
-    if show_impact:
-        lines += _build_impact_table(result, displayed_changes=changes)
-
-    lines += _footer_lines()
-    return "\n".join(lines)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1066,40 +970,57 @@ def _fmt_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
-def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
+def compute_redundancy_note(result: DiffResult) -> _rmd.RedundancyNote | None:
+    """The structured intermediate for :func:`_append_redundancy_note`."""
     if result.redundant_count > 0:
-        lines.append("")
-        lines.append(
-            f"> ℹ️ {result.redundant_count} redundant change(s) hidden "
-            "(derived from root type changes). Set `scope.show_redundant: true` in\n"
-            "> `.abicheck.yml` to show all."
-        )
+        return _rmd.RedundancyNote(redundant_count=result.redundant_count)
+    return None
+
+
+def compute_out_of_surface_note(result: DiffResult) -> _rmd.OutOfSurfaceNote | None:
+    """The structured intermediate for :func:`_append_out_of_surface_note`."""
+    if result.scope_to_public_surface and result.out_of_surface_count:
+        return _rmd.OutOfSurfaceNote(count=result.out_of_surface_count)
+    return None
+
+
+def compute_suppression_note(result: DiffResult) -> _rmd.SuppressionNote | None:
+    """The structured intermediate for :func:`_append_suppression_note`."""
+    if not result.suppression_file_provided:
+        return None
+    entries: list[_rmd.SuppressedEntry] = []
+    if result.suppressed_count != 0:
+        for sc in result.suppressed_changes:
+            contract_text = None
+            relevance = getattr(sc, "contract_relevance", None)
+            if relevance is not None:
+                reason_code = getattr(sc, "contract_reason_code", None)
+                assurance = getattr(sc, "contract_assurance", None)
+                contract_text = _contract_decision_text(
+                    relevance, reason_code, assurance
+                )
+            entries.append(
+                _rmd.SuppressedEntry(
+                    symbol=sc.symbol,
+                    description=sc.description,
+                    contract_text=contract_text,
+                )
+            )
+    return _rmd.SuppressionNote(
+        suppressed_count=result.suppressed_count, entries=tuple(entries)
+    )
+
+
+def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
+    lines += _rmd.render_redundancy_note(compute_redundancy_note(result))
 
 
 def _append_out_of_surface_note(lines: list[str], result: DiffResult) -> None:
-    if result.scope_to_public_surface and result.out_of_surface_count:
-        lines += ["", f"> ℹ️ {result.out_of_surface_count} finding(s) filtered as non-public ABI surface (`--scope-public-headers`). Pass `--show-filtered` to list them."]
+    lines += _rmd.render_out_of_surface_note(compute_out_of_surface_note(result))
 
 
 def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
-    if result.suppression_file_provided:
-        lines.append("")
-        if result.suppressed_count == 0:
-            lines.append(
-                "> ℹ️ Suppression file active — 0 changes matched (nothing suppressed)"
-            )
-        else:
-            lines.append(
-                f"> ℹ️ {result.suppressed_count} change(s) suppressed via suppression file"
-            )
-            for sc in result.suppressed_changes:
-                line = f">   - `{sc.symbol}` — {sc.description}"
-                relevance = getattr(sc, "contract_relevance", None)
-                if relevance is not None:
-                    reason_code = getattr(sc, "contract_reason_code", None)
-                    assurance = getattr(sc, "contract_assurance", None)
-                    line += f" [contract: {_contract_decision_text(relevance, reason_code, assurance)}]"
-                lines.append(line)
+    lines += _rmd.render_suppression_note(compute_suppression_note(result))
 
 
 # ---------------------------------------------------------------------------
@@ -1133,7 +1054,7 @@ def _section_severity_label(
     return f" {emoji} `{level_val.upper()}`"
 
 
-def _build_severity_summary_md(
+def compute_severity_summary(
     changes: list[Change],
     severity_config: SeverityConfig,
     *,
@@ -1143,8 +1064,8 @@ def _build_severity_summary_md(
     policy_file: object | None = None,
     scoped_counts: dict[str, int] | None = None,
     scoped_blocking_categories: tuple[str, ...] | None = None,
-) -> list[str]:
-    """Build a severity configuration summary table for markdown output.
+) -> _rmd.SeveritySummary:
+    """Build the severity configuration summary table's structured intermediate.
 
     *changes* are the (possibly ``--show-only``-filtered) changes used for
     the displayed ``Count`` column. *all_changes*, when provided, is the
@@ -1190,12 +1111,6 @@ def _build_severity_summary_md(
         if all_changes is not None
         else categorized
     )
-    lines = [
-        "## Severity Configuration",
-        "",
-        "| Category | Severity | Count | Exit Impact |",
-        "|----------|----------|-------|-------------|",
-    ]
 
     _CATEGORY_INFO: list[tuple[str, str, list[HasKind], list[HasKind]]] = [
         (
@@ -1224,6 +1139,7 @@ def _build_severity_summary_md(
         ),
     ]
 
+    rows: list[_rmd.SeverityRow] = []
     for label, attr, cat_changes, exit_cat_changes in _CATEGORY_INFO:
         level = getattr(severity_config, attr, SeverityLevel.INFO)
         level_val = level.value if hasattr(level, "value") else str(level)
@@ -1242,88 +1158,113 @@ def _build_severity_summary_md(
             )
             else "no exit impact"
         )
-        lines.append(
-            f"| {label} | {emoji} `{level_val.upper()}` | {count} | {impact} |"
+        rows.append(
+            _rmd.SeverityRow(
+                label=label,
+                emoji=emoji,
+                level_upper=level_val.upper(),
+                count=count,
+                impact=impact,
+            )
         )
 
-    lines.append("")
-    return lines
+    return _rmd.SeveritySummary(rows=tuple(rows))
+
+
+def _build_severity_summary_md(
+    changes: list[Change],
+    severity_config: SeverityConfig,
+    *,
+    all_changes: list[Change] | None = None,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+    scoped_counts: dict[str, int] | None = None,
+    scoped_blocking_categories: tuple[str, ...] | None = None,
+) -> list[str]:
+    return _rmd.render_severity_summary(
+        compute_severity_summary(
+            changes,
+            severity_config,
+            all_changes=all_changes,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            scoped_counts=scoped_counts,
+            scoped_blocking_categories=scoped_blocking_categories,
+        )
+    )
 
 
 def _footer_lines() -> list[str]:
-    return [
-        "---",
-        "## Legend",
-        "",
-        "| Verdict | Meaning |",
-        "|---------|---------|",
-        "| ✅ NO_CHANGE | Identical ABI |",
-        "| ✅ COMPATIBLE | No incompatible ABI/API changes — may include additions and quality findings (backward compatible) |",
-        "| ⚠️ COMPATIBLE_WITH_RISK | Binary-compatible; verify target environment |",
-        "| ⚠️ API_BREAK | Source-level API change — recompilation required |",
-        "| ❌ BREAKING | Binary ABI break — recompilation required |",
-        "",
-        "_Generated by [abicheck](https://github.com/abicheck/abicheck)_",
-    ]
+    return _rmd.render_footer()
 
 
-def _build_library_files_section(
+def compute_library_files(
     old_meta: LibraryMetadata | None, new_meta: LibraryMetadata | None
-) -> list[str]:
-    """Build the '## Library Files' markdown section."""
-    lines = ["## Library Files", "", "| | Old | New |", "|---|---|---|"]
+) -> _rmd.LibraryFilesSection | None:
+    """The structured intermediate for the '## Library Files' section."""
     old_path = getattr(old_meta, "path", "—") if old_meta else "—"
     new_path = getattr(new_meta, "path", "—") if new_meta else "—"
     old_sha = getattr(old_meta, "sha256", "—")[:12] if old_meta else "—"
     new_sha = getattr(new_meta, "sha256", "—")[:12] if new_meta else "—"
     old_size = _fmt_size(old_meta.size_bytes) if old_meta else "—"
     new_size = _fmt_size(new_meta.size_bytes) if new_meta else "—"
-    lines += [
-        f"| **Path** | `{old_path}` | `{new_path}` |",
-        f"| **SHA-256** | `{old_sha}…` | `{new_sha}…` |",
-        f"| **Size** | {old_size} | {new_size} |",
-        "",
-    ]
-    return lines
+    return _rmd.LibraryFilesSection(
+        old_path=old_path,
+        new_path=new_path,
+        old_sha=old_sha,
+        new_sha=new_sha,
+        old_size=old_size,
+        new_size=new_size,
+    )
 
 
-def _build_severity_sections(
+def compute_severity_sections(
     breaking: list[Change],
     source_breaks: list[Change],
     risk: list[Change],
     compatible: list[Change],
     *,
     severity_config: SeverityConfig | None = None,
-) -> list[str]:
-    """Build all severity-grouped markdown sections."""
-    lines: list[str] = []
+) -> _rmd.SeveritySectionsData:
+    """The structured intermediate for all severity-grouped sections."""
+    groups: list[_rmd.ChangeGroup] = []
 
     if breaking:
         sev_label = _section_severity_label(severity_config, "abi_breaking")
-        lines += [f"## {_BREAKING_ICON} Breaking Changes{sev_label}", ""]
-        for c in breaking:
-            lines.append(_format_change_md(c))
-        lines.append("")
+        groups.append(
+            _rmd.ChangeGroup(
+                heading=f"## {_BREAKING_ICON} Breaking Changes{sev_label}",
+                changes=tuple(breaking),
+                oneline=False,
+            )
+        )
 
     if source_breaks:
         sev_label = _section_severity_label(severity_config, "potential_breaking")
-        lines += [f"## {_SOURCE_BREAK_ICON} Source-Level Breaks{sev_label}", ""]
-        for c in source_breaks:
-            lines.append(_format_change_md(c))
-        lines.append("")
+        groups.append(
+            _rmd.ChangeGroup(
+                heading=f"## {_SOURCE_BREAK_ICON} Source-Level Breaks{sev_label}",
+                changes=tuple(source_breaks),
+                oneline=False,
+            )
+        )
 
     if risk:
         sev_label = _section_severity_label(severity_config, "potential_breaking")
-        lines += [f"## {_RISK_ICON} Deployment Risk Changes{sev_label}", ""]
-        lines += [
-            "> These changes are **binary-compatible** but may cause the library to fail",
-            "> loading on older systems (e.g. a new GLIBC version requirement). Verify",
-            "> your target environment before deploying.",
-            "",
-        ]
-        for c in risk:
-            lines.append(_format_change_md_oneline(c))
-        lines.append("")
+        groups.append(
+            _rmd.ChangeGroup(
+                heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
+                changes=tuple(risk),
+                oneline=True,
+                note_lines=(
+                    "> These changes are **binary-compatible** but may cause the library to fail",
+                    "> loading on older systems (e.g. a new GLIBC version requirement). Verify",
+                    "> your target environment before deploying.",
+                ),
+            )
+        )
 
     if compatible:
         from .checker_policy import ADDITION_KINDS as _ADDITION_KINDS
@@ -1332,28 +1273,38 @@ def _build_severity_sections(
         additions_list = [c for c in compatible if c.kind in _ADDITION_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
-            lines += [f"## {_QUALITY_ICON} Quality Issues{sev_label}", ""]
-            for c in quality:
-                lines.append(_format_change_md_oneline(c))
-            lines.append("")
+            groups.append(
+                _rmd.ChangeGroup(
+                    heading=f"## {_QUALITY_ICON} Quality Issues{sev_label}",
+                    changes=tuple(quality),
+                    oneline=True,
+                )
+            )
         if additions_list:
+            # Same per-change detail as Breaking/Source-Level Breaks
+            # (kind, location, impact) — a bare description dropped the
+            # kind and any per-kind caveat (e.g. enum_member_added's
+            # "may shift subsequent values" note), silently losing
+            # information a reviewer needs to approve new public API
+            # surface.
             sev_label = _section_severity_label(severity_config, "addition")
-            lines += [f"## {_ADDITION_ICON} Additions{sev_label}", ""]
-            for c in additions_list:
-                # Same per-change detail as Breaking/Source-Level Breaks
-                # (kind, location, impact) — a bare description dropped the
-                # kind and any per-kind caveat (e.g. enum_member_added's
-                # "may shift subsequent values" note), silently losing
-                # information a reviewer needs to approve new public API
-                # surface.
-                lines.append(_format_change_md(c))
-            lines.append("")
+            groups.append(
+                _rmd.ChangeGroup(
+                    heading=f"## {_ADDITION_ICON} Additions{sev_label}",
+                    changes=tuple(additions_list),
+                    oneline=False,
+                )
+            )
 
-    return lines
+    return _rmd.SeveritySectionsData(groups=tuple(groups))
 
 
-def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
-    """Disclose the findings compatibility policy did not score (ADR-049 D1).
+def compute_not_evaluated(
+    not_evaluated: list[Change],
+) -> _rmd.NotEvaluatedSection | None:
+    """The structured intermediate for :func:`_build_not_evaluated_section`.
+
+    Disclose the findings compatibility policy did not score (ADR-049 D1).
 
     These are real detector facts that carry no verdict: contract evaluation
     either proved the entity outside the declared contract, or could not
@@ -1363,35 +1314,31 @@ def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
     same report -- so this section is what keeps them visible, with the
     relevance and reason code that explain *why* they did not gate.
 
-    Empty (and so entirely absent) unless the run opted into
+    ``None`` (and so entirely absent) unless the run opted into
     ``--contract``.
     """
     if not not_evaluated:
-        return []
-    lines: list[str] = [
-        "## 🔍 Not Evaluated (Contract)",
-        "",
-        "> These findings were detected but **not scored** by compatibility",
-        "> policy: each is either proven outside the declared contract or",
-        "> unresolved for want of evidence (ADR-049). They contribute nothing",
-        "> to the verdict or the gate. Incomplete evidence is reported",
-        "> separately on the contract-coverage axis, which has its own exit",
-        "> code — uncertainty is never silently treated as compatible.",
-        "",
-    ]
+        return None
+    entries = []
     for c in not_evaluated:
         relevance = getattr(c, "contract_relevance", None)
         reason = getattr(c, "contract_reason_code", None)
         label = getattr(relevance, "value", None) or "UNKNOWN"
         suffix = f" ({reason})" if reason else ""
-        lines.append(_format_change_md_oneline(c))
-        lines.append(f"  > Contract: {label}{suffix}")
-    lines.append("")
-    return lines
+        entries.append(_rmd.NotEvaluatedEntry(change=c, label=label, suffix=suffix))
+    return _rmd.NotEvaluatedSection(entries=tuple(entries))
 
 
-def _build_environment_drift_section(changes: list[Change]) -> list[str]:
-    """Group environment/toolchain-drift findings under one heading.
+def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
+    return _rmd.render_not_evaluated_section(compute_not_evaluated(not_evaluated))
+
+
+def compute_environment_drift(
+    changes: list[Change],
+) -> _rmd.EnvironmentDriftSection | None:
+    """The structured intermediate for :func:`_build_environment_drift_section`.
+
+    Group environment/toolchain-drift findings under one heading.
 
     These findings share a root cause the severity sections cannot express:
     the *build environment* moved (compiler, binutils/linker defaults,
@@ -1404,22 +1351,17 @@ def _build_environment_drift_section(changes: list[Change]) -> list[str]:
 
     drift = [c for c in changes if c.kind.value in ENVIRONMENT_DRIFT_KINDS]
     if not drift:
-        return []
-    lines = [
-        "## 🛠️ Environment & Toolchain Drift",
-        "",
-        "> The findings below are artifacts of the **build environment** — a",
-        "> different compiler, binutils/linker default, or glibc/sysroot —",
-        "> rather than a change to the library's declared interface. They also",
-        "> appear in their severity sections above; this view groups them by",
-        "> root cause. If the source did not change, review the build",
-        "> environment first.",
-        "",
-    ]
-    for c in drift:
-        lines.append(f"- **{c.kind.value}**: {c.description}")
-    lines.append("")
-    return lines
+        return None
+    return _rmd.EnvironmentDriftSection(
+        entries=tuple(
+            _rmd.EnvironmentDriftEntry(kind=c.kind.value, description=c.description)
+            for c in drift
+        )
+    )
+
+
+def _build_environment_drift_section(changes: list[Change]) -> list[str]:
+    return _rmd.render_environment_drift_section(compute_environment_drift(changes))
 
 
 # Verdict -> short merge-effect phrase for the reviewer digest.
@@ -1458,20 +1400,12 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
     return "blocked by severity policy — review required before merge"
 
 
-def to_review_digest(
+def compute_review_digest(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
-) -> str:
-    """Compact GitHub-facing review digest (Markdown).
-
-    A single, reviewer-oriented summary suitable for a job summary
-    ($GITHUB_STEP_SUMMARY) or a PR comment body: verdict + merge effect, a
-    counts table that separates breaking / API / risk / public additions /
-    filtered-internal, the release recommendation, a manual-review banner when
-    public-header scoping fell back (issue #235), and the top impacted symbols.
-    Distinct from to_markdown (the full report) — this is the "presentation"
-    layer over the same machine-readable decision contract.
+) -> _rmd.ReviewDigest:
+    """The structured intermediate for :func:`to_review_digest`.
 
     *severity_config*, when given, drives the merge-effect phrase from the
     actual severity-aware CI gate instead of the raw compatibility verdict —
@@ -1488,45 +1422,23 @@ def to_review_digest(
         else _VERDICT_MERGE_EFFECT.get(v, "")
     )
 
-    lines: list[str] = [
-        f"## ABI review — `{result.library}` {result.old_version} → {result.new_version}",
-        "",
-        f"**Verdict:** {emoji} `{label}` — {effect}",
-        "",
-    ]
-
     # Manual-review banner: scoping requested but the public surface could not
     # be confirmed, so compatibility is unconfirmed (don't overclaim).
-    if result.scope_to_public_surface and not result.scope_resolved:
-        lines += [
-            "> ⚠️ **Manual review required.** `--scope-public-headers` could not "
-            "resolve the public surface, so analysis fell back to the full export "
-            "table. Treat this result as *unconfirmed*, not a clean public surface.",
-            "",
-        ]
+    manual_review_banner = bool(
+        result.scope_to_public_surface and not result.scope_resolved
+    )
+
+    # Coverage-warning banner (Codex review): a clean verdict can still rest
+    # on incomplete evidence -- e.g. compare.note_if_same_binary_compared's
+    # byte-identical-inputs warning -- and this digest is exactly the
+    # GitHub-facing summary a reviewer approves a merge from, so it must not
+    # read as unconditionally clean when one of these is present.
+    coverage_warnings = tuple(result.coverage_warnings or ())
 
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"
-    lines += [
-        "| Category | Count |",
-        "|---|---|",
-        f"| ❌ Breaking (ABI) | {summary.breaking} |",
-        f"| ⚠️ API breaks (source) | {summary.source_breaks} |",
-        f"| ⚠️ Risk findings | {summary.risk_count} |",
-        f"| ✅ {additions_label} | {summary.compatible_additions} |",
-    ]
-    if scoped:
-        lines.append(
-            f"| 🔒 Filtered (internal/private) | {result.out_of_surface_count} |"
-        )
-    lines.append("")
 
     rec = recommend_release(result)
-    lines += [
-        f"**Release recommendation:** `{rec.bump.value}` version bump · "
-        f"SONAME `{rec.soname.value}`",
-        "",
-    ]
 
     # Top impacted symbols (breaking + API), capped for readability. Filters
     # by each change's *effective* verdict (DiffResult._effective_verdict_for_change)
@@ -1541,39 +1453,82 @@ def to_review_digest(
     # here printed "safe to merge" directly above the symbol it says is
     # impacted (Codex review). The excluded finding keeps its own disclosed
     # section elsewhere in the report; this list is the digest of what gated.
-    impacted = [
-        c
-        for c in result.changes
-        if is_evaluated(c)
-        if result._effective_verdict_for_change(c)
-        in (Verdict.BREAKING, Verdict.API_BREAK)
-    ]
-    if impacted:
-        lines += ["**Top impacted symbols:**", ""]
-        for c in impacted[:10]:
-            sym = c.symbol or "?"
-            lines.append(f"- `{sym}` — {c.kind.value}")
-        if len(impacted) > 10:
-            lines.append(f"- … and {len(impacted) - 10} more")
-        lines.append("")
+    from .report.finding import report_findings_for
 
-    return "\n".join(lines).rstrip() + "\n"
+    impacted = [
+        f.change
+        for f in report_findings_for(result)
+        if is_evaluated(f.change)
+        if f.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
+    ]
+
+    return _rmd.ReviewDigest(
+        library=result.library,
+        old_version=result.old_version,
+        new_version=result.new_version,
+        verdict_emoji=emoji,
+        verdict_label=label,
+        effect=effect,
+        manual_review_banner=manual_review_banner,
+        coverage_warnings=coverage_warnings,
+        additions_label=additions_label,
+        breaking_count=summary.breaking,
+        source_breaks_count=summary.source_breaks,
+        risk_count=summary.risk_count,
+        additions_count=summary.compatible_additions,
+        scoped=bool(scoped),
+        out_of_surface_count=result.out_of_surface_count,
+        bump_value=rec.bump.value,
+        soname_value=rec.soname.value,
+        impacted=tuple(
+            _rmd.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
+            for c in impacted
+        ),
+    )
+
+
+def to_review_digest(
+    result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> str:
+    """Compact GitHub-facing review digest (Markdown).
+
+    A single, reviewer-oriented summary suitable for a job summary
+    ($GITHUB_STEP_SUMMARY) or a PR comment body: verdict + merge effect, a
+    counts table that separates breaking / API / risk / public additions /
+    filtered-internal, the release recommendation, a manual-review banner when
+    public-header scoping fell back (issue #235), and the top impacted symbols.
+    Distinct from to_markdown (the full report) — this is the "presentation"
+    layer over the same machine-readable decision contract. ADR-061 Phase 2
+    item 1: crosses the canonical ``ReportDocument`` boundary via
+    ``report/render_markdown_document.py`` — the same fact/formatting split
+    JSON/SARIF/JUnit/``--stat``/HTML already use.
+    """
+    from .report.render_markdown_document import (
+        build_review_digest_document,
+        render_review_digest_document,
+    )
+
+    return render_review_digest_document(
+        build_review_digest_document(result, severity_config=severity_config)
+    )
+
+
+def compute_rtti_note(breaking: list[Change]) -> _rmd.RttiNote | None:
+    """The structured intermediate for :func:`_build_internal_rtti_note`."""
+    bd = surface_breakdown(breaking)
+    if not (bd.rtti or bd.internal):
+        return None
+    return _rmd.RttiNote(
+        rtti=bd.rtti, internal=bd.internal, total=bd.total, public=bd.public
+    )
 
 
 def _build_internal_rtti_note(breaking: list[Change]) -> list[str]:
     """Build the up-front note when breaking findings are mostly RTTI/internal
     churn. Returns an empty list when there is nothing to note."""
-    _bd = surface_breakdown(breaking)
-    if not (_bd.rtti or _bd.internal):
-        return []
-    return [
-        f"> ℹ️ **{_bd.rtti + _bd.internal} of {_bd.total} breaking findings are "
-        f"internal/RTTI churn** ({_bd.rtti} RTTI, {_bd.internal} "
-        "internal-namespace) — typically a missing `-fvisibility=hidden`, not "
-        f"public-API breaks. Genuine public-surface breaking findings: "
-        f"**{_bd.public}**.",
-        "",
-    ]
+    return _rmd.render_rtti_note(compute_rtti_note(breaking))
 
 
 def _markdown_alternate_rendering(
@@ -1615,8 +1570,10 @@ def _markdown_alternate_rendering(
     return None
 
 
-def _markdown_headline_table(result: DiffResult, emoji: str, label: str) -> list[str]:
-    """The report's headline summary table.
+def compute_headline_table(
+    result: DiffResult, emoji: str, label: str
+) -> _rmd.HeadlineTable:
+    """The structured intermediate for the report's headline summary table.
 
     ADR-049 D1/D11: when contract evaluation excluded findings from the
     compatibility axis, say so in the headline table. The four counts above
@@ -1625,24 +1582,18 @@ def _markdown_headline_table(result: DiffResult, emoji: str, label: str) -> list
     count that reconciles them rather than an apparent contradiction. The
     row is absent for every run that did not opt in, where it is always 0.
     """
-    lines: list[str] = [
-        f"# ABI Report: {result.library}",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| **Old version** | `{result.old_version}` |",
-        f"| **New version** | `{result.new_version}` |",
-        f"| **Verdict** | {emoji} `{label}` |",
-        f"| Breaking changes | {len(result.breaking)} |",
-        f"| Source-level breaks | {len(result.source_breaks)} |",
-        f"| Deployment risk changes | {len(result.risk)} |",
-        f"| Compatible changes | {len(result.compatible)} |",
-    ]
-    not_evaluated_total = len(result.not_evaluated)
-    if not_evaluated_total:
-        lines.append(f"| Not evaluated (contract) | {not_evaluated_total} |")
-    lines.append("")
-    return lines
+    return _rmd.HeadlineTable(
+        library=result.library,
+        old_version=result.old_version,
+        new_version=result.new_version,
+        verdict_emoji=emoji,
+        verdict_label=label,
+        breaking=len(result.breaking),
+        source_breaks=len(result.source_breaks),
+        risk=len(result.risk),
+        compatible=len(result.compatible),
+        not_evaluated=len(result.not_evaluated),
+    )
 
 
 def to_markdown(
@@ -1679,108 +1630,33 @@ def to_markdown(
     if alternate is not None:
         return _out(alternate)
 
-    v = result.verdict
-    emoji = _VERDICT_EMOJI[v]
-    label = _VERDICT_LABEL[v]
-
-    old_meta = getattr(result, "old_metadata", None)
-    new_meta = getattr(result, "new_metadata", None)
-
-    # Apply show-only filter if provided (display-only, does not affect verdict)
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        # A filter can keep a finding while dropping the co-reported one its
-        # own correlated_change_kind names -- clear the now-dangling note
-        # rather than reference a finding this view no longer shows.
-        changes = _suppress_dangling_correlation_notes(changes)
-
-    # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
-    # classification + summary in one place, shared across formats.
-    from .report_model import ReportModel
-
-    model = ReportModel.from_result(result, changes=changes)
-    breaking, source_breaks, risk, compatible = (
-        model.breaking,
-        model.source_breaks,
-        model.risk,
-        model.compatible,
+    # ADR-061 Phase 2 item 1: the default (full-mode) view crosses the
+    # canonical ReportDocument boundary via report/render_markdown_document.py
+    # -- the same fact/formatting split JSON/SARIF/JUnit/--stat/HTML already
+    # use. `demangle` is applied inside the document renderer itself (the
+    # document's own "demangle" field), not by this function's `_out`.
+    from .report.render_markdown_document import (
+        build_markdown_document,
+        render_markdown_document,
     )
 
-    lines = _markdown_headline_table(result, emoji, label)
-    # When most of the breaking count is RTTI / internal-namespace churn, say so
-    # up front — otherwise a huge count from a library lacking -fvisibility=hidden
-    # buries the handful of genuine public-API breaks.
-    lines += _build_internal_rtti_note(breaking)
-
-    _append_confidence_section(lines, result)
-
-    _append_policy_section(lines, result)
-
-    if show_recommendation:
-        _append_recommendation_section(lines, result)
-
-    # Severity configuration summary when provided
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
+    return render_markdown_document(
+        build_markdown_document(
+            result,
+            show_only=show_only,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            show_recommendation=show_recommendation,
+            demangle=demangle,
         )
-
-    if show_only:
-        lines.append(
-            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
-        )
-        lines.append("")
-
-    if old_meta or new_meta:
-        lines += _build_library_files_section(old_meta, new_meta)
-
-    lines += _build_severity_sections(
-        breaking,
-        source_breaks,
-        risk,
-        compatible,
-        severity_config=severity_config,
     )
 
-    lines += _build_not_evaluated_section(model.not_evaluated)
 
-    lines += _build_environment_drift_section(changes)
-
-    if not changes:
-        if show_only and result.changes:
-            lines.append("_No changes match the current filter._")
-        else:
-            lines.append("_No ABI changes detected._")
-
-    _append_redundancy_note(lines, result)
-    _append_suppression_note(lines, result)
-    _append_out_of_surface_note(lines, result)
-
-    if show_impact:
-        lines.append("")
-        lines += _build_impact_table(result, displayed_changes=changes)
-
-    lines += _footer_lines()
-    return _out("\n".join(lines))
-
-
-def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
-    """Append confidence/evidence metadata section to markdown lines."""
+def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | None:
+    """The structured intermediate for :func:`_append_confidence_section`."""
     conf = getattr(result, "confidence", None)
     if conf is None:
-        return
+        return None
     tiers = getattr(result, "evidence_tiers", None)
     cov_warns = getattr(result, "coverage_warnings", None)
     conf_val = conf.value if hasattr(conf, "value") else str(conf)
@@ -1789,30 +1665,28 @@ def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
     etier_val = (
         etier.value if (etier is not None and hasattr(etier, "value")) else str(etier)
     )
-    lines += [
-        "## Analysis Confidence",
-        "",
-        "| Field | Value |",
-        "|---|---|",
-        f"| Confidence | {conf_val.upper()} |",
-        f"| Evidence tier | `{etier_val}` |",
-        f"| Evidence tiers | {tier_str} |",
-    ]
-    if cov_warns:
-        for warning in cov_warns:
-            lines.append(f"| Coverage gap | {warning} |")
-    lines.append("")
+    return _rmd.ConfidenceSection(
+        confidence_upper=conf_val.upper(),
+        evidence_tier=etier_val,
+        evidence_tiers_str=tier_str,
+        coverage_warnings=tuple(cov_warns) if cov_warns else (),
+    )
 
 
-def _append_policy_section(lines: list[str], result: DiffResult) -> None:
-    """Append policy metadata section to markdown lines."""
-    lines.append(f"> **Policy**: `{result.policy or 'strict_abi'}`")
+def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
+    """Append confidence/evidence metadata section to markdown lines."""
+    lines += _rmd.render_confidence_section(compute_confidence_section(result))
+
+
+def compute_policy_section(result: DiffResult) -> _rmd.PolicySection:
+    """The structured intermediate for :func:`_append_policy_section`."""
+    overrides_text = None
     if result.policy_file and result.policy_file.overrides:
-        overrides = ", ".join(
+        overrides_text = ", ".join(
             f"`{kind.value}` → `{severity.value}`"
             for kind, severity in result.policy_file.overrides.items()
         )
-        lines.append(f"> **Policy overrides**: {overrides}")
+    reclassify_text = None
     if result.policy_file and result.policy_file.reclassify:
         # Codex review: mirrors the JSON `policy_reclassify` disclosure
         # (reporter.py's `_add_policy_overrides`) -- the active rule set,
@@ -1828,173 +1702,43 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
             # CodeRabbit review: code-span-wrap describe()'s raw selector
             # text (e.g. `_ZN6oneapi3dal.*`) -- unescaped, `_`/`*` read as
             # Markdown emphasis, same as `Policy overrides` above already does.
-            rules = "; ".join(f"`{rule.describe()}`" for rule in active)
-            lines.append(f"> **Policy reclassify**: {rules}")
-    lines.append("")
+            reclassify_text = "; ".join(f"`{rule.describe()}`" for rule in active)
+    return _rmd.PolicySection(
+        policy=result.policy or "strict_abi",
+        overrides_text=overrides_text,
+        reclassify_text=reclassify_text,
+    )
+
+
+def _append_policy_section(lines: list[str], result: DiffResult) -> None:
+    """Append policy metadata section to markdown lines."""
+    lines += _rmd.render_policy_section(compute_policy_section(result))
 
 
 _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
 
+#: ``reporter_markdown._view_preamble`` (the opening block leaf/root-cause
+#: mode share -- title/verdict table, coverage-warning banner, optional
+#: recommendation section, the ``--show-only`` filter note) is retired.
+#: ``report.render_markdown_alternate.build_leaf_document``/
+#: ``build_root_cause_document`` call ``_view_preamble_mapping`` (that
+#: module's own JSON-safe compute half) directly instead -- see this
+#: module's own docstring and ``_to_markdown_leaf``/``_to_markdown_root_
+#: cause``.
 
-def _view_preamble(
-    result: DiffResult,
-    view_label: str,
-    *,
-    show_only: str | None,
-    show_recommendation: bool,
-) -> tuple[list[str], list[Change]]:
-    """Opening block shared by the leaf-change and root-cause markdown views.
 
-    Both views open identically — the titled version/verdict table, the optional
-    recommendation section, then the ``--show-only`` filter applied to the
-    change list with its "Filtered by" note. Stated once so the two views cannot
-    drift apart in what a filter does or how the header reads (CodeFactor:
-    duplicate code). Full mode deliberately does not share this: its table
-    carries four extra count rows and it applies ``--show-only`` silently, with
-    no note line.
-
-    Returns the opening lines and the (possibly filtered) changes to render.
-    """
-    lines: list[str] = [
-        f"# ABI Report: {result.library} ({view_label})",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| **Old version** | `{result.old_version}` |",
-        f"| **New version** | `{result.new_version}` |",
-        f"| **Verdict** | {_VERDICT_EMOJI[result.verdict]} `{_VERDICT_LABEL[result.verdict]}` |",
-        "",
-    ]
-
-    if show_recommendation:
-        _append_recommendation_section(lines, result)
-
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        lines.append(
-            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
-        )
-        lines.append("")
-        # A filter can keep a finding while dropping the co-reported one its
-        # own correlated_change_kind names -- clear the now-dangling note
-        # rather than reference a finding this view no longer shows.
-        changes = _suppress_dangling_correlation_notes(changes)
-
-    return lines, changes
+def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSection:
+    """The structured intermediate for :func:`_append_recommendation_section`."""
+    rec = recommend_release(result)
+    return _rmd.RecommendationSection(
+        bump_emoji=_BUMP_EMOJI.get(rec.bump.value, ""),
+        bump_upper=rec.bump.value.upper(),
+        soname_value=rec.soname.value,
+        state_value=rec.state.value,
+        rationale=rec.rationale,
+    )
 
 
 def _append_recommendation_section(lines: list[str], result: DiffResult) -> None:
     """Append the release-recommendation section (semver bump + soname action)."""
-    rec = recommend_release(result)
-    emoji = _BUMP_EMOJI.get(rec.bump.value, "")
-    lines += [
-        "## Release Recommendation",
-        "",
-        "| Field | Value |",
-        "|---|---|",
-        f"| Version bump | {emoji} **{rec.bump.value.upper()}** |",
-        f"| SONAME action | `{rec.soname.value}` |",
-        f"| Recommendation state | `{rec.state.value}` |",
-        "",
-        f"{rec.rationale}",
-        "",
-    ]
-
-
-def _format_change_md_oneline(c: object) -> str:
-    """Format a single change as a bare ``- **kind**: description`` line, plus
-    a "See also" correlation note when ``correlated_change_kind`` is set.
-
-    Used by the sections (Deployment Risk, Quality Issues, Not Evaluated)
-    that deliberately render a change as a single terse line rather than
-    routing through the fuller :func:`_format_change_md` (impact/affected-
-    symbols/contract detail) -- but the cross-detector correlation must
-    still reach every section a correlated finding (currently only
-    ``LAYOUT_UNVERIFIABLE``) can land in, or a policy/contract
-    configuration that routes it into one of these terse sections silently
-    drops the "See also" note the fuller formatter carries (Codex review,
-    fresh evidence).
-    """
-    kind = getattr(c, "kind", None)
-    kind_val = kind.value if kind else ""
-    desc = getattr(c, "description", "")
-    line = f"- **{kind_val}**: {desc}"
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        line += f"\n  > See also: `{correlated}` finding for the same symbol"
-    return line
-
-
-def _format_change_md(c: object) -> str:
-    """Format a single change as a markdown list item with impact and metadata."""
-    kind = getattr(c, "kind", None)
-    kind_val = kind.value if kind else ""
-    desc = getattr(c, "description", "")
-    old_val = getattr(c, "old_value", None)
-    new_val = getattr(c, "new_value", None)
-    loc = getattr(c, "source_location", None)
-    affected = getattr(c, "affected_symbols", None)
-    caused_count = getattr(c, "caused_count", 0)
-
-    # Base line
-    old_new = ""
-    if old_val is not None and new_val is not None:
-        old_new = f" (`{old_val}` → `{new_val}`)"
-    elif old_val is not None:
-        old_new = f" (`{old_val}`)"
-    elif new_val is not None:
-        old_new = f" (`{new_val}`)"
-    line = f"- **{kind_val}**: {desc}{old_new}"
-
-    # Source location
-    if loc:
-        line += f" — `{loc}`"
-
-    # Impact
-    if kind:
-        impact = impact_for(kind)
-        if impact:
-            line += f"\n  > {impact}"
-
-    # Collapsed derived changes
-    if caused_count > 0:
-        line += f"\n  > {caused_count} derived change(s) collapsed"
-
-    # Affected functions
-    if affected:
-        names = ", ".join(f"`{s}`" for s in affected[:5])
-        suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
-        line += f"\n  > Affected symbols: {names}{suffix}"
-
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract's
-    # own help text promises every finding is stamped with a contract
-    # decision, but only the JSON report (reporter.py's
-    # _add_contract_evaluation_fields) ever rendered it -- an ordinary
-    # `compare --contract` run (default markdown format) was
-    # byte-for-byte identical to one without the flag. A no-op when *c* was
-    # never stamped (contract_evaluation not requested), mirroring that
-    # helper's own documented default.
-    contract_relevance = getattr(c, "contract_relevance", None)
-    if contract_relevance is not None:
-        reason_code = getattr(c, "contract_reason_code", None)
-        contract_assurance = getattr(c, "contract_assurance", None)
-        line += f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
-
-    # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
-    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
-    # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED). Only
-    # JSON (reporter.py) and SARIF (sarif.py) rendered this field before —
-    # the default `compare --format markdown` report showed the two findings
-    # with no visible link between them (Codex review).
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        line += f"\n  > See also: `{correlated}` finding for the same symbol"
-
-    return line
+    lines += _rmd.render_recommendation_section(compute_recommendation_section(result))

@@ -55,7 +55,7 @@ real, build-integrated translation unit. Reusing them here needs zero changes.
 - Anything from ADR-031's *build*-level schema (``target``/``compile_unit``/
   ``build_option`` nodes, ``TARGET_HAS_SOURCE``, …) — not available at all;
   there is no ``BuildEvidence`` in a header-only world, so this module never
-  calls :func:`~abicheck.buildsource.source_graph.build_source_graph`.
+  calls :func:`~abicheck.buildsource.source_graph_build.build_source_graph`.
 
 **Coverage honesty (ADR-031 D9):** every node/edge this module creates itself
 carries ``provenance="header_ast_l2"`` and the graph's ``extractor_passes`` use
@@ -92,7 +92,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..fact_provenance import func_fact_key, var_fact_key
-from ..model import AbiSnapshot, ScopeOrigin
+from ..model import AbiSnapshot, ScopeOrigin, resolved_fact_value
+from ..model.graph_facts import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    GraphEdge,
+    GraphNode,
+    _decl_node_id,
+    _type_node_id,
+)
+from ..model.source_graph import SourceGraphSummary, _header_node_id
 from ..provenance import (
     _public_dirs_from_include_roots,
     build_public_set,
@@ -100,16 +109,6 @@ from ..provenance import (
 )
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
-from .source_graph import (
-    CONF_HIGH,
-    CONF_REDUCED,
-    GraphEdge,
-    GraphNode,
-    SourceGraphSummary,
-    _decl_node_id,
-    _header_node_id,
-    _type_node_id,
-)
 from .type_graph import (
     EDGE_DECL_HAS_TYPE,
     EDGE_TYPE_HAS_FIELD_TYPE,
@@ -258,7 +257,7 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
     return_type``/``.params``, and ``Variable.type`` identically, so this
     works uniformly regardless of which frontend parsed the headers, at zero
     extra compiler-invocation cost. Confidence is always
-    :data:`~abicheck.buildsource.source_graph.CONF_REDUCED` — even a
+    :data:`~abicheck.model.graph_facts.CONF_REDUCED` — even a
     :data:`~abicheck.buildsource.type_graph.RESOLUTION_UNIQUE_CANDIDATE` match
     here is a weaker guess than the AST path's scope-walk resolution.
     """
@@ -311,7 +310,16 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
         # rule already applied to edge targets.
         if counts.get(rt.name, 0) > 1:
             continue
-        for base in rt.bases:
+        # Fact[T]-bridged read (ADR-063 Phase 0): value-preserving, see
+        # `model.resolved_fact_value`'s own docstring. ADR-063 Phase 5B audit
+        # note (kept short — see this repo's own line-count cap; full
+        # reasoning in docs/contribute/plans/one-semantic-pipeline.md's 5B
+        # section): stays on the plain collapse deliberately — a
+        # single-snapshot graph (never an old/new pair), and this package's
+        # own governing rule already caps everything it feeds at
+        # API_BREAK_KINDS/RISK_KINDS, so a gap here can only omit an edge,
+        # never fabricate a BREAKING finding.
+        for base in resolved_fact_value(rt.bases_fact, []):
             emit(rt.name, base, EDGE_TYPE_INHERITS, "base")
         for fld in rt.fields:
             emit(rt.name, fld.type, EDGE_TYPE_HAS_FIELD_TYPE, "field")
@@ -687,10 +695,10 @@ class ClangHeaderIncludeExtractor:
     drives it through a throwaway :class:`~abicheck.buildsource.build_evidence.BuildEvidence`
     with one synthetic :class:`~abicheck.buildsource.build_evidence.CompileUnit`
     per header — its ``id`` set to that header's graph node id
-    (:func:`abicheck.buildsource.source_graph._header_node_id`), so
+    (:func:`abicheck.model.source_graph._header_node_id`), so
     :func:`abicheck.buildsource.include_graph.augment_graph_with_includes`
     can fold the result straight onto the already-built
-    :class:`~abicheck.buildsource.source_graph.SourceGraphSummary` without any
+    :class:`~abicheck.model.source_graph.SourceGraphSummary` without any
     extra id translation. A missing ``clang`` (or any per-header failure)
     degrades to an empty/partial map — never aborts the dump (ADR-028 D3).
     """

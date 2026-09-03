@@ -313,6 +313,7 @@ class TestBaselineSummaryKeysArePinned:
             "policy_file",
             "analysis_assurance",
             "analysis_assurance_exit_contribution",
+            "coverage_warnings",
         }
     )
 
@@ -383,6 +384,7 @@ class TestBaselineSummaryKeysArePinned:
             suppressed_changes=suppressed,
             policy="strict_abi",
             policy_file=policy_file,
+            coverage_warnings=["old and new binaries are byte-identical (sha256 match)"],
             # P0.4: `analysis_assurance_report_dict` (`analysis_assurance.py`)
             # only emits the key for a real `AnalysisAssurance` instance
             # (`isinstance` check) -- a plain `SimpleNamespace`/dict fixture

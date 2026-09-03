@@ -41,18 +41,20 @@ Mapping rules:
 from __future__ import annotations
 
 import hashlib
-import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
+from .junit_coverage_warnings import append_coverage_warnings_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
+    from .policy.severity import IssueCategory
+    from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
 
@@ -93,6 +95,31 @@ _VERDICT_TO_JUNIT_TYPE: dict[Verdict, str] = {
 }
 
 
+def _resolved_verdict(
+    change: Change, result: DiffResult, kind_sets: KindSets, finding: ReportFinding | None
+) -> Verdict:
+    """*finding*'s verdict if resolved (ADR-061 Phase 2 item 4b), else the
+    direct resolver call every caller used before ``findings_by_id``."""
+    if finding is not None:
+        return finding.verdict
+    from .severity import effective_verdict_for_change
+    return effective_verdict_for_change(
+        change, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
+    )
+
+
+def _resolved_category(
+    change: Change, result: DiffResult, kind_sets: KindSets, finding: ReportFinding | None
+) -> IssueCategory:
+    """Category counterpart of :func:`_resolved_verdict`."""
+    if finding is not None:
+        return finding.category
+    from .severity import classify_effective_change
+    return classify_effective_change(
+        change, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
+    )
+
+
 def _is_failure(
     change: Change,
     result: DiffResult,
@@ -100,6 +127,7 @@ def _is_failure(
     severity_config: SeverityConfig | None = None,
     *,
     relevant_ids: frozenset[str] | None = None,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> bool:
     """Return True if the change should be a JUnit ``<failure>``.
 
@@ -107,7 +135,8 @@ def _is_failure(
     canonical per-finding verdict, which honours PolicyFile overrides, the
     A4 per-finding ``effective_verdict`` (ADR-027), and frozen-namespace
     escalation guards — so the JUnit file can never disagree with the JSON
-    report or the severity-aware exit code.
+    report or the severity-aware exit code. *findings_by_id*, when given,
+    resolves via :func:`_resolved_verdict`/:func:`_resolved_category`.
 
     When *severity_config* is given (from ``--severity-preset`` or
     ``severity:`` config overrides), it is the sole source of truth — a finding
@@ -143,17 +172,13 @@ def _is_failure(
         return False
     if relevant_ids is not None and _finding_id(change) not in relevant_ids:
         return False
+    finding = findings_by_id.get(id(change)) if findings_by_id is not None else None
     if severity_config is not None:
-        from .severity import SeverityLevel, classify_effective_change
+        from .severity import SeverityLevel
 
-        cat = classify_effective_change(
-            change,
-            policy=result.policy,
-            kind_sets=kind_sets,
-            policy_file=result.policy_file,
-        )
+        cat = _resolved_category(change, result, kind_sets, finding)
         return severity_config.level_for(cat) == SeverityLevel.ERROR
-    verdict = result._effective_verdict_for_change(change)
+    verdict = _resolved_verdict(change, result, kind_sets, finding)
     if verdict in (Verdict.BREAKING, Verdict.API_BREAK):
         return True
     # COMPATIBLE_WITH_RISK never fails without a severity_config: all
@@ -177,15 +202,14 @@ def _failure_type(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
+    *,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> str:
     """Return the ``type`` attribute for a ``<failure>`` element.
 
-    Uses the same canonical per-finding verdict/category as ``_is_failure``
-    so the reported type always matches why the finding failed. Takes the
-    caller's precomputed *kind_sets* rather than recomputing them
-    (``_build_testsuite`` already builds them once per report;
-    ``DiffResult._effective_verdict_for_change`` would otherwise rebuild them
-    per finding).
+    Uses the same canonical per-finding verdict/category as ``_is_failure``,
+    including *findings_by_id* (ADR-061 Phase 2 item 4b), so the reported
+    type always matches why the finding failed.
 
     When *severity_config* is given, ``_is_failure`` decides pass/fail from
     the finding's effective *category* (:func:`classify_effective_change`),
@@ -195,15 +219,11 @@ def _failure_type(
     ``type="COMPATIBLE"`` (``_VERDICT_TO_JUNIT_TYPE``'s fallback for any
     verdict it doesn't recognise), contradicting the very reason it failed.
     """
+    finding = findings_by_id.get(id(change)) if findings_by_id is not None else None
     if severity_config is not None:
-        from .severity import IssueCategory, classify_effective_change
+        from .severity import IssueCategory
 
-        category = classify_effective_change(
-            change,
-            policy=result.policy,
-            kind_sets=kind_sets,
-            policy_file=result.policy_file,
-        )
+        category = _resolved_category(change, result, kind_sets, finding)
         if category == IssueCategory.POTENTIAL_BREAKING:
             # IssueCategory doesn't itself distinguish API break from
             # deployment risk (both fold into POTENTIAL_BREAKING) — recover
@@ -213,14 +233,7 @@ def _failure_type(
             # change's verdict without changing which kind-set its raw kind
             # belongs to, so kind-set membership alone could contradict the
             # category already resolved above (CodeRabbit review, PR #557).
-            from .severity import effective_verdict_for_change
-
-            verdict = effective_verdict_for_change(
-                change,
-                policy=result.policy,
-                kind_sets=kind_sets,
-                policy_file=result.policy_file,
-            )
+            verdict = _resolved_verdict(change, result, kind_sets, finding)
             if verdict == Verdict.API_BREAK:
                 return "API_BREAK"
             if verdict == Verdict.COMPATIBLE_WITH_RISK:
@@ -228,14 +241,7 @@ def _failure_type(
             return "POTENTIAL_BREAKING"
         return _CATEGORY_TO_JUNIT_TYPE.get(category.value, "COMPATIBLE")
 
-    from .severity import effective_verdict_for_change
-
-    verdict = effective_verdict_for_change(
-        change,
-        policy=result.policy,
-        kind_sets=kind_sets,
-        policy_file=result.policy_file,
-    )
+    verdict = _resolved_verdict(change, result, kind_sets, finding)
     return _VERDICT_TO_JUNIT_TYPE.get(verdict, "COMPATIBLE")
 
 
@@ -356,12 +362,14 @@ def _count_failures(
     severity_config: SeverityConfig | None,
     *,
     relevant_ids: frozenset[str] | None = None,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> int:
     """Count distinct symbols that have at least one failing change."""
     symbols_with_failure: set[str] = set()
     for c in changes:
         if _is_failure(
-            c, result, kind_sets, severity_config, relevant_ids=relevant_ids
+            c, result, kind_sets, severity_config,
+            relevant_ids=relevant_ids, findings_by_id=findings_by_id,
         ):
             symbols_with_failure.add(c.symbol)
     return len(symbols_with_failure)
@@ -377,6 +385,7 @@ def _emit_testcases(
     *,
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> None:
     """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
 
@@ -390,14 +399,9 @@ def _emit_testcases(
             tc.set("classname", classname)
             if sym in change_by_symbol:
                 _maybe_add_failure(
-                    tc,
-                    change_by_symbol[sym],
-                    result,
-                    kind_sets,
-                    severity_config,
-                    relevant_ids=relevant_ids,
-                    root_cause_lookup=root_cause_lookup,
-                )
+                    tc, change_by_symbol[sym], result, kind_sets, severity_config,
+                    relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
+                    findings_by_id=findings_by_id)
     else:
         # No snapshot — only emit changed symbols
         for sym, c in sorted(change_by_symbol.items()):
@@ -405,14 +409,9 @@ def _emit_testcases(
             tc.set("name", sym)
             tc.set("classname", _classname_for(c))
             _maybe_add_failure(
-                tc,
-                c,
-                result,
-                kind_sets,
-                severity_config,
-                relevant_ids=relevant_ids,
-                root_cause_lookup=root_cause_lookup,
-            )
+                tc, c, result, kind_sets, severity_config,
+                relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
+                findings_by_id=findings_by_id)
 
 
 def _append_extra_failures(
@@ -424,6 +423,7 @@ def _append_extra_failures(
     *,
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> None:
     """Append extra ``<failure>`` children -- and, regardless of pass/fail,
     a secondary change's ``correlated_change_kind`` -- to already-existing
@@ -454,18 +454,14 @@ def _append_extra_failures(
     for c in extra_changes:
         _add_correlation_property_if_testcase_found(ts, c)
         if _is_failure(
-            c, result, kind_sets, severity_config, relevant_ids=relevant_ids
+            c, result, kind_sets, severity_config,
+            relevant_ids=relevant_ids, findings_by_id=findings_by_id,
         ):
             for tc in ts:
                 if tc.get("name") == c.symbol:
                     _add_failure(
-                        tc,
-                        c,
-                        result,
-                        kind_sets,
-                        severity_config,
-                        root_cause_lookup=root_cause_lookup,
-                    )
+                        tc, c, result, kind_sets, severity_config,
+                        root_cause_lookup=root_cause_lookup, findings_by_id=findings_by_id)
                     break
 
 
@@ -529,13 +525,25 @@ def _build_testsuite(
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
 
+    # ADR-061 Phase 2 item 4b: resolve every verdict/category once. Built
+    # from *changes*, not just result.changes, since it also carries
+    # scoped_only_changes.
+    from .report.finding import build_report_findings, findings_by_change_id
+
+    findings_by_id = findings_by_change_id(
+        build_report_findings(
+            changes, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
+        )
+    )
+
     # When --used-by/--required-symbol scoping is active, relevant_ids makes
     # failures follow the scoped gate rather than the full library verdict
     # (CLI-audit P1 fix); None means no scoping is active, so behavior below
     # is unchanged from before.
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
     failure_count = _count_failures(
-        changes, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        changes, result, kind_sets, severity_config,
+        relevant_ids=relevant_ids, findings_by_id=findings_by_id,
     )
     missing_labels = getattr(result, "scoped_missing_labels", ()) or ()
     # The missing-contract failure decision must follow the same severity
@@ -592,23 +600,14 @@ def _build_testsuite(
     )
 
     _emit_testcases(
-        ts,
-        all_symbols,
-        change_by_symbol,
-        result,
-        kind_sets,
-        severity_config,
-        relevant_ids=relevant_ids,
-        root_cause_lookup=root_cause_lookup,
+        ts, all_symbols, change_by_symbol, result, kind_sets, severity_config,
+        relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
+        findings_by_id=findings_by_id,
     )
     _append_extra_failures(
-        ts,
-        extra_changes,
-        result,
-        kind_sets,
-        severity_config,
-        relevant_ids=relevant_ids,
-        root_cause_lookup=root_cause_lookup,
+        ts, extra_changes, result, kind_sets, severity_config,
+        relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
+        findings_by_id=findings_by_id,
     )
     _emit_missing_contract_testcases(
         ts,
@@ -737,6 +736,7 @@ def _maybe_add_failure(
     *,
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure, and
     ``<properties>`` blocks with ADR-049's per-finding contract decision
@@ -746,15 +746,12 @@ def _maybe_add_failure(
     _add_contract_properties(tc, change, result, severity_config)
     _add_correlation_property(tc, change)
     if _is_failure(
-        change, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        change, result, kind_sets, severity_config,
+        relevant_ids=relevant_ids, findings_by_id=findings_by_id,
     ):
         _add_failure(
-            tc,
-            change,
-            result,
-            kind_sets,
-            severity_config,
-            root_cause_lookup=root_cause_lookup,
+            tc, change, result, kind_sets, severity_config,
+            root_cause_lookup=root_cause_lookup, findings_by_id=findings_by_id,
         )
 
 
@@ -878,9 +875,12 @@ def _add_failure(
     severity_config: SeverityConfig | None = None,
     *,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
+    findings_by_id: dict[int, ReportFinding] | None = None,
 ) -> None:
     """Append a ``<failure>`` element to testcase *tc*."""
-    ftype = _failure_type(change, result, kind_sets, severity_config)
+    ftype = _failure_type(
+        change, result, kind_sets, severity_config, findings_by_id=findings_by_id
+    )
     description = change.description or change.kind.value.replace("_", " ")
     message = f"{change.kind.value}: {description}"
 
@@ -910,12 +910,7 @@ def _add_failure(
 
 
 def _build_error_testsuite(library: str, error_msg: str) -> ET.Element:
-    """Build a ``<testsuite>`` with a single errored testcase.
-
-    Used by ``to_junit_xml_multi`` to represent libraries whose comparison
-    failed (e.g. bad input, missing headers) so that CI dashboards show
-    the failure rather than silently omitting the library.
-    """
+    """Build a ``<testsuite>`` with a single errored testcase, used by ``to_junit_xml_multi`` for a library whose comparison failed (bad input, missing headers) so CI dashboards show the failure rather than silently omitting the library."""
     ts = ET.Element("testsuite")
     ts.set("name", library)
     ts.set("tests", "1")
@@ -999,9 +994,9 @@ def to_junit_xml(
     # the assertion failed"). Emitting it as a passing testcase, or omitting
     # it, would let a CI dashboard read "no evidence" as "compatible".
     errors = _append_coverage_suite(root, result)
-
+    warnings = append_coverage_warnings_suite(root, result)
     # Roll up counts
-    root.set("tests", str(int(ts.get("tests", "0")) + errors))
+    root.set("tests", str(int(ts.get("tests", "0")) + errors + warnings))
     root.set("failures", ts.get("failures", "0"))
     root.set("errors", str(errors))
 
@@ -1095,6 +1090,8 @@ def to_junit_xml_multi(
         coverage_errors = _append_coverage_suite(root, result)
         total_tests += coverage_errors
         total_errors += coverage_errors
+        # Per result, mirroring the coverage-error suite above: each library carries its own coverage_warnings, not a document-wide list.
+        total_tests += append_coverage_warnings_suite(root, result)
 
     for entry in error_libraries or []:
         ts = _build_error_testsuite(
@@ -1113,12 +1110,10 @@ def to_junit_xml_multi(
 
 
 def _to_xml_string(root: ET.Element) -> str:
-    """Serialize an ElementTree element to an XML string with declaration."""
-    ET.indent(root)
-    tree = ET.ElementTree(root)
-    buf = io.BytesIO()
-    tree.write(buf, encoding="UTF-8", xml_declaration=True)
-    return buf.getvalue().decode("UTF-8")
+    """Serialize a JUnit element tree to XML (via ``report.render_xml``)."""
+    from .report.render_xml import render_element_as_xml
+
+    return render_element_as_xml(root)
 
 
 def to_junit_xml_not_comparable(

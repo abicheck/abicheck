@@ -711,30 +711,30 @@ class TestResolveFunctionIdentity:
         )
 
     def test_parameter_type_spelling_is_canonicalized(self) -> None:
-        # Codex review: castxml ("char const*") and clang's -ast-dump=json
-        # ("char const *") spell an otherwise-identical parameter type
-        # differently -- a real, confirmed cross-producer discrepancy
-        # (name_classification.canonicalize_type_name's own docstring,
-        # diff_symbols._params_differ already compares through it). Without
-        # canonicalizing here, the same declaration seen from two producers
-        # would get different NORMALIZED-tier signatures, fragmenting
-        # identity the same way an uncanonicalized qualified_name would.
-        castxml_spelling = Function(
-            name="foo",
-            mangled=None,
-            return_type="void",
-            params=[Param(name="s", type="char const*")],
-        )
-        clang_spelling = Function(
-            name="foo",
-            mangled=None,
-            return_type="void",
-            params=[Param(name="s", type="char const *")],
-        )
-        assert (
-            resolve_function_identity(castxml_spelling).primary_id
-            == resolve_function_identity(clang_spelling).primary_id
-        )
+        # Codex review: castxml ("char const*") vs. clang's -ast-dump=json
+        # ("char const *") spell an identical param type differently;
+        # canonicalizing here keeps two producers' NORMALIZED-tier
+        # signatures from fragmenting the same declaration's identity.
+        def sig(t: str) -> str:
+            f = Function(
+                name="foo", mangled=None, return_type="void", params=[Param("s", t)]
+            )
+            return resolve_function_identity(f).primary_id
+
+        assert sig("char const*") == sig("char const *")
+
+    def test_by_value_cv_delegates_to_shared_signature_primitive(self) -> None:
+        # ADR-063 Phase 2: shares canonicalize_function_signature_param_type
+        # with entity_id_for_function -- drops a BY-VALUE cv, keeps a POINTEE one.
+        def sig(t: str) -> str:
+            f = Function(
+                name="f", mangled="f", return_type="void", params=[Param("x", t)]
+            )
+            return resolve_function_identity(f).primary_id
+
+        assert sig("int") == sig("const int")
+        assert sig("char *") != sig("const char *")
+        sig("void (*)(" * 500 + "int" + ")" * 500)  # must not raise (PR #952)
 
 
 class TestResolveVariableIdentity:
@@ -885,7 +885,7 @@ class TestResolveChangeIdentity:
         assert identity.tier == IDENTITY_TIER_NORMALIZED
 
     def test_batch_rename_synthetic_id_is_not_canonical(self) -> None:
-        # diff_symbols.py's _emit_batch_rename stores a synthetic
+        # diff_symbols_renames.py's emit_prefix_batch_rename stores a synthetic
         # "batch_rename:<prefix>*" identifier, never a real symbol.
         change = Change(
             kind=ChangeKind.SYMBOL_RENAMED_BATCH,

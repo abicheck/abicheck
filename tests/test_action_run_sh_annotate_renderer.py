@@ -301,6 +301,35 @@ class TestAnnotateRendererReadsThePersistedReport:
         assert "::notice title=abicheck annotate::" in combined
         assert "no JSON report is available" in combined
 
+    def test_effective_format_override_still_emits_the_diagnostic(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #998, fresh evidence: `format: json` overridden
+        by `extra-args: --format text --write markdown=...` really does
+        leave no JSON report anywhere (`_json_report_src` correctly finds
+        nothing), but the notice above used to gate on the *nominal*
+        `$FORMAT` -- which still read "json" -- and so stayed silent about
+        exactly the situation it exists to explain. Same scenario as
+        `test_non_json_write_target_emits_a_diagnostic_not_silence` above,
+        with the override direction reversed.
+        """
+        result = _run_compare(
+            tmp_path,
+            {
+                "INPUT_FORMAT": "json",
+                "INPUT_ANNOTATE": "true",
+                "INPUT_EXTRA_ARGS": f"--format text --write markdown={tmp_path / 'out.md'}",
+            },
+            stub_report=_REPORT_WITH_ANNOTATIONS,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::error title=ABI Break::function foo removed" not in _emitted_lines(
+            result
+        )
+        combined = result.stdout + result.stderr
+        assert "::notice title=abicheck annotate::" in combined
+        assert "no JSON report is available" in combined
+
     def test_discovers_a_user_supplied_write_json_path(self, tmp_path: Path) -> None:
         """Codex review, PR #798: when the primary FORMAT isn't json and the
         caller's own extra-args already carries ``--write json=PATH``, the

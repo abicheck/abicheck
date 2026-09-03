@@ -228,7 +228,8 @@ when available.
 
 Only an abicheck-constructed command runs automatically. An *arbitrary*
 `build.query` command runs only when it is operator-supplied — an explicit
-`--config` (the project `.abicheck.yml` contract) or `--build-query` on the CLI.
+`--config` (the project `.abicheck.yml` contract), which is the only thing that
+can authorize it: there is no CLI flag for a query.
 An auto-discovered `.abicheck.yml` sitting inside the `--sources` tree is never
 trusted to execute its `build.query` (it may be attacker-controlled); its
 non-executing settings are still honoured. Pre-generating and passing a

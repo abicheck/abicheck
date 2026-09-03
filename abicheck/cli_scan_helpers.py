@@ -21,8 +21,9 @@ Keeping them here holds ``cli_scan.py`` under the 2000-line hard cap while
 decomposing the two long methods into legible pieces.
 
 No import cycle: this module imports only from :mod:`abicheck.buildsource`
-and, function-locally, the dependency-free :mod:`abicheck.cli_secondary_output`
-leaf (never :mod:`abicheck.cli_options` itself -- see
+and, function-locally, the dependency-free
+:mod:`abicheck.frontends.cli.options.secondary_output` leaf (never
+:mod:`abicheck.cli_options` itself -- see
 :func:`reject_incoherent_scan_secondary_output`'s own docstring for why that
 distinction matters). The render helpers take the ``ScanOutcome`` dataclass
 as ``Any`` rather than importing it from :mod:`abicheck.cli_scan` (even under
@@ -49,35 +50,43 @@ if TYPE_CHECKING:
 def reject_incoherent_scan_operands(
     *,
     artifact: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
     against: Path | None,
-    dry_run: bool,
     bundle_system_providers: str,
 ) -> None:
     """Reject operand/flag combinations ``scan`` cannot serve.
 
-    An empty ``--artifact-set`` is rejected explicitly rather than left to
-    collapse to ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit
-    review). ``--artifact-set`` is audit-only -- there is no old side for a set
-    -- so ``--against`` is rejected with it, and ``--dry-run`` is not wired for
-    it yet. ``--bundle-system-providers`` is the mirror case: it only means
+    ``--artifact-set`` is a repeatable option (CLI cleanup phase two, PR 5):
+    ``artifact_set`` is the tuple Click collects, empty when the flag was
+    never given at all -- so "supplied" is exactly ``bool(artifact_set)``,
+    with no truthiness/``is not None`` mismatch left to reintroduce the
+    CodeRabbit-caught bug the comma-separated single-string form once had
+    (an empty ``--artifact-set ""`` still yields a non-empty one-element
+    tuple, so it is correctly treated as *supplied* here and rejected by the
+    empty-member check below, never silently read as "not set"). Any empty
+    or blank member is rejected explicitly rather than left to collapse to
+    ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit review,
+    preserved from the comma-separated form's own fix). ``--artifact-set``
+    is audit-only -- there is no old side for a set -- so ``--against`` is
+    rejected with it. ``--dry-run`` *is* supported (CLI cleanup phase two,
+    PR 5's set-mode-semantics slice) -- see
+    :func:`abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
+    -- so it is no longer rejected here.
+    ``--bundle-system-providers`` is the mirror case: it only means
     something *for* a set.
     """
-    if artifact_set is not None and not artifact_set.strip():
+    if any(not member.strip() for member in artifact_set):
         raise click.UsageError("--artifact-set must not be empty.")
-    if (artifact is not None) == (artifact_set is not None):
+    supplied = bool(artifact_set)
+    if (artifact is not None) == supplied:
         raise click.UsageError(
             "scan requires exactly one of ARTIFACT or --artifact-set."
         )
-    if artifact_set is not None:
+    if supplied:
         if against is not None:
             raise click.UsageError(
                 "--against is not supported with --artifact-set "
                 "(audit-only -- no old side for a set)."
-            )
-        if dry_run:
-            raise click.UsageError(
-                "--dry-run is not yet supported with --artifact-set."
             )
     elif bundle_system_providers:
         raise click.UsageError("--bundle-system-providers requires --artifact-set.")
@@ -89,31 +98,31 @@ def reject_incoherent_scan_secondary_output(
     output: Path | None,
     secondary_fmt: str | None,
     secondary_output: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
 ) -> None:
     """Reject a ``--secondary-*`` combination that cannot mean anything.
 
     The four checks common to any command carrying the shared
-    ``cli_secondary_output.secondary_output_options`` pair (dry-run,
+    ``secondary_output.secondary_output_options`` pair (dry-run,
     half-given pair either direction, same-file collision) now live once in
-    ``cli_secondary_output.reject_incoherent_secondary_output`` -- previously
+    ``secondary_output.reject_incoherent_secondary_output`` -- previously
     duplicated byte-for-byte from ``compare``'s own
     ``_reject_incoherent_compare_flags`` (Codex review). Imported from the
-    dependency-free ``cli_secondary_output`` leaf module rather than from
-    ``cli_options`` itself: this module sits on an existing import path back
-    into ``cli_options`` (``cli_options -> cli_resolve -> service_scan ->
-    scan_engine -> cli_scan_helpers``), so a ``cli_scan_helpers ->
-    cli_options`` edge would close a real cycle the AI-readiness
-    ``import-cycle-growth`` gate rejects -- see ``cli_secondary_output``'s
-    own module docstring. This wrapper adds only the one check specific to
+    dependency-free ``frontends.cli.options.secondary_output`` leaf module
+    rather than from ``cli_options`` itself: this module sits on an existing
+    import path back into ``cli_options`` (``cli_options -> cli_resolve ->
+    service_scan -> scan_engine -> cli_scan_helpers``), so a
+    ``cli_scan_helpers -> cli_options`` edge would close a real cycle the
+    AI-readiness ``import-cycle-growth`` gate rejects -- see that leaf
+    module's own docstring. This wrapper adds only the one check specific to
     ``scan``: ``--artifact-set`` has no single-artifact report to render a
     second time at all.
     """
-    from .cli_secondary_output import (
+    from .frontends.cli.options import (
         reject_incoherent_secondary_output as _reject_shared,
     )
 
-    if artifact_set is not None and (
+    if artifact_set and (
         secondary_fmt is not None or secondary_output is not None
     ):
         raise click.UsageError(
@@ -308,7 +317,7 @@ def resolve_effective_allow_query(
     ):
         return allow_build_query, None
 
-    from .buildsource.inline import load_build_config
+    from .workflows.extraction import load_build_config
 
     try:
         _cfg = load_build_config(build_config)
@@ -458,6 +467,12 @@ def render_baseline_lines(out: Any, *, show_suppressed: bool = False) -> list[st
     if suppressed_count:
         counts_line += f" suppressed={suppressed_count}"
     lines = ["", "Baseline comparison", counts_line]
+    # Codex review: the JSON summary has carried this since
+    # `_baseline_summary` first surfaced it, but the text renderer (the
+    # *default* format) never printed it — a byte-identical-binaries warning
+    # was invisible in an ordinary `scan --against` run's console output.
+    for warning in out.diff_summary.get("coverage_warnings", []):
+        lines.append(f"  Warning: {warning}")
     for f in out.diff_summary.get("findings", []):
         loc = f" ({f['source_location']})" if f.get("source_location") else ""
         symbol = f.get("symbol") or "?"

@@ -1,3 +1,15 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+summarizes:
+  - class-layout
+depends_on:
+  - abicheck/diff_types.py
+lifecycle: active
+generated: false
+---
 # Part 3 — Type Layout Breaks
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -7,8 +19,7 @@
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -210,6 +221,16 @@ bytes into what v2 treats as an 8-byte cell.
 
 ---
 
+## C++ classes: the same rules, plus bases and vptrs
+
+Everything above applies to a C++ class as a plain aggregate. What C++ adds
+— base-class sub-objects at fixed offsets, the hidden vptr, the empty-base
+and tail-padding optimizations, `[[no_unique_address]]`, standard-layout
+and trivially-copyable status — is a second family of layout facts the
+compiler bakes into callers the same way, and each has its own change
+kind and evidence tier. That family is owned by one page:
+[Class Layout ABI & API](../class-layout-abi.md).
+
 ## How to defend type layout
 
 !!! tip "Design patterns for Part 3"
@@ -252,3 +273,7 @@ silently flips the calling convention.
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [BREAKING examples](../../reference/examples/by-verdict/breaking.md) ·
 [COMPATIBLE examples](../../reference/examples/by-verdict/compatible.md)
+
+---
+
+**Ladder:** ← [Part 2 — Symbol Contract Breaks](02-symbol-contracts.md) · Step 3 · How Breaks Happen · [Part 4 — C++ ABI Specifics](04-cpp-abi.md) →

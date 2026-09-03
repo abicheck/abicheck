@@ -28,7 +28,7 @@ Profiles:
            The everyday inner-loop command.
     pr     The exact always-required CI-equivalent checks: everything `fast`
            runs, plus golden tests, coverage floor, and the ai-readiness /
-           module-architecture / FP-rate / tier-accuracy / doc-sync /
+           architecture / FP-rate / tier-accuracy / doc-sync /
            schema/FAIR-metadata gates that required workflows run on every PR.
     full   Everything in `pr`, plus external-tool, parity, performance,
            packaging, and changelog-fragment lanes — each skipped (not
@@ -322,24 +322,10 @@ STEPS: tuple[Step, ...] = (
         description="Structural readiness gate (file size, ChangeKind partition, import cycles, mypy drift, ...)",
     ),
     Step(
-        "module-architecture-tests",
-        _py(
-            "unittest",
-            "discover",
-            "-s",
-            "tests",
-            "-p",
-            "test_module_architecture.py",
-            "-v",
-        ),
+        "architecture",
+        _pyscript("scripts/check_architecture.py"),
         frozenset({PR, FULL}),
-        description="Focused tests for the bounded-module architecture gate",
-    ),
-    Step(
-        "module-architecture",
-        _pyscript("scripts/module_architecture.py"),
-        frozenset({PR, FULL}),
-        description="Delta-based module size and dependency-direction gate",
+        description="ADR-061 responsibility packages, dependency direction, and debt no-growth gate",
     ),
     Step(
         "unit-pr",
@@ -391,6 +377,15 @@ STEPS: tuple[Step, ...] = (
         _pyscript("scripts/check_usecase_docs_sync.py"),
         frozenset({PR, FULL}),
         description="Use-case registry vs. human docs drift gate",
+    ),
+    Step(
+        # The learning-series hub's step list and role-path table are rendered
+        # from docs/_meta/learning-ladder.yaml; this is the drift half only
+        # (the ladder's rules run inside docs-contract).
+        "learning-ladder",
+        _pyscript("scripts/gen_learning_ladder.py", "--check"),
+        frozenset({PR, FULL}),
+        description="Learning-series hub ladder/paths blocks in sync with docs/_meta/learning-ladder.yaml",
     ),
     Step(
         "docs-contract",
@@ -551,9 +546,63 @@ STEPS: tuple[Step, ...] = (
     ),
     Step(
         "slow",
-        _py("pytest", "tests/", "-m", "slow", "--tb=short"),
+        # -n auto --dist worksteal, matching ci.yml's "Run slow tests" step:
+        # most `slow`-marked tests here are independent (Hypothesis/property-
+        # based suites plus the production-scale snapshot-compression round
+        # trips), so a serial run was pure wasted wall time on a multi-core
+        # runner/machine and left this local step unable to reproduce CI's
+        # actual timing behavior (Codex review, PR #1036).
+        # tests/test_performance.py, tests/test_perf_binary_scan.py, AND
+        # tests/test_header_scan_deadline_integration.py are excluded here
+        # and covered by the separate "slow-perf" step below, run serially --
+        # see that step's own comment for why (Codex review, same PR, three
+        # rounds: the second and third files each caught in their own
+        # follow-up round).
+        _py(
+            "pytest",
+            "tests/",
+            "-m",
+            "slow",
+            "--ignore=tests/test_performance.py",
+            "--ignore=tests/test_perf_binary_scan.py",
+            "--ignore=tests/test_header_scan_deadline_integration.py",
+            "--tb=short",
+            "-n",
+            "auto",
+            "--dist",
+            "worksteal",
+        ),
         frozenset({FULL}),
-        description="Hypothesis / perf-benchmark tests",
+        description="Hypothesis / perf-benchmark tests (parallel; excludes wall-clock-timed tests)",
+    ),
+    Step(
+        "slow-perf",
+        # Deliberately NOT parallelized, unlike "slow" above: every test in
+        # tests/test_performance.py, tests/test_perf_binary_scan.py, and
+        # tests/test_header_scan_deadline_integration.py (whole-file
+        # `pytestmark = pytest.mark.slow` in the first two; the third has one
+        # `@pytest.mark.slow` test,
+        # test_pathological_header_natural_cost_is_tracked, with its own 60s
+        # ceiling) measures real wall-clock time against a fixed budget
+        # (2s/5s/30s, 3s/5s and 30s/45s, and 60s respectively) or fits a
+        # scaling exponent -- running them concurrently with other CPU-heavy
+        # tests makes scheduler contention part of the measurement, which can
+        # fail (or distort) the gate with no actual product regression.
+        # ci.yml's "Run slow tests" step keeps all three files serial,
+        # together, for the identical reason (Codex review, PR #1036);
+        # performance.yml's own dedicated job only covers the first two --
+        # an acknowledged, separate gap in that workflow, not fixed here.
+        _py(
+            "pytest",
+            "tests/test_performance.py",
+            "tests/test_perf_binary_scan.py",
+            "tests/test_header_scan_deadline_integration.py",
+            "-m",
+            "slow",
+            "--tb=short",
+        ),
+        frozenset({FULL}),
+        description='Wall-clock-timed perf-benchmark tests (serial, unlike "slow")',
     ),
     Step(
         # Report-only (no --baseline): a single-checkout, single-Step run has

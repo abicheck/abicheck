@@ -434,6 +434,29 @@ STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
 _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
     "<lambda",
     "{lambda",
+    # Clang's own closure spelling is ``(lambda at <path>:<line>:<col>)`` --
+    # and after :func:`strip_anonymous_type_location` normalizes it, simply
+    # ``(lambda:<file>:<line>:<col>)``. Neither form starts the marker with
+    # ``<`` or ``{``, so a template instantiation over a closure type
+    # (``raii_guard<(lambda:task_group.h:522:26)>``) matched none of the
+    # markers above and was treated as ordinary ABI surface -- even though
+    # the *same* module already parses this exact spelling one screen down
+    # (``_ANON_LOCATION_RE``), i.e. the omission was in this list, not in
+    # what the codebase knows about clang's spelling. The consequence is a
+    # type whose identity carries a source *line number*: an unrelated edit
+    # earlier in the header shifts it, and the shifted spelling reads as a
+    # whole type removed and a whole type added, at BREAKING severity, for a
+    # closure class that has no user-nameable identity to break in the first
+    # place. GCC/DWARF's ``{lambda(...)#1}`` spelling matched all along,
+    # which is why this only ever showed up on clang-derived spellings.
+    #
+    # Like its two siblings this is a substring test, so it also matches a
+    # type whose name merely *contains* the text (the documented
+    # ``Tag<"(lambda at a.hpp:1:2)">`` string-NTTP shape). That exposure is
+    # identical in kind to what ``<lambda``/``{lambda`` already carry, and
+    # errs toward excluding a synthetic-looking type rather than admitting a
+    # line-number-keyed one.
+    "(lambda",
     "(anonymous",
     "(unnamed",
     "<unnamed",
@@ -468,6 +491,24 @@ def is_compiler_internal_type(name: str) -> bool:
     )
 
 
+def contains_anonymous_type_marker(text: str | None) -> bool:
+    """Return True if *text* embeds an anonymous/lambda-closure type marker.
+
+    A narrower, standalone sibling of :func:`is_non_abi_surface_type`'s
+    anonymous-type check (the marker test alone, with none of that
+    function's compiler-internal/stdlib-namespace exclusions) for a caller
+    that isn't testing a *type identity* string but some other piece of
+    already-recorded text a type's own spelling can flow into — e.g. a
+    ``Change.symbol``/``old_value``/``new_value`` for a function-level
+    finding whose parameter or owner type is closure-parameterized. Safe on
+    ``None`` (returns ``False``) so a caller doesn't need to guard every
+    optional ``Change`` field before checking it.
+    """
+    if not text:
+        return False
+    return any(marker in text for marker in _ANONYMOUS_TYPE_MARKERS)
+
+
 def is_non_abi_surface_type(
     name: str, *, exclude_stdlib_namespaces: bool = True
 ) -> bool:
@@ -490,7 +531,7 @@ def is_non_abi_surface_type(
         return True
     if exclude_stdlib_namespaces and name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return True
-    return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
+    return contains_anonymous_type_marker(name)
 
 
 def is_abi_surface_type_name(name: str, *, exclude_stdlib: bool) -> bool:
@@ -577,9 +618,9 @@ _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 #: extra whitespace to clean up afterward (the previous unconditional
 #: multi-space collapse this function used to apply is gone; see its own
 #: past instance of exactly this over-broad-collision failure mode, fixed
-#: two rounds ago, since fixed generically here at the regex level instead).
+#: two rounds ago, since fixed generically here at the regex level instead). ``anonymous\s+\w+`` mirrors the identical, real-corpus-driven addition to ``model.graph_identity._BARE_ANON_TYPE_LOCATION_RE``.
 _ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
-    r"(\((?:lambda|unnamed\s+\w+))\s+at\s+(.*?)(:\d+:\d+)(?=\s*\))"
+    r"(\((?:lambda|unnamed\s+\w+|anonymous\s+\w+))\s+at\s+(.*?)(:\d+:\d+)(?=\s*\))"
 )
 
 

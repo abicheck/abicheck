@@ -81,12 +81,12 @@ from .cli_scan_helpers import (
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
-from .errors import ProfileMismatchError, ScopeMismatchError
+from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
-from .service_input_resolution import (
-    BaselineReuseContext,
-    SideResolution,
-)
+from .workflows.artifact.execute import SideResolution
+from .workflows.artifact.resolve import BaselineReuseContext
+from .workflows.plan import scan_bazel_scoping_failure
+from .workflows.scan_abort_result import attach_prior_on_budget_overflow
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -198,6 +198,8 @@ class ScanOutcome:
             d["effective_depth"] = self.effective_depth
         if self.baseline_channel is not None:
             d["baseline_channel"] = self.baseline_channel
+        from .policy.outcome import run_outcome_dict_for_scan_outcome
+        d["run_outcome"] = run_outcome_dict_for_scan_outcome(self.verdict, self.exit_code, self.diff_summary)
         return d
 
 
@@ -281,8 +283,8 @@ def _build_new_snapshot(
     from .api_types import InputSpec
     from .errors import AbicheckError
     from .header_utils import split_public_header_inputs
-    from .service_compare_evidence import SideEvidence
-    from .service_input_resolution import _resolve_side_snapshot_impl
+    from .service_compare_evidence import SideEvidence, explicit_source_extractor
+    from .workflows.artifact.execute import _resolve_side_snapshot_impl
 
     # L4 replay's own public-header roots, kept deliberately WIDER than the
     # L2/crosscheck-origin provenance set (`public_headers`/`public_header_dirs`
@@ -345,6 +347,9 @@ def _build_new_snapshot(
         collect_mode=collect_mode,
         dump_manifest=None,
     )
+    # Bazel target-scoping is checked once, in run_scan_core (the only caller,
+    # before its S3/POI work) -- not repeated here as a second, unguarded copy
+    # that would reintroduce the depth=binary false positive (Codex review).
     try:
         return _resolve_side_snapshot_impl(
             side,
@@ -404,15 +409,15 @@ def _build_new_snapshot(
             # (Codex review).
             seed_lang_explicit=lang.lower() == "c",
             defer_cleanup=defer_cleanup,
-            # scan has always taken `embed_build_source`'s own "auto" default,
-            # which `_make_source_extractor` reads as clang; every other
-            # resolver passes `effective_frontend`, which resolves "auto" to
-            # castxml. Matching them would newly require castxml for a `scan
-            # --depth source` that works with clang today -- a real behaviour
-            # change for real users, unverifiable without a castxml-capable
-            # lane, so it stays a documented divergence (plan, PR 3A) rather
-            # than a guessed fix folded into this migration.
-            source_extractor="auto",
+            # An *explicit* `--ast-frontend`/`compile.frontend` is honored the
+            # way every other resolver honors it -- the helper delegates to
+            # `effective_frontend`, so it cannot resolve differently here.
+            # An unstated one keeps `embed_build_source`'s own "auto", which
+            # `_make_source_extractor` reads as clang: adopting
+            # `effective_frontend` wholesale would resolve an unflagged "auto"
+            # to castxml and newly require it for a plain `scan --depth
+            # source`, a documented divergence (plan, PR 3A item 2).
+            source_extractor=explicit_source_extractor(compile_context) or "auto",
             # Kept expanded (individual header files). A change to the shared
             # primitive's raw pass-through was landed and reverted for
             # regressing `clang_public_roots._equivalent_public_roots_for_
@@ -446,59 +451,44 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
 
     Defaults to ``False`` (filtered, matching `dump`/`compare`'s own default)
     -- correct for the single most common case: no baseline, a native-binary
-    baseline (which now resolves filtered too), or a JSON baseline that is
-    itself filtered/untagged. Only a JSON baseline explicitly dumped with
-    ``dump --include-system-declarations`` (tagged ``"full"``) needs the candidate
-    to go unfiltered too, else the comparability gate hard-fails that
-    legitimate, if less common, inverse workflow (Codex review, fresh
-    evidence) -- and ``scan`` has no ``--include-system-declarations`` flag of its
-    own to let a caller request it directly. A cheap, best-effort JSON peek
-    (not a full ``resolve_input``/dump) so this never triggers expensive
-    work merely to decide a default; any failure to read/parse falls back to
-    the filtered default.
+    baseline, or a JSON baseline that is itself filtered/untagged. Only a
+    JSON baseline explicitly dumped with ``dump --include-system-declarations``
+    (tagged ``"full"``) needs the candidate to go unfiltered too, else the
+    comparability gate hard-fails that legitimate, if less common, inverse
+    workflow (Codex review) -- ``scan`` has no such flag of its own. A cheap,
+    best-effort peek (not a full ``resolve_input``/dump); any failure to
+    read/parse falls back to the filtered default.
 
     Deliberately does NOT pre-filter on :func:`cli_scan_baseline.
     _baseline_is_native_library` before attempting the JSON parse (Codex
-    review, fresh evidence): that helper's own filename-suffix fallback
-    (``".so" in name``, ...) only applies once magic-byte sniffing finds no
-    recognized binary format -- exactly the case for a real JSON snapshot
-    saved under a library-like name (e.g. a baseline written to
-    ``libfoo.so.json`` and then renamed, or just handed a ``libfoo.so``
-    path by a caller's own naming convention). Calling it first would skip
-    the peek entirely for that baseline, silently keeping the candidate
-    filtered against a "full"-tagged snapshot.
-
-    Content-sniffs the first 4 bytes via :func:`binary_utils.
-    detect_binary_format` first, though (a real magic-byte check, not the
-    filename-fallback heuristic above) -- a real native binary's raw bytes
-    would still fail to decode/parse as JSON either way, but only after
-    ``json.load`` reads and decodes the *entire* file first; for a large
-    native baseline that's a real, avoidable memory/I/O cost merely to
-    choose a default (Codex review, fresh evidence). A recognized magic
-    number short-circuits straight to the filtered default without ever
-    opening the file as text.
+    review): that helper's filename-suffix fallback only applies once
+    magic-byte sniffing finds no recognized binary format -- exactly the
+    case for a real JSON snapshot saved under a library-like name. Calling
+    it first would skip the peek, silently keeping the candidate filtered.
+    Content-sniffs via :func:`binary_utils.detect_binary_format` first
+    instead -- a native binary still fails to parse as JSON either way, but
+    only after ``json.load`` reads the entire file; a recognized magic
+    number short-circuits to filtered without opening it as text.
     """
     if baseline is None:
         return False
+    if baseline.is_dir():
+        # A ProjectSnapshot package dir (Codex review: was silently `False`).
+        from .project_snapshot_legacy import package_declares_full_dependency_scope
+
+        return package_declares_full_dependency_scope(baseline)
     from .binary_utils import detect_binary_format
 
     if detect_binary_format(baseline) is not None:
         return False
-    # ADR-059 (Codex review, fresh evidence): a gzip/zstd-compressed baseline
-    # (`dump --compression gzip|zstd`) fails `detect_binary_format` the same
-    # way plain JSON does (neither magic is ELF/PE/Mach-O), so it reaches
-    # this point same as before -- but its raw *stored* bytes are compressed,
-    # not JSON text, so both the tail-byte-scan trick below and a plain-text
-    # `json.load` would silently fail to find `dependency_scope` regardless
-    # of its real value, always falling through to the `False` (filtered)
-    # default even for a baseline explicitly dumped `--include-system-declarations`
-    # (tagged `"full"`). Decode through the canonical snapshot I/O path
-    # first for a compressed file -- skipping the tail-scan heuristic
-    # entirely (it has no equivalent for compressed content: the *decoded*
-    # tail isn't at any fixed offset in the *stored* bytes), going straight
-    # to a full decode + parse. This is still cheap relative to a real dump:
-    # decompression is fast, and a "full"-tagged snapshot with the largest
-    # dependency surface is exactly the case that compresses best.
+    # ADR-059 (Codex review): a gzip/zstd-compressed baseline fails
+    # `detect_binary_format` the same way plain JSON does, so it reaches
+    # this point -- but its raw *stored* bytes are compressed, not JSON
+    # text, so neither the tail-byte-scan below nor a plain-text `json.load`
+    # would ever find `dependency_scope`. Decode through the canonical
+    # snapshot I/O path first, skipping the tail-scan heuristic entirely (no
+    # fixed offset exists in the compressed stream), straight to a full
+    # decode + parse -- still cheap relative to a real dump.
     from .snapshot_io import SnapshotCompression, detect_snapshot_compression
 
     try:
@@ -514,21 +504,16 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
             return False
         if not isinstance(data, dict):
             return False
-        return bool(data.get("dependency_scope") == "full")
-    # `dependency_scope` (model.py) is declared as one of `AbiSnapshot`'s very
-    # last fields -- serialized (via dataclasses.asdict field order) as one
-    # of the last keys in the JSON object, right before `schema_version` is
-    # appended, well after the (potentially huge) functions/types/DWARF
-    # payload. A real `dump`-produced snapshot is `json.dumps(..., indent=2)`
-    # (never minified), so the tag is reliably within the file's last ~4KB
-    # regardless of how large the payload before it is. Try a cheap tail
-    # regex scan first -- avoiding a full json.load for exactly the case
-    # Codex flagged as most expensive (an explicitly unfiltered "full"
-    # snapshot, which by definition can carry the largest transitive
-    # dependency surface) -- and only fall back to the full parse when the
-    # tail scan doesn't confidently resolve it (non-standard formatting, a
-    # tiny file, the key genuinely absent, ...), so correctness never
-    # actually depends on the heuristic.
+        return _dependency_scope_is_full(data)
+    # `dependency_scope` (model.py) is one of `AbiSnapshot`'s last fields,
+    # so on a flat legacy document it's reliably within the file's last
+    # ~4KB regardless of payload size (a real `dump` never minifies).
+    # ADR-062/063 Phase 8's sectioned document has no such guarantee (it
+    # nests under `sections["layout"]`, not necessarily near the end -- see
+    # `_dependency_scope_is_full`'s own docstring), so this tail-scan is a
+    # best-effort fast path only: try a cheap regex scan first, and only
+    # fall back to the full parse (below, shape-aware) when it doesn't
+    # confidently resolve -- correctness never depends on the heuristic.
     try:
         size = baseline.stat().st_size
         with open(baseline, "rb") as f:
@@ -548,6 +533,26 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
         return False
     if not isinstance(data, dict):
         return False
+    return _dependency_scope_is_full(data)
+
+
+def _dependency_scope_is_full(data: dict[str, Any]) -> bool:
+    """Whether a parsed snapshot document tags itself ``"full"`` on the
+    ``dependency_scope`` axis, regardless of on-disk shape. ADR-062/063
+    Phase 8's sectioned document nests it under `sections["layout"]
+    ["payload"]`, not the top level (Codex review, fresh evidence: a plain
+    `data.get(...)` always read `None` there) -- unwrap the same way
+    `serialization.snapshot_from_dict` does before reading it."""
+    from .storage.sectioned_document import (
+        from_sectioned_document,
+        is_sectioned_document,
+    )
+
+    if is_sectioned_document(data):
+        try:
+            data = from_sectioned_document(data)
+        except ValueError:
+            return False
     return bool(data.get("dependency_scope") == "full")
 
 
@@ -772,48 +777,42 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
 
 def _audit_exit_code(
     findings: list[Any], severities: dict[str, str]
-) -> tuple[str, int]:
-    """Verdict/exit for the no-baseline path from cross-source finding tiers.
+) -> tuple[str, int, dict[str, Any]]:
+    """Verdict/exit/prior-decision dict for the no-baseline path (cross-source tiers).
 
     Cross-source findings are never ``BREAKING`` on their own (authority rule), so
-    an audit can reach at most ``API_BREAK`` (exit 2); ``RISK`` stays advisory
-    (exit 0) unless the maintainer promoted that check to ``error`` (D6).
-    Adoption never starts by blocking merges (ADR-035 UX step 7).
+    an audit can reach at most ``API_BREAK`` (exit 2); ``RISK`` stays advisory (exit
+    0) unless the maintainer promoted that check to ``error`` (D6). The dict lets a
+    *later* budget overflow preserve these contributions instead of discarding them.
     """
-    # Defensive: a mis-partitioned kind would be caught by the import-time
-    # assertion, but never let a cross-source finding gate a BREAKING verdict.
     assert not any(f.kind in BREAKING_KINDS for f in findings), (
         "cross-source findings must never be BREAKING (ADR-035 D1 authority rule)"
     )
     has_api_break = any(f.kind in API_BREAK_KINDS for f in findings)
-    exit_code = max(
-        2 if has_api_break else 0,
-        _crosscheck_severity_exit(findings, severities),
-    )
-    return ("API_BREAK" if exit_code >= 2 else "COMPATIBLE"), exit_code
+    crosscheck_exit = _crosscheck_severity_exit(findings, severities)
+    exit_code = max(2 if has_api_break else 0, crosscheck_exit)
+    from .workflows.scan_abort_result import audit_prior_decision
+
+    verdict = "API_BREAK" if exit_code >= 2 else "COMPATIBLE"
+    return verdict, exit_code, audit_prior_decision(has_api_break, crosscheck_exit)
 
 
 class _BudgetOverflow(Exception):
     """Raised by ``run_scan_core`` when the scan exceeds ``--budget`` (ADR-035 D3).
 
-    A scan-engine signal (not a click concern): the budget is a *failure guard*
-    that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
+    A scan-engine signal (not a click concern): the budget is a *failure guard* that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
     """
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+        self.prior_decision: dict[str, object] | None = None
 
 
 class _EvidenceContractError(Exception):
     """Raised by ``run_scan_core`` when a *pinned* depth can't collect its evidence.
 
-    ADR-037 D5 (#2 auto-strict): an explicitly-pinned ``--depth``/``--source-method``
-    is a contract — if the requested source/build evidence is unavailable the scan
-    fails loudly rather than silently degrading to a shallower one. Like
-    :class:`_BudgetOverflow`, it is an engine signal the CLI maps onto an error
-    exit (a clean ``ClickException``, exit 1) and ``service.run_scan`` maps onto a
-    failed :class:`ScanResult`. The implicit ``auto`` default never raises it.
+    ADR-037 D5 (#2 auto-strict): an explicitly-pinned ``--depth``/``--source-method`` is a contract -- if the requested source/build evidence is unavailable the scan fails loudly rather than silently degrading to a shallower one. Like :class:`_BudgetOverflow`, it is an engine signal the CLI maps onto an error exit (a clean ``ClickException``, exit 1) and ``service.run_scan`` maps onto a failed :class:`ScanResult`. The implicit ``auto`` default never raises it.
     """
 
     def __init__(self, message: str) -> None:
@@ -849,13 +848,9 @@ def _run_abi3_audit(
     """
     py_ext = new_snap.python_ext
     if py_ext is None or not py_ext.is_extension:
-        raise _EvidenceContractError(
-            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
-            f"'{binary.name}' is not a recognisable CPython extension module "
-            "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
-            "audit applies only to extension modules (Cython/pybind11/"
-            "nanobind/C)."
-        )
+        from .python_ext import abi3_precondition_message
+
+        raise _EvidenceContractError(abi3_precondition_message(abi3_floor, binary.name))
     from .diff_python import audit_stable_abi_imports
 
     abi3_findings = audit_stable_abi_imports(py_ext, abi3_floor)
@@ -1101,6 +1096,19 @@ def run_scan_core(
     library and diverging from the baseline's own scoped evidence. Empty by
     default (the pre-existing, unscoped behavior).
     """
+    # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
+    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight.
+    if _bf := scan_bazel_scoping_failure(
+        headers,
+        eff_depth_enum,
+        collect_mode,
+        effective_build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
+    ):
+        raise PlanningError((_bf,))
+
     stage_timings: dict[str, float] = {}
 
     def _record_stage(name: str, started: float) -> None:
@@ -1297,6 +1305,7 @@ def run_scan_core(
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None
+    audit_prior: dict[str, Any] | None = None
     if baseline is not None and scan_mode is not ScanMode.AUDIT:
         _stage = time.monotonic()
         not_comparable = False
@@ -1384,21 +1393,22 @@ def run_scan_core(
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start
             raise _BudgetOverflow(
-                f"error: --budget {budget} exceeded ({elapsed:.1f}s > "
-                f"{budget_s:.0f}s) while parsing the --against baseline "
-                "(header/build/source parse). Pin a shallower level or raise "
-                "the budget; a budget never silently shrinks the pinned scope."
+                f"error: --budget {budget} exceeded ({elapsed:.1f}s > {budget_s:.0f}s) "
+                "while parsing the --against baseline (header/build/source parse). "
+                "Pin a shallower level or raise the budget; a budget never silently "
+                "shrinks the pinned scope."
             ) from exc
         except (ProfileMismatchError, ScopeMismatchError) as exc:
-            # ADR-050 D2: the candidate and --against baseline were not
-            # extracted under a comparable profile/scope contract -- a hard
-            # gate result, not a soft-launch RISK finding, so it is never
-            # something a promoted cross-check finding (below) can soften or
-            # override.
+            # ADR-050 D2: not a comparable profile/scope contract -- a hard gate
+            # result no promoted cross-check finding (below) can soften/override.
             not_comparable = True
             verdict = "NOT_COMPARABLE"
             exit_code = 6
-            diff_summary = {"reason": str(exc)}
+            from .exit_decision import resolve_scan_exit_decision  # ADR-064 stage 1b
+
+            nc_decision = resolve_scan_exit_decision(not_comparable=True)
+            assert nc_decision is not None  # always set when not_comparable=True
+            diff_summary = {"reason": str(exc), "exit": nc_decision.to_dict()}
         if not not_comparable:
             # A cross-check the maintainer promoted to `error` (D6) gates the exit
             # even when the baseline diff itself is clean.
@@ -1445,10 +1455,11 @@ def run_scan_core(
             click.echo(
                 "note: --audit ignores --baseline (intra-version scan).", err=True
             )
-        verdict, exit_code = _audit_exit_code(cc.findings, severities)
+        verdict, exit_code, audit_prior = _audit_exit_code(cc.findings, severities)
 
     elapsed = time.monotonic() - start
-    _check_scan_budget(budget, budget_s, elapsed)
+    with attach_prior_on_budget_overflow(diff_summary or audit_prior):
+        _check_scan_budget(budget, budget_s, elapsed)
 
     outcome = ScanOutcome(
         mode=scan_mode.value,

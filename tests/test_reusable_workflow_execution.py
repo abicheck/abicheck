@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import pytest
 from _workflow_exec import (
+    FORBIDDEN_ARTIFACT_NAME_CHARS,
+    HOSTILE_SCALAR_CORPUS,
     find_run_step,
     have_bash,
     make_workspace,
@@ -48,31 +50,14 @@ pytestmark = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
 # CHECK_ID reaches this step from `steps.run.outputs.check-id`, which derives
 # from caller input, and its sanitized form becomes an uploaded *artifact
 # name*. That is the trust boundary on this workflow.
-
-HOSTILE_CHECK_IDS = [
-    pytest.param("../../etc/passwd", id="path-traversal"),
-    pytest.param("/absolute/path", id="absolute-path"),
-    pytest.param("..", id="dotdot"),
-    pytest.param("a/b/c", id="nested-path"),
-    pytest.param("lib\nrepository=evil", id="newline-record-injection"),
-    pytest.param("lib\rrepository=evil", id="carriage-return"),
-    pytest.param("lib\x1frepository=evil", id="unit-separator"),
-    pytest.param("lib; rm -rf /", id="shell-metacharacters"),
-    pytest.param("$(whoami)", id="command-substitution"),
-    pytest.param("`whoami`", id="backticks"),
-    pytest.param("lib name with spaces", id="spaces"),
-    pytest.param("lüb-éà", id="non-ascii"),
-    pytest.param("*", id="glob"),
-    pytest.param("x" * 300, id="very-long"),
-]
-
-#: Characters `actions/upload-artifact` rejects in an artifact name, plus the
-#: path separators that would make the name more than one path component.
-#: Deliberately GitHub's real rule rather than an ASCII allowlist: the step
-#: keeps any `str.isalnum()` character, so a genuinely valid non-ASCII library
-#: name ("libpüppchen") survives, and asserting bare ASCII here would have been
-#: the test being wrong rather than the sanitizer.
-_FORBIDDEN_ARTIFACT_CHARS = set('":<>|*?\r\n/\\')
+#
+# The corpus and forbidden-character set are shared (`_workflow_exec.py`) --
+# `check-project.yml` carries an independently-maintained copy of this exact
+# sanitizer, checked against the identical corpus in
+# `test_check_project_workflow_execution.py` (bug-class-regression-testing.md
+# Phase 8).
+HOSTILE_CHECK_IDS = HOSTILE_SCALAR_CORPUS
+_FORBIDDEN_ARTIFACT_CHARS = FORBIDDEN_ARTIFACT_NAME_CHARS
 
 
 def _sanitize(tmp_path, check_id: str):

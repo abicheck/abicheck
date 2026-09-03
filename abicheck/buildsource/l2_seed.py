@@ -37,6 +37,7 @@ from typing import Any
 
 from .._compiler_options import split_gcc_options
 from ..compile_context import CompileContext
+from . import pack_io
 from .inline import (
     BuildConfig,
     _run_cleanups,
@@ -45,7 +46,6 @@ from .inline import (
     is_pack_dir,
     load_build_config,
 )
-from .pack import BuildSourcePack
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +96,16 @@ def _l2_seed_config(
 
 
 def _is_inputs_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a Flow-2 ``abicheck_inputs/`` directory (ADR-035 D5).
+    """Compatibility alias for ``inputs_pack.is_inputs_pack_dir``.
 
-    A local copy of ``cli_buildsource_helpers._is_inputs_pack_dir``'s own
-    None/is_dir guard around ``inputs_pack.is_inputs_pack``, not an import of
-    it: ``cli_buildsource_helpers`` sits several layers above this leaf
-    module (it is reached from ``cli_buildsource`` -> ``cli_dump_helpers`` ->
-    this module, among other paths), so importing it here -- even
-    function-locally -- closes a real cycle the AI-readiness
-    ``import-cycle-growth`` gate correctly rejects. ``inputs_pack.py`` itself
-    has no such path back to here, so importing straight from it is safe.
+    Owned there since ADR-061 Phase 3; this was one of three copies of the
+    same guard, each kept local because the original lived in the CLI layer.
+    The import stays function-local, as the copy's own note required: this
+    module is reached from ``inline``, and ``inputs_pack`` imports ``inline``.
     """
-    if path is None or not path.is_dir():
-        return False
-    from .inputs_pack import is_inputs_pack
+    from .inputs_pack import is_inputs_pack_dir
 
-    return is_inputs_pack(path)
+    return is_inputs_pack_dir(path)
 
 
 def _l2_seed_pack_build_evidence(path: Path) -> Any:
@@ -134,7 +128,7 @@ def _l2_seed_pack_build_evidence(path: Path) -> Any:
     function does not need its own catch.
     """
     if is_pack_dir(path):
-        return BuildSourcePack.load(path).build_evidence
+        return pack_io.load(path).build_evidence
     from .inputs_pack import _load_build_evidence, load_inputs_manifest
 
     manifest = load_inputs_manifest(path)
@@ -344,6 +338,8 @@ def derive_l2_include_dirs(
     path. Purely best-effort: any failure drains the cleanups and returns
     ``([], [])`` so a scan that works today never regresses.
     """
+    from ..errors import ValidationError
+
     if sources is None and build_info is None:
         return [], []
     cleanups: list[Callable[[], None]] = []
@@ -393,6 +389,11 @@ def derive_l2_include_dirs(
             _run_cleanups(cleanups)
             return [], []
         return out, cleanups
+    except ValidationError:
+        # A deliberate usage error (ADR-063 Phase 4), not "best-effort hint
+        # failed" -- must propagate; mirrors the carve-out below.
+        _run_cleanups(cleanups)
+        raise
     except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
         _run_cleanups(cleanups)
         return [], []
@@ -434,7 +435,7 @@ def derive_l2_compile_context(
 
     Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
     resolution precedence (explicit ``--build-info``/``--sources`` pack ->
-    trusted ``--config``/``--build-query`` -> ``build.compile_db`` ->
+    trusted ``--config`` (or a programmatic ``build_query``) -> ``build.compile_db`` ->
     auto-discovered ``compile_commands.json`` -> the inferred build-system
     query) via the same :func:`abicheck.buildsource.inline.collect_inline_pack`
     call — kept as an independent call (rather than folded into
@@ -465,7 +466,7 @@ def derive_l2_compile_context(
     to hand the exception a value along with it, so the caller receives none
     and has nothing left to run.
     """
-    from ..errors import HeaderCompileContextAmbiguousError
+    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
     from .header_compile_context import resolve_header_compile_context
 
     if (sources is None and build_info is None) or not headers:
@@ -509,9 +510,9 @@ def derive_l2_compile_context(
             _run_cleanups(cleanups)
             return None, []
         return resolution.context, cleanups
-    except HeaderCompileContextAmbiguousError:
-        # P0.3's fail-closed case: release any temp build dir this attempt
-        # created, then propagate — never resolved by silently guessing.
+    except (HeaderCompileContextAmbiguousError, ValidationError):
+        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
+        # Phase 4) -- release any temp build dir, then propagate.
         _run_cleanups(cleanups)
         raise
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
@@ -828,7 +829,7 @@ def seed_includes_and_fold_compile_context(
     one of the documented ways to resolve exactly that -- and, before it was
     threaded here, the one the error message named without it working.
     """
-    from ..errors import HeaderCompileContextAmbiguousError
+    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
     from ..header_utils import _context_tokens, _has_include_build_context
     from .header_compile_context import (
         filter_units_by_source,
@@ -945,9 +946,9 @@ def seed_includes_and_fold_compile_context(
         if cleanups:
             pending_cleanups.extend(cleanups)
         return incs, True, merged, dirs
-    except HeaderCompileContextAmbiguousError:
-        # P0.3's fail-closed case: release any temp build dir this attempt
-        # created, then propagate -- never resolved by silently guessing.
+    except (HeaderCompileContextAmbiguousError, ValidationError):
+        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
+        # Phase 4) -- release any temp build dir, then propagate.
         _run_cleanups(cleanups)
         raise
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs

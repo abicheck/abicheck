@@ -170,6 +170,57 @@ class TestDumpDryRun:
         assert "--build-info resolved to a compilation database" in result.output
         assert "no --sources/--build-info given -- L0-L2 only" not in result.output
 
+    def test_dry_run_rejects_empty_header_directory_like_the_real_run(
+        self, tmp_path: Path
+    ) -> None:
+        # CLI cleanup phase two plan, PR 3C prerequisite 3's own residual
+        # "-H directory gap": --dry-run never validated a -H directory, so
+        # it could report success for an invocation the real run would
+        # reject outright. Both must fail the same way.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        empty_dir = tmp_path / "empty_headers"
+        empty_dir.mkdir()
+        dry = CliRunner().invoke(
+            main, ["dump", str(snap), "--dry-run", "-H", str(empty_dir)]
+        )
+        real = CliRunner().invoke(main, ["dump", str(snap), "-H", str(empty_dir)])
+        assert dry.exit_code == real.exit_code == 1
+        assert "Header directory contains no supported header files" in dry.output
+        assert "Header directory contains no supported header files" in real.output
+
+    def test_dry_run_does_not_reject_a_useless_header_dir_for_source_only_dump(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: the empty-directory check above must
+        # not reach a source-only dump (no SO_PATH) -- that path deliberately
+        # treats -H as inert (dump_source_only() never receives `headers` at
+        # all, so it only warns, never rejects; a prior hard-rejection
+        # attempt was reverted for breaking 20 pre-existing tests exercising
+        # exactly this shape). Hard-rejecting an empty -H dir here, before
+        # that branch is even reached, would reintroduce the same
+        # regression under a different name.
+        empty_dir = tmp_path / "empty_headers"
+        empty_dir.mkdir()
+        result = CliRunner().invoke(
+            main,
+            ["dump", "--sources", str(tmp_path), "-H", str(empty_dir), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_dry_run_accepts_a_header_directory_with_real_headers(
+        self, tmp_path: Path
+    ) -> None:
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header_dir = tmp_path / "include"
+        header_dir.mkdir()
+        (header_dir / "api.h").write_text("void f(void);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main, ["dump", str(snap), "--dry-run", "-H", str(header_dir)]
+        )
+        assert result.exit_code == 0, result.output
+
     def test_depth_build_with_unmatched_compile_db_blocks(self, tmp_path: Path) -> None:
         # The sibling case: an empty/non-matching compile database is now a
         # *definite* verdict (the same load+match the real run performs),
@@ -365,6 +416,7 @@ class TestDumpDryRun:
         # genuinely succeed for real. The blocker above must not fire for
         # this case -- unlike a raw compile database, checked via
         # buildsource.inline.is_pack_dir (cheap manifest-shape read).
+        from abicheck.buildsource import pack_io
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_abi import SourceAbiSurface
 
@@ -375,7 +427,7 @@ class TestDumpDryRun:
         surface = SourceAbiSurface()
         surface.coverage["compile_units_selected"] = 1
         surface.coverage["compile_units_parsed"] = 1
-        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        pack_io.write(BuildSourcePack(root=pack_dir, source_abi=surface))
         result = CliRunner().invoke(
             main,
             [
@@ -423,6 +475,7 @@ class TestDumpDryRun:
         # A dry run must not load the pack to verify (real I/O), so this
         # stays a soft warning -- "possibly satisfiable" -- not a blocker,
         # mirroring the sibling --depth build/some-compile-database warning.
+        from abicheck.buildsource import pack_io
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_abi import SourceAbiSurface
 
@@ -433,7 +486,7 @@ class TestDumpDryRun:
         surface = SourceAbiSurface()
         surface.coverage["compile_units_selected"] = 1
         surface.coverage["compile_units_parsed"] = 1
-        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        pack_io.write(BuildSourcePack(root=pack_dir, source_abi=surface))
         result = CliRunner().invoke(
             main,
             [

@@ -352,3 +352,48 @@ class TestAnalyzeBundleDegradesAdditivelyOnFailure:
         joined = " ".join(result.analysis_errors)
         assert "synthetic compare_bundle failure" in joined
         assert "synthetic signature-evidence failure" in joined
+
+
+class TestAnalyzeBundleForwardsPolicyFile:
+    """Codex review on PR #883: a caller's ``policy_file`` reached
+    per-library findings (``service.compare_snapshots``) but never
+    ``BundleDiffResult.bundle_verdict`` -- the ``BUNDLE_*``-kind aggregate
+    was always scored under the bare ``policy`` name alone. Pinned here at
+    the ``analyze_bundle``/``compare_bundle`` boundary (the shared
+    orchestrator both the live and stored-facts callers route through),
+    and again below at the real ``compare_release_against_bundle_facts``
+    entry point."""
+
+    def test_policy_file_override_reaches_bundle_verdict(self) -> None:
+        from abicheck.policy_file import PolicyFile
+
+        # BUNDLE_LIBRARY_REMOVED requires a surviving consumer that actually
+        # depended on the removed library's exports (bundle.py's own
+        # `_detect_library_structural_changes` gate).
+        old = _snapshot(_bundle_metadata())
+        new_meta = {
+            "libconsumer.so": _meta(
+                soname="libconsumer.so", needed=["libcore.so"], imports=["core_fn"]
+            )
+        }
+        new = _snapshot(new_meta)
+
+        without_override = analyze_bundle(
+            old, new, [_diff("libconsumer.so")],
+        )
+        found_kinds = {f.kind for f in without_override.bundle_findings}
+        assert ChangeKind.BUNDLE_LIBRARY_REMOVED in found_kinds
+        assert without_override.bundle_verdict == Verdict.BREAKING
+
+        # Both findings (the removal itself, and the now-unresolved import
+        # it necessarily causes) must be overridden for the aggregate to
+        # actually change -- overriding only one still leaves the other's
+        # default BREAKING classification in effect.
+        pf = PolicyFile(
+            overrides={kind: Verdict.COMPATIBLE for kind in found_kinds}
+        )
+        with_override = analyze_bundle(
+            old, new, [_diff("libconsumer.so")], policy_file=pf,
+        )
+        assert {f.kind for f in with_override.bundle_findings} == found_kinds
+        assert with_override.bundle_verdict == Verdict.COMPATIBLE

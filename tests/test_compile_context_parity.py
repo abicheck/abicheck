@@ -21,7 +21,7 @@ The cross-toolchain + frontend family is defined once in
 (``cli_options.merge_compile_config`` / ``resolve_compile_context``). This guards
 that the three commands never drift, that ``scan`` threads the context down to the
 header dump, and that ``compare`` now threads its both-sides context to *both*
-sides while the per-side ``--old/new-ast-frontend`` override still wins.
+sides while the per-side ``--old/new-ast-frontend`` override still wins.ADR-061 Phase 4, throughout: patch the owner, not ``abicheck.cli`` -- its lazy ``__getattr__`` means a ``setattr`` there rebinds nothing the caller reads.
 """
 
 from __future__ import annotations
@@ -1220,11 +1220,10 @@ def test_dump_reads_compile_block_from_config(
 ) -> None:
     """dump's ELF path folds the compile: block in via the same shared resolver.
 
-    Patches ``perform_elf_dump`` (so the fake-ELF bytes are never parsed for real)
-    and asserts the synthesized ``-std`` reaches its literal gcc option tokens.
+    CLI cleanup phase two, PR C: the real ELF run reaches `dumper.dump`
+    via `execute_dump_request`, not the retired `perform_elf_dump` -- patch
+    that instead, and assert `-std` reaches its literal gcc option tokens.
     """
-    import abicheck.cli as cli_mod
-
     so = tmp_path / "libfoo.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)
     header = tmp_path / "foo.h"
@@ -1234,15 +1233,16 @@ def test_dump_reads_compile_block_from_config(
 
     captured: dict[str, object] = {}
 
-    def _fake_perform_elf_dump(**kwargs: object) -> None:
+    def _fake_dump(**kwargs: object) -> AbiSnapshot:
         captured.update(kwargs)
+        return AbiSnapshot(library="libfoo.so", version="1.0")
 
-    monkeypatch.setattr(cli_mod, "perform_elf_dump", _fake_perform_elf_dump)
+    monkeypatch.setattr("abicheck.dumper.dump", _fake_dump)
     result = CliRunner().invoke(
         main, ["dump", str(so), "-H", str(header), "--config", str(cfg)]
     )
     assert result.exit_code == 0, result.output
-    assert captured["effective_gcc_options"] is None
+    assert captured["gcc_options"] is None
     assert captured["gcc_option_tokens"] == ("-std=c++17",)
 
 
@@ -1253,7 +1253,7 @@ def test_compare_threads_compile_context_for_set_inputs(
     resolved CompileContext to the release fan-out, not reject it -- the
     per-library fan-out now threads the L2 context to each pair's header
     dump (fix: whole-product-bundle known-gap entry, AGENTS.md)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1294,7 +1294,7 @@ def test_compare_threads_compiler_aliases_for_set_inputs(
     release fan-out's resolved CompileContext exactly like they reach a
     single-pair compare's (test_compare_threads_compile_context_for_set_inputs
     above)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1375,7 +1375,7 @@ def test_compare_set_inputs_without_compile_flags_not_rejected(
     """The guard fires only on explicitly-passed compile-context flags — a plain
     directory compare still dispatches (no false rejection from the 'auto'
     --ast-frontend default)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1400,7 +1400,7 @@ def test_compare_set_inputs_applies_config_compile_block(
     block must apply it (not silently drop it, and no longer just warn) --
     the fan-out now threads the L2 context (fix: whole-product-bundle
     known-gap entry, AGENTS.md)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1437,7 +1437,7 @@ def test_compare_set_inputs_forwards_config_include_dirs(
     configured include root could fail or parse incompletely despite the
     compile: block otherwise being applied.
     """
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1516,14 +1516,18 @@ def test_compare_config_include_dirs_survive_per_side_include(
     assert cfg_inc in new_inc
 
 
+def _capture_dump_pe(captured: dict[str, object], **kwargs: object) -> AbiSnapshot:
+    """Shared fake for `abicheck.service_dump_native._dump_pe` (ADR-063 Phase 1)."""
+    captured.update(kwargs)
+    return AbiSnapshot(library="foo.dll", version="1.0")
+
+
 def test_dump_pe_threads_compile_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A PE/Mach-O dump now folds the compile: block into header scoping too — the
     context is resolved before the format dispatch and threaded into the non-ELF
     path (Codex review). Previously --gcc-options were warned-and-ignored there."""
-    import abicheck.cli as cli_mod
-
     pe = tmp_path / "foo.dll"
     pe.write_bytes(b"MZ" + b"\x00" * 128)
     header = tmp_path / "foo.h"
@@ -1532,31 +1536,26 @@ def test_dump_pe_threads_compile_context(
     cfg.write_text("compile:\n  std: c++20\n  frontend: clang\n", encoding="utf-8")
 
     captured: dict[str, object] = {}
-
-    def _fake_non_elf(*args: object, **kwargs: object) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr(cli_mod, "handle_non_elf_dump", _fake_non_elf)
+    monkeypatch.setattr(
+        "abicheck.service_dump_native._dump_pe",
+        lambda *a, **k: _capture_dump_pe(captured, **k),
+    )
     result = CliRunner().invoke(
         main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
     )
     assert result.exit_code == 0, result.output
-    # The merged compile context reaches the PE path (frontend folded from config)...
-    cc = captured["compile_context"]
+    cc = captured["compile"]
     assert cc is not None
     assert getattr(cc, "frontend") == "clang"
     assert getattr(cc, "gcc_options") is None
     assert getattr(cc, "gcc_option_tokens") == ("-std=c++20",)
     assert captured["header_backend"] == "clang"
-    # ...and the old "gcc-options ignored on the native path" warning is gone.
     assert "will be ignored" not in result.output
 
 
 def test_dump_pe_explicit_gcc_options_no_longer_warns(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import abicheck.cli as cli_mod
-
     pe = tmp_path / "foo.dll"
     pe.write_bytes(b"MZ" + b"\x00" * 128)
     header = tmp_path / "foo.h"
@@ -1564,14 +1563,15 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        "abicheck.service_dump_native._dump_pe",
+        lambda *a, **k: _capture_dump_pe(captured, **k),
     )
     result = CliRunner().invoke(
         main, ["dump", str(pe), "-H", str(header), "--compiler-option", "-DPE=1"]
     )
     assert result.exit_code == 0, result.output
     assert "will be ignored" not in result.output
-    assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DPE=1",)
+    assert getattr(captured["compile"], "gcc_option_tokens") == ("-DPE=1",)
 
 
 def test_fallback_flag_is_scoped_to_one_cli_invocation(
@@ -1714,7 +1714,7 @@ def test_a_one_sided_frontend_keeps_the_source_trees_configured_frontend(
     explicitness -- rather than through a full inline dump, so the test states
     the contract rather than one downstream consequence of it.
     """
-    import abicheck.cli_compare_helpers as helpers
+    import abicheck.frontends.cli.commands.compare as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree"
@@ -1754,7 +1754,7 @@ def test_a_shared_frontend_is_explicit_for_both_inline_source_sides(
 ) -> None:
     # The other direction, so the fix above cannot be satisfied by simply
     # never reporting the inline path's shared frontend as explicit.
-    import abicheck.cli_compare_helpers as helpers
+    import abicheck.frontends.cli.commands.compare as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree2"

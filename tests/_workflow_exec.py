@@ -41,10 +41,61 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+
+#: Adversarial values for a scalar caller-controlled input that reaches a
+#: workflow/composite-action shell (or ``python3 -c``) step's environment,
+#: shared across every consuming test module rather than duplicated per
+#: script (bug-class-regression-testing.md Phase 8: the invariant is stated
+#: over "every scalar input ... across the repository's other shell scripts
+#: and composite-action steps", not one script's own private corpus).
+#: Widen this list -- not a per-file copy -- when a new adversarial shape is
+#: identified; every consumer picks it up automatically.
+#:
+#: The last eight entries were added under Phase 8 specifically to cover
+#: shapes its own mechanism names that the original (#758-era, one-repro-
+#: scoped) corpus did not yet include: a tab, a leading ``-`` (flag-shaped),
+#: a value that itself looks like more than one CLI flag, both quote
+#: characters, and both shell redirect operators. The empty string closes a
+#: real edge this corpus previously never exercised: none of the earlier
+#: fourteen entries had length zero, so "sanitizing nothing" was untested.
+HOSTILE_SCALAR_CORPUS = [
+    pytest.param("../../etc/passwd", id="path-traversal"),
+    pytest.param("/absolute/path", id="absolute-path"),
+    pytest.param("..", id="dotdot"),
+    pytest.param("a/b/c", id="nested-path"),
+    pytest.param("lib\nrepository=evil", id="newline-record-injection"),
+    pytest.param("lib\rrepository=evil", id="carriage-return"),
+    pytest.param("lib\x1frepository=evil", id="unit-separator"),
+    pytest.param("lib; rm -rf /", id="shell-metacharacters"),
+    pytest.param("$(whoami)", id="command-substitution"),
+    pytest.param("`whoami`", id="backticks"),
+    pytest.param("lib name with spaces", id="spaces"),
+    pytest.param("lüb-éà", id="non-ascii"),
+    pytest.param("*", id="glob"),
+    pytest.param("x" * 300, id="very-long"),
+    pytest.param("lib\ttab-separated", id="tab"),
+    pytest.param("-rf", id="leading-dash-flag-shaped"),
+    pytest.param("--evil-flag --another", id="multiple-flags-shaped"),
+    pytest.param('lib"quoted"', id="double-quote"),
+    pytest.param("lib'quoted'", id="single-quote"),
+    pytest.param("a>b", id="output-redirect"),
+    pytest.param("a<b", id="input-redirect"),
+    pytest.param("", id="empty-string"),
+]
+
+#: Characters ``actions/upload-artifact`` rejects in an artifact name, plus
+#: the path separators that would make the name more than one path
+#: component. Deliberately GitHub's real rule rather than an ASCII allowlist:
+#: a sanitizer that keeps any ``str.isalnum()`` character must let a
+#: genuinely valid non-ASCII name (e.g. "libpüppchen") survive, so asserting
+#: bare ASCII here would be the test being wrong, not the sanitizer. Shared
+#: for the same reason as ``HOSTILE_SCALAR_CORPUS`` above.
+FORBIDDEN_ARTIFACT_NAME_CHARS = set('":<>|*?\r\n/\\')
 
 
 def load_workflow(name: str) -> dict[str, Any]:

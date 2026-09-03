@@ -26,9 +26,6 @@ import platform
 import re
 import stat
 import struct
-from dataclasses import dataclass, field
-from enum import Enum
-from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +49,16 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
 from macholib.MachO import MachO  # type: ignore[import-untyped]
 from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
 
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# parses into them and re-exports them so the historical
+# ``from abicheck.macho_metadata import MachoExport`` spelling keeps resolving.
+from .model.fact import sync_present_facts
+from .model.macho_facts import (
+    MachoExport as MachoExport,
+    MachoMetadata as MachoMetadata,
+    MachoSymbolType as MachoSymbolType,
+)
+
 log = logging.getLogger(__name__)
 
 # macholib uses lowercase short names ("dylib"); we use the traditional MH_* form.
@@ -69,69 +76,6 @@ _FILETYPE_NAMES: dict[int, str] = {
     11: "MH_KEXT_BUNDLE",
 }
 
-
-class MachoSymbolType(str, Enum):
-    EXPORTED = "exported"     # N_EXT: externally visible
-    WEAK = "weak"             # N_WEAK_DEF: weak definition
-    REEXPORT = "reexport"     # re-exported from another dylib
-    OTHER = "other"
-
-
-@dataclass
-class MachoExport:
-    """A single exported symbol from a Mach-O binary."""
-    name: str
-    sym_type: MachoSymbolType = MachoSymbolType.EXPORTED
-    is_weak: bool = False
-    is_data: bool = False  # True when symbol lives in __DATA segment (global variable)
-
-
-@dataclass
-class MachoMetadata:
-    """Mach-O metadata from a macOS dynamic library.
-
-    NOTE: Do NOT add ``frozen=True`` — ``@cached_property`` requires a
-    writable ``__dict__``.
-    """
-    # Binary characteristics
-    cpu_type: str = ""                   # selected slice, e.g. "ARM64", "X86_64"
-    cpu_types: list[str] = field(default_factory=list)  # ALL slices in a fat/universal binary
-    filetype: str = ""                   # e.g. "MH_DYLIB", "MH_BUNDLE"
-    flags: int = 0                       # MH_* flags bitmask
-
-    # Install name (equivalent of ELF SONAME)
-    install_name: str = ""               # LC_ID_DYLIB install name
-
-    # Dependencies (equivalent of ELF DT_NEEDED)
-    dependent_libs: list[str] = field(default_factory=list)  # LC_LOAD_DYLIB
-
-    # Re-exported libraries
-    reexported_libs: list[str] = field(default_factory=list)  # LC_REEXPORT_DYLIB
-
-    # Exported symbols
-    exports: list[MachoExport] = field(default_factory=list)
-
-    # Imported (undefined, N_UNDF) external symbol names — the Mach-O analogue
-    # of ELF undefined imports. Needed to see a CPython extension's libpython
-    # C-API import surface (G14). Leading '_' stripped, matching exports.
-    imported_symbols: list[str] = field(default_factory=list)
-
-    # Version info from LC_ID_DYLIB
-    current_version: str = ""            # e.g. "1.2.3"
-    compat_version: str = ""             # e.g. "1.0.0"
-
-    # Minimum OS version
-    min_os_version: str = ""             # from LC_VERSION_MIN_MACOSX or LC_BUILD_VERSION
-
-    # Runtime search paths (LC_RPATH) — the Mach-O analogue of ELF DT_RUNPATH.
-    # Tri-state: None = not captured (legacy snapshot written before this
-    # field existed); [] = parsed Mach-O carrying no LC_RPATH commands.
-    rpaths: list[str] | None = None
-
-    @cached_property
-    def export_map(self) -> dict[str, MachoExport]:
-        """Name → MachoExport mapping (built once, cached on first access)."""
-        return {e.name: e for e in self.exports if e.name}
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +406,9 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
             if path:
                 rpaths.append(path)
     meta.rpaths = rpaths
+    # Plain attribute assignment never re-runs __post_init__ (ADR-063
+    # Phase 5 -- see elf_metadata.py's/pe_metadata.py's identical fix).
+    sync_present_facts(meta, "rpaths")
 
 
 def _build_section_segment_map(header: Any) -> dict[int, str]:

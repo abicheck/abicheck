@@ -130,7 +130,7 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release._run_compare_pair", _fake_run_compare_pair
+        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
     )
     entry = _compare_one_library(
         "libfoo.so",
@@ -154,6 +154,159 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
     )
     assert entry["contract_coverage_exit_contribution"] == 0
     assert entry["contract_coverage_failure_count"] == 0
+
+
+def test_compare_one_library_stamps_coverage_warnings_onto_the_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-binary (or similar) `coverage_warnings` entry on the real
+    `DiffResult` must reach the release's per-library entry dict -- it is
+    embedded verbatim into both the primary release JSON's "libraries"
+    list and `--output-dir`'s summary.json, so nothing else needs to copy
+    it once it lands here (Codex review, fresh evidence)."""
+    from abicheck.api_types import CompareResult
+    from abicheck.checker import DiffResult, Verdict
+
+    old_path = tmp_path / "libfoo.so.1"
+    new_path = tmp_path / "libfoo.so.2"
+    old_snap = _snap("1.0")
+    new_snap = _snap("1.0")
+
+    def _fake_run_compare_pair(*_args: object, **_kwargs: object) -> CompareResult:
+        result = DiffResult(
+            old_version="1.0",
+            new_version="1.0",
+            library="libfoo.so",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+        )
+        result.coverage_warnings = ["old and new binaries are byte-identical (sha256 abc...)"]
+        return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
+
+    monkeypatch.setattr(
+        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
+    )
+    entry = _compare_one_library(
+        "libfoo.so",
+        {"libfoo.so": old_path},
+        {"libfoo.so": new_path},
+        None,
+        None,
+        lambda _old, _dbg: None,
+        [],
+        [],
+        [],
+        [],
+        "1.0",
+        "1.0",
+        "c",
+        None,
+        "strict_abi",
+        None,
+        None,
+    )
+    assert entry["coverage_warnings"] == [
+        "old and new binaries are byte-identical (sha256 abc...)"
+    ]
+
+
+def test_compare_one_library_omits_coverage_warnings_key_when_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Absent, not an empty list -- matching every other format's own
+    `if result.coverage_warnings:` convention (reporter.py)."""
+    from abicheck.api_types import CompareResult
+    from abicheck.checker import DiffResult, Verdict
+
+    old_path = tmp_path / "libfoo.so.1"
+    new_path = tmp_path / "libfoo.so.2"
+    old_snap = _snap("1.0")
+    new_snap = _snap("2.0")
+
+    def _fake_run_compare_pair(*_args: object, **_kwargs: object) -> CompareResult:
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+        )
+        return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
+
+    monkeypatch.setattr(
+        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
+    )
+    entry = _compare_one_library(
+        "libfoo.so",
+        {"libfoo.so": old_path},
+        {"libfoo.so": new_path},
+        None,
+        None,
+        lambda _old, _dbg: None,
+        [],
+        [],
+        [],
+        [],
+        "1.0",
+        "2.0",
+        "c",
+        None,
+        "strict_abi",
+        None,
+        None,
+    )
+    assert "coverage_warnings" not in entry
+
+
+def test_release_markdown_renders_the_per_library_coverage_warnings() -> None:
+    """Codex review, fresh evidence: the release Markdown table only
+    renders library/verdict/counts -- a byte-identical matched library
+    otherwise still presents a clean report with no warning at all in
+    this format."""
+    from abicheck.cli_compare_release import _format_release_markdown
+
+    libs = [
+        {
+            "library": "liba.so",
+            "verdict": "NO_CHANGE",
+            "coverage_warnings": ["old and new binaries are byte-identical (sha256 abc...)"],
+        },
+        {"library": "libb.so", "verdict": "NO_CHANGE"},
+    ]
+    md = _format_release_markdown(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, None, None
+    )
+    assert "## ⚠️ Coverage Warnings" in md
+    assert "`liba.so`: old and new binaries are byte-identical" in md
+
+
+def test_release_markdown_omits_the_section_when_no_library_carries_a_warning() -> None:
+    from abicheck.cli_compare_release import _format_release_markdown
+
+    libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
+    md = _format_release_markdown(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, None, None
+    )
+    assert "Coverage Warnings" not in md
+
+
+def test_release_json_carries_the_per_library_coverage_warnings_through() -> None:
+    """`_format_release_json` embeds `library_results` verbatim -- no
+    separate wiring is needed for this field to reach the release JSON."""
+    libs = [
+        {
+            "library": "liba.so",
+            "verdict": "NO_CHANGE",
+            "coverage_warnings": ["old and new binaries are byte-identical (sha256 abc...)"],
+        },
+    ]
+    out = _format_release_json(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, [], None, None
+    )
+    data = json.loads(out)
+    assert data["libraries"][0]["coverage_warnings"] == [
+        "old and new binaries are byte-identical (sha256 abc...)"
+    ]
 
 
 def test_compare_one_library_stashes_old_snapshot_only_when_requested(
@@ -197,7 +350,7 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release._run_compare_pair", _fake_run_compare_pair
+        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
     )
     common = (
         {"libfoo.so": old_path},

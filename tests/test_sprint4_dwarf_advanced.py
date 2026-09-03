@@ -402,10 +402,12 @@ def test_process_cu_unions_flags_across_cus() -> None:
 
 def test_serialization_roundtrip_no_crash() -> None:
     """snapshot_to_json must not raise TypeError on set fields."""
+    from abicheck.storage.sectioned_document import from_sectioned_document
+
     snap = _snap(_adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"}))
     # This must not raise TypeError: Object of type set is not JSON serializable
     json_str = snapshot_to_json(snap)
-    data = json.loads(json_str)
+    data = from_sectioned_document(json.loads(json_str))
     assert isinstance(data["dwarf_advanced"]["packed_structs"], list)
     assert isinstance(data["dwarf_advanced"]["toolchain"]["abi_flags"], list)
 
@@ -421,9 +423,11 @@ def test_serialization_roundtrip_set_values() -> None:
 
 
 def test_serialization_empty_sets_roundtrip() -> None:
+    from abicheck.storage.sectioned_document import from_sectioned_document
+
     snap = _snap(_adv())
     json_str = snapshot_to_json(snap)
-    data = json.loads(json_str)
+    data = from_sectioned_document(json.loads(json_str))
     assert data["dwarf_advanced"]["packed_structs"] == []
 
 

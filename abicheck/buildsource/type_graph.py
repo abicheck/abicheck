@@ -39,7 +39,7 @@ Architecture mirrors ``call_graph.py`` deliberately:
   exercised on the ``integration`` lane; a missing compiler degrades
   gracefully.
 - :func:`augment_graph_with_types` folds the resulting edges into a
-  :class:`~abicheck.buildsource.source_graph.SourceGraphSummary`.
+  :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 
 Every edge is best-effort and approximate — type names are matched by their
 *textual* base spelling (cv/pointer/reference/array stripped). clang's
@@ -70,19 +70,14 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
+from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from ..model.source_graph import function_decl_identity
 from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import register_fact
-from .source_graph import (
-    CONF_HIGH,
-    CONF_REDUCED,
-    GraphEdge,
-    GraphNode,
-    function_decl_identity,
-)
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
-    from .source_graph import SourceGraphSummary
 
 # ── edge kinds (already reserved by source_graph.GRAPH_EDGE_KINDS) ─────────
 EDGE_TYPE_INHERITS = "TYPE_INHERITS"
@@ -1777,8 +1772,8 @@ def augment_graph_with_types(
 
     Returns the number of edges added.
     """
+    from ..model.graph_facts import _decl_node_id, _type_node_id
     from .call_graph import _file_in_project
-    from .source_graph import _decl_node_id, _type_node_id
 
     node_by_id: dict[str, GraphNode] = {n.id: n for n in graph.nodes}
 

@@ -250,7 +250,7 @@ opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 |------|-----------------|------------------|-----------|
 | `compare --scope-public-headers` | **ON** | Findings are silently filtered out of the report | Keep ON, but always print the filtered count (it does on resolve-fail only) |
 | `compare-release -j/--jobs` | ~~1 (serial)~~ → **0 (auto)** | Was serial by default, making multi-library releases slow | ✅ Implemented: defaults to `0` (auto-detect CPUs); parallel output is deterministic (matched-key order) |
-| `compare --demangle` | **OFF** | Human-readable output shows mangled `_ZN…` names by default | ✅ Implemented: default ON for `markdown`/`review`; `json`/`sarif`/`html` keep mangled (HTML can't be safely string-demangled) |
+| `compare --demangle` | ~~OFF~~ → **ON** (`markdown`/`review`/`html`) | Was OFF, so human-readable output showed mangled `_ZN…` names by default | ✅ Implemented: default ON for `markdown`/`review`/`html`; `json`/`sarif` keep mangled. HTML demangles structurally (`<abbr title="mangled">demangled</abbr>`, both sides `html.escape`d), never by string substitution, so it's safe |
 | `--lang` | **`c++`** | C libraries parsed as C++ can mis-parse | Reasonable default; add autodetect note |
 | `compat -report-format` | **`html`** | A CLI invocation writes an HTML file by default | ABICC parity — keep, but document |
 | `suggest-suppressions --expiry-days` | **180** | Generated suppressions silently expire in ~6 months | Fine, but state it in the generated file header |
@@ -331,9 +331,11 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
 **Do later (defaults polish):**
 6. ✅ **Done.** `compare-release -j` defaults to `0` (auto-detect CPUs). (§4)
 7. ✅ **Done.** `compare --demangle` defaults ON for `markdown`/`review` (the
-   formats whose renderer post-processes symbols through `demangle_text`), OFF
-   for `json`/`sarif` and `html` (HTML is rendered structurally and is never
-   demangled — demangling its string would inject unescaped `<`/`>`/`&`). (§4)
+   formats whose renderer post-processes symbols through `demangle_text`) and
+   for `html` (rendered structurally via `<abbr title="mangled">demangled</abbr>`,
+   both sides `html.escape`d — never by substituting into the raw string, which
+   is what would risk injecting unescaped `<`/`>`/`&`), OFF for `json`/`sarif`.
+   (§4)
 8. ✅ **Done.** The weak/list `appcompat` branches now warn when `-H`/`-I` are
    supplied (instead of silently ignoring them). (§2.7)
 

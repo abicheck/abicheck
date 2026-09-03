@@ -133,6 +133,16 @@ inputs:
   requested-depth:
     description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
     required: true
+  explicit-id:
+    description: >
+      This check's checks[].id (G42 "Explicit check identifiers"), if the
+      project declared one -- folded into check_id's '~<explicit_id>' tail
+      so two checks[] entries sharing (name, profile, baseline-channel,
+      requested-depth) but declaring different analysis: each produce a
+      distinct, non-colliding check_id/report. Omit (default) for the
+      pre-G42, unqualified check_id shape.
+    required: false
+    default: ''
   gate-mode:
     description: "'local' (default), 'deferred', or 'advisory' (ADR-047 §7)."
     required: false
@@ -211,6 +221,28 @@ inputs:
   gcc-options:
     description: 'Extra compiler flags passed through to the header frontend (the CLI --compiler-option). Forwarded to the internal analysis step.'
     required: false
+  consumer-ast-frontend:
+    description: 'Consumer-only L2 header frontend. When set, candidate headers are extracted in a separate pass against the same producer binary.'
+    required: false
+  consumer-gcc-path:
+    description: 'Consumer-only compiler executable used by the separate candidate header extraction pass.'
+    required: false
+  consumer-gcc-options:
+    description: 'Consumer-only compiler options used by the separate candidate header extraction pass.'
+    required: false
+  consumer-compile-active:
+    description: >-
+      Whether the profile declared a consumer_compile: overlay at all
+      (independent of whether it resolved any of the three fields above to
+      a non-empty value -- e.g. an overlay naming only a `binding:` with no
+      matching --toolchain-bindings entry). Forces the separate candidate
+      consumer-context dump below to run even when consumer-ast-frontend/
+      consumer-gcc-path/consumer-gcc-options are all empty, so a declared
+      overlay always isolates the candidate's header parse from the
+      producer's own compiler options rather than silently falling back to
+      them (Codex review).
+    required: false
+    default: 'false'
   sysroot:
     description: 'Alternative system root directory for cross-compilation. Forwarded to the internal analysis step.'
     required: false
@@ -486,6 +518,59 @@ runs:
         sources: ${{ inputs.sources }}
         python-version: ${{ inputs.python-version }}
 
+    # A consumer_compile overlay describes the client header context, not
+    # the toolchain that produced the library.  Materialize the candidate
+    # snapshot in a distinct dump invocation so the producer binary remains
+    # unchanged while its public headers are interpreted by that client.
+    # Placed before "Clean stale analysis output" (not after) so that step
+    # still runs immediately before "Run analysis" -- this step never
+    # writes check-target-analysis.json itself (its own output-file is
+    # check-target-consumer.abi.json), so nothing is lost by running it
+    # earlier, and the stale-cleanup invariant that step's own comment
+    # documents stays exactly as simple to audit as before this step
+    # existed (Codex review / test_action_check_target.py's
+    # TestStaleAnalysisOutputIsCleanedBeforeEachRun).
+    - name: Extract candidate consumer context
+      id: consumer_context
+      if: |
+        inputs.kind == 'target' &&
+        (inputs.consumer-compile-active == 'true' || inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
+        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
+        steps.collect_verify.outcome != 'failure' &&
+        steps.collect_replay.outcome != 'failure'
+      continue-on-error: true
+      uses: ./.abicheck-check-target-src
+      with:
+        mode: dump
+        new-library: ${{ inputs.new-library }}
+        # mode: dump has no old/new distinction -- root action/run.sh's dump
+        # path adds -H/-I for *both* `header`/`new-header` (and
+        # `include`/`new-include`) unconditionally, so passing both here
+        # would union them into one parse instead of letting the candidate-
+        # specific value replace the shared one the way `compare` mode does
+        # for its own new side. A stale shared header can then retain
+        # declarations the candidate header set actually removed (Codex
+        # review). Select the candidate-specific value when the caller gave
+        # one, falling back to the shared value otherwise -- exactly
+        # `compare`'s own new-side precedent.
+        header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
+        include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
+        lang: ${{ inputs.lang }}
+        ast-frontend: ${{ inputs.consumer-ast-frontend }}
+        gcc-path: ${{ inputs.consumer-gcc-path }}
+        gcc-prefix: ${{ inputs.gcc-prefix }}
+        gcc-options: ${{ inputs.consumer-gcc-options }}
+        sysroot: ${{ inputs.sysroot }}
+        sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
+        build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
+        compile-db: ${{ inputs.compile-db }}
+        build-config: ${{ inputs.build-config }}
+        depth: ${{ inputs.requested-depth }}
+        output-file: check-target-consumer.abi.json
+        add-job-summary: 'false'
+        install-deps: ${{ inputs.install-deps }}
+        dependency-source: ${{ inputs.dependency-source }}
+
     # ── Analysis: compare against the resolved baseline, or (baseline: ─────
     # none) a scan audit with no --against -- continue-on-error so the ─────
     # report-envelope step below always runs, per ADR-047 §7's required ─────
@@ -520,24 +605,25 @@ runs:
       if: |
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
         steps.collect_verify.outcome != 'failure' &&
-        steps.collect_replay.outcome != 'failure'
+        steps.collect_replay.outcome != 'failure' &&
+        steps.consumer_context.outcome != 'failure'
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
         mode: ${{ inputs.baseline-channel == 'none' && 'scan' || 'compare' }}
         old-library: ${{ inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir || steps.resolve.outputs.snapshot-path }}
-        new-library: ${{ inputs.new-library }}
-        header: ${{ inputs.header }}
+        new-library: ${{ steps.consumer_context.outcome == 'success' && 'check-target-consumer.abi.json' || inputs.new-library }}
+        header: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.header }}
         old-header: ${{ inputs.old-header }}
-        new-header: ${{ inputs.new-header }}
+        new-header: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.new-header }}
         include: ${{ inputs.include }}
         old-include: ${{ inputs.old-include }}
-        new-include: ${{ inputs.new-include }}
+        new-include: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.new-include }}
         lang: ${{ inputs.lang }}
-        ast-frontend: ${{ inputs.ast-frontend }}
-        gcc-path: ${{ inputs.gcc-path }}
+        ast-frontend: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.ast-frontend }}
+        gcc-path: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.gcc-path }}
         gcc-prefix: ${{ inputs.gcc-prefix }}
-        gcc-options: ${{ inputs.gcc-options }}
+        gcc-options: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.gcc-options }}
         sysroot: ${{ inputs.sysroot }}
         # collect-facts' own replay phase defaults an empty `sources` to '.'
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
@@ -551,9 +637,9 @@ runs:
         # source-only findings at requested-depth: build/source (Codex
         # review). Mirror collect-facts' own default here so the analysis
         # step sees the same directory replay validated.
-        sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
-        build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
-        compile-db: ${{ inputs.compile-db }}
+        sources: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
+        build-info: ${{ steps.consumer_context.outcome == 'success' && '' || ((inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info) }}
+        compile-db: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-db }}
         build-config: ${{ inputs.build-config }}
         depth: ${{ inputs.requested-depth }}
         used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
@@ -584,6 +670,7 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_EXPLICIT_ID: ${{ inputs.explicit-id }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
         INPUT_PROJECT: ${{ inputs.project }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}
@@ -600,5 +687,6 @@ runs:
         ANALYSIS_EXIT_CODE: ${{ steps.analysis.outputs.exit-code }}
         COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
         COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
+        CONSUMER_CONTEXT_OUTCOME: ${{ steps.consumer_context.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

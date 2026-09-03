@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI cleanup phase two, PR G1: ``exit_decision.ExitDecision``.
+"""CLI cleanup phase two, PR G1/G2: ``exit_decision.ExitDecision``.
 
 The pure-resolver tests (``TestResolveExitDecision``) state the primitive's
 own contract as invariants -- precedence, tie-handling, the ``clean``
@@ -22,6 +22,21 @@ sentinel -- independent of any one caller. The CLI-level tests
 canonical resolver reproduces exactly the exit code the pre-refactor,
 three-separate-``max``-calls fold chain produced, and that the JSON report's
 new ``exit`` block agrees with the real process exit.
+
+``TestResolveScanExitDecision``/``TestResolveReleaseExitDecision`` cover
+ADR-064's additive extension: pure resolvers for the three axes PR G1
+deliberately left unmodeled (evidence-contract error, budget overflow,
+not-comparable, and a release's mode-dependent removed-required-library
+rank). `tests/test_scan_abort_result.py` covers a later stage-1b slice built
+on top of `resolve_scan_exit_decision`: `abicheck.workflows.scan_abort_
+result.scan_abort_result_fields`, which `service_scan.run_scan`/
+`_run_scan_one_member`'s own `_BudgetOverflow`/`_EvidenceContractError`
+catches use to persist a decision into `ScanResult.report["exit"]` -- a
+separate module/test file since shaping a `ScanResult` is `workflows`
+responsibility, not `policy`'s (`abicheck/policy/AGENTS.md`). See
+``docs/contribute/adr/064-canonical-gate-algorithm-and-exit-decision.md``
+and `abicheck/policy/exit_decision_precedence.py`'s own module docstring
+for what remains open.
 """
 
 from __future__ import annotations
@@ -36,6 +51,10 @@ from abicheck.checker import compare
 from abicheck.cli import main
 from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.exit_decision_precedence import (
+    resolve_release_exit_decision,
+    resolve_scan_exit_decision,
+)
 from abicheck.reporter import to_json
 from abicheck.schemas import load_compare_report_schema
 from abicheck.serialization import snapshot_to_json
@@ -131,6 +150,11 @@ class TestResolveExitDecision:
             "contract_coverage_contribution": 1,
             "analysis_assurance_contribution": 0,
             "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
         }
 
     def test_crosscheck_promotion_is_a_real_contribution_not_a_patch(self) -> None:
@@ -190,6 +214,492 @@ class TestResolveExitDecision:
             raise AssertionError("ExitDecision must be immutable")
 
 
+class TestResolveScanExitDecision:
+    """`resolve_scan_exit_decision` -- ADR-064's outer precedence layer for
+    `scan`, ahead of the ordinary gate/coverage/assurance fold.
+    """
+
+    def test_none_of_the_three_axes_returns_none(self) -> None:
+        assert resolve_scan_exit_decision() is None
+
+    def test_evidence_contract_error_alone(self) -> None:
+        decision = resolve_scan_exit_decision(evidence_contract_error=True)
+        assert decision is not None
+        # 7, not the generic ClickException code 1 -- cli_scan.py's
+        # dedicated `_EXIT_EVIDENCE_CONTRACT_ERROR` (2026-09-03).
+        assert decision.code == 7
+        assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
+        assert decision.compatibility_contribution == 0
+        assert decision.contract_coverage_contribution == 0
+        assert decision.analysis_assurance_contribution == 0
+        assert decision.evidence_contract_error_contribution == 7
+
+    def test_budget_overflow_alone(self) -> None:
+        decision = resolve_scan_exit_decision(budget_overflow=True)
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+        # No `prior_decision` was given -- nothing was computed, so every
+        # other contribution stays `0` (genuinely "not asked").
+        assert decision.compatibility_contribution == 0
+        assert decision.contract_coverage_contribution == 0
+        assert decision.analysis_assurance_contribution == 0
+
+    def test_budget_overflow_preserves_a_prior_decision(self) -> None:
+        """The budget check fires *after* a comparable baseline compare may
+        already have built a full gate/coverage/assurance decision -- that
+        decision's own contributions must survive into the dominant
+        `BUDGET_OVERFLOW` outcome for explainability, even though they no
+        longer decide `code` (Codex review, fresh evidence: an earlier
+        revision silently zeroed them, violating `ExitDecision`'s own
+        documented `code == max(contributions)` invariant whenever a real
+        prior decision existed).
+        """
+        prior = resolve_exit_decision(
+            compatibility_contribution=2, contract_coverage_contribution=1,
+        )
+        decision = resolve_scan_exit_decision(
+            budget_overflow=True,
+            prior_decision=prior,
+        )
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+        assert decision.compatibility_contribution == 2
+        assert decision.contract_coverage_contribution == 1
+        assert decision.budget_overflow_contribution == 5
+        assert decision.code == max(
+            decision.compatibility_contribution,
+            decision.contract_coverage_contribution,
+            decision.analysis_assurance_contribution,
+            decision.crosscheck_promotion_contribution,
+            decision.evidence_contract_error_contribution,
+            decision.budget_overflow_contribution,
+            decision.not_comparable_contribution,
+            decision.removed_required_library_contribution,
+        )
+
+    def test_not_comparable_alone(self) -> None:
+        decision = resolve_scan_exit_decision(not_comparable=True)
+        assert decision is not None
+        assert decision.code == 6
+        assert decision.reasons == (ExitReason.NOT_COMPARABLE,)
+        # No `DiffResult` exists for `scan`'s own not-comparable outcome --
+        # unlike a release's aggregated not-comparable (see
+        # TestResolveReleaseExitDecision), nothing was computed at all.
+        assert decision.compatibility_contribution == 0
+        assert decision.contract_coverage_contribution == 0
+
+    def test_budget_overflow_discards_not_comparable(self) -> None:
+        """`scan_engine.run_scan_core` runs its budget check unconditionally
+        after a `not_comparable` result may already be decided, and that
+        check's own exception discards the already-built report entirely --
+        so when both are true for the same run, budget wins, not a tie.
+        """
+        decision = resolve_scan_exit_decision(
+            budget_overflow=True, not_comparable=True,
+        )
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+
+    def test_evidence_contract_error_dominates_the_later_two(self) -> None:
+        """`_EvidenceContractError` aborts during evidence collection, before
+        a baseline comparison -- and therefore before the *later* budget
+        checks (baseline-compare deadline, final check) or not-comparable
+        could ever be decided -- is even attempted.
+        """
+        decision = resolve_scan_exit_decision(
+            evidence_contract_error=True, budget_overflow=True, not_comparable=True,
+        )
+        assert decision is not None
+        assert decision.code == 7
+        assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
+
+    def test_budget_overflow_before_evidence_check_dominates_everything(self) -> None:
+        """Codex review, fresh evidence against the real line order in
+        `scan_engine.py`: candidate-snapshot collection (its own deadline
+        scope, `scan_engine.py:1180-1221`) runs *before*
+        `_check_scan_evidence_contract` (`scan_engine.py:1229`) is even
+        called. A budget overflow at that specific, earlier stage preempts
+        the evidence-contract check entirely -- it must win even over
+        `evidence_contract_error`, reversing the ordinary (later-stage)
+        `budget_overflow` axis's own precedence relative to it.
+        """
+        decision = resolve_scan_exit_decision(
+            budget_overflow_before_evidence_check=True,
+            evidence_contract_error=True,
+            budget_overflow=True,
+            not_comparable=True,
+        )
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+
+    def test_budget_overflow_before_evidence_check_alone(self) -> None:
+        decision = resolve_scan_exit_decision(
+            budget_overflow_before_evidence_check=True,
+        )
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+        # Nothing later ever ran -- genuinely "not asked", same as the
+        # ordinary evidence-contract-error case.
+        assert decision.compatibility_contribution == 0
+        assert decision.contract_coverage_contribution == 0
+
+    def test_custom_codes_are_honored(self) -> None:
+        """The `*_code` keywords default to `scan`'s own numbers, but are
+        real parameters, not hard-coded -- see the resolver's own docstring
+        for why the numbers stay per-command (ADR-064).
+        """
+        decision = resolve_scan_exit_decision(
+            not_comparable=True, not_comparable_code=99,
+        )
+        assert decision is not None
+        assert decision.code == 99
+
+    def test_custom_code_not_exceeding_a_prior_contribution_is_rejected(
+        self,
+    ) -> None:
+        """Codex review, exact counter-example: a custom `budget_overflow_
+        code` of `1` alongside a preserved compatibility contribution of
+        `4` would return `code=1` while the true maximum contribution is
+        `4` -- an internally contradictory `ExitDecision`. Reject it
+        instead of silently constructing one.
+        """
+        prior = resolve_exit_decision(compatibility_contribution=4)
+        with pytest.raises(ValueError, match="must strictly exceed"):
+            resolve_scan_exit_decision(
+                budget_overflow=True,
+                budget_overflow_code=1,
+                prior_decision=prior,
+            )
+
+    def test_custom_code_exactly_tying_a_prior_contribution_is_also_rejected(
+        self,
+    ) -> None:
+        """A tie is rejected too, not just a strictly-lower code -- an equal
+        custom code would silently drop the genuinely tied prior axis from
+        `reasons` (Codex review's second half of the same finding).
+        """
+        prior = resolve_exit_decision(compatibility_contribution=5)
+        with pytest.raises(ValueError, match="must strictly exceed"):
+            resolve_scan_exit_decision(
+                budget_overflow=True,
+                budget_overflow_code=5,
+                prior_decision=prior,
+            )
+
+
+class TestResolveReleaseExitDecision:
+    """`resolve_release_exit_decision` -- reproduces
+    `cli_compare_release_helpers._exit_compare_release`'s exact precedence,
+    including removed-required-library's mode-dependent rank.
+    """
+
+    def test_not_comparable_dominates_everything(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=True,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=4,
+            removed_required_library=True,
+            contract_coverage_contribution=1,
+        )
+        assert decision.code == 16
+        assert decision.reasons == (ExitReason.NOT_COMPARABLE,)
+        # The aggregated verdict/severity and coverage codes were already
+        # resolved (across every library) before `_exit_compare_release` is
+        # even called -- `not_comparable` overrides which one *decides*
+        # `code`, it does not mean nothing was computed (Codex review,
+        # fresh evidence). `16` still exceeds both, so `reasons` stays a
+        # clean singleton.
+        assert decision.compatibility_contribution == 4
+        assert decision.contract_coverage_contribution == 1
+        assert decision.not_comparable_contribution == 16
+        assert decision.code == max(
+            decision.compatibility_contribution,
+            decision.contract_coverage_contribution,
+            decision.analysis_assurance_contribution,
+            decision.crosscheck_promotion_contribution,
+            decision.evidence_contract_error_contribution,
+            decision.budget_overflow_contribution,
+            decision.not_comparable_contribution,
+            decision.removed_required_library_contribution,
+        )
+
+    def test_legacy_scheme_breaking_wins_over_removed_library(self) -> None:
+        """The pinned regression this mirrors:
+        `tests/test_compare_release.py::test_removed_and_breaking_exits_4_not_8`
+        -- BREAKING (4) takes priority over removed-library (8) under the
+        legacy scheme, even though 8 is numerically larger.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=4,
+            removed_required_library=True,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
+        # The real `_exit_compare_release` returns from this branch without
+        # ever reading `removed_keys`/`fail_on_removed` -- removed-library
+        # was genuinely not consulted this run, which `0` correctly states.
+        assert decision.removed_required_library_contribution == 0
+
+    def test_legacy_scheme_removed_library_only_when_verdict_clean(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=0,
+            removed_required_library=True,
+            contract_coverage_contribution=1,
+        )
+        assert decision.code == 8
+        assert decision.reasons == (ExitReason.REMOVED_REQUIRED_LIBRARY,)
+        assert decision.removed_required_library_contribution == 8
+        # The real `_exit_compare_release` never reaches its own coverage
+        # check once this branch's `sys.exit(8)` fires, but the coverage
+        # value was already computed and available -- preserve it (`8`
+        # still exceeds coverage's `0`/`1` range, so `reasons` is
+        # unaffected).
+        assert decision.contract_coverage_contribution == 1
+
+    def test_legacy_scheme_no_removed_library_falls_to_coverage(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=0,
+            removed_required_library=False,
+            contract_coverage_contribution=1,
+        )
+        assert decision.code == 1
+        assert decision.reasons == (ExitReason.CONTRACT_COVERAGE,)
+
+    def test_severity_scheme_removed_library_wins_outright(self) -> None:
+        """A real, pre-existing asymmetry in today's code: the severity
+        branch's removed-library check runs *before* the coverage floor is
+        even read, so removed-library wins even over a coverage
+        contribution that would otherwise floor a clean gate to `1`.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=0,
+            removed_required_library=True,
+            contract_coverage_contribution=1,
+        )
+        assert decision.code == 8
+        assert decision.reasons == (ExitReason.REMOVED_REQUIRED_LIBRARY,)
+        assert decision.removed_required_library_contribution == 8
+        assert decision.contract_coverage_contribution == 1
+
+    def test_severity_scheme_no_removed_library_folds_coverage_via_max(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=2,
+            removed_required_library=False,
+            contract_coverage_contribution=1,
+        )
+        assert decision.code == 2
+        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
+
+    def test_severity_scheme_operational_error_is_tagged_distinctly(self) -> None:
+        """Codex review, fresh evidence: a library that failed to dump/
+        extract/compare (the release fan-out's own operational `ERROR`
+        sentinel, floored to `4`) is not a real ABI/API or policy finding
+        -- a nonzero `operational_error_contribution` must be tagged
+        `OPERATIONAL_ERROR`, not folded into the default `COMPATIBILITY_
+        GATE`, so a report reader isn't told a compatibility gate decided
+        an exit that was actually an extraction failure.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=0,
+            removed_required_library=False,
+            operational_error_contribution=4,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
+
+    def test_severity_scheme_operational_error_ties_with_compatibility_gate(
+        self,
+    ) -> None:
+        """The real bug this axis exists to fix (Codex review, fresh
+        evidence): library A's own severity-gate finding and library B's
+        operational `ERROR` are independently computed by
+        `_compute_release_severity_exit_code`/`_fold_release_global_
+        severity` and then combined with `max()` -- a genuine tie an
+        `is_operational_error` boolean (an earlier revision) could not
+        represent, since it forced exactly one reason onto one combined
+        contribution. Both must be named when they tie.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=4,
+            removed_required_library=False,
+            operational_error_contribution=4,
+        )
+        assert decision.code == 4
+        assert set(decision.reasons) == {
+            ExitReason.COMPATIBILITY_GATE, ExitReason.OPERATIONAL_ERROR,
+        }
+
+    def test_legacy_scheme_operational_error_is_tagged_distinctly(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=0,
+            removed_required_library=True,  # must lose to the ERROR anyway
+            operational_error_contribution=4,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
+
+    def test_legacy_scheme_would_preserve_a_tie_given_both_contributions(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: today's real `worst_verdict`
+        aggregation (`cli_compare_release.py`'s `_RELEASE_VERDICT_ORDER`
+        loop) collapses a release's outcome to one scalar ranked with
+        `"ERROR"` *above* `"BREAKING"`, so a release with one `BREAKING`
+        library and a second, unrelated library that failed to compare
+        loses the `BREAKING` finding entirely once `worst_verdict` becomes
+        `"ERROR"` -- unlike severity mode, where `_compute_release_severity_
+        exit_code` already iterates `library_results` independently of
+        `worst_verdict` and never discards a real finding this way. That is
+        a gap in the real release fan-out's *legacy* aggregation (closing
+        it means iterating `library_results` for a legacy-scheme "worst
+        verdict among non-`ERROR`/non-`not_comparable` libraries", the same
+        way `_compute_release_severity_exit_code` already does for
+        severity) -- not a limitation of this resolver, which this test
+        proves already preserves such a tie correctly *if* a future,
+        enhanced caller supplies both contributions. Recorded as explicit
+        stage-1b scope in `resolve_release_exit_decision`'s own docstring
+        and ADR-064, rather than fixed here, since it requires new
+        aggregation logic in `cli_compare_release.py` no code path
+        computes today.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=4,
+            operational_error_contribution=4,
+        )
+        assert decision.code == 4
+        assert set(decision.reasons) == {
+            ExitReason.COMPATIBILITY_GATE, ExitReason.OPERATIONAL_ERROR,
+        }
+
+    def test_severity_scheme_clean_with_no_removed_library_is_clean(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=0,
+            removed_required_library=False,
+        )
+        assert decision.code == 0
+        assert decision.reasons == (ExitReason.CLEAN,)
+
+    def test_custom_codes_are_honored(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=True,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=0,
+            not_comparable_code=77,
+        )
+        assert decision.code == 77
+
+    def test_custom_removed_library_code_not_exceeding_coverage_is_rejected(
+        self,
+    ) -> None:
+        prior_coverage = 9  # deliberately above a too-small custom code below
+        with pytest.raises(ValueError, match="must strictly exceed"):
+            resolve_release_exit_decision(
+                not_comparable=False,
+                severity_scheme_active=True,
+                verdict_or_severity_contribution=0,
+                removed_required_library=True,
+                contract_coverage_contribution=prior_coverage,
+                removed_required_library_code=8,
+            )
+
+    @pytest.mark.parametrize(
+        "decision",
+        [
+            resolve_scan_exit_decision(evidence_contract_error=True),
+            resolve_scan_exit_decision(budget_overflow=True),
+            resolve_scan_exit_decision(not_comparable=True),
+            resolve_release_exit_decision(
+                not_comparable=True,
+                severity_scheme_active=True,
+                verdict_or_severity_contribution=4,
+                removed_required_library=True,
+                contract_coverage_contribution=1,
+            ),
+            resolve_release_exit_decision(
+                not_comparable=False,
+                severity_scheme_active=True,
+                verdict_or_severity_contribution=0,
+                removed_required_library=True,
+                contract_coverage_contribution=1,
+            ),
+            resolve_release_exit_decision(
+                not_comparable=False,
+                severity_scheme_active=False,
+                verdict_or_severity_contribution=0,
+                removed_required_library=True,
+                contract_coverage_contribution=1,
+            ),
+        ],
+    )
+    def test_dominant_decisions_satisfy_the_code_equals_max_invariant(
+        self,
+        decision: ExitDecision,
+    ) -> None:
+        """Every decision an ADR-064 resolver can produce -- across both
+        `resolve_scan_exit_decision` and `resolve_release_exit_decision` --
+        must satisfy `ExitDecision`'s own documented invariant once its four
+        additional fields are included in the fold (Codex review: an
+        earlier revision zeroed those four fields unconditionally, which
+        made this property false for every one of these cases whenever a
+        real prior/raw contribution was also passed in).
+        """
+        assert decision is not None
+        assert decision.code == max(
+            decision.compatibility_contribution,
+            decision.contract_coverage_contribution,
+            decision.analysis_assurance_contribution,
+            decision.crosscheck_promotion_contribution,
+            decision.operational_error_contribution,
+            decision.evidence_contract_error_contribution,
+            decision.budget_overflow_contribution,
+            decision.not_comparable_contribution,
+            decision.removed_required_library_contribution,
+        )
+
+    def test_to_dict_now_includes_the_adr_064_fields(self) -> None:
+        """ADR-064 stage 1b (report schema 2.47/1.22): `to_dict()` now
+        serializes all five ADR-064 fields, so a real `exit` block can name
+        `not_comparable`/etc. See `ExitDecision.to_dict`'s own docstring.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=True,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=0,
+        )
+        assert decision.code == 16
+        d = decision.to_dict()
+        assert d["not_comparable_contribution"] == 16
+        assert d["evidence_contract_error_contribution"] == 0
+        assert d["budget_overflow_contribution"] == 0
+        assert d["removed_required_library_contribution"] == 0
+        assert d["operational_error_contribution"] == 0
+
+
 def _fn(name: str, mangled: str) -> Function:
     return Function(
         name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC,
@@ -247,6 +757,11 @@ class TestCompareExitDecisionIntegration:
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
             "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(

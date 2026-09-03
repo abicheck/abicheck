@@ -55,6 +55,7 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.va_list_diff import diff_va_list_params
 from .diff_helpers import make_change
 from .finding_identity_ctor_dtor import iter_matched_function_pairs
 from .model import Function
@@ -83,6 +84,7 @@ def param_restrict_changes(
                         old=str(p_old.name or i),
                         old_value=f"restrict={p_old.is_restrict}",
                         new_value=f"restrict={p_new.is_restrict}",
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
     return changes
@@ -124,30 +126,23 @@ def param_va_list_changes(
     guessed at; revisit once ``dumper_hybrid.py`` backfills ``is_va_list``
     per parameter the way it does for a handful of scalar record-layout
     attributes today.
+
+    **ADR-063 Phase 5B:** the snapshot-level ``clang_va_list_facts_reliable``
+    gate above only says the *producer* is trustworthy when it ran — it does
+    not guarantee ``is_va_list_fact`` reached ``PRESENT`` for *this specific*
+    parameter (a per-function extraction failure still leaves an individual
+    ``Param.is_va_list_fact`` at ``NOT_COLLECTED``/``FAILED``). Each pair is
+    gated through :func:`compare_facts` rather than the old
+    present-or-``False`` collapse (``_fact_bool``, since removed from this
+    module): a parameter whose evidence is incomplete on either side is
+    skipped instead of silently read as "confirmed not ``va_list``", which
+    could otherwise fabricate a ``PARAM_BECAME_VA_LIST``/
+    ``PARAM_LOST_VA_LIST`` finding against a real ``va_list`` parameter on
+    the other side purely from that side's own capture gap.
+
+    Delegation-only facade over :func:`abicheck.compare.va_list_diff.
+    diff_va_list_params` (Codex review, PR #1033) — the evidence-reliability
+    gate above stays here since it's a snapshot-level question, not a raw
+    change; the per-parameter loop moved.
     """
-    changes: list[Change] = []
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if not p_old.is_va_list and p_new.is_va_list:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_BECAME_VA_LIST,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.type,
-                        new_value="va_list",
-                    )
-                )
-            elif p_old.is_va_list and not p_new.is_va_list:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_LOST_VA_LIST,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value="va_list",
-                        new_value=p_new.type,
-                    )
-                )
-    return changes
+    return diff_va_list_params(old_map, new_map)

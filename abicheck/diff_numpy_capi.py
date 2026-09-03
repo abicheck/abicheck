@@ -40,7 +40,7 @@ from .diff_helpers import make_change
 if TYPE_CHECKING:
     from packaging.specifiers import SpecifierSet
 
-    from .numpy_capi import NumPyCapiSurface
+    from .model.python_facts import NumPyCapiSurface
 
 
 def _target_tuple(version: str | None) -> tuple[int, ...]:

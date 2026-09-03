@@ -31,6 +31,7 @@ from .checker_policy import (
     EvidenceTier,
     ReachabilityState,
     Verdict,
+    apply_policy_file_overrides as _apply_policy_file_overrides,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_relevance_types import (
@@ -41,7 +42,9 @@ from .contract_relevance_types import (
 from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
-from .policy_file import PolicyFile
+from .model.identity import EntityId
+from .model.policy_file_protocol import PolicyFileProtocol
+from .report_side_facts import ReportSideFacts
 
 # Marker appended to a ``SYMBOL_VERSION_ALIAS_CHANGED`` description when the old
 # default symbol version is NOT retained as a non-default alias (so consumers of
@@ -53,12 +56,10 @@ from .policy_file import PolicyFile
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
 
 # The public evidence-depth ladder (ADR-043 D2/ADR-047 §7): exactly the four
-# user-facing rungs, matching the public CLI's ``--depth`` and
-# ``abicheck/mcp_server.py``'s own ``_PUBLIC_DEPTHS`` (kept as a separate,
-# self-contained copy here rather than importing mcp_server — that module
-# sits above this one in the dependency graph). Shared by
-# DiffResult.requested_depth/effective_depth and ScanOutcome's matching
-# fields (G30 P0.3) so both validate against the same set.
+# user-facing rungs, matching the public CLI's ``--depth`` (the now-removed
+# MCP server mirrored this as its own ``_PUBLIC_DEPTHS``, per ADR-021).
+# Shared by DiffResult.requested_depth/effective_depth and ScanOutcome's
+# matching fields (G30 P0.3) so both validate against the same set.
 EVIDENCE_DEPTH_VALUES = frozenset({"binary", "headers", "build", "source"})
 
 
@@ -73,9 +74,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
     for any future caller (G30 P1.3) that sets it from a less-validated
     source, since a bad value would otherwise only be caught by the JSON
     Schema — which production code never runs against (only opt-in tests
-    do). Matches
-    ``mcp_server._validate_public_depth``'s same check on the same set.
-    Shared by ``reporter._add_check_identity`` (compare) and
+    do). Shared by ``reporter._add_check_identity`` (compare) and
     ``ScanOutcome.to_dict`` (scan) so both validate identically.
     """
     if value not in EVIDENCE_DEPTH_VALUES:
@@ -88,11 +87,31 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 # A check's full identity (ADR-047 §7): "target@profile#baseline_channel@requested_depth".
 # Each of the four components is constrained to a safe identifier charset (no
 # further '@'/'#' inside a component) so the delimiter-joined form stays
-# unambiguous. Mirrors the ``pattern`` in compare_report.schema.json's
-# ``check_id`` property.
+# unambiguous. Same accepted-string set as the ``pattern`` in
+# compare_report.schema.json's ``check_id`` property -- not the identical
+# regex text, since that pattern is published for external, cross-language
+# (ECMAScript) consumers and so uses a portable ``$(?!\n)`` end-assertion
+# instead of this module's Python-only ``\Z`` (Codex review, fresh
+# evidence: ``\Z`` is not a valid ECMAScript escape -- Ajv either rejects it
+# or treats it as a literal 'Z').
+#
+# G42 adds two further optional, composable tail segments, in this fixed
+# order: "!<environment_id>" (a named-environment qualifier -- reserved here,
+# not yet produced by any generator) and "~<explicit_id>" (a project-author-
+# supplied checks[].id). Absent both, this pattern accepts exactly what it
+# accepted before G42. Mirrors
+# ``abicheck.workflows.aggregate.contracts._CHECK_ID_RE`` -- the two must
+# extend in lockstep (see that module's own comment for why).
+#: Anchored with ``\Z``, not a trailing ``$`` -- without ``re.MULTILINE``,
+#: ``$`` also matches just before a trailing ``\n`` (Codex review; see
+#: ``project_targets._IDENTIFIER_RE``'s identical fix for the full
+#: rationale), which would let a constructed check_id carrying an embedded
+#: newline (e.g. from an unvalidated explicit_id) slip past this check.
 CHECK_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*"
-    r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)$"
+    r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)"
+    r"(?:![A-Za-z0-9][A-Za-z0-9._-]*)?"
+    r"(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?\Z"
 )
 
 
@@ -290,16 +309,12 @@ class Change:
     contract_relevance: ContractRelevance | None = None
     contract_reason_code: str | None = None
     contract_assurance: ContractAssurance | None = None
-    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): the ids
-    # of the `contract_evidence` provider records this finding's decision
-    # actually rests on (`contract_evidence_collect.evidence_refs_for_reason`),
-    # or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision made
-    # outside `compare()` by a caller that holds no evidence block -- the
-    # `--used-by`/`--required-symbol` scoped stamp. `None` when contract
-    # evaluation was not requested; `()` is a real value, meaning "this
-    # decision consulted no provider" (a non-entity finding, whose relevance
-    # follows from its `ChangeKind` alone). Kept as a flat tuple for the same
-    # circular-import reason as the three fields above.
+    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): ids of
+    # the `contract_evidence` provider records this finding's decision rests
+    # on, or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision
+    # made outside `compare()` (the `--used-by`/`--required-symbol` stamp).
+    # `None` when not requested; `()` = "consulted no provider". Flat tuple,
+    # same circular-import reason as above.
     contract_evidence_refs: tuple[str, ...] | None = None
     # ADR-049 D1's other half of the canonical per-finding shape, and the one
     # that makes the contract decision *authoritative* rather than shadow:
@@ -318,7 +333,7 @@ class Change:
     # `checker.compare`, *before* the verdict is computed.
     compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
     compatibility_decision: Verdict | None = None
-    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # Set by diff_types_vtable._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
     # when it rests on the identical asymmetric-layout-evidence gap
     # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
     # an internal cross-detector correlation key for
@@ -336,54 +351,53 @@ class Change:
     # evidence" entry for the full account). ``False`` for every ordinary
     # TYPE_VTABLE_CHANGED and every other finding kind.
     #
-    # ``field(kw_only=True)``, per-field rather than the ``dataclasses.
-    # KW_ONLY`` sentinel (Codex review, fresh evidence): ``Change`` is
-    # documented as a public Python-API type (checker_types.py's own module
-    # docstring; CLAUDE.md: "changing their public surface is a breaking
-    # change to the Python API — coordinate it"), and a whole-class
-    # ``KW_ONLY`` marker placed after ``description`` would make every
-    # pre-existing optional field keyword-only too — breaking any external
-    # caller that previously passed ``old_value``/``new_value``/etc.
-    # positionally, which this codebase cannot audit (only its own call
-    # sites, all of which already pass every field beyond the first three by
-    # keyword). Appended at the very end of the dataclass instead of
-    # mid-list, for the same reason `field(kw_only=True)` alone doesn't
-    # already make position irrelevant: a plain field inserted anywhere
-    # earlier still shifts every later *positional* argument for a
-    # hypothetical caller reaching that far — appending keeps every
-    # pre-existing field's position, and therefore every pre-existing
-    # positional caller's behavior, completely unchanged. Mirrors
-    # ``AbiSnapshot``'s identical per-field fix in PR #582 exactly (that
-    # precedent predates this dataclass's own instance of the same bug).
+    # ``field(kw_only=True)`` per-field, not the whole-class ``dataclasses.
+    # KW_ONLY`` sentinel (Codex review): ``Change`` is public API (CLAUDE.md:
+    # "changing their public surface is a breaking change... coordinate
+    # it"), and a class-wide ``KW_ONLY`` marker after ``description`` would
+    # make every pre-existing optional field keyword-only too, breaking an
+    # external caller that passed one positionally. Appended at the very
+    # end, not mid-list, since ``kw_only=True`` alone doesn't stop a later
+    # *positional* argument from shifting — only position preserves that.
+    # Mirrors ``AbiSnapshot``'s identical fix in PR #582.
     vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
     # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
     # string — "global"/"weak"/"local"/"unique"/"other") of the removed (or
     # visibility-hidden) symbol, stamped by
     # diff_symbols._check_removed_function/_var_removed on
     # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED/FUNC_VISIBILITY_CHANGED
-    # findings (the old side's binding — still real ELF-linkage evidence for
-    # a symbol that went hidden, not just one that vanished outright), and by
-    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK
-    # (the other common export-disappearance path — a function still
-    # declared but silently absent from .dynsym). None for every other
-    # kind, and None here too when the symbol's binding was never
-    # captured (non-ELF platform, older snapshot, ELF metadata without a
-    # matching .dynsym entry). Exists so a suppression rule's ``binding:``
+    # findings (the old side's binding), and by
+    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK.
+    # None for every other kind, and None here too when the symbol's binding
+    # was never captured. Exists so a suppression rule's ``binding:``
     # selector (suppression.py) can narrow a removal rule to the common
     # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
-    # safety: it names the *library's own build*'s linkage, not whether
-    # every consumer already carries its own copy — see AGENTS.md's
-    # "Linkage-blind removal" entry (the extern-template counterexample) and
-    # Suppression.binding's own docstring, which carries the full caveat.
-    # Deliberately a plain string, not
-    # the ``SymbolBinding`` enum itself: mirrors ``old_value``/``new_value``
-    # and every other string-typed selector-facing field already on this
-    # class, and keeps ``model.py``'s ``elf_metadata`` dependency from
-    # leaking into this dataclass's own import surface. Same
-    # ``field(kw_only=True)``-appended-last convention as
-    # ``vtable_covers_unverifiable_layout_gap`` immediately above, for the
-    # identical reason (Change is public API; see that field's own comment).
+    # safety — see AGENTS.md's "Linkage-blind removal" entry. Deliberately a
+    # plain string, not the ``SymbolBinding`` enum itself, mirroring
+    # ``old_value``/``new_value``. Same ``field(kw_only=True)``-appended-last
+    # convention as ``vtable_covers_unverifiable_layout_gap`` above, since
+    # Change is public API.
     symbol_binding: str | None = field(default=None, kw_only=True)
+    # Structured field identity for a field-level Change ("x" in "Widget::x"),
+    # stamped by the six TYPE_FIELD_*/STRUCT_FIELD_* emitters
+    # (diff_types.py/diff_platform.py) so diff_filtering._dedup_cross_kind's
+    # parent-type match can require field agreement instead of dropping any
+    # DWARF field finding whose *type* has an AST-tier finding, regardless of
+    # *which* field changed (Codex review). None for every other kind.
+    field_name: str | None = field(default=None, kw_only=True)
+    # G39 Phase 0: evidence tier(s) producing this finding, same shape as
+    # contract_evidence_refs. Same field(kw_only=True)-appended-last
+    # convention as symbol_binding above (Change is public API).
+    evidence_provenance: tuple[str, ...] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 2 (finding_identity.py algorithm migration, second half):
+    # the compare-time EntityId this finding is about -- the OLD side's when
+    # it exists (REMOVED-shaped finding has none), else the NEW side's
+    # (ADDED-shaped), mirroring symbol_binding's own old-side convention
+    # above. None when unresolved; not yet read by any consumer.
+    # `compare=False` like the declaration-side carriers -- identical-content
+    # findings stay equal regardless of identity coverage (Codex review).
+    # Same field(kw_only=True)-appended-last convention as evidence_provenance.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
 
 @dataclass
@@ -407,7 +421,7 @@ class LibraryMetadata:
 
 
 @dataclass
-class DiffResult:
+class DiffResult(ReportSideFacts):
     old_version: str
     new_version: str
     library: str
@@ -422,7 +436,7 @@ class DiffResult:
     policy: str = (
         "strict_abi"  # active policy profile; drives breaking/source_breaks/compatible
     )
-    policy_file: PolicyFile | None = None  # custom policy with overrides (Bug 4)
+    policy_file: PolicyFileProtocol | None = None  # custom policy w/ overrides (Bug 4)
     old_metadata: LibraryMetadata | None = None
     new_metadata: LibraryMetadata | None = None
     redundant_changes: list[Change] = field(
@@ -684,33 +698,27 @@ class DiffResult:
         frozenset[ChangeKind],
         frozenset[ChangeKind],
     ]:
-        """Return (breaking, api_break, compatible, risk) kind sets with overrides applied."""
-        breaking, api_break, compatible, risk = _policy_kind_sets(self.policy)
-        if not self.policy_file or not self.policy_file.overrides:
-            return breaking, api_break, compatible, risk
+        """Return (breaking, api_break, compatible, risk) kind sets with overrides applied.
 
-        # Apply overrides: move kinds between sets
-        b, a, c, r = set(breaking), set(api_break), set(compatible), set(risk)
-        _VERDICT_TO_SET_IDX = {
-            Verdict.BREAKING: 0,
-            Verdict.API_BREAK: 1,
-            Verdict.COMPATIBLE: 2,
-            Verdict.COMPATIBLE_WITH_RISK: 3,
-        }
-        sets = [b, a, c, r]
-        for kind, verdict in self.policy_file.overrides.items():
-            # Remove from all sets
-            for s in sets:
-                s.discard(kind)
-            # Add to target set
-            idx = _VERDICT_TO_SET_IDX.get(verdict)
-            if idx is not None:
-                sets[idx].add(kind)
-        return frozenset(b), frozenset(a), frozenset(c), frozenset(r)
+        Pure delegation (ADR-061 Phase 4's own recorded gap, now closed): the
+        override-application algorithm itself lives in
+        ``checker_policy.apply_policy_file_overrides`` — this method only
+        consumes that already-computed result, it does not itself execute
+        policy-resolution logic. See that function's own docstring for why
+        this split matters and what changed.
+        """
+        overrides = self.policy_file.overrides if self.policy_file else None
+        return _apply_policy_file_overrides(_policy_kind_sets(self.policy), overrides)
 
     def _effective_verdict_for_change(self, change: Change) -> Verdict:
-        """Return the per-change verdict, including frozen namespace guards."""
-        from .severity import effective_verdict_for_change
+        """Return the per-change verdict, including frozen namespace guards.
+
+        Pure delegation to ``reclassify.effective_verdict_for_change`` — this
+        method holds no policy-resolution logic of its own (unlike
+        ``_effective_kind_sets`` before ADR-061 Phase 4's closure above; see
+        that method's docstring).
+        """
+        from .reclassify import effective_verdict_for_change  # severity re-exports it
 
         return effective_verdict_for_change(
             change,

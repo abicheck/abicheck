@@ -1,3 +1,16 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+summarizes:
+  - class-layout
+depends_on:
+  - abicheck/diff_types.py
+  - abicheck/demangle.py
+lifecycle: active
+generated: false
+---
 # Part 4 — C++ ABI Specifics
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -7,8 +20,7 @@
 > **4. C++ ABI** ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -277,24 +289,10 @@ the kind of change that merits review rather than a silent pass.
 
 ## Exception unwinding: the machinery behind `noexcept`
 
-Removing `noexcept` turns on the caller's **unwinding assumption** — but
-that assumption rests on a full ABI in its own right, one the Itanium C++
-ABI freezes as part of your binary contract. Two compiler-emitted tables
-(`.eh_frame`, `.gcc_except_table`) and a per-frame **personality routine**
-(`__gxx_personality_v0`) let the runtime unwind the stack and run
-destructors on the way to a matching handler; a caller compiled expecting a
-landing pad relies on them existing and being correct. Crossing a DSO
-boundary adds a second hazard: catch matching is RTTI-based, and a type
-thrown across a library boundary can, on some runtime/toolchain
-configurations, make the `catch` fail to match — the exact conditions are
-narrower than "hidden visibility" alone (GNU libstdc++'s default string-name
-fallback usually still catches correctly even then). Toolchain flags
-(`-fno-exceptions` mixed with `-fexceptions` across a call chain, changing
-an exception specification) are the same class of hazard again.
-
-➡️ **[Exception Unwinding: The Machinery Behind `noexcept`](../exception-unwinding-abi.md)**
-covers the full mechanics — the unwind tables, the personality routine, the
-cross-DSO RTTI trap, and what abicheck can and cannot observe about it.
+Removing `noexcept` turns on the caller's unwinding assumption, and that
+assumption rests on a full ABI of its own (unwind tables, the personality
+routine, RTTI-based catch matching across a DSO boundary) —
+[Exception Unwinding](../exception-unwinding-abi.md) covers it.
 
 ---
 
@@ -351,111 +349,36 @@ garbage, with no toolchain diagnostic
 
 ## 7. Base-class position and layout
 
-Multiple inheritance places each base sub-object at a specific offset, and those
-offsets are compiled into every upcast and virtual call.
-
-```cpp
-/* v1 */ struct Widget : Drawable, Clickable { /*...*/ };
-/* v2 */ struct Widget : Clickable, Drawable { /*...*/ };   // bases reordered
-```
-
-The type name and every method signature are identical, yet
-`static_cast<Drawable*>(widget)` now points into the `Clickable` sub-object,
-because the compiler applied v1's offset to v2's layout
-([case60](../../reference/examples/case60_base_class_position_changed.md)).
-
-[case37](../../reference/examples/case37_base_class.md) generalizes this with three
-independent hazards: **reordering** bases changes `this`-adjustments and which
-vptr sits at offset 0; converting non-virtual to **`virtual` inheritance**
-restructures the whole object (the virtual base moves to the end and a
-vbase-offset table is inserted); **appending** a base grows `sizeof` and shifts
-every member.
-
-A related multiple-inheritance trap is **overriding a virtual inherited from a
-*non-primary* base** — i.e. any base after the first. Because that base
-sub-object sits at a non-zero offset, the override needs a *thunk* that adjusts
-`this` back to the sub-object before dispatching. Introducing (or removing) such
-an override in a later release changes the set of thunks the vtable must carry
-and the `this`-adjustments baked into consumer call sites — a silent break even
-though the method's source signature is unchanged.
-
-!!! note "How abicheck sees it"
-    Reported as `base_class_position_changed` / `type_base_changed` when DWARF
-    or headers are available — ELF symbol tables alone cannot see them, which
-    is why C++ ABI checking *requires* debug info or headers.
-
-### Empty bases, tail padding, and overlap optimizations
-
-Two Itanium-ABI space optimizations make class layout *more* fragile than the
-plain struct rules from [Part 3](03-type-layout.md), because they let a
-seemingly free change resize or re-pack an object:
-
-- **Empty-base optimization (EBO).** An empty base class occupies **zero bytes**
-  in the derived object. The moment that base gains its first data member — even
-  a single `char` "just for debugging" — it starts occupying real space at
-  offset 0 of every derived class, shifting every member after it. Tag types,
-  policy classes, and allocators are the classic victims:
-  [case94](../../reference/examples/case94_empty_tag_gained_state.md) shows an empty tag
-  struct gaining state and silently re-laying-out everything built on it.
-- **Tail-padding reuse.** For non-POD bases, a derived class may place its first
-  member *inside the base's tail padding*. The consequence: changing a base's
-  members can change the **derived** class's layout even when
-  `sizeof(Base)` stays identical — the padding the derived class was reusing is
-  suddenly occupied. You cannot reason about a base class "in isolation"; its
-  padding is part of its ABI.
-- **`[[no_unique_address]]`** opts member sub-objects into the same overlap
-  rules: adding or removing the attribute (or changing whether the member is
-  empty) re-packs the enclosing object
-  ([case117](../../reference/examples/case117_no_unique_address.md)).
-
-The common thread: these layouts are computed from *the whole inheritance and
-member graph*, so the break surfaces in classes the author never edited.
-Detection therefore needs the compiler's own record of the final layout — DWARF
-sizes/offsets (L1) or the header AST (L2); see
-[Detecting Breaks](08-detection.md) for the full evidence story.
+Multiple inheritance places each base sub-object at a fixed offset, and
+those offsets — plus which vptr sits at offset 0, the `this`-adjusting
+thunks an override of a non-primary base needs, and the empty-base and
+tail-padding optimizations that let a base's change re-lay-out a derived
+class the author never touched — are compiled into every upcast and
+virtual call ([case60](../../reference/examples/case60_base_class_position_changed.md),
+[case37](../../reference/examples/case37_base_class.md),
+[case94](../../reference/examples/case94_empty_tag_gained_state.md)). The
+full treatment — every class-layout change, the `ChangeKind` it emits, and
+the evidence tier that reveals it — is owned by
+[Class Layout ABI & API](../class-layout-abi.md).
 
 ---
 
 ## Modern C/C++ and toolchain ABI hazards
 
-The break families above predate C++11. Newer language features and toolchain
-*flags* introduce a second class of hazard: the **declaration looks unchanged in
-the header, but the bytes the compiler emits move** because a type's size,
-mangling, or passing rule shifted under it — the `_GLIBCXX_USE_CXX11_ABI` dual-ABI
-flip, `[[gnu::abi_tag]]`, `char8_t`, `_BitInt(N)`, `_Atomic`,
-`[[no_unique_address]]`, C++20 concept tightening, and LP64→ILP64 data-model
-drift are the recurring offenders, alongside build-flag-only hazards like
-`-fno-exceptions`/`-fno-rtti` and CPU-dispatch/IFUNC selection. These are the
-cases reviewers miss most often, because nothing in the diff "looks like" an
-ABI change.
-
-➡️ **[Modern C/C++ and Toolchain ABI Hazards](../modern-cpp-toolchain-hazards.md)**
-has the full case-by-case table and the build-flag hazards in detail.
+Newer language features and toolchain flags add a class of break where the
+declaration looks unchanged but the emitted bytes move —
+[Modern C/C++ and Toolchain ABI Hazards](../modern-cpp-toolchain-hazards.md)
+has the case-by-case table.
 
 ---
 
 ## How to design C++ libraries for ABI stability
 
-!!! tip "Design patterns for Part 4"
-    - **Pure-virtual interface + factory.** Expose an abstract class (no data
-      members, no inline methods) and a C-linkage `create_foo()`. Consumers
-      hold only the abstract pointer, so you can evolve the implementation
-      class without touching any consumer vtable.
-    - **Non-Virtual Interface (NVI).** Public methods are *non-virtual*
-      wrappers over a small, stable set of `virtual` hooks. You can add public
-      methods (non-virtual additions are ABI-safe) without growing the vtable.
-    - **Pimpl ABI firewall.** Every data member lives in an `Impl` defined in
-      the `.cpp`; the public class holds one `std::unique_ptr<Impl>`.
-      `sizeof(Widget)` never changes; offsets are invisible.
-    - **Inline namespaces for generational ABI.** Wrap public declarations in
-      `inline namespace abi_v1`. For a breaking change, ship `abi_v2` alongside
-      and keep the old symbols exported — consumers migrate on their schedule,
-      mirroring libstdc++ `__cxx11`.
-    - **`-fvisibility=hidden` + export macros.** Shrink the exported surface to
-      exactly what you intend to stabilize (see [Part 5](05-linker-elf.md)).
-
-    Full code for each is in
-    [Part 7 — Designing for Stability](07-designing-for-stability.md).
+The patterns that keep a C++ ABI evolvable — pure-virtual interface plus
+factory, non-virtual interface, the Pimpl firewall, inline namespaces for
+generational ABI, hidden visibility with export macros — are the subject of
+[Part 7 — Designing for Stability](07-designing-for-stability.md), with full
+code for each.
 
 ---
 
@@ -471,3 +394,7 @@ conventions, and TLS models — all recorded in the `.so` itself.
 [Risk examples](../../reference/examples/by-verdict/compatible-risk.md) ·
 [Exception Unwinding](../exception-unwinding-abi.md) ·
 [Modern C/C++ and Toolchain ABI Hazards](../modern-cpp-toolchain-hazards.md)
+
+---
+
+**Ladder:** ← [Part 3 — Type Layout Breaks](03-type-layout.md) · Step 3 · How Breaks Happen · [Part 5 — ELF & Linker-Level Concerns](05-linker-elf.md) →

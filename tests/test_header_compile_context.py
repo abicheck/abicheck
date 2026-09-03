@@ -1353,7 +1353,7 @@ def _write_corrupt_pack(pack_dir: Path) -> None:
     """A directory ``is_pack_dir()`` recognizes as a (corrupt) pack: a
     ``manifest.json`` present but unparseable, matching ``is_pack_dir``'s own
     documented "present but unparseable: keep treating it as a (corrupt) pack"
-    contract -- ``BuildSourcePack.load()`` then raises decoding it."""
+    contract -- ``pack_io.load()`` then raises decoding it."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     (pack_dir / "manifest.json").write_text("{not valid json", encoding="utf-8")
 
@@ -1363,7 +1363,7 @@ def test_derive_l2_include_dirs_corrupt_sources_pack_degrades_to_empty(
 ) -> None:
     """P2 regression: a ``--sources`` pack recognized by ``is_pack_dir`` but
     failing to load (corrupt ``manifest.json``) must degrade this best-effort
-    seeding to ``([], [])``, not raise -- ``BuildSourcePack.load()`` used to
+    seeding to ``([], [])``, not raise -- ``pack_io.load()`` used to
     run inside this function's own protected section pre-refactor; the shared
     ``_resolve_l2_seed_pack_args`` extraction moved it ahead of the ``try``
     by mistake (Codex review)."""

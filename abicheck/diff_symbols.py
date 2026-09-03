@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import bisect
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -44,6 +43,9 @@ from .diff_helpers import (
     type_map_key,
 )
 from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
+from .diff_symbols_anon_fields import (
+    check_anon_fields_for_type,
+)
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
@@ -70,6 +72,10 @@ from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _unqualified_name as _unqualified_name,
     _unqualified_name_of as _unqualified_name_of,
     _unwrap_funcptr_declarator as _unwrap_funcptr_declarator,
+    emit_namespace_move_batches as emit_namespace_move_batches,
+    emit_prefix_batch_rename as emit_prefix_batch_rename,
+    find_namespace_move_groups as find_namespace_move_groups,
+    find_prefix_rename_pairs as find_prefix_rename_pairs,
 )
 from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _abi_equivalent_scalar as _abi_equivalent_scalar,
@@ -118,6 +124,12 @@ from .model import (
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
+
+# Real home is model/cc_attributes.py (ADR-061 D1): a pure membership test
+# with no I/O, living in model so extract's tu_merge.py can use it too
+# without a forbidden extract -> compare edge. Re-exported by value here
+# for back-compat.
+from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .name_classification import is_local_rtti_symbol
 
 # Visibility levels that constitute the public ABI surface.
@@ -295,6 +307,7 @@ def _check_removed_function(
             new_value=f_hidden.visibility.value,
             # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
+            entity_id=f_old.entity_id or f_hidden.entity_id,
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
@@ -308,6 +321,7 @@ def _check_removed_function(
         old_value=f_old.name,
         # See Change.symbol_binding's docstring — None when not captured.
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
+        entity_id=f_old.entity_id,
     )
 
 
@@ -350,6 +364,7 @@ def _check_return_type_change(
             name=f_old.name,
             old=f_old.return_type,
             new=f_new.return_type,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -414,6 +429,7 @@ def _check_params_change(
             name=f_old.name,
             old=_format_params(f_old.params),
             new=_format_params(f_new.params),
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -435,6 +451,7 @@ def _check_ref_qualifier_change(
             new=repr(new_rq),
             old_value=old_rq or "(none)",
             new_value=new_rq or "(none)",
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -454,6 +471,7 @@ def _check_linkage_change(
             name=f_old.name,
             old=old_linkage,
             new=new_linkage,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -474,6 +492,7 @@ def _check_noexcept_change(
             ChangeKind.FUNC_NOEXCEPT_REMOVED,
             f"noexcept specifier removed: {f_old.name}",
         ),
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -490,6 +509,7 @@ def _check_virtual_change(
             ChangeKind.FUNC_VIRTUAL_REMOVED,
             f"Function is no longer virtual: {f_old.name}",
         ),
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -519,6 +539,7 @@ def _check_explicit_change(
             f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
         ),
         removed_values=("explicit", "implicit"),
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -545,28 +566,8 @@ def _check_variadic_change(
             f"Function is no longer variadic (lost ...): {f_old.name}",
         ),
         removed_values=("variadic", "fixed-arity"),
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
-
-
-#: Calling-convention attribute base names. When one of these flips inside
-#: ``contract_attributes`` it is a parameter-passing change, not a semantic
-#: contract change, so it routes to the existing BREAKING kind.
-_CC_ATTRIBUTE_BASES = frozenset(
-    {
-        "cdecl",
-        "stdcall",
-        "fastcall",
-        "thiscall",
-        "regparm",
-        "ms_abi",
-        "sysv_abi",
-        "vectorcall",
-    }
-)
-
-
-def _is_cc_attribute(token: str) -> bool:
-    return token.split("(", 1)[0] in _CC_ATTRIBUTE_BASES
 
 
 def _check_contract_attributes_change(
@@ -601,6 +602,7 @@ def _check_contract_attributes_change(
                 ),
                 old_value=", ".join(sorted(old_cc)) or "(default)",
                 new_value=", ".join(sorted(new_cc)) or "(default)",
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
         old_attrs -= old_cc
@@ -616,6 +618,7 @@ def _check_contract_attributes_change(
                 name=f_old.name,
                 detail=", ".join(gained),
                 new_value=", ".join(gained),
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
     if lost:
@@ -626,6 +629,7 @@ def _check_contract_attributes_change(
                 name=f_old.name,
                 detail=", ".join(lost),
                 old_value=", ".join(lost),
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
     return changes
@@ -650,6 +654,7 @@ def _check_exception_spec_change(
             name=f_old.name,
             old=f_old.exception_spec or "(none)",
             new=f_new.exception_spec or "(none)",
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -677,6 +682,7 @@ def _check_vtable_index_change(
             ),
             old_value=str(f_old.vtable_index),
             new_value=str(f_new.vtable_index),
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -741,6 +747,7 @@ def _check_inline_transitions(
                     ),
                     old_value="non-inline",
                     new_value="inline",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         elif f_old.is_inline and not f_new.is_inline:
@@ -751,6 +758,7 @@ def _check_inline_transitions(
                     name=f_old.name,
                     old="inline",
                     new="non-inline",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -775,12 +783,10 @@ def _match_old_function(
 
     ADR-049 Phase 2: both tiers of the join run through
     :class:`~abicheck.finding_identity.SymbolIdentityIndex` -- the exact-key
-    tier as this index's own ``Mapping`` lookup, and the ``extern "C"``
-    fallback as one ambiguity-checked alias lookup, replacing the hand-rolled
-    name multimap plus ``len(candidates) == 1`` count this function used to
-    carry. The rule is unchanged, and deliberately so: the count *was* the
-    ambiguity-safety, it just lived here instead of in the shared primitive
-    that every other flat join now uses.
+    tier as this index's own ``Mapping`` lookup, the ``extern "C"`` fallback
+    as one ambiguity-checked alias lookup (``len(candidates) == 1``, the
+    same rule the hand-rolled name multimap this replaced used, now living
+    in the shared primitive every other flat join uses too).
     """
     f_new_exact = new_index.get(mangled)
     if f_new_exact is not None:
@@ -846,12 +852,9 @@ def _detect_newly_deleted_functions(
 ) -> list[Change]:
     """Detect functions that gained ``= delete`` between snapshots.
 
-    FUNC_DELETED: detected via castxml is_deleted attribute (header analysis).
-    FUNC_DELETED_DWARF: detected via DWARF DW_AT_deleted attribute (binary analysis).
-
-    Only ABI-visible (PUBLIC / ELF_ONLY) functions are reported; hidden or
-    internal functions are not part of the public ABI surface and must not
-    produce spurious BREAKING findings. ``drift_old_by_new_key`` covers a
+    FUNC_DELETED: castxml ``is_deleted`` (header analysis). FUNC_DELETED_DWARF:
+    DWARF ``DW_AT_deleted`` (binary analysis). Only ABI-visible (PUBLIC /
+    ELF_ONLY) functions are reported. ``drift_old_by_new_key`` covers a
     reconciled ctor/dtor pair (PR #761 finding 2).
     """
     changes: list[Change] = []
@@ -861,23 +864,21 @@ def _detect_newly_deleted_functions(
     old_exported = exported_symbol_names(
         getattr(old_snapshot, "elf", None), FUNCTION_SYMBOL_TYPES
     )
-    # Whether the new side has an ELF symbol table at all. This tells "no ELF
-    # evidence available" apart from "ELF table present but this function is not
-    # exported": when a table exists, an empty *function* export set (e.g. the
-    # library exports only data, or every function is hidden) is authoritative —
-    # a DWARF-only DW_AT_deleted internal member is genuinely not exported and
-    # must not be reported. Keying on ``exported`` truthiness instead would only
-    # apply the filter when some *other* function happened to be exported.
+    # Whether the new side has an ELF symbol table at all -- "no ELF evidence
+    # available" vs. "table present but this function is not exported": when a
+    # table exists, an empty *function* export set is authoritative (a
+    # DWARF-only DW_AT_deleted internal member is genuinely not exported).
+    # Keying on ``exported`` truthiness alone would only apply this when some
+    # *other* function happened to be exported.
     has_elf_symbol_table = bool(getattr(new_elf, "symbols", None))
     for mangled, f_new in new_all.items():
         if not f_new.is_deleted:
             continue
-        # Suppress only a *genuinely internal* DWARF-deleted member: one that the
-        # new ELF table proves is not exported AND that was not exported in the
-        # old library either. A function that *was* an old export and is now
-        # ``= delete``'d + dropped from .dynsym is a real deletion of a public
-        # API and must still be reported (the removal-side path defers to this
-        # detector for it, so suppressing here would drop the finding entirely).
+        # Suppress only a *genuinely internal* DWARF-deleted member: not
+        # exported now AND not exported before either. One that *was* an old
+        # export and is now ``= delete``'d + dropped from .dynsym is a real
+        # deletion and must still be reported (the removal-side path defers
+        # to this detector for it).
         if (
             f_new.deleted_from_dwarf
             and has_elf_symbol_table
@@ -895,6 +896,7 @@ def _detect_newly_deleted_functions(
                 if f_new.deleted_from_dwarf
                 else ChangeKind.FUNC_DELETED
             )
+            deleted_entity_id = f_old_any.entity_id or f_new.entity_id
             changes.append(
                 make_change(
                     kind,
@@ -902,6 +904,7 @@ def _detect_newly_deleted_functions(
                     name=f_new.name,
                     old_value="callable",
                     new_value="deleted",
+                    entity_id=deleted_entity_id,
                 )
             )
     return changes
@@ -982,6 +985,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     ChangeKind.FUNC_ADDED,
                     symbol=mangled,
                     new=f_new.name,
+                    entity_id=f_new.entity_id,
                 )
             )
 
@@ -1115,6 +1119,7 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     symbol=f.mangled,
                     name=cls,
                     new=f"{cls}({', '.join(sig)})",
+                    entity_id=f.entity_id,
                 )
             )
     return changes
@@ -1169,6 +1174,7 @@ def _check_variable(
                     name=v_old.name,
                     old=v_old.type,
                     new=v_new.type,
+                    entity_id=v_old.entity_id or v_new.entity_id,
                 )
             ]
     # const-qualification transitions only matter when the type is unchanged.
@@ -1186,6 +1192,7 @@ def _check_variable(
             f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
         ),
         removed_values=("const", "non-const"),
+        entity_id=v_old.entity_id or v_new.entity_id,
     )
 
 
@@ -1197,6 +1204,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             name=v_old.name,
             # See Change.symbol_binding's docstring — None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
+            entity_id=v_old.entity_id,
         )
     ]
 
@@ -1207,6 +1215,7 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
             ChangeKind.VAR_ADDED,
             symbol=mangled,
             name=v_new.name,
+            entity_id=v_new.entity_id,
         )
     ]
 
@@ -1274,20 +1283,16 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     the two backends' default VALUE representations are not cross-comparable
     (castxml keeps the real source expression; clang's is a placeholder/
     fingerprint for anything non-trivial), even between two pure
-    single-backend snapshots (a pure ``--ast-frontend clang`` run vs. a pure
-    ``--ast-frontend castxml`` run — ``fact_producer`` returns the producer
-    for those too). Requiring the SAME producer on both sides (not "castxml
-    on both sides", which would wrongly suppress a same-producer
+    single-backend snapshots. Requiring the SAME producer on both sides (not
+    "castxml on both sides", which would wrongly suppress a same-producer
     clang-vs-clang pair) avoids a false CHANGED/REMOVED from a
     representation mismatch while still catching a real change.
 
     The per-pair skip only fires when BOTH producers are POSITIVELY known
-    and DIFFER — never merely because one side's producer is unknown. An
+    and DIFFER, never merely because one side's producer is unknown: an
     unset ``ast_producer`` (a hand-built test snapshot, or a legacy
-    pre-provenance baseline) makes ``fact_producer(...) is None``, so
-    comparing it against a genuinely castxml-backed function is a legitimate
-    same-producer comparison that must not be silently dropped just because
-    one side lacks metadata it never had a chance to record.
+    pre-provenance baseline) must not be silently dropped as a mismatch
+    just because it lacks metadata it never had a chance to record.
 
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
     (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
@@ -1321,6 +1326,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(p_old.name or i),
                         old_value=p_old.default,
                         new_value=None,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
             elif (
@@ -1340,6 +1346,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(p_old.name or i),
                         old_value=p_old.default,
                         new_value=p_new.default,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
 
@@ -1350,10 +1357,9 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter renames (same type+position, different name)."""
     changes: list[Change] = []
-    # Require *explicit* header provenance on both sides. A legacy snapshot
-    # predating the from_headers key has it inferred from a populated surface,
-    # which a DWARF-only dump also satisfies — trusting that inference here
-    # reintroduces PARAM_RENAMED/API_BREAK false positives on DWARF baselines.
+    # Require *explicit* header provenance on both sides -- a legacy snapshot's
+    # inferred-from-populated-surface fallback also matches a DWARF-only dump,
+    # which would reintroduce PARAM_RENAMED/API_BREAK false positives.
     if not (old.from_headers and new.from_headers):
         return changes
     if old.from_headers_inferred or new.from_headers_inferred:
@@ -1377,6 +1383,7 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(i),
                         old=p_old.name,
                         new=p_new.name,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
 
@@ -1413,6 +1420,7 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old=str(f_old.return_pointer_depth),
                     new=str(f_new.return_pointer_depth),
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1436,6 +1444,7 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(p_old.name or i),
                         old=str(p_old.pointer_depth),
                         new=str(p_new.pointer_depth),
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
 
@@ -1446,9 +1455,7 @@ def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
 ) -> list[Change]:
-    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions,
-    including a ctor/dtor pair only visible via synthetic-key format-drift
-    reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
+    """Emit METHOD_ACCESS_CHANGED for narrowing access transitions, including a ctor/dtor pair only visible via synthetic-key format-drift reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if f_old.access != f_new.access and _is_access_narrowing(
@@ -1461,6 +1468,7 @@ def _check_method_access_changes(
                     name=f_old.name,
                     old=f_old.access.value,
                     new=f_new.access.value,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -1496,6 +1504,7 @@ def _check_field_access_changes(
                         detail=fname,
                         old=f_old_f.access.value,
                         new=f_new_f.access.value,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
     return changes
@@ -1527,62 +1536,6 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-def _is_anon_field(f: Any) -> bool:
-    """Return True for compiler-generated anonymous/unnamed fields."""
-    return not f.name or f.name.startswith("__anon")
-
-
-def _check_anon_field_at_offset(
-    name: str,
-    offset: int,
-    f_old: Any,
-    new_by_offset: dict[int, Any],
-) -> Change | None:
-    """Compare a single anonymous field (by offset) to what the new type has."""
-    f_new = new_by_offset.get(offset)
-    if f_new is None:
-        return make_change(
-            ChangeKind.ANON_FIELD_CHANGED,
-            symbol=name,
-            description=f"Anonymous field removed at offset {offset} in {name}",
-            old_value=f_old.type,
-        )
-    if f_old.type != f_new.type:
-        return make_change(
-            ChangeKind.ANON_FIELD_CHANGED,
-            symbol=name,
-            description=f"Anonymous field type changed at offset {offset} in {name}",
-            old_value=f_old.type,
-            new_value=f_new.type,
-        )
-    return None
-
-
-def _anon_fields_by_offset(fields: list[Any]) -> dict[int, Any]:
-    """Index anonymous fields (no name or __anon prefix) by their bit offset."""
-    return {
-        f.offset_bits: f
-        for f in fields
-        if _is_anon_field(f) and f.offset_bits is not None
-    }
-
-
-def _check_anon_fields_for_type(name: str, t_old: Any, t_new: Any) -> list[Change]:
-    """Compare anonymous fields by offset for a single matched type pair."""
-    old_by_offset = _anon_fields_by_offset(t_old.fields)
-    new_by_offset = _anon_fields_by_offset(t_new.fields)
-
-    if not old_by_offset and not new_by_offset:
-        return []
-
-    changes: list[Change] = []
-    for offset, f_old in old_by_offset.items():
-        ch = _check_anon_field_at_offset(name, offset, f_old, new_by_offset)
-        if ch is not None:
-            changes.append(ch)
-    return changes
-
-
 @registry.detector("anon_fields")
 def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect changes in anonymous struct/union members."""
@@ -1601,82 +1554,31 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Bare, not the qualified matching key.
         name = t_old.name
-        changes.extend(_check_anon_fields_for_type(name, t_old, t_new))
+        changes.extend(check_anon_fields_for_type(name, t_old, t_new))
 
     return changes
-
-
-def _find_rename_pairs(
-    removed: set[str],
-    added: set[str],
-    old_map: dict[str, Function],
-    new_map: dict[str, Function],
-) -> list[tuple[str, str]]:
-    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name.
-
-    The match condition is ``a_name.endswith(r_name)`` with ``a_name`` strictly
-    longer (a prefix was prepended). The old ``endswith("_" + r_name)`` branch
-    was redundant — any name ending with ``"_" + r_name`` already ends with
-    ``r_name``. To avoid the O(removed × added) cross-product, index the added
-    names *reversed* so the suffix test becomes a prefix lookup: a binary search
-    locates the contiguous block of reversed added names that start with the
-    reversed removed name. Both ``removed`` and the reversed index are iterated
-    in sorted order, so the result is deterministic.
-    """
-    rev_index = sorted(
-        (new_map[a_sym].name[::-1], new_map[a_sym].name) for a_sym in added
-    )
-    rev_keys = [k for k, _ in rev_index]
-    pairs: list[tuple[str, str]] = []
-    for r_sym in sorted(removed):
-        r_name = old_map[r_sym].name
-        rk = r_name[::-1]
-        i = bisect.bisect_left(rev_keys, rk)
-        while i < len(rev_keys) and rev_keys[i].startswith(rk):
-            a_name = rev_index[i][1]
-            if len(a_name) > len(r_name):
-                pairs.append((r_name, a_name))
-                break
-            i += 1
-    return pairs
-
-
-def _emit_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
-    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix."""
-    if len(rename_pairs) < 2:
-        return []
-    prefixes = {
-        new_name[: new_name.rfind(old_name)] for old_name, new_name in rename_pairs
-    }
-    if len(prefixes) != 1:
-        return []
-    prefix = prefixes.pop()
-    pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
-    if len(rename_pairs) > 5:
-        pair_desc += f", ... ({len(rename_pairs)} total)"
-    return [
-        make_change(
-            ChangeKind.SYMBOL_RENAMED_BATCH,
-            symbol=f"batch_rename:{prefix}*",
-            name=prefix,
-            detail=f"{len(rename_pairs)} symbols ({pair_desc})",
-            old_value=", ".join(o for o, _ in rename_pairs),
-            new_value=", ".join(n for _, n in rename_pairs),
-        )
-    ]
 
 
 @registry.detector("symbol_renames")
 def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect batch symbol renames (namespace refactoring).
 
-    When multiple symbols are removed and corresponding prefixed versions are
-    added (e.g. ``init`` → ``mylib_init``), this indicates a namespace
-    refactoring that breaks all existing consumers.
+    Two independent shapes, both rolled up into ``SYMBOL_RENAMED_BATCH`` and
+    both implemented in the leaf ``diff_symbols_renames`` module:
 
-    Heuristic: if 2+ removed symbols each have a matching added symbol where
-    the added name ends with the removed name (common prefix pattern), emit
-    a SYMBOL_RENAMED_BATCH change.
+    * a common *prefix* prepended to many leaf names (``init`` ->
+      ``mylib_init``) — :func:`find_prefix_rename_pairs`;
+    * a namespace *segment substitution* shared by many symbols
+      (``tbb::detail::d1::X`` -> ``tbb::detail::d2::X`` for every ``X``) —
+      :func:`find_namespace_move_groups`. A namespace move is neither a
+      prefix nor a suffix of the old name, so the prefix shape above cannot
+      see it and every moved symbol was reported as an unpaired
+      ``func_removed``/``func_added`` with nothing tying the two halves
+      together.
+
+    The roll-up is additive: the per-symbol removals stay, because a moved
+    symbol really is gone from the old name and a consumer linked against it
+    really does fail to resolve.
     """
     old_map = _public_functions(old)
     new_map = _public_functions(new)
@@ -1687,8 +1589,13 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if len(removed) < 2 or not added:
         return []
 
-    rename_pairs = _find_rename_pairs(removed, added, old_map, new_map)
-    return _emit_batch_rename(rename_pairs)
+    changes = emit_prefix_batch_rename(
+        find_prefix_rename_pairs(removed, added, old_map, new_map)
+    )
+    changes.extend(
+        emit_namespace_move_batches(find_namespace_move_groups(removed, added))
+    )
+    return changes
 
 
 @registry.detector("param_restrict")
@@ -1744,14 +1651,13 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     :func:`fact_provenance.both_known_backed_fact` (not the narrower
     ``both_castxml_backed_fact``): both castxml and the direct-clang backend
     populate ``Function.deprecated`` today (G31 Phase C — see
-    ``dumper_clang._clang_deprecated_message``; the clang backend didn't
-    when this detector was first written for PR #582), and the two
-    backends' values are directly cross-comparable (a plain message string,
-    not a backend-specific encoding), so a clang-vs-clang or
-    clang-vs-castxml pair is just as comparable as a castxml-vs-castxml one.
-    A per-pair check (rather than a whole-snapshot gate) also correctly
-    handles a ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this
-    fact's producer is recorded per *declaration*, not uniformly across the
+    ``dumper_clang._clang_deprecated_message``), and the two backends'
+    values are directly cross-comparable (a plain message string, not a
+    backend-specific encoding), so a clang-vs-clang or clang-vs-castxml
+    pair is just as comparable as a castxml-vs-castxml one. A per-pair
+    check (rather than a whole-snapshot gate) also correctly handles a
+    ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this fact's
+    producer is recorded per *declaration*, not uniformly across the
     whole snapshot. Looks each side up under ITS OWN ``mangled`` (PR #761
     finding 3): a reconciled ctor/dtor pair's provenance lives under two
     different keys.
@@ -1773,6 +1679,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     detail=f_new.deprecated,
                     new_value=f_new.deprecated,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         elif f_old.deprecated is not None and f_new.deprecated is None:
@@ -1782,6 +1689,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=mangled,
                     name=f_old.name,
                     old_value=f_old.deprecated,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -1798,11 +1706,10 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     override". Gated per-pair on :func:`fact_provenance.both_known_backed_fact`
     (not the narrower ``both_castxml_backed_fact``): G31 Phase C wired real
     ``is_override`` extraction into the direct-clang backend too
-    (``dumper_clang._clang_method_is_override``, matching castxml's own "was
-    `override` written" semantics via clang's ``OverrideAttr`` child node),
-    so this is now a cross-producer, directly-comparable bool, the same
-    shape ``deprecated`` already has. A per-declaration check (not a
-    whole-snapshot gate) is what correctly supports ``--ast-frontend hybrid``.
+    (``dumper_clang._clang_method_is_override``), so this is now a
+    cross-producer, directly-comparable bool, the same shape ``deprecated``
+    already has. A per-declaration check (not a whole-snapshot gate) is
+    what correctly supports ``--ast-frontend hybrid``.
     """
     changes: list[Change] = []
     old_map = _public_functions(old)
@@ -1826,6 +1733,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     name=f_old.name,
                     old_value="no override",
                     new_value="override",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         else:
@@ -1836,6 +1744,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     name=f_old.name,
                     old_value="override",
                     new_value="no override",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -1869,6 +1778,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=v_old.name,
                     detail=v_new.deprecated,
                     new_value=v_new.deprecated,
+                    entity_id=v_old.entity_id or v_new.entity_id,
                 )
             )
         elif v_old.deprecated is not None and v_new.deprecated is None:
@@ -1878,6 +1788,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=mangled,
                     name=v_old.name,
                     old_value=v_old.deprecated,
+                    entity_id=v_old.entity_id or v_new.entity_id,
                 )
             )
     return changes
@@ -1948,6 +1859,7 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     old_value=old_val,
+                    entity_id=old.constant_entity_ids.get(name),
                 )
             )
         elif new_val != old_val:
@@ -1964,6 +1876,8 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new=repr(new_val),
                     old_value=old_val,
                     new_value=new_val,
+                    entity_id=old.constant_entity_ids.get(name)
+                    or new.constant_entity_ids.get(name),
                 )
             )
 
@@ -1975,6 +1889,7 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     new_value=new_val,
+                    entity_id=new.constant_entity_ids.get(name),
                 )
             )
     return changes

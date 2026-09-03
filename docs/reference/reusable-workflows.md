@@ -181,6 +181,12 @@ for the full requirement. A `build-output.json` with no `profile.id` set
 fails the `plan` job outright, even though that field is optional in the
 schema generally.
 
+For a target carrying `targets[].evidence`, the check cell resolves both the
+pack path and its `evidence_producer.kind` from this same downloaded manifest.
+It never substitutes the workflow-global pack path for a target with no
+declared evidence; the global producer input remains only for replay and
+legacy callers without a target evidence entry.
+
 ```yaml
 jobs:
   build-linux:
@@ -263,9 +269,22 @@ could not be applied and silently dropping it would parse headers under the
 wrong one. A bundle cell therefore keeps resolving the workflow-global
 `ast-frontend` input exactly as it did before this override existed.
 
-The sibling `consumer_compile.frontend` is *not* forwarded at all: it
-describes the consumer half of a two-pass extraction that does not exist yet,
-so there is only one dump invocation per cell for it to steer.
+The sibling `consumer_compile.frontend`, compiler binding, and options are
+forwarded to a separate candidate dump. That invocation reads the same
+producer binary under the client header context, and the comparison consumes
+the materialized snapshot without reparsing candidate headers. An omitted
+field falls back to this same workflow's global input (`ast-frontend`/
+`gcc-path`/`gcc-options`), never to the empty string — an overlay that sets
+only `standard:`, say, still uses the caller's selected frontend for the
+consumer dump rather than silently reverting to the CLI default.
+
+**Known gap: only this candidate-side dump exists.** The baseline (old)
+side of a real `baseline-channel` comparison is produced by
+`publish-baseline.yml`/`update-main-baseline.yml` long before this job
+runs, and neither reads a profile's `consumer_compile:` overlay — see
+`project-targets-schema.md`'s own "Known gap" note above for what this
+means for a `consumer_compile:` check compared against a real baseline
+(it currently resolves `NOT_COMPARABLE` rather than a wrong verdict).
 
 Every *other* analysis option above stays global-only, unaffected by these
 three exceptions.
@@ -278,6 +297,26 @@ only, so a GCC-profile cell and a Clang-profile cell in one run can each
 provision a matching conda environment instead of sharing whatever the
 workflow-level value said. With both unset the legacy `install-deps` boolean
 still decides, exactly as before.
+
+**Exception: `header` also gets a per-cell override**, on the same
+precedence rule. A `kind: library` target's own `public_headers:`
+([`project-targets-schema.md`](project-targets-schema.md#targets)) —
+newline-joined into `run_plan.RunPlanCheck.header` — wins over this workflow's
+`header` input for that target's cells only, so a project whose libraries
+each have their own header tree gets that scoping automatically once
+declared, instead of every cell sharing one workflow-global `header` value.
+An `app-consumer`/`plugin-contract` target has no `public_headers:` of its
+own and redirects through its `library:` target's, the same way its
+`binary_pattern` already does. A target that declares none falls back to
+the workflow-global `header` input unchanged, so a project that only ever
+set the global value sees no behavior change. **`kind: bundle` cells are
+excluded from this override**, for the same reason `ast-frontend` is: a
+bundle cell's candidate is the staged directory of every member's own
+binary, and there is no per-bundle-member header staging mechanism to give
+each member's binary its own header tree in that one directory comparison
+— see `BUNDLE_CHECK_DEPTHS`'s own docstring in `project_targets.py`. A
+bundle cell keeps resolving the workflow-global `header` input exactly as
+it did before this override existed.
 
 **Each cell is scheduled on its profile's own runner** (G34 Phase C), rather
 than the `ubuntu-latest` every cell used to hardcode: the `plan` job derives

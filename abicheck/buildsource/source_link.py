@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import ctor_export_match
 from .fact_set import fact_set_rollup_is_inconsistent, rollup_coverage, rollup_fact_set
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 
@@ -1251,9 +1252,7 @@ def link_source_abi(
     surface.roots["exported_symbols"] = sorted(exported)
     surface.roots["forced_public"] = sorted(forced)
 
-    state = _LinkState()
-    state.export_index = _build_export_index(exported)
-    state.exact_index = _build_exact_index(exported)
+    state = _LinkState(export_index=_build_export_index(exported), exact_index=_build_exact_index(exported), ctor_dtor_owner_index=ctor_export_match.build_ctor_dtor_owner_index(exported))
     source_edges = _fold_tu_source_edges(tus)
     for tu in tus:
         for header in tu.public_header_roots:
@@ -1269,13 +1268,18 @@ def link_source_abi(
             _route_entity(entity, surface, state, exported)
     surface.source_edges = source_edges
     surface.roots["public_header_declarations"] = sorted(set(state.public_decl_ids))
-    # Second-tier: rescue decls whose mangled name differs textually from the
-    # export (ABI-tag / substitution drift) via demangled identity.
+    # Second tier: rescue decls whose mangled name differs textually from the export
+    # (ABI-tag / substitution drift) via demangled identity; third: drop a still-
+    # unmatched compiler_generated candidate only now that it has had that same
+    # chance an ordinary declaration gets (Codex review, PR #930).
     _demangled_rematch(
         surface.reachable_declarations,
         state.decl_to_symbol,
         state.matched_symbols,
         exported,
+    )
+    surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
+        surface.reachable_declarations, state.decl_to_symbol, exported, state.ctor_dtor_owner_index
     )
     surface.mappings["source_decl_to_binary_symbol"] = dict(
         sorted(state.decl_to_symbol.items())
@@ -1394,33 +1398,27 @@ def relink_surface_exports(
     as :func:`link_source_abi` (``mangled_name or qualified_name`` matched against
     the export set), so the result is identical to what ``dump <binary> --sources``
     would have produced and introduces no new behaviour. Mutates and returns
-    *surface*.
-    """
+    *surface*. At most once per surface (Codex review, PR #930): the drop below
+    is permanent, so a second call vs. a different export set can't recover a
+    dropped candidate -- the one caller only ever relinks an empty-exports one."""
     exported = set(exported_symbols)
     surface.roots["exported_symbols"] = sorted(exported)
-    export_index = _build_export_index(exported)
-    exact_index = _build_exact_index(exported)
-    mapping: dict[str, str] = {}
-    matched: set[str] = set()
-    # identity -> display name, so the recomputed decls_without_symbol carries the
-    # same qualified-name labels the original link produced rather than raw keys.
-    identity_to_qname: dict[str, str] = {}
-    for entity in surface.reachable_declarations:
-        key = entity.identity()
-        if not key:
-            continue
-        identity_to_qname[key] = entity.qualified_name or key
-        export_sym = entity.mangled_name or entity.qualified_name
-        primary, variants = _match_export(
-            export_sym, exported, export_index, exact_index
-        )
-        if primary:
-            mapping[key] = primary
-            matched.update(variants)
-        else:
-            mapping.setdefault(key, "")
-    # Second-tier demangled-identity rematch (ABI-tag / substitution drift).
+    export_index, exact_index = _build_export_index(exported), _build_exact_index(exported)
+    ctor_dtor_owner_index = ctor_export_match.build_ctor_dtor_owner_index(exported)
+    # A source-only relink (the parallel-baseline `merge` flow) links against an empty export set first, so
+    # `_route_declaration`'s own compiler_generated miss-drop never fires there. Recompute the mapping for
+    # every declaration (kept unconditionally here -- see rematch_declarations' own docstring for why).
+    kept, mapping, matched, identity_to_qname = ctor_export_match.rematch_declarations(
+        surface.reachable_declarations, exported, export_index, exact_index, ctor_dtor_owner_index, _match_export
+    )
+    surface.reachable_declarations = kept
+    # Second-tier demangled-identity rematch (ABI-tag / substitution drift), then a
+    # third: drop a still-unmatched compiler_generated candidate now that it has had
+    # its chance at both prior tiers (Codex review, PR #930).
     _demangled_rematch(surface.reachable_declarations, mapping, matched, exported)
+    surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
+        surface.reachable_declarations, mapping, exported, ctor_dtor_owner_index
+    )
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
 
     # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their
@@ -1483,6 +1481,8 @@ def relink_surface_exports(
         identity_to_qname.get(key, key) for key, sym in mapping.items() if not sym
     )
     if isinstance(surface.coverage, dict):
+        # Refresh from the empty-export first link's unfiltered count, or crosscheck's counters keep the removed phantoms (Codex review, PR #930).
+        surface.coverage["reachable_declarations"] = len(surface.reachable_declarations)
         surface.coverage["exported_symbols"] = len(exported)
         surface.coverage["matched_symbols"] = len(matched)
         surface.coverage["synthesized_symbols_matched"] = len(synthesized)
@@ -1538,6 +1538,7 @@ class _LinkState:
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)
     exact_index: dict[str, str] = field(default_factory=dict)
+    ctor_dtor_owner_index: dict[str, str] = field(default_factory=dict)  # ctor_export_match
 
 
 def _route_entity(
@@ -1599,9 +1600,7 @@ def _route_type(
         )
     else:
         state.type_by_name[key] = entity.type_hash
-    surface.mappings["source_type_to_debug_type"][entity.qualified_name] = (
-        entity.type_hash
-    )
+    surface.mappings["source_type_to_debug_type"][entity.qualified_name] = entity.type_hash
 
 
 def _route_declaration(
@@ -1617,7 +1616,12 @@ def _route_declaration(
     keep independent mappings. The exported symbol is the mangled name for C++ or
     the plain qualified name for C / extern "C" decls whose extractor leaves
     mangled_name empty — matching on either avoids false "unmatched" evidence.
-    """
+    A ``compiler_generated`` entity that never exact/ctor-fold-matches is
+    dropped later, in ``link_source_abi`` after ``_demangled_rematch``'s
+    second-tier pass has had its own chance to rescue it -- not here (PR
+    #930, Codex review) -- so it is always appended below, matched or not."""
+    export_sym = entity.mangled_name or entity.qualified_name
+    primary, variants = _match_export(export_sym, exported, state.export_index, state.exact_index)
     surface.reachable_declarations.append(entity)
     key = entity.identity()
     if not key:
@@ -1641,10 +1645,6 @@ def _route_declaration(
     if usr:
         state.identity_to_usr[key] = usr
     state.identity_to_qname[key] = entity.qualified_name or key
-    export_sym = entity.mangled_name or entity.qualified_name
-    primary, variants = _match_export(
-        export_sym, exported, state.export_index, state.exact_index
-    )
     if primary:
         state.decl_to_symbol[key] = primary
         state.matched_symbols.update(variants)

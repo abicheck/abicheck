@@ -150,7 +150,7 @@ class DeduplicateAstDwarf:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _deduplicate_ast_dwarf
 
-        return _deduplicate_ast_dwarf(changes)
+        return _deduplicate_ast_dwarf(changes, ctx.old, ctx.new)
 
 
 class DeduplicateCrossDetector:
@@ -161,7 +161,10 @@ class DeduplicateCrossDetector:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _deduplicate_cross_detector
 
-        return _deduplicate_cross_detector(changes)
+        # Pass the snapshots so the enum bare/qualified-name bridge can run
+        # here (before EnrichSourceLocations, which runs later in this
+        # pipeline) — see _deduplicate_cross_detector's own docstring.
+        return _deduplicate_cross_detector(changes, ctx.old, ctx.new)
 
 
 class DowngradeOpaqueTypeChanges:
@@ -181,7 +184,7 @@ class AnnotateLayoutUnverifiableCoveredByVtableChanged:
     identical asymmetric-evidence gap — never removing either finding from
     ``changes``.
 
-    ``diff_types._vtable_transition_is_evidenced`` and
+    ``diff_types_vtable._vtable_transition_is_evidenced`` and
     ``diff_layout._check_layout_unverifiable`` both key off the same "one
     side has real layout evidence, the other has none" condition. The
     vtable detector correctly stays BREAKING for it (an unknown size

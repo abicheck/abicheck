@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
-    from .buildsource.source_graph import SourceGraphSummary
+    from .model.source_graph import SourceGraphSummary
 
 
 def _load_source_graph(path: Path) -> SourceGraphSummary:
@@ -44,16 +44,15 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
     directory (the graph is read from its manifest layout). Raises a Click error
     when neither yields a graph so the failure is actionable.
     """
-    from .buildsource.pack import BuildSourcePack
-    from .buildsource.source_graph import SourceGraphSummary
+    from .errors import SnapshotError
+    from .model.source_graph import SourceGraphSummary
+    from .workflows.extraction import load_pack_or_raise
 
     if path.is_dir():
         try:
-            pack = BuildSourcePack.load(path)
-        except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(
-                f"Invalid evidence pack at {path}: {exc}"
-            ) from exc
+            pack = load_pack_or_raise(path)
+        except SnapshotError as exc:
+            raise click.ClickException(str(exc)) from exc
         if pack.source_graph is None:
             raise click.ClickException(
                 f"Evidence pack at {path} has no L5 source graph."

@@ -50,11 +50,10 @@ from abicheck.model import Visibility
 # different mangling schemes and never match. The pure-parser unit suite
 # (``test_dumper_clang.py``) covers the backend logic on every platform.
 #
-# NB: deliberately *not* marked ``integration`` — that marker's Linux gate
-# requires castxml (tests/conftest.py ``_integration_skip_reason``), but the
-# whole point here is the **castxml-absent** host. Each test instead self-skips
-# on its own real tool requirement (clang + g++; the parity test additionally
-# needs castxml).
+# NB: the module isn't marked ``integration`` (that gate requires castxml
+# per tests/conftest.py) since most tests self-skip on clang+g++ alone. The
+# one test below that also needs castxml carries a per-test
+# ``@pytest.mark.integration`` so a castxml-having host's fast lane skips it.
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="clang L2 backend integration test is ELF/Linux-scoped (see module docstring)",
@@ -239,6 +238,7 @@ def test_clang_backend_recovers_c_anonymous_typedef_enum(tmp_path: Path) -> None
     ] == "log_level_t"
 
 
+@pytest.mark.integration
 def test_clang_and_castxml_snapshots_agree_on_public_surface(
     built_lib: tuple[Path, Path],
 ) -> None:
@@ -1304,9 +1304,9 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
             ],
         )
         assert result.exit_code == 0, result.output
-        import json
+        from abicheck.serialization import load_snapshot_document
 
-        return json.loads(out.read_text())
+        return load_snapshot_document(out)
 
     default_snap = _dump()
     explicit_snap = _dump("--lang", "c++")

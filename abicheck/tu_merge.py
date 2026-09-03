@@ -67,16 +67,36 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from functools import partial
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from .diff_symbols import _is_cc_attribute as _is_cc_attribute
 from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
+    entity_is_record_member as entity_is_record_member,
 )
 from .errors import TuMergeError
-from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
-from .provenance import build_public_set, classify_origin, header_from_location
+from .model import (
+    EnumType,
+    Fact,
+    Function,
+    Param,
+    RecordType,
+    ScopeOrigin,
+    Variable,
+    replace_with_fact_sync,
+)
+from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
+from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
+from .tu_merge_provenance import (
+    _blank_provenance,
+    _more_public_of,
+    _other_is_strictly_less_public,
+    _pick_deprecated,
+    _with_more_public_provenance,
+)
+
+if TYPE_CHECKING:
+    from .model.identity import EntityId
 
 #: TuMergeError.code values (ADR-050 D4). Kept as plain module constants
 #: (not an enum) since TuMergeError.code is a bare string field, matching
@@ -217,22 +237,33 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     sharing a bare name in different TUs therefore reach this branch and
     fall to ``fn.is_static`` -- ordinarily ``False`` for a non-static
     method, so ``is_local`` is wrongly ``False`` and the two land in the
-    same ``entity_key`` bucket. If their signatures happen to differ (the
-    common case) :func:`_merge_functions` raises a spurious
-    ``INCONSISTENT_DECLARATION``; if their signatures happen to coincide,
-    they silently merge into one function despite being unrelated. Fixing
-    this precisely needs a way to tell "genuinely unmangled, e.g. plain
-    C/`extern "C"`" apart from "C++ but clang produced no mangled name" at
-    this call site -- :class:`Function` carries no such signal today
-    (unlike :class:`RecordType`'s ``is_template_pattern``, there is no
-    per-function equivalent, and nothing here links a ``Function`` back to
-    its enclosing template even if there were) -- so, like the MSVC gap
-    above, this needs a producer-side model/schema addition rather than a
-    guess at this call site, and is documented rather than fixed this
-    round.
+    same ``entity_key`` bucket regardless of the fix below (``False and
+    anything`` is still ``False``); this NON-static-method collision
+    remains open, for the identical reason originally stated: a
+    return-type-independent (here, bare-name) collision between two
+    UNRELATED templates needs entity identity sharper than a mangled
+    string, which is a producer-side/model addition, not a fix at this
+    call site.
+
+    **What PR #1024's fresh evidence (Codex/CodeRabbit review) DID close**
+    is the sibling STATIC-member sub-case of this same "mangled == name is
+    not proof of plain-C" gap: a **static** member function of an
+    uninstantiated template (or, more commonly, :func:`_variable_key`'s
+    own static DATA member case below) has ``is_static=True``, so it used
+    to satisfy ``fn.is_static`` and get wrongly TU-qualified as internal
+    linkage, even though a static member is an ordinarily externally-
+    linked declaration, not TU-local at all. Unlike the non-static case
+    above, this ATTRIBUTE-based fallback is closeable at this call site:
+    ``fn.entity_id.scope`` -- populated from the real AST scope walk
+    regardless of whether mangling succeeded -- carries a trailing
+    :class:`~abicheck.model.identity.Record` segment for a record member,
+    a signal independent of mangled-name availability the way
+    ``is_static`` is not.
+    :func:`~abicheck.extract.headers.scope_segments.entity_is_record_member`
+    withholds trust in the ``is_static`` fallback for exactly this case.
     """
     if fn.mangled == fn.name:
-        is_local = fn.is_static
+        is_local = fn.is_static and not entity_is_record_member(fn.entity_id)
     else:
         is_local = _has_local_linkage_mangling(fn.mangled)
     name = f"{tu_name}::{fn.mangled}" if is_local else fn.mangled
@@ -249,25 +280,47 @@ def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
     to an ordinary marker-free symbol, e.g. ``_ZN6Widget7counterE`` --
     Codex review, PR #635 round 6).
 
-    **Known, accepted limitation**: unlike :class:`Function`,
-    :class:`Variable` carries no ``is_static`` field at all, so a plain-C
-    (or `extern "C"`) file-scope ``static`` variable -- whose mangled name
-    equals its bare name, carrying no Itanium marker to detect -- has no
-    signal this function can read to distinguish it from an ordinary
-    external variable. Closing that gap needs a new ``Variable.is_static``
-    model field (a schema change, `dumper_clang.py`/`dumper_castxml.py`
-    updates to populate it) -- out of proportionate scope for this fix,
-    matching this PR's typedef-qualification precedent (see G32 Phase C
-    PR discussion) of documenting a producer-side gap rather than papering
-    over it. The C++ case (the more common source of same-named
-    file-scope/anonymous-namespace variable collisions in practice) is
-    fully handled.
+    **Previously a known, accepted limitation, now closed (Codex/
+    CodeRabbit review, PR #1024, fresh evidence).** Unlike :class:`Function`,
+    :class:`Variable` used to carry no ``is_static`` field at all, so a
+    plain-C (or `extern "C"`) file-scope ``static`` variable -- whose
+    mangled name equals its bare name, carrying no Itanium marker to
+    detect -- had no signal this function could read to distinguish it
+    from an ordinary external variable of the same name. Confirmed
+    empirically to be a real, currently-reachable collision (a real clang
+    C-mode compile of two TUs, one declaring `static int counter;` and an
+    unrelated one declaring `extern int counter;`, both folded into ONE
+    ``Variable`` by this function's own merge, silently discarding one
+    declaration outright). ``Variable.is_static`` (mirroring
+    ``Function.is_static`` exactly -- same castxml ``static="1"`` XML
+    attribute / clang ``storageClass == "static"`` AST field) closes the
+    same way :func:`_function_key` already handles its own plain-C
+    fallback branch: when ``var.mangled == var.name`` (no C++ mangling was
+    applied at all), ``var.is_static`` is now an unambiguous, purely-C
+    linkage signal, mirroring :func:`_function_key`'s identical branch for
+    the identical reason.
+
+    **Second known, accepted limitation, closed on arrival** (Codex/
+    CodeRabbit review, fresh evidence, same round as the fix above): the
+    ``is_static`` fallback just described is not itself proof of file-scope
+    C linkage -- a ``static`` DATA MEMBER of an *uninstantiated* class
+    template (``template<class T> struct A { static int x; };``) also gets
+    no ``mangledName`` from clang (mangling a member needs a concrete
+    instantiation, exactly the shape :func:`_function_key`'s own
+    template-method gap already documents), so it satisfies
+    ``var.mangled == var.name`` too, with ``is_static=True`` -- but is an
+    ordinarily externally-linked member, not TU-local. Gated the identical
+    way :func:`_function_key` now is:
+    :func:`~abicheck.extract.headers.scope_segments.entity_is_record_member`
+    checks whether ``var.entity_id.scope`` ends in a
+    :class:`~abicheck.model.identity.Record` segment, which is populated
+    from the real scope walk regardless of mangling success.
     """
-    name = (
-        f"{tu_name}::{var.mangled}"
-        if _has_local_linkage_mangling(var.mangled)
-        else var.mangled
-    )
+    if var.mangled == var.name:
+        is_local = var.is_static and not entity_is_record_member(var.entity_id)
+    else:
+        is_local = _has_local_linkage_mangling(var.mangled)
+    name = f"{tu_name}::{var.mangled}" if is_local else var.mangled
     return entity_key("variable", name)
 
 
@@ -303,6 +356,8 @@ def merge_fragments(
             typedefs={},
             typedefs_qualified={},
             constants={},
+            typedef_entity_ids={},
+            constant_entity_ids={},
             ast_producer="castxml",
             ast_toolchain={},
             ast_fallback_reason=None,
@@ -490,6 +545,34 @@ def merge_fragments(
         ),
         kind="constant",
     )
+    # `EntityId` sidecars (ADR-063 Phase 2): unioned by
+    # `_merge_entity_id_sidecar`, not `_merge_scalar_group` -- the latter
+    # compares wire *values* (a typedef's underlying-type string, a
+    # constant's value string), which two TUs already had to agree on above
+    # for `typedefs_qualified`/`constants` to merge at all. An `EntityId` is
+    # a *structural* fact instead (scope + kind + leaf name), and two TUs
+    # can agree on a qualified name's string spelling while disagreeing on
+    # its structure -- ADR-063's own motivating collision (`ns::Alias`
+    # nested in a namespace in one TU, nested in a same-named `struct ns`
+    # in another) is exactly this shape, so it needs its own conflict check
+    # rather than inheriting `_merge_scalar_group`'s value-only one (Codex
+    # review).
+    typedef_entity_ids = _merge_entity_id_sidecar(
+        (
+            (f.tu_name, name, eid)
+            for f in ordered
+            for name, eid in f.typedef_entity_ids.items()
+        ),
+        kind="typedef",
+    )
+    constant_entity_ids = _merge_entity_id_sidecar(
+        (
+            (f.tu_name, name, eid)
+            for f in ordered
+            for name, eid in f.constant_entity_ids.items()
+        ),
+        kind="constant",
+    )
 
     # Any contributing fragment's AST provenance is representative: ADR-050
     # D3 rejects a manifest declaring different compilers/target triples
@@ -543,6 +626,8 @@ def merge_fragments(
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
         constants=constants,
+        typedef_entity_ids=typedef_entity_ids,
+        constant_entity_ids=constant_entity_ids,
         ast_producer=representative.ast_producer,
         ast_toolchain=merged_ast_toolchain,
         ast_fallback_reason=representative.ast_fallback_reason,
@@ -710,46 +795,39 @@ def _merge_scalar_group(
     return merged
 
 
-def _pick_deprecated(
-    primary: _T, secondary: _T, *, secondary_is_private: bool = False
-) -> str | None:
-    """Pick which side's ``deprecated`` message survives a merge -- prefer
-    *primary* (whichever side the caller already selected as the merge's
-    representative, e.g. via :func:`_more_public_of`) when it carries one,
-    otherwise fall back to *secondary* -- **unless** *secondary_is_private*
-    is ``True``, in which case an unset *primary* stays unset rather than
-    picking up *secondary*'s message.
-
-    Two TUs' redeclarations carrying *different* non-``None`` messages --
-    e.g. ``[[deprecated("a")]] void f();`` in one TU, ``[[deprecated("b")]]
-    void f();`` in another -- is **not** a conflict (Codex review, PR #635
-    round 13, verified empirically against both GCC and Clang compiling
-    exactly that pair under ``-pedantic-errors``: both accept it cleanly).
-    A deprecation message is additive diagnostic metadata, not part of a
-    declaration's type or an ODR-significant fact, unlike
-    ``contract_attributes``/calling-convention tokens
-    (:func:`_merge_contract_attributes`), which really can describe
-    genuinely incompatible ABI-relevant claims. There is therefore nothing
-    to reject here -- this never fails, unlike every other optional-fact
-    merge in this module.
-
-    But when the caller can *prove* *secondary* is the strictly-less-public
-    side (:func:`_other_is_strictly_less_public`), an unset *primary* must
-    not pick up *secondary*'s message anyway: a private-only redeclaration
-    annotating an otherwise-undecorated public declaration as
-    ``[[deprecated]]`` does not make the library's actual public consumers
-    -- who only ever see the public header -- see that deprecation, and
-    later removing/changing that private-only annotation would surface as
-    a false ``FUNC_DEPRECATED_REMOVED``/``CHANGED`` (or the variable/type/
-    enum equivalent) against a public surface that never carried it (Codex
-    review, PR #635 round 18) -- the same leak :func:`_merge_functions`'s
-    default-argument union was fixed against in round 17.
+def _merge_entity_id_sidecar(
+    items: Iterable[tuple[str, str, EntityId]], *, kind: str
+) -> dict[str, EntityId]:
+    """The `EntityId`-sidecar analogue of :func:`_merge_scalar_group`: two
+    TUs contributing the same qualified key must resolve the identical
+    structural identity, or the merge cannot pick one over the other any
+    more safely than :func:`_merge_scalar_group` can pick one disagreeing
+    value over another. Compares by value (`EntityId` is a frozen,
+    structurally-equal dataclass), not by `.key` string, so this stays exact
+    even before `.key`'s own cross-release stability is established
+    elsewhere (`model/identity.py`).
     """
-    if primary.deprecated is not None:
-        return primary.deprecated
-    if secondary_is_private:
-        return None
-    return secondary.deprecated
+    by_name: dict[str, list[tuple[str, EntityId]]] = {}
+    for tu_name, name, eid in items:
+        by_name.setdefault(name, []).append((tu_name, eid))
+
+    merged: dict[str, EntityId] = {}
+    for name, candidates in by_name.items():
+        acc_tu, acc_eid = candidates[0]
+        for tu_name, eid in candidates[1:]:
+            if eid != acc_eid:
+                raise TuMergeError(
+                    f"translation units {acc_tu!r} and {tu_name!r} resolve "
+                    f"different entity identities for {kind} {name!r} "
+                    f"({acc_eid!r} vs {eid!r}) -- two TUs agreeing on this "
+                    "name's spelling while disagreeing on its structural "
+                    "scope cannot be reconciled.",
+                    code=INCONSISTENT_DECLARATION,
+                    entity_key=entity_key(kind, name),
+                    tu_names=(acc_tu, tu_name),
+                )
+        merged[name] = acc_eid
+    return merged
 
 
 #: Attribute families whose arguments are a *set* that legally accumulates
@@ -871,206 +949,6 @@ def _suppress_private_only_attributes(
     ]
 
 
-def _blank_provenance(entity: _T) -> _T:
-    """Blank *entity*'s ``source_location``/``source_header``/``origin``/
-    ``deprecated`` for an equality comparison.
-
-    Every one of the four model types this module compares
-    (:class:`Function`/:class:`Variable`/:class:`RecordType`/:class:`EnumType`)
-    carries these same provenance fields (ADR-015 schema v6). They
-    legitimately differ across TUs for what is otherwise the very same
-    declaration -- each TU force-includes its own header file, so a
-    genuinely identical redeclaration still has a different
-    ``source_location``/``source_header`` per side (e.g. ``"a.h:1"`` vs
-    ``"b.h:1"``) purely because of *which* TU parsed it, not because the
-    declarations disagree. Comparing them directly would make ADR-050 D4's
-    own "declaration + redeclaration" trivial-merge case -- the routine
-    shape of a real multi-TU manifest, not an edge case -- spuriously
-    conflict on every ordinary cross-TU redeclaration.
-
-    ``deprecated`` gets the same treatment for the same reason: one TU
-    seeing ``[[deprecated]]`` on an otherwise-identical redeclaration that
-    another TU sees without it -- or even a *different* message than
-    another TU sees (round 13) -- is exactly as routine as differing
-    provenance, never a structural disagreement -- every caller of this
-    function picks ``deprecated`` back explicitly via
-    :func:`_pick_deprecated` afterwards.
-    """
-    return replace(  # type: ignore[type-var]
-        entity,
-        source_location=None,
-        source_header=None,
-        origin=ScopeOrigin.UNKNOWN,
-        deprecated=None,
-    )
-
-
-def _more_public_of(
-    a: _T,
-    b: _T,
-    *,
-    header_segs: list[tuple[str, ...]],
-    dir_segs: list[tuple[str, ...]],
-    have_public_set: bool,
-) -> _T:
-    """Pick whichever of *a*/*b* -- two already-confirmed-compatible
-    declarations -- should lend its ``source_location``/``source_header``/
-    ``origin`` to the merged result.
-
-    A merged declaration carries exactly one ``source_location`` (the model
-    has no "seen from N headers" field), and
-    :func:`abicheck.provenance.apply_provenance` classifies a declaration's
-    public/private ``origin`` from that single field, *after* this merge
-    already ran. Defaulting to an arbitrary side (e.g. always the
-    tu_name-sorted-first one) is a real correctness gap, not a cosmetic
-    choice: if TU ``a`` reaches this declaration only through a private
-    header while TU ``b`` reaches the identical declaration through a
-    declared *public* one, keeping ``a``'s location would make a genuinely
-    public API read as private -- silently hiding a real ABI change from
-    public-surface scoping (Codex review, PR #635). When exactly one side
-    classifies as ``PUBLIC_HEADER``, that side wins; otherwise *a* (the
-    deterministic tu_name-ordered default) is kept, unchanged from before.
-    """
-    if not have_public_set:
-        return a
-    origin_a = classify_origin(
-        header_from_location(a.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    if origin_a == ScopeOrigin.PUBLIC_HEADER:
-        return a
-    origin_b = classify_origin(
-        header_from_location(b.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    return b if origin_b == ScopeOrigin.PUBLIC_HEADER else a
-
-
-def _other_is_strictly_less_public(
-    base: _T,
-    other: _T,
-    *,
-    header_segs: list[tuple[str, ...]],
-    dir_segs: list[tuple[str, ...]],
-    have_public_set: bool,
-) -> bool:
-    """Whether *other* is definitively *less* public than *base* -- i.e.
-    :func:`_more_public_of` picked *base* specifically because it classifies
-    as ``PUBLIC_HEADER`` and *other* does not (not merely an arbitrary
-    tu_name-ordered tie-break between two equally-classified, or
-    unclassifiable, sides).
-
-    A capability only *other*'s declaration grants -- most concretely, a
-    default argument (Codex review, PR #635 round 17) -- must not be
-    attributed to the merged, *base*-provenanced declaration when this is
-    ``True``: a private-only header redeclaring ``f(int)`` (the public
-    signature) as ``f(int = 42)`` does not give the library's actual public
-    consumers -- who only ever see the public header -- the ability to call
-    ``f()`` with no argument; unioning that default in anyway would make
-    the merged snapshot claim a capability the public API never granted,
-    and later removing/changing that private-only default would then
-    surface as a false ``PARAM_DEFAULT_VALUE_REMOVED``/``CHANGED`` finding
-    against the public surface. When public/private status can't be
-    determined at all (``have_public_set`` is ``False``) or both sides
-    classify the same way, this returns ``False`` and every other
-    optional-fact union in this module keeps its existing, symmetric
-    behavior -- this narrower check exists only for the one case where we
-    can concretely prove *other* is the less-visible side.
-    """
-    if not have_public_set:
-        return False
-    origin_base = classify_origin(
-        header_from_location(base.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    if origin_base != ScopeOrigin.PUBLIC_HEADER:
-        return False
-    origin_other = classify_origin(
-        header_from_location(other.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    return origin_other != ScopeOrigin.PUBLIC_HEADER
-
-
-def _with_more_public_provenance(
-    winner: _T,
-    other: _T,
-    *,
-    header_segs: list[tuple[str, ...]],
-    dir_segs: list[tuple[str, ...]],
-    have_public_set: bool,
-) -> _T:
-    """Return *winner* -- the structurally-complete side of a forward-
-    declaration/definition merge (:func:`_merge_types`/:func:`_merge_enums`)
-    -- with its provenance possibly overridden from *other* (the forward
-    declaration) when *other* classifies as more public, and its
-    ``deprecated`` picked via :func:`_pick_deprecated` (preferring whichever
-    side ends up as the provenance representative).
-
-    :func:`_more_public_of` alone isn't enough here: unlike the
-    already-identical-modulo-provenance case it's built for, *winner* and
-    *other* are structurally different (fields/members differ by
-    construction -- that's the whole point of a forward-decl/definition
-    pair), so simply calling it and returning whichever side "wins" would
-    silently drop the winner's richer structural facts whenever the forward
-    declaration happens to be the public one. A public header commonly
-    forward-declares a type whose full definition lives only in a private
-    implementation header -- keeping the definition's fields/size/members
-    is still correct, but the merged entity's *provenance* must reflect the
-    public forward declaration, or ``apply_provenance`` reads a genuinely
-    public type as private (Codex review, PR #635 follow-up).
-
-    ``deprecated`` gets the same "don't silently drop the other side's
-    fact" treatment (Codex review, PR #635 round 7): a public
-    ``class [[deprecated("old")]] X;`` forward declaration merged with an
-    undecorated private definition must not lose the deprecation -- picking
-    *winner*'s fields wholesale, as before this fix, always did, since
-    *winner* is the definition and definitions commonly carry no
-    ``[[deprecated]]`` of their own. Two differing non-``None`` messages are
-    not a conflict here either (round 13 -- see :func:`_pick_deprecated`),
-    so this function can no longer fail and returns ``_T`` unconditionally.
-    """
-    provenance_source = _more_public_of(
-        winner,
-        other,
-        header_segs=header_segs,
-        dir_segs=dir_segs,
-        have_public_set=have_public_set,
-    )
-    provenance_fallback = other if provenance_source is winner else winner
-    fallback_is_private = _other_is_strictly_less_public(
-        provenance_source,
-        provenance_fallback,
-        header_segs=header_segs,
-        dir_segs=dir_segs,
-        have_public_set=have_public_set,
-    )
-    deprecated = _pick_deprecated(
-        provenance_source, provenance_fallback, secondary_is_private=fallback_is_private
-    )
-    merged = (
-        winner
-        if provenance_source is winner
-        else replace(  # type: ignore[type-var]
-            winner,
-            source_location=other.source_location,
-            source_header=other.source_header,
-            origin=other.origin,
-        )
-    )
-    if merged.deprecated != deprecated:
-        merged = replace(merged, deprecated=deprecated)  # type: ignore[type-var]
-    return merged
-
-
 def _merge_identical_modulo_provenance(
     a: _T,
     b: _T,
@@ -1117,7 +995,10 @@ def _merge_identical_modulo_provenance(
     return (
         winner
         if winner.deprecated == deprecated
-        else replace(winner, deprecated=deprecated)  # type: ignore[type-var]
+        # replace_with_fact_sync: `deprecated` is Fact[...]-bridged (ADR-063
+        # Phase 5), so a bare replace() would carry the stale sibling forward
+        # and revert this pick.
+        else replace_with_fact_sync(winner, deprecated=deprecated)
     )
 
 
@@ -1161,15 +1042,21 @@ def _merge_functions(
     # explicitly afterwards via `_merge_contract_attributes`.
     # Only the *comparison* ignores these -- the merged declaration's own
     # parameter names come from `base` below, not blanked ones.
+    # replace_with_fact_sync (not raw replace()) keeps contract_attributes_fact
+    # consistent with the blanked None value on both sides -- a raw replace()
+    # would carry each side's own, possibly-differing, ORIGINAL fact forward
+    # unchanged, which could make an otherwise-trivial redeclaration compare
+    # unequal purely from Fact-status noise unrelated to any real field
+    # (ADR-063 Phase 5).
     a_bare = _blank_provenance(
-        replace(
+        replace_with_fact_sync(
             a,
             params=[replace(p, name="", default=None) for p in a.params],
             contract_attributes=None,
         )
     )
     b_bare = _blank_provenance(
-        replace(
+        replace_with_fact_sync(
             b,
             params=[replace(p, name="", default=None) for p in b.params],
             contract_attributes=None,
@@ -1261,11 +1148,23 @@ def _merge_functions(
         )
         for p_base, p_other in zip(base.params, other.params, strict=True)
     ]
-    return replace(
+    return replace_with_fact_sync(
         base,
         params=merged_params,
         deprecated=deprecated,
         contract_attributes=contract_attributes,
+        # `replace_with_fact_sync`'s own blanket "derive Fact.present(value)"
+        # rule is wrong here specifically when the merge left
+        # `contract_attributes` at `None`: per `_merge_contract_attributes`'s
+        # own docstring, `None` means "neither side captured this", not
+        # "confirmed no attributes" -- so the merged fact must stay
+        # NOT_COLLECTED, never a fabricated PRESENT(None) (Codex review, PR
+        # #982).
+        contract_attributes_fact=(
+            Fact.not_collected()
+            if contract_attributes is None
+            else Fact.present(contract_attributes)
+        ),
     )
 
 
@@ -1329,7 +1228,9 @@ def _merge_variables(
     # only `other` carries must not leak onto `base` when `other` is
     # private (round 18).
     deprecated = _pick_deprecated(base, other, secondary_is_private=other_is_private)
-    return replace(base, value=value, deprecated=deprecated)
+    # replace_with_fact_sync for `deprecated`'s Fact[...] sibling (ADR-063
+    # Phase 5); `value` has none, so it passes through unchanged.
+    return replace_with_fact_sync(base, value=value, deprecated=deprecated)
 
 
 def _record_kinds_compatible(a_kind: str, b_kind: str) -> bool:

@@ -25,13 +25,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Visibility
+from .model.binary_naming import strip_vendor_hash
 
 _INTERNAL_NAME_PATTERNS = (
     "internal",
@@ -269,8 +269,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.EXECUTABLE_STACK,
                 symbol="PT_GNU_STACK",
-                old_value="RW",
-                new_value="RWE",
+                old_value="RW", new_value="RWE",
+                evidence_provenance=("both:l0:elf_program_headers",),
             )
         )
     elif old_exec and not new_exec:
@@ -280,8 +280,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.EXECUTABLE_STACK_REMOVED,
                 symbol="PT_GNU_STACK",
-                old_value="RWE",
-                new_value="RW",
+                old_value="RWE", new_value="RW",
+                evidence_provenance=("both:l0:elf_program_headers",),
             )
         )
 
@@ -833,8 +833,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.RELRO_WEAKENED,
                 symbol="GNU_RELRO",
-                old=old_relro,
-                new=new_relro,
+                old=old_relro, new=new_relro,
+                evidence_provenance=("both:l0:elf_dynamic", "both:l0:elf_program_headers"),
             )
         )
 
@@ -843,8 +843,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.PIE_DISABLED,
                 symbol="DF_1_PIE",
-                old_value="PIE",
-                new_value="no-PIE",
+                old_value="PIE", new_value="no-PIE",
+                evidence_provenance=("both:l0:elf_dynamic", "both:l0:elf_header"),
             )
         )
 
@@ -855,8 +855,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.STACK_CANARY_REMOVED,
                 symbol="__stack_chk_fail",
-                old_value="canary",
-                new_value="none",
+                old_value="canary", new_value="none",
+                evidence_provenance=("both:l0:elf_symtab",),
             )
         )
 
@@ -867,8 +867,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.FORTIFY_SOURCE_WEAKENED,
                 symbol="_FORTIFY_SOURCE",
-                old_value="fortified",
-                new_value="none",
+                old_value="fortified", new_value="none",
+                evidence_provenance=("both:l0:elf_symtab",),
             )
         )
 
@@ -879,8 +879,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
                 symbol="PT_LOAD",
-                old_value="W^X",
-                new_value="W+X",
+                old_value="W^X", new_value="W+X",
+                evidence_provenance=("both:l0:elf_program_headers",),
             )
         )
 

@@ -56,6 +56,7 @@ from .model import (
     is_non_abi_surface_type as _is_non_abi_surface_type,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+from .model.identity import EntityId
 
 
 @registry.detector("enum_renames")
@@ -106,6 +107,7 @@ def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                             detail=str(old_mval),
                             old=old_mname,
                             new=new_mname,
+                            entity_id=e_old.entity_id or e_new.entity_id,
                         )
                     )
 
@@ -117,8 +119,16 @@ def _check_field_qualifier_pair(
     fname: str,
     f_old: TypeField,
     f_new: TypeField,
+    *,
+    entity_id: EntityId | None = None,
 ) -> list[Change]:
-    """Check const/volatile/mutable qualifier changes for a single field pair."""
+    """Check const/volatile/mutable qualifier changes for a single field pair.
+
+    *entity_id* is the containing record's own identity, not the field's --
+    a field carries no EntityId of its own (EntityKind.FIELD is declared but
+    unimplemented), so every field-level finding here is stamped with the
+    record's identity instead, threaded down from the caller.
+    """
     changes: list[Change] = []
 
     if not f_old.is_const and f_new.is_const:
@@ -130,6 +140,7 @@ def _check_field_qualifier_pair(
                 detail=fname,
                 old_value="non-const",
                 new_value="const",
+                entity_id=entity_id,
             )
         )
     elif f_old.is_const and not f_new.is_const:
@@ -141,6 +152,7 @@ def _check_field_qualifier_pair(
                 detail=fname,
                 old_value="const",
                 new_value="non-const",
+                entity_id=entity_id,
             )
         )
 
@@ -153,6 +165,7 @@ def _check_field_qualifier_pair(
                 detail=fname,
                 old_value="non-volatile",
                 new_value="volatile",
+                entity_id=entity_id,
             )
         )
     elif f_old.is_volatile and not f_new.is_volatile:
@@ -164,6 +177,7 @@ def _check_field_qualifier_pair(
                 detail=fname,
                 old_value="volatile",
                 new_value="non-volatile",
+                entity_id=entity_id,
             )
         )
 
@@ -176,6 +190,7 @@ def _check_field_qualifier_pair(
                 detail=fname,
                 old_value="non-mutable",
                 new_value="mutable",
+                entity_id=entity_id,
             )
         )
     elif f_old.is_mutable and not f_new.is_mutable:
@@ -187,6 +202,7 @@ def _check_field_qualifier_pair(
                 detail=fname,
                 old_value="mutable",
                 new_value="non-mutable",
+                entity_id=entity_id,
             )
         )
 
@@ -237,11 +253,16 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
 
+        entity_id = t_old.entity_id or t_new.entity_id
         for fname, f_old in old_fields.items():
             f_new = new_fields.get(fname)
             if f_new is None:
                 continue
-            changes.extend(_check_field_qualifier_pair(name, fname, f_old, f_new))
+            changes.extend(
+                _check_field_qualifier_pair(
+                    name, fname, f_old, f_new, entity_id=entity_id
+                )
+            )
 
     return changes
 
@@ -281,7 +302,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     gate above, even when the removal is genuine. The tempting relaxation
     — trust a hybrid merge's ``"castxml"`` provenance stamp on a ``None``
     value as "both backends independently confirmed absence" — is UNSOUND:
-    ``dumper_hybrid._backfill_fact``'s own docstring already discloses that
+    ``fact_provenance.backfill_fact``'s own docstring already discloses that
     this stamp means only "the final value is castxml-sourced," and
     confirmed empirically that it fires identically whether clang genuinely
     examined the field and agreed, OR never matched the field/type at all
@@ -347,7 +368,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                 # backend confirmed it, in principle. Two earlier attempts
                 # at exploiting this tried to trust a hybrid merge's
                 # "castxml" provenance stamp on the NEW side as dual-backend
-                # confirmation (dumper_hybrid._backfill_fact's docstring:
+                # confirmation (fact_provenance.backfill_fact's docstring:
                 # "Provenance is recorded as castxml even when own_value is
                 # None and no clang value was available to backfill from").
                 # That docstring line is exactly the trap: it explicitly
@@ -375,6 +396,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                         name=name,
                         detail=fname,
                         old_value=f_old.default,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
             elif f_old.default != f_new.default:
@@ -392,6 +414,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                         detail=fname,
                         old=f_old.default,
                         new=f_new.default,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
@@ -471,6 +494,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=fname,
                         new=f_new.deprecated,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
             elif f_old.deprecated is not None and f_new.deprecated is None:
@@ -481,6 +505,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=fname,
                         old_value=f_old.deprecated,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
@@ -542,6 +567,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=name,
                     detail=t_new.deprecated,
                     new_value=t_new.deprecated,
+                    entity_id=t_old.entity_id or t_new.entity_id,
                 )
             )
         elif t_old.deprecated is not None and t_new.deprecated is None:
@@ -551,6 +577,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     old_value=t_old.deprecated,
+                    entity_id=t_old.entity_id or t_new.entity_id,
                 )
             )
 
@@ -603,6 +630,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=name,
                     detail=e_new.deprecated,
                     new_value=e_new.deprecated,
+                    entity_id=e_old.entity_id or e_new.entity_id,
                 )
             )
         elif e_old.deprecated is not None and e_new.deprecated is None:
@@ -612,6 +640,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=name,
                     name=name,
                     old_value=e_old.deprecated,
+                    entity_id=e_old.entity_id or e_new.entity_id,
                 )
             )
 
@@ -696,6 +725,7 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         old=f_old.name,
                         new=f_new.name,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 

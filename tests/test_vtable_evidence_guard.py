@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.diff_types import _vtable_transition_is_evidenced
+from abicheck.diff_types_vtable import _vtable_transition_is_evidenced
 from abicheck.model import Function, RecordType, Visibility
 
 NAME = "Abstract"
@@ -101,17 +101,23 @@ class TestVptrIsNotEvidence:
         from the vtable list. If it ever computes a real vptr too, this
         fails and the reasoning must be revisited before the field is
         trusted as evidence again.
+
+        The derivation itself moved from ``abicheck.dumper_castxml`` to
+        ``abicheck.extract.headers.castxml.records`` (ADR-061 Phase 5's
+        record-entity split) — ``dumper_castxml.py`` now only delegates to
+        it, so the source text this test pins must be read from its real
+        home rather than the thin wrapper.
         """
         import importlib
         from pathlib import Path
 
         src = Path(
-            importlib.import_module("abicheck.dumper_castxml").__file__ or ""
+            importlib.import_module("abicheck.extract.headers.castxml.records").__file__
+            or ""
         ).read_text(encoding="utf-8")
-        assert "vptr_offset_bits=0 if vtable else None" in src or (
-            "vptr_offset_bits = 0 if vtable else None" in src
-        ), (
-            "abicheck.dumper_castxml no longer derives vptr_offset_bits from the vtable list"
+        assert "vptr_offset_bits = 0 if vtable else None" in src, (
+            "abicheck.extract.headers.castxml.records no longer derives "
+            "vptr_offset_bits from the vtable list"
         )
 
     def test_capture_gap_is_suppressed_on_producer_shaped_records(self) -> None:

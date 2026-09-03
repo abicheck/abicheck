@@ -338,10 +338,12 @@ class TestStableSerialization:
 
     def test_json_is_valid_json(self) -> None:
         """snapshot_to_json output is valid JSON."""
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
         orig = _rich_snap()
         json_str = snapshot_to_json(orig)
         # Should not raise
-        parsed = json.loads(json_str)
+        parsed = from_sectioned_document(json.loads(json_str))
         assert isinstance(parsed, dict)
         assert parsed["library"] == orig.library
         assert parsed["version"] == orig.version

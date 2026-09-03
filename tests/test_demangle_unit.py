@@ -36,6 +36,21 @@ class TestDemangle:
     def test_non_z_prefix_returns_none(self):
         assert _mod.demangle("myFunction") is None
 
+    def test_double_underscore_prefix_rejected_by_default(self):
+        """Codex review, fresh evidence: a literal ELF export coincidentally
+        named like Mach-O-prefixed Itanium mangling (e.g. a hand-written
+        assembler alias) must not be silently demangled by a caller that
+        never opted into Mach-O-prefix recognition -- `demangle()` is also
+        used for correctness-critical matching (`debian_symbols.py`'s
+        Debian `.symbols` file generation, `dwarf_snapshot.py`), not only
+        report display, and those callers must keep the old, strict,
+        unambiguous behavior."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            assert _mod.demangle("__ZN3foo3barEv") is None
+        mock_cxxfilt.demangle.assert_not_called()
+
     def test_cxxfilt_available(self):
         """When cxxfilt is importable and works, we get a demangled string."""
         mock_cxxfilt = MagicMock()
@@ -130,6 +145,24 @@ class TestDemangle:
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
+    def test_cppfilt_file_not_found_is_remembered_across_calls(self):
+        """Codex review, fresh evidence: once a subprocess.run() call proves
+        the c++filt binary itself isn't installed, a later demangle() call
+        for a *different* symbol must not re-attempt the same doomed
+        subprocess launch -- a large HTML report with no demangler installed
+        would otherwise re-launch a fresh subprocess pair per row."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run", side_effect=FileNotFoundError) as mock_run:
+                assert _mod.demangle("_ZN3foo3barEv") is None
+                first_call_count = mock_run.call_count
+                assert first_call_count > 0
+                _mod.demangle.cache_clear()  # bypass the lru_cache, not the fix
+                assert _mod.demangle("_ZN3baz4quxEv") is None
+        # No new subprocess.run() calls for the second, different symbol.
+        assert mock_run.call_count == first_call_count
+
     def test_cppfilt_timeout(self):
         """When c++filt times out, return None."""
         mock_cxxfilt = MagicMock()
@@ -150,6 +183,72 @@ class TestDemangle:
                 _mod.demangle("_ZN3foo3bazEv")
         assert _mod._warned_no_demangler is True
 
+    def test_macho_double_underscore_prefix_via_cxxfilt(self):
+        """Codex review, fresh evidence: clang's own `mangledName` carries the
+        Mach-O global-symbol prefix on macOS (`__ZN3foo3barEv`, not the plain
+        ELF `_ZN3foo3barEv`) -- demangle() must recognize it and strip the
+        extra leading underscore before handing it to cxxfilt, which only
+        speaks the canonical `_Z...` spelling."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            result = _mod.demangle("__ZN3foo3barEv", accept_macho_prefix=True)
+        assert result == "demangled:_ZN3foo3barEv"
+        mock_cxxfilt.demangle.assert_called_once_with("_ZN3foo3barEv")
+
+    def test_macho_double_underscore_prefix_via_cppfilt(self):
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="foo::bar()\n", stderr="",
+                )
+                result = _mod.demangle("__ZN3foo3barEv", accept_macho_prefix=True)
+        assert result == "foo::bar()"
+        # The canonical (single-underscore) form must reach the subprocess,
+        # not the raw Mach-O `__Z...` spelling.
+        called_args = mock_run.call_args[0][0]
+        assert "_ZN3foo3barEv" in called_args
+        assert "__ZN3foo3barEv" not in called_args
+
+    def test_macho_prefixed_malformed_name_via_cppfilt_is_not_demangled(self):
+        """Codex review, fresh evidence: c++filt exits 0 and simply echoes
+        back its input for a name it can't demangle. Comparing that echo
+        against the *original* (double-underscore) symbol instead of the
+        canonical (single-underscore) input it was actually given made a
+        malformed `__Z...` token that isn't real Itanium mangling silently
+        succeed -- the echoed `_ZNOTVALID` never equals the original
+        `__ZNOTVALID`, so it read as a real demangling result."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle("__ZNOTVALID", accept_macho_prefix=True)
+        assert result is None
+
+    def test_macho_prefixed_malformed_name_via_cxxfilt_is_not_demangled(self):
+        """Codex review, fresh evidence: some cxxfilt/__cxa_demangle
+        versions return the input unchanged on failure rather than raising
+        -- this direct cxxfilt path returned unconditionally, with no
+        comparison against `canonical` at all, unlike the batch cxxfilt
+        path which already guards this identically."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: s  # echo back unchanged
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle("__ZNOTVALID", accept_macho_prefix=True)
+        assert result is None
+
 
 # ── demangle_batch() ────────────────────────────────────────────────────────
 
@@ -159,6 +258,34 @@ class TestDemangleBatch:
 
     def test_empty_list(self):
         assert _mod.demangle_batch([]) == {}
+
+    def test_double_underscore_prefix_rejected_by_default(self):
+        """Same guard as demangle()'s own -- a caller that doesn't opt into
+        Mach-O-prefix recognition must not have a `__Z...`-shaped symbol
+        silently demangled."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            assert _mod.demangle_batch(["__ZN3foo3barEv"]) == {}
+        mock_cxxfilt.demangle.assert_not_called()
+
+    def test_permissive_cache_entry_does_not_leak_into_a_strict_call(self):
+        """Codex review, fresh evidence: once an `accept_macho_prefix=True`
+        caller (report rendering) has cached a `__Z...` symbol's demangled
+        result, a later *strict* caller (e.g. debian_symbols.py) for the
+        identical symbol must still get the old, safe answer -- the
+        Itanium-mangled gate runs before any cache lookup, so a stricter
+        caller never even consults an entry it wouldn't itself have
+        produced."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            permissive = _mod.demangle_batch(
+                ["__ZN3foo3barEv"], accept_macho_prefix=True
+            )
+            assert permissive == {"__ZN3foo3barEv": "demangled:_ZN3foo3barEv"}
+            strict = _mod.demangle_batch(["__ZN3foo3barEv"])
+        assert strict == {}
 
     def test_no_cpp_symbols(self):
         assert _mod.demangle_batch(["printf", "strlen", ""]) == {}
@@ -213,6 +340,18 @@ class TestDemangleBatch:
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
+
+    def test_cppfilt_file_not_found_is_remembered_across_batch_calls(self):
+        """Codex review, fresh evidence: once one demangle_batch() call proves
+        c++filt itself isn't installed, a later demangle_batch() call for
+        different symbols must not re-attempt the doomed subprocess launch."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run", side_effect=FileNotFoundError) as mock_run:
+                assert _mod.demangle_batch(["_ZN3foo3barEv"]) == {}
+                first_call_count = mock_run.call_count
+                assert first_call_count > 0
+                assert _mod.demangle_batch(["_ZN3baz4quxEv"]) == {}
+        assert mock_run.call_count == first_call_count
 
     def test_cppfilt_timeout_batch(self):
         with patch.dict("sys.modules", {"cxxfilt": None}):
@@ -281,6 +420,60 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             result = _mod.demangle_batch(["printf", "_ZN3foo3barEv", "", "strlen"])
         assert list(result.keys()) == ["_ZN3foo3barEv"]
+
+    def test_macho_double_underscore_prefix_via_cxxfilt(self):
+        """Codex review, fresh evidence: a batch containing a Mach-O
+        `__Z...`-prefixed symbol must be recognized, canonicalized before
+        being handed to cxxfilt, and the result keyed by the *original*
+        (double-underscore) symbol so callers can look it up unchanged."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            result = _mod.demangle_batch(["__ZN3foo3barEv"], accept_macho_prefix=True)
+        assert result == {"__ZN3foo3barEv": "demangled:_ZN3foo3barEv"}
+        mock_cxxfilt.demangle.assert_called_once_with("_ZN3foo3barEv")
+
+    def test_macho_double_underscore_prefix_via_cppfilt(self):
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="foo::bar()\n", stderr="",
+                )
+                result = _mod.demangle_batch(["__ZN3foo3barEv"], accept_macho_prefix=True)
+        assert result == {"__ZN3foo3barEv": "foo::bar()"}
+        sent_input = mock_run.call_args[1]["input"]
+        assert sent_input == "_ZN3foo3barEv"
+
+    def test_macho_prefixed_malformed_name_is_not_demangled_via_cppfilt(self):
+        """Codex review, fresh evidence: `demangle_batch(["__ZNOTVALID"])`
+        must not silently succeed. c++filt exits 0 and echoes back its
+        input (the *canonical* single-underscore form) for a name it can't
+        demangle -- comparing that echo against the original double-
+        underscore symbol instead of the canonical input it was actually
+        given made this read as a real (and wrong) demangling."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle_batch(["__ZNOTVALID"], accept_macho_prefix=True)
+        assert result == {}
+
+    def test_macho_prefixed_malformed_name_is_not_demangled_via_cxxfilt(self):
+        """Same failure mode, one layer up: some cxxfilt/__cxa_demangle
+        versions return the input unchanged on failure rather than raising."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: s  # echo back unchanged
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle_batch(["__ZNOTVALID"], accept_macho_prefix=True)
+        assert result == {}
 
 
 # ── base_name() ─────────────────────────────────────────────────────────────
@@ -467,18 +660,20 @@ class TestDemangleText:
     stubbed batch demangler so it passes where no c++filt/cxxfilt exists."""
 
     def test_replaces_known_tokens(self, monkeypatch):
-        monkeypatch.setattr(_mod, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(
+            _mod, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"}
+        )
         out = _mod.demangle_text("New public function: _Z3foov; see also _Z3foov.")
         assert out == "New public function: foo(); see also foo()."
 
     def test_leaves_unresolved_tokens_unchanged(self, monkeypatch):
-        monkeypatch.setattr(_mod, "demangle_batch", lambda syms: {})
+        monkeypatch.setattr(_mod, "demangle_batch", lambda syms, **kw: {})
         assert _mod.demangle_text("_ZUnresolved stays as-is") == "_ZUnresolved stays as-is"
 
     def test_noop_and_no_batch_call_without_tokens(self, monkeypatch):
         calls = {"n": 0}
 
-        def _fake(syms):
+        def _fake(syms, **kw):
             calls["n"] += 1
             return {}
 
@@ -491,6 +686,18 @@ class TestDemangleText:
         if _mod.demangle("_Z3foov") is None:
             pytest.skip("no c++filt/cxxfilt demangler available")
         assert "foo()" in _mod.demangle_text("call _Z3foov now")
+
+    def test_macho_double_underscore_token_replaced_whole(self, monkeypatch):
+        """Codex review, fresh evidence: matching only the `_Z...` suffix of
+        a Mach-O `__Z...` token left the extra leading underscore glued onto
+        the demangled text (`_Foo::bar()` instead of `Foo::bar()`). The whole
+        `__Z...` span must be captured and replaced as one unit."""
+        monkeypatch.setattr(
+            _mod, "demangle_batch", lambda syms, **kw: {"__ZN3Foo3barEv": "Foo::bar()"}
+        )
+        out = _mod.demangle_text("removed: __ZN3Foo3barEv")
+        assert out == "removed: Foo::bar()"
+        assert "_Foo::bar()" not in out
 
 
 def test_demangle_reads_warmed_batch_cache(monkeypatch):
@@ -531,3 +738,70 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
     finally:
         dm._BATCH_CACHE_FAIL.discard(sym)
         dm.demangle.cache_clear()
+
+
+class TestPrewarmDemangleFromJsonValue:
+    """`prewarm_demangle_from_json_value` -- ADR-061 Phase 2's HTML closure
+    (Codex review, fresh evidence): `render_html_document` can now run
+    standalone on a document built or deserialized in an earlier process,
+    with no compute-side prewarm ever having populated the cache, so this
+    primitive has to find every embeddable symbol *by walking the document's
+    own JSON shape* rather than by name-listing fields -- the general
+    invariant a single reported field would not have proven."""
+
+    def test_batches_tokens_found_at_every_nesting_depth(self):
+        """Tokens live at every JSON shape a real ReportDocument mixes:
+        directly under a dict key, inside a list, inside a tuple, and nested
+        several dicts deep -- one batched subprocess call must resolve all
+        of them, not one per occurrence."""
+        value = {
+            "top": "_ZN3foo3barEv",
+            "rows": [
+                {"symbol": "_ZN3baz4quxEv", "old_value": "int"},
+                {"affected_symbols": ("_ZN3abc3defEv",)},
+            ],
+            "nested": {"deeper": {"still": ["_ZN3ghi3jklEv"]}},
+            "irrelevant": {"count": 3, "flag": True, "note": None},
+        }
+        expected = {
+            "_ZN3foo3barEv": "foo::bar()",
+            "_ZN3baz4quxEv": "baz::qux()",
+            "_ZN3abc3defEv": "abc::def()",
+            "_ZN3ghi3jklEv": "ghi::jkl()",
+        }
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="\n".join(expected[sym] for sym in sorted(expected)) + "\n",
+                    stderr="",
+                )
+                _mod.prewarm_demangle_from_json_value(value)
+                assert mock_run.call_count == 1, (
+                    "expected one batched c++filt call for every token found "
+                    f"across the tree, got {mock_run.call_count}"
+                )
+
+            # Every symbol is now a pure cache hit -- no further subprocess.
+            with patch("subprocess.run") as mock_run_after:
+                for sym, want in expected.items():
+                    assert _mod.demangle(sym, accept_macho_prefix=True) == want
+                mock_run_after.assert_not_called()
+
+    def test_no_tokens_makes_no_call(self):
+        value = {"a": ["b", "c"], "d": (1, 2, None, True), "e": {"f": "plain text"}}
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                _mod.prewarm_demangle_from_json_value(value)
+        mock_run.assert_not_called()
+
+    def test_non_string_scalars_do_not_raise(self):
+        """ints/floats/bools/None reach the walk unscathed -- a real document
+        carries plenty of them (counts, exit codes, flags) -- and contribute
+        no token, so the return value is the same "did nothing" `None` a
+        function with no explicit `return` always gives."""
+        result = _mod.prewarm_demangle_from_json_value(
+            {"n": 3, "f": 1.5, "b": False, "none": None, "empty": {}, "l": []}
+        )
+        assert result is None

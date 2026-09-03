@@ -319,11 +319,11 @@ class TestScanNewLibrarySet:
         )
         assert result.returncode == 1
 
-    def test_rejects_dry_run_with_new_library_set(self) -> None:
-        # P2 regression (Codex review): --artifact-set estimation isn't
-        # implemented; without this preflight check a dry-run + set step
-        # incurred the full toolchain install before the CLI's own
-        # UsageError.
+    def test_allows_dry_run_with_new_library_set(self) -> None:
+        # CLI cleanup phase two, PR 5: --artifact-set --dry-run is a real
+        # preview now (cli_scan._run_artifact_set), not a hard rejection --
+        # this preflight must let it through to run.sh, not fail early the
+        # way it did while the CLI itself still rejected the combination.
         result = _run_validate(
             {
                 "INPUT_MODE": "scan",
@@ -331,16 +331,11 @@ class TestScanNewLibrarySet:
                 "INPUT_DRY_RUN": "true",
             }
         )
-        assert result.returncode == 1
-        assert "dry-run" in result.stdout
+        assert result.returncode == 0, result.stdout + result.stderr
 
-    def test_rejects_estimate_alias_with_new_library_set(self) -> None:
-        # P2 regression (Codex review): run.sh converts the deprecated
-        # estimate: true alias into INPUT_DRY_RUN=true downstream, but this
-        # preflight check only looked at INPUT_DRY_RUN directly -- a set +
-        # estimate combination passed preflight and only failed after the
-        # full Python/toolchain install, same as the direct dry-run case
-        # above.
+    def test_allows_estimate_alias_with_new_library_set(self) -> None:
+        # Same as above, via the deprecated estimate: true alias (run.sh
+        # converts it to INPUT_DRY_RUN=true downstream).
         result = _run_validate(
             {
                 "INPUT_MODE": "scan",
@@ -348,8 +343,7 @@ class TestScanNewLibrarySet:
                 "INPUT_ESTIMATE": "true",
             }
         )
-        assert result.returncode == 1
-        assert "estimate" in result.stdout
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_warns_new_library_set_outside_scan(self) -> None:
         result = _run_validate(
@@ -612,7 +606,7 @@ class TestCompareFormatAllowlistMatchesCli:
     own Choice.choices for the single-pair set (introspected directly rather
     than scraped from --help-all's output, which rich-click hard-wraps
     mid-word inside its option table at this terminal width) and
-    abicheck/cli.py's _RELEASE_FORMATS constant for the release-style set --
+    the compare command module's _RELEASE_FORMATS constant for the release-style set --
     so a future CLI format addition/removal doesn't silently desync the
     Action's fail-fast validator from what the CLI really accepts."""
 
@@ -648,15 +642,15 @@ class TestCompareFormatAllowlistMatchesCli:
         validator_formats = self._extract_allowlist(
             "only 'json', 'markdown', and 'junit' are available"
         )
-        cli_source = (
-            Path(__file__).resolve().parents[1] / "abicheck" / "cli.py"
-        ).read_text(encoding="utf-8")
+        # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
+        cmd = "abicheck/frontends/cli/commands/compare.py"
+        cli_source = (Path(__file__).resolve().parents[1] / cmd).read_text("utf-8")
         m = re.search(r"_RELEASE_FORMATS = frozenset\(\{([^}]+)\}\)", cli_source)
-        assert m, "could not find _RELEASE_FORMATS in abicheck/cli.py"
+        assert m, "could not find _RELEASE_FORMATS in the compare command module"
         cli_formats = {f.strip().strip('"') for f in m.group(1).split(",")}
         assert validator_formats == cli_formats, (
             f"validate-inputs.sh's release-style compare allowlist {sorted(validator_formats)} "
-            f"has drifted from abicheck/cli.py's _RELEASE_FORMATS {sorted(cli_formats)}"
+            f"has drifted from the compare command module's _RELEASE_FORMATS {sorted(cli_formats)}"
         )
 
 

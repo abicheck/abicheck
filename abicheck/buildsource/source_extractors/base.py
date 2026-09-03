@@ -162,6 +162,24 @@ def entity_from_function(fn: Function) -> SourceEntity:
         f"{p.name}={p.default}" for p in fn.params if p.default is not None
     )
     mangled = fn.mangled if fn.mangled and fn.mangled != fn.name else ""
+    # A confirmed compiler-generated declaration (fn.is_compiler_generated is
+    # True) is recorded as evidence via `ownership`, not excluded outright
+    # here: it usually has no real out-of-line symbol of its own (a trivial
+    # implicit special member), but an ODR-used one CAN -- e.g. returning a
+    # public type by value calls its (possibly user-defined-field-owning)
+    # implicit copy/move constructor, which the compiler still emits as a
+    # real weak export. Excluding it unconditionally at this per-declaration,
+    # export-table-blind stage would drop that genuine symbol's only source
+    # declaration (Codex review, PR #930). `link_source_abi`'s own
+    # `_route_declaration` is where the export table is actually known, so
+    # it -- not this pure per-TU mapping -- decides whether an unmatched
+    # compiler-generated candidate stays off the surface. `is None` (older
+    # snapshot / DWARF-only path -- "not captured") stamps no ownership hint,
+    # matching the tri-state convention this codebase's other confirmed-
+    # True-only exclusions use.
+    ownership = {}
+    if fn.is_compiler_generated is True:
+        ownership["compiler_generated"] = "true"
     return SourceEntity(
         id=_content_hash("function", mangled or fn.name, sig),
         kind="function",
@@ -171,19 +189,49 @@ def entity_from_function(fn: Function) -> SourceEntity:
         value=default_repr,
         source_location=_location(fn.source_header, fn.source_location, fn.origin),
         visibility=_visibility(fn.origin),
-        # Private/protected members of a public class are not part of the callable
-        # public surface, so keep them off it (Codex review #335, P2).
-        api_relevant=fn.origin in _PUBLIC_ORIGINS and fn.access not in _NON_PUBLIC_ACCESS,
+        ownership=ownership,
+        # Private/protected members of a public class are not part of the
+        # callable public surface, so keep them off it (Codex review #335,
+        # P2). The compiler-generated case above is handled downstream, not
+        # here -- see the comment above.
+        api_relevant=(
+            fn.origin in _PUBLIC_ORIGINS and fn.access not in _NON_PUBLIC_ACCESS
+        ),
         confidence=LayerConfidence.HIGH,
     )
 
 
 def entity_from_record(rec: RecordType) -> SourceEntity:
     """Map a parsed :class:`RecordType` (struct/class/union) to a ``record`` entity."""
+    # Fact[T]-bridged reads (ADR-063 Phase 0): `bases_fact`/`vtable_fact`
+    # and their legacy siblings are kept in lockstep by `RecordType.
+    # __post_init__`, so resolving through the sibling here is exactly
+    # value-preserving. Each `*_fact` field is declared `Fact[list[str]] |
+    # None` (only `__init__`-time callers may omit it); `__post_init__`
+    # always backfills a real `Fact`, so the leading `is not None` check
+    # never actually fails at runtime — it, and the trailing `.value is
+    # not None` (mirroring `bridge_legacy_and_fact`'s own resolution),
+    # exist to narrow the type for mypy.
+    bases_fact = rec.bases_fact
+    rec_bases = (
+        bases_fact.value
+        if bases_fact is not None
+        and bases_fact.is_present
+        and bases_fact.value is not None
+        else []
+    )
+    vtable_fact = rec.vtable_fact
+    rec_vtable = (
+        vtable_fact.value
+        if vtable_fact is not None
+        and vtable_fact.is_present
+        and vtable_fact.value is not None
+        else []
+    )
     field_repr = ";".join(f"{f.name}:{f.type}@{f.offset_bits}" for f in rec.fields)
     type_repr = (
         f"{rec.kind}|size={rec.size_bits}|align={rec.alignment_bits}"
-        f"|bases={','.join(rec.bases)}|vt={','.join(rec.vtable)}|{field_repr}"
+        f"|bases={','.join(rec_bases)}|vt={','.join(rec_vtable)}|{field_repr}"
     )
     return SourceEntity(
         id=_content_hash("record", rec.name, type_repr),

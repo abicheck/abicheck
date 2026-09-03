@@ -367,7 +367,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
         )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -379,6 +381,251 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             facts_path, new_dir, include_dependencies=True
         )
         assert captured_kwargs["include_dependencies"] is True
+
+    def test_policy_file_is_forwarded_to_per_library_compare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before this fix, this driver forwarded only *policy* (a bare
+        base-policy name) to ``service.compare_snapshots`` for each matched
+        library's per-library diff -- a caller's ``policy_file``-shaped
+        reclassify/override rules never reached that call regardless of
+        whether the caller's own policy document declared any (Codex
+        review; the highest-leverage gap in this driver)."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.checker_policy import ChangeKind, Verdict as VerdictEnum
+        from abicheck.policy_file import PolicyFile
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+
+        def _fake_resolve_input(path, **kwargs):
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        captured: dict[str, object] = {}
+
+        def _fake_compare_snapshots(
+            old, new, suppress=None, *, policy, policy_file=None
+        ):
+            captured["policy_file"] = policy_file
+            return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _fake_compare_snapshots)
+
+        # Omitted: unchanged behavior, None reaches the per-library call.
+        compare_release_against_bundle_facts(facts_path, new_dir)
+        assert captured["policy_file"] is None
+
+        # Given: forwarded verbatim to every matched library's own compare.
+        pf = PolicyFile(overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: VerdictEnum.BREAKING})
+        compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
+        assert captured["policy_file"] is pf
+
+    def test_suppress_is_forwarded_to_per_library_compare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before this fix, this driver had no way to honor a caller's
+        suppression list at all -- ``service.compare_snapshots`` was called
+        with no *suppression* argument, so a matched library was always
+        scored with every known/intentional change still live, unlike every
+        other comparison entry point in this codebase (the same class of
+        gap the ``policy_file`` fix above closed for reclassify/override
+        rules)."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.workflows.suppression import SuppressionList
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            ),
+        )
+        captured: dict[str, object] = {}
+
+        def _fake_compare_snapshots(old, new, suppress=None, *, policy, policy_file=None):
+            captured["suppress"] = suppress
+            return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _fake_compare_snapshots)
+
+        # Omitted: unchanged behavior, None reaches the per-library call.
+        compare_release_against_bundle_facts(facts_path, new_dir)
+        assert captured["suppress"] is None
+
+        # Given: forwarded verbatim to every matched library's own compare.
+        suppression = SuppressionList([])
+        compare_release_against_bundle_facts(facts_path, new_dir, suppress=suppression)
+        assert captured["suppress"] is suppression
+
+    def test_policy_file_also_reaches_bundle_level_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (P2, follow-up on the same PR): the fix above threaded
+        ``policy_file`` into each per-library ``service.compare_snapshots``
+        call, but the final ``compare_bundle_from_facts`` call this driver
+        makes for its own bundle-level (``BUNDLE_*``-kind) findings still
+        received only the bare ``policy`` name -- ``BundleDiffResult.
+        bundle_verdict`` never saw the policy file at all. Pinned end to end
+        via the real returned ``BundleDiffResult``, not a mock."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.policy_file import PolicyFile
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            ),
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
+        )
+
+        pf = PolicyFile()
+        result = compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
+        assert result.policy_file is pf
+
+    def test_policy_file_override_genuinely_demotes_a_real_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bug-class regression (plan Phase 9, incident #883): the two
+        tests above only prove *forwarding* -- both mock
+        ``service.compare_snapshots`` itself, the very function whose real
+        behavior a ``policy_file`` override is supposed to change -- so
+        neither would catch a regression where the override reaches the
+        call but is silently ignored by it, or is threaded to the wrong
+        keyword and has no effect. This lets the real, production
+        ``compare_snapshots`` run end to end (only ``service.resolve_input``
+        is mocked, since the NEW side has no real compiled binary here) and
+        asserts the actual, returned verdict is genuinely demoted -- closing
+        #883's own registered gap of "checked independently, not all
+        derived from one production helper" for at least this one detector
+        family."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.policy_file import PolicyFile
+
+        old_fn = Function(
+            name="core_fn",
+            mangled="core_fn",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[old_fn],
+        )
+        facts = capture_bundle_facts({"libcore.so": old_snapshot})
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+
+        new_fn = Function(
+            name="core_fn",
+            mangled="core_fn",
+            return_type="int",
+            visibility=Visibility.HIDDEN,
+        )
+
+        def _fake_resolve_input(path, **kwargs):
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=[]),
+                functions=[new_fn],
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+
+        # Baseline: no override -- the real compare_snapshots reports this
+        # kind's built-in default verdict, BREAKING.
+        baseline = compare_release_against_bundle_facts(facts_path, new_dir)
+        baseline_diffs = [d for d in baseline.per_library if d.library == "libcore.so"]
+        assert len(baseline_diffs) == 1
+        assert any(
+            c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+            for c in baseline_diffs[0].changes
+        )
+        assert baseline_diffs[0].verdict == Verdict.BREAKING
+        assert baseline.verdict == Verdict.BREAKING
+
+        # Given: a real PolicyFile override demoting that one kind must
+        # actually change the per-library verdict AND the aggregate
+        # BundleDiffResult.verdict this driver returns -- not merely be
+        # accepted and discarded.
+        pf = PolicyFile(
+            overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: Verdict.COMPATIBLE}
+        )
+        demoted = compare_release_against_bundle_facts(
+            facts_path, new_dir, policy_file=pf
+        )
+        demoted_diffs = [d for d in demoted.per_library if d.library == "libcore.so"]
+        assert len(demoted_diffs) == 1
+        assert any(
+            c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+            for c in demoted_diffs[0].changes
+        )
+        assert demoted_diffs[0].verdict == Verdict.COMPATIBLE
+        assert demoted.verdict == Verdict.COMPATIBLE
 
     def test_duplicate_new_side_versions_use_version_aware_selection(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -422,12 +669,145 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
         )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
 
         assert resolved_paths == [v10]
+
+    def test_header_backend_and_compile_are_forwarded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Prior to this fix, ``header_backend``/``compile`` were silently
+        dropped -- the NEW side always resolved under
+        ``header_backend="auto"`` with no ``CompileContext``, so a
+        header-scoped comparison on a host with no working castxml (a
+        clang/icpx-only host) died rather than using the caller's own
+        resolved compiler binding/frontend."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.compile_context import CompileContext
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        captured_kwargs: dict[str, object] = {}
+
+        def _fake_resolve_input(path, **kwargs):
+            captured_kwargs.update(kwargs)
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
+        )
+
+        ctx = CompileContext(
+            gcc_path="icpx",
+            gcc_option_tokens=("-fsycl", "-DONEDAL_DATA_PARALLEL", "-std=c++17"),
+            frontend="clang",
+        )
+        compare_release_against_bundle_facts(
+            facts_path, new_dir, header_backend="clang", compile=ctx
+        )
+
+        assert captured_kwargs["header_backend"] == "clang"
+        assert captured_kwargs["compile"] is ctx
+
+    def test_per_library_overrides_win_over_the_uniform_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``headers``/``includes``/``compile`` apply uniformly to every
+        matched library by default -- correct only when every library in the
+        bundle shares one header tree/compile configuration, which does not
+        hold for a mixed-toolchain release (e.g. a plain-C++ library
+        alongside a ``-fsycl``/``icpx`` one). A per-library override for one
+        library must not leak onto a library with no entry in that map, which
+        must keep falling back to the uniform default."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.compile_context import CompileContext
+
+        metadata = {
+            "libcore.so": _meta(soname="libcore.so", exports=["core_fn"]),
+            "libdpc.so": _meta(soname="libdpc.so", exports=["dpc_fn"]),
+        }
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        core_so = new_dir / "libcore.so"
+        dpc_so = new_dir / "libdpc.so"
+        core_so.write_bytes(b"")
+        dpc_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [core_so, dpc_so],
+        )
+        captured_kwargs: dict[Path, dict[str, object]] = {}
+
+        def _fake_resolve_input(path, **kwargs):
+            captured_kwargs[path] = kwargs
+            return AbiSnapshot(
+                library=path.name,
+                version="new",
+                elf=_meta(soname=path.name, exports=["fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+                new.library, verdict=Verdict.NO_CHANGE
+            ),
+        )
+
+        uniform_headers = [Path("/include/common")]
+        uniform_includes = [Path("/include/common/sys")]
+        dpc_headers = [Path("/include/dpc")]
+        dpc_includes = [Path("/include/dpc/sys")]
+        dpc_ctx = CompileContext(gcc_path="icpx", frontend="clang")
+
+        compare_release_against_bundle_facts(
+            facts_path,
+            new_dir,
+            headers=uniform_headers,
+            includes=uniform_includes,
+            per_library_headers={"libdpc.so": dpc_headers},
+            per_library_includes={"libdpc.so": dpc_includes},
+            per_library_compile={"libdpc.so": dpc_ctx},
+        )
+
+        assert captured_kwargs[core_so]["headers"] == uniform_headers
+        assert captured_kwargs[core_so]["includes"] == uniform_includes
+        assert captured_kwargs[core_so]["compile"] is None
+        assert captured_kwargs[dpc_so]["headers"] == dpc_headers
+        assert captured_kwargs[dpc_so]["includes"] == dpc_includes
+        assert captured_kwargs[dpc_so]["compile"] is dpc_ctx
 
 
 # ---------------------------------------------------------------------------

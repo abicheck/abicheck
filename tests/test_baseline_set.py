@@ -14,13 +14,9 @@
 # limitations under the License.
 
 """Unit tests for ``abicheck/buildsource/baseline_set.py`` (G30 P1.2,
-ADR-047 §4/§6).
-
-Pure-Python tests over hand-authored ``manifest.json``/snapshot/binary
-fixtures -- no compiler, no real ``abicheck dump``/``actions/baseline`` run
-needed. See ``tests/test_action_resolve_baseline.py`` for the bash/CLI-level
-orchestration this module's logic backs.
-"""
+ADR-047 §4/§6). Pure-Python tests over hand-authored manifest/snapshot/
+binary fixtures -- see ``tests/test_action_resolve_baseline.py`` for the
+bash/CLI-level orchestration this module's logic backs."""
 
 from __future__ import annotations
 
@@ -53,13 +49,11 @@ PROFILE = "linux-x86_64-gcc13-release"
 def _stub_bundle_elf_parse(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bundle-resolution tests stage placeholder bytes (not a real ELF
     structure) under ``binaries/`` -- stub the deep ELF parse
-    ``_not_elf_issue()`` runs (added to catch truncated/corrupted staged
-    binaries that still pass the magic-byte sniff, Codex review) so those
-    tests exercise ``resolve_bundle()``'s path/digest/output plumbing
-    rather than requiring a hand-built, fully valid ELF fixture.
+    ``_not_elf_issue()`` runs (Codex review) so those tests exercise
+    ``resolve_bundle()``'s path/digest/output plumbing rather than
+    requiring a hand-built, fully valid ELF fixture.
     ``test_resolve_bundle_rejects_truncated_elf_binary`` below restores
-    the real parser to test the deep-parse guard itself.
-    """
+    the real parser to test the deep-parse guard itself."""
     monkeypatch.setattr(
         "abicheck.buildsource.baseline_set.parse_elf_metadata",
         lambda path: ElfMetadata(soname=path.name),
@@ -95,13 +89,10 @@ def _target_artifact(
     name: str, *, snapshot: bool = True, extra: dict | None = None
 ) -> dict:
     # No "sha256" by default -- an empty/absent recorded digest means
-    # resolve_target()'s digest-verification check has nothing to compare
-    # against and no-ops (see _snapshot_digest_issue), so tests that aren't
-    # specifically about digest verification aren't coupled to the exact
-    # bytes a fixture snapshot happens to contain. Tests that DO want digest
-    # verification pass extra={"sha256": compute_snapshot_content_hash(...)}
-    # explicitly (see the TestSnapshotDigestVerification-equivalent cases
-    # below).
+    # resolve_target()'s digest check has nothing to compare and no-ops
+    # (_snapshot_digest_issue), decoupling most tests from the exact bytes
+    # a fixture snapshot contains. Tests that DO want digest verification
+    # pass extra={"sha256": compute_snapshot_content_hash(...)} explicitly.
     entry = {
         "library": name,
         "artifact": f"build/{name}.so",
@@ -141,12 +132,9 @@ def test_load_baseline_manifest_os_error_raises_value_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # OSError (e.g. a permission error, or the file disappearing between the
-    # is_file() check and open() -- a restored archive/cache race) is raised
-    # by open() itself, before JSON decoding even starts -- must be caught
-    # too, or a manifest that exists but can't be read escapes this
-    # function's documented ValueError contract (Codex review). Simulated
-    # via monkeypatch since a real permission error isn't reliably
-    # reproducible when tests run as root.
+    # is_file() check and open()) is raised by open() itself, before JSON
+    # decoding starts -- must be caught too (Codex review). Simulated via
+    # monkeypatch since a real permission error isn't reliable as root.
     (tmp_path / BASELINE_MANIFEST_FILENAME).write_text("{}", encoding="utf-8")
     real_open = Path.open
 
@@ -404,12 +392,10 @@ def test_resolve_target_snapshot_own_schema_newer_than_reader_is_stale_schema(
     tmp_path: Path,
 ) -> None:
     # _schema_and_profile_check only looks at the manifest's aggregate
-    # snapshot_schema field, which an older/hand-authored manifest may
-    # omit entirely -- but the snapshot file itself always carries its own
-    # schema_version. Without checking that too, this would previously
-    # resolve as RESOLVED (only JSON-shape validated) and fail opaquely in
-    # the later compare step instead of returning the typed stale_schema
-    # outcome resolve-baseline exists to give callers (Codex review).
+    # snapshot_schema field, absent on an older/hand-authored manifest --
+    # but the snapshot file always carries its own schema_version, which
+    # must be checked too or this resolves RESOLVED and fails opaquely in
+    # the later compare step instead (Codex review).
     _write_manifest(
         tmp_path, snapshot_schema=None, artifacts=[_target_artifact("libpvxs")]
     )
@@ -757,13 +743,11 @@ def test_resolve_target_incompatible_evidence_producer_mismatch(tmp_path: Path) 
 def test_resolve_target_version_mismatch_alone_is_not_incompatible(
     tmp_path: Path,
 ) -> None:
-    # evidence_producer.version (candidate, package-release-styled per
-    # ADR-047 section 2's own example) and fact_set.producer_version
-    # (baseline, an independent internal extractor-recipe version e.g.
-    # "0.7") are two incommensurable numbering schemes -- comparing them
-    # directly would reject nearly every real resolution on a coincidental
-    # mismatch, so this check intentionally does NOT compare version when
-    # the producer kind itself matches (Codex review).
+    # evidence_producer.version (candidate) and fact_set.producer_version
+    # (baseline) are two incommensurable numbering schemes -- comparing
+    # them would reject nearly every real resolution on a coincidental
+    # mismatch, so this check does NOT compare version when the producer
+    # kind itself matches (Codex review).
     _write_manifest(
         tmp_path,
         fact_set={
@@ -841,12 +825,9 @@ def test_resolve_target_clang_plugin_alias_matches_real_producer_id(
     tmp_path: Path,
 ) -> None:
     # The C++ clang-plugin extractor self-reports fact_set.producer as
-    # "abicheck-clang-plugin" (contrib/abicheck-clang-plugin/
-    # AbicheckFactsPlugin.cpp), not the "clang-plugin" name
-    # actions/collect-facts/run.sh's own `producer` input/build-output.json
-    # evidence_producer.kind uses -- must not spuriously report
-    # incompatible_evidence for a candidate/baseline pair that are actually
-    # the same producer (Codex review).
+    # "abicheck-clang-plugin", not the "clang-plugin" name evidence_
+    # producer.kind uses -- must not spuriously report incompatible_
+    # evidence for the same producer under two spellings (Codex review).
     _write_manifest(
         tmp_path,
         fact_set={
@@ -1538,14 +1519,10 @@ def test_resolve_bundle_snapshot_sha256_is_not_used_as_binary_digest(
     tmp_path: Path,
 ) -> None:
     # A bundle-scoped manifest row can carry a "sha256" left over from the
-    # snapshot it was originally written for (build_manifest.py always sets
-    # it), plus a "binary" path added on top. If binary-digest verification
-    # ever reused that same "sha256" field, it would compare the JSON
-    # snapshot's content hash against the ELF binary's raw-byte hash --
-    # these can never coincidentally match, so the bundle would report
-    # ambiguous for every real baseline. binary_sha256 is a separate field
-    # and, when absent (as here), the binary-digest check must no-op just
-    # like an ordinary missing digest (Codex review).
+    # snapshot it was originally written for, plus a "binary" path added on
+    # top. Binary-digest verification must never reuse that "sha256" field
+    # (a JSON content hash can never match an ELF's raw-byte hash) --
+    # binary_sha256 is separate and, when absent, must no-op (Codex review).
     binary_content = b"\x7fELF-fake-binary-contents"
     snapshot_content = {"library": "libpvxs", "schema_version": 9}
     snapshot_digest = compute_snapshot_content_hash(snapshot_content)
@@ -1913,13 +1890,10 @@ def test_resolve_bundle_rejects_binary_field_equal_to_binaries_dir_itself(
     tmp_path: Path,
 ) -> None:
     # Path.is_relative_to() is true for a path relative to *itself*, so a
-    # manifest entry whose "binary" field is exactly "binaries" (equal to
-    # BASELINE_BINARIES_DIRNAME) would otherwise satisfy the containment
-    # check without actually being a child of it. In a corrupted
-    # baseline-set where binaries/ was itself staged as a plain file (not
-    # a directory), this member would then "resolve" to that file --
-    # meaning the advertised binaries-dir output points at a file, not a
-    # directory containing member binaries (Codex review, fourth round).
+    # manifest entry whose "binary" field is exactly "binaries" would
+    # otherwise satisfy the containment check without being a child of it
+    # -- in a corrupted baseline-set where binaries/ was itself staged as a
+    # plain file, this member would "resolve" to that file (Codex review).
     _write_manifest(
         tmp_path,
         artifacts=[_target_artifact("libpvxs", extra={"binary": "binaries"})],

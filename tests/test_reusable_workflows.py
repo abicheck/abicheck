@@ -810,6 +810,7 @@ class TestPreCheckOperationalErrorReport:
             "MATRIX_PROFILE_ID": "linux-x86_64",
             "MATRIX_BASELINE_CHANNEL": "accepted-main",
             "MATRIX_REQUESTED_DEPTH": "headers",
+            "MATRIX_EXPLICIT_ID": "",
             "MATRIX_GATE_MODE": "deferred",
             "PROJECT": "abicheck/abicheck",
             "HEAD_SHA": "deadbeef",
@@ -1048,21 +1049,6 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         # GitHub's `a && b || c`: when `a` is false the result is `c`, so a
         # bundle cell lands on the workflow-global input, not ''.
         assert expr.endswith("|| inputs.ast-frontend }}")
-
-    def test_consumer_compile_ast_frontend_is_not_forwarded_anywhere(self) -> None:
-        """The consumer overlay's frontend has no consumer *by design*.
-
-        It describes the header-AST pass of the two-pass producer/consumer
-        extraction G34 Phase 0 has not built yet. There is only one dump
-        invocation per cell today, so forwarding `consumer_compile_ast_frontend`
-        onto it would silently steer the *producer* pass with a consumer
-        setting — worse than leaving the field projected but inert. This
-        pins that absence so wiring it becomes a deliberate act.
-        """
-        for path in (CHECK_PROJECT, CHECK_SINGLE):
-            assert "consumer_compile_ast_frontend" not in path.read_text(
-                encoding="utf-8"
-            ), f"{path.name} forwards a consumer overlay onto the producer pass"
 
     def test_check_job_shell_steps_resolve_their_python_interpreter(self) -> None:
         """G34 Phase C consequence (Codex review): this job can land on a

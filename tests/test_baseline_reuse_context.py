@@ -278,10 +278,15 @@ class TestSharedPrimitiveAcceptsTheHint:
     """
 
     def _resolution(self, monkeypatch, tmp_path: Path, hint):
-        from abicheck import service, service_input_resolution as sir
+        # ADR-061 Phase 3: patch the implementation owner
+        # (`workflows.artifact.execute`), not the `service_input_resolution`
+        # facade -- `_resolve_side_snapshot_impl` reads the owner's own module
+        # global, so a patch on the facade would leave the real seed running.
+        from abicheck import service
         from abicheck.api_types import InputSpec
         from abicheck.model import AbiSnapshot
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "api.h"
         hdr.write_text("int f(void);\n", encoding="utf-8")

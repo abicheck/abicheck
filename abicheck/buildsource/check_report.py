@@ -61,13 +61,17 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
+from ..evidence_depth import DEPTH_RANK, weaker_depth
+from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
+from .check_report_exit_backfill import backfill_exit_block_fields
+from .check_report_run_outcome import backfill_run_outcome, synthetic_run_outcome
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
-#: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
-#: baseline channel names all validate against this.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: §7's delimiter-unambiguity fix). ``\Z``, not ``$`` -- the latter also
+#: matches just before a trailing ``\n`` (Codex review; project_targets.py has the full rationale).
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 #: The five real ``Verdict`` enum values (``abicheck.change_registry_types.
 #: Verdict``), duplicated here as plain strings rather than importing the
@@ -150,25 +154,28 @@ def validate_identifier(field_name: str, value: str) -> None:
 
 
 def build_check_id(
-    name: str, profile_id: str, baseline_channel: str, requested_depth: str
+    name: str, profile_id: str, baseline_channel: str, requested_depth: str, *, environment_id: str | None = None, explicit_id: str | None = None
 ) -> str:
-    """Build the unconditional ``target@profile#baseline_channel@depth`` id.
-
-    Always includes the ``@requested_depth`` suffix -- ADR-047 §7's
-    corrected rule, not only when a collision would occur (no run-plan-level
-    collision detection is available to a standalone ``check-target`` call).
-    """
+    """Build the unconditional ``target@profile#baseline_channel@depth`` id
+    (ADR-047 §7). G42: *environment_id*/*explicit_id* append an optional,
+    composable ``!<environment_id>``/``~<explicit_id>`` tail."""
     validate_identifier("target/bundle", name)
     validate_identifier("profile_id", profile_id)
     validate_identifier("baseline_channel", baseline_channel)
     validate_evidence_depth("requested_depth", requested_depth)
     check_id = f"{name}@{profile_id}#{baseline_channel}@{requested_depth}"
+    for field, prefix, value in (("environment_id", "!", environment_id), ("explicit_id", "~", explicit_id)):
+        if value:
+            validate_identifier(field, value)
+            check_id += f"{prefix}{value}"
     validate_check_id(check_id)
     return check_id
 
 
-#: Ladder order (shallow -> deep), matching EVIDENCE_DEPTH_VALUES.
-_DEPTH_RANK = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+#: Ladder order (shallow -> deep). Owned by ``evidence_depth.DEPTH_RANK``,
+#: which derives it from ``scan_levels.USER_DEPTHS`` -- this used to be a
+#: fourth independent copy of the same four rungs (ADR-061 Phase 3).
+_DEPTH_RANK = DEPTH_RANK
 
 
 def derive_effective_depth(
@@ -205,7 +212,7 @@ def derive_effective_depth(
         and old_d in _DEPTH_RANK
         and new_d in _DEPTH_RANK
     ):
-        achieved = old_d if _DEPTH_RANK[old_d] <= _DEPTH_RANK[new_d] else new_d
+        achieved = weaker_depth(old_d, new_d)
         source = "compare"
     else:
         level = report.get("level")
@@ -267,6 +274,10 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
+    # ADR-063 Phase 7: zero `run_outcome.gate` too, never `.operational` (see `final_exit_code`'s invariant).
+    run_outcome = report.get("run_outcome")
+    if isinstance(run_outcome, dict):
+        report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
     # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
     # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
     # *prefers* it over the top-level `exit_code` zeroed just above -- so
@@ -309,7 +320,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     # module's documented "*report* itself is never mutated" contract (Codex
     # review). Copying per path is cheap and, unlike a blanket deepcopy,
     # leaves the report's large `changes` payload untouched.
-    from ..aggregate import contract_coverage_block_paths
+    from ..workflows.aggregate import contract_coverage_block_paths
 
     for path in contract_coverage_block_paths(report):
         node: dict[str, Any] = report
@@ -357,13 +368,35 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         # a consumer adopting the new canonical field would read as
         # blocking). Replaced wholesale with the "clean" decision, the same
         # way the `severity` gate above is replaced rather than
-        # conditionally rewritten: advisory mode means every axis gates
-        # nothing, so the persisted explanation has to say so outright
-        # rather than being left to disagree with the axes it summarizes.
-        if isinstance(node.get("exit"), Mapping):
+        # conditionally rewritten: advisory mode means every *deferrable*
+        # axis gates nothing, so the persisted explanation has to say so
+        # outright rather than being left to disagree with the axes it
+        # summarizes. The four "comparison never completed" axes --
+        # operational_error/evidence_contract_error/budget_overflow/
+        # not_comparable_contribution (`_classify_verdict` treats those
+        # verdicts identically to an operational error; mutually exclusive
+        # per `resolve_scan_exit_decision`'s own docstring, so at most one
+        # is ever nonzero) -- are carried over, not zeroed with the rest
+        # (Codex review, fresh evidence, two rounds: round one only kept
+        # `operational_error_contribution`, leaving the same "exit.code: 0
+        # but the job still fails" gap for `NOT_COMPARABLE`). Every one of
+        # these fails every gate mode per `final_exit_code`, so zeroing any
+        # would make `exit.code` claim a clean pass the job doesn't give.
+        old_exit = node.get("exit")
+        if isinstance(old_exit, Mapping):
             from ..exit_decision import resolve_exit_decision
 
-            node["exit"] = resolve_exit_decision(compatibility_contribution=0).to_dict()
+            def _int_or_zero(key: str) -> int:
+                value = old_exit.get(key, 0)
+                return value if isinstance(value, int) else 0
+
+            node["exit"] = resolve_exit_decision(
+                compatibility_contribution=0,
+                operational_error_contribution=_int_or_zero("operational_error_contribution"),
+                evidence_contract_error_contribution=_int_or_zero("evidence_contract_error_contribution"),
+                budget_overflow_contribution=_int_or_zero("budget_overflow_contribution"),
+                not_comparable_contribution=_int_or_zero("not_comparable_contribution"),
+            ).to_dict()
 
 
 def _zero_nested_severity_gates(report: dict[str, Any]) -> None:
@@ -388,7 +421,7 @@ def _zero_nested_severity_gates(report: dict[str, Any]) -> None:
     published gate must say so outright, exactly as the root ``severity``
     branch above already does for a ``compare`` report.
     """
-    from ..aggregate import scan_severity_gate_paths
+    from ..workflows.aggregate import scan_severity_gate_paths
 
     for path in scan_severity_gate_paths(report):
         node: dict[str, Any] = report
@@ -464,20 +497,24 @@ def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
     ``aggregate.py``'s ``_VALID_GATE_EXIT = {0, 1, 2, 4}``; 8 itself is not a
     legal ``severity.exit_code`` and would raise ``_MalformedGate`` there).
     Only escalates -- never downgrades an already->=4 severity block, though 4
-    is already that ceiling so there is nothing to downgrade from.
+    is already that ceiling so there is nothing to downgrade from. The two
+    escalations below are independent (Codex review, fresh evidence): a pre-severity legacy report can still carry `run_outcome`, which an early return gated on `severity` alone previously left unescalated.
     """
     severity = out.get("severity")
-    if not isinstance(severity, dict) or severity.get("exit_code", 0) >= 4:
-        return
-    cats = list(severity.get("blocking_categories") or [])
-    if "abi_breaking" not in cats:
-        cats.append("abi_breaking")
-    out["severity"] = {
-        **severity,
-        "exit_code": 4,
-        "blocking": True,
-        "blocking_categories": cats,
-    }
+    if isinstance(severity, dict) and severity.get("exit_code", 0) < 4:
+        cats = list(severity.get("blocking_categories") or [])
+        if "abi_breaking" not in cats:
+            cats.append("abi_breaking")
+        out["severity"] = {
+            **severity,
+            "exit_code": 4,
+            "blocking": True,
+            "blocking_categories": cats,
+        }
+    # ADR-063 Phase 7: fold into `run_outcome.gate` too (no-op if absent), independently of `severity` above.
+    run_outcome = out.get("run_outcome")
+    if isinstance(run_outcome, dict):
+        out["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.ABI_BREAKING.value}
 
 
 def _classify_verdict(
@@ -521,16 +558,10 @@ def _classify_verdict(
 def augment_report(
     report: dict[str, Any],
     *,
-    name: str,
-    profile_id: str,
-    baseline_channel: str,
-    requested_depth: str,
-    gate_mode: str,
-    project: str | None = None,
-    head_sha: str | None = None,
-    base_ref: str | None = None,
-    action_version: str | None = None,
-    analysis_exit_code: int | None = None,
+    name: str, profile_id: str, baseline_channel: str, requested_depth: str, gate_mode: str,
+    project: str | None = None, head_sha: str | None = None, base_ref: str | None = None,
+    action_version: str | None = None, analysis_exit_code: int | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Layer ADR-047 §7's identity/new fields onto a real analysis report.
 
@@ -554,8 +585,11 @@ def augment_report(
     if gate_mode not in GATE_MODES:
         raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
     out = dict(report)
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
+    backfill_run_outcome(out)
+    backfill_exit_block_fields(out)
     _stamp_schema_version(out, report)
     out["check_id"] = check_id
     out["target_id"] = check_id
@@ -596,6 +630,19 @@ def augment_report(
     return out
 
 
+def _apply_optional_envelope_fields(
+    report: dict[str, Any], *, project: str | None, head_sha: str | None,
+    base_ref: str | None, tool_version: str | None, action_version: str | None,
+) -> None:
+    """Set each optional field only when given (shared by the three builders below)."""
+    for key, value in (
+        ("project", project), ("head_sha", head_sha), ("base_ref", base_ref),
+        ("tool_version", tool_version), ("action_version", action_version),
+    ):
+        if value is not None:
+            report[key] = value
+
+
 def build_operational_error_report(
     *,
     name: str,
@@ -609,6 +656,7 @@ def build_operational_error_report(
     base_ref: str | None = None,
     tool_version: str | None = None,
     action_version: str | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize a full report envelope for a ``resolve-baseline`` failure.
 
@@ -617,7 +665,8 @@ def build_operational_error_report(
     block), so no ``severity`` block is written here at all -- omitting it
     is the ADR-047 §7-documented choice, not an oversight.
     """
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -636,17 +685,11 @@ def build_operational_error_report(
         "operational_errors": [{"kind": resolve_outcome, "message": resolve_message}],
         "publication": {"state": "skipped", "channels": []},
         "verdict": OPERATIONAL_ERROR_VERDICT,
+        "run_outcome": synthetic_run_outcome(operational=OperationalStatus.EXTRACTION_ERROR),
     }
-    if project is not None:
-        report["project"] = project
-    if head_sha is not None:
-        report["head_sha"] = head_sha
-    if base_ref is not None:
-        report["base_ref"] = base_ref
-    if tool_version is not None:
-        report["tool_version"] = tool_version
-    if action_version is not None:
-        report["action_version"] = action_version
+    _apply_optional_envelope_fields(
+        report, project=project, head_sha=head_sha, base_ref=base_ref,
+        tool_version=tool_version, action_version=action_version)
     return report
 
 
@@ -662,9 +705,11 @@ def build_bootstrap_report(
     base_ref: str | None = None,
     tool_version: str | None = None,
     action_version: str | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize the "no baseline published yet" advisory pass (§6)."""
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -686,17 +731,11 @@ def build_bootstrap_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": BOOTSTRAP_VERDICT,
         "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.BOOTSTRAP),
     }
-    if project is not None:
-        report["project"] = project
-    if head_sha is not None:
-        report["head_sha"] = head_sha
-    if base_ref is not None:
-        report["base_ref"] = base_ref
-    if tool_version is not None:
-        report["tool_version"] = tool_version
-    if action_version is not None:
-        report["action_version"] = action_version
+    _apply_optional_envelope_fields(
+        report, project=project, head_sha=head_sha, base_ref=base_ref,
+        tool_version=tool_version, action_version=action_version)
     return report
 
 
@@ -712,6 +751,7 @@ def build_new_target_report(
     base_ref: str | None = None,
     tool_version: str | None = None,
     action_version: str | None = None,
+    explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize the "target new to this baseline-set" advisory pass.
 
@@ -721,7 +761,8 @@ def build_new_target_report(
     ``BOOTSTRAP_VERDICT``: the baseline-set itself resolved cleanly here, it
     simply carries no artifact for this particular target yet.
     """
-    check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
+    check_id = build_check_id(
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -743,17 +784,11 @@ def build_new_target_report(
         "publication": {"state": "skipped", "channels": []},
         "verdict": NEW_TARGET_VERDICT,
         "message": resolve_message,
+        "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET),
     }
-    if project is not None:
-        report["project"] = project
-    if head_sha is not None:
-        report["head_sha"] = head_sha
-    if base_ref is not None:
-        report["base_ref"] = base_ref
-    if tool_version is not None:
-        report["tool_version"] = tool_version
-    if action_version is not None:
-        report["action_version"] = action_version
+    _apply_optional_envelope_fields(
+        report, project=project, head_sha=head_sha, base_ref=base_ref,
+        tool_version=tool_version, action_version=action_version)
     return report
 
 

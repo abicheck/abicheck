@@ -83,6 +83,7 @@ if TYPE_CHECKING:
     from .bundle_models import BundleSignatureEvidence, BundleSnapshot
     from .checker_types import DiffResult
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
 
 
 def analyze_bundle(
@@ -94,6 +95,7 @@ def analyze_bundle(
     system_providers: Iterable[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
     old_signature_evidence: Mapping[str, AbiSnapshot | BundleSignatureEvidence]
     | None = None,
     new_signature_evidence: Mapping[str, AbiSnapshot | BundleSignatureEvidence]
@@ -113,8 +115,9 @@ def analyze_bundle(
         new: Bundle snapshot of the new release (mirrors ``compare_bundle``).
         per_library_results: Per-library ``checker.compare()`` output
             (mirrors ``compare_bundle``). Not modified.
-        manifest / system_providers / cohorts / policy: Forwarded verbatim
-            to ``compare_bundle`` -- see that function's own docstring.
+        manifest / system_providers / cohorts / policy / policy_file:
+            Forwarded verbatim to ``compare_bundle`` -- see that function's
+            own docstring.
         old_signature_evidence: Bundle-canonical-key -> ``AbiSnapshot`` (or
             the compact ``BundleSignatureEvidence`` projection) for the OLD
             side. When this and *new_signature_evidence* are both given and
@@ -156,6 +159,7 @@ def analyze_bundle(
             system_providers=system_providers,
             cohorts=cohorts,
             policy=policy,
+            policy_file=policy_file,
         )
     except Exception as exc:
         # Mirrors the pre-Phase-12 `_run_bundle_analysis` contract exactly:
@@ -175,6 +179,7 @@ def analyze_bundle(
             # it) could act on directly (Codex review).
             per_library=list(per_library_results),
             policy=policy,
+            policy_file=policy_file,
             analysis_errors=[f"bundle analysis raised: {exc}"],
         )
 

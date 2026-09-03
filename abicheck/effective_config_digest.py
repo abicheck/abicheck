@@ -60,29 +60,36 @@ field values themselves are also recorded (verbatim, not just hashed) so a
 mismatch can be attributed to a specific field rather than read as an
 opaque hash.
 
-**Known, documented gap: the directory/package release fan-out's own
-*per-library* digests stay at the baseline tier even under ``--pack``**
-(Codex review, PR #803, fresh evidence). ``cli_compare_release_helpers.
-_run_compare_pair`` forwards only ``PackApplication.policy_overrides``/
-``internal_namespaces`` to ``service.run_compare`` for each library -- it
-never stamps the resolved ``CompatibilityEvaluationConfig`` onto that
-library's own ``DiffResult`` the way ``cli_compare_receipt.
-record_resolved_config`` does for single-pair ``compare``. So a release run
-under two different pack *revisions* that happen to project the same
-policy/severity assignments produces the same per-library digest, even
-though the rich tier's whole point is real, versioned pack identities.
-Closing this needs the release fan-out's per-library resolution to gain an
-equivalent stamp -- deliberately deferred alongside this plan's other
-release-fan-out-internals gap (see the plan doc's PR B section, "the
-GateOptions unification"), since both touch the same delicate,
-already-heavily-reviewed severity/pack resolution code the release engine
-runs per library. The release-level *summary* digest
-(``cli_compare_release_helpers._format_release_json``) is a separate,
-narrower computation -- it only ever resolves the baseline tier (no
-`CompatibilityEvaluationConfig` object exists at that scope at all), so it
-was never subject to this same gap; it captures the release's own resolved
-severity/exit-code-scheme (which a gate pack's contribution already folds
-into, per ``apply_release_gate_pack``), not pack identity.
+**Closed: the directory/package release fan-out's own *per-library* digests
+now reach the rich tier under ``--pack``** (Codex review, PR #803, fresh
+evidence; closed in CLI cleanup phase two, "PR B" first slice).
+``cli_compare_release._run_compare_pair`` used to forward only
+``PackApplication.policy_overrides``/``internal_namespaces`` to
+``service.run_compare`` for each library -- it never stamped the resolved
+``CompatibilityEvaluationConfig`` onto that library's own ``DiffResult`` the
+way ``cli_compare_receipt.record_resolved_config`` does for single-pair
+``compare``. So a release run under two different pack *revisions* that
+happen to project the same policy/severity assignments used to produce the
+same per-library digest, even though the rich tier's whole point is real,
+versioned pack identities. Closed by ``cli_compare_receipt.
+record_release_resolved_config`` (``PackApplication.resolved_config``,
+populated by the shared ``pack_application()`` factory both paths call
+through, threaded to each library's ``DiffResult.evaluation_config`` *and*,
+when one exists, merged into that library's own ``contract_context`` --
+``effective_config_fields`` below prefers the latter over the bare attribute
+whenever a ``PersistedContractContext`` exists, which a release run given
+``--contract`` builds per library same as single-pair `compare`). Still
+deferred, and *not* closed by this slice: the release fan-out's own gate
+resolution (exit-code scheme/severity) has no per-library
+``GateOptions``-shaped object yet -- see the plan doc's PR B section, "the
+GateOptions unification" -- so this closed slice covers only the
+config-merge half, never ``with_resolved_gate``. The release-level
+*summary* digest (``cli_compare_release_helpers._format_release_json``) is
+a separate, narrower computation -- it only ever resolves the baseline tier
+(no `CompatibilityEvaluationConfig` object exists at that scope at all), so
+it was never subject to this same gap; it captures the release's own
+resolved severity/exit-code-scheme (which a gate pack's contribution
+already folds into, per ``apply_release_gate_pack``), not pack identity.
 """
 
 from __future__ import annotations

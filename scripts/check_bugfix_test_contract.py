@@ -31,6 +31,15 @@ None of these needed a cleverer reviewer. They needed the fix to state which
 invariant it restores and which neighbouring inputs it covers — which is what
 this gate asks for, mechanically, at the point the claim is cheap to make.
 
+The "general-invariant" row exists specifically to keep this from degrading
+into "a test for the reported input, plus a paragraph describing the class":
+the invariant must be backed by a test that exercises it with inputs beyond
+the one reported, against a named oracle — not restated as prose alone. See
+docs/contribute/plans/bug-class-regression-testing.md for the full analysis
+and the named bug classes it identifies. ``tests/regressions/manifest.py``
+(that plan's Phase 1) is the queryable registry: check it first for a
+matching class before restating an invariant from scratch.
+
 Two kinds of check, deliberately separated:
 
 **Structural** (objective, always enforced): a fix that changes shipped code
@@ -161,6 +170,46 @@ _DOC_SUFFIXES = (".md", ".rst")
 #: golden report snapshots are compared byte-for-byte, so changing one is a
 #: genuine test change. Verified against tests/golden/*.md.
 _TEST_DATA_DIR = "golden"
+
+#: `.py` files under a `tests/` tree that are real, executable tests despite
+#: not matching pytest's `test_*.py`/`*_test.py` collection convention — each
+#: is invoked directly as `python <path> ...` by a checked-in CI workflow,
+#: not through pytest, so `_is_collected_python_test_module()`'s naming check
+#: alone would credit zero test evidence to a fix confined to editing one of
+#: these (Codex review, PR #885 — the reported gap was the two clang-plugin
+#: entries; the `examples-validation`/nightly entries are the same bug class,
+#: found by re-checking every `python .../tests/*.py` invocation across
+#: `.github/workflows/*.yml`, not just the reported pair). Allowlist-and-grow,
+#: mirroring `CLI_CONTRACT_ALLOWLIST`/`ENGINE_CLI_BOUNDARY_ALLOWLIST`'s own
+#: convention in `check_ai_readiness.py`: a new standalone runner belongs here
+#: only once it is genuinely invoked directly by a workflow step *whose exit
+#: code actually gates that workflow* — verified by grepping
+#: `.github/workflows/*.yml` for `python .../<name>.py` and confirming the
+#: invocation does not end in `|| true` (or an equivalent always-succeed
+#: guard). `tests/summarize_validate_results.py` was in this set once and
+#: was removed: both of its invocations end in `|| true` (a Job Summary
+#: formatting step whose own failure cannot fail the workflow), so editing
+#: only it proved nothing was actually tested (Codex review, PR #885).
+_STANDALONE_TEST_RUNNERS = frozenset(
+    {
+        # contrib/abicheck-clang-plugin/tests/ — clang-plugin.yml's C.6
+        # differential-conformance and scan-flow legs (test_public_roots_
+        # diagnostic.py, the third script that workflow runs, already
+        # matches the test_*.py convention and needs no entry here).
+        "contrib/abicheck-clang-plugin/tests/conformance.py",
+        "contrib/abicheck-clang-plugin/tests/scan_flow.py",
+        # tests/ — examples-validation.yml and examples-validation-nightly.yml
+        # run these directly as the real-binary example-catalog validation
+        # lane (as opposed to test_abi_examples.py's own pytest-collected
+        # ground-truth checks, which import some of the same helpers). Each
+        # invocation's exit code is unguarded, so a nonzero exit fails the
+        # job — unlike summarize_validate_results.py, see above.
+        "tests/validate_examples.py",
+        "tests/check_validate_results.py",
+        "tests/check_stripped_fp.py",
+        "tests/example_shards.py",
+    }
+)
 
 
 def _is_conditional_subject(path: str) -> bool:
@@ -327,7 +376,19 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "general-invariant",
         "General invariant",
         "The property that now holds for every input, not just the reported "
-        "one. 'None — documented as a known gap' is an acceptable answer; "
+        "one — and the named regression test must exercise it with inputs "
+        "beyond the one reported (generated/property-based, an exhaustive "
+        "small-domain enumeration, or several independently-chosen sibling "
+        "cases), against an oracle that is not the same formula/helper the "
+        "implementation itself uses. Prose describing the class without such "
+        "a test does not satisfy this row (AGENTS.md 'A bug fix's regression "
+        "test targets the bug class, not the one reported input'; see "
+        "docs/contribute/plans/bug-class-regression-testing.md for the "
+        "analysis this requirement is based on). Check "
+        "tests/regressions/manifest.py (BUG_CLASSES/get()) first for a "
+        "matching class before restating the invariant from scratch — name "
+        "its id here if it already has a home. "
+        "'None — documented as a known gap' is an acceptable answer; "
         "silence is not.",
     ),
     # --- conditional ---------------------------------------------------
@@ -523,8 +584,22 @@ def commit_subjects(base: str, head: str) -> list[str]:
 
 
 def is_bugfix(subjects: list[str], title: str | None) -> bool:
-    candidates = [*subjects, title or ""]
-    return any(_FIX_SUBJECT.match(s.strip()) for s in candidates if s)
+    """Classify the proposed change by its authoritative public subject.
+
+    CI always supplies the pull-request title. That title is the subject users
+    review and the squash-merge commit GitHub will create, so it is
+    authoritative there. Looking through every intermediate commit as well
+    made a feature/refactor PR suddenly require a bug-fix declaration after a
+    routine ``fix: address review`` follow-up, even though neither the public
+    PR classification nor the proposed squash commit changed.
+
+    Local runs have no PR title and therefore fall back to commit subjects.
+    This retains useful enforcement for a standalone ``fix:`` commit while
+    making CI classification stable over a PR's review history.
+    """
+    if title is not None:
+        return bool(_FIX_SUBJECT.match(title.strip()))
+    return any(_FIX_SUBJECT.match(subject.strip()) for subject in subjects)
 
 
 def touches_shipped_code(paths: list[str]) -> bool:
@@ -573,6 +648,72 @@ def is_test_path(path: str) -> bool:
 def touches_tests(paths: list[str]) -> bool:
     """Path-only form: any test path, whatever happened to it."""
     return any(is_test_path(p) for p in paths)
+
+
+def _is_collected_python_test_module(path: str) -> bool:
+    """Does this `.py` path look like a file pytest actually *collects* as
+    a test — `test_*.py` / `*_test.py` — rather than a shared support/data
+    module a real test merely imports?
+
+    `is_test_path()` credits any non-prose file under a `tests/` directory
+    as evidence, including a shared support module like
+    `canonical_identity_contract.py`, `_workflow_exec.py`, or this
+    repository's own `tests/regressions/manifest.py` — none of which
+    pytest's `testpaths = ["tests"]` collection ever runs on its own. A fix
+    that only edits such a module (e.g. registering a new `BugClass` entry
+    with no `seed_tests` path actually changed) satisfied the structural
+    "you changed a test" gate with zero executable test evidence (Codex
+    review). Scoped to `.py` files only — a non-`.py` file under `tests/`
+    is still recognised as test *data* (fixtures, golden snapshots) by
+    `is_test_path()`'s own docstring, unaffected by this narrower check.
+
+    The naming convention alone is also too narrow in the other direction: a
+    handful of real, CI-executed tests are invoked directly as `python
+    <path> ...` by a checked-in workflow rather than collected by pytest, so
+    they never needed `test_*.py` naming in the first place — see
+    `_STANDALONE_TEST_RUNNERS`'s own docstring (Codex review, PR #885).
+
+    A `conftest.py` under the root `tests/` tree is also accepted, despite
+    being neither `test_*.py`-named nor CI-invoked directly — pytest
+    auto-discovers and applies *every* `conftest.py` under its rootdir to
+    every test in that file's own directory and below, unconditionally, by
+    pytest's own collection contract (not by anything this PR-specific
+    diff does). A fix that only widens an existing parametrized fixture
+    there (adding a case to a `params=[...]` list an existing test already
+    iterates) exercises genuinely new test runs without touching any
+    `test_*.py` file at all (Codex review, PR #885, fifth round). This is
+    deliberately narrower than the review's own broader framing ("count
+    executable Python fixture changes as test evidence" generally, for any
+    imported fixture/data module) — `conftest.py` is special because
+    *pytest itself* guarantees it is wired into collection; an arbitrary
+    imported module like `canonical_identity_contract.py`/
+    `_workflow_exec.py`/this file's own `tests/regressions/manifest.py`
+    carries no such guarantee (whether it actually affects a collected
+    test is PR-specific and content-dependent), and crediting those
+    unconditionally is the exact loophole `_is_collected_python_test_module`
+    exists to close — widening it to "any file some test happens to
+    import" would reopen it.
+
+    Scoped to the root `tests/` tree specifically, not "any depth"
+    (Codex review, PR #885, ninth round, fresh evidence): this
+    repository's own `testpaths = ["tests"]` means pytest's collection
+    root is exactly that one directory — a `conftest.py` under
+    `contrib/abicheck-clang-plugin/tests/` (a real, sibling `tests/`
+    directory in this repo, whose own tests are invoked directly with
+    `python <path> ...`, never through pytest — see
+    `_STANDALONE_TEST_RUNNERS`'s own docstring) is never loaded by pytest
+    at all, so the earlier "any depth" version credited a fix confined to
+    a plugin-tree `conftest.py` with test evidence the plugin's own CI
+    lane never actually exercises.
+    """
+    if path in _STANDALONE_TEST_RUNNERS:
+        return True
+    parts = PurePosixPath(path).parts
+    if parts and parts[0] == _TEST_DIR and parts[-1] == "conftest.py":
+        return True
+    return path.endswith(".py") and (
+        PurePosixPath(path).name.startswith("test_") or path.endswith("_test.py")
+    )
 
 
 def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
@@ -778,7 +919,9 @@ def adds_or_modifies_a_test(
     the *status* rules out a deletion (the opposite of evidence) and a type
     change (retyping a test file is not writing one), while the *content* rules
     out a rename or a whitespace/comment-only edit, which carry an `A`/`M`
-    status while asserting nothing new.
+    status while asserting nothing new. A third check, `.py`-only, rules out a
+    shared support/data module under `tests/` that is not itself collected —
+    see `_is_collected_python_test_module()`'s own docstring (Codex review).
     """
     with_content = added_content_paths(diff_text, read_new)
     # A removal counts only in a *fixture*: dropping an expected line from a
@@ -791,6 +934,7 @@ def adds_or_modifies_a_test(
     return any(
         status in ("A", "M")
         and is_test_path(path)
+        and (not path.endswith(".py") or _is_collected_python_test_module(path))
         and (path in with_content or (status == "M" and path in with_removals))
         for status, path in changed
     )

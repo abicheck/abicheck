@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - ownership-and-lifetime
 depends_on:
@@ -13,22 +13,15 @@ generated: false
 
 # Ownership & Lifetime Contracts
 
-A pointer, handle, or reference crossing an API boundary carries an implicit
-contract — **who allocated it, who may free it, how long it stays valid,
-and who is responsible for its destruction.** A raw C pointer encodes none
-of it; a C++ smart pointer (`std::unique_ptr<T>`/`std::shared_ptr<T>`) can
-encode *part* of it — ownership transfer, in particular — in the type
-itself, as the "Designing for it" section below recommends, but even that
-only goes so far: an allocator/CRT mismatch across the boundary, or a
-lifetime shorter than the pointer's own scope suggests, is invisible to
-the type either way. No ABI/API checker can read the remainder off a
-signature. This page names that
-contract explicitly — it comes up constantly in
-[Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md)'s
-pimpl and opaque-handle patterns and in
-[plugin/callback contracts](../use/plugin-systems.md), but deserves its own
-treatment because getting it wrong is a distinct failure mode from every
-other compatibility dimension on this site.
+A static comparison cannot decide this dimension;
+[§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+says why. A pointer, handle, or reference crossing an API boundary carries an
+implicit contract — **who allocated it, who may free it, how long it stays
+valid, and who destroys it** — that no signature encodes in full. This page
+names that contract explicitly; it comes up constantly in
+[Part 7](abi-series/07-designing-for-stability.md)'s pimpl and opaque-handle
+patterns and in [plugin/callback contracts](../use/plugin-systems.md).
+
 
 ## Why this is invisible to a signature
 
@@ -162,8 +155,20 @@ enough to treat as proof:
   reviewer changing that boundary will actually see it, not to have it
   automatically enforced.
 
+As one shell line, the check is the consumer's lifecycle test run under
+AddressSanitizer against the new library, which is where a double free or
+a cross-allocator free surfaces:
+
+```bash
+ASAN_OPTIONS=detect_leaks=1 LD_LIBRARY_PATH=new/lib ./consumer-asan --lifecycle-test
+```
+
 See also: [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
 for the broader category this belongs to, and
 [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md)
 for the pimpl/opaque-handle patterns that make an ownership contract part of
 a stable, checkable ABI boundary.
+
+---
+
+**Ladder:** ← [Data, Wire & Storage Compatibility](data-wire-compatibility.md) · Step 9 · Beyond Static ABI · [Concurrency & Initialization Contracts](concurrency-and-initialization.md) →

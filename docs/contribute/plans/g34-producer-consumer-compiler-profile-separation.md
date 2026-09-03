@@ -121,15 +121,20 @@ confirmed by reading the workflow, not asserted from a design doc):
       — additive, not a breaking schema change; existing single-profile
       projects need zero edits. Covered in
       `tests/test_project_targets_consumer_compile.py`.
-- [ ] A profile *with* `consumer_compile:` runs L0/L1 extraction once
-      (producer toolchain) and L2/L4 header extraction under the consumer
-      toolchain, then merges them into one snapshot the same way an
-      existing hybrid/dual-backend snapshot already merges facts from two
-      producers (see `dumper_hybrid.merge_snapshots()` for the existing
-      merge pattern to extend, not duplicate). **Still open** — this is
-      the actual extraction/merge integration; the schema and its
-      `run_plan.py` projection (below) land first as an independently
-      mergeable, lower-risk slice.
+- [x] A profile *with* `consumer_compile:` gets a second extraction pass
+      under the consumer toolchain — **landed with a different design than
+      originally scoped here.** This item originally called for merging
+      L0/L1 producer facts with L2/L4 consumer facts into *one* snapshot
+      (mirroring `dumper_hybrid.merge_snapshots()`). PR #860 instead has
+      `check-project.yml` run a wholly separate `dump` of the (unchanged)
+      candidate binary under the consumer's frontend/binding/options, and
+      feeds that materialized snapshot to `compare` as the entire new side
+      — no merge with the producer pass's own L0/L1 facts. That is a real,
+      working extraction pass (not config-schema projection only any
+      more), just a narrower one: the compared snapshot reflects the
+      consumer's header view end to end, not "producer binary facts plus
+      consumer header facts" as one object. Revisit the original merge
+      design only if this narrower shape proves insufficient in practice.
 - [x] `run_plan.py` projects `consumer_compile:` into the generated cell
       the same way `compile:` already does, as its own, independently
       resolved `RunPlanCheck.consumer_compile_gcc_path`/
@@ -137,12 +142,29 @@ confirmed by reading the workflow, not asserted from a design doc):
       — never falling back to the producer overlay's own resolved values.
 - [x] `tests/test_project_targets_consumer_compile.py` (shape parsing,
       round-trip, absence-is-None, unknown-key/not-a-mapping validation
-      errors) and `tests/test_run_plan.py`'s
-      `TestConsumerCompileOverlayProjection` (target checks, bundle checks,
-      independent binding resolution) cover the schema/projection slice
-      landed here. **Still open:** an integration test exercising the
-      actual "producer + consumer profile → two extraction passes merged"
-      behavior, once that extraction/merge work above lands.
+      errors), `test_run_plan.py`'s `TestConsumerCompileOverlayProjection`
+      (target checks, bundle checks, independent binding resolution), and
+      `tests/test_reusable_workflows_project_evidence.py` (the separate
+      candidate dump itself: mode, per-cell frontend/binding/options
+      forwarding and their fallback to the workflow-global input, new-side
+      header/include replacement semantics) cover the schema/projection and
+      extraction slices landed here.
+- [ ] **Still open:** the baseline (old) side of a real `baseline-channel`
+      comparison. `publish-baseline.yml`/`update-main-baseline.yml` read
+      only `build-output.json` (no per-profile compile-context fields) and
+      never consult `run-plan.json`, so they cannot apply a
+      `consumer_compile:` overlay to the baseline dump the way
+      `check-project.yml` now does for the candidate. A `consumer_compile:`
+      check compared against a real baseline channel therefore usually
+      resolves `NOT_COMPARABLE`/`ProfileMismatchError` (the comparability
+      gate refusing a genuine profile-fingerprint mismatch, not a silent
+      wrong verdict) rather than actually comparing; `baseline-channel:
+      none` (audit-only) is unaffected. Closing this needs `actions/
+      baseline` and `abicheck/buildsource/baseline_publish.py`'s
+      `derive_baseline_libraries()` to gain the same per-library compile-
+      context resolution `check-target` already has, sourced from a real
+      per-target run-plan read neither baseline workflow performs today —
+      see `run_plan.py`'s own docstring for the same note.
 
 ### Phase A — toolchain-identity enforcement (L, risk: medium-high)
 
@@ -241,13 +263,15 @@ confirmed by reading the workflow, not asserted from a design doc):
       its own decision (silently drop, gate the same way, or make the
       combination a hard `project validate`/`project plan` error the way an
       unroutable `os:` already is), not a drive-by extension here.
-- [ ] **Still open:** `consumer_compile_ast_frontend` is deliberately *not*
-      forwarded, and that absence is pinned by a test rather than left to
-      drift. It describes the header-AST pass of the two-pass extraction
-      Phase 0 has not built, so there is only one dump invocation per cell
-      for it to steer — forwarding it would apply a consumer overlay to the
-      producer pass. It becomes wireable when Phase 0's extraction/merge
-      lands, not before.
+- [x] `consumer_compile_ast_frontend` (and its `consumer_compile_gcc_path`/
+      `consumer_compile_gcc_options` siblings) are now forwarded — to the
+      separate consumer-context candidate dump Phase 0 landed above, never
+      onto the producer pass. `check-project.yml` forwards each with the
+      same per-cell-first precedence `compile_ast_frontend` uses, falling
+      back to the workflow-global `ast-frontend`/`gcc-path`/`gcc-options`
+      input (not the empty string, and not the producer overlay's own
+      resolved value) when the profile's `consumer_compile:` overlay
+      omits that field.
 - [ ] **Still open:** a fixture project with one GCC profile (castxml) and
       one Clang/DPC++ profile (direct-clang `icpx`) in the same
       `.abicheck.yml`, exercising two cells that actually invoke different

@@ -180,7 +180,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             result = resolve_input(p, is_elf=True)
         assert result is snap
         mock.assert_called_once()
@@ -189,7 +189,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True, include_dependencies=False)
         assert mock.call_args.kwargs["include_dependencies"] is False
 
@@ -197,7 +197,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         assert mock.call_args.kwargs["include_dependencies"] is True
 
@@ -221,7 +221,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         _, kwargs = mock.call_args
         assert "header_graph" not in kwargs
@@ -233,7 +233,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p)
         _, kwargs = mock.call_args
         assert "header_graph" not in kwargs
@@ -251,7 +251,7 @@ class TestResolveInput:
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(script)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
@@ -269,7 +269,7 @@ class TestResolveInput:
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(script, include_dependencies=False)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
@@ -289,9 +289,9 @@ class TestResolveInput:
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c++")
@@ -309,9 +309,9 @@ class TestResolveInput:
         header.write_text("void f(void);\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c")
@@ -337,8 +337,8 @@ class TestResolveInput:
         explicit_dir = tmp_path / "explicit"
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap) as mock_dump_elf,
-            patch("abicheck.service._attach_header_graph", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap) as mock_dump_elf,
+            patch("abicheck.service_dump_native._attach_header_graph", return_value=snap),
         ):
             run_dump(
                 p,
@@ -368,9 +368,9 @@ class TestResolveInput:
         explicit_dir = tmp_path / "explicit"
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(
@@ -399,9 +399,9 @@ class TestResolveInput:
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="c++")
@@ -418,9 +418,9 @@ class TestResolveInput:
         header.write_text("void f(void);\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="C")
@@ -431,7 +431,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap):
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap):
             result = resolve_input(p)
         assert result is snap
 
@@ -497,14 +497,14 @@ class TestResolveInput:
         p = tmp_path / "snap.json"
         snap = AbiSnapshot(library="test", version="1.0")
         p.write_text('{"library": "test"}')
-        with patch("abicheck.service.load_snapshot", return_value=snap):
+        with patch("abicheck.workflows.input_resolution.load_snapshot", return_value=snap):
             result = resolve_input(p, is_elf=False)
         assert result is snap
 
     def test_json_load_error_wraps_in_snapshot_error(self, tmp_path):
         p = tmp_path / "bad.json"
         p.write_text("{invalid json")
-        with patch("abicheck.service.load_snapshot", side_effect=ValueError("bad")):
+        with patch("abicheck.workflows.input_resolution.load_snapshot", side_effect=ValueError("bad")):
             with pytest.raises(SnapshotError, match="Failed to load JSON"):
                 resolve_input(p, is_elf=False)
 
@@ -512,8 +512,8 @@ class TestResolveInput:
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = {};")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="perl"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="perl"):
                 with patch(
                     "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
                     return_value=snap,
@@ -524,8 +524,8 @@ class TestResolveInput:
     def test_perl_import_error(self, tmp_path):
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = {};")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="perl"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="perl"):
                 with patch(
                     "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
                     side_effect=ValueError("parse fail"),
@@ -536,8 +536,8 @@ class TestResolveInput:
     def test_unknown_format_raises(self, tmp_path):
         p = tmp_path / "mystery"
         p.write_text("???")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="unknown"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="unknown"):
                 with pytest.raises(ValidationError, match="Cannot detect format"):
                     resolve_input(p, is_elf=False)
 
@@ -567,7 +567,7 @@ class TestRunDump:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service._dump_elf", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_elf", return_value=snap):
             result = run_dump(p, "elf")
         assert result is snap
 
@@ -575,7 +575,7 @@ class TestRunDump:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe")
         assert result is snap
 
@@ -583,7 +583,7 @@ class TestRunDump:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service._dump_macho", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_macho", return_value=snap):
             result = run_dump(p, "macho")
         assert result is snap
 
@@ -615,7 +615,7 @@ class TestRunDumpHybridNormalization:
             library="test", version="1.0", from_headers=True, ast_producer="clang"
         )
         with patch(
-            "abicheck.service._dump_elf",
+            "abicheck.service_dump_native._dump_elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
             result = run_dump(p, "elf", header_backend="HYBRID")
@@ -632,7 +632,7 @@ class TestRunDumpHybridNormalization:
             library="test", version="1.0", from_headers=True, ast_producer="clang"
         )
         with patch(
-            "abicheck.service._dump_elf",
+            "abicheck.service_dump_native._dump_elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
             result = run_dump(p, "elf")  # header_backend defaults to "auto"
@@ -677,10 +677,10 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
 
         with (
             patch(
-                "abicheck.service._dump_elf",
+                "abicheck.service_dump_native._dump_elf",
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
         ):
             result = run_dump(p, "elf", header_backend="hybrid")
 
@@ -734,10 +734,10 @@ class TestRunDumpHybridDoesNotDoubleEnrichLayout:
 
         with (
             patch(
-                "abicheck.service._dump_elf",
+                "abicheck.service_dump_native._dump_elf",
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
-            patch("abicheck.service.attach_clang_layout", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native.attach_clang_layout", side_effect=_fake_attach),
         ):
             result = run_dump(p, "elf", header_backend="hybrid")
 
@@ -1225,7 +1225,7 @@ class TestDumpElf:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", return_value=snap):
                 result = _dump_elf(p, [], [], "1.0", "c++")
         assert result is snap
@@ -1238,7 +1238,7 @@ class TestDumpElf:
         h = tmp_path / "foo.h"
         h.write_text("")
         bad_inc = tmp_path / "nonexistent"
-        with patch("abicheck.service.expand_header_inputs", return_value=[h]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[h]):
             with pytest.raises(ValidationError, match="Include directory"):
                 _dump_elf(p, [h], [bad_inc], "1.0", "c++")
 
@@ -1247,7 +1247,7 @@ class TestDumpElf:
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x00" * 10)
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", side_effect=RuntimeError("bad elf")):
                 with pytest.raises(SnapshotError, match="Failed to dump"):
                     _dump_elf(p, [], [], "1.0", "c++")
@@ -1260,7 +1260,7 @@ class TestDumpElf:
         inc = tmp_path / "inc"
         inc.mkdir()
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", return_value=snap):
                 result = _dump_elf(p, [], [inc], "1.0", "c++")
         assert result is snap
@@ -1271,7 +1271,7 @@ class TestDumpElf:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
                 _dump_elf(p, [], [], "1.0", "c")
         call_kwargs = mock_dump.call_args
@@ -1289,7 +1289,7 @@ class TestDumpElf:
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]),
             patch(
                 "abicheck.debug_resolver.resolve_debug_info", return_value=None
             ) as mock_resolve,
@@ -1315,7 +1315,7 @@ class TestDumpElf:
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]),
             patch(
                 "abicheck.debug_resolver.resolve_debug_info", return_value=None
             ) as mock_resolve,
@@ -1785,7 +1785,7 @@ class TestCollectMetadata:
     def test_binary_file(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        with patch("abicheck.service.sniff_text_format", return_value="unknown"):
+        with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="unknown"):
             meta = collect_metadata(p)
         assert meta is not None
         assert meta.path == str(p)
@@ -1911,14 +1911,17 @@ class TestLoadSuppressionAndPolicy:
     def test_dedup_scope_shared_with_cli_params_loader(self, tmp_path, capsys, caplog):
         """`dedup_policy_override_warnings()` must dedupe across *both*
         loaders, not just repeated `service.load_suppression_and_policy()`
-        calls -- `compare-release` also loads through `cli_params.
-        _load_suppression_and_policy` (its early strict-suppression
-        validation and probe-matrix paths), and a scope covering only one
-        loader would still let the same warning through twice (Codex
-        review: fresh evidence on the follow-up commit)."""
+        calls -- `compare-release` also loads through
+        `frontends.cli.options.params._load_suppression_and_policy` (its
+        early strict-suppression validation and probe-matrix paths), and a
+        scope covering only one loader would still let the same warning
+        through twice (Codex review: fresh evidence on the follow-up
+        commit)."""
         import logging
 
-        from abicheck.cli_params import _load_suppression_and_policy
+        from abicheck.frontends.cli.options.params import (
+            _load_suppression_and_policy,
+        )
 
         pf = tmp_path / "policy.yaml"
         pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
@@ -2212,13 +2215,13 @@ class TestCompareRequestAdr055Evidence:
         def _fake_embed(snap, **kwargs):
             embed_calls.append(kwargs)
 
-        monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", _fake_embed)
+        monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", _fake_embed)
         # The real diffing/pack-loading (prepare_embedded_build_source) is
         # exercised by the CLI-path tests already; here we're only asserting
         # that run_compare_request wires sources/collect_mode into
         # embed_build_source, so stub the diff step to a no-op.
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2237,7 +2240,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
 
@@ -2263,7 +2266,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         sentinel_change = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -2271,7 +2274,7 @@ class TestCompareRequestAdr055Evidence:
             description="source-only ABI break injected by test",
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: ([sentinel_change], [], {}, [sentinel_change]),
         )
 
@@ -2307,7 +2310,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         captured_args = {}
 
@@ -2316,7 +2319,7 @@ class TestCompareRequestAdr055Evidence:
             return extra_changes, [], {}, []
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source", _fake_prepare
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source", _fake_prepare
         )
 
         request = CompareRequest(
@@ -2339,11 +2342,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2373,11 +2376,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2434,11 +2437,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2479,11 +2482,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2522,11 +2525,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2589,16 +2592,14 @@ class TestCompareRequestAdr055Evidence:
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
+        # Real manifest, not a patched predicate: is_pack_dir only reads it.
+        (pack_dir / "manifest.json").write_text('{"build_source_pack_version": 1}')
 
         monkeypatch.setattr(
-            "abicheck.buildsource.inline.is_pack_dir",
-            lambda p: p == pack_dir,
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
-        )
-        monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2621,10 +2622,10 @@ class TestCompareRequestAdr055Evidence:
         build_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2650,10 +2651,10 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2741,11 +2742,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2768,7 +2769,7 @@ class TestCompareRequestAdr055Evidence:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label", lambda *a, **k: "build"
+            "abicheck.evidence_depth.gated_source_label", lambda *a, **k: "build"
         )
 
         request = CompareRequest(
@@ -2976,7 +2977,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "build",
         )
 
@@ -2990,7 +2991,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "source",
         )
 
@@ -3010,7 +3011,7 @@ class TestCompareRequestDepthSatisfaction:
             return "source" if snap.version == "1.0" else "binary"
 
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label", _by_version
+            "abicheck.evidence_depth.gated_source_label", _by_version
         )
 
         request = CompareRequest(
@@ -3023,7 +3024,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "binary",
         )
 
@@ -3037,7 +3038,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "binary",
         )
 
@@ -3230,15 +3231,54 @@ class TestContractEvaluationThreading:
         # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
         # two, "PR B" slice 1) were appended after contract_mode in turn,
         # following the same rule; compile_context (both-sides L2 compile
-        # context for the directory/package release fan-out) was appended
-        # after those in turn.
-        assert params[-1] == "compile_context"
-        assert params[-2] == "pack_internal_namespaces"
-        assert params[-3] == "pack_policy_overrides"
-        assert params[-4] == "contract_mode"
-        assert params[-5] == "include_dependencies"
-        assert params[-6] == "contract_evaluation"
-        assert params[-7] == "diagnostic_comparison"
+        # context for the release fan-out), then depth (D1, CLI-audit), then
+        # severity_preset/exit_code_scheme (ADR-064/PR G2, Codex review:
+        # run_compare had no way to forward the severity-aware gate).
+        assert params[-1] == "exit_code_scheme"
+        assert params[-2] == "severity_preset"
+        assert params[-3] == "depth"
+        assert params[-4] == "compile_context"
+        assert params[-5] == "pack_internal_namespaces"
+        assert params[-6] == "pack_policy_overrides"
+        assert params[-7] == "contract_mode"
+        assert params[-8] == "include_dependencies"
+        assert params[-9] == "contract_evaluation"
+        assert params[-10] == "diagnostic_comparison"
+
+    def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
+        """CodeRabbit review, fresh evidence, PR #1032, then corrected by a
+        P1 Codex finding on the first fix: this docstring has claimed every
+        param from `debuginfod_url` onward is "keyword-only" since PR #551,
+        but no `*` separator ever enforced it -- `severity_preset`/
+        `exit_code_scheme` (ADR-064/PR G2) were added under that same claim
+        and, like every param before them, still silently accepted
+        positional binding. The first fix added `*` before `debuginfod_url`,
+        which closed the gap for the two new params but retroactively made
+        every *pre-existing* param from `debuginfod_url` onward (e.g.
+        `compile_context`, `depth`) keyword-only too -- a public-API break
+        for any real caller still passing one of them positionally, which
+        this same docstring's "keeps binding positionally" guarantee
+        forbids. Corrected by moving the `*` to right before
+        `severity_preset`: only the two newest, never-previously-released
+        params are actually enforced; every older param keeps accepting
+        positional binding exactly as before."""
+        import inspect
+
+        params = inspect.signature(run_compare).parameters
+        assert params["severity_preset"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["exit_code_scheme"].kind is inspect.Parameter.KEYWORD_ONLY
+        for name in (
+            "debuginfod_url",
+            "diagnostic_comparison",
+            "contract_evaluation",
+            "include_dependencies",
+            "contract_mode",
+            "pack_policy_overrides",
+            "pack_internal_namespaces",
+            "compile_context",
+            "depth",
+        ):
+            assert params[name].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into
@@ -3771,7 +3811,7 @@ class TestPeHeaderScoping:
             patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
             patch("abicheck.dumper._dump_pe", return_value=scoped),
             patch(
-                "abicheck.service._extract_pdb_debug",
+                "abicheck.service_dump_native_pe._extract_pdb_debug",
                 return_value=(dwarf_meta, dwarf_adv),
             ),
         ):
@@ -3880,7 +3920,7 @@ class TestRunDumpHeaderWiring:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap) as mock_pe:
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap) as mock_pe:
             run_dump(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
         assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
         assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
@@ -3889,7 +3929,7 @@ class TestRunDumpHeaderWiring:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
-        with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
+        with patch("abicheck.service_dump_native._dump_macho", return_value=snap) as mock_macho:
             run_dump(p, "macho", [Path("api.h")], [], "1.0", "c++")
         assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
 
@@ -3909,7 +3949,7 @@ class TestRunDumpHeaderGraph:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
         assert result.build_source is not None
 
@@ -3917,7 +3957,7 @@ class TestRunDumpHeaderGraph:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [], [], "1.0", "c++")
         assert result.build_source is None
 
@@ -3934,7 +3974,7 @@ class TestRunDumpHeaderGraph:
         )
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
                 "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
@@ -3985,7 +4025,7 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         cc = CompileContext(frontend_context="device")
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
                 "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
@@ -4005,7 +4045,7 @@ class TestRunDumpHeaderGraph:
             raise SnapshotError("clang not found")
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
@@ -4031,7 +4071,7 @@ class TestRunDumpHeaderGraph:
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
                 "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
@@ -4059,7 +4099,7 @@ class TestRunDumpHeaderGraph:
             stderr = ""
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4103,7 +4143,7 @@ class TestRunDumpHeaderGraph:
             returncode = 0
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4161,7 +4201,7 @@ class TestRunDumpHeaderGraph:
             return _OkProc() if str(good) in cmd else _FailProc()
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4202,7 +4242,7 @@ class TestRunDumpHeaderGraph:
         # test used to check is gone; see
         # test_header_graph_includes_folds_include_edges above for the
         # include-edge content check).
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         assert result.build_source is not None
 
@@ -4229,10 +4269,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             result = run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=True)
@@ -4253,10 +4293,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=False)
@@ -4285,8 +4325,8 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
         ):
             run_dump(p, "elf", header_backend="hybrid", dwarf_only=True)
 
@@ -4314,10 +4354,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "elf", [header], [], "1.0", "c++", symbols_only=True)
@@ -4346,9 +4386,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return snap
 
         with (
-            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
+            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             assert not dumper_cache.ast_memoize_active()
@@ -4374,10 +4414,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", symbols_only=True)
@@ -4399,10 +4439,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_macho", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_macho", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "macho", [header], [], "1.0", "c++", symbols_only=True)
@@ -4704,7 +4744,7 @@ class TestCliNativeBinaryHeaderWiring:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap) as mock_pe:
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap) as mock_pe:
             _dump_native_binary(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
         assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
         assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
@@ -4715,7 +4755,7 @@ class TestCliNativeBinaryHeaderWiring:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
-        with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
+        with patch("abicheck.service_dump_native._dump_macho", return_value=snap) as mock_macho:
             _dump_native_binary(p, "macho", [Path("api.h")], [], "1.0", "c++")
         assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
 
@@ -4726,7 +4766,7 @@ class TestCliNativeBinaryHeaderWiring:
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch("abicheck.service._dump_pe", side_effect=SnapshotError("boom")):
+        with patch("abicheck.service_dump_native._dump_pe", side_effect=SnapshotError("boom")):
             with pytest.raises(click.ClickException, match="boom"):
                 _dump_native_binary(p, "pe", [], [], "1.0", "c++")
 
@@ -4737,7 +4777,7 @@ class TestCliNativeBinaryHeaderWiring:
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
-        with patch("abicheck.service._dump_macho", side_effect=SnapshotError("nope")):
+        with patch("abicheck.service_dump_native._dump_macho", side_effect=SnapshotError("nope")):
             with pytest.raises(click.ClickException, match="nope"):
                 _dump_native_binary(p, "macho", [], [], "1.0", "c++")
 
@@ -4969,7 +5009,7 @@ class TestRunDumpDependencyScope:
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
-        with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
+        with patch("abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf")
         assert result.dependency_scope == "full"
 
@@ -4977,7 +5017,7 @@ class TestRunDumpDependencyScope:
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
-        with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
+        with patch("abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf", include_dependencies=False)
         assert result.dependency_scope == "filtered"
 
@@ -5252,7 +5292,7 @@ class TestRunCompareRequestResolutionParity:
 
     def _stub_dump(self, monkeypatch) -> dict[str, dict[str, object]]:
         """Record resolve_input's debug kwargs per side, without a real parse."""
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         seen: dict[str, dict] = {}
 
@@ -5263,7 +5303,7 @@ class TestRunCompareRequestResolutionParity:
             }
             return AbiSnapshot(library=Path(path).name, version="x")
 
-        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        monkeypatch.setattr(input_resolution_mod, "run_dump", _fake)
         return seen
 
     def _request(self, tmp_path, **kwargs) -> CompareRequest:
@@ -5378,7 +5418,7 @@ class TestDebugFormatResolution:
         )
 
     def _spy(self, monkeypatch) -> dict[str, object]:
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         seen: dict[str, object] = {}
 
@@ -5386,7 +5426,7 @@ class TestDebugFormatResolution:
             seen["debug_format"] = kwargs.get("debug_format")
             return AbiSnapshot(library=Path(path).name, version="x")
 
-        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        monkeypatch.setattr(input_resolution_mod, "run_dump", _fake)
         return seen
 
     def test_auto_becomes_none_not_the_literal_string(self, tmp_path, monkeypatch):
@@ -5524,7 +5564,7 @@ class TestComparePipelinePhases:
         checks the wiring itself: rows it produces are attached to the
         ``DiffResult``, and the metrics call still receives the extra changes.
         """
-        from abicheck import cli_buildsource
+        from abicheck.buildsource import evidence_report
         from abicheck.service import classify_compare_pair, resolve_compare_request
 
         rows = [{"layer": "L3", "covered": 1}]
@@ -5536,10 +5576,12 @@ class TestComparePipelinePhases:
         def _fake_attach(result, metrics, extra, **_kwargs):
             attached.append((result, metrics, extra))
 
+        # ADR-061 Phase 3: patch the owner -- these moved to the engine, and
+        # `classify_compare_pair` imports them from there.
         monkeypatch.setattr(
-            cli_buildsource, "prepare_embedded_build_source", _fake_prepare
+            evidence_report, "prepare_embedded_build_source", _fake_prepare
         )
-        monkeypatch.setattr(cli_buildsource, "attach_evidence_metrics", _fake_attach)
+        monkeypatch.setattr(evidence_report, "attach_evidence_metrics", _fake_attach)
 
         old_p = self._snap_file(tmp_path, "libtest", "1.0")
         new_p = self._snap_file(tmp_path, "libtest", "2.0")
@@ -5549,88 +5591,3 @@ class TestComparePipelinePhases:
         assert result.diff.layer_coverage == rows
         assert len(attached) == 1
         assert attached[0][0] is result.diff
-
-
-class TestResolveSidesSequentially:
-    """ADR-050 D6 / G32 Phase E, generalised by ADR-055 D1.
-
-    A manifest-driven dump sizes its per-TU worker pool from a live
-    ``MemAvailable`` reading, so two starting concurrently size two full pools
-    off the same reading and jointly overcommit. That guard used to be
-    implicit — the native ``compare`` CLI simply resolved sequentially, and
-    ``run_compare_request`` was documented as unable to reach a manifest at
-    all. ``InputSpec.dump_manifest`` made that documentation stale: the typed
-    path could reach a manifest *and* resolved concurrently. Now that both
-    front ends share one resolution, the guard is explicit and lives with it.
-    """
-
-    def _request(self, tmp_path, *, old_manifest=None, new_manifest=None):
-        return CompareRequest(
-            old=InputSpec(path=tmp_path / "old.so", dump_manifest=old_manifest),
-            new=InputSpec(path=tmp_path / "new.so", dump_manifest=new_manifest),
-        )
-
-    def test_plain_pair_may_resolve_concurrently(self, tmp_path, monkeypatch):
-        from abicheck.service import resolve_sides_sequentially
-
-        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
-        assert resolve_sides_sequentially(self._request(tmp_path)) is False
-
-    @pytest.mark.parametrize("side", ["old", "new"])
-    def test_a_dump_manifest_on_either_side_forces_sequential(
-        self, tmp_path, monkeypatch, side
-    ):
-        from types import SimpleNamespace
-
-        from abicheck.service import resolve_sides_sequentially
-
-        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
-        manifest = SimpleNamespace(translation_units=[])
-        request = self._request(tmp_path, **{f"{side}_manifest": manifest})
-        assert resolve_sides_sequentially(request) is True
-
-    @pytest.mark.parametrize("value", ["0", "false", "no", "NO", " 0 "])
-    def test_env_opt_out_forces_sequential(self, tmp_path, monkeypatch, value):
-        from abicheck.service import resolve_sides_sequentially
-
-        monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", value)
-        assert resolve_sides_sequentially(self._request(tmp_path)) is True
-
-    def test_manifest_request_really_resolves_one_side_at_a_time(
-        self, tmp_path, monkeypatch
-    ):
-        """The behavioural half: not just the predicate, but the resolution.
-
-        Without the guard this is exactly the double-pool-sizing case — two
-        manifest dumps in a ``ThreadPoolExecutor``, overlapping in time.
-        """
-        import time
-        from types import SimpleNamespace
-
-        from abicheck import service as service_mod
-        from abicheck.service import resolve_compare_request
-
-        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
-        spans: list[tuple[str, float, float]] = []
-
-        def _fake_resolve(path, headers, includes, version, lang, **kwargs):
-            start = time.monotonic()
-            time.sleep(0.05)
-            spans.append((version, start, time.monotonic()))
-            return AbiSnapshot(library="libtest", version=version)
-
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
-        old_p = tmp_path / "old.so"
-        new_p = tmp_path / "new.so"
-        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        manifest = SimpleNamespace(translation_units=[])
-        resolve_compare_request(
-            CompareRequest(
-                old=InputSpec(path=old_p, version="old", dump_manifest=manifest),
-                new=InputSpec(path=new_p, version="new", dump_manifest=manifest),
-            )
-        )
-        assert len(spans) == 2
-        (_old_v, _old_start, old_end), (_new_v, new_start, _new_end) = spans
-        assert new_start >= old_end

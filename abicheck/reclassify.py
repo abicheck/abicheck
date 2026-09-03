@@ -32,17 +32,23 @@ regression on an unrelated symbol, and suppressing the finding outright
 throws away evidence a reviewer may still want to see.
 
 ``ReclassifyRule`` is that third form: the same selector grammar
-:class:`~abicheck.suppression.Suppression` already implements (``symbol``/
+:class:`~abicheck.policy.selectors.SelectorSet` implements (``symbol``/
 ``symbol_pattern``/``type_pattern``/``member_name``/``namespace``/
 ``entity_namespace``/``cause_namespace``/``source_location``/
-``change_kind``/``expires``), with ``to:`` instead of deletion. Reuses
-:class:`~abicheck.suppression.Suppression` itself for selector matching
-(via the public :meth:`~abicheck.suppression.Suppression.selector_matches`)
-rather than re-implementing the glob/regex machinery a second time --
-deliberately bypassing that class's reachability / ``allow_public_break``
-gates, since those exist to guard against a rule *hiding* evidence, which
-does not apply here: a reclassified finding stays in the report, just at a
-different verdict.
+``change_kind``/``binding``/``expires``), with ``to:`` instead of deletion.
+Builds a :class:`~abicheck.policy.selectors.SelectorSet` directly (ADR-063
+D10, implementation plan Phase 9) for selector matching rather than
+re-implementing the glob/regex machinery a second time — deliberately
+bypassing :class:`~abicheck.suppression.Suppression`'s reachability /
+``allow_public_break`` gates, since those exist to guard against a rule
+*hiding* evidence, which does not apply here: a reclassified finding stays
+in the report, just at a different verdict. Before Phase 9, this module
+built a :class:`~abicheck.suppression.Suppression` instance purely for its
+selector grammar (resolved via ``importlib.import_module`` — see below for
+why a static import couldn't be used at the time); now that the grammar
+itself lives in a dependency-free leaf module neither this module nor
+``suppression.py`` needs to import the *other*, so this module imports
+``policy/selectors.py`` **statically**, and the workaround is gone.
 
 Loaded as an optional ``reclassify:`` block in a ``--policy-file`` document,
 parsed by :mod:`abicheck.policy_file` (which owns the ``to:`` severity
@@ -59,22 +65,22 @@ example::
         to: risk
         reason: "COMDAT-inline demotions; consumers already embed their own copy"
 
-Deliberately never imports :mod:`abicheck.suppression`/
-:mod:`abicheck.checker_types` at module (or ``TYPE_CHECKING``) scope, even
-though it uses :class:`~abicheck.suppression.Suppression` at runtime and
-type-annotates against ``Change``. ``checker_types.py`` imports ``PolicyFile``
-from ``policy_file.py``, and ``policy_file.py`` is this module's own caller
--- a static edge to either module here would close that loop into a real
-import cycle (``policy_file -> reclassify -> suppression -> checker_types ->
-policy_file``), which ``scripts/check_ai_readiness.py``'s ``import-cycle-
-growth`` gate treats as SCC growth regardless of whether the importing
-statement is function-local (its cycle detector walks the whole AST, not
-just module scope). Resolving ``Suppression`` via ``importlib.import_module``
-at call time (mirroring the lazy ``__getattr__`` shim in
-``cli_buildsource.py``, a runtime call rather than a static import edge) is
-the sanctioned way around that per CLAUDE.md "What NOT to do" -- extending
-``IMPORT_CYCLE_ALLOWLIST`` instead would paper over a real, growing SCC.
-``change``/``Change`` parameters are typed ``Any`` for the same reason.
+Still deliberately never imports :mod:`abicheck.checker_types` at module (or
+``TYPE_CHECKING``) scope, even though it type-annotates against ``Change``.
+``checker_types.py`` imports ``PolicyFile`` from ``policy_file.py``, and
+``policy_file.py`` is this module's own caller -- a static edge to
+``checker_types.py`` here would close that loop into a real import cycle
+(``policy_file -> reclassify -> checker_types -> policy_file``), which
+``scripts/check_ai_readiness.py``'s ``import-cycle-growth`` gate treats as
+SCC growth regardless of whether the importing statement is function-local
+(its cycle detector walks the whole AST, not just module scope).
+``change``/``Change`` parameters stay typed ``Any`` for the same reason.
+:mod:`abicheck.policy.selectors` carries no such risk and is imported
+statically at module scope -- it is a leaf with zero dependency on
+``policy_file.py``/``checker_types.py``/``suppression.py``/this module/
+``finding_identity.py`` (enforced by ``scripts/check_architecture.py``, not
+just documented -- see that module's own docstring), so it cannot
+participate in the cycle above.
 
 **Known gap, deliberately not closed here (Codex review, P2):**
 ``contract_pipeline.ContractEvaluationStage.build_context()`` -- the ADR-049
@@ -91,16 +97,53 @@ through ``CompatibilityPolicyConfig``, its JSON serialization (a real
 schema-version concern -- see ``contract_context_io.py``), and
 ``contract_replay.py``'s policy-independent replay evaluator -- a scoped,
 independently-verified follow-up, not a same-PR extension of this change.
+
+**This module also owns the per-change effective-verdict resolver**
+(:func:`effective_verdict_for_change`) and its disclosure sibling
+(:func:`reclassify_rule_for_change`), which moved here from ``severity.py``
+during ADR-061 Phase 2. Two reasons, one architectural and one local:
+
+- Architectural: ``checker_types.DiffResult``'s verdict buckets
+  (``breaking``/``source_breaks``/``compatible``/``risk``) and
+  ``severity.py``'s severity/gating layer both need that resolver, and
+  ADR-061 classifies those two callers into *different* responsibility
+  layers (``compare`` and ``policy``) whose dependency contract forbids the
+  first importing the second. This module is the leaf both may depend on --
+  the "pull the shared logic out to a leaf both sides can depend on" pattern
+  ADR-061 names for exactly this class of blocker. It stays deliberately
+  unclassified until ``checker_policy.py``'s own model/policy split lands,
+  which is what will decide the leaf's final owner.
+- Local: the resolver's precedence chain is built *around* the selector
+  rules defined here, and :func:`reclassify_rule_for_change` has to mirror
+  that chain step for step. Three separate review rounds have already
+  corrected a disagreement between the two; co-locating them puts both
+  implementations of one precedence order in one file.
+
+``severity.effective_verdict_for_change`` / ``severity.reclassify_rule_for_change``
+/ ``severity.KindSets`` remain importable and unchanged -- ``severity.py``
+re-exports all three, so no caller (in this repo or out of it) moved.
 """
 
 from __future__ import annotations
 
-import importlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
-from .checker_policy import Verdict
+from .checker_policy import (
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    COMPATIBLE_KINDS,
+    RISK_KINDS,
+    ChangeKind,
+    HasKind,
+    Verdict,
+    effective_category,
+    policy_kind_sets,
+)
+from .model.policy_file_protocol import ReclassifyRuleProtocol
+from .policy.selectors import SelectorSet
 
 #: The four verdicts a `to:` value is allowed to resolve to -- the exact set
 #: `policy_file.parse_severity_value`'s `break`/`warn`/`risk`/`ignore`
@@ -131,12 +174,6 @@ _CANONICAL_TO_SPELLING: dict[Verdict, str] = {
     Verdict.COMPATIBLE_WITH_RISK: "risk",
     Verdict.COMPATIBLE: "ignore",
 }
-
-
-def _suppression_cls() -> Any:
-    """Resolve :class:`abicheck.suppression.Suppression` at call time --
-    see the module docstring for why this can't be a static import."""
-    return importlib.import_module("abicheck.suppression").Suppression
 
 
 #: YAML keys accepted in one ``reclassify:`` entry. ``kind`` is this rule
@@ -191,6 +228,13 @@ class ReclassifyRule:
         reason: Optional human-readable justification, for audit output.
         label: Optional grouping tag, mirroring
             :attr:`Suppression.label`.
+
+    **Selector fields are read once, into an internal ``SelectorSet``, at
+    construction time (``__post_init__``) -- mutating one afterward does not
+    change what :meth:`matches` matches, the identical contract
+    :class:`~abicheck.suppression.Suppression` documents for the same
+    reason.** Construct a new ``ReclassifyRule`` instead of mutating one in
+    place if a rule's selectors need to change.
     """
 
     to_verdict: Verdict
@@ -216,9 +260,12 @@ class ReclassifyRule:
     #: Built at construction time and reused for every :meth:`matches` call
     #: rather than re-validated/re-compiled per call — mirrors how
     #: :class:`~abicheck.suppression.Suppression` itself eagerly compiles its
-    #: own patterns. Typed ``Any`` (really a ``Suppression`` instance) --
-    #: see the module docstring.
-    _selector: Any = field(init=False, repr=False)
+    #: own patterns (it now builds an identical
+    #: :class:`~abicheck.policy.selectors.SelectorSet` internally, ADR-063
+    #: D10). Typed against the real leaf class directly -- unlike
+    #: ``Suppression``, ``policy/selectors.py`` carries no cycle risk for
+    #: this module, so no ``Any``/``importlib`` indirection is needed here.
+    _selector: SelectorSet = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.to_verdict not in _VALID_RECLASSIFY_VERDICTS:
@@ -251,12 +298,13 @@ class ReclassifyRule:
         if isinstance(self.expires, datetime):
             self.expires = self.expires.date()
         # Delegates all selector validation (mutual exclusivity, unknown
-        # change_kind, malformed glob/regex, "at least one selector") to
-        # Suppression's own __post_init__ -- a ValueError raised there
-        # propagates unchanged to this rule's own construction, so a
-        # ReclassifyRule can never exist with an invalid selector any more
-        # than a Suppression can.
-        self._selector = _suppression_cls()(
+        # change_kind, malformed glob/regex, "at least one selector",
+        # malformed binding) to SelectorSet's own __post_init__ -- a
+        # ValueError raised there propagates unchanged to this rule's own
+        # construction, so a ReclassifyRule can never exist with an invalid
+        # selector any more than a Suppression can (both build the identical
+        # leaf class now).
+        self._selector = SelectorSet(
             symbol=self.symbol,
             symbol_pattern=self.symbol_pattern,
             type_pattern=self.type_pattern,
@@ -279,9 +327,12 @@ class ReclassifyRule:
         :class:`Suppression`. Deliberately consults only the selector
         grammar -- see the module docstring for why the reachability /
         ``allow_public_break`` gates :class:`Suppression` layers on top
-        don't apply to reclassification.
+        don't apply to reclassification. Never passes a
+        ``canonical_finding_id`` -- this rule form has no ``finding_id``
+        selector, so :meth:`~abicheck.policy.selectors.SelectorSet.
+        matches_selectors` never needs one.
         """
-        return bool(self._selector.selector_matches(change, today))
+        return bool(self._selector.matches_selectors(change, today=today))
 
     def is_expired(self, today: date | None = None) -> bool:
         """Return True if this rule has passed its ``expires`` date.
@@ -377,8 +428,8 @@ def first_matching_reclassify_verdict(
 
 
 def active_reclassify_rules(
-    rules: list[ReclassifyRule], today: date | None = None
-) -> list[ReclassifyRule]:
+    rules: Sequence[ReclassifyRuleProtocol], today: date | None = None
+) -> list[ReclassifyRuleProtocol]:
     """Return the subset of *rules* not yet past their ``expires`` date.
 
     Every report renderer disclosing the *active* rule set (``reporter.py``'s
@@ -387,5 +438,272 @@ def active_reclassify_rules(
     rule verbatim (Codex review) -- an expired rule can never actually match
     (:meth:`ReclassifyRule.matches`), so disclosing it as active claims a
     downgrade is in effect when it no longer is.
+
+    Typed against :class:`~abicheck.model.policy_file_protocol.
+    ReclassifyRuleProtocol`/``Sequence`` rather than the concrete
+    ``ReclassifyRule``/``list`` (ADR-061 Phase 4's ``PolicyFile``
+    investigation): a real ``list[ReclassifyRule]`` still satisfies this
+    signature structurally (``Sequence`` is covariant), but so does the
+    ``Sequence[ReclassifyRuleProtocol]`` a ``DiffResult.policy_file.
+    reclassify`` read now yields once that field is typed against
+    ``PolicyFileProtocol``.
     """
     return [r for r in rules if not r.is_expired(today)]
+
+
+# ---------------------------------------------------------------------------
+# Per-change effective-verdict resolution (moved from severity.py, ADR-061
+# Phase 2 -- see this module's docstring for why it lives here)
+# ---------------------------------------------------------------------------
+
+#: Pre-computed (breaking, api_break, compatible, risk) kind sets.
+KindSets = tuple[
+    frozenset[ChangeKind],
+    frozenset[ChangeKind],
+    frozenset[ChangeKind],
+    frozenset[ChangeKind],
+]
+
+_VERDICT_ORDER = [
+    Verdict.NO_CHANGE,
+    Verdict.COMPATIBLE,
+    Verdict.COMPATIBLE_WITH_RISK,
+    Verdict.API_BREAK,
+    Verdict.BREAKING,
+]
+
+
+def resolve_kind_sets(
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+) -> KindSets:
+    """Return (breaking, api_break, compatible, risk) kind sets.
+
+    *kind_sets* takes precedence when provided (e.g. from
+    ``DiffResult._effective_kind_sets()`` which includes PolicyFile overrides).
+    Falls back to ``policy_kind_sets(policy)`` or canonical sets.
+    """
+    if kind_sets is not None:
+        return kind_sets
+    if policy is None or policy == "strict_abi":
+        return (
+            frozenset(BREAKING_KINDS),
+            frozenset(API_BREAK_KINDS),
+            frozenset(COMPATIBLE_KINDS),
+            RISK_KINDS,
+        )
+    return policy_kind_sets(policy)
+
+
+def _has_frozen_namespace_violation(change: HasKind) -> bool:
+    """Return True only for a real frozen-namespace tag string."""
+    fnv = getattr(change, "frozen_namespace_violation", None)
+    return isinstance(fnv, str) and bool(fnv)
+
+
+def _raw_verdict_for_kind(kind: ChangeKind, kind_sets: KindSets) -> Verdict:
+    """Return the verdict for *kind* without per-finding overrides."""
+    breaking, api_break, compatible, risk = kind_sets
+    if kind in breaking:
+        return Verdict.BREAKING
+    if kind in api_break:
+        return Verdict.API_BREAK
+    if kind in risk:
+        return Verdict.COMPATIBLE_WITH_RISK
+    if kind in compatible:
+        return Verdict.COMPATIBLE
+    return Verdict.BREAKING
+
+
+def effective_verdict_for_change(
+    change: HasKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+    today: date | None = None,
+) -> Verdict:
+    """Return the effective verdict for one change.
+
+    Policy-file overrides usually move an entire ``ChangeKind`` into another
+    verdict bucket. Frozen-namespace violations are deliberately per-change: if
+    an override would downgrade a tagged finding below the base-policy verdict,
+    the override is ignored for that one finding.
+
+    *today* is forwarded to a matching `reclassify:` rule's own expiry check
+    (:func:`first_matching_reclassify_verdict`) -- pass a fixed date for a
+    deterministic/testable caller (e.g. ``SuppressionList.audit()``'s own
+    *today* parameter); ``None`` uses the real current date, same as every
+    other caller already relies on.
+    """
+    kind = change.kind
+    base_policy = getattr(policy_file, "base_policy", policy)
+    base_sets = (
+        resolve_kind_sets(base_policy, None)
+        if policy_file is not None
+        else resolve_kind_sets(base_policy, kind_sets)
+    )
+
+    eff = getattr(change, "effective_verdict", None)
+    if isinstance(eff, Verdict):
+        raw_v = _raw_verdict_for_kind(kind, base_sets)
+        if (
+            _has_frozen_namespace_violation(change)
+            and _VERDICT_ORDER.index(eff) < _VERDICT_ORDER.index(raw_v)
+        ):
+            return raw_v
+        return eff
+
+    # A: selector-scoped reclassification (the rules above) -- consulted
+    # ahead of the kind-global `overrides` below, mirroring
+    # PolicyFile._resolve_change_verdict's own priority order exactly, so
+    # this per-finding resolver (severity/category buckets, JSON/HTML/SARIF
+    # labels, severity-based gating) agrees with the legacy verdict
+    # PolicyFile.compute_verdict already computes instead of silently
+    # re-deriving a different answer for the same change.
+    reclassify_rules = (
+        getattr(policy_file, "reclassify", None) if policy_file is not None else None
+    )
+    if reclassify_rules:
+        reclass_v = first_matching_reclassify_verdict(reclassify_rules, change, today)
+        if reclass_v is not None:
+            base_v = effective_category(change, *base_sets)
+            if (
+                _has_frozen_namespace_violation(change)
+                and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
+            ):
+                return base_v
+            return reclass_v
+
+    overrides = (
+        getattr(policy_file, "overrides", None)
+        if policy_file is not None
+        else None
+    )
+    if overrides and kind in overrides:
+        base_v = effective_category(change, *base_sets)
+        override_v = cast(Verdict, overrides[kind])
+        if (
+            _has_frozen_namespace_violation(change)
+            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
+        ):
+            return base_v
+        return override_v
+    # Reuses `base_sets` (already computed above from `policy_file.
+    # base_policy` when a policy_file is given) rather than recomputing from
+    # the outer `policy`/`kind_sets` parameters directly (Codex review,
+    # pre-existing bug surfaced by suppression.py's audit() calling this
+    # with only `policy_file=` set, no `policy=`/`kind_sets=`): for a
+    # policy_file whose base_policy isn't strict_abi (e.g. plugin_abi), a
+    # finding with no effective_verdict/reclassify/override match fell all
+    # the way back to strict_abi's own kind sets, silently ignoring the
+    # policy file's own base policy. For the no-policy_file case this is a
+    # pure simplification, not a behavior change: base_sets there is already
+    # computed as `resolve_kind_sets(policy, kind_sets)` -- identical to
+    # what this line used to recompute.
+    return effective_category(change, *base_sets)
+
+
+def reclassify_rule_for_change(
+    change: HasKind, policy_file: object | None, today: date | None = None
+) -> Any | None:
+    """Return the ``ReclassifyRule`` that actually decided *change*'s
+    effective verdict, or ``None`` if no rule did.
+
+    Mirrors :func:`effective_verdict_for_change`'s own precedence exactly: a
+    rule that *matches* but is shadowed by a higher-priority
+    ``effective_verdict`` (an ADR-027 pipeline modulation) or blocked by the
+    frozen-namespace verdict floor did not actually decide the change's
+    verdict, so it is not "the reclassifying rule" for disclosure purposes
+    even though :meth:`ReclassifyRule.matches` would say yes.
+
+    Used by ``reporter.py`` to stamp a per-change ``reclassified_by`` field
+    on the JSON report (Codex review: ``cli_pr_comment``'s
+    ``pr_comment._reclassified_count()`` only recognized the kind-global
+    ``policy_overrides`` map, so a PR comment silently omitted the
+    "reclassified by --policy-file" notice for a finding downgraded by a
+    selector-scoped ``reclassify:`` rule instead). Computing this from the
+    real ``Change`` object here -- rather than having ``pr_comment.py``
+    reimplement selector matching against the JSON report alone -- is
+    deliberate: a JSON-serialized change doesn't carry every selector field a
+    rule can match on (``type_pattern``/``member_name``/``namespace``/
+    ``entity_namespace``/``cause_namespace`` have no JSON counterpart), so a
+    JSON-only reimplementation could not be sound.
+
+    A matching rule whose ``to_verdict`` merely *restates* the verdict the
+    next-priority path (a same-kind ``overrides:`` entry, or the base policy)
+    would already have produced is a no-op, not a reclassification -- e.g.
+    ``func_removed: to: break`` under ``strict_abi``, where ``func_removed``
+    is already BREAKING (Codex review: a matching-but-no-op rule was still
+    stamping ``reclassified_by``, making the PR comment falsely report a
+    downgrade that never happened). Only a rule that actually *changes* the
+    verdict from what would apply in its absence counts as deciding it. That
+    comparison verdict is computed through the identical frozen-namespace
+    floor the ``overrides:`` branch below applies -- not the override's raw
+    value (Codex review, second round: a frozen-namespace finding with e.g.
+    ``overrides: func_removed: ignore`` plus ``reclassify: ... to: break``
+    would, absent the rule, already clamp back to BREAKING via the floor;
+    comparing against the raw COMPATIBLE override instead made the rule read
+    as deciding a verdict that was already going to be BREAKING anyway).
+    """
+    if isinstance(getattr(change, "effective_verdict", None), Verdict):
+        return None
+    rules = (
+        getattr(policy_file, "reclassify", None) if policy_file is not None else None
+    )
+    if not rules:
+        return None
+    base_policy = getattr(policy_file, "base_policy", None)
+    base_sets = resolve_kind_sets(base_policy, None)
+    base_v = effective_category(change, *base_sets)
+    overrides = (
+        getattr(policy_file, "overrides", None) if policy_file is not None else None
+    )
+    kind = change.kind
+    # The verdict that would apply if *this* reclassify rule didn't exist --
+    # the next step down the same precedence chain effective_verdict_for_change
+    # walks (a same-kind overrides: entry, else the base policy's own
+    # verdict), with the identical frozen-namespace floor clamp the overrides:
+    # branch below applies -- so a rule that merely restates it is recognized
+    # as a no-op regardless of which of the two it happens to restate, and
+    # regardless of whether the floor would already have clamped it.
+    if overrides and kind in overrides:
+        override_v = cast(Verdict, overrides[kind])
+        if (
+            _has_frozen_namespace_violation(change)
+            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
+        ):
+            next_priority_v = base_v
+        else:
+            next_priority_v = override_v
+    else:
+        next_priority_v = base_v
+    for rule in rules:
+        if rule.matches(change, today):
+            reclass_v = rule.to_verdict
+            # The verdict this matching rule *actually* produces, applying
+            # the identical frozen-namespace floor
+            # effective_verdict_for_change's own reclassify branch applies:
+            # when reclass_v is blocked, that branch returns base_v directly
+            # -- it never falls through to consult overrides:, even though
+            # overrides: would have applied had no reclassify rule matched
+            # at all (Codex review, third round: a blocked rule was
+            # previously always read as a no-op, but the real effective
+            # verdict it produces -- base_v -- can still differ from
+            # next_priority_v, e.g. a global `overrides: ... to: break` with
+            # a frozen-namespace `reclassify: ... to: ignore` blocked back
+            # to a weaker base_v than the override would have given: the
+            # rule genuinely changed the outcome from what overrides: alone
+            # would have produced, just not to the verdict it asked for).
+            effective_v = (
+                base_v
+                if (
+                    _has_frozen_namespace_violation(change)
+                    and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
+                )
+                else reclass_v
+            )
+            if effective_v == next_priority_v:
+                return None
+            return rule
+    return None

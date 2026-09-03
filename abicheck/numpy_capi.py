@@ -69,8 +69,14 @@ minimum NumPy this extension needs" question without it.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
+
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# detects them and re-exports them so the historical
+# ``from abicheck.numpy_capi import NumPyCapiSurface`` spelling keeps resolving.
+from .model.python_facts import (
+    NumPyCapiSurface as NumPyCapiSurface,
+)
 
 #: Hard cap on how much of a binary is read into memory to scan. Real NumPy
 #: C-API extensions are KB-to-low-single-digit-MB; this only bounds the
@@ -105,17 +111,6 @@ _TARGET_VERSION_RE = re.compile(
 )
 
 
-@dataclass
-class NumPyCapiSurface:
-    """One library's NumPy C-API consumption, from binary evidence alone."""
-
-    consumes_array_api: bool = False
-    consumes_ufunc_api: bool = False
-    #: The minimum NumPy release this module's compiled-in C-API usage
-    #: requires (NPY_TARGET_VERSION, or NumPy's own default when the build
-    #: didn't set one), e.g. ``"1.23"``. ``None`` when the target-version
-    #: string wasn't recoverable (a degraded-coverage case, not "no floor").
-    capi_target_version: str | None = None
 
 
 def extract_numpy_capi_surface(binary_path: Path) -> NumPyCapiSurface | None:

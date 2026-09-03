@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -208,7 +209,13 @@ def _m_virtual_method_added(tag: int):
     record the growth (DWARF/symbol-only blind spot) → VIRTUAL_METHOD_ADDED."""
     cls_name = f"Cv{tag}"
     n = len(cls_name)  # Itanium source-name length prefix (valid for multi-digit tags)
-    cls = RecordType(name=cls_name, kind="class", size_bits=64, vtable=[])
+    # ADR-063 Phase 5B: `bases`/`virtual_bases` stated explicitly (empty,
+    # not omitted) so `virtual_method_addition`'s evidence-completeness
+    # check reads a confirmed-empty transitive-bases walk, matching how
+    # every real producer constructs a base-less RecordType.
+    cls = RecordType(
+        name=cls_name, kind="class", size_bits=64, vtable=[], bases=[], virtual_bases=[]
+    )
     keep = Function(name=f"{cls_name}::foo", mangled=f"_ZN{n}{cls_name}3fooEv", return_type="void",
                     visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
     new = Function(name=f"{cls_name}::bar", mangled=f"_ZN{n}{cls_name}3barEv", return_type="void",
@@ -234,13 +241,124 @@ def _m_overload_added(tag: int):
             ChangeKind.OVERLOAD_ADDED, False)
 
 
+def _m_stack_canary_removed(tag: int):
+    """A binary-level (not function/type) mutation, unlike every entry above:
+    ``diff_platform_elf_dynamic._diff_security_hardening`` reads only
+    ``old.elf``/``new.elf`` container-level flags, so this fragment sets
+    ``elf`` instead of ``functions``/``types`` (see ``build_snapshot``'s
+    ``elf=extra.get("elf", ...)`` merge). ``tag`` is unused — there is no
+    per-instance identifier to keep unique, unlike the symbol-mangling
+    mutations above.
+
+    Only the weakening direction (canary present -> absent) is a finding;
+    the reverse (canary added) is a compatible improvement and emits
+    nothing (see ``ASYMMETRIC`` below) — G39 Phase 1 evidence_provenance:
+    ``("both:l0:elf_symtab",)``, since ``has_stack_canary`` is derived
+    purely from ``.dynsym`` import/symbol names."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_stack_canary=True)},
+        {"elf": ElfMetadata(has_stack_canary=False)},
+        ChangeKind.STACK_CANARY_REMOVED,
+        False,
+    )
+
+
+def _m_fortify_source_weakened(tag: int):
+    """Same shape as ``_m_stack_canary_removed`` above — a binary-level
+    (``elf``-fragment) mutation, weakening-direction-only."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_fortify_source=True)},
+        {"elf": ElfMetadata(has_fortify_source=False)},
+        ChangeKind.FORTIFY_SOURCE_WEAKENED,
+        False,
+    )
+
+
+def _m_relro_weakened(tag: int):
+    """G39 Phase 1 second sub-slice — same binary-level shape, weakening-
+    direction-only (strengthening RELRO emits nothing)."""
+    del tag
+    return (
+        {"elf": ElfMetadata(relro="full", bind_now=True)},
+        {"elf": ElfMetadata(relro="none")},
+        ChangeKind.RELRO_WEAKENED,
+        False,
+    )
+
+
+def _m_pie_disabled(tag: int):
+    """Weakening-direction-only (enabling PIE emits nothing)."""
+    del tag
+    return (
+        {"elf": ElfMetadata(is_pie=True)},
+        {"elf": ElfMetadata(is_pie=False)},
+        ChangeKind.PIE_DISABLED,
+        False,
+    )
+
+
+def _m_writable_executable_segment(tag: int):
+    """Introduction-direction-only (removing W+X emits nothing)."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_writable_executable_segment=False)},
+        {"elf": ElfMetadata(has_writable_executable_segment=True)},
+        ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
+        False,
+    )
+
+
+def _m_executable_stack_introduced(tag: int):
+    """Not asymmetric, unlike its siblings above: the reverse edit emits a
+    *different* kind (EXECUTABLE_STACK_REMOVED, an improvement) on the
+    identical symbol ("PT_GNU_STACK"), so forward/backward symbol sets
+    still agree -- see diff_platform_elf_dynamic._diff_elf_dynamic_
+    section's own comment for why both directions are real findings."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_executable_stack=False)},
+        {"elf": ElfMetadata(has_executable_stack=True)},
+        ChangeKind.EXECUTABLE_STACK,
+        False,
+    )
+
+
+def _m_executable_stack_removed(tag: int):
+    """The improvement-direction sibling of ``_m_executable_stack_introduced``."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_executable_stack=True)},
+        {"elf": ElfMetadata(has_executable_stack=False)},
+        ChangeKind.EXECUTABLE_STACK_REMOVED,
+        False,
+    )
+
+
 # Mutations whose reverse is legitimately a non-change, so touched-symbol
 # direction-symmetry does NOT hold and must not be asserted: making a virtual
 # method pure is a break, but the reverse (providing a concrete implementation)
 # is ABI-compatible and emits nothing. Adding an overload flags the original
 # declaration, but the reverse (removing the new overload) touches a different
 # symbol, so it is asymmetric too.
-ASYMMETRIC = {"_m_method_became_pure", "_m_overload_added"}
+ASYMMETRIC = {
+    "_m_method_became_pure",
+    "_m_overload_added",
+    # Both weakening-only hardening detectors (diff_platform_elf_dynamic.
+    # _diff_security_hardening): the reverse edit (canary/FORTIFY added) is
+    # a compatible improvement, deliberately not reported (see each
+    # mutation's own docstring above).
+    "_m_stack_canary_removed",
+    "_m_fortify_source_weakened",
+    # Same reason -- weakening-only, strengthening emits nothing.
+    "_m_relro_weakened",
+    "_m_pie_disabled",
+    "_m_writable_executable_segment",
+    # NOT asymmetric: EXECUTABLE_STACK/EXECUTABLE_STACK_REMOVED are two
+    # distinct real kinds on the same symbol, so forward/backward symbol
+    # sets still agree (see each mutation's own docstring above).
+}
 
 
 MUTATIONS: list[Mutation] = [
@@ -260,11 +378,26 @@ MUTATIONS: list[Mutation] = [
     _m_method_became_pure,
     _m_virtual_method_added,
     _m_overload_added,
+    _m_stack_canary_removed,
+    _m_fortify_source_weakened,
+    _m_relro_weakened,
+    _m_pie_disabled,
+    _m_writable_executable_segment,
+    _m_executable_stack_introduced,
+    _m_executable_stack_removed,
 ]
 
 
 def build_snapshot(version: str, context: dict, extra: dict) -> AbiSnapshot:
-    """Merge a shared *context* with a mutation *extra* into a snapshot."""
+    """Merge a shared *context* with a mutation *extra* into a snapshot.
+
+    ``elf`` falls back to the context's own value (never set by any
+    existing context builder — see ``_context()`` in
+    ``test_detector_properties.py`` — so this is always ``None`` there
+    today) when the mutation fragment itself doesn't set one, the same
+    "context provides the default, extra provides the override" pattern
+    the four list-valued fields already use.
+    """
     return AbiSnapshot(
         library="liboracle.so.1",
         version=version,
@@ -272,6 +405,7 @@ def build_snapshot(version: str, context: dict, extra: dict) -> AbiSnapshot:
         types=context.get("types", []) + extra.get("types", []),
         enums=context.get("enums", []) + extra.get("enums", []),
         variables=context.get("variables", []) + extra.get("variables", []),
+        elf=extra.get("elf", context.get("elf")),
     )
 
 

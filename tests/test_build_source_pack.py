@@ -27,6 +27,7 @@ from abicheck.buildsource import (
     BuildSourceManifest,
     BuildSourcePack,
     BuildSourceRef,
+    pack_io,
 )
 from abicheck.buildsource.adapters import (
     CMakeFileApiAdapter,
@@ -64,8 +65,8 @@ def test_empty_pack_write_load_roundtrip(tmp_path):
     pack = BuildSourcePack.empty(
         tmp_path / "p.evidence", abicheck_version="9.9", created_at="t0"
     )
-    pack.write()
-    loaded = BuildSourcePack.load(tmp_path / "p.evidence")
+    pack_io.write(pack)
+    loaded = pack_io.load(tmp_path / "p.evidence")
     assert loaded.manifest.abicheck_version == "9.9"
     # All standard subdirs were created.
     for sub in ("build", "source", "graph", "toolchain", "raw", "normalized"):
@@ -75,28 +76,28 @@ def test_empty_pack_write_load_roundtrip(tmp_path):
 def test_load_missing_manifest_raises(tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(FileNotFoundError):
-        BuildSourcePack.load(tmp_path / "empty")
+        pack_io.load(tmp_path / "empty")
 
 
 def test_content_hash_is_stable_across_created_at(tmp_path):
     """Two packs with identical evidence but different timestamps hash equal."""
     p1 = BuildSourcePack.empty(tmp_path / "a", created_at="2026-01-01")
-    p1.write()
+    pack_io.write(p1)
     p2 = BuildSourcePack.empty(tmp_path / "b", created_at="2099-12-31")
-    p2.write()
-    assert p1.content_hash() == p2.content_hash()
-    assert p1.content_hash().startswith("sha256:")
+    pack_io.write(p2)
+    assert pack_io.content_hash(p1) == pack_io.content_hash(p2)
+    assert pack_io.content_hash(p1).startswith("sha256:")
 
 
 def test_content_hash_changes_with_build_evidence(tmp_path):
     p1 = BuildSourcePack.empty(tmp_path / "a")
-    p1.write()
+    pack_io.write(p1)
     p2 = BuildSourcePack.empty(tmp_path / "b")
     p2.build_evidence = BuildEvidence(
         build_options=[BuildOption(key="std:CXX", value="c++20")]
     )
-    p2.write()
-    assert p1.content_hash() != p2.content_hash()
+    pack_io.write(p2)
+    assert pack_io.content_hash(p1) != pack_io.content_hash(p2)
 
 
 def test_content_hash_stable_across_coverage_detail_and_elapsed_s(tmp_path):
@@ -120,7 +121,7 @@ def test_content_hash_stable_across_coverage_detail_and_elapsed_s(tmp_path):
             elapsed_s=1.80,
         )
     ]
-    p1.write()
+    pack_io.write(p1)
     p2 = BuildSourcePack.empty(tmp_path / "b")
     p2.manifest.coverage = [
         LayerCoverage(
@@ -130,8 +131,8 @@ def test_content_hash_stable_across_coverage_detail_and_elapsed_s(tmp_path):
             elapsed_s=9.42,
         )
     ]
-    p2.write()
-    assert p1.content_hash() == p2.content_hash()
+    pack_io.write(p2)
+    assert pack_io.content_hash(p1) == pack_io.content_hash(p2)
 
 
 def test_content_hash_stable_across_source_abi_coverage_timing(tmp_path):
@@ -162,7 +163,7 @@ def test_content_hash_stable_across_source_abi_coverage_timing(tmp_path):
             "cache_hits": 0,
         },
     )
-    p1.write()
+    pack_io.write(p1)
     p2 = BuildSourcePack.empty(tmp_path / "b")
     p2.source_abi = SourceAbiSurface(
         library="libfoo.so",
@@ -177,15 +178,15 @@ def test_content_hash_stable_across_source_abi_coverage_timing(tmp_path):
             "cache_hits": 3,
         },
     )
-    p2.write()
-    assert p1.content_hash() == p2.content_hash()
+    pack_io.write(p2)
+    assert pack_io.content_hash(p1) == pack_io.content_hash(p2)
 
 
 def test_to_ref_roundtrip(tmp_path):
     pack = BuildSourcePack.empty(tmp_path / "p")
     pack.manifest.coverage = []
-    pack.write()
-    ref = pack.to_ref(path_hint="p.evidence/")
+    pack_io.write(pack)
+    ref = pack_io.to_ref(pack, path_hint="p.evidence/")
     ref2 = BuildSourceRef.from_dict(ref.to_dict())
     assert ref2.content_hash == ref.content_hash
     assert ref2.path_hint == "p.evidence/"
@@ -326,7 +327,7 @@ def test_embed_filters_coverage_to_layers_actually_embedded(tmp_path):
             layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT
         ),
     ]
-    pack.write()
+    pack_io.write(pack)
 
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
     embed_build_source(snap, build_info=tmp_path / "p", sources=None)
@@ -355,7 +356,7 @@ def test_embed_merges_coverage_from_both_packs(tmp_path):
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
     ]
     bi.manifest.extractors = [ExtractorRecord(name="compile-db", version="1")]
-    bi.write()
+    pack_io.write(bi)
 
     src = BuildSourcePack.empty(tmp_path / "src")
     src.source_abi = SourceAbiSurface(library="libfoo.so")
@@ -365,7 +366,7 @@ def test_embed_merges_coverage_from_both_packs(tmp_path):
         ),
     ]
     src.manifest.extractors = [ExtractorRecord(name="clang-source", version="2")]
-    src.write()
+    pack_io.write(src)
 
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
     embed_build_source(snap, build_info=tmp_path / "bi", sources=tmp_path / "src")
@@ -1931,10 +1932,10 @@ def test_inline_pack_content_hash_reflects_embedded_payloads():
     same = _pack("a.cpp")
 
     # Different embedded facts → different content hash; identical facts → equal.
-    assert a.content_hash() != b.content_hash()
-    assert a.content_hash() == same.content_hash()
+    assert pack_io.content_hash(a) != pack_io.content_hash(b)
+    assert pack_io.content_hash(a) == pack_io.content_hash(same)
     # The digest is non-empty (the payload actually contributed).
-    assert a.content_hash().startswith("sha256:")
+    assert pack_io.content_hash(a).startswith("sha256:")
 
 
 def test_embedded_and_ondisk_pack_hash_agree(tmp_path):
@@ -1948,6 +1949,6 @@ def test_embedded_and_ondisk_pack_hash_agree(tmp_path):
     embedded = BuildSourcePack(root=Path(""), build_evidence=ev)
     on_disk = BuildSourcePack.empty(tmp_path / "pk")
     on_disk.build_evidence = ev
-    on_disk.write()
+    pack_io.write(on_disk)
 
-    assert embedded.content_hash() == on_disk.content_hash()
+    assert pack_io.content_hash(embedded) == pack_io.content_hash(on_disk)

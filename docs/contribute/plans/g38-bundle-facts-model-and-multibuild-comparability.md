@@ -187,8 +187,12 @@ identified. Lowest risk, do first.
 
 **Implementation status (2026-08-23): the model, the mandatory parity test,
 and the producer (`--bundle-facts-out`) are shipped; the CLI consumer half
-is deliberately deferred.** Two real deviations from this section's original
-design, both discovered during implementation rather than planned up front:
+is deliberately deferred.** *(Update: the CLI consumer half shipped later —
+Phase 13 built its Python-API driver, Phase 17 gave it a real CLI surface,
+`compare --old-bundle-facts`. This note is kept as the historical record of
+this phase's own original scope, not a still-open item.)* Two real
+deviations from this section's original design, both discovered during
+implementation rather than planned up front:
 
 1. **No `BundleArtifactFacts`/persisted `ResolutionGraph`.** The sketch
    below assumed the resolution graph needed its own serialized form. It
@@ -388,6 +392,14 @@ plan, informed by whatever `BundleFacts` looked like in production by then.
 surface that discovers real per-variant `BundleFacts` and feeds them to
 `pair_variants` is deliberately deferred, the same posture Phase 2's own
 implementation-status note already took for its CLI consumer half.**
+*(Update: unlike Phase 2's CLI consumer half, this one did not later ship —
+Phase 15's own correction found it is not needed at all. The declarative CI
+pipeline that would have called `pair_variants()`
+(`check-project.yml`/G30's `bundles:`/`profiles:` schema) always resolves
+its baseline live, in-job, so it never needs to pair two already-captured
+`BundleFacts` documents in the first place; see Phase 15's "Why
+`bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec` stay
+unwired" note. This deferral is therefore permanent, not pending.)*
 
 - `abicheck/bundle_multibuild.py` implements `variant_fingerprint`,
   `VariantOutcome`, `VariantComparison`, `pair_variants`, and
@@ -435,12 +447,13 @@ implementation-status note already took for its CLI consumer half.**
   reporter's `bundle.json`/`bundle.md` yet (that's this phase's own
   "Reporter" row in "Files & surfaces", still open). Also not shipped: any
   CLI/config surface that discovers a release's real build variants,
-  extracts `BundleFacts` per variant, and calls `pair_variants` — that needs
-  the same real, separate design Phase 2's CLI consumer half deferred for
-  (most of `compare`'s release-fan-out option surface loses its per-variant
-  meaning once there is more than one old/new directory pair per release),
-  and `comparability.py`'s bundle-level fingerprint-mismatch refusal is
-  likewise not yet wired to this module's `variant_fingerprint`.
+  extracts `BundleFacts` per variant, and calls `pair_variants` — see Phase
+  15's later correction (this deferral turned out to be permanent, not
+  pending: the declarative CI pipeline that would have called it never
+  needs to, since it always resolves its baseline live rather than pairing
+  two already-captured `BundleFacts` documents) — and `comparability.py`'s
+  bundle-level fingerprint-mismatch refusal is likewise not yet wired to
+  this module's `variant_fingerprint`.
 
 **New module, `abicheck/bundle_multibuild.py`:**
 
@@ -1062,7 +1075,7 @@ table asks for.
 - **Shipped:** `bundle_intra_dep_signature_unverified`'s positive/negative
   cases (Phase 4) — see `tests/test_bundle_signature_evidence.py`, listed in
   the Phase 4 implementation-status note above.
-- New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
+- **Shipped:** `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
   and sensitivity: two builds differing only in an ABI-irrelevant flag, or
   only in `-std=`/build-derived defines, fingerprint **identically** (Phase
   3's own point — that drift is corroborated-comparable build state, not
@@ -1762,12 +1775,51 @@ bundle_variants_config.py`'s own module docstrings record this same table
 (re-measured at the time each was written) so a future contributor who
 splits one of these files has a concrete, checkable pointer to what should
 consume the room it frees, rather than rediscovering this constraint from
-scratch. Until then: `bundle_variants_config.py` also does not verify a
-captured `BundleFacts.variant_fingerprint` against what a declared spec's
-own `.fingerprint()` would compute for the same name — documented in that
-module's own `run_bundle_variant_pairing()` docstring as a second,
-narrower gap that a real config-discovery producer should close alongside
-the CLI wiring itself, once one exists.
+scratch.
+
+**Update (2026-09-01): both halves of this gap are now accounted for,
+neither by squeezing into the at-cap files this table measured.**
+`compare_release_against_bundle_facts()`'s own CLI surface shipped in
+Phase 17 below (`compare --old-bundle-facts`), via a new, split-out
+`frontends/cli/commands/compare_bundle_facts.py` dispatch module
+(ADR-061's migrated-package pattern) rather than a new option squeezed
+into one of the legacy files this table measured — sidestepping the
+constraint described above rather than resolving it in place.
+`run_bundle_variant_pairing()`'s own `.abicheck.yml` `bundle_variants:`
+wiring, by contrast, turned out not to need building at all: Phase 15's
+own correction (below) found that the declarative CI pipeline that would
+have been its caller (`check-project.yml`, via G30 P1.4/P1.5's
+`bundles:`/`profiles:` schema) always resolves its baseline live, in-job,
+so it never needs a mechanism for pairing two already-*captured*
+`BundleFacts` documents in the first place — see Phase 15's own "Why
+`bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec` stay
+unwired" note for the full reasoning. Neither half remains blocked on
+file-size room the way this section originally framed it; the table above
+is kept as the historical record of why this phase itself didn't attempt
+either at the time.
+
+**Fixed (Phase 13 follow-up, second pass):** `bundle_variants_config.py`'s
+own narrower, non-CLI-blocked gap — that it never verified a captured
+`BundleFacts.variant_fingerprint` against what a declared spec's own
+`.fingerprint()` would compute for the same name — is closed.
+`run_bundle_variant_pairing()` gained an opt-in `verify_fingerprints: bool
+= False` parameter: when `True`, a name present in both `specs` and one of
+the facts maps whose captured, *non-default* `variant_fingerprint`
+disagrees with `specs[name].fingerprint()` raises
+`BundleVariantsConfigError` (the wrong file assigned to the wrong declared
+variant name), while a facts file still carrying the
+`DEFAULT_VARIANT_FINGERPRINT` sentinel — what every `--bundle-facts-out`
+capture produces today, since no real capture pipeline can be told a
+variant name yet — is never flagged, since it was never captured against
+any declared coordinates to verify against. Default `False` so every
+pre-existing caller (this module's own test suite included, which pairs
+specs against arbitrary sentinel fingerprints unrelated to any real
+coordinates) is unaffected. This does not need the CLI/`BuildConfig`
+wiring above — it is a pure addition to the already-shipped Python-API
+`run_bundle_variant_pairing()` function — so it was safe to close
+independently of the CLI-surface gap above (itself now resolved, per the
+Update note above, rather than still open). See
+`tests/test_bundle_variants_config.py::TestRunBundleVariantPairingVerifyFingerprints`.
 
 The original multi-binary performance problem (repeated header/AST
 extraction across sibling DSOs sharing one source tree) is explicitly out
@@ -1776,6 +1828,765 @@ Phase 4's wiring introduced, it does not address the pre-existing
 per-binary extraction cost. That remains its own, separately-scoped
 initiative (shared/content-addressed evidence storage, memory-aware
 scan scheduling), not additional G38 phase surface.
+
+### Phase 13 follow-up — real-world assessment of the driver, all three gaps closed
+
+A follow-up assessment, exercising `compare_release_against_bundle_facts()`
+against a real, mixed-toolchain oneDAL-shaped release (a `-fsycl`/`icpx`
+`dpc` library alongside plain-C++ `daal`/`oneapi::dal` libraries sharing one
+umbrella header tree), reported three gaps. All three are now small and
+precisely specified rather than architectural — all three are fixed, the
+first later than the other two:
+
+1. **Fixed, later — Phase 17.** At the time this follow-up was written,
+   adoption still needed a committed Python step calling
+   `compare_release_against_bundle_facts(...)` directly, not `uses:
+   abicheck/abicheck@sha` with a bare CLI flag, for the same file-size-cap
+   reason the "Known gap" note above gives. Phase 17 below closed this: a
+   real `compare --old-bundle-facts` CLI flag, reachable from a plain
+   `abicheck compare old.bundlefacts.json new-release/ --old-bundle-facts`
+   invocation with no committed driver script — see Phase 17's own
+   "Shipped implementation" list for exactly how it landed without
+   squeezing into any of the at-cap files this note used to name.
+2. **Fixed.** The driver's `service.resolve_input()` call never forwarded
+   `header_backend`/`compile`, so a header-scoped NEW side always resolved
+   under the library's own `header_backend="auto"` default — absent a real
+   castxml on the host, `resolve_input` still picks castxml first and dies
+   in seconds on a clang/icpx-only host rather than falling back. The
+   assessment's own monkeypatch injecting
+   `CompileContext(gcc_path="icpx", gcc_option_tokens=("-fsycl",
+   "-DONEDAL_DATA_PARALLEL", "-std=c++17"), frontend="clang")` directly into
+   `service.resolve_input` is what produced its one successful (35-minute,
+   10.2 GB peak RSS) header-scoped run — proof the fix works, not a
+   supported way to reach it. Both kwargs are now real, forwarded
+   parameters on `compare_release_against_bundle_facts()` itself; no
+   monkeypatch needed.
+3. **Fixed, additively.** `headers`/`includes`/`compile` applied uniformly
+   to every matched library — correct only when every library in the
+   bundle shares one header tree and one compile configuration, which does
+   not hold for oneDAL's own mix (plain C++ `daal`/`oneapi::dal` alongside
+   `-fsycl`/`icpx` `dpc`): the assessment's header-scoped run in practice
+   parsed the `daal` library's headers under the `dpc` library's own
+   SYCL/DPC++ flags, since there was no way to say otherwise. That run is
+   therefore correctly characterized as a **cost proof** (the driver
+   completes end to end in bounded time/memory against a real multi-library
+   release) rather than a **correctness proof** (every library's headers
+   parsed under its own real compile configuration) — the two are
+   different claims, and only the former was actually demonstrated. New
+   optional `per_library_headers`/`per_library_includes`/
+   `per_library_compile` `{canonical_name: ...}` maps are now consulted
+   before the uniform fallback per matched library, so a caller can give
+   `dpc` its own SYCL flags while `daal`/`oneapi::dal` fall back to the
+   plain-C++ uniform default (or vice versa) — a library absent from a
+   given override map still falls back to that map's own uniform sibling,
+   so only the libraries that actually differ need naming. The function's
+   own docstring states the cost-proof-vs-correctness-proof distinction
+   explicitly, so a future caller running with only the uniform fallback
+   against a mixed-toolchain bundle cannot mistake the resulting exit code
+   for a per-library-correct comparison.
+
+Regression coverage for both fixes, in
+`tests/test_bundle_side_input.py::TestCompareReleaseAgainstBundleFactsResolutionUnit`:
+`test_header_backend_and_compile_are_forwarded` (pins that both kwargs reach
+`service.resolve_input` unchanged, replacing the need for the assessment's
+own monkeypatch) and `test_per_library_overrides_win_over_the_uniform_fallback`
+(a two-library fixture confirming a `per_library_*` entry for one library
+doesn't leak onto a library absent from that same map, which still receives
+the uniform `headers`/`compile` default).
+
+### Phase 14 — Decouple diff-derived bundle detectors from public-surface scoping (SHIPPED)
+
+**Origin:** external upstream-only review (base commit `327df7b5616bcf
+aea8c330aad418b796c17f3970`, PRs #860/#883 merged), items 7 and 8 of its
+P1 list. Read alongside `docs/use/multi-binary.md`'s own "Diff-derived
+detectors inherit scoping indirectly, through starvation" section, which
+already documents the mechanism this phase exists to fix — that section
+stays accurate as a description of *today's* behavior; this phase is what
+makes it stop being the correct behavior for the bundle-internal case.
+
+**Finding:** the bundle layer has two detector families, and only one of
+them is safe against public-header scoping. Graph-native detectors
+(`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`,
+version-drift, manifest enforcement — see the "Graph-native detectors
+ignore public-surface scoping entirely" section of `multi-binary.md`) work
+directly from the bundle's own ELF resolution graph and are unaffected.
+Diff-derived detectors (`bundle_intra_dep_signature_changed`,
+`bundle_intra_type_changed`, `bundle_provider_changed`) are computed by
+scanning each library's *already public-surface-scoped* `DiffResult.
+changes` for the specific kinds they promote — so when `--scope-public-
+headers` removes the underlying provider-side change because the changed
+symbol isn't part of that library's own public API, the bundle detector
+never sees it and never promotes it, even though the symbol is very much
+part of the *bundle's* internal linkage contract between two sibling DSOs.
+
+This is unsafe specifically for an internal C ABI between siblings:
+`libcore.so` exports an internal C function with no public header at all;
+`libmath.so` imports it via `DT_NEEDED`; the function's signature changes
+incompatibly. The external SDK report may correctly classify the symbol as
+non-public (that classification is *correct* for the "did the public API
+change" question) — but the shipped bundle still breaks at load/call time,
+and today's diff-derived detectors are starved of the evidence needed to
+say so.
+
+**Each of the three detectors has its own, already-shipped reachability
+mechanism, and none of them should be replaced with a uniform "actual
+sibling `DT_NEEDED` import" gate — verified against all three functions
+directly, correcting an earlier draft of this section that got one of the
+three wrong.**
+
+- `_detect_intra_dep_signature_changed()` genuinely does gate on an import-
+  resolution edge already: it calls `new.resolution.consumers_of(change.
+  symbol)` and `_consumer_resolves_via_provider()`, i.e. a real "does this
+  sibling actually import and resolve this exact symbol against this
+  provider" check — this part of the earlier description was correct.
+- **`_detect_intra_type_changed()` is not gated on an import edge at
+  all, and must not become so.** Verified directly: its reachability
+  computation (`consumer_reach`) is a **name-embedding match against every
+  other library's own symbol table** — "does `stripped(type_name)` appear
+  as a substring in some sibling's exported (`public_hit`) or internal
+  (`internal_hit`) symbol name" — with no call to `resolution.consumers_of`
+  or any other import-graph primitive anywhere in the function. Its own
+  docstring documents this explicitly as a "conservative heuristic," not
+  an import-based check, and states the reason: a type layout change
+  affects every mangled symbol that embeds the type's name in its
+  template/signature encoding, regardless of whether the consumer's own
+  build happens to import a *specific symbol* from the provider —
+  requiring an actual `DT_NEEDED`-resolved import edge here would be a
+  **new, strictly narrower** gate than the detector's shipped semantics,
+  dropping a case its own reachability rule is designed to catch: a
+  sibling that publicly re-exposes the provider's type in its own exported
+  signature (embedding the type name in its own mangled symbols) without
+  necessarily having an import-resolution edge to the *specific* changed
+  symbol the provider-side diff names.
+- `_detect_provider_changed()` (`bundle.py`) is a third, distinct shape
+  again: it emits `bundle_provider_changed` whenever a mangled symbol is
+  removed from one library and added, under the same name, to a different
+  library in the same release — **unconditionally, with no reachability
+  check of any kind today** — because a provider move is exactly as
+  breaking for an *external* consumer statically/dynamically linked
+  against the old provider's DSO as it is for a bundle sibling; ADR-023
+  and the current implementation both treat the finding as protecting that
+  external-consumer case, not only an intra-bundle one. Adding any
+  reachability requirement here — import-edge or otherwise — before
+  promoting `bundle_provider_changed` would silently drop that existing
+  protection for the (arguably more common) external-consumer case
+  whenever no bundle sibling happens to reach the moved symbol — a real
+  regression relative to today's behavior, not a refinement of it.
+
+**Planned fix:** maintain two separate views rather than one scoped
+`DiffResult` feeding both questions:
+
+- the **external public-contract view** — today's already-scoped
+  `DiffResult`, unchanged, answering "did the public API change" for the
+  standalone per-library report;
+- a **bundle-internal linkage-contract view** — either the unscoped raw
+  per-library changes, or raw old/new signature and type evidence computed
+  independently of `--scope-public-headers` — that all three diff-derived
+  bundle detectors consume instead of the scoped view. Public scoping
+  continues to determine the standalone library's own verdict; it must
+  never again be the mechanism that silently erases evidence needed to
+  prove a sibling DSO no longer works.
+- **on top of the unscoped view, each detector keeps its own,
+  already-shipped reachability rule unchanged — none is replaced with a
+  uniform import-edge gate:**
+  - `bundle_intra_dep_signature_changed` continues requiring the same
+    `resolution.consumers_of()`/`_consumer_resolves_via_provider()`
+    import-resolution check it already has, just evaluated against
+    unscoped rather than scoped evidence.
+  - `bundle_intra_type_changed` continues requiring the same
+    name-embedding symbol-table match (`consumer_reach`, `public_hit`/
+    `internal_hit`) it already has — **not** an import-resolution edge —
+    also evaluated against unscoped evidence. Its existing
+    internal-vs-public demotion (`Verdict.COMPATIBLE_WITH_RISK` when the
+    match is only against a sibling's internal symbols) is unaffected.
+  - `bundle_provider_changed` keeps its current, unconditional promotion
+    rule unchanged (unscoped evidence only, no reachability requirement of
+    any kind added) — the fix for this detector is purely "stop losing the
+    underlying change to public-header scoping," not a new gate.
+
+The reachability requirement matters as much as the unscoping, for the two
+detectors that have one: an internal, headerless change with **no**
+sibling reaching it under that detector's *own* existing rule must not
+become a `bundle_intra_dep_signature_changed` (no resolved import edge) or
+`bundle_intra_type_changed` (no name-embedding match, public or internal)
+finding just because scoping no longer filters it. `bundle_provider_changed`
+is not subject to any reachability requirement, per the previous
+paragraph.
+
+**Acceptance tests:** (1) an internal, headerless C export consumed by a
+sibling changes from `int(int)` to `long(long)`. The standalone external
+API report may demote/filter it (unaffected, by design). The bundle report
+must emit a consumer-attributed `bundle_intra_dep_signature_changed`
+breaking finding. The identical change with no sibling consumer must not
+become a bundle break. (2) an internal, headerless C export with no
+public header moves from `libcore.so` to `libmath.so` between releases,
+with no sibling DSO importing it at all. The standalone external report
+may demote/filter the per-library removal (unaffected, by design). The
+bundle report must still emit `bundle_provider_changed` for the move —
+confirming the fix does not regress the existing external-consumer
+protection by requiring a sibling import that this detector never
+required before. (3) an internal, headerless type changes layout in
+`libcore.so`, and a sibling `libmath.so` publicly re-exports the type by
+embedding its name in one of `libmath.so`'s own exported (mangled) symbols
+— with **no** `DT_NEEDED` import-resolution edge from `libmath.so` to the
+specific changed symbol in `libcore.so` (e.g. the type reaches `libmath.so`
+only via a shared header, not via a call to a provider symbol). The
+standalone external report may demote/filter the per-library change
+(unaffected, by design). The bundle report must still emit
+`bundle_intra_type_changed` for this case — confirming the unscoping fix
+does not regress `_detect_intra_type_changed()`'s existing name-embedding
+reachability rule by wrongly requiring an import edge this detector never
+required before.
+
+**Files & surfaces — routed through ADR-061's canonical package owners, not
+grown in the frozen legacy modules that currently host this logic**
+(`bundle.py`/`bundle_side_input.py` are both listed in `architecture/
+modules.yaml`'s `legacy_root_modules` no-growth inventory, and
+`cli_compare_release.py` is a `frozen_root_families["cli_"]` entry — new
+behavior belongs in the target layer, with only a thin call added to the
+existing legacy entry point):
+
+- **`abicheck/compare/`** — the new raw, unscoped signature/type-matching
+  logic itself (a `compare/`-owned sibling to today's
+  `_detect_intra_dep_signature_changed`/`_detect_intra_type_changed`/
+  `_detect_provider_changed`, since this is "match old/new entities or
+  identify a raw change" per ADR-061's routing table) plus each sibling's
+  own, already-shipped reachability rule, unchanged in kind: an
+  import-resolution check (`resolution.consumers_of()`/
+  `_consumer_resolves_via_provider()`) for `_detect_intra_dep_signature_
+  changed`, a name-embedding symbol-table match (`consumer_reach`) for
+  `_detect_intra_type_changed` — **not** the same mechanism as its
+  sibling, despite both being "gated" in some sense — and no reachability
+  check at all for `_detect_provider_changed`, which consumes the unscoped
+  view unconditionally (see the "Finding"/"Planned fix" sections above).
+- **`abicheck/workflows/`** — coordination that decides when to invoke the
+  new `compare/` matcher (alongside the existing graph-native detectors)
+  and folds its output into `BundleDiffResult`, rather than this decision
+  living inline in `bundle.py`/`bundle_side_input.py` directly.
+- **`abicheck/frontends/`** — the CLI-level plumbing that supplies the
+  unscoped evidence to `workflows/` for the `compare-release` fan-out
+  (today's `cli_compare_release.py`/`cli_compare_release_helpers.py` call
+  sites gain only the minimal forwarding needed, not new detector logic).
+- `bundle.py`/`bundle_side_input.py`/`cli_compare_release.py` keep their
+  existing call shape (`compare_bundle()`'s own signature, `analyze_bundle()`),
+  extended with a second, parallel `unscoped_results`/raw-evidence
+  parameter that is threaded straight through to the new `compare/`/
+  `workflows/` code — likely as a second, parallel argument rather than
+  re-running the per-library compare a second time with scoping disabled
+  (that would double the extraction cost this initiative's own Phase
+  8/13-follow-up work is careful to bound).
+
+**Effort:** M — the reachability-gating logic already exists in spirit for
+the graph-native detectors; the new work is threading a second, unscoped
+evidence view to the three diff-derived detectors without doubling
+per-library compare cost, plus updating `docs/use/multi-binary.md`'s
+"Diff-derived detectors inherit scoping indirectly" section once this
+phase ships (it will no longer be an accurate description of the shipped
+behavior).
+
+**Shipped**, in a materially cheaper shape than this phase's own text
+above assumed, and with the ADR-061 routing explicitly *not* done --
+both discovered only once implementation started, not designed for up
+front.
+
+- **The "second, unscoped evidence view" already existed, at zero extra
+  extraction cost.** `DiffResult.out_of_surface_changes` (`checker_
+  types.py`) already carries every change `post_processing.
+  FilterNonPublicSurface` demoted for being outside the public-header
+  surface -- ADR-024 §D4/D5's "recorded, never silently dropped" ledger,
+  wired since long before this phase. The "second raw evidence view...
+  computed independently of `--scope-public-headers`" this phase's own
+  "Planned fix" section above sketched as needing new extraction plumbing
+  through `workflows/`/`frontends/` turns out to already be sitting on the
+  object every caller already has: `diff.changes + diff.out_of_surface_
+  changes`. No new compare pass, no doubled extraction cost, no new
+  workflow/frontend surface -- the fix is a one-line change to what each
+  detector iterates, at each of the three call sites.
+- **ADR-061 `compare/`-package routing is not reachable today, and was
+  not attempted, for the identical reason G38 Phase 16 already
+  documented for its own resolver.** `architecture/debt.yaml` names
+  `compare` as `bundle.py`'s own migration target -- but `compare/`'s
+  `may_import` (`architecture/modules.yaml`) is `["model"]` only, and
+  every type this logic operates over (`ChangeKind`, `BundleFinding`,
+  `ElfSymbol`) is an unclassified `legacy_root_module`, not part of
+  `model`. Verified rather than assumed: attempting a sibling flat module
+  (`abicheck/bundle_diff_derived_detectors.py`, following the
+  established `bundle_resolution_reachability.py` precedent for a
+  second bundle-level module `bundle.py` imports) was tried first and
+  rejected outright by `check_architecture.py`'s own
+  `frozen-root-family`/`root-module` checks -- unlike the no-growth
+  ledger (which gates *existing* file line counts), these two checks
+  reject *any* file not already named in `architecture/modules.yaml`'s
+  closed `frozen_root_families`/`legacy_root_modules` enumeration,
+  regardless of size. There is no flat-module escape valve at all for
+  new production code; only a real classified-package home or an
+  in-place edit to an already-listed file is accepted. Implemented as
+  the latter instead: the fix is entirely in-place inside `bundle.py`
+  itself (also pinned at an exact 2000-line no-growth baseline), each of
+  the three detector functions' own `for change in diff.changes:` line
+  changed to iterate `diff.changes + diff.out_of_surface_changes`
+  instead -- a content edit to an existing line, not a new one -- with
+  each function's docstring extended to document why, offset by
+  compacting a few genuinely collapsible pre-existing multi-line
+  conditionals elsewhere in the same file (no logic change) so the file
+  lands one line *under* its pinned baseline rather than over it.
+- **A narrower, previously-undocumented gap found while writing this
+  entry: suppression asymmetry between the two change sources now being
+  combined.** `post_processing.py`'s own step ordering runs
+  `FilterNonPublicSurface` before `ApplySuppression`, so a change already
+  demoted to `out_of_surface_changes` never reaches `ApplySuppression` at
+  all -- it was never checked against a `--suppress` rule, whereas a
+  change that stayed in `diff.changes` was. Combining the two sources
+  means a `--suppress` rule targeting an internal-only symbol has no
+  effect on the newly-visible out-of-surface half of the combined view,
+  even though it already suppressed the in-surface half before this
+  phase. Documented as a known, deliberately-undosed gap in
+  `bundle.py`'s own docstrings and in `docs/use/multi-binary.md`'s
+  updated suppression section, rather than solved here: re-running
+  suppression against the out-of-surface ledger specifically is a real,
+  separate behavior change to what `--suppress` reaches (needing its own
+  verification), not a silent side effect of this fix.
+- `docs/use/multi-binary.md`'s "Diff-derived detectors inherit scoping
+  indirectly, through starvation" section is rewritten to describe the
+  shipped behavior (scoping no longer starves these three detectors;
+  suppression still does, for the in-surface half only).
+
+Regression coverage: `tests/test_bundle_diff_derived_scoping.py` (a new
+file -- `tests/test_bundle.py` carries the identical no-growth pin
+`bundle.py` does, so a genuinely new test class needs a new file),
+reproducing this phase's own three acceptance scenarios directly against
+a `DiffResult` whose relevant `Change` lives *only* in
+`out_of_surface_changes`: (1) an internal signature break with a
+resolving sibling consumer promotes, the identical break with no
+resolving consumer does not (unchanged reachability rule); (2) an
+internal provider move between two libraries with no bundle sibling
+importing it at all still promotes (confirming no reachability
+requirement was added); (3) an internal type-layout change reachable
+only via a sibling's own exported (mangled) symbol name -- no DT_NEEDED
+edge at all -- still promotes (confirming the name-embedding rule was
+not replaced with an import-edge requirement). All three positive cases
+confirmed to fail against the pre-fix `bundle.py` (`git stash` on that
+one file); the negative-reachability control passes on both.
+
+### Phase 15 — Declarative-pipeline wiring: `check-project.yml`/Action/CLI for `BundleFacts` and variants (SHIPPED — via G30, not via this phase's own original design)
+
+**Origin:** same external review, item 8. Phase 13/13-follow-up above
+shipped the *Python-API* half of item 8 — `BundleSideInput`/
+`resolve_bundle_side()`/`compare_bundle_sides()` (live/live, stored/live,
+live/stored, stored/stored all through one `analyze_bundle()`
+orchestrator), plus `bundle_variants_config.parse_bundle_variants_config()`/
+`run_bundle_variant_pairing()`, implementing the exact `bundle_variants:`
+shape (`target_triple`/`feature_toggles`/`required`) the review's own
+sketch proposes.
+
+**This section previously described the CI-declarative half as blocked on
+a real, unsolved "cross-job assembly problem": no mechanism for one
+`check-project.yml` matrix cell's snapshot to reach a later "bundle
+dispatch" job, and no `DiffResult.to_dict()`/`from_dict()` to reconstruct a
+per-member comparison result across a job boundary. That framing was
+itself stale — the third time this document's own prose has drifted from
+shipped reality (after Phase 17's operand-kind-detection sketch and this
+same phase's own file-split-blocker text, both corrected earlier). A
+separate initiative, **G30 P1.4/P1.5** (`abicheck/buildsource/run_plan.py`,
+`abicheck/buildsource/project_targets.py`) plus **ADR-047**'s declarative
+`targets:`/`bundles:`/`profiles:`/`baseline:` `.abicheck.yml` schema, wired
+into `check-project.yml`, landed after this phase's text was written and
+was never cross-referenced here. It already satisfies this phase's own
+acceptance bar — via a fundamentally different design than the one this
+section used to assume, which is why the "assembly problem" it worried
+about turns out not to apply.**
+
+**Why no cross-job assembly is needed.** The blocked design this section
+used to describe assumed one job must capture a snapshot for a *later* job
+to reassemble. The shipped design instead makes each `(bundle, profile)`
+pair its own independent `check-project.yml` matrix cell —
+`run_plan.py`'s `generate_run_plan()` loops `for check in bundle.checks:
+for profile_id in profile_ids: ...` (`run_plan.py:825-911`), emitting one
+`RunPlanCheck` per cell, each carrying exactly one `profile_id` — and each
+cell resolves its **own baseline live, in-job**, via `resolve-baseline`
+(`actions/check-target/action.yml:604`: `old-library: ... inputs.kind ==
+'bundle' && steps.resolve.outputs.binaries-dir`). Baseline resolution
+never crosses a job boundary in this design, so "cell A's snapshot must
+reach cell B" — the problem `DiffResult` serialization/recompute would
+have solved — never arises for it. This is not a smaller version of the
+same problem; it is a different architecture that doesn't have the
+problem.
+
+**The acceptance bar, checked against what this shipped design actually
+proves:**
+
+- **"Old CPU pairs only with new CPU, old DPC pairs only with new DPC,
+  never unioned"** — true by construction: a generated `RunPlanCheck` cell
+  carries exactly one `profile_id`, with its own independent
+  baseline/candidate resolution, so no code path can union two profiles'
+  facts even accidentally. Proven for a bundle spanning two sibling
+  required ELF profiles by
+  `tests/test_run_plan_bundle_multi_profile.py::TestBundleAcrossTwoRequiredVariantProfiles::test_two_required_variant_profiles_produce_two_independent_bundle_checks`
+  (added alongside this correction — the pre-existing `test_run_plan.py`
+  bundle tests only exercised one ELF profile plus a non-participating
+  Windows profile, not two profiles both required).
+- **"Missing required DPC is a coverage regression"** — a hard,
+  run-plan-generation-time error, **provided the bundle's check declares
+  an explicit `checks[].profiles:` selector** naming every mandatory
+  profile (e.g. `profiles: [cpu, dpc]`). Proven by
+  `tests/test_run_plan.py::TestBundleChecks::test_bundle_check_errors_when_a_member_is_missing_and_profile_is_explicit`
+  and `::test_bundle_check_missing_build_output_for_an_explicit_profile_is_an_error`
+  (single-profile shape, pre-existing) plus
+  `test_run_plan_bundle_multi_profile.py`'s
+  `test_missing_required_variant_profile_is_a_hard_run_plan_error`/
+  `test_required_variant_profile_entirely_absent_is_a_hard_run_plan_error`
+  (two-required-profile shape, added alongside this correction). **The one
+  real authoring requirement this phase's own investigation surfaced**:
+  omitting `profiles:` (the "implicit sweep") instead treats a
+  non-participating profile as a silent, valid skip — correct for "this
+  profile legitimately doesn't build this bundle" (a Windows-only profile
+  skipping a Linux-only bundle), wrong for "this variant is mandatory and
+  went missing." A project author declaring a genuinely mandatory
+  multi-variant bundle must use the explicit selector, not the implicit
+  sweep — a config-authoring convention to document (`docs/reference/
+  project-targets-schema.md`), not a missing capability.
+  `generate_run_plan()`'s failure is also partial, not atomic worth noting
+  precisely: a still-valid profile's cell (e.g. `cpu`) stays in
+  `plan.checks` even when a sibling required profile (`dpc`) fails — but
+  `report.ok` is `False` either way, and `cli_project.py`'s `project plan`
+  command does `sys.exit(0 if report.ok else 1)` regardless of
+  `plan.checks`'s contents, so the `plan` job (and, via `check-project.yml`'s
+  own `needs:` chain, the whole run) still fails loudly.
+- **"Facts from variants are never unioned"** — same structural guarantee
+  as the first bullet; nothing to add.
+- **"Live/live and stored/live runs produce equivalent normalized
+  findings"** — Phase 12's own guarantee, extended by Phase 13,
+  independent of this phase's CI-wiring question.
+
+**Why `bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec`
+(Phase 13) stay unwired into `.abicheck.yml` — a deliberate design fact,
+not a lingering gap.** They solve a genuinely different problem than the
+one `check-project.yml`'s declarative pipeline has: pairing two
+already-*captured*, already-serialized `BundleFacts` documents for a
+caller with **no live access to the old binaries** — the Python-API/
+stored-facts consumer G38 Phase 17's `compare --old-bundle-facts` surface
+serves. The CI declarative pipeline always has live baseline access (via
+`resolve-baseline`), so it never needs that pairing mechanism; wiring
+`bundle_variants:` into `.abicheck.yml` on top of the already-sufficient
+`profiles:`/`bundles:` mechanism would be a second, redundant way to
+express the same declaration, not a missing one.
+
+**Do not implement `depth: source` for bundles by simply passing headers
+and sources to a directory operand** (the review's own explicit caution,
+still holds) — that reintroduces exactly the per-binary extraction-cost
+regression Phase 9 was written to close and the mixed-toolchain
+per-library-compile-context gap Phase 13-follow-up's fix #3 closed. Route
+`depth: source` bundle checks through the already-shipped
+`compare_release_against_bundle_facts()`/per-library override maps
+instead.
+
+**Out of scope, unchanged:** the measurement-harness and SARIF-output
+items the original review also raised for this phase remain genuinely
+separate, unstarted work — nothing in this correction touches them.
+
+**Effort:** none remaining — every acceptance-bar invariant is proven by an
+existing or newly-added test against already-shipped code (G30 P1.4/P1.5 +
+ADR-047), with no new production code needed. The only artifact this
+phase's finalization produced is the missing test coverage for the
+two-required-profile shape
+(`tests/test_run_plan_bundle_multi_profile.py`) and this section's own
+correction.
+
+### Phase 16 — Thread a resolved `PolicyFile` into the release fan-out's own bundle analysis (SHIPPED)
+
+**Origin:** Codex review on the PR that documented Phase 14/15 above,
+verified against current source, not assumed. `compare_bundle()`/
+`analyze_bundle()` both accept an optional `policy_file: PolicyFile |
+None` (see this plan's own docstring excerpt for `compare_bundle`'s
+`policy_file` parameter above), and the stored-`BundleFacts` Python-API
+driver (`bundle_facts.compare_bundle_from_facts()`,
+`bundle_side_input.compare_bundle_sides()`/
+`compare_release_against_bundle_facts()`) already resolves and forwards a
+real one. **The CLI's directory/package `compare-release` fan-out does
+not**: `cli_compare_release_helpers._run_bundle_analysis()` calls
+`analyze_bundle(..., policy=policy, ...)` with only the bare
+policy-profile-name string, and its caller,
+`_collect_bundle_result()`, has no `policy_file` parameter at all —
+confirmed by reading both functions and their one caller in
+`cli_compare_release.py`. So a `--policy custom.yaml` document's
+`overrides:` entry for a `bundle_*` kind still has no effect on the
+release fan-out's own aggregate `bundle_verdict` today, even though the
+capability to honor one now exists two calls away.
+
+**Fix:** thread the release fan-out's already-resolved `PolicyFile` (the
+same one `_load_suppression_and_policy`/`policy_file_with_packs` already
+build for per-library scoring in this same module — see
+`_load_probe_matrix_changes`'s sibling handling a few functions over) into
+`_collect_bundle_result()`'s and `_run_bundle_analysis()`'s signatures and
+onward into `analyze_bundle(..., policy_file=pf, ...)`, mirroring exactly
+what the stored-facts driver already does. This is a narrow, mechanical
+change — the capability, its Python-API plumbing, and its stored-facts
+caller are all already shipped; only this one live-comparison caller is
+missing the thread-through.
+
+**Acceptance test:** `compare-release` two directories with a `--policy
+custom.yaml` document overriding `bundle_intra_dep_removed` to
+`compatible`; the release's aggregate `bundle_verdict` must reflect the
+override (previously: unaffected, always scored under the bare policy
+name's coarse three-way switch).
+
+**Effort:** S — the blocking file-size-cap constraint documented in Phase
+13's table applies to *adding a new CLI surface* (a flag, a config block);
+this phase adds no new flag, only forwards an already-resolved local
+variable one call deeper, so it was never blocked by that constraint the
+way Phase 13's own literal CLI/config surface once was — see Phase 13's
+own "Update" note and Phase 15's corrected section for how that later
+resolved (shipped via Phase 17's split-out module, in one case; found to
+be permanently unnecessary, in the other) rather than by relieving the
+file-size room this table measured.
+
+**Shipped**, in a materially different shape than the first pass, once
+`architecture/debt.yaml`'s no-growth pin on `cli_compare_release.py`
+*and* `cli_compare_release_helpers.py` (ADR-061 -- both are frozen at
+their exact adoption-time line count, not merely the AI-readiness
+2000-line hard cap) turned out to also gate this phase, caught by Codex
+review after the first pass landed a new resolver function inside
+`cli_compare_release_helpers.py` and grew both frozen files. Two changes
+from that finding:
+
+- **The resolver lives in `abicheck/pack_application.py`**
+  (`resolve_bundle_policy_file()`), not in `cli_compare_release_helpers.py`
+  -- the same `_load_suppression_and_policy()` then, when a `--pack` was
+  resolved, `policy_file_with_packs()` pattern `_collect_matrix_result()`
+  already uses a few functions over in `cli_compare_release.py`, just
+  homed in a module with no no-growth pin (`pack_application.py` isn't in
+  `architecture/debt.yaml` at all) rather than one that is.
+- **`_run_bundle_analysis()` itself is untouched -- no `policy_file`
+  parameter, no forwarding to `analyze_bundle()`.** `BundleDiffResult.
+  policy_file` is a plain mutable dataclass field (not frozen) and
+  `bundle_verdict` is a lazily-computed `@property` that reads it at
+  *access* time, not construction time -- so `_collect_bundle_result()`
+  (which does still gain a `policy_file` parameter, since it's the one
+  place both the resolved value and the `BundleDiffResult` it must land on
+  are both in scope) simply does `bundle_result.policy_file = policy_file`
+  right after `_run_bundle_analysis()` returns, *before* reading
+  `bundle_result.bundle_verdict` to fold into the release's `worst_verdict`
+  a few lines later. This reaches the identical outcome as threading a new
+  parameter through `_run_bundle_analysis()`/`analyze_bundle()` -- confirmed
+  by reading `BundleDiffResult.bundle_verdict`'s own implementation, which
+  is the *only* place `policy_file` is ever consulted anywhere in the
+  bundle-analysis pipeline -- while touching one frozen file's line count
+  instead of two, and touching it for only a parameter-line and a
+  one-line mutation (offset by compacting two pre-existing multi-line
+  `if`-conditions in `cli_compare_release.py`/`cli_compare_release_
+  helpers.py` down to one line each, a legitimate, behavior-preserving
+  trim of code these files already contained, so both files land at or
+  under their exact pinned baseline rather than merely under the separate
+  2000-line hard cap).
+
+`docs/use/multi-binary.md`'s "release fan-out doesn't forward policy
+files" section was updated to describe the shipped behavior. Regression
+coverage: `tests/test_cli_compare_release_bundle_signature_wiring.py`'s
+`TestBundleAnalysisForwardsPolicyFile` (a `policy_file` override actually
+demoting `BundleDiffResult.bundle_verdict` through `_collect_bundle_
+result`, with a negative control, plus a direct plumbing check pinning
+that `_collect_bundle_result` sets `policy_file` on the result *before*
+reading `bundle_verdict`) and `TestResolveBundlePolicyFile` (the resolver
+itself: no-op with nothing given, a real policy document, a resolved pack
+application) -- the latter deliberately lives alongside the former rather
+than in `test_pack_application.py`, since that test module carries its
+own `architecture/debt.yaml` no-growth pin too.
+
+**A second, sibling gap found by the same review round (Codex, fresh
+evidence), fixed alongside the above:** `_fold_release_global_severity()`
+(`cli_compare_release_helpers.py`) folds bundle findings into the
+severity-aware process exit code via `compute_exit_code(bundle_changes,
+config, policy=bundle_result.policy)` -- forwarding `.policy` (the fix a
+prior Phase 10 entry already made) but not `.policy_file`. Once
+`BundleDiffResult.policy_file` started being genuinely set by this phase's
+own fix, that gap became live: a `bundle_intra_dep_removed: ignore`
+override already changed the *displayed* `bundle_verdict` (a `.policy_
+file`-aware property) while the severity-aware exit code still scored the
+unmodified bare-policy classification -- the identical displayed-verdict-
+vs-exit-code disagreement Phase 10 already fixed for `.policy` alone,
+just for the field this phase added. Fixed by forwarding `policy_file=
+bundle_result.policy_file` at that one call site (a single-line edit, no
+line growth in the pinned file). Regression coverage:
+`tests/test_config_review.py::TestReleaseSeverityPolicyAndGlobal::
+test_fold_bundle_honors_the_bundle_result_own_policy_file` (confirmed to
+fail against the pre-fix code -- asserted exit 0 under the override,
+observed exit 4).
+
+### Phase 17 — Stored-facts/per-library CLI surface (SHIPPED)
+
+**Origin:** [uxlfoundation/oneDAL#3693](https://github.com/uxlfoundation/oneDAL/pull/3693)
+— a *second*, fully independent real-world driver (`bundle_gate.py` plus
+`onedal_libraries.py`) hitting the identical "No CLI surface" known gap
+Phase 13's own table and Phase 13 follow-up's item 1 already named, against
+the same 6-library, 3-toolchain-lane oneDAL shape Phase 8's 2.5h/38.3GB
+measurement used. This was confirmation, by two unrelated callers, that the
+gap had outgrown "known gap" footnote status.
+
+**Revision note (2026-09-01):** this section originally drafted a design
+where `compare`'s existing positional `OLD_INPUT`/`NEW_INPUT` operands would
+gain a new *auto-detected* operand kind (`cli_resolve.classify_compare_
+operand()` returning `"bundle_facts"` from a bounded, compression-aware
+content-shape probe), through several Codex review rounds refining that
+probe's exact discriminators. **That design was not what shipped, and this
+section is rewritten to describe the actual implementation instead of the
+superseded plan.** What shipped is simpler: a `--old-bundle-facts` boolean
+flag on `OLD_INPUT` (`compare old.bundlefacts.json new-release/
+--old-bundle-facts`), landed in `c562b63` ("feat(compare): expose
+--old-bundle-facts and wire public_headers into run-plan") and hardened
+through roughly twenty follow-up `fix:` commits closing gaps found in
+review — package-operand extraction, `--devel-pkg`/OLD-side header
+rejection, `--lang`/`OSError` handling, `--depth binary` clearing headers,
+temp-dir cleanup, and more. The prior design's operand-kind-detection
+machinery (the two-discriminator plain/gzip/zstd-JSON vs. G40-archive probe,
+the `{"directory", "package"}` membership-test sweep across `cli_resolve.py`/
+`cli_compare_helpers.py`/`cli_options.py`) was never built and should not be
+read as a still-intended target — the flag-based dispatch below reaches the
+same acceptance bar without it.
+
+**Shipped implementation:**
+
+- `abicheck/frontends/cli/commands/compare.py:465-487` — `--old-bundle-facts`
+  (boolean flag) and `--max-json-object-nodes` (the decode-budget override),
+  declared inline on `compare_cmd` alongside its other single-command
+  options.
+- `abicheck/frontends/cli/commands/compare.py:744-796` — inside
+  `compare_cmd`'s body, `if kwargs.pop("old_bundle_facts", False):`
+  short-circuits *before* `run_compare`/`_dispatch_release_compare` ever
+  run, dispatching to `compare_bundle_facts.dispatch()`.
+- `abicheck/frontends/cli/commands/compare_bundle_facts.py` (a new leaf
+  module under `frontends/cli/commands/`, not a flat `cli_*.py` root
+  sibling — the `cli_` root-prefix family is frozen per
+  `architecture/modules.yaml`'s `frozen-root-family` gate) — the real
+  dispatcher: resolves the small option subset `compare_release_against_
+  bundle_facts()` actually needs from `compare_cmd`'s already-parsed,
+  already-`normalize_sided_options`-processed kwargs, extracts a package
+  NEW-side operand via the same `_extract_if_package()` primitive the live
+  release fan-out uses (`--devel-pkg new=...` honored the same way), calls
+  `compare_release_against_bundle_facts()`, and renders the result as its
+  own `mode: "bundle_facts"` JSON/markdown envelope.
+- `abicheck/frontends/cli/commands/compare_bundle_facts_rejections.py` — a
+  sibling module (split out purely to keep `compare_bundle_facts.py` under
+  the architecture no-growth 800-line production cap as this guard list
+  grew round over round) that raises `click.UsageError` for every flag
+  `dispatch()` doesn't explicitly wire through, rather than silently
+  ignoring it — the same "reject rather than silently diverge from the
+  request" rule `--dry-run`/`--contract` already set as precedent elsewhere
+  in this CLI.
+- `bundle_side_input.py` is classified `workflows` in
+  `architecture/modules.yaml`, so `compare_bundle_facts.py` (a `frontends`
+  module; `may_import: [model, workflows, report]`) reaching it is a legal
+  edge, not an architecture-boundary workaround — the concern this section
+  originally raised at length about `bundle_side_input.py` being
+  architecturally unclassified no longer applies.
+- `docs/use/multi-binary.md`'s "## Comparing against a stored bundle
+  baseline" section documents `--old-bundle-facts` as shipped, superseding
+  the "deliberately scoped to the producer half" disclaimer this section's
+  own text used to quote.
+
+**Two things this section originally called "must reach parity" were
+instead deliberately, permanently rejected by the shipped code, with the
+reasoning recorded in `compare_bundle_facts.py`'s own module docstring —
+these are closed design decisions, not open gaps:**
+
+1. **`--fail-on-removed-library` support.** Rejected outright
+   (`compare_bundle_facts_rejections.py`). Per the module docstring:
+   "computing it would mean re-scanning `old_facts_path` a second time only
+   to read back `per_library_snapshots.keys()`, defeating the entire point
+   of a caller handing in an already-loaded, potentially huge (SYCL/DPC++-
+   scale) facts document just to avoid re-parsing it." The exit-8 gating
+   parity this section's "systemic requirement" text called for is
+   therefore explicitly out of scope, not deferred.
+2. **The full release-summary rendering shape** (exit-decision object,
+   severity/contract blocks, `_format_release_summary()`'s own input
+   shape). Per the same docstring: "deliberately not the full
+   release-summary shape... since this is a narrower, newly-exposed
+   surface, not a drop-in replacement for it." `--contract`/
+   `--severity-preset`/`--pack` are all explicitly rejected too
+   (`compare_bundle_facts_rejections.py`). Plain `--policy`/`--suppress`
+   **are** already forwarded and honored (`_load_suppression_and_policy()`,
+   consumed by `compare_release_against_bundle_facts()`'s own
+   `policy`/`policy_file`/`suppress` parameters) — only the coarser
+   severity-preset/pack/contract knobs and the release-summary rendering
+   shape stay out of scope.
+
+This codebase's earlier "reject explicitly, never silently drop" principle
+(this section's own prior text) is exactly what was applied: every
+flag without a real channel into `compare_release_against_bundle_facts()`
+is a `UsageError`, not a silent no-op — but the target design decided
+several of them should *stay* rejected rather than be built out, once their
+cost (re-scanning a large facts document, or maintaining a second
+release-summary shape for a narrower surface) was weighed against the
+actual need.
+
+**The one genuinely open gap this section identified — now closed in this
+same change:** per-library `headers`/`includes`/`compile` overrides for a
+mixed-toolchain bundle (oneDAL's own CPU/DPC++ shape — the whole reason
+this phase exists, per its own "Origin" table). `compare_release_against_
+bundle_facts()` already accepted `per_library_headers`/`per_library_
+includes`/`per_library_compile: dict[str, CompileContext]` since Phase 13
+follow-up, but nothing on the CLI path forwarded them. Closed via:
+
+- `abicheck/workflows/bundle_facts_library_overrides.py` — `parse_bundle_
+  facts_library_overrides()`, an eager, strict-unknown-key-rejecting parser
+  for a `{library_name: {headers: [...], includes: [...], gcc_path: ...,
+  gcc_options: [...], ...}}` YAML/JSON manifest. Physically under
+  `abicheck/workflows/` from the start (unlike `bundle_variants_config.py`'s
+  own pre-ADR-061 flat-root placement — a real Codex-review finding: adding
+  a *new* module to the frozen `bundle_` root family instead of routing it
+  to its real ADR-061 owner "defeats the migration gate," root AGENTS.md's
+  own "route new behavior to the target owner rather than extending a flat
+  root prefix family"), reusing that module's validation-style precedent (a
+  plain `dict` input
+  rather than a new `.abicheck.yml` block, for the identical reason that
+  module's own docstring already gives: `BuildConfig` has a fixed, declared
+  schema and adding a new top-level block there needs real schema/precedence
+  work a CLI-only manifest flag avoids entirely).
+- `abicheck/frontends/cli/options/bundle_facts.py` —
+  `@bundle_facts_manifest_options`, declaring `--bundle-facts-library-manifest
+  PATH` as a small, reusable decorator (not an inline `@click.option` on
+  `compare_cmd`, which was already at the 800-line production cap with no
+  headroom) applied to `compare_cmd` alongside `--old-bundle-facts`.
+- `compare_bundle_facts.dispatch()` parses the manifest and forwards its
+  three maps into the existing `per_library_headers=`/`per_library_
+  includes=`/`per_library_compile=` parameters unchanged;
+  `compare_bundle_facts_rejections.py` rejects the flag outright when
+  `--old-bundle-facts` isn't set, mirroring `_reject_bundle_facts_out_for_
+  single_pair`'s existing precedent for the producer-side flag.
+
+**Explicitly out of scope, unchanged from the original review:**
+
+- **A driver's own summary-JSON/Markdown rendering, but not blanket SARIF.**
+  `compare_bundle_facts.py`'s own `mode: "bundle_facts"` JSON/markdown
+  envelope covers the summary/Markdown half; SARIF for a directory/package
+  (bundle/release) comparison remains unavailable at any granularity
+  (`_RELEASE_FORMATS` is exactly `{"json", "markdown", "junit"}`, and
+  `sarif.to_sarif()` consumes a single `DiffResult`, not a
+  `BundleDiffResult`) — a real, separate, currently-undocumented gap, not
+  reimplemented by this phase.
+- **A caller's own measurement harness.** Wrapper scripts reproducing
+  wall-clock/peak-RSS/exit-code numbers under a pinned container (e.g.
+  oneDAL#3693's `mkvenv909.sh`/`bg909.sh`/`bg909b.sh`) carry zero ABI
+  content by design and are not a candidate for upstreaming under any
+  phase of this plan.
+
+**Acceptance criteria (all met):** a directory/package `compare
+--old-bundle-facts` invocation can (a) consume a stored OLD-side
+`BundleFacts` baseline instead of reopening OLD `.so` files — shipped; (b)
+give each library its own header root and compile context via
+`--bundle-facts-library-manifest`, entirely from `abicheck compare ...`
+flags with no committed driver script standing in for it — shipped, this
+change; (c) `--fail-on-removed-library` — explicitly rejected rather than
+supported, a deliberate scope decision (see above), not an unmet criterion.
+
+**Tests:** `tests/test_cli_compare_bundle_facts.py`,
+`tests/test_cli_compare_bundle_facts_rejections.py`,
+`tests/test_cli_compare_bundle_facts_rejections_more.py` (the flag surface
+and its rejection matrix); `tests/test_bundle_facts_library_overrides.py`
+(the manifest parser, table-driven over valid/unknown-key/wrong-type/
+unknown-library/empty-manifest cases, mirroring
+`tests/test_bundle_variants_config.py`'s style); `tests/
+test_bundle_side_input.py` (the per-library override forwarding, at the
+Python-API layer `compare_release_against_bundle_facts()` already covers).
 
 ---
 

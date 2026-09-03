@@ -69,6 +69,42 @@ jobs:
         run: python scripts/gen_agent_skills.py
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/verify.py --profile pr --only ai-readiness
+      # A `pull_request` run scopes the debt-no-growth check to the PR's own
+      # base sha. A `push`-to-`main`/`workflow_dispatch` run has no PR base
+      # at all -- `github.event.pull_request.base.sha` is simply empty there
+      # -- so `push` instead uses its own `before` sha (the tip of `main`
+      # immediately prior) and `workflow_dispatch` uses the checked-out
+      # revision's own parent commit, scoping the check to growth *this run*
+      # introduced rather than every file's original ADR-061 adoption
+      # baseline. Falling through to that unscoped baseline on every
+      # post-merge `main` run would make it permanently red on any
+      # pre-existing drift already on `main` (individually-compliant PRs
+      # each growing a debt-tracked file a little further past its original
+      # baseline), even when the merged/dispatched change itself introduced
+      # none (Codex review, fresh evidence, both for `push` and, in a
+      # follow-up finding, for `workflow_dispatch`: reproduced directly
+      # against this tree both times). `push`'s `before` is skipped when
+      # it's the all-zero sentinel git uses for a branch's first push (no
+      # prior commit to compare against); `workflow_dispatch`'s `HEAD^` is
+      # skipped when it doesn't resolve (the repository's very first commit)
+      # -- `check_repository()` would otherwise report a hard
+      # `base-revision` error for an unresolvable sha rather than silently
+      # falling back, for either case.
+      - name: Resolve architecture check base revision
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ] \
+            && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="$(git rev-parse --verify -q HEAD^ || true)"
+          else
+            base=""
+          fi
+          echo "ARCHITECTURE_BASE=${base}" >> "$GITHUB_ENV"
+      - name: Architecture contract (ADR-061)
+        run: python scripts/verify.py --profile pr --only architecture
       # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
       # docs sync gate, the docs/AGENTS.md ownership contract gate, the
       # generated agent-skill trees' drift gate (ADR-058), and
@@ -77,7 +113,7 @@ jobs:
       # --profile pr` run locally (CLAUDE.md "M0-3"), so this job can't
       # silently diverge from the local PR-profile definition of done.
       - name: Scoping / tier-accuracy / doc-sync / docs-contract / agent-skills / repo-facts gates
-        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,agent-skills-generated,repo-facts
+        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,repo-facts
       # G37 Phase 0. Deliberately in this job and not a new one: both steps are
       # deterministic re-derivations over content this job already has on
       # disk (committed repo content, plus the freshly-generated agent-skill
@@ -147,7 +183,27 @@ jobs:
 
   unit-tests:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 15 was too tight for the canonical (ubuntu, 3.13) leg: its own
+    # coverage-collecting main-suite step alone measured 803s (13m23s) on
+    # 2026-08-29, leaving under two minutes of job budget for the
+    # subsequent "Run slow tests" step, the durations/coverage uploads, and
+    # normal runner variance — which twice cancelled that step mid-run at
+    # the identical ~73% completion point (PR #940) despite every test up
+    # to that point passing. 20 was raised to match the headroom other
+    # multi-step jobs in this file already carry, but PR #1002 (which added
+    # tests/test_selectors.py, tests/test_selectors_namespace_glob.py, and
+    # tests/test_reclassify_leaf_import_contract.py) pushed the canonical
+    # leg's total wall time right back up against that same 20-minute wall
+    # twice in a row on 2026-09-02 — once cancelled mid "Run slow tests"
+    # (14m42s into the coverage step alone), once cancelled at exactly
+    # 20m01s with every single step, coverage floor included, already
+    # reporting success (a job-level timeout racing its own last step, not
+    # a real failure). The lesson generalizes: the canonical leg's total
+    # cost (coverage-collecting suite + slow/hypothesis tests + uploads)
+    # grows with the whole test suite, so a fixed budget with days-old
+    # headroom keeps re-drifting to zero as tests are added anywhere in the
+    # fast lane. 30 restores real headroom over the ~20m1s observed here.
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -209,9 +265,66 @@ jobs:
         run: |
           pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run slow tests (hypothesis / property-based)
+        # -n auto --dist worksteal, matching every other step in this job:
+        # this step ran fully serial (no `-n`) while its siblings didn't,
+        # and most `slow`-marked tests it selects are independent
+        # (Hypothesis/property-based suites plus the production-scale
+        # snapshot-compression round trips in
+        # tests/test_snapshot_compression_public_api_scale.py, individually
+        # 90-195s), so running them one at a time was pure wasted wall time
+        # on a multi-core runner and a real contributor to this leg
+        # repeatedly running past its own timeout-minutes (see that
+        # comment's own incident history above). pytest-cov's xdist
+        # integration combines per-worker coverage automatically, so
+        # --cov-append here still lands in one coverage-slow.xml.
+        #
+        # tests/test_performance.py AND tests/test_perf_binary_scan.py are
+        # carved out and run separately, serially, unchanged (Codex review,
+        # PR #1036 -- the second file caught in a follow-up round: same
+        # whole-file `pytestmark = pytest.mark.slow`, same wall-clock
+        # ceilings, 3s/5s and 30s/45s here). Both measure real elapsed time,
+        # so running them concurrently with the CPU-heavy tests above makes
+        # xdist scheduler contention part of the measurement, and this
+        # required job could fail (or a scaling fit could distort) with no
+        # actual product regression. .github/workflows/performance.yml's own
+        # dedicated job already runs both files together the identical
+        # serial way on its own schedule; this invocation is this job's
+        # copy, for every PR.
+        #
+        # No --cov on that second invocation, matching performance.yml's own
+        # (uninstrumented) "Run slow perf tests" step -- fresh evidence
+        # (this same PR): coverage.py fell back from the sysmon core to the
+        # much slower trace-based one for this specific invocation ("Can't
+        # use core=sysmon: sys.monitoring can't measure branches in this
+        # version"), which alone pushed
+        # test_serialization_roundtrip_under_2_seconds from its normal
+        # well-under-budget time to 6.70s against a hard 2s ceiling -- a
+        # confirmed pre-existing flake (reproduced identically on PR #1033's
+        # CI before this PR existed), not scheduler contention this time.
+        # Instrumentation overhead corrupting the very wall-clock
+        # measurement a test asserts on is exactly why performance.yml never
+        # instruments this file either; --cov-append here would only add a
+        # few small test files' worth of informational coverage to
+        # coverage-slow.xml, not gate anything (no --cov-fail-under in this
+        # step).
+        #
+        # tests/test_header_scan_deadline_integration.py is carved out the
+        # same way, for the same reason (Codex review, PR #1036, a third
+        # independent trigger site): its lone `@pytest.mark.slow` test,
+        # test_pathological_header_natural_cost_is_tracked, measures real
+        # elapsed time against a 60s ceiling -- collected here (not by
+        # performance.yml's own dedicated job, which only runs
+        # test_performance.py/test_perf_binary_scan.py; this file is a gap
+        # in that job too, not fixed here) whenever clang/g++ are present,
+        # which they are on this canonical Ubuntu lane. Its sibling tests in
+        # the same file aren't `slow`-marked, so excluding the whole file
+        # from this `-m "slow"` selector (and re-including it in the serial
+        # invocation, where `-m "slow"` again narrows it to just this one
+        # test) has no effect on them either way.
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_perf_binary_scan.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/test_performance.py tests/test_perf_binary_scan.py tests/test_header_scan_deadline_integration.py -v --tb=short -m "slow"
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner

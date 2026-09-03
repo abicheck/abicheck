@@ -53,24 +53,37 @@ shows up in the report under any `--policy` profile; only
 `--scope-public-headers` (or suppression, a third, separate mechanism —
 see below) decides whether it's there at all.
 
-**A built-in policy profile name reaches bundle findings; a custom
-`--policy custom.yaml` document does not.**
-`compare_bundle()`'s own `policy` parameter is a bare string, resolved
-through `policy_kind_sets()` — the same three-way switch
-(`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own docstring
-describes. It never receives the resolved `PolicyFile` object a `--policy
-custom.yaml` document produces, unlike the per-library path
-(`checker.compare()` calls `policy_file.compute_verdict(...)` directly when
-a real `PolicyFile` was resolved). So a `--policy custom.yaml`'s
-`overrides:` entry for `bundle_intra_dep_removed` has **no effect on the
-bundle verdict** — the CLI passes the raw `--policy` string through
-unconditionally, and an unrecognized name (a YAML path) silently falls back
-to `strict_abi` for bundle-verdict purposes specifically, per
-`compute_verdict()`'s own "Unknown policy names fall back to `strict_abi`"
-contract. Only the three built-in profile *names* can reach a bundle
-finding's classification today, and even then via the same coarse
-kind-family-level rules `compute_verdict()` documents — a *custom* override
-document reaches per-library findings only.
+**`compare_bundle()`/`analyze_bundle()` honor a custom `PolicyFile` for
+bundle findings on every entry point, including the CLI's directory/
+package release fan-out (`compare-release`) — G38 Phase 16 closed the one
+remaining gap.** `compare_bundle()` has a second, optional `policy_file:
+PolicyFile | None` parameter alongside its original bare `policy: str`
+name — when supplied, `BundleDiffResult.bundle_verdict` scores `bundle_*`
+findings through `policy_file.compute_verdict(changes)` directly (the same
+call the per-library path already makes), instead of always falling back
+to the coarse three-way `policy_kind_sets()` switch
+(`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own
+docstring describes. `bundle_analysis.analyze_bundle()` (the shared
+orchestrator both a live comparison and a stored-facts comparison route
+through) accepts and forwards the same parameter. The **stored
+`BundleFacts` Python-API driver** — `bundle_facts.compare_bundle_from_facts()`,
+`bundle_side_input.compare_bundle_sides()`/
+`compare_release_against_bundle_facts()` — resolves and threads a real
+`policy_file` through to it, and so does the CLI's directory/package
+`compare-release` fan-out: `pack_application.resolve_bundle_policy_file()`
+resolves it (called from `cli_compare_release.py`), and
+`cli_compare_release_helpers._collect_bundle_result()` sets it on the
+`BundleDiffResult` it already got back from `_run_bundle_analysis()`
+before reading `bundle_verdict` — `policy_file` is a plain mutable field
+and `bundle_verdict` a lazily-computed property, so this reaches the
+identical outcome without changing `_run_bundle_analysis()`'s own
+signature — so a `--policy custom.yaml` document's `overrides:` entry for e.g.
+`bundle_intra_dep_removed` now reaches the release fan-out's aggregate
+bundle verdict on every entry point. See
+[G38's plan, Phase 16](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md)
+for the fix's history. Direct, per-finding suppression of a `bundle_*`
+kind is still not supported on any entry point — see the suppression
+section below, unchanged by this.
 
 **Graph-native detectors ignore public-surface scoping entirely.**
 `bundle_intra_dep_removed`, `bundle_library_removed`/`bundle_library_added`,
@@ -85,47 +98,66 @@ load regardless of whether any external consumer ever called `core_mul`
 directly, and `--scope-public-headers` never touches this detector's input at
 all.
 
-**Diff-derived detectors inherit scoping indirectly, through starvation.**
-`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`, and
-`bundle_provider_changed` are computed by scanning each library's own
-per-library `DiffResult.changes` for the specific kinds they promote
-(`func_params_changed`/`func_return_changed`/`var_type_changed` for the
-signature-change detector, `type_size_changed`/`type_field_removed`/etc. for
-the type-change detector, `func_removed`+`func_added` pairs for the
-provider-migration detector) — and that `DiffResult` is the *same*,
-already-scoped result the per-library report itself uses. If
-`--scope-public-headers` filtered the underlying provider-side change out of
-`diff.changes` because the changed symbol isn't part of `libcore.so`'s public
-surface, the bundle detector never sees it and never promotes it to a
-`bundle_*` finding either. So for these three kinds, `--scope-public-headers`
-*does* reach bundle-level findings — just indirectly, by removing the
-upstream signal they depend on, not by filtering the `bundle_*` finding
-itself.
+**Diff-derived detectors no longer inherit `--scope-public-headers` through
+starvation — G38 Phase 14 closed that gap.** `bundle_intra_dep_signature_
+changed`, `bundle_intra_type_changed`, and `bundle_provider_changed` are
+computed by scanning each library's own per-library `DiffResult` for the
+specific kinds they promote (`func_params_changed`/`func_return_changed`/
+`var_type_changed` for the signature-change detector, `type_size_changed`/
+`type_field_removed`/etc. for the type-change detector, `func_removed`+
+`func_added` pairs for the provider-migration detector) — but the source
+they scan is `diff.changes` **plus** `diff.out_of_surface_changes`, not
+`diff.changes` alone. `--scope-public-headers` (on by default) never
+*drops* a non-public-surface finding — `post_processing.
+FilterNonPublicSurface` moves it to `out_of_surface_changes` instead (ADR-024
+§D4/D5's "recorded, never silently dropped" ledger) — so an internal,
+headerless C export with no public header naming either side still reaches
+these three detectors, exactly as it should: the standalone per-library
+report correctly excludes it from that library's own *public* API, but the
+*bundle's* internal linkage contract between two siblings is a different
+question, and these three detectors exist specifically to answer it.
+Each detector keeps its own, already-shipped reachability rule unchanged —
+this phase did not unify them to one gate: the signature-change detector
+still requires a real resolved import edge
+(`resolution.consumers_of`/`_consumer_resolves_via_provider`), the
+type-change detector still requires only a name-embedding symbol-table
+match (never an import edge — see that detector's own docstring for why an
+import-edge requirement would be a strictly narrower, wrong gate here), and
+the provider-migration detector still requires no reachability at all (a
+provider move breaks an external consumer of the old DSO exactly as much as
+a bundle sibling).
 
 Contrast either case with an *ordinary* per-library finding that never gets
 promoted to a bundle finding at all (`func_removed` on something no sibling
-imports): that one **is** filtered by `--scope-public-headers`, same as any
-other per-library finding — but is unaffected by which `--policy` profile is
-selected, since policy never removes a finding, only reclassifies its
-verdict.
+imports): that one **is** filtered from the per-library report by
+`--scope-public-headers`, same as any other per-library finding — but is
+unaffected by which `--policy` profile is selected, since policy never
+removes a finding, only reclassifies its verdict.
 
-**No `bundle_*` kind can be suppressed *directly* — but suppression can still
-reach a diff-derived finding indirectly, the same way scoping does, on the
-CLI fan-out specifically.** `compare_bundle()` is never given a suppression
-ruleset itself, so no [suppression](suppressions.md) rule can target a
-`bundle_*` kind by name — that part holds for every `bundle_*` kind, with no
-exception, on every entry point. On the directory/package `compare` fan-out,
-`--suppress` is applied to each library's `DiffResult` *before* it reaches
-`compare_bundle()` (the same per-library compare pipeline that applies
-`--scope-public-headers`) — so, for the three **diff-derived** detectors
-(`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`,
-`bundle_provider_changed`), a suppression rule targeting the underlying
-per-library kind (`func_params_changed`, `type_size_changed`,
-`func_removed`/`func_added`) starves the bundle detector exactly like a
-scoping exclusion would, and the `bundle_*` finding never fires. This is a
-side effect of suppressing the per-library finding, not a way to suppress
-the bundle finding on its own terms — you can't write a rule that says
-"ignore `bundle_intra_dep_signature_changed` for symbol X" directly.
+**No `bundle_*` kind can be suppressed *directly* — and, unlike scoping,
+suppression still reaches a diff-derived finding indirectly through
+starvation, on the CLI fan-out specifically.** `compare_bundle()` is never
+given a suppression ruleset itself, so no [suppression](suppressions.md)
+rule can target a `bundle_*` kind by name — that part holds for every
+`bundle_*` kind, with no exception, on every entry point. On the
+directory/package `compare` fan-out, `--suppress` is applied to each
+library's `DiffResult.changes` *before* it reaches `compare_bundle()` (the
+same per-library compare pipeline that applies `--scope-public-headers`) —
+and `post_processing.py`'s own step ordering runs `FilterNonPublicSurface`
+*before* `ApplySuppression`, so a change already demoted to
+`out_of_surface_changes` never reaches `ApplySuppression` at all and can
+never be suppressed, while a change that stayed in-surface can still be
+suppressed out of `diff.changes` there. So, for the three **diff-derived**
+detectors, a suppression rule targeting the underlying per-library kind
+(`func_params_changed`, `type_size_changed`, `func_removed`/`func_added`)
+still starves the bundle detector for an *in-surface* finding exactly like
+before — this is a side effect of suppressing the per-library finding, not
+a way to suppress the bundle finding on its own terms — but has **no**
+effect on an out-of-surface finding these detectors now also see, since
+that finding was never checked against `--suppress` in the first place.
+Closing that narrower residual (re-running suppression against the
+out-of-surface ledger specifically) is tracked as a known gap, not
+attempted as part of this fix — see the G38 plan doc's own Phase 14 entry.
 
 **The whole-product baseline compare (`abicheck/product_baseline.py`'s
 `compare_product_directories`) has no suppression mechanism at all, for
@@ -515,16 +547,21 @@ abicheck compare release-1.0/ release-2.0/ -H include/ \
 
 # Later, get a bundle-level verdict for release-1.0 -> release-3.0 without
 # ever reopening release-1.0's binaries.
+abicheck compare release-1.0.bundlefacts.json release-3.0/ --old-bundle-facts
 ```
 
-The stored facts are consumed programmatically via
-`abicheck.bundle_facts.compare_bundle_from_facts()` (see
-[Programmatic API](#programmatic-api) below) — a `compare` CLI flag that
-takes a `BundleFacts` file as its old-side operand is expected to land once
-the CLI-cleanup-phase-two convergence settles on where directory/package
-`compare` should route a non-directory old-side input; this is deliberately
-scoped in this phase to the *producer* half and the tested Python API, not a
-CLI *consumer* half, per G38's own phased design.
+`--old-bundle-facts` is the CLI consumer half of this workflow: it treats
+`OLD_INPUT` as a stored `BundleFacts` document (from a prior
+`--bundle-facts-out` run) instead of a live directory/package, while
+`NEW_INPUT` stays a live release directory or package (extracted the same
+way the ordinary release fan-out extracts one). Only `--format json`/
+`markdown` are available in this mode, and most of the ~44 flags the live
+release fan-out accepts have no channel into a stored-facts comparison and
+are rejected explicitly (exit 64) rather than silently ignored — see
+`abicheck compare --help-all` for the full, current list. Internally it
+routes through `abicheck.bundle_side_input.
+compare_release_against_bundle_facts()`, the same driver the paragraph
+below describes.
 
 `compare_bundle_from_facts()` reconstructs a live-equivalent
 `BundleSnapshot` from the stored per-library `AbiSnapshot.elf` metadata (no
@@ -532,6 +569,36 @@ binaries read) and then delegates to the exact same `compare_bundle()` a
 live-directory comparison uses — so the two entry points can never
 independently drift, and a stored-facts comparison produces byte-identical
 findings to a live one for the same underlying facts.
+
+### Per-library header/include/compile-context overrides (G38 Phase 17)
+
+`--old-bundle-facts` normally applies one uniform `--header`/`--include`/
+compile-context to every library in `NEW_INPUT` — fine when the whole bundle
+shares one toolchain, but not for a bundle built with more than one (e.g. a
+plain-C++ library alongside a `-fsycl`/`icpx` DPC++ one sharing an umbrella
+header tree). `--bundle-facts-library-manifest PATH` names a YAML/JSON file
+giving individual libraries their own header root, include path, or compile
+context instead:
+
+```yaml
+# manifest.yaml
+libonedal_dpc.so:
+  headers: [include/oneapi/dal/dpc]
+  gcc_path: icpx
+  gcc_options: ["-fsycl", "-DONEDAL_DATA_PARALLEL"]
+  sysroot: /opt/intel/oneapi/sysroot
+```
+
+```bash
+abicheck compare release-1.0.bundlefacts.json release-3.0/ --old-bundle-facts \
+    --bundle-facts-library-manifest manifest.yaml
+```
+
+A library not named in the manifest keeps the uniform `--header`/
+`--include`/compile-context fallback unchanged. A manifest entry naming a
+library outside the bundle (a typo, or a library that was renamed/removed)
+is a hard error, not a silent no-op. The flag is meaningless — and rejected
+— without `--old-bundle-facts`.
 
 ## Platform support
 

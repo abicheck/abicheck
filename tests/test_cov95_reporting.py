@@ -165,6 +165,28 @@ class TestReporterStat:
         text = to_stat(_diff_result([], verdict=Verdict.NO_CHANGE))
         assert "no changes" in text
 
+    def test_to_stat_with_severity_config_fail(self) -> None:
+        # reporter_markdown.to_stat's severity_config branch, and
+        # render_stat_document's non-zero exit_code -> "[gate: FAIL ...]"
+        # branch -- both previously unexercised by any test.
+        from abicheck.reporter import to_stat
+        from abicheck.severity import PRESET_STRICT
+
+        changes = [_change(ChangeKind.FUNC_REMOVED, "rm")]
+        result = _diff_result(changes, verdict=Verdict.BREAKING)
+        text = to_stat(result, severity_config=PRESET_STRICT)
+        assert "[gate: FAIL (exit " in text
+
+    def test_to_stat_with_severity_config_pass(self) -> None:
+        # render_stat_document's exit_code == 0 -> "[gate: PASS]" branch.
+        from abicheck.reporter import to_stat
+        from abicheck.severity import PRESET_INFO_ONLY
+
+        changes = [_change(ChangeKind.FUNC_REMOVED, "rm")]
+        result = _diff_result(changes, verdict=Verdict.BREAKING)
+        text = to_stat(result, severity_config=PRESET_INFO_ONLY)
+        assert "[gate: PASS]" in text
+
 
 class TestReporterChangeToDict:
     def test_change_to_dict_without_kind_sets_uses_policy(self) -> None:

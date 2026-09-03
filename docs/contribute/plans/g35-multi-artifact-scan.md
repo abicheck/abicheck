@@ -15,6 +15,17 @@ lifecycle: active
 > (`scan --artifact-set`) and GitHub Action surfaces this plan describes
 > are unaffected and remain current.
 
+> **Superseded (2026-08-28, CLI cleanup phase two, PR 5).** Every
+> comma-separated `--artifact-set a.so,b.so,c.so`-style example below is
+> historical: the flag is now a repeatable option
+> (`--artifact-set a.so --artifact-set b.so --artifact-set c.so`), with no
+> comma-separated alias — see
+> `docs/contribute/plans/cli-cleanup-phase-two.md`'s PR 5 section and
+> `docs/contribute/adr/056-multi-artifact-library-set-scan.md`'s own
+> matching note. This plan's design decisions (the explicit-list-vs-directory
+> distinction, per-member rejection, colliding-identity handling) are
+> unaffected — only the value syntax multiple explicit paths use changed.
+
 # G35 — Multi-Artifact / Library-Set `scan`
 
 **Origin:** User request to properly scan cases where one logical
@@ -76,10 +87,19 @@ case. **Still open, not silently dropped:**
 - The full example-catalog obligation (`examples/caseNNN_.../`,
   `ground_truth.json`, `examples/README.md`, `gen_examples_docs.py`) — a
   unit-level fixture covers the detector for now, not a binary example case.
-- The dry-run/estimator's L1-L5 per-member scaling fix flagged below (Phase
-  3's estimator bullet) — `--dry-run` is currently rejected outright for
-  `--artifact-set` rather than shipped with an approximate estimate (now
-  also enforced at the Action's preflight step, not just the CLI).
+- ~~The dry-run/estimator gap flagged below (Phase 3's estimator bullet)~~ —
+  **done (2026-08-29, CLI cleanup phase two, PR 5).** `scan --artifact-set
+  --dry-run` is a real preview now (`render_artifact_set_dry_run`,
+  `abicheck/frontends/cli/artifact_set_dry_run.py`), not a hard rejection.
+  Its cost projection sums a genuinely per-member-scaled estimate: one
+  single-binary `ScanRequest` per discovered member, each run through
+  `service.estimate_scan()` independently and the per-layer results
+  summed across members — closing the L1-L5 under-count Phase 3's own
+  estimator bullet flagged (only `L0_binary` scaled by `len(binaries)`
+  there). Scoped to this one preview call site, not `estimate_scan()`
+  itself: any *other* caller passing a multi-binary `ScanRequest` still
+  hits the original single-request-shaped estimator, so that general gap
+  stays open for those callers.
 - **Cross-member header-obligation attribution — fixed (2026-08-09), via the
   minimum-viable half of the two options this entry originally named.**
   `_run_artifact_set` passes the *same* declared header set to every
@@ -756,7 +776,8 @@ implementation that shipped.
   artifact-set member's findings match what a single-binary `scan` of the
   same file with the same `--abi3`/`--crosscheck` flags would produce.
 - **`--dry-run` needs its own `--artifact-set`-aware branch, not the
-  existing one.** Making `ARTIFACT` optional means an
+  existing one — done (2026-08-29), see the "Still open" bullet above for
+  the shipped shape.** Making `ARTIFACT` optional means an
   `--artifact-set ... --dry-run` invocation reaches the live dry-run
   branch (`cli_scan.py`) with `artifact=None` — it unconditionally passes
   `artifact=artifact` into `render_scan_dry_run` and constructs

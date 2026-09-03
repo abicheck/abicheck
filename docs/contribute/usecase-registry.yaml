@@ -396,7 +396,7 @@ use_cases:
     gap: G21
     plan: docs/contribute/plans/g21-oneshot-deep-compare.md
     evidence:
-      modules: [abicheck/cli.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
+      modules: [abicheck/cli.py, abicheck/frontends/cli/help.py, abicheck/cli_dump_helpers.py]
       tests: [tests/test_depth_vocabulary.py, tests/test_cov95_cli.py]
     next_steps: >
       Superseded: the standalone `deep-compare` orchestrator was removed and
@@ -603,7 +603,7 @@ use_cases:
       modules: [
         abicheck/diff_versioning.py,
         abicheck/checker_policy.py,
-        abicheck/change_registry_coverage.py,
+        abicheck/model/change_catalog/platform.py,
         abicheck/package.py,
       ]
       tests: [tests/test_environment_drift.py, tests/test_package.py]
@@ -639,7 +639,7 @@ use_cases:
       modules: [
         abicheck/numpy_capi.py,
         abicheck/diff_numpy_capi.py,
-        abicheck/change_registry_numpy.py,
+        abicheck/model/change_catalog/build.py,
         abicheck/package.py,
       ]
       tests: [
@@ -681,7 +681,7 @@ use_cases:
         abicheck/diff_versioning.py,
         abicheck/diff_wheel_deployment.py,
         abicheck/package.py,
-        abicheck/change_registry_wheel.py,
+        abicheck/model/change_catalog/build.py,
       ]
       tests: [
         tests/test_environment_drift.py,

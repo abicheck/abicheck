@@ -597,3 +597,223 @@ def test_metrics_json_empty_surface() -> None:
     data = compute_surface_metrics(_bare_snap()).to_dict()
     assert data["top_fan_in"] == []
     assert data["header_coverage"] == []
+
+
+# --------------------------------------------------------------------------- #
+# ADR-063 Phase 3 D5 -- public_entity_ids threading
+# --------------------------------------------------------------------------- #
+
+
+def _fn_with_id(name, mangled, eid, vis=Visibility.PUBLIC, ret="void", params=()):
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
+        visibility=vis,
+        entity_id=eid,
+    )
+
+
+class TestPublicEntityIdsDefaultIsUnchanged:
+    """``public_entity_ids=None`` (every call site outside ``compare()``'s
+    own pipeline) must reproduce the exact pre-Phase-3 behavior -- pinned
+    directly against the real, non-trivial fixture the rest of this file
+    already exercises, not just an empty snapshot."""
+
+    def test_public_roots_unaffected(self) -> None:
+        snap = _snap()
+        assert (
+            build_surface_graph(snap).public_roots()
+            == build_surface_graph(snap, public_entity_ids=None).public_roots()
+        )
+
+    def test_metrics_unaffected(self) -> None:
+        snap = _snap()
+        assert compute_surface_metrics(snap) == compute_surface_metrics(
+            snap, public_entity_ids=None
+        )
+
+
+class TestPublicEntityIdsNarrowsPublicRoots:
+    def test_only_matching_id_is_a_root(self) -> None:
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_g = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        fn_g = _fn_with_id("g", "_Z1gv", eid_g)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f, fn_g])
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset({eid_f}))
+        assert graph.public_roots() == frozenset({"f"})
+
+    def test_declaration_with_no_matching_id_drops_out_even_if_visibility_public(
+        self,
+    ) -> None:
+        # The two-sided correction this phase exists for: a declaration
+        # that IS Visibility.PUBLIC on this snapshot but whose entity_id is
+        # not in the resolved set (e.g. removed from the public-header set
+        # on the OTHER side of a real compare()) must not be a root.
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f])
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset())
+        assert graph.public_roots() == frozenset()
+
+    def test_reachable_types_still_work_for_a_narrowed_root(self) -> None:
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        rec = RecordType(name="Widget", kind="struct")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f, ret="Widget*")
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f], types=[rec])
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset({eid_f}))
+        assert graph.public_roots() == frozenset({"f"})
+        assert "Widget" in graph.reachable_types("f")
+
+    def test_excluded_overloads_own_types_do_not_leak_through_an_included_sibling(
+        self,
+    ) -> None:
+        # Two overloads share the demangled name "f": f(Included*) stays in
+        # the resolved public set, f(Excluded*) does not (e.g. narrowed out
+        # on this side of a real compare() the same way
+        # test_declaration_with_no_matching_id_drops_out_even_if_visibility_public
+        # exercises for a single declaration). _build_root_seed_types unions
+        # overload seed types by name -- unioning first and narrowing the
+        # name afterward would leak Excluded's own type through the still-
+        # included f(Included*) overload; filtering per-overload before the
+        # union (what _build_root_seed_types actually does) must not
+        # (Codex/CodeRabbit review, PR #962).
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_included = entity_id_for_function((), "f", mangled_name="_Z1fP8Included")
+        eid_excluded = entity_id_for_function((), "f", mangled_name="_Z1fP8Excluded")
+        fn_included = _fn_with_id(
+            "f", "_Z1fP8Included", eid_included, params=["Included*"]
+        )
+        fn_excluded = _fn_with_id(
+            "f", "_Z1fP8Excluded", eid_excluded, params=["Excluded*"]
+        )
+        rec_included = RecordType(name="Included", kind="struct")
+        rec_excluded = RecordType(name="Excluded", kind="struct")
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[fn_included, fn_excluded],
+            types=[rec_included, rec_excluded],
+        )
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset({eid_included}))
+        assert graph.public_roots() == frozenset({"f"})
+        reachable = graph.reachable_types("f")
+        assert "Included" in reachable
+        assert "Excluded" not in reachable
+
+
+class TestComputeSurfaceMetricsThreading:
+    def test_public_functions_counts_by_entity_id_membership(self) -> None:
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_g = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        fn_g = _fn_with_id("g", "_Z1gv", eid_g)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f, fn_g])
+
+        metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_f}))
+        assert metrics.public_functions == 1
+        assert metrics.exported_symbols == 1
+
+    def test_declared_counts_stay_unfiltered_regardless(self) -> None:
+        # declared_counts (HeaderCoverage.declared) is never filtered --
+        # only exported_counts is. Both functions are declared in "a.h"
+        # even though only one is in the resolved public set.
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_g = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        fn_f.source_header = "a.h"
+        fn_g = _fn_with_id("g", "_Z1gv", eid_g)
+        fn_g.source_header = "a.h"
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f, fn_g])
+
+        metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_f}))
+        coverage = {h.header: h for h in metrics.header_coverage}
+        assert coverage["a.h"].declared == 2
+        assert coverage["a.h"].exported == 1
+
+    def test_public_types_counts_via_entity_id_when_given(self) -> None:
+        from abicheck.model.identity import entity_id_for_type
+
+        eid_rec = entity_id_for_type((), "Widget")
+        rec = RecordType(name="Widget", kind="struct", entity_id=eid_rec)
+        rec_hidden = RecordType(name="Hidden", kind="struct")
+        snap = AbiSnapshot(library="l", version="1", types=[rec, rec_hidden])
+
+        metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_rec}))
+        assert metrics.public_types == 1
+
+
+class TestPublicEntityIdsKindFilter:
+    """A resolved ``public_entity_ids`` set legitimately mixes function/
+    variable ids with record/enum/typedef ids (``PublicSurfaceQuery.
+    resolve()`` collects both) -- ``public_roots()`` must still return a
+    clean ``frozenset[str]`` of only function/variable spellings, silently
+    excluding the type-kind ids rather than mapping them onto a bogus root
+    name. Confirmed to fail against a naive version of ``public_roots()``
+    that iterated every id in the set instead of only ever consulting
+    ``_root_seed_types`` (built from functions/variables alone)."""
+
+    def test_type_kind_id_in_the_resolved_set_is_not_a_root(self) -> None:
+        from abicheck.model.identity import entity_id_for_function, entity_id_for_type
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        # A public function's own return type, itself resolved into the set
+        # -- exactly PublicSurfaceQuery.resolve()'s documented shape (roots
+        # AND reachable record/enum ids together).
+        eid_widget = entity_id_for_type((), "Widget")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f, ret="Widget*")
+        rec = RecordType(name="Widget", kind="struct", entity_id=eid_widget)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f], types=[rec])
+
+        graph = build_surface_graph(
+            snap, public_entity_ids=frozenset({eid_f, eid_widget})
+        )
+        # Only "f" -- never "Widget" (a record, not a root-eligible name),
+        # even though its EntityId is present in the same resolved set.
+        assert graph.public_roots() == frozenset({"f"})
+        assert "Widget" in graph.reachable_types("f")
+
+
+def test_surface_graph_module_imports_nothing_from_policy() -> None:
+    """``surface_graph.py`` (root module) stays a leaf the ``policy/``
+    layer's ``PublicSurfaceQuery`` calls *into* -- never the reverse. Not
+    structurally enforced by ``scripts/check_architecture.py`` (this module
+    is unclassified in ``architecture/modules.yaml``, so the layer-boundary
+    gate does not evaluate it at all), so this is asserted directly against
+    the module's own real, parsed import statements."""
+    import ast
+    from pathlib import Path
+
+    import abicheck.surface_graph as surface_graph_module
+
+    src = Path(surface_graph_module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_modules.add(alias.name)
+
+    assert not any(
+        m == "policy" or m.startswith("policy.") or ".policy" in m
+        for m in imported_modules
+    ), f"surface_graph.py must not import policy/: found {sorted(imported_modules)}"

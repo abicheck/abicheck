@@ -32,6 +32,12 @@ and snapshot reference. ADR-029 adds the build-evidence model and adapters.
 """
 from __future__ import annotations
 
+from ..model.graph_facts import GraphEdge, GraphNode
+from ..model.source_graph import (
+    SOURCE_GRAPH_VERSION,
+    GraphSummaryDiff,
+    SourceGraphSummary,
+)
 from .build_evidence import (
     BuildEvidence,
     BuildOption,
@@ -119,16 +125,9 @@ from .source_extractors import (
     SourceAbiExtractor,
     SourceExtractionError,
 )
-from .source_graph import (
-    SOURCE_GRAPH_VERSION,
-    GraphEdge,
-    GraphNode,
-    GraphSummaryDiff,
-    SourceGraphSummary,
-    build_source_graph,
-    diff_source_graph,
-    diff_source_graph_findings,
-)
+from .source_graph_build import build_source_graph
+from .source_graph_compare import diff_source_graph
+from .source_graph_findings import diff_source_graph_findings
 from .source_link import link_source_abi
 from .source_replay import (
     REPLAY_SCOPES,

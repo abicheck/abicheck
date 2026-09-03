@@ -33,6 +33,7 @@ to `test-action.yml` escaping its own aggregate's `needs:` list.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -138,7 +139,7 @@ class TestGateJobPollingLogic:
         assert "'success', 'neutral'" in script
         assert "'skipped'" not in script
 
-    @pytest.mark.parametrize("workflow_name", ["ci.yml", "verify-merge-checks.yml"])
+    @pytest.mark.parametrize("workflow_name", ["ci.yml"])
     def test_github_script_is_pinned_by_sha(self, workflow_name: str) -> None:
         wf = _load_workflow(workflow_name)
         for job in _jobs(wf).values():
@@ -227,77 +228,43 @@ class TestTestActionSummaryCoversEveryJob:
         assert "contains(needs.*.result, 'skipped')" in run_step["run"]
 
 
-class TestVerifyMergeChecksWorkflow:
-    def test_triggers_only_on_push_to_main(self) -> None:
-        wf = _load_workflow("verify-merge-checks.yml")
-        on_block = wf.get("on", wf.get(True))
-        assert set(on_block) == {"push"}
-        assert on_block["push"]["branches"] == ["main"]
+class TestBranchRulesetArtifact:
+    """`.github/branch-protection-ruleset.json` records the *non-fast-forward*
+    protection this repo actually wants on `main`. It deliberately carries no
+    `required_status_checks` rule -- see `.github/AGENTS.md`'s
+    "Required-status-check configuration" section: this repo made a conscious
+    choice not to block a merge on CI completion, so there is no
+    required-check list left for this artifact to keep in sync with."""
 
-    def test_required_checks_list_present_in_script(self) -> None:
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "REQUIRED_CHECKS" in raw
-        # Every unconditional required check named in .github/AGENTS.md's
-        # own derived list should appear in the script's own list literal --
-        # a loose substring check (not a full JS parse), but enough to catch
-        # a check silently dropped from one place and not the other.
-        for name in (
-            "ai-readiness",
-            "FAIR metadata and packaging",
-            "lint-and-types",
-            "unit-tests (ubuntu-latest, 3.13, false)",
-            "packaging (ubuntu-latest)",
-            "packaging (windows-latest)",
-            "changelog-fragment",
-            "cli-interface-diff",
-            "test-contract",
-            "Dependency Review",
-            "Security Scan",
-            "CodeQL Analysis (python)",
-            # The two neutral-aggregate gate jobs' own emitted check names
-            # (not their job ids) -- both are unconditioned like every other
-            # ci.yml job, so they exist on every PR head SHA and belong here.
-            "docs-pr (required)",
-            "test-action (required)",
-        ):
-            assert name in raw, f"{name!r} missing from verify-merge-checks.yml"
+    @staticmethod
+    def _ruleset() -> dict[str, Any]:
+        raw = (ROOT / ".github" / "branch-protection-ruleset.json").read_text(
+            encoding="utf-8"
+        )
+        data = json.loads(raw)
+        assert isinstance(data, dict)
+        return data
 
-    def test_does_not_require_the_path_filtered_aggregate_checks(self) -> None:
-        """`build-docs`/`test-action summary` are deliberately excluded --
-        whether they exist at all for a given PR head SHA depends on the
-        same path filter the `ci.yml` gate jobs already re-evaluate, so
-        requiring them here too would either duplicate that logic or, if it
-        drifted, produce a false failure on a PR that never touched those
-        paths."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "'build-docs'" not in raw
-        assert "'test-action summary'" not in raw
+    def test_targets_main_and_is_active(self) -> None:
+        ruleset = self._ruleset()
+        assert ruleset.get("target") == "branch"
+        assert ruleset.get("enforcement") == "active"
+        include = ruleset.get("conditions", {}).get("ref_name", {}).get("include", [])
+        assert "refs/heads/main" in include
 
-    def test_check_run_listing_is_paginated(self) -> None:
-        """A hand-added `per_page: 100` ceiling silently drops any check run
-        past the 100th once the repo's check-run count grows past it -- use
-        `github.paginate` instead so there's no ceiling to outgrow."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "github.paginate(github.rest.checks.listForRef" in raw
+    def test_carries_no_required_status_checks_rule(self) -> None:
+        """The one thing this test suite must keep true: no rule of type
+        `required_status_checks` sneaks back into the applied ruleset without
+        a deliberate decision to re-enable merge-blocking on CI -- see
+        `.github/AGENTS.md`'s "Required-status-check configuration" section."""
+        rules = self._ruleset().get("rules")
+        assert isinstance(rules, list) and rules
+        assert not [r for r in rules if r.get("type") == "required_status_checks"]
 
-    def test_target_pr_selection_is_restricted_to_merged_prs_targeting_main(
-        self,
-    ) -> None:
-        """`listPullRequestsAssociatedWithCommit` can return an unrelated
-        open PR that happens to contain the same commit -- selection must be
-        restricted to merged PRs based against `main` before falling back to
-        anything, or an unrelated PR's head SHA could be verified instead."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "pr.merged_at" in raw
-        assert "pr.base.ref === 'main'" in raw
-
-    def test_empty_candidates_does_not_fall_back_to_an_unfiltered_pr(self) -> None:
-        """If every commit<->PR association GitHub returns is ineligible (not
-        merged, or not based against `main`), the workflow must treat that
-        the same as "no PR associated" rather than silently falling back to
-        `prs[0]` -- an unfiltered fallback can validate a completely
-        unrelated PR's head SHA and read as green or red for reasons that
-        have nothing to do with the actual merge being verified."""
-        raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
-        assert "candidates.length === 0" in raw
-        assert "|| prs[0]" not in raw
+    def test_runbook_references_the_json_file_and_gh_command(self) -> None:
+        runbook = (ROOT / ".github" / "branch-protection-ruleset.md").read_text(
+            encoding="utf-8"
+        )
+        assert "branch-protection-ruleset.json" in runbook
+        assert "gh api" in runbook
+        assert "/repos/abicheck/abicheck/rulesets" in runbook

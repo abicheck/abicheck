@@ -236,8 +236,8 @@ abidiff shows full demangled signatures: `'method virtual int Widget::draw()'`.
 Our reports use the mangled name or bare type name.
 
 Our HTML does have demangled-as-display + mangled-as-tooltip support
-(`_symbol_cell` in html_report.py), but JSON/Markdown don't include a
-`demangled` field.
+(`abbr_symbol_text` in `abicheck/report/render_html.py`), but JSON/Markdown
+don't include a `demangled` field.
 
 ### 4.3 What WE report that others DON'T
 

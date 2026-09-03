@@ -13,15 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``_CastxmlParser.parse_typedefs``/``parse_typedefs_qualified`` bodies,
-split out of :mod:`abicheck.dumper_castxml` to keep that module under the
-AI-readiness file-size hard cap (G31 Phase C, ``AbiSnapshot.typedefs_qualified``
-schema v25 -- see that field's own docstring in ``model.py`` for why a
-qualified-name-keyed twin of ``typedefs`` exists at all).
+"""``_CastxmlParser.parse_typedefs``/``parse_typedefs_qualified`` bodies.
 
-Pure functions taking the parser's own bound helper methods as callables,
-rather than parser methods themselves, so this module has no dependency on
-``_CastxmlParser`` and cannot form an import cycle back into it.
+``_deprecation_marker`` and ``_extract_contract_attributes`` both moved on
+to :mod:`abicheck.extract.headers.castxml.location` (ADR-061 D9, Codex
+review on PR #939 and PR #940 respectively) once an ``extract``-owned
+entity module needed each — this module, still flat and unmigrated itself,
+is exactly the "legacy sibling" ``abicheck/extract/AGENTS.md`` says a new
+``extract`` module must not reach into the private helpers of. Both are
+re-exported here under their old private names so every existing caller
+(including ``dumper_castxml.py``'s own re-export of them, and the direct
+``from abicheck.dumper_castxml_typedefs import ...`` test imports) is
+unaffected.
+
+Pure functions taking the parser's own bound helper methods (or an
+already-extracted XML attribute string/``Element``) as arguments, never
+``_CastxmlParser`` methods themselves, so this module has no dependency on
+the parser class and cannot form an import cycle back into it.
 """
 
 from __future__ import annotations
@@ -31,6 +39,35 @@ from typing import Any
 from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
+
+# Moved to abicheck.extract.headers.castxml.location (ADR-061 D9's "extract
+# owns castxml/clang header-AST entity parsing", Codex review on PR #939):
+# this module is a still-flat, unmigrated `dumper_castxml.py` sibling, and
+# extract/headers/castxml/enums.py needed this exact primitive — reaching
+# back into a private helper here would have been the "don't reach into a
+# flat legacy module's private helpers" violation abicheck/extract/AGENTS.md
+# warns against. Re-exported under its old private name so every existing
+# caller here (and `dumper_castxml.py`'s own `as`-aliased re-export of it)
+# is unaffected.
+from .extract.headers.castxml.location import (
+    _CONTRACT_ATTRIBUTE_BASES as _CONTRACT_ATTRIBUTE_BASES,
+    contract_attributes,
+    deprecation_marker,
+)
+
+
+def _extract_contract_attributes(attributes: str) -> list[str]:
+    """Back-compat private alias — see
+    :func:`abicheck.extract.headers.castxml.location.contract_attributes`,
+    this primitive's real home since ADR-061 D9."""
+    return contract_attributes(attributes)
+
+
+def _deprecation_marker(el: Element) -> str | None:
+    """Back-compat private alias — see
+    :func:`abicheck.extract.headers.castxml.location.deprecation_marker`,
+    this primitive's real home since ADR-061 D9."""
+    return deprecation_marker(el)
 
 
 def iter_typedef_entries(

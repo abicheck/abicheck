@@ -38,7 +38,8 @@ Several more live only in the **build flags**, not the source, and abicheck
 surfaces them as toolchain/deployment risk when build context is captured:
 `-fno-exceptions` / `-fno-rtti` (drop EH/RTTI machinery callers may rely
 on — see [Exception Unwinding](exception-unwinding-abi.md) for what
-`-fno-rtti` actually strips), `-fshort-enums` (changes enum underlying size
+`-fno-rtti` actually strips; [case131](../reference/examples/case131_rtti_mode_flip.md)
+is the RTTI-mode flip), `-fshort-enums` (changes enum underlying size
 — see [Part 3](abi-series/03-type-layout.md)), packing/alignment flags,
 vector-ABI flags, and CPU-dispatch/IFUNC selection
 ([case83](../reference/examples/case83_cpu_dispatch_isa_dropped.md),
@@ -61,3 +62,7 @@ See also: [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) for the
 core, pre-C++11 mechanisms this page's hazards sit alongside, and
 [Exception Unwinding](exception-unwinding-abi.md) for the
 `-fno-exceptions`/`-fno-rtti` machinery in full.
+
+---
+
+**Ladder:** ← [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) · Step 3 · How Breaks Happen · [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) →

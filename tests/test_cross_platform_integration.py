@@ -187,7 +187,9 @@ class TestMachoIntegration:
             )
 
         assert result.returncode == 0, f"dump failed: {result.stderr}"
-        snap = json.loads(result.stdout)
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
+        snap = from_sectioned_document(json.loads(result.stdout))
         assert snap["platform"] == "macho"
         func_names = [f["name"] for f in snap.get("functions", [])]
         assert "api_fn" in func_names
@@ -355,7 +357,9 @@ class TestPeIntegration:
             )
 
         assert result.returncode == 0, f"dump failed: {result.stderr}"
-        snap = json.loads(result.stdout)
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
+        snap = from_sectioned_document(json.loads(result.stdout))
         assert snap["platform"] == "pe"
         func_names = [f["name"] for f in snap.get("functions", [])]
         assert "api_fn" in func_names

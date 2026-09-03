@@ -1,0 +1,787 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Severity configuration for issue categories.
+
+Builds on top of the existing policy/verdict system in ``checker_policy``
+to provide user-facing severity presets that control exit codes and report
+presentation.
+
+The canonical kind-set classification lives in ``checker_policy`` (single
+source of truth).  This module provides:
+
+- **SeverityLevel** — ``error`` / ``warning`` / ``info``.
+- **IssueCategory** — the four high-level categories users interact with.
+- **SeverityConfig** — maps each category to a severity level.
+- **Presets** — ``default``, ``strict``, ``info-only``.
+- **classify_change** / **categorize_changes** — thin wrappers over the
+  canonical kind sets.
+- **compute_exit_code** — severity-aware exit-code computation.
+
+The four categories map to the canonical kind sets as follows:
+
+1. **abi_breaking** → ``BREAKING_KINDS`` — clear ABI/API incompatibilities.
+   Default: ``error``.
+2. **potential_breaking** → ``API_BREAK_KINDS ∪ RISK_KINDS`` — potential
+   incompatibilities that need manual review.  Default: ``warning``.
+3. **quality_issues** → ``QUALITY_KINDS`` (= ``COMPATIBLE_KINDS − ADDITION_KINDS``)
+   — problematic behaviors such as exposing std symbols, missing SONAME,
+   toolchain flag drift.  Default: ``warning``.
+4. **addition** → ``ADDITION_KINDS`` — new public symbols, types, enum
+   members.  Default: ``info``.
+
+Each category can be set to ``error``, ``warning``, or ``info``:
+
+- ``error`` — flagged prominently in the report, contributes to non-zero exit code.
+- ``warning`` — shown as a warning in the report, does NOT affect exit code.
+- ``info`` — informational only, shown in the report but neutral.
+
+Built-in presets:
+
+- ``default`` — abi_breaking=error, potential_breaking=warning,
+  quality_issues=warning, addition=info.
+- ``strict`` — all categories set to error.
+- ``info-only`` — all categories set to info (purely informational report).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date
+from enum import Enum
+
+from ..checker_policy import (
+    ADDITION_KINDS as ADDITION_KINDS,
+    ChangeKind as ChangeKind,
+    HasKind as HasKind,
+    Verdict as Verdict,
+)
+from ..contract_gating import is_evaluated as is_evaluated
+from ..errors import PolicyError as PolicyError
+
+# ADR-061 Phase 2: the per-change effective-verdict resolver, its disclosure
+# sibling, and the kind-set alias/resolver they share now live in
+# ``reclassify.py`` -- the leaf ``checker_types.DiffResult`` (``compare``) and
+# this module (``policy``) may both depend on, since the dependency contract
+# forbids the first importing the second. Re-exported through the redundant-
+# alias form so ``abicheck.severity.effective_verdict_for_change`` /
+# ``reclassify_rule_for_change`` / ``KindSets`` keep working unchanged for
+# every existing caller; see ``reclassify.py``'s docstring for the reasoning.
+from ..reclassify import (
+    KindSets as KindSets,
+    effective_verdict_for_change as effective_verdict_for_change,
+    first_matching_reclassify_verdict as first_matching_reclassify_verdict,
+    reclassify_rule_for_change as reclassify_rule_for_change,
+    resolve_kind_sets as _resolve_kind_sets,
+)
+
+
+def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
+    """The findings the change gate scores (ADR-049 D1).
+
+    One predicate shared by :func:`compute_exit_code` and
+    :func:`compute_gate_decision` so an exit code and the categories blamed
+    for it are always derived from the same set -- the two disagreeing is the
+    class of bug ``compute_gate_decision`` was introduced to close.
+    """
+    return [c for c in changes if is_evaluated(c)]
+
+
+class SeverityLevel(str, Enum):
+    """Criticality level for an issue category."""
+
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+
+
+class IssueCategory(str, Enum):
+    """The four high-level issue categories."""
+
+    ABI_BREAKING = "abi_breaking"
+    POTENTIAL_BREAKING = "potential_breaking"
+    QUALITY_ISSUES = "quality_issues"
+    ADDITION = "addition"
+
+
+# ---------------------------------------------------------------------------
+# Change-kind -> IssueCategory classification
+# ---------------------------------------------------------------------------
+# Delegates entirely to the canonical kind sets in checker_policy.py.
+# When a *policy* is provided, uses the policy-adjusted sets so that
+# kinds downgraded/upgraded by the policy (e.g. sdk_vendor, plugin_abi)
+# are classified correctly.
+
+
+def classify_change(
+    kind: ChangeKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+) -> IssueCategory:
+    """Classify a ChangeKind into one of the four issue categories.
+
+    Uses the canonical kind sets from ``checker_policy`` by default.
+
+    When *kind_sets* is provided (e.g. from ``DiffResult._effective_kind_sets()``),
+    those sets are used directly, which includes PolicyFile overrides.
+
+    When only *policy* is provided, uses the built-in policy-adjusted sets.
+
+    Unknown kinds default to ``ABI_BREAKING`` (fail-safe).
+
+    Note: ``ADDITION_KINDS`` and ``QUALITY_KINDS`` are disjoint by
+    construction (``QUALITY_KINDS = COMPATIBLE_KINDS - ADDITION_KINDS``),
+    so the check order between them does not matter.
+    """
+    breaking, api_break, compatible, risk = _resolve_kind_sets(policy, kind_sets)
+    if kind in breaking:
+        return IssueCategory.ABI_BREAKING
+    if kind in api_break or kind in risk:
+        return IssueCategory.POTENTIAL_BREAKING
+    # Within compatible, split into additions vs quality issues.
+    if kind in ADDITION_KINDS:
+        return IssueCategory.ADDITION
+    if kind in compatible:
+        return IssueCategory.QUALITY_ISSUES
+    # Fail-safe: unclassified kinds are treated as breaking.
+    return IssueCategory.ABI_BREAKING
+
+
+def classify_change_object(
+    change: HasKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> IssueCategory:
+    """Classify a *change* honouring its per-finding ``effective_verdict`` (A4).
+
+    Routes through :func:`checker_policy.effective_category` — the single place
+    a finding's category is decided — so an ADR-027 pattern-aware demotion (a
+    ``Change`` carrying ``effective_verdict``) reads compatible in the
+    severity-aware exit code and category counts, not just the verdict. Falls
+    back to kind-based ``classify_change`` for plain stubs with no override.
+
+    *policy_file* is optional and defaults to ``None`` (unchanged prior
+    behavior for every existing caller that doesn't pass it): without it,
+    only a *kind-global* `overrides:` entry baked into *kind_sets* (e.g. via
+    ``DiffResult._effective_kind_sets()``) is visible here -- a
+    selector-scoped `reclassify:` rule needs the real ``PolicyFile`` object,
+    which *kind_sets* alone cannot express (Codex review: a scan's
+    blocking-finding report was silently omitting a `reclassify:`-demoted
+    finding for exactly this reason).
+    """
+    return classify_effective_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
+    )
+
+
+def _reclassify_resolved_to_compatible(
+    change: HasKind, policy_file: object | None, today: date | None = None
+) -> bool:
+    """True if a selector-scoped `reclassify:` rule -- not a kind-global
+    `overrides:` entry or the base policy -- is what produced this change's
+    COMPATIBLE verdict.
+
+    Used only to widen the ADDITION-vs-QUALITY_ISSUES gate below (Codex
+    review): ``sets[2]`` there is whatever *kind-global* ``kind_sets`` the
+    caller supplied (typically ``DiffResult._effective_kind_sets()``, which
+    bakes in ``overrides:`` but has no notion of a selector-scoped rule at
+    all). A `reclassify:` rule reclassifying one specific addition-kind
+    finding to `ignore` -- even under a kind-global `overrides:
+    {func_added: break}` that would otherwise move `func_added` out of
+    ``sets[2]`` entirely -- is exactly the case that check cannot see: the
+    verdict already correctly resolved to COMPATIBLE (`reclassify:` outranks
+    `overrides:`, see `effective_verdict_for_change`), but the addition/
+    quality split would still read the *overridden* kind set and miscount
+    it as `quality_issues`.
+
+    Must agree with `effective_verdict_for_change`'s own precedence, not
+    just "does some rule happen to match and resolve to COMPATIBLE" (Codex
+    review, fresh evidence): when `change.effective_verdict` is already set,
+    that value wins outright and `reclassify:` is never even consulted to
+    produce the verdict -- a *matching* rule sitting shadowed behind it must
+    not still be treated as "the reclassification that won" here, or an
+    addition kind globally overridden to `break` could get waved into
+    ADDITION merely because an irrelevant reclassify: rule happens to name
+    the same symbol.
+    """
+    if isinstance(getattr(change, "effective_verdict", None), Verdict):
+        return False
+    if policy_file is None:
+        return False
+    rules = getattr(policy_file, "reclassify", None)
+    if not rules:
+        return False
+    return first_matching_reclassify_verdict(rules, change, today) == Verdict.COMPATIBLE
+
+
+def classify_effective_change(
+    change: HasKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+    today: date | None = None,
+    verdict: Verdict | None = None,
+) -> IssueCategory:
+    """Classify one change, preserving per-finding verdict guards.
+
+    *verdict*, when given, is used as-is instead of re-deriving it via
+    ``effective_verdict_for_change`` -- pass a value already resolved by an
+    identical call (same *change*/*policy*/*kind_sets*/*policy_file*/
+    *today*) to avoid computing it twice for the same change (Codex review:
+    ``report.finding.build_report_findings`` resolves both the verdict and
+    the category for one change and was calling this function without it,
+    so the verdict it had just computed was silently recomputed here too).
+    """
+    sets = _resolve_kind_sets(policy, kind_sets)
+    if verdict is None:
+        verdict = effective_verdict_for_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+        )
+    if verdict == Verdict.BREAKING:
+        return IssueCategory.ABI_BREAKING
+    if verdict in (Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):
+        return IssueCategory.POTENTIAL_BREAKING
+    # COMPATIBLE (and the unreachable NO_CHANGE — effective_category only ever
+    # returns BREAKING/API_BREAK/RISK/COMPATIBLE): an addition keeps its
+    # ADDITION bucket; everything else (including a demoted break, or a
+    # hypothetical NO_CHANGE) is a quality issue, never an addition. A
+    # reclassify: rule's own COMPATIBLE resolution counts as "in sets[2]"
+    # even when a kind-global override moved this kind out of it (see
+    # _reclassify_resolved_to_compatible).
+    if change.kind in ADDITION_KINDS and (
+        change.kind in sets[2]
+        or _reclassify_resolved_to_compatible(change, policy_file, today)
+    ):
+        return IssueCategory.ADDITION
+    return IssueCategory.QUALITY_ISSUES
+
+
+# ---------------------------------------------------------------------------
+# Severity configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SeverityConfig:
+    """Maps each issue category to a criticality level.
+
+    Attributes:
+        abi_breaking: Severity for clear ABI/API incompatibilities.
+        potential_breaking: Severity for potential incompatibilities needing review.
+        quality_issues: Severity for problematic behaviors (e.g., std symbol leaks).
+        addition: Severity for additive changes (new public API surface).
+    """
+
+    abi_breaking: SeverityLevel = SeverityLevel.ERROR
+    potential_breaking: SeverityLevel = SeverityLevel.WARNING
+    quality_issues: SeverityLevel = SeverityLevel.WARNING
+    addition: SeverityLevel = SeverityLevel.INFO
+
+    def __post_init__(self) -> None:
+        # The four annotations aren't runtime-enforced, so an untyped
+        # manifest/API adapter (e.g. compatibility_evaluation_config.py's
+        # GateConfig, which only validates the outer isinstance(...,
+        # SeverityConfig)) could otherwise construct
+        # SeverityConfig(abi_breaking="erorr") -- has_errors() would then
+        # treat an ABI-breaking finding as non-error (potentially making a
+        # release gate green on a real break), and describe() would crash
+        # on the raw string's missing .value (Codex review).
+        for field_name in (
+            "abi_breaking",
+            "potential_breaking",
+            "quality_issues",
+            "addition",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, SeverityLevel):
+                raise TypeError(
+                    f"SeverityConfig.{field_name} must be a SeverityLevel, "
+                    f"not {value!r}."
+                )
+
+    def level_for(self, category: IssueCategory) -> SeverityLevel:
+        """Return the configured severity level for *category*.
+
+        Works because SeverityConfig field names match IssueCategory values.
+        """
+        result: SeverityLevel = getattr(self, category.value)
+        return result
+
+    def level_for_kind(
+        self,
+        kind: ChangeKind,
+        *,
+        policy: str | None = None,
+        kind_sets: KindSets | None = None,
+    ) -> SeverityLevel:
+        """Return the configured severity level for a specific ChangeKind."""
+        return self.level_for(classify_change(kind, policy=policy, kind_sets=kind_sets))
+
+    def has_errors(
+        self,
+        changes: Sequence[HasKind],
+        *,
+        policy: str | None = None,
+        kind_sets: KindSets | None = None,
+    ) -> bool:
+        """Return True if any change falls into a category configured as error."""
+        return any(
+            self.level_for_kind(c.kind, policy=policy, kind_sets=kind_sets)
+            == SeverityLevel.ERROR
+            for c in changes
+        )
+
+    def describe(self, *, prefix: str = "", title: str | None = None) -> str:
+        """Human-readable summary of this configuration.
+
+        Args:
+            prefix: String prepended to each line (e.g. indentation).
+            title: Optional title line printed before the category listing.
+        """
+        lines: list[str] = []
+        if title is not None:
+            lines.append(f"{prefix}{title}")
+        for cat in IssueCategory:
+            lines.append(f"{prefix}  {cat.value}: {self.level_for(cat).value}")
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Built-in presets
+# ---------------------------------------------------------------------------
+
+#: Default preset: breaks are errors, potential issues and quality are warnings,
+#: additions are informational.
+PRESET_DEFAULT = SeverityConfig()
+
+#: Strict preset: everything is an error.
+PRESET_STRICT = SeverityConfig(
+    abi_breaking=SeverityLevel.ERROR,
+    potential_breaking=SeverityLevel.ERROR,
+    quality_issues=SeverityLevel.ERROR,
+    addition=SeverityLevel.ERROR,
+)
+
+#: Info-only preset: everything is informational (no exit-code impact).
+PRESET_INFO_ONLY = SeverityConfig(
+    abi_breaking=SeverityLevel.INFO,
+    potential_breaking=SeverityLevel.INFO,
+    quality_issues=SeverityLevel.INFO,
+    addition=SeverityLevel.INFO,
+)
+
+SEVERITY_PRESETS: dict[str, SeverityConfig] = {
+    "default": PRESET_DEFAULT,
+    "strict": PRESET_STRICT,
+    "info-only": PRESET_INFO_ONLY,
+    "info_only": PRESET_INFO_ONLY,  # underscore alias for programmatic use
+}
+
+
+def resolve_severity_config(
+    preset: str | None = None,
+    *,
+    abi_breaking: str | None = None,
+    potential_breaking: str | None = None,
+    quality_issues: str | None = None,
+    addition: str | None = None,
+) -> SeverityConfig:
+    """Build a SeverityConfig from a preset name and optional per-category overrides.
+
+    Per-category overrides take precedence over the preset.
+
+    Args:
+        preset: One of ``default``, ``strict``, ``info-only``, or *None* for default.
+        abi_breaking: Override for the abi_breaking category (``error``, ``warning``, ``info``).
+        potential_breaking: Override for potential_breaking.
+        quality_issues: Override for quality_issues.
+        addition: Override for addition.
+
+    Returns:
+        A fully resolved SeverityConfig.
+
+    Raises:
+        ValueError: If the preset name or any override value is invalid.
+    """
+    if preset is None:
+        base = PRESET_DEFAULT
+    else:
+        looked_up = SEVERITY_PRESETS.get(preset)
+        if looked_up is None:
+            raise PolicyError(
+                f"Unknown severity preset {preset!r}. "
+                f"Valid presets: {sorted(SEVERITY_PRESETS)}"
+            )
+        base = looked_up
+
+    def _parse(name: str, raw: str | None, fallback: SeverityLevel) -> SeverityLevel:
+        if raw is None:
+            return fallback
+        try:
+            return SeverityLevel(raw.lower())
+        except ValueError:
+            raise PolicyError(
+                f"Invalid severity level {raw!r} for {name}. "
+                f"Valid values: error, warning, info"
+            ) from None
+
+    return SeverityConfig(
+        abi_breaking=_parse("abi_breaking", abi_breaking, base.abi_breaking),
+        potential_breaking=_parse(
+            "potential_breaking", potential_breaking, base.potential_breaking
+        ),
+        quality_issues=_parse("quality_issues", quality_issues, base.quality_issues),
+        addition=_parse("addition", addition, base.addition),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Exit code computation
+# ---------------------------------------------------------------------------
+
+# Severity-aware exit codes (used when a severity setting is in effect):
+#
+#   0 — no error-level findings
+#   1 — error-level findings in additions or quality_issues only
+#   2 — error-level findings in potential_breaking (but not abi_breaking)
+#   4 — error-level findings in abi_breaking
+#
+# The highest applicable code wins (e.g. both abi_breaking=error and
+# quality_issues=error → exit 4).
+#
+# Note: exit codes 1 and 2 intentionally share a code between two
+# categories each (additions/quality_issues → 1, potential_breaking → 2).
+# Callers that need per-category granularity should inspect the JSON
+# ``severity.categories`` output instead of the exit code.
+#
+# These codes align with the legacy verdict-based exits (BREAKING → 4,
+# API_BREAK → 2) but are independent: the legacy path runs when no
+# severity setting is in effect.  The two paths are mutually exclusive
+# in cli.py.
+
+_CATEGORY_EXIT_CODES: dict[IssueCategory, int] = {
+    IssueCategory.ABI_BREAKING: 4,
+    IssueCategory.POTENTIAL_BREAKING: 2,
+    IssueCategory.QUALITY_ISSUES: 1,
+    IssueCategory.ADDITION: 1,
+}
+
+
+# Legacy (non-severity-aware) verdict → process exit code. Canonical mapping
+# shared by every flow that exits on a single verdict (`compare`,
+# `compare-release` per-library/global). Kept next to the severity-aware
+# `compute_exit_code` so both schemes live in one place (C7). Documented
+# contract (see /CLAUDE.md "Exit codes"): BREAKING→4, API_BREAK→2, compatible→0.
+_LEGACY_VERDICT_EXIT_CODE: dict[Verdict, int] = {
+    Verdict.BREAKING: 4,
+    Verdict.API_BREAK: 2,
+    Verdict.COMPATIBLE_WITH_RISK: 0,
+    Verdict.COMPATIBLE: 0,
+    Verdict.NO_CHANGE: 0,
+}
+
+
+def legacy_exit_code(verdict: Verdict) -> int:
+    """Map a single overall *verdict* to the legacy process exit code.
+
+    The one place the verdict→exit-code contract is encoded for the
+    non-severity-aware flows, so `compare` and `compare-release` cannot drift
+    apart. Flow-specific floors (operational ERROR→4, removed-library→8) are
+    applied by the caller on top of this base.
+    """
+    return _LEGACY_VERDICT_EXIT_CODE.get(verdict, 0)
+
+
+def missing_contract_exit_code(config: SeverityConfig) -> int:
+    """Severity-aware exit code floor for a scoped contract missing outright.
+
+    A ``--used-by``/``--required-symbol(s)`` scope can be BREAKING because a
+    required symbol/version/entrypoint is simply absent from the new
+    library -- there is no resolution to compare against, so nothing reaches
+    the diff and ``compute_exit_code`` never sees a ``Change`` to classify.
+    Left alone this makes a severity-scheme scoped compare silently exit 0
+    for a library that no longer satisfies the app/host's load-time contract
+    at all (Codex review). A missing contract symbol is the same failure
+    class as ``abi_breaking`` (the app's dependency can no longer be
+    resolved), so it is floored by that category's configured level, exactly
+    like a real ``BREAKING_KINDS`` finding would be.
+    """
+    if config.abi_breaking == SeverityLevel.ERROR:
+        return _CATEGORY_EXIT_CODES[IssueCategory.ABI_BREAKING]
+    return 0
+
+
+def compute_exit_code(
+    changes: Sequence[HasKind],
+    config: SeverityConfig,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> int:
+    """Compute the process exit code based on severity configuration.
+
+    Returns the highest exit code among categories that have both:
+    - at least one finding, AND
+    - severity configured as ``error``.
+
+    *kind_sets* (from ``DiffResult._effective_kind_sets()``) includes
+    PolicyFile overrides and takes precedence over *policy*. When
+    *policy_file* is provided, frozen-namespace downgrade guards are applied
+    per change before classifying severity.
+
+    Returns 0 if no category at error level has findings.
+
+    ADR-049 D1: a finding contract evaluation left ``NOT_EVALUATED`` --
+    proven outside the declared contract, or unresolved for want of evidence
+    -- contributes ``0`` and is skipped here. It keeps its place in the
+    report and in every ledger; what it loses is the ability to gate. Every
+    finding is evaluated for a run that did not opt into
+    ``--contract``, so this is inert by default.
+    """
+    worst = 0
+    for change in gate_eligible_changes(changes):
+        cat = classify_effective_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
+        if config.level_for(cat) == SeverityLevel.ERROR:
+            worst = max(worst, _CATEGORY_EXIT_CODES[cat])
+    return worst
+
+
+def gate_contribution_for_change(
+    change: HasKind,
+    config: SeverityConfig | None,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> int:
+    """What one finding contributes to the process exit code.
+
+    ADR-049 D1 makes this a per-finding report field, so it has to be the
+    number that actually applied rather than a plausible one:
+
+    - a ``NOT_EVALUATED`` finding contributes ``0`` -- it is not on the
+      compatibility axis at all;
+    - under the severity scheme, a finding contributes its category's exit
+      code when that category is configured ``error``, and ``0`` otherwise --
+      which is exactly what :func:`compute_exit_code` folds with ``max``;
+    - under the legacy scheme (*config* ``None``), it contributes its own
+      effective verdict's legacy exit code. The overall legacy exit is
+      ``legacy_exit_code`` of the worst evaluated verdict, and both mappings
+      are monotone in the same verdict order, so folding these with ``max``
+      reproduces it.
+
+    This is deliberately *not* a new gate: every value it can return is one
+    :func:`compute_exit_code` or :func:`legacy_exit_code` would already have
+    produced for the same finding.
+    """
+    if not is_evaluated(change):
+        return 0
+    if config is None:
+        return legacy_exit_code(
+            effective_verdict_for_change(
+                change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            )
+        )
+    category = classify_effective_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    if config.level_for(category) != SeverityLevel.ERROR:
+        return 0
+    return _CATEGORY_EXIT_CODES[category]
+
+
+@dataclass(frozen=True)
+class CategorizedChanges:
+    """Changes partitioned into the four issue categories.
+
+    Fields use ``list[HasKind]`` intentionally so that any object with a
+    ``.kind`` attribute can be categorized (e.g. ``Change``, ``AbiChange``,
+    or lightweight stubs in tests).  Callers that need full change objects
+    should cast the elements to the concrete type.
+    """
+
+    abi_breaking: list[HasKind]
+    potential_breaking: list[HasKind]
+    quality_issues: list[HasKind]
+    addition: list[HasKind]
+
+
+def categorize_changes(
+    changes: Sequence[HasKind],
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> CategorizedChanges:
+    """Partition changes into the four issue categories."""
+    abi: list[HasKind] = []
+    potential: list[HasKind] = []
+    quality: list[HasKind] = []
+    adds: list[HasKind] = []
+
+    for c in changes:
+        cat = classify_effective_change(
+            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
+        if cat == IssueCategory.ABI_BREAKING:
+            abi.append(c)
+        elif cat == IssueCategory.POTENTIAL_BREAKING:
+            potential.append(c)
+        elif cat == IssueCategory.QUALITY_ISSUES:
+            quality.append(c)
+        else:
+            adds.append(c)
+
+    return CategorizedChanges(
+        abi_breaking=abi,
+        potential_breaking=potential,
+        quality_issues=quality,
+        addition=adds,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Formal compatibility/gate separation (architectural recommendation from the
+# post-#549/#551 reporting review)
+# ---------------------------------------------------------------------------
+
+#: The compatibility axis is already exactly ``Verdict``: NO_CHANGE/
+#: COMPATIBLE/COMPATIBLE_WITH_RISK/API_BREAK/BREAKING answer "is this ABI/API
+#: compatible?" and nothing else. This alias gives that question a name
+#: distinct from the gate question below, without introducing a second enum
+#: or touching any existing ``Verdict`` call site (purely additive — no
+#: behavior or public-API change, just a second name for callers that want
+#: to say "compatibility decision" explicitly).
+CompatibilityDecision = Verdict
+
+
+@dataclass(frozen=True)
+class GateDecision:
+    """The CI-gate outcome — a decision formally distinct from compatibility.
+
+    A :data:`CompatibilityDecision` (== ``Verdict``) answers "is this
+    ABI/API compatible?". A ``GateDecision`` answers "does this block CI?" —
+    a genuinely separate question once severity configuration is in play: an
+    addition can gate CI (``severity.addition: error``) while its
+    compatibility decision stays ``COMPATIBLE``; a breaking kind can pass CI
+    (``--severity-preset info-only``) while its compatibility decision stays
+    ``BREAKING``. Renderers should read gate status from here rather than
+    inferring it from compatibility wording — the exact confusion this type
+    was introduced to close off.
+
+    Attributes:
+        scheme: ``"legacy"`` (verdict-only exit code — no ``SeverityConfig``
+            was supplied) or ``"severity"`` (severity-aware exit code).
+        exit_code: The resolved process exit code under this scheme.
+        blocking: ``exit_code != 0``, named separately so callers don't need
+            to know the exit-code convention.
+        blocking_categories: The :class:`IssueCategory` names actually
+            responsible for a nonzero ``exit_code``. Always empty under the
+            ``"legacy"`` scheme, which has no per-category configuration to
+            single one out — legacy exit codes key off the single overall
+            verdict.
+    """
+
+    scheme: str
+    exit_code: int
+    blocking: bool
+    blocking_categories: tuple[str, ...]
+
+
+def compute_gate_decision(
+    changes: Sequence[HasKind],
+    severity_config: SeverityConfig | None,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+    legacy_exit_code: int = 0,
+) -> GateDecision:
+    """Compute the single, canonical :class:`GateDecision` for *changes*.
+
+    Without *severity_config* the gate is the legacy verdict-based scheme:
+    the caller supplies *legacy_exit_code* (typically from
+    :func:`legacy_exit_code` or a flow-specific floor, e.g. removed-library
+    escalation) and no category can be singled out as "the" blocker
+    (``blocking_categories`` is always empty in this scheme — there is no
+    per-category configuration to single one out from). None of this
+    function's three current call sites (``reporter._build_severity_json``,
+    ``sarif._severity_gate_properties``, ``cli_compare_release._release_gating_buckets``)
+    actually reach this branch — each already special-cases
+    ``severity_config is None`` itself before calling in, since their
+    own legacy-scheme needs differ from an empty ``blocking_categories``
+    (e.g. ``_release_gating_buckets``'s legacy branch needs three fixed
+    *named* buckets — breaking/api_break/risk — to walk, which this
+    branch's empty tuple can't supply). The legacy branch exists so a
+    caller that only ever wants a single, uniform :class:`GateDecision`
+    regardless of scheme has one to call — see ``tests/test_severity.py``'s
+    ``TestComputeGateDecision`` for its own direct coverage.
+
+    With *severity_config*, ``exit_code`` (via :func:`compute_exit_code`)
+    and ``blocking_categories`` (via :func:`categorize_changes`) are both
+    derived from the same *changes*/*kind_sets*/*policy_file*, so they can
+    never disagree with each other the way two independently-computed
+    values could — the root cause of two real bugs this function replaces
+    the duplicated logic for: JSON's ``severity.blocking_categories``
+    disagreeing with ``exit_code`` under ``--show-only`` (it was derived
+    from the display-filtered changes instead of the unfiltered gate set),
+    and release JSON's per-library ``findings`` list missing
+    severity-gated additions (it only ever walked the legacy verdict
+    buckets). Route every gate computation through this one function
+    instead of hand-rolling the categorize-then-filter-to-error pattern
+    again.
+    """
+    if severity_config is None:
+        return GateDecision(
+            scheme="legacy",
+            exit_code=legacy_exit_code,
+            blocking=legacy_exit_code != 0,
+            blocking_categories=(),
+        )
+
+    # ADR-049 D1 -- applied here as well as inside compute_exit_code, so the
+    # blamed categories are computed over the same set the exit code was.
+    # `categorize_changes` itself is deliberately left unfiltered: it is also
+    # the *display* partition, where a not-evaluated finding still belongs.
+    gated = gate_eligible_changes(changes)
+    exit_code = compute_exit_code(
+        gated, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    categorized = categorize_changes(
+        gated, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    blocking_categories = tuple(
+        cat.value
+        for cat, cat_changes in (
+            (IssueCategory.ABI_BREAKING, categorized.abi_breaking),
+            (IssueCategory.POTENTIAL_BREAKING, categorized.potential_breaking),
+            (IssueCategory.QUALITY_ISSUES, categorized.quality_issues),
+            (IssueCategory.ADDITION, categorized.addition),
+        )
+        if cat_changes and severity_config.level_for(cat) == SeverityLevel.ERROR
+    )
+    return GateDecision(
+        scheme="severity",
+        exit_code=exit_code,
+        blocking=exit_code != 0,
+        blocking_categories=blocking_categories,
+    )

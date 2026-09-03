@@ -28,9 +28,14 @@ at the bottom of the dependency graph (no cycle with ``checker``).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .checker_policy import Confidence, EvidenceTier
 from .detectors import DetectorResult
 from .model import AbiSnapshot
+
+if TYPE_CHECKING:
+    from .checker_types import DiffResult
 
 __all__ = [
     "compute_confidence",
@@ -38,6 +43,7 @@ __all__ = [
     "_detect_evidence_tiers",
     "_determine_evidence_tier",
     "_determine_confidence_level",
+    "note_if_same_binary_compared",
 ]
 
 
@@ -241,3 +247,85 @@ def compute_confidence(
 # Back-compat alias: the function was historically named ``_compute_confidence``
 # and imported under that name by checker and tests.
 _compute_confidence = compute_confidence
+
+
+#: Substring every ``note_if_same_binary_compared`` message shares, regardless
+#: of which variant fires -- the one stable marker a consumer can filter
+#: `coverage_warnings` on to isolate this specific warning from the rest
+#: (detector-disabled notices, missing-metadata notes), used by both
+#: ``cli_compare_options.echo_coverage_warnings``'s ``--profile quick`` filter
+#: and ``junit_coverage_warnings``'s JUnit rendering.
+SAME_BINARY_WARNING_MARKER = "byte-identical"
+
+
+def note_if_same_binary_compared(result: DiffResult) -> None:
+    """Append an L0 coverage warning when *result*'s two compared binaries
+    are byte-for-byte identical.
+
+    A comparison against the identical file content necessarily reports
+    ``NO_CHANGE`` (there is nothing to diff), and that is the *correct*
+    verdict for the bytes actually given -- but it silently reads the same
+    as "these two builds genuinely have no ABI-visible differences" from
+    the report alone. A user who intended to compare two distinct
+    releases and instead passed a stale/duplicate artifact (a build that
+    didn't actually rerun, a symlink resolving both `--old`/`--new` to the
+    same file, a packaging step that copied the wrong binary) gets a clean
+    report with no signal that the comparison itself couldn't have caught
+    anything either way -- the under-reporting is silent specifically
+    because the correct verdict and the "nothing was actually compared"
+    case are indistinguishable without this warning.
+
+    Uses ``LibraryMetadata.sha256`` (populated post-``compare()`` by each
+    caller that has real file paths -- ``cli._finalize_compare_result``,
+    ``service_compare_pipeline.classify_compare_pair``) rather than any
+    ELF-level identity (build-id, soname, symbol-table digest): the sha256
+    is the only signal available that is unconditionally exact regardless
+    of binary format (ELF/PE/Mach-O) or whether the snapshot carries ELF
+    metadata at all, and it needs no new model field or extraction work.
+    A no-op whenever either side's metadata is absent (a pure two-snapshot
+    Python-API comparison never populates ``old_metadata``/
+    ``new_metadata`` at all) or the two digests differ.
+
+    Idempotent and additive: appends to the existing
+    ``DiffResult.coverage_warnings`` list already surfaced by every
+    report format (JSON/SARIF/text/HTML/Markdown), so this needed no new
+    field on the ADR-061 no-growth-baselined ``DiffResult``/``checker.py``.
+    """
+    old_meta, new_meta = result.old_metadata, result.new_metadata
+    if old_meta is None or new_meta is None:
+        return
+    if old_meta.sha256 != new_meta.sha256:
+        return
+    # The two *binaries* being byte-identical says nothing about whether a
+    # real change could still be caught: a comparison that also analyzed
+    # header/AST evidence (e.g. --old-header/--new-header, --build-info,
+    # or --sources pointing at genuinely different content than what
+    # produced this identical .so/.dll/.dylib) can still detect a real
+    # API/source-level difference even though the binary content is the
+    # same -- so the stronger "this comparison cannot detect a change"
+    # claim is only true when no such evidence was in play (Codex review,
+    # fresh evidence: the original wording overclaimed for exactly this
+    # case).
+    # Also true whenever the comparison already produced a real finding:
+    # L3-L5 build/source-pack evidence can detect and report a change
+    # without ever setting "header" in evidence_tiers (that list only
+    # reflects snapshot-level elf/dwarf/header/pe/macho facts), so a
+    # non-empty result.changes directly contradicts "cannot detect a
+    # change" regardless of which tier produced it (Codex review, fresh
+    # evidence).
+    header_evidence_used = "header" in result.evidence_tiers or bool(result.changes)
+    if header_evidence_used:
+        detection_note = (
+            "any ABI/API difference this run could still catch would have "
+            "to come from the header/build evidence supplied alongside "
+            "these binaries, not from the binaries themselves"
+        )
+    else:
+        detection_note = (
+            "this comparison cannot detect a change even if one was "
+            "intended -- verify the correct build artifacts were provided"
+        )
+    result.coverage_warnings.append(
+        f"old and new binaries are {SAME_BINARY_WARNING_MARKER} (sha256 "
+        f"{old_meta.sha256[:12]}...); {detection_note}"
+    )

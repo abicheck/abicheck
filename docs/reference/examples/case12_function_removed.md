@@ -12,6 +12,11 @@
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
+**Related rule:** same `exported-function-removed` rule as
+`case01_symbol_removal` (the canonical
+case for this rule) — a plain exported-function removal, same mechanism and
+evidence. See `examples/CLAUDE.md`'s "Taxonomy" section.
+
 ## Verdict and consumer impact
 
 Any binary dynamically linked against v1 fails to resolve `fast_add` after

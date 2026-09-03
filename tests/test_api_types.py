@@ -438,6 +438,35 @@ class TestCompareResult:
         with pytest.raises(dataclasses.FrozenInstanceError):
             result.old_snapshot = new  # type: ignore[misc]
 
+    def test_get_type_hints_resolves_without_nameerror(self):
+        """CodeRabbit review, fresh evidence, PR #1032:
+        `TestCompareRequestRuntimeResolvableAnnotations` above already
+        establishes the pattern (PEP 563 -- every annotation is a lazy
+        string that `typing.get_type_hints()` must resolve against the
+        *module's runtime globals*, not merely under `TYPE_CHECKING`) for
+        `CompareRequest`; `CompareResult` had the identical bug for six of
+        `api_types.py`'s then-seven `TYPE_CHECKING`-only names, all
+        referenced directly by its own fields: `diff: DiffResult`,
+        `old_snapshot`/`new_snapshot: AbiSnapshot`, `suppression:
+        SuppressionList | None`, `exit_decision: ExitDecision | None`,
+        `severity_config: SeverityConfig | None`. The review comment's own
+        suggestion (import only `DiffResult`) would have left
+        `get_type_hints()` failing on the very next name (`AbiSnapshot`) --
+        fixed by importing all five unconditionally (verified no import
+        cycle: none of `checker_types`/`model`/`suppression`/
+        `policy.exit_decision`/`policy.severity` imports `api_types`,
+        directly or transitively). `CompileContext`/`DumpManifest` stay
+        `TYPE_CHECKING`-only since `CompareResult` never references them."""
+        import typing
+
+        hints = typing.get_type_hints(CompareResult)
+        assert hints["diff"] is not None
+        assert "old_snapshot" in hints
+        assert "new_snapshot" in hints
+        assert "suppression" in hints
+        assert "exit_decision" in hints
+        assert "severity_config" in hints
+
 
 class TestDebugFormatValidation:
     """ADR-055 D1 second slice (Codex review): the newly-exposed

@@ -23,7 +23,16 @@ from __future__ import annotations
 
 import re
 import struct
+from functools import partial
 from pathlib import Path
+
+# ``strip_vendor_hash``'s real home is ``model/binary_naming.py`` (ADR-061
+# D1): a pure string transform with no I/O, living in ``model`` so
+# ``compare``-layer detectors can use it without a forbidden
+# ``compare -> extract`` edge. ``_canonical_library_key`` below still needs
+# it; re-exported by value here so an existing
+# ``from .binary_utils import strip_vendor_hash`` still resolves.
+from .model.binary_naming import strip_vendor_hash as strip_vendor_hash
 
 # Mach-O magic bytes — covers all variants:
 # 32-bit BE/LE, 64-bit BE/LE, fat archive 32/64
@@ -120,6 +129,30 @@ def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     return None, True
 
 
+def resolve_linker_script_chain(path: Path, max_hops: int = 32) -> Path:
+    """Follow a chain of GNU ld linker scripts to the final real artifact.
+
+    ``resolve_linker_script`` only ever resolves one hop; a linker script
+    can legitimately point at another linker script (e.g. a dev symlink
+    ``libfoo.so`` -> ``libfoo.so.1``, itself a script pointing at the
+    versioned ``libfoo.so.1.2.3``), which ``service.resolve_input`` already
+    follows correctly via its own recursive self-call. A caller that only
+    needs the final resolved path (not a full snapshot) -- e.g. hashing an
+    operand for the same-binary coverage warning -- needs the identical
+    multi-hop behavior rather than a single-hop copy of it (Codex review,
+    fresh evidence). ``max_hops`` guards against a pathological cyclic
+    chain; returns *path* itself once no further hop resolves (including
+    immediately, for an ordinary non-script input).
+    """
+    current = path
+    for _ in range(max_hops):
+        target, is_ld = resolve_linker_script(current)
+        if not is_ld or target is None:
+            return current
+        current = target
+    return current
+
+
 def normalize_binary_input(path: Path) -> tuple[Path, str | None]:
     """Detect binary format, following resolvable GNU ld linker scripts."""
     fmt = detect_binary_format(path)
@@ -146,48 +179,6 @@ def detect_archive(path: str | Path) -> bool:
     except OSError:
         return False
     return magic in _ARCHIVE_MAGICS
-
-
-#: `auditwheel` (Linux) and `delocate` (macOS) rewrite each vendored library to
-#: ``lib<name>-<hex>.so.<ver>`` / ``lib<name>-<hex>.dylib`` and rewrite its
-#: SONAME/install-name to match, so the hash changes on every rebuild even
-#: though the underlying dependency didn't. Restricted to a hyphen + 6-16 hex
-#: chars immediately before ``.so``/``.dylib`` (or a numeric version
-#: component leading to one) so ordinary hyphenated names — e.g.
-#: ``libwebpdemux``, ``libbrotlicommon``, or a real ``-cafe`` (too short) —
-#: are never touched (G9, ADR: docs/contribute/plans/g9-wheel-vendored-matching.md).
-#: The lookahead ``(?=[0-9a-f]*[a-f])`` requires at least one non-decimal hex
-#: letter in the run: without it, a purely-decimal 6-16-digit suffix (a
-#: legitimate embedded build/version number, e.g. ``libfoo-100200.so.1`` vs.
-#: ``libfoo-100300.so.1``) also matched and stripped to the same key,
-#: silently hiding a real SONAME/dependency change as vendor-hash noise —
-#: the exact false-negative an ABI-breaking-change detector must not produce
-#: (self-review finding).
-#: Case-insensitive (``re.IGNORECASE``): a vendored library can carry an
-#: uppercase-hex or uppercase-extension spelling (``libfoo-ABCDEF.SO.1``) --
-#: matching only lowercase let two releases differing solely in that
-#: generated hash's case key as unrelated libraries, reporting spurious
-#: removal/addition noise (Codex). Only the matched hash/extension span is
-#: affected -- re.sub() replaces just that span with "", so the rest of the
-#: name (and every other consumer of the stripped result) keeps its
-#: original case.
-_VENDOR_HASH_RE = re.compile(
-    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)", re.IGNORECASE
-)
-
-
-def strip_vendor_hash(name: str) -> str:
-    """Strip an auditwheel/delocate content-hash suffix from a library name.
-
-    Pairing on the unhashed stem lets ``compare-release`` diff two wheels'
-    vendored libraries directly instead of reporting every one as
-    removed+added noise every rebuild (G9), and lets SONAME/install-name
-    diffing treat a hash-only rebuild as unchanged rather than a spurious
-    ``SONAME_CHANGED``. A genuinely changed vendored dependency (e.g. a
-    SONAME major bump) still surfaces as a real break — this only normalizes
-    the filename/SONAME spelling, never the content.
-    """
-    return _VENDOR_HASH_RE.sub("", name)
 
 
 #: Mach-O's version-before-extension convention: ``libfoo.1.dylib``,
@@ -387,3 +378,121 @@ def _canonical_library_key(path: Path) -> str:
     if represented.endswith(".dylib"):
         return represented_cased
     return name
+
+
+def _version_sort_key(
+    path: Path, canonical_key: str
+) -> tuple[list[tuple[int, int | str]], str]:
+    """Build a version-aware sort key for ambiguous library candidates.
+
+    Uses the vendor-hash-stripped name (G9) so an auditwheel/delocate content
+    hash never enters the comparison — otherwise the hash's digits/letters can
+    outrank the real SONAME version tokens and :func:`build_match_map` picks a
+    stale duplicate over the newer one (Codex review, PR #551).
+
+    Lives here (not ``cli_helpers_compare.py``, which re-exports it for
+    back-compat, mirroring :func:`_canonical_library_key`'s own precedent) so
+    ``bundle_side_input.py``'s stored-facts driver (ADR-061: classified
+    ``workflows``, which may not import a ``frontends``-legacy module) can
+    use it directly.
+    """
+    lower = strip_vendor_hash(path.name.lower())
+    # ADR-059 (Codex review): strip a compressed snapshot's storage suffix
+    # (".json.gz"/".json.zst") up front, before anything else touches
+    # `lower` -- _canonical_library_key already groups a plain and a
+    # compressed snapshot of the same release under one bucket, but this
+    # function ranks candidates *within* that bucket to pick which one
+    # wins, and `lower` feeds both the token comparison below AND the
+    # raw-string tie-break returned at the end. Left unstripped, a ".gz"/
+    # ".zst" tail becomes an extra alphabetic sort token (and an
+    # alphabetically-later raw string) that always outranks a plain
+    # ".json" -- and ".zst" always outranks ".gz" -- regardless of which
+    # file is actually current. A stale compressed sibling left over from
+    # a previous release could then silently win over a freshly-written
+    # plain/differently-compressed snapshot. (Two candidates differing
+    # only by encoding now reduce to the same sort key -- genuinely
+    # ambiguous, indistinguishable from the filename alone, and already
+    # surfaced by `build_match_map`'s own "Ambiguous match" warning for
+    # any multi-candidate bucket.)
+    from .snapshot_io import _COMPRESSED_SUFFIXES
+
+    for suffix, _compression in _COMPRESSED_SUFFIXES:
+        if lower.endswith(suffix):
+            lower = lower[: -len(suffix[len(".json") :])]
+            break
+    remainder = lower
+    if canonical_key.endswith(".so") and canonical_key in lower:
+        remainder = lower[lower.find(canonical_key) + len(canonical_key) :]
+    # strip known wrapper extensions for snapshots/dumps
+    for suffix in (".json", ".pl", ".pm"):
+        if remainder.endswith(suffix):
+            remainder = remainder[: -len(suffix)]
+            break
+    remainder = remainder.lstrip("._-")
+    tokens = re.findall(r"\d+|[a-z]+", remainder)
+    parsed: list[tuple[int, int | str]] = []
+    for tok in tokens:
+        if tok.isdigit():
+            parsed.append((1, int(tok)))
+        else:
+            parsed.append((0, tok))
+    return parsed, lower
+
+
+def build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
+    """Build key->path map with version-aware duplicate resolution.
+
+    Raises :class:`~abicheck.errors.AmbiguousLibraryMatchError` for a genuine
+    top-of-ranking tie (Codex review, PR #699, second round on the same fix):
+    stripping a compressed snapshot's storage suffix (ADR-059) from the sort
+    key makes two candidates differing *only* by encoding -- e.g. a plain
+    ``libfoo.abicheck.json`` and a stale ``libfoo.abicheck.json.zst`` left
+    over from a previous release -- reduce to an *identical* sort key, not
+    merely "multiple candidates present". ``sorted()``'s stability then
+    means the winner is decided by each candidate's position in the
+    original, lexically-sorted input list -- itself alphabetically biased
+    toward whichever compression suffix sorts last (``.zst`` after ``.gz``
+    after plain) -- so silently picking ``ordered[-1]`` and only warning
+    would deterministically prefer a stale compressed sibling over a newer
+    one every time. There is no information left in the filename to break a
+    genuine tie correctly, so this fails closed instead of guessing; a real
+    multi-version bucket (each candidate's sort key genuinely differs) is
+    unaffected and still resolves with a warning, exactly as before.
+
+    A plain, Click-free primitive (see :class:`~abicheck.errors.
+    AmbiguousLibraryMatchError`'s own docstring for why) -- lives here, not
+    ``cli_helpers_compare.py``, so ``bundle_side_input.py`` can call it
+    without a ``frontends``-legacy import (ADR-061: ``workflows`` may not
+    import ``frontends``). ``cli_helpers_compare._build_match_map`` is now a
+    thin wrapper translating :class:`AmbiguousLibraryMatchError` into
+    ``click.ClickException`` with the identical message, so every existing
+    CLI-facing caller (``compare``/``compare-release``) is unaffected.
+    """
+    from .errors import AmbiguousLibraryMatchError
+
+    buckets: dict[str, list[Path]] = {}
+    for p in paths:
+        buckets.setdefault(_canonical_library_key(p), []).append(p)
+
+    mapping: dict[str, Path] = {}
+    warnings: list[str] = []
+    for key, vals in buckets.items():
+        # `partial` binds this iteration's key rather than closing over the
+        # loop variable (the sort runs eagerly here, but the explicit binding
+        # keeps that independent of when the key function is called).
+        sort_key = partial(_version_sort_key, canonical_key=key)
+        ordered = sorted(vals, key=sort_key)
+        if len(ordered) > 1 and sort_key(ordered[-1]) == sort_key(ordered[-2]):
+            raise AmbiguousLibraryMatchError(
+                f"Ambiguous match for '{key}': {[v.name for v in ordered]} "
+                "are indistinguishable except by storage encoding -- cannot "
+                "tell which is current. Remove the stale duplicate(s), or "
+                "pass the intended file directly instead of a directory."
+            )
+        selected = ordered[-1]
+        mapping[key] = selected
+        if len(ordered) > 1:
+            warnings.append(
+                f"Ambiguous match for '{key}': {[v.name for v in ordered]}; using '{selected.name}'"
+            )
+    return mapping, warnings

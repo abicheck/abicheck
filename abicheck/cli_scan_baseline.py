@@ -28,8 +28,8 @@ sub-flows that stand apart from the always-on core pipeline —
 ``cli_scan`` re-imports every name below so the historical import paths
 (``abicheck.cli_scan._run_baseline_compare`` etc., relied on by the scan tests
 and ``service_scan``) keep resolving unchanged. The heavy engine dependencies
-(``service``, ``cli_buildsource``, ``errors``, ``binary_utils``, ``yaml``) stay
-function-local exactly as they were in ``cli_scan`` so import time is unaffected.
+(``service``, ``cli_buildsource``, ``errors``, ``yaml``) stay function-local
+exactly as they were in ``cli_scan`` so import time is unaffected.
 """
 
 from __future__ import annotations
@@ -40,43 +40,30 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 from .checker_policy import ADDITION_KINDS
+from .errors import SnapshotError
+from .workflows.scan_config import RiskRules
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
-    from .policy_file import PolicyFile
     from .service_scan import CompileContext
-    from .suppression import SuppressionList
+    from .workflows.policy_file import PolicyFile
+    from .workflows.suppression import SuppressionList
 
 
 def _public_provenance_set(
     headers: list[Path], public_header_dirs: list[Path]
 ) -> tuple[list[Path], list[Path]]:
-    """Build the ``(public_headers, public_header_dirs)`` provenance set for scan.
+    """CLI alias for ``workflows.scan_config.public_provenance_set``.
 
-    A directory boundary is what lets ``apply_provenance`` classify origins as
-    PUBLIC/INTERNAL (and so unlocks the leakage / RTTI / exported-vs-public
-    cross-checks, ADR-024). Directories come from ``--public-header-dir`` and from
-    any ``-H`` argument that is itself a directory; ``-H`` *file* arguments ride
-    along as explicit public headers.
-
-    A lone ``-H`` umbrella *file* with no directory does **not** activate
-    provenance: a single header cannot establish a public directory boundary
-    (the abicheck A1 finding), so we return empty sets and every origin stays
-    ``UNKNOWN`` — preserving the prior default-scan behaviour.
+    The rule moved to the engine in ADR-061 Phase 4 (``service_scan`` needed it
+    and had to import upward for it); this spelling stays because several call
+    sites and tests use it.
     """
-    dirs = list(public_header_dirs)
-    files: list[Path] = []
-    for h in headers:
-        if h.is_dir():
-            dirs.append(h)
-        else:
-            files.append(h)
-    if not dirs:
-        return [], []
-    return files, dirs
+    from .workflows.scan_config import public_provenance_set
+
+    return public_provenance_set(headers, public_header_dirs)
 
 
 def _expand_public_headers(headers: list[Path]) -> list[str]:
@@ -181,20 +168,18 @@ def _emit_estimate(
 
 
 def _load_risk_rules(path: Path | None) -> RiskRules:
-    """Load a ``risk_rules:`` profile from a YAML file, or the shipped default."""
-    if path is None:
-        return RiskRules.default()
-    import yaml  # hard dep (pyyaml); import out of the try so the except can name it
+    """CLI adapter over ``workflows.scan_config.load_risk_rules``.
+
+    Translates the engine's ``SnapshotError`` into a plain ``ClickException``
+    (**exit 1** -- operational, not a usage error: the flag was well-formed and
+    the file was not). Message unchanged from before the move.
+    """
+    from .workflows.scan_config import load_risk_rules
 
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        # yaml.YAMLError (e.g. ParserError) is not a ValueError, so catch it
-        # explicitly — else malformed --risk-rules YAML escapes as a traceback
-        # through the installed console script (Codex review).
-        raise click.ClickException(f"cannot read --risk-rules {path}: {exc}") from exc
-    block = raw.get("risk_rules") if isinstance(raw, dict) else None
-    return RiskRules.from_dict(block if isinstance(block, dict) else raw)
+        return load_risk_rules(path)
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 #: Default cap on findings embedded in the ``scan --baseline`` summary so a
@@ -375,22 +360,13 @@ def _add_severity_blocking_compatible_findings(
     added = _baseline_finding_dicts(
         blocking, "compatible", policy_file=getattr(diff, "policy_file", None)
     )
-    # Both groups get a share; neither may evict the other outright. Two
-    # opposite failures were found here in successive reviews, and each fix
-    # caused the next:
-    #
-    # - appending only if there was room let the legacy buckets spend all 20
-    #   slots on findings a demoting preset had made non-blocking, dropping
-    #   the compatible finding that actually failed the run; then
-    # - reserving the whole cap for the compatible blockers did the mirror
-    #   image -- 20+ error-level additions alongside an ABI break exited 4
-    #   while itemizing only additions (Codex review).
-    #
-    # So severity decides the *order* (the legacy buckets are already sorted
-    # breaking -> api_break -> risk, and drive the higher exit), while a
-    # reserved floor guarantees the compatible blockers are represented at
-    # all. Both are causes of the exit code; a report that names only one is
-    # wrong whichever one it names.
+    # Both groups get a share; neither may evict the other outright --
+    # appending only if there's room lets the legacy buckets starve a
+    # compatible blocker that actually failed the run, while reserving the
+    # whole cap for compatible blockers does the mirror image (20+
+    # error-level additions alongside an ABI break exiting 4 while itemizing
+    # only additions). Severity decides the *order*; a reserved floor keeps
+    # both causes of the exit code represented (Codex review).
     reserved = min(len(added), max(1, cap // 4))
     head = findings[: cap - reserved]
     tail = added[: cap - len(head)]
@@ -398,12 +374,9 @@ def _add_severity_blocking_compatible_findings(
     if len(findings) > len(head) or len(added) > len(tail):
         summary["findings_truncated"] = True
         # Findings evicted here were either already counted in `findings`
-        # (now bumped out to make room for a compatible blocker) or never
-        # made it in at all (`added` beyond `tail`) -- both are real cuts a
-        # reader can't otherwise see the shape of without rerunning at a
-        # higher cap, so both accumulate onto the same per-kind ledger
-        # `_baseline_summary` started (Low-effort DX follow-up: report cap
-        # was hard-coded with no per-kind visibility into what was cut).
+        # (bumped out to make room for a compatible blocker) or never made
+        # it in at all (`added` beyond `tail`) -- both are real cuts, so both
+        # accumulate onto the same per-kind ledger `_baseline_summary` started.
         _accumulate_kind_counts(
             summary,
             "findings_truncated_kinds",
@@ -438,7 +411,7 @@ def _blocking_compatible_changes(diff: Any, blamed: set[str]) -> list[Any]:
     report, even though the gate itself (`_build_severity_json`, which does
     already pass `policy_file`) correctly named it as blocking.
     """
-    from .severity import classify_change_object
+    from .workflows.gate import classify_change_object
 
     kept: list[Any] = []
     for change in list(getattr(diff, "compatible", ()) or ()):
@@ -565,8 +538,8 @@ def _baseline_finding_dicts(
     with no way to tell *which* ``reclassify:`` rule produced it, unlike the
     compare/report path.
     """
-    from .finding_identity import report_canonical_finding_id, report_finding_id
     from .reporter import _reclassified_by_for_change
+    from .workflows.findings import report_canonical_finding_id, report_finding_id
 
     findings = []
     for c in changes:
@@ -673,7 +646,7 @@ def _baseline_is_native_library(path: Path) -> bool:
     name = path.name.lower()
     if name.endswith((".json", ".dump", ".tar.gz", ".tgz", ".xml")):
         return False
-    from .binary_utils import detect_binary_format
+    from .workflows.extraction import detect_binary_format
 
     if detect_binary_format(path) is not None:
         return True
@@ -712,21 +685,19 @@ def _resolve_baseline_header_scope(
 
     bl_headers = list(baseline_headers)
     bl_includes = list(baseline_includes) if baseline_includes else includes
-    # The old-side public boundary comes ONLY from `-H old=`: dirs in
-    # it are public-header dirs, files opt in just themselves. Do NOT fall back
-    # to the new side's public dirs — a relative dir like `include/` would
-    # (segment-based provenance) re-mark old private headers as PUBLIC and skew
-    # the public-surface scoping (Codex review).
-    #
-    # Split by file-vs-dir the same way the candidate side's
-    # `_public_provenance_set` already does (Codex review, PR #624
-    # follow-up): a lone `-H old=<dir>` umbrella must feed its directory
-    # into `bl_public_dirs` ONLY, not also into `bl_public_headers` as a
-    # raw directory "path" -- doing both fed the ADR-050 comparability
-    # gate an old side whose declared scope was represented differently
-    # from the new side's (a directory counted twice vs. once), a false
-    # scope_fingerprint mismatch on an ordinary --against comparison
-    # that never touched the actual public surface.
+    # The old-side public boundary comes ONLY from `-H old=`: dirs in it
+    # are public-header dirs, files opt in just themselves. Do NOT fall
+    # back to the new side's public dirs -- a relative dir like `include/`
+    # would (segment-based provenance) re-mark old private headers as
+    # PUBLIC and skew the public-surface scoping (Codex review). Split by
+    # file-vs-dir the same way the candidate side's `_public_provenance_
+    # set` already does (Codex review, PR #624 follow-up): a lone
+    # `-H old=<dir>` umbrella must feed its directory into `bl_public_dirs`
+    # ONLY, not also into `bl_public_headers` as a raw directory "path" --
+    # doing both fed the ADR-050 comparability gate an old side whose
+    # declared scope was represented differently from the new side's (a
+    # directory counted twice vs. once), a false `scope_fingerprint`
+    # mismatch on an ordinary --against comparison.
     bl_public_headers = [p for p in bl_headers if not p.is_dir()]
     bl_public_dirs = [p for p in bl_headers if p.is_dir()]
     return bl_headers, bl_includes, bl_public_headers, bl_public_dirs
@@ -810,30 +781,28 @@ def _baseline_summary(
             summary["policy_reclassify"] = [rule.to_report_dict() for rule in active]
             if getattr(policy_file, "source_path", None):
                 summary["policy_file"] = str(policy_file.source_path)
-    # ADR-049 D9 conserves every detector fact in exactly one visible
-    # outcome. The four buckets above are the *compatibility* axis, so since
-    # Phase 7 they exclude findings contract evaluation did not score -- and
-    # this summary itemizes findings from those buckets alone, so an
-    # excluded fact disappeared from the scan report altogether rather than
-    # merely stopping gating (Codex review, confirmed with a
-    # `PROVEN_OUT_OF_CONTRACT` removal: `NO_CHANGE`, all counts zero, no
-    # findings at all). Emitted only when non-empty, so an ordinary scan's
-    # summary is byte-identical to before.
-    # Duck-typed like the other optional reads in this function: a
-    # `DiffResult` always has the property, but this module is also driven
-    # with lightweight stand-ins that model only the buckets they exercise.
+    # ADR-049 D9 conserves every detector fact in exactly one visible outcome.
+    # The four buckets above are the *compatibility* axis, so since Phase 7
+    # they exclude findings contract evaluation did not score -- and this
+    # summary itemizes those buckets alone, so an excluded fact disappeared
+    # from the scan report altogether rather than merely stopping gating
+    # (Codex review, confirmed with a `PROVEN_OUT_OF_CONTRACT` removal:
+    # `NO_CHANGE`, all counts zero, no findings at all). Emitted only when
+    # non-empty; duck-typed like the other optional reads here, since this
+    # module is also driven with lightweight stand-ins.
     not_evaluated = list(getattr(diff, "not_evaluated", ()) or ())
     if not_evaluated:
         summary["not_evaluated"] = len(not_evaluated)
+    # Codex review: surface `coverage_warnings` the way `compare` does.
+    coverage_warnings = list(getattr(diff, "coverage_warnings", ()) or ())
+    if coverage_warnings:
+        summary["coverage_warnings"] = coverage_warnings
     # ADR-049 Phase 5 §6.4 names *detector provenance* among the fields the
-    # two commands must agree on, and `compare`'s JSON report has carried it
+    # two commands must agree on: `compare`'s JSON report has carried it
     # since long before this Gate (`reporter._add_detectors`) while `scan
-    # --against`'s summary carried nothing equivalent -- so "which detector
-    # produced this comparison's findings, and did any report a coverage
-    # gap" was answerable for one command and not the other on the same
-    # inputs. Same shape and same "only detectors with findings or a
-    # coverage gap" filter as the reporter's, so the two are comparable
-    # rather than merely both non-empty.
+    # --against`'s summary carried nothing equivalent. Same shape and same
+    # "only detectors with findings or a coverage gap" filter as the
+    # reporter's, so the two are comparable rather than merely both non-empty.
     detectors = [
         {
             "name": det.name,
@@ -943,7 +912,7 @@ def _baseline_summary(
     # separate `compare` invocation. `checker.compare` (reached through
     # `compare_snapshots` above) always attaches the result to *diff*, so
     # this is unconditional here too, exactly like `compare`'s report.
-    from .analysis_assurance import (
+    from .workflows.gate import (
         analysis_assurance_exit_contribution,
         analysis_assurance_report_dict,
     )
@@ -986,8 +955,8 @@ def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
     context = context_block(diff)
     if context is None:
         return {}
-    from .contract_coverage_exit import coverage_exit_for_context
     from .contract_coverage_ledger import coverage_failures_for_context
+    from .workflows.gate import coverage_exit_for_context
 
     # The sibling unsuppressible ledger, on the same terms `compare`
     # reports it (plan Section 6.1) -- a coverage failure is not a
@@ -1076,36 +1045,32 @@ def _run_baseline_compare(
     ``build_source``).
 
     *require_complete_analysis* mirrors ``compare``'s own P0.4
-    ``--require-complete-analysis``: ``checker.compare`` (reached through
-    :func:`~abicheck.service.compare_snapshots` above) always attaches an
-    ``analysis_assurance`` result to *diff* regardless of this flag, and
-    :func:`_baseline_summary` always reports it in ``--format json`` --
-    this parameter only controls whether an incomplete status additionally
+    ``--require-complete-analysis``: ``checker.compare`` always attaches an
+    ``analysis_assurance`` result to *diff* regardless of this flag; this
+    parameter only controls whether an incomplete status additionally
     floors the returned exit code (folded with the same ``max`` discipline
-    :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` already
-    uses for its own orthogonal axis, immediately below).
+    :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` uses for
+    its own orthogonal axis, immediately below).
 
     *requested_depth* (Codex review, fresh evidence): the caller's own
     explicitly-pinned ``--depth``/non-``auto`` ``--source-method`` (``None``
-    when the depth was only inferred, mirroring the exact "explicit
-    override, never inferred" discipline ``cli_compare_helpers.
-    _report_compare_result`` already applies for ``compare --depth``).
-    ``checker.compare()``'s own internal ``compute_analysis_assurance`` call
-    runs *before* this function ever sees *diff*, so it always reads
+    when only inferred, mirroring ``cli_compare_helpers.
+    _report_compare_result``'s "explicit override, never inferred"
+    discipline for ``compare --depth``). ``checker.compare()``'s own
+    internal ``compute_analysis_assurance`` call runs *before* this
+    function ever sees *diff*, so it always reads
     ``DiffResult.requested_depth`` as ``None`` regardless of what the scan
-    was actually pinned to -- without this, an explicit ``scan --against
-    --depth source --sources <tree>`` that never reached source evidence
-    (no compile database found, so the effective depth silently stayed
-    ``headers``) reported ``analysis_assurance.status="complete"`` (nothing
-    to compare the unset ``requested_depth`` against) even though the
-    evidence contract was demonstrably not satisfied, silently defeating
-    ``--require-complete-analysis``. When given, *diff* is stamped and
-    ``analysis_assurance`` is recomputed before the summary/exit-code fold
-    below so the requested-vs-effective gate has something real to check.
+    was actually pinned to -- without this, an unreached ``--depth
+    source`` silently defeats ``--require-complete-analysis``. When given,
+    *diff* is stamped and ``analysis_assurance`` recomputed below so the
+    requested-vs-effective gate has something real to check.
     """
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
-    from .service import compare_snapshots, resolve_input
+    from .service import collect_metadata, compare_snapshots, resolve_input
+
+    # note_if_same_binary_compared lives in workflows.gate, not workflows.extraction (Codex review) -- see that module's own docstring for why a post-comparison coverage warning belongs there.
+    from .workflows.gate import note_if_same_binary_compared
 
     bl_headers, bl_includes, bl_public_headers, bl_public_dirs = (
         _resolve_baseline_header_scope(
@@ -1141,6 +1106,12 @@ def _run_baseline_compare(
         raise click.ClickException(
             f"Failed to load --baseline {baseline}: {exc}"
         ) from exc
+
+    # ADR-063 Phase 8 "--depth" ceiling (PR #1020): mirrors
+    # `cli_compare_helpers.run_compare`'s own capped view.
+    from .service_compare_pipeline import project_pair_to_depth
+
+    old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)
 
     # Preserve hard L0 removals even when the richer header/source view cannot
     # prove public-header ownership for the removed entity.  A source/full scan
@@ -1196,6 +1167,22 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
+    # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
+    from .workflows.extraction import resolve_linker_script_chain
+
+    def _hashable_path(p: Path) -> Path:  # skip linker-script resolution for a text snapshot/manifest, which can coincidentally match the INPUT()/GROUP() probe (Codex review)
+        from .service import sniff_text_format
+
+        return p if sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+
+    try:
+        old_meta = collect_metadata(_hashable_path(baseline))
+        new_meta = collect_metadata(_hashable_path(binary))
+    except OSError:
+        pass
+    else:
+        diff.old_metadata, diff.new_metadata = old_meta, new_meta
+        note_if_same_binary_compared(diff)
     # P0.4 (Codex review, fresh evidence): checker.compare()'s own internal
     # compute_analysis_assurance call (inside compare_snapshots above) runs
     # before this function ever sees *diff*, so it always reads
@@ -1209,7 +1196,7 @@ def _run_baseline_compare(
     # --require-complete-analysis.
     if requested_depth is not None:
         diff.requested_depth = requested_depth
-        from .analysis_assurance import compute_analysis_assurance
+        from .workflows.gate import compute_analysis_assurance
 
         diff.analysis_assurance = compute_analysis_assurance(
             diff,
@@ -1249,7 +1236,7 @@ def _run_baseline_compare(
     # that configured `exit_code_scheme="severity"` without ever resolving
     # a `sev_config` gets the identical legacy-scheme answer both places
     # agree on, rather than the resolver's severity branch's own assertion.
-    from .exit_decision import resolve_compare_exit_decision
+    from .workflows.gate import resolve_compare_exit_decision
 
     exit_scheme = (
         "severity"
@@ -1280,7 +1267,7 @@ def _run_baseline_compare(
     )
 
     from .cli_compare_helpers import _verdict_exit_code
-    from .contract_coverage_exit import fold_coverage_exit
+    from .workflows.gate import fold_coverage_exit, gate_decision_for_result
 
     verdict = diff.verdict.value
     # Mirrors `compare`'s own `_exit_with_severity_or_verdict` (cli.py):
@@ -1298,15 +1285,15 @@ def _run_baseline_compare(
         # exits 1), and without the gate block the report said `COMPATIBLE`
         # with exit 1 and no stated cause -- indistinguishable from ADR-049's
         # orthogonal contract-coverage 1 (Codex review). Built by
-        # `reporter._build_severity_json`, the same function that produces
-        # `compare`'s own `severity` block, so the two commands' gate
-        # receipts are comparable field-by-field rather than merely both
-        # present. Emitted only under the severity scheme: a legacy-scheme
-        # scan has no gate to report, so its summary stays byte-identical
-        # to before.
+        # `reporter._build_severity_json` via the shared
+        # `gate_decision_for_result` chokepoint (ADR-061 D9), so the two
+        # commands' gate receipts are comparable field-by-field.
+        computed_gate = gate_decision_for_result(diff, sev_config)
+        assert computed_gate is not None  # sev_config is not None here
         gate = _build_severity_json(
             list(diff.changes),
             sev_config,
+            gate=computed_gate,
             policy=diff.policy,
             kind_sets=diff._effective_kind_sets(),
             policy_file=diff.policy_file,
@@ -1340,7 +1327,7 @@ def _run_baseline_compare(
     # folds both immediately in sequence so a caller cannot pick up one
     # orthogonal axis and forget the other. `0` contribution, and this is a
     # pure no-op, whenever the flag was not passed (default False).
-    from .analysis_assurance import (
+    from .workflows.gate import (
         assurance_floor_diagnostic,
         fold_analysis_assurance_exit,
     )

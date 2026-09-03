@@ -44,64 +44,11 @@ if TYPE_CHECKING:
 
 
 def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
-    """Exported (mangled) symbol names already parsed into *snap* — no re-dump.
+    """Alias for ``buildsource.snapshot_exports.exported_symbols_from_snapshot``,
+    which has owned this since ADR-061 Phase 3."""
+    from .workflows.extraction import exported_symbols_from_snapshot
 
-    Used to plumb L0 exports into inline source replay (A1) for the
-    ``dump <binary> --sources`` flow. Empty for a source-only snapshot.
-
-    The authoritative export set is the platform **dynamic symbol table**
-    (``elf.symbols`` / ``pe.exports`` / ``macho.exports``), which lists every
-    exported symbol as its raw linker name. When one is present it is used
-    **alone**: the modeled ``functions``/``variables`` lists are a *narrower*,
-    DWARF-shaped view that (a) covers only a fraction of the exports — feeding
-    only those collapsed symbol matching to a handful of hits (the plugin/
-    ``merge`` regression) — and (b) can carry non-ABI ctor/dtor linkage tags
-    (GCC's unified ``C4``/``D4``) that are **not** real exports; unioning them in
-    would let a source decl mangled ``C4`` exact-match a phantom and inflate
-    ``exported_symbols``/``matched_symbols`` with a name the binary never exported
-    (Codex review). The modeled mangled names are therefore only a *fallback* for
-    backends that expose no raw table at all (a source-only snapshot, or a format
-    whose export table did not parse).
-    """
-    raw: set[str] = set()
-    have_raw_table = False
-    elf = getattr(snap, "elf", None)
-    if elf is not None:
-        have_raw_table = True
-        # Only DEFAULT-versioned ELF exports enter the relink set. A name that
-        # exists *solely* as a non-default version alias (`foo@VER` with no
-        # `foo@@VER`) cannot be linked against by an unversioned consumer, so
-        # including it would let the L4 mapping mark a header decl backed only by
-        # such an alias as "exported" — and the crosscheck's two-way reconciliation
-        # would then wrongly suppress the `public_not_exported` finding the consumer
-        # would actually hit as an undefined symbol (Codex review). Mirrors
-        # `crosscheck._exported_symbol_names`. `is_default` is True for unversioned
-        # symbols, so plain (non-versioned) libraries are unaffected.
-        raw |= {
-            s.name
-            for s in getattr(elf, "symbols", ())
-            if getattr(s, "name", "") and getattr(s, "is_default", True)
-        }
-    pe = getattr(snap, "pe", None)
-    if pe is not None:
-        have_raw_table = True
-        raw |= {e.name for e in getattr(pe, "exports", ()) if getattr(e, "name", "")}
-    macho = getattr(snap, "macho", None)
-    if macho is not None:
-        have_raw_table = True
-        raw |= {e.name for e in getattr(macho, "exports", ()) if getattr(e, "name", "")}
-    raw.discard("")
-    if have_raw_table:
-        # A parsed platform table is authoritative EVEN WHEN EMPTY — a hidden-only
-        # library genuinely exports nothing, so its DWARF-modeled `functions` are
-        # *not* exports and must not be relinked as if they were (Codex review).
-        return tuple(sorted(raw))
-    # No platform table parsed at all (a source-only snapshot): the modeled
-    # mangled names are the only available fallback.
-    syms = {fn.mangled for fn in snap.functions if fn.mangled}
-    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
-    syms.discard("")
-    return tuple(sorted(syms))
+    return exported_symbols_from_snapshot(snap)
 
 
 def _ingest_inputs_pack_snapshot(path: Path) -> AbiSnapshot:
@@ -112,8 +59,8 @@ def _ingest_inputs_pack_snapshot(path: Path) -> AbiSnapshot:
     existing ``merge`` fold combines them with the artifact-side dump — no
     compiler frontend is re-run.
     """
-    from .buildsource.inputs_pack import ingest_inputs_pack
     from .model import AbiSnapshot
+    from .workflows.extraction import ingest_inputs_pack
 
     ingested = ingest_inputs_pack(path)
     snap = AbiSnapshot(
@@ -131,8 +78,8 @@ def _merge_load_snapshots(inputs: tuple[Path, ...]) -> list[tuple[Path, AbiSnaps
     directory (ADR-035 D5); the latter is ingested into a source-side snapshot so
     build-emitted facts ride the existing fold.
     """
-    from .buildsource.inputs_pack import is_inputs_pack
     from .serialization import load_snapshot
+    from .workflows.extraction import is_inputs_pack
 
     if len(inputs) < 2:
         raise click.UsageError("merge needs at least two inputs.")
@@ -234,12 +181,12 @@ def _relink_combined_against_exports(
         and not (combined.source_abi.roots.get("exported_symbols"))
     ):
         from .buildsource.build_evidence import BuildEvidence
-        from .buildsource.inline import build_inline_coverage
-        from .buildsource.source_graph import (
+        from .workflows.extraction import (
+            build_inline_coverage,
             build_source_graph,
             mark_source_edges_extractor_coverage,
+            relink_surface_exports,
         )
-        from .buildsource.source_link import relink_surface_exports
 
         relink_surface_exports(combined.source_abi, base_exports)
         # L5: rebuild source graph so L5 mapping/localization is not inert.
@@ -299,11 +246,13 @@ def _merge_attach_combined(
     output: Path,
 ) -> None:
     """Relink source-ABI surface against binary exports (A1) and attach combined to base."""
+    from .workflows.extraction import pack_to_ref
+
     base_exports = _exported_symbols_from_snapshot(base)
     _relink_combined_against_exports(combined, base_exports)
     _warn_if_source_surface_empty(combined, base_exports)
     base.build_source = combined
-    base.build_source_pack = combined.to_ref(path_hint=str(output))
+    base.build_source_pack = pack_to_ref(combined, path_hint=str(output))
 
 
 def embed_inputs_pack(
@@ -316,6 +265,8 @@ def embed_inputs_pack(
     command, with no frontend re-run: combine its L3/L4/L5 facts into *snap*,
     and relink the source surface against the binary's exports.
     """
+    from .workflows.extraction import pack_to_ref
+
     ingested = _ingest_inputs_pack_snapshot(inputs_path)
     combined = _combine_packs(snap.build_source, ingested.build_source)
     if combined is None:
@@ -324,7 +275,9 @@ def embed_inputs_pack(
     _relink_combined_against_exports(combined, base_exports)
     _warn_if_source_surface_empty(combined, base_exports)
     snap.build_source = combined
-    snap.build_source_pack = combined.to_ref(path_hint=str(output) if output else "")
+    snap.build_source_pack = pack_to_ref(
+        combined, path_hint=str(output) if output else ""
+    )
 
 
 def _warn_if_source_surface_empty(

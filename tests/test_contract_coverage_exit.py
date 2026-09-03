@@ -287,8 +287,13 @@ class TestTheGatingConditionIsVisible:
         # Confirms this really went through the one-line renderer (not, say,
         # a format that happens to also lack the ledger) -- the coverage
         # notice is appended after it, so the output leads with the
-        # one-liner's own verdict label (CodeRabbit review).
-        assert result.output.startswith("NO_CHANGE:"), result.output
+        # one-liner's own verdict label (CodeRabbit review). Checked on
+        # `result.stdout`, not the stderr-mixed `result.output`: `quick`'s
+        # `depth=binary` (ADR-063 Phase 8's ceiling fix) means this
+        # unscoped-headers fixture no longer resolves a public-header
+        # surface at that depth either, and that scope-fallback warning is
+        # by design routed to stderr so it never corrupts this contract.
+        assert result.stdout.startswith("NO_CHANGE:"), result.output
         assert "Contract coverage incomplete" in result.output
 
     def test_it_does_not_claim_a_floor_it_did_not_apply(self) -> None:
@@ -304,7 +309,7 @@ class TestTheGatingConditionIsVisible:
         it, so the base exit has to come from the caller here rather than
         from a fixture that cannot exist.
         """
-        from abicheck.contract_coverage_exit import _coverage_message
+        from abicheck.policy.contract_coverage_exit import _coverage_message
 
         message = _coverage_message(["old/export_table"], 1, 4)
         assert "floored" not in message
@@ -314,7 +319,7 @@ class TestTheGatingConditionIsVisible:
         """`base_exit == floor` is its own case. "Floored" would claim a change
         the axis did not make alone, and "below ... which stands" is simply
         false when the two are equal (CodeRabbit review)."""
-        from abicheck.contract_coverage_exit import _coverage_message
+        from abicheck.policy.contract_coverage_exit import _coverage_message
 
         tie = _coverage_message(["old/export_table"], 1, 1)
         assert "already 1" in tie

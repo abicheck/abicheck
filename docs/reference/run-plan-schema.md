@@ -92,19 +92,23 @@ dicts can forward each field through with no renaming.
 | `target_kind` | `kind: target` | `library` \| `app-consumer` \| `plugin-contract`. |
 | `baseline_target` | `target_kind: app-consumer`/`plugin-contract` | The referenced `kind: library` target's id (empty otherwise — `check-target`'s own `baseline-target` input treats empty as "use `name`"). |
 | `binary_pattern` | `kind: target` | Glob pattern (resolved against the *current* build's candidate artifacts by the calling workflow, never by this generator) locating the candidate binary. For a redirected check, the referenced library's own pattern. |
+| `header` | `kind: target`, and the target (or, for a redirected check, the referenced library) declares `public_headers:` | That target's `public_headers:`, newline-joined so a header root containing whitespace survives `action/run.sh`'s `add_flag()` multi-value input handling intact. Empty (field omitted) when the target declares none — a caller then falls back to its own workflow-global `header` input. Never set for `kind: bundle` (no per-bundle-member header staging exists yet — see `BUNDLE_CHECK_DEPTHS` in `project_targets.py`). |
 | `consumer_binary_pattern` | `target_kind: app-consumer` | The consumer binary/binaries pattern. |
 | `contract_file` | `target_kind: plugin-contract` | The `.syms` contract file path. |
 | `bundle_members` | `kind: bundle` | Member target ids. |
 | `member_binary_patterns` | `kind: bundle` | Member target id → that member's own `binary_pattern`, so a caller can stage a member-binaries directory without re-reading `.abicheck.yml`. |
 | `compile_gcc_path` | this cell's profile declares `compile.binding` *and* `--toolchain-bindings` was given | That binding, resolved to an exact executable path — forwarded as `check-target`'s `gcc-path` input. Empty (field omitted) when the profile has no `compile:` overlay, declares no `binding`, or `--toolchain-bindings` was omitted/the binding wasn't found in it — a caller then falls back to its own global `gcc-path`. |
 | `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. Not filtered by `compile.compiler_family`: the composed string is always consumed by a Clang-based frontend in this pipeline (castxml's internal bundled Clang, or the direct-clang backend), never a literal GCC binary, so `-stdlib=`/`--target=` are emitted regardless of the declared family — see `_compose_gcc_options`'s own docstring for why an earlier attempt to drop them for `compiler_family: gcc` was reverted. |
-| `consumer_compile_gcc_path` | this cell's profile declares `consumer_compile.binding` *and* `--toolchain-bindings` was given | Same resolution as `compile_gcc_path`, but from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_gcc_path`'s own resolved value when the profile has no `consumer_compile:`. |
+| `consumer_compile_gcc_path` | this cell's profile declares `consumer_compile.binding` *and* `--toolchain-bindings` was given | Same resolution as `compile_gcc_path`, but from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_gcc_path`'s own resolved value when the profile has no `consumer_compile:`. `check-project.yml` forwards it to check-target's separate consumer-context candidate dump. |
 | `consumer_compile_gcc_options` | this cell's profile's `consumer_compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Same composition as `compile_gcc_options`, from the `consumer_compile:` overlay. |
 | `compile_ast_frontend` | this cell's profile's `compile` overlay sets `frontend` | One of `auto`/`castxml`/`clang`/`hybrid` (G34 Phase B), overriding the global `--ast-frontend` default for this profile's cell only. Empty (field omitted) when the profile has no `compile:` overlay or sets no `frontend`. |
-| `consumer_compile_ast_frontend` | this cell's profile's `consumer_compile` overlay sets `frontend` | Same resolution as `compile_ast_frontend`, from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_ast_frontend`'s own value when the profile has no `consumer_compile:`. |
+| `consumer_compile_ast_frontend` | this cell's profile's `consumer_compile` overlay sets `frontend` | Same resolution as `compile_ast_frontend`, from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_ast_frontend`'s own value when the profile has no `consumer_compile:`. `check-project.yml` uses it for the distinct consumer-context extraction pass, never the producer comparison pass. |
 | `runs_on` | **always** | The GitHub-hosted runner this cell must be scheduled on, derived from its profile's `os:` (G34 Phase C) — `check-project.yml` reads it as `matrix.runs_on`. `ubuntu-latest` for a profile with no `os:`, which is what every cell hardcoded before this phase. Unlike every other optional field here it is emitted even at its default: a matrix entry missing the key resolves `runs-on:` to the empty string, scheduling nothing. |
 | `dependency_source` | this cell's profile declares `dependency_source:` | How this cell provisions its own system dependencies — one of `conda-forge`/`conda-forge-gcc14`/`conda-forge-clang20`/`system`/`none` (G34 Phase C), forwarded as `check-target`'s `dependency-source` input. Empty (field omitted) when the profile declares none, which leaves the caller's workflow-level default standing. |
 | `allow_new_target` | `checks[].allow_new_target: true` | Forwarded as `check-target`'s `allow-new-target` input — opts this cell into the `new_target` outcome instead of `ambiguous` when the resolved baseline-set has no entry for this target yet (e.g. a new library's first release). Field omitted (defaults `false`) otherwise. `kind: bundle` never carries it — `project_targets.py` rejects `allow_new_target: true` on a bundle check at config-validation time, since a bundle comparison needs one coherent release where every member already coexisted. See [Baseline Management → A new library's first release](../use/baseline-management.md#a-new-librarys-first-release). |
+| `consumer_compile_active` | this cell's profile declares a *non-empty* `consumer_compile:` overlay | `true` whenever the profile has a `consumer_compile:` block that sets at least one field, regardless of what its fields resolve to (a `binding:` with no matching `--toolchain-bindings` entry still counts). Field omitted (defaults `false`) both for a profile with no overlay at all AND for one declaring an *empty* `consumer_compile: {}` — `ProfileCompileSpec.is_empty`/`ProfileSpec.to_dict()` already treat an empty overlay as indistinguishable from an absent one, and this field agrees rather than promising an activation marker a generated plan wouldn't actually contain. `check-project.yml` gates its `consumer_compile_ast_frontend`/`consumer_compile_gcc_path`/`consumer_compile_gcc_options` → workflow-global-input fallback on this flag, not on whether the resolved field itself is non-empty — otherwise a profile with *no* (or an empty) overlay would still get a non-empty `consumer-ast-frontend`/etc. the moment the caller sets any workflow-global `ast-frontend`/`gcc-path`/`gcc-options` *input*, activating check-target's separate consumer-context dump for every cell instead of only the ones that actually declare a real overlay. |
+| `explicit_id` | `checks[].id` declared | (G42) The unqualified `checks[].id` value — already folded into `check_id`'s `~<explicit_id>` tail, carried here too so a caller can read the logical id without re-parsing `check_id`. Field omitted when no `id:` was declared. |
+| `analysis_evidence` / `analysis_policy` / `analysis_assurance` | `checks[].analysis.evidence`/`.policy`/`.assurance` declared | (G42) Forwarded verbatim from `CheckSpec.analysis_*`. Each field omitted when the corresponding `analysis:` key is absent. |
 
 **`profiles.<id>.compile` reaches the cell (P1 toolchain-profile audit).**
 [`project-targets-schema.md`'s `profiles:`](project-targets-schema.md#profiles)
@@ -127,9 +131,9 @@ section](project-targets-schema.md#consumer_compile-a-separate-client-toolchain-
 documents the config-schema side; this generator projects it into its own
 separate `consumer_compile_gcc_path`/`consumer_compile_gcc_options` pair,
 resolved identically to (but independently of) `compile:`'s own fields.
-Actually applying these fields to a distinct header-AST (L2) extraction
-pass, merged with the producer toolchain's binary facts, is not yet wired
-anywhere in this pipeline — this is config-schema projection only.
+`check-project.yml` applies these fields to a distinct candidate dump that
+reads the unchanged producer binary and parses its headers under the consumer
+context; comparison consumes the resulting snapshot.
 
 **`compile.frontend`/`consumer_compile.frontend` reach the cell the same
 way (G34 Phase B).** [`project-targets-schema.md`'s `compile.frontend`
@@ -148,11 +152,9 @@ bundle cell's operand is the `bundle-staging` directory it stages members
 into, and the root Action rejects every non-`auto` `ast-frontend` for a
 directory/package operand, since the per-library fan-out never threads an L2
 compile context to each pair's header dump.
-`consumer_compile_ast_frontend` is deliberately *not*
-forwarded: it describes the consumer half of the two-pass extraction
-`consumer_compile:` above has not built, so there is only one dump
-invocation per cell for it to steer, and forwarding it would apply a
-consumer overlay to the producer pass.
+`consumer_compile_ast_frontend` is forwarded only to check-target's
+separate consumer-context candidate dump. It never steers the ordinary
+producer-context comparison pass.
 
 **A cell schedules itself (G34 Phase C).** `runs_on` and `dependency_source`
 are the two axes `check-project.yml` previously fixed for the whole run: every

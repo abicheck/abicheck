@@ -88,7 +88,7 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
-    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+    monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     sources = tmp_path / "src"
     sources.mkdir()
@@ -193,7 +193,7 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
 
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+        "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
 
     _res = _build_new_snapshot(
@@ -251,7 +251,7 @@ def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
 
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+        "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
 
     _build_new_snapshot(
@@ -288,7 +288,7 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
     )
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+        "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
 
     _res = _build_new_snapshot(
@@ -344,7 +344,7 @@ def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp
     def fake_embed(*args, **kwargs):
         embed_kwargs.update(kwargs)
 
-    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+    monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     _build_new_snapshot(
         # Empty `headers` (PR 3A, dump/scan L4 root-set convergence): this
@@ -408,7 +408,7 @@ def test_scan_candidate_widens_l4_roots_with_a_lone_header_file(monkeypatch, tmp
     def fake_embed(*args, **kwargs):
         embed_kwargs.update(kwargs)
 
-    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+    monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     _build_new_snapshot(
         binary=tmp_path / "lib.so",
@@ -511,6 +511,59 @@ class TestScanCandidateIncludeDependencies:
         baseline = tmp_path / "baseline.json"
         baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
         assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_project_snapshot_package_dir_tagged_full_matches_full(self, tmp_path):
+        """ADR-062/063 storage-v2 (Codex review): a `--against` operand can
+        also be a `ProjectSnapshot` package *directory* (`dump
+        --project-snapshot-dir --include-system-declarations`), not just a
+        JSON file. Every branch above this test opens `baseline` as a file,
+        so a directory used to fall through -- silently defaulting to
+        filtered -- instead of being read the same way a JSON baseline is."""
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0.0", dependency_scope="full"
+        )
+        root = tmp_path / "pkg"
+        write_legacy_snapshot_package(
+            snapshot_to_dict(snap),
+            root,
+            artifact_id=snap.library,
+            max_known_schema_version=SCHEMA_VERSION,
+        )
+        assert _scan_candidate_include_dependencies(root) is True
+
+    def test_project_snapshot_package_dir_tagged_filtered_stays_filtered(
+        self, tmp_path
+    ):
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0.0", dependency_scope="filtered"
+        )
+        root = tmp_path / "pkg"
+        write_legacy_snapshot_package(
+            snapshot_to_dict(snap),
+            root,
+            artifact_id=snap.library,
+            max_known_schema_version=SCHEMA_VERSION,
+        )
+        assert _scan_candidate_include_dependencies(root) is False
+
+    def test_plain_directory_stays_filtered(self, tmp_path):
+        """A directory that is not a real ProjectSnapshot package (no
+        manifest.json) must fall back to the filtered default, not raise."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        plain_dir = tmp_path / "not_a_package"
+        plain_dir.mkdir()
+        assert _scan_candidate_include_dependencies(plain_dir) is False
 
     def test_json_baseline_tagged_filtered_stays_filtered(self, tmp_path):
         from abicheck.scan_engine import _scan_candidate_include_dependencies
@@ -686,3 +739,104 @@ class TestScanCandidateIncludeDependenciesCompressed:
         baseline = tmp_path / "baseline.abicheck.json.gz"
         baseline.write_bytes(b"\x1f\x8b\x08\x00not a real gzip stream")
         assert _scan_candidate_include_dependencies(baseline) is False
+
+
+class TestScanCandidateIncludeDependenciesSectionedDocument:
+    """ADR-062/063 Phase 8 redesign (Codex review, fresh evidence): a real
+    `dump`-produced baseline's on-disk shape is now the single-file
+    sectioned document by default (`storage.sectioned_document`), which
+    nests `dependency_scope` inside `sections["layout"]["payload"]` instead
+    of at the document's top level. A plain `data.get("dependency_scope")`
+    against that shape always reads `None`, silently dumping the candidate
+    filtered against an explicitly unfiltered baseline and then hard-failing
+    the comparability gate with `ScopeMismatchError`."""
+
+    def _write_sectioned_baseline(self, path, *, dependency_scope: str):
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0.0", dependency_scope=dependency_scope
+        )
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json as json_mod
+
+        path.write_text(json_mod.dumps(sectioned, indent=2), encoding="utf-8")
+
+    def test_sectioned_baseline_tagged_full_matches_full(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        self._write_sectioned_baseline(baseline, dependency_scope="full")
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_sectioned_baseline_tagged_filtered_stays_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        self._write_sectioned_baseline(baseline, dependency_scope="filtered")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_compressed_sectioned_baseline_tagged_full_matches_full(self, tmp_path):
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.snapshot_io import SnapshotCompression, write_snapshot_text
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0.0", dependency_scope="full"
+        )
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json as json_mod
+
+        baseline = tmp_path / "baseline.abicheck.json.gz"
+        write_snapshot_text(
+            json_mod.dumps(sectioned), baseline, compression=SnapshotCompression.GZIP
+        )
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_large_sectioned_baseline_beyond_tail_scan_still_matches_full(
+        self, tmp_path
+    ):
+        """`dependency_scope` sits in the `layout` section, ahead of
+        `debug`/`build`/`graph`/`provenance` in section order -- unlike the
+        flat legacy shape, it is not reliably within the tail-scan's last
+        4KB once a later section carries enough content of its own. This
+        must still resolve correctly through the full-parse fallback, not
+        silently default to filtered."""
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.sectioned_document import to_sectioned_document
+
+        snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0.0",
+            dependency_scope="full",
+            # A "provenance"-section field -- sections serialize in
+            # alphabetical order (binary, build, debug, declarations,
+            # layout, provenance, types), so "provenance" comes right after
+            # "layout" and padding it here reliably pushes
+            # `dependency_scope` out of the tail-scan's last 4KB.
+            git_commit="p" * 8192,
+        )
+        sectioned = to_sectioned_document(
+            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+        )
+        import json as json_mod
+
+        text = json_mod.dumps(sectioned, indent=2)
+        # Confirm the padding actually defeats the tail-scan window, so this
+        # test exercises the full-parse fallback rather than accidentally
+        # passing through the same heuristic the plain-baseline tests do.
+        tail = text[-4096:]
+        assert '"dependency_scope"' not in tail
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(text, encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is True

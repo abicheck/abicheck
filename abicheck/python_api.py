@@ -53,9 +53,29 @@ from __future__ import annotations
 
 import ast
 import logging
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# detects them and re-exports them so the historical
+# ``from abicheck.python_api import DESC_CLASS`` spelling keeps resolving.
+from .model.python_facts import (
+    DESC_CLASS as DESC_CLASS,
+    DESC_FUNCTION as DESC_FUNCTION,
+    DESC_INSTANCE as DESC_INSTANCE,
+    DESC_PROPERTY as DESC_PROPERTY,
+    DESC_STATIC as DESC_STATIC,
+    KEYWORD_ONLY as KEYWORD_ONLY,
+    POSITIONAL_ONLY as POSITIONAL_ONLY,
+    POSITIONAL_OR_KEYWORD as POSITIONAL_OR_KEYWORD,
+    VAR_KEYWORD as VAR_KEYWORD,
+    VAR_POSITIONAL as VAR_POSITIONAL,
+    PyClass as PyClass,
+    PyFunction as PyFunction,
+    PyParameter as PyParameter,
+    PythonApiSurface as PythonApiSurface,
+)
 
 MAX_STUB_BYTES = 1_048_576
 
@@ -64,120 +84,11 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-#: Parameter kinds, mirroring :class:`inspect.Parameter` kinds. Kept as plain
-#: strings so the surface serializes to JSON without an enum round-trip.
-POSITIONAL_ONLY = "positional_only"
-POSITIONAL_OR_KEYWORD = "positional_or_keyword"
-VAR_POSITIONAL = "var_positional"  # ``*args``
-KEYWORD_ONLY = "keyword_only"
-VAR_KEYWORD = "var_keyword"  # ``**kwargs``
 
 
-@dataclass
-class PyParameter:
-    """A single parameter of a Python-level function or method."""
-
-    name: str
-    kind: str = POSITIONAL_OR_KEYWORD
-    #: True when the parameter has a default (is optional at the call site).
-    has_default: bool = False
-    #: The PEP 484 annotation as source text (``"int"``, ``"list[str]"``), or
-    #: ``None`` when the stub declares the parameter without an annotation.
-    annotation: str | None = None
-
-    @property
-    def is_positional(self) -> bool:
-        """True for the two kinds that can be passed by position."""
-        return self.kind in (POSITIONAL_ONLY, POSITIONAL_OR_KEYWORD)
-
-    @property
-    def is_variadic(self) -> bool:
-        """True for ``*args`` / ``**kwargs`` collectors (not a named argument)."""
-        return self.kind in (VAR_POSITIONAL, VAR_KEYWORD)
 
 
-#: Descriptor kinds a callable can present. A module-level function is
-#: ``FUNCTION``; a class member is one of the others. The distinction matters
-#: to callers: a ``PROPERTY`` is accessed as an attribute (not called), a
-#: ``STATIC``/``CLASS`` method binds differently from an ``INSTANCE`` method, so
-#: a change between them breaks existing call/access sites.
-DESC_FUNCTION = "function"
-DESC_INSTANCE = "instance"
-DESC_STATIC = "static"
-DESC_CLASS = "class"
-DESC_PROPERTY = "property"
 
-
-@dataclass
-class PyFunction:
-    """A top-level function or a class method recovered from the stub.
-
-    Represents one signature. When a name is ``@overload``-ed the extra
-    variants are carried in :attr:`overloads` (each itself a
-    :class:`PyFunction`); a plain callable has an empty ``overloads`` list.
-    """
-
-    name: str
-    parameters: list[PyParameter] = field(default_factory=list)
-    #: Return annotation as source text, or ``None`` when unannotated.
-    return_annotation: str | None = None
-    #: True when the stub declared ``async def`` — a caller must ``await`` the
-    #: result, so flipping this is a call-contract break.
-    is_async: bool = False
-    #: How the callable is bound (:data:`DESC_FUNCTION` for a module function,
-    #: else ``instance``/``static``/``class``/``property`` for a class member).
-    descriptor: str = DESC_FUNCTION
-    #: When the callable is ``@overload``-ed, all signature variants (including
-    #: the one this object itself represents), in declaration order. Empty for a
-    #: single-signature callable.
-    overloads: list[PyFunction] = field(default_factory=list)
-
-    @property
-    def named_parameters(self) -> list[PyParameter]:
-        """Parameters that name an argument (excludes ``*args`` / ``**kwargs``)."""
-        return [p for p in self.parameters if not p.is_variadic]
-
-
-@dataclass
-class PyClass:
-    """A top-level class and its public methods."""
-
-    name: str
-    #: method name → :class:`PyFunction`
-    methods: dict[str, PyFunction] = field(default_factory=dict)
-
-
-@dataclass
-class PythonApiSurface:
-    """The Python-visible API surface of an extension module.
-
-    Absent (``AbiSnapshot.python_api is None``) when no Python-level surface
-    could be recovered — the common case for a plain C/C++ library, and for an
-    extension module that ships no ``.pyi`` stub.
-    """
-
-    #: Module name (``foo``), recovered from the extension init export or the
-    #: stub filename.
-    module_name: str | None = None
-    #: Where the surface was recovered from — currently always ``"stub"`` (a
-    #: ``.pyi`` file). Reserved for future docstring / runtime sources.
-    source: str = "stub"
-    #: Path to the artifact the surface was recovered from (the ``.pyi``).
-    source_path: str | None = None
-    #: top-level function name → :class:`PyFunction`
-    functions: dict[str, PyFunction] = field(default_factory=dict)
-    #: top-level class name → :class:`PyClass`
-    classes: dict[str, PyClass] = field(default_factory=dict)
-    #: True when the stub parsed cleanly. ``False`` marks an *unrecoverable*
-    #: surface (a syntax error or size limit): the emptiness is a parse failure,
-    #: not an intentionally-empty API, so the diff must report the invalid
-    #: checked input rather than read every old name as removed.
-    parse_ok: bool = True
-
-    @property
-    def is_empty(self) -> bool:
-        """True when the surface carries no functions and no classes."""
-        return not self.functions and not self.classes
 
 
 # ---------------------------------------------------------------------------

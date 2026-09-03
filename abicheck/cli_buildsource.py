@@ -30,12 +30,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.merge_support import (
-    _combine_packs,
-    _filter_pack_layers,
-    _layer_value,
-    route_inline_source_supplier,
-)
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
 from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stability / tests)
@@ -62,7 +56,6 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _merge_pick_base as _merge_pick_base,
     _merge_print_summary as _merge_print_summary,
     _optional_coverage as _optional_coverage,
-    _purge_external_outputs as _purge_external_outputs,
     _resolve_side_pack as _resolve_side_pack,
     _run_adapters as _run_adapters,
     _run_external_extractors as _run_external_extractors,
@@ -70,7 +63,9 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     diff_embedded_build_source as diff_embedded_build_source,
     parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
+    purge_external_outputs as purge_external_outputs,
 )
+from .errors import SnapshotError, ValidationError
 
 if TYPE_CHECKING:
     from .api_types import DumpRequest
@@ -100,249 +95,46 @@ def embed_build_source(
     defer_cleanup: list[Callable[[], None]] | None = None,
     quiet: bool = False,
 ) -> None:
-    """Embed build-info / source facts inline in *snap* (single-artifact UX).
+    """CLI adapter over :func:`abicheck.buildsource.embed.embed_build_source`.
 
-    *collect_mode* is the ADR-033 D2 CI evidence mode selecting which layers and
-    replay scope to collect: ``build`` captures L3 build context only, ``off``
-    embeds nothing, the source/graph modes collect L3+L4+L5 at the matching scope.
+    The operation moved to the engine in ADR-061 Phase 3; this keeps the CLI's
+    two obligations, both of which the engine must not own:
 
-    Source-tree-centric inputs (ADR-028..033 amendment): ``sources`` is a source
-    checkout — L4 source ABI replay and the L5 graph are run *inline* and
-    embedded; ``build_info`` is an optional build dir / ``compile_commands.json``
-    / pre-captured pack supplying L3. A ``compile_commands.json`` inside the
-    source tree is auto-discovered when ``build_info`` is omitted.
-
-    For back-compatibility a path that is itself a pack directory (it has a
-    ``manifest.json`` — e.g. from the ``abicheck-cc`` wrapper, the Clang
-    plugin, or a build-emitted ``abicheck_inputs/`` pack) is loaded as that
-    pack instead of being collected inline.
-
-    The combined facts ride inside the ``.abi.json`` so a later
-    ``compare old.json new.json`` works with no out-of-band directories. Also
-    records the matching content-addressed ``build_source_pack`` reference.
-    ``quiet=True`` (Codex review) suppresses this function's own
-    ``click.echo`` (e.g. the "no compile_commands.json found" warning) for a
-    non-CLI caller (``service.run_compare_request``) with no stream to write
-    to and no way to suppress it otherwise.
+    * **Exit codes.** ``ValidationError`` (a malformed ``.abicheck.yml``) is a
+      usage error -> ``click.UsageError``, which ``cli.main`` remaps to 64.
+      ``SnapshotError`` (an invalid pack) is operational -> a plain
+      ``ClickException``, exit 1. Collapsing the two would tell a CI consumer
+      the invocation was wrong when the data was.
+    * **The stream.** ``quiet`` is preserved as this layer's spelling; it
+      simply decides whether a stderr writer is handed to the engine.
     """
-    from .buildsource.inline import (
-        collect_inline_pack,
-        discover_build_config,
-        is_pack_dir,
-        load_build_config,
-    )
-    from .buildsource.source_replay import collection_for_ci_mode
+    from .workflows.extraction import embed_build_source as _embed
 
-    scope, layers = collection_for_ci_mode(collect_mode)
-    if not layers:  # 'off' (or an unknown mode) embeds nothing
-        return
-
-    # The analyzed binary's L0 exports — used both to seed a Flow-2
-    # abicheck_inputs/ pack's decl→symbol linking at ingest (so a
-    # `dump --build-info <inputs pack>`'s source surface maps onto the DSO's
-    # exports instead of reporting matched_symbols=0, AC-003) and, below, to
-    # seed the inline replay's A1 linking. Empty in the source-only
-    # `dump --sources` flow (no binary), where it stays inert.
-    exported = _exported_symbols_from_snapshot(snap)
-
-    bi_is_pack = is_pack_dir(build_info)
-    src_is_pack = is_pack_dir(sources)
-    # A build-emitted abicheck_inputs/ pack (ADR-035 D5) is auto-detected and
-    # validated the same way here as a collect-produced BuildSourcePack --
-    # `--build-info`/`--sources` is the one public entry point for build-produced
-    # information; there is no separate `inputs validate` command to run first.
-    bi_is_inputs = (not bi_is_pack) and _is_inputs_pack_dir(build_info)
-    src_is_inputs = (not src_is_pack) and _is_inputs_pack_dir(sources)
-    bi_pack = (
-        _load_inputs_pack_or_raise(build_info, exported_symbols=exported)
-        if (bi_is_inputs and build_info is not None)
-        else _load_pack_or_raise(build_info)
-        if (bi_is_pack and build_info is not None)
-        else None
-    )
-    src_pack = (
-        _load_inputs_pack_or_raise(sources, exported_symbols=exported)
-        if (src_is_inputs and sources is not None)
-        else _load_pack_or_raise(sources)
-        if (src_is_pack and sources is not None)
-        else None
-    )
-
-    raw_build_info = (
-        None if (build_info is None or bi_is_pack or bi_is_inputs) else build_info
-    )
-    raw_sources = None if (sources is None or src_is_pack or src_is_inputs) else sources
-
-    inline_pack: BuildSourcePack | None = None
-    if raw_build_info is not None or raw_sources is not None:
-        cfg_path = build_config or discover_build_config(raw_sources)
-        # Only operator-supplied input is trusted for subprocess execution: an
-        # explicit --config file or an explicit --build-query command on the CLI.
-        # Auto-discovered source-tree configs may be attacker-controlled; their
-        # non-executable settings are still honored, but their query never runs.
-        # (Inferred build queries — cmake/make/bazel that abicheck constructs
-        # itself — always run regardless; see buildsource.build_query.)
-        cfg_trusted_for_query = build_config is not None or build_query is not None
-        try:
-            cfg = load_build_config(cfg_path) if cfg_path is not None else None
-        except ValueError as exc:
-            # A bad .abicheck.yml is a usage error (exit 64), not an operational
-            # failure of this run (ADR-043 CLI reset: config errors use exit 64).
-            raise click.UsageError(str(exc)) from exc
-        # CLI overrides (no config file needed): --build-query / --build-compile-db /
-        # --build-target win over the .abicheck.yml values when supplied.
-        if (
-            build_query is not None
-            or build_compile_db is not None
-            or build_targets
-        ):
-            import dataclasses
-
-            from .buildsource.inline import BuildConfig
-
-            cfg = cfg or BuildConfig()
-            cfg = dataclasses.replace(
-                cfg,
-                query=build_query if build_query is not None else cfg.query,
-                compile_db=build_compile_db
-                if build_compile_db is not None
-                else cfg.compile_db,
-                targets=list(build_targets) if build_targets else cfg.targets,
-            )
-        # A1: plumb the binary's L0 exports (already computed above) into the
-        # inline replay, so the linked source surface knows which decls map to
-        # exports and the provenance/mapping checks have a signal.
-        inline_pack = collect_inline_pack(
-            sources=raw_sources,
-            build_info=raw_build_info,
-            build_config=cfg,
+    try:
+        _embed(
+            snap,
+            build_info,
+            sources,
+            build_config=build_config,
             allow_build_query=allow_build_query,
-            build_config_trusted_for_query=cfg_trusted_for_query,
-            # A build.compile_db is an *explicit* L3 input (its miss must surface,
-            # not fall through to inference) when it came from the CLI
-            # --build-compile-db or an operator --config — never from an
-            # auto-discovered .abicheck.yml (review).
-            compile_db_explicit=build_compile_db is not None
-            or build_config is not None,
-            base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
-            extractor=extractor,
-            scope=scope,
-            layers=layers,
-            exported_symbols=exported,
+            collect_mode=collect_mode,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
+            build_targets=build_targets,
             changed_paths=changed_paths,
-            public_header_roots=tuple(
-                dict.fromkeys((*public_headers, *public_header_dirs))
-            ),
+            extractor=extractor,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             defer_cleanup=defer_cleanup,
+            on_warning=None
+            if quiet
+            else (lambda message: click.echo(message, err=True)),
         )
-        # P09: don't fail *silently* when a source/build tree yields no compile DB.
-        # Autotools `configure` (and a bare checkout) emit no compile_commands.json,
-        # so L3/L4/L5 collect nothing — previously with no explanation. Warn with an
-        # actionable hint (unless a build.query diagnostic already explains it).
-        _ev = inline_pack.build_evidence if inline_pack is not None else None
-        _has_l3 = _ev is not None and bool(_ev.compile_units)
-        _has_query_note = inline_pack is not None and any(
-            # Both the trusted `build.query` and the zero-config inferred query
-            # ("build_query_auto") record a diagnostic that already explains the
-            # missing L3 — don't also emit the generic "run cmake …" hint, which
-            # would contradict an inferred query abicheck just attempted.
-            e.name in ("build_query", "build_query_auto")
-            for e in inline_pack.manifest.extractors
-        )
-        if not _has_l3 and bi_pack is None and not _has_query_note and not quiet:
-            _tree = raw_sources if raw_sources is not None else raw_build_info
-            _deeper = "/L4/L5" if ("L4" in layers or "L5" in layers) else ""
-            click.echo(
-                f"warning: no compile_commands.json found under {_tree} "
-                "(looked in: ., build, builddir, out, _build, cmake-build-debug, "
-                "and any immediate subdirectory); "
-                f"L3{_deeper} not collected. Generate one — CMake: configure with "
-                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON; Meson: emitted by `meson setup`; "
-                "Autotools/Make: run `bear -- make` — or pass "
-                "--build-info <dir|compile_commands.json>.",
-                err=True,
-            )
-
-    # Pre-captured packs must also honour the collect-mode layer set (Codex).
-    bi_pack = _filter_pack_layers(bi_pack, layers)
-    src_pack = _filter_pack_layers(src_pack, layers)
-
-    # --build-info (pack) wins L3; --sources wins L4/L5; the inline collection of
-    # a raw --sources/--build-info tree backfills. AC-001: a raw `--sources` cold
-    # scan is the *sources* contributor, so route it into the src_pack slot (which
-    # outranks --build-info for L4/L5); a real --sources pack keeps that slot and
-    # the inline pack backfills. Coverage is rebuilt per layer from the supplying
-    # pack.
-    sources_supplier, inline_backfill = route_inline_source_supplier(
-        src_pack, inline_pack
-    )
-    merged = _combine_packs(bi_pack, sources_supplier, inline_backfill)
-    if merged is None:
-        return
-    # ADR-041 addendum / G29 Phase A: the always-on header-only-graph attach
-    # already ran and attached a header-only L5 pack to `snap.build_source`
-    # before this function ran (see service._attach_header_graph, called from
-    # cli_dump_helpers before write_snapshot_output). `_combine_packs` above
-    # only sees bi_pack/src_pack/inline_pack, so a plain
-    # `snap.build_source = merged` would silently drop that graph whenever
-    # this embed step supplies any L3/L4/L5 facts of its own (even
-    # build-only facts with no graph) — a `dump --build-info ...` snapshot
-    # would then serialize without the graph that is now always built
-    # (Codex review). Backfill only: a
-    # genuine --sources L5 collection in `merged` always wins; the header-only
-    # graph fills the gap only when `merged` carries none. Patched in field-by-
-    # field (not via a chained _combine_packs(merged, None, existing) call)
-    # because the coverage-row lookup there keys off *pack identity*, first
-    # non-None pack in supplier order wins regardless of whether that pack
-    # actually supplied the fact — `merged` always carries its own (stale,
-    # not_collected) L5 row even when its source_graph is None, so a chained
-    # combine would silently keep reporting L5 as not collected despite the
-    # backfilled facts now being present.
-    existing = snap.build_source
-    if (
-        merged.source_graph is None
-        and existing is not None
-        and existing.source_graph is not None
-    ):
-        import dataclasses
-
-        graph_layer = DataLayer.L5_SOURCE_GRAPH.value
-        graph_row = next(
-            (
-                c
-                for c in existing.manifest.coverage
-                if _layer_value(c.layer) == graph_layer
-            ),
-            None,
-        )
-        coverage = [
-            c for c in merged.manifest.coverage if _layer_value(c.layer) != graph_layer
-        ]
-        if graph_row is not None:
-            coverage.append(graph_row)
-        # merged.manifest.artifacts (if any) was precomputed from the
-        # pre-backfill payloads and does not include a digest for the
-        # newly-adopted source_graph. BuildSourcePack.content_hash() prefers
-        # a non-empty manifest.artifacts over recomputing it, so a stale list
-        # here would let two packs with genuinely different header-only
-        # graphs (but identical L3 facts) hash identically. Clear it so
-        # content_hash() falls back to _artifact_digests(), which hashes the
-        # current in-memory payloads including the backfilled graph — the
-        # same "mutating payloads invalidates precomputed digests" rule
-        # cli_buildsource_merge.py's own merge step already follows (Codex
-        # review).
-        merged = dataclasses.replace(
-            merged,
-            source_graph=existing.source_graph,
-            manifest=dataclasses.replace(
-                merged.manifest, coverage=coverage, artifacts=[]
-            ),
-        )
-    snap.build_source = merged
-    # Provenance hint: prefer the source input, else build-info.
-    hint = str(sources) if sources is not None else str(build_info)
-    snap.build_source_pack = merged.to_ref(path_hint=hint)
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def dump_source_only(
@@ -387,8 +179,8 @@ def dump_source_only(
     honors the same compiler override a binary dump would.
     """
     from .cli import _stamp_provenance
-    from .dumper_clang import resolve_source_frontend_clang_bin
     from .model import AbiSnapshot
+    from .workflows.extraction import resolve_source_frontend_clang_bin
 
     if sources is None and build_info is None:
         raise click.UsageError(
@@ -472,8 +264,8 @@ def _missing_requested_evidence_layers(
     """
     if pack is None:
         return []
-    from .buildsource.model import CoverageStatus, DataLayer
-    from .buildsource.source_replay import collection_for_ci_mode
+    from .buildsource.model import CoverageStatus
+    from .workflows.extraction import collection_for_ci_mode
 
     _layer_for = {
         "L3": DataLayer.L3_BUILD,
@@ -496,9 +288,7 @@ def _missing_requested_evidence_layers(
     return missing
 
 
-def build_source_already_satisfies(
-    snap: AbiSnapshot, collect_mode: str
-) -> bool:
+def build_source_already_satisfies(snap: AbiSnapshot, collect_mode: str) -> bool:
     """True when *snap* already carries every layer *collect_mode* asks for.
 
     The idempotence predicate behind :func:`_write_snapshot_output`'s
@@ -548,7 +338,7 @@ def _classify_missing_layers(
     """
     if pack is None:
         return list(missing), []
-    from .buildsource.model import CoverageStatus, DataLayer
+    from .buildsource.model import CoverageStatus
 
     by_value = {layer.value: layer for layer in DataLayer}
     absent: list[str] = []
@@ -585,6 +375,13 @@ def _write_snapshot_output(
     public_header_dirs: tuple[Path, ...] = (),
 ) -> None:
     """Serialize snapshot and write to file or stdout.
+
+    ADR-062/ADR-063 Phase 8 (redesign): every snapshot this function writes
+    -- to `-o`/`--output` or stdout -- is the single-file, D8-sectioned
+    shape (`storage.sectioned_document`, wired in at `write_snapshot_payload`
+    below and at the stdout `json.dumps` call), not a separate opt-in
+    package. `snapshot_from_dict` transparently reads either the new
+    sectioned shape or an older flat `.abi.json` a prior build wrote.
 
     When *build_info* and/or *sources* are given, their normalized L3/L4/L5 facts
     are collected (inline from a source tree / build dir, or loaded from a pack
@@ -643,13 +440,19 @@ def _write_snapshot_output(
         build_source_already_satisfies(snap, collect_mode)
     ):
         from .cli_buildsource import embed_build_source
+
         embed_build_source(
-            snap, build_info, sources,
-            build_config=build_config, allow_build_query=allow_build_query,
+            snap,
+            build_info,
+            sources,
+            build_config=build_config,
+            allow_build_query=allow_build_query,
             collect_mode=collect_mode,
-            build_query=build_query, build_compile_db=build_compile_db,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=build_targets,
-            extractor=extractor, clang_bin=clang_bin,
+            extractor=extractor,
+            clang_bin=clang_bin,
             public_headers=tuple(str(p) for p in public_headers),
             public_header_dirs=tuple(str(p) for p in public_header_dirs),
         )
@@ -702,13 +505,15 @@ def _write_snapshot_output(
     # --sources/--build-info embed, so both fact sources combine).
     if inputs_pack is not None:
         from .cli_buildsource_merge import embed_inputs_pack
+
         embed_inputs_pack(snap, inputs_pack, output)
     # CLI-audit P1: an *explicitly* requested --depth that was not actually
     # reached is a hard failure, not a warning — see
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
-    from .dumper_scoping import resolve_dependency_scope
+    from .workflows.extraction import resolve_dependency_scope
+
     snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
     # ADR-059: one payload dict, one JSON encode -- previously this built a
     # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
@@ -725,7 +530,13 @@ def _write_snapshot_output(
     else:
         import json
 
-        click.echo(json.dumps(payload, indent=2))
+        from .serialization import SCHEMA_VERSION
+        from .workflows.storage import to_sectioned_document
+
+        sectioned = to_sectioned_document(
+            payload, max_known_schema_version=SCHEMA_VERSION
+        )
+        click.echo(json.dumps(sectioned, indent=2))
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
@@ -733,10 +544,12 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     CLI's error contract.
 
     The Tier-2 pipeline signals a bad request as
-    :class:`~abicheck.errors.ValidationError`; a Click front end owes the user
-    a ``UsageError`` (exit 64) instead. Translated here, at the boundary,
-    rather than inside the pipeline — the same Tier-1/Tier-2 separation
-    ``embed_side_build_source`` observes in the other direction.
+    :class:`~abicheck.errors.ValidationError` or, since ADR-063 Phase 4's
+    pre-flight `AnalysisPlan` check, :class:`~abicheck.errors.PlanningError`;
+    a Click front end owes the user a ``UsageError`` (exit 64) for either
+    instead. Translated here, at the boundary, rather than inside the
+    pipeline — the same Tier-1/Tier-2 separation ``embed_side_build_source``
+    observes in the other direction.
 
     Worth being explicit about what this can newly reject on the ``--dry-run``
     path, since that path's own contract is "never raises on anything but a
@@ -755,16 +568,18 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     (`IMPORT_CYCLE_ALLOWLIST` in `scripts/check_ai_readiness.py`), which
     `cli_buildsource` already is.
     """
-    from .errors import ValidationError
+    from .errors import PlanningError, ValidationError
     from .service_dump_pipeline import resolve_dump_request
 
     try:
         return resolve_dump_request(request)
-    except ValidationError as exc:
+    except (ValidationError, PlanningError) as exc:
+        # PlanningError (ADR-063 Phase 4) is a bad-input combination, the
+        # same usage-error contract as ValidationError.
         raise click.UsageError(str(exc)) from exc
 
 
-# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# ── Back-compat re-export shims (lazy) ─────────────────────────────────────
 # `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
 # (re-exported from `cli_buildsource_helpers`, like the block above). They moved
 # to `cli_graph` when the `graph` command group was extracted. A *static*
@@ -777,10 +592,29 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
 # from `cli_graph` directly.
 _GRAPH_REEXPORTS = frozenset({"_load_source_graph", "_resolve_symbol_from_report"})
 
+# `_purge_external_outputs` was `cli_buildsource_helpers._purge_external_outputs`
+# (a private helper, but one this module has always re-exported "for API
+# stability / tests" per AGENTS.md's "Moving helpers out of a module that
+# re-exports them?" guidance) before it moved to `buildsource/pack_shape.py`
+# as the public `purge_external_outputs` (ADR-061). Resolved the same lazy
+# way as the `cli_graph` names above -- not because of an import cycle here,
+# but so this compatibility path keeps tracking whatever
+# `cli_buildsource_helpers.purge_external_outputs` currently resolves to
+# (including a test's `monkeypatch.setattr` on that name) rather than
+# freezing a snapshot of it at this module's own import time the way a plain
+# assignment would (Codex review).
+_HELPERS_REEXPORTS = frozenset({"_purge_external_outputs"})
+
 
 def __getattr__(name: str) -> Any:
     if name in _GRAPH_REEXPORTS:
         import importlib
 
         return getattr(importlib.import_module("abicheck.cli_graph"), name)
+    if name in _HELPERS_REEXPORTS:
+        import importlib
+
+        return importlib.import_module(
+            "abicheck.cli_buildsource_helpers"
+        ).purge_external_outputs
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

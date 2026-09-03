@@ -300,6 +300,7 @@ def test_derive_l2_include_dirs_from_pack(tmp_path):
     # A collected BuildSourcePack passed as --build-info supplies compile units
     # directly (via base_build), so its include dirs must be surfaced too — the
     # non-compile-DB build-info form the earlier hand-rolled resolver missed.
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.inline import derive_l2_include_dirs
     from abicheck.buildsource.pack import BuildSourcePack
@@ -311,7 +312,7 @@ def test_derive_l2_include_dirs_from_pack(tmp_path):
     pack.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://foo", include_paths=[str(inc)])]
     )
-    pack.write()
+    pack_io.write(pack)
 
     dirs, cleanups = derive_l2_include_dirs(build_info=pack_dir, sources=None)
     for fn in cleanups:
@@ -327,6 +328,7 @@ def test_derive_l2_include_dirs_from_sources_pack(tmp_path):
     # path/to/pack` with no -I can parse dependency headers the pack already knows
     # (Codex review). Previously the sources pack was dropped to None and its
     # include dirs were silently ignored.
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.inline import derive_l2_include_dirs
     from abicheck.buildsource.pack import BuildSourcePack
@@ -338,7 +340,7 @@ def test_derive_l2_include_dirs_from_sources_pack(tmp_path):
     pack.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://foo", include_paths=[str(inc)])]
     )
-    pack.write()
+    pack_io.write(pack)
 
     dirs, cleanups = derive_l2_include_dirs(build_info=None, sources=pack_dir)
     for fn in cleanups:
@@ -352,6 +354,7 @@ def test_derive_l2_include_dirs_build_info_pack_wins_over_sources_pack(tmp_path)
     # seeding must therefore use the build-info pack's include dirs and NOT fold in
     # the sources pack's — the source pack only backfills when build-info supplies
     # no L3.
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.inline import derive_l2_include_dirs
     from abicheck.buildsource.pack import BuildSourcePack
@@ -366,14 +369,14 @@ def test_derive_l2_include_dirs_build_info_pack_wins_over_sources_pack(tmp_path)
     bi_pack.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://bi", include_paths=[str(bi_inc)])]
     )
-    bi_pack.write()
+    pack_io.write(bi_pack)
 
     src_dir = tmp_path / "srcpack"
     src_pack = BuildSourcePack.empty(src_dir)
     src_pack.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://src", include_paths=[str(src_inc)])]
     )
-    src_pack.write()
+    pack_io.write(src_pack)
 
     dirs, cleanups = derive_l2_include_dirs(build_info=bi_dir, sources=src_dir)
     for fn in cleanups:
@@ -389,6 +392,7 @@ def test_derive_l2_include_dirs_raw_build_info_wins_over_sources_pack(tmp_path):
     # base_build would make collect_inline_pack skip the raw build DB and parse -H
     # headers against stale source-pack dirs (Codex review). Guard is
     # `build_info is None`, not `base_build is None`.
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.inline import derive_l2_include_dirs
     from abicheck.buildsource.pack import BuildSourcePack
@@ -414,7 +418,7 @@ def test_derive_l2_include_dirs_raw_build_info_wins_over_sources_pack(tmp_path):
     src_pack.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://stale", include_paths=[str(stale_inc)])]
     )
-    src_pack.write()
+    pack_io.write(src_pack)
 
     dirs, cleanups = derive_l2_include_dirs(build_info=bidir, sources=src_dir)
     for fn in cleanups:
@@ -558,6 +562,7 @@ def test_seed_l2_includes_seeds_when_gcc_options_have_no_includes(tmp_path):
 def test_seed_l2_includes_from_sources_pack(tmp_path):
     # End-to-end through the shared wrapper: -H headers, no -I, --sources pointing
     # at a pack → the pack's include dirs are seeded into the effective includes.
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.inline import seed_l2_includes
     from abicheck.buildsource.pack import BuildSourcePack
@@ -569,7 +574,7 @@ def test_seed_l2_includes_from_sources_pack(tmp_path):
     pack.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://foo", include_paths=[str(inc)])]
     )
-    pack.write()
+    pack_io.write(pack)
 
     incs, pending = seed_l2_includes(
         headers=[tmp_path / "h.h"], includes=[], sources=pack_dir,

@@ -53,7 +53,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -62,15 +62,6 @@ from .buildsource.crosscheck import (  # noqa: F401 - CrosscheckConfig/run_cross
     CrosscheckConfig,
     run_crosschecks,
 )
-from .buildsource.pattern_scan import scan_files  # noqa: F401 - re-export for tests
-from .buildsource.poi import (  # noqa: F401 - re-export for tests
-    build_points_of_interest,
-    resolve_symbol_tus,
-)
-from .buildsource.preprocessor_scan import (
-    run_preprocessor_scan,  # noqa: F401 - re-export for tests
-)
-from .buildsource.risk import RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
     EvidenceDepth,
     ScanMode,
@@ -85,7 +76,6 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_options import _cli_flag, _warn_force_public_ignored
-from .cli_help import scan_help_options
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -103,7 +93,6 @@ from .cli_options import (
     split_sided_paths,
     verbose_option,
 )
-from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM, _load_suppression_and_policy
 from .cli_scan_baseline import (
     _baseline_is_native_library,  # noqa: F401 - re-export for scan tests/service_scan
     _emit_estimate,  # noqa: F401 - re-export; --estimate CLI flag removed, kept for direct callers
@@ -131,6 +120,12 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
+from .frontends.cli.help import scan_help_options
+from .frontends.cli.options.params import (
+    DEPTH_PARAM,
+    SIDED_PATH_PARAM,
+    _load_suppression_and_policy,
+)
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
 # scan_engine.py, not here — this module is a thin Click front-end over it
@@ -150,6 +145,16 @@ from .scan_engine import (  # noqa: F401 - several re-exported for tests/service
     _load_exports_for_poi,
     run_scan_core,
 )
+from .workflows.extraction import (  # noqa: F401 - re-exported for tests
+    build_points_of_interest,
+    resolve_symbol_tus,
+    run_preprocessor_scan,
+    scan_files,
+)
+from .workflows.scan_config import RiskScore, score_changed_paths
+
+if TYPE_CHECKING:
+    from .workflows.scan_abort_result import ScanAbortAxis
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -160,6 +165,14 @@ _merge_compile_config = merge_compile_config
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
 #: generic error code (1) so CI can tell a budget overflow from a real break.
 _EXIT_BUDGET_OVERFLOW = 5
+
+#: Exit code for scan's own evidence-contract abort (ADR-037 D5,
+#: ``_EvidenceContractError``) -- a dedicated code, not the generic
+#: ClickException code (1). Earlier stderr/marker-file signals for this axis
+#: were each shown forgeable by a PR-controlled build script; a process's own
+#: exit code, reported to its parent by the OS kernel, cannot be. See
+#: ADR-064. Distinct from every other value scan uses (0/1/2/4/5/6/64).
+_EXIT_EVIDENCE_CONTRACT_ERROR = 7
 
 #: Suffixes ``time``-style duration strings accept (``15m``, ``900s``, ``1h``).
 _DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
@@ -382,172 +395,6 @@ def _scan_explicit_flags(
     return level_explicit, pinned_explicit
 
 
-def _dry_run_exit_code_lines(
-    scheme_label: str, sev_config: Any, against: Path | None
-) -> list[str]:
-    """The dry-run's exit-code preview, for the scheme this run actually resolved.
-
-    Split out of :func:`render_scan_dry_run` so the two schemes' wording sits
-    side by side rather than inside an already-long renderer.
-
-    *scheme_label* is the caller's already-resolved label (from
-    ``cli_compare_receipt.dry_run_scheme_label``, the same one ``compare
-    --dry-run`` prints); the severity branch keys off *sev_config* being
-    present, which is exactly when the caller resolved that scheme.
-
-    That branch is reachable only with ``--against``: every severity flag is a
-    comparison-only flag, and without a baseline there is no comparison to
-    gate, so an audit-only run always previews the legacy codes.
-    """
-    tail = "5 budget overflow, 6 not_comparable"
-    lines = [
-        "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
-        "64 usage error",
-        f"exit-code scheme: {scheme_label}",
-    ]
-    if sev_config is not None and against is not None:
-        levels = ", ".join(
-            f"{attr}={getattr(getattr(sev_config, attr, None), 'value', '?')}"
-            for attr in (
-                "abi_breaking", "potential_breaking", "quality_issues", "addition",
-            )
-        )
-        lines.append(f"resolved severity: {levels}")
-        lines.append(
-            "a real scan run's exit codes are 0 no error-level findings, "
-            "1 error-level addition/quality findings (or incomplete contract "
-            "coverage under --contract), 2 error-level "
-            "potential_breaking, 4 error-level abi_breaking, "
-            f"{tail} -- a category set to warning/info never gates, so a "
-            "breaking comparison can exit 0"
-        )
-        return lines
-    lines.append(
-        "a real scan run's exit codes are 0 compatible, "
-        "1 incomplete contract coverage (--contract only), "
-        f"2 API break, 4 ABI break, {tail}"
-    )
-    return lines
-
-
-def render_scan_dry_run(
-    *,
-    artifact: Path,
-    against: Path | None,
-    headers: list[Path],
-    includes: list[Path],
-    sources: Path | None,
-    effective_build_info: Path | None,
-    changed: list[str],
-    changed_src: str,
-    seeded: bool,
-    depth: str | None,
-    eff_depth_enum: EvidenceDepth,
-    resolved: SourceMethod,
-    collect_mode: str,
-    budget_s: float | None,
-    lang: str,
-    header_backend: str,
-    fmt: str,
-    build_targets: tuple[str, ...] = (),
-    scheme_label: str = "legacy (0/2/4)",
-    sev_config: Any = None,
-) -> Any:
-    """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
-
-    Reuses :func:`service.estimate_scan`'s per-layer cost/TU-count probe (the
-    same read-only projection ``--estimate`` used to provide) so the report
-    also states how many translation units the resolved level would touch.
-
-    *scheme_label*/*sev_config* describe this invocation's **already-resolved**
-    gate (the caller resolves them before emitting), so the preview states the
-    contract the real run would actually use. Stating the legacy codes
-    unconditionally was wrong once `scan --against` gained a severity gate --
-    `--severity-preset info-only` previewed "0 compatible / 4 ABI break" for a
-    run that exits 0 on a breaking comparison (Codex review). Same defect
-    `compare --dry-run` already had and fixed, which is why the scheme label
-    comes from its :func:`~abicheck.cli_compare_receipt.dry_run_scheme_label`
-    rather than a second spelling of the same idea.
-    """
-    from .dry_run import DryRunResult, tool_status
-    from .service import Budget, ScanRequest, estimate_scan
-
-    result = DryRunResult(command="scan")
-    result.add(
-        "Inputs",
-        f"artifact: {artifact}",
-        f"against: {against}" if against else "against: (none -- one-build audit only)",
-    )
-    scope_label = "changed" if seeded else "target"
-    result.add(
-        "Resolved depth and source scope",
-        f"requested depth: {depth or '(auto)'}",
-        f"effective collect mode: {collect_mode}",
-        f"source scope: {scope_label}" if resolved.value == "s5" else None,
-        f"changed paths ({changed_src}): {len(changed)}",
-    )
-    result.add("Headers and compile context", f"ast-frontend: {header_backend}")
-    result.add(
-        "Build/source inputs",
-        f"--sources: {sources}" if sources else None,
-        f"--build-info: {effective_build_info}" if effective_build_info else None,
-        f"--build-target: {', '.join(build_targets)}" if build_targets else None,
-    )
-    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
-    result.add(
-        "Consumer/contract scoping",
-        "audit checks: always run (pattern pre-scan + intra-version cross-source)",
-        "compatibility comparison: will run against --against"
-        if against is not None
-        else "compatibility comparison: will NOT run (no --against)",
-    )
-    result.add(
-        "Output and exit-code behavior",
-        f"format: {fmt}",
-        *_dry_run_exit_code_lines(scheme_label, sev_config, against),
-    )
-    try:
-        req = ScanRequest(
-            binaries=[artifact],
-            headers=headers,
-            includes=includes,
-            sources=sources,
-            build_info=effective_build_info,
-            mode="pr",
-            source_method=resolved.value,
-            depth=eff_depth_enum.value,
-            changed_paths=list(changed),
-            seeded=seeded,
-            budget=Budget(total_timeout=budget_s),
-            lang=lang,
-            build_targets=build_targets,
-        )
-        estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
-        total = sum(e.est_seconds for e in estimates)
-        result.add(
-            "Resolved depth and source scope",
-            *(
-                f"{e.layer}: {e.tus} TU(s), ~{e.est_seconds:.2f}s -- {e.note}"
-                for e in estimates
-            ),
-            f"projected total: {total:.2f}s",
-            # Codex review: estimate_scan's TU count is a workspace-wide probe
-            # (compile-DB/source-tree file count) -- it does not scope to
-            # build_targets the way the real scan's Bazel collection would, so
-            # a --build-target run's actual TU count is typically LOWER than
-            # this preview states. Flagged rather than silently misleading.
-            "note: --build-target given -- the TU counts above are an "
-            "UNSCOPED workspace-wide estimate; the real run's Bazel "
-            "collection will scope to the requested root target(s) and "
-            "typically touch fewer TUs than shown"
-            if build_targets
-            else None,
-        )
-    except Exception as exc:  # pragma: no cover - best-effort probe
-        result.warn(f"could not project per-layer cost: {exc}")
-    return result
-
-
 def _scan_pre_coverage_base_exit(outcome: ScanOutcome) -> int:
     """This run's compatibility exit code *before* the coverage floor was folded.
 
@@ -624,7 +471,7 @@ def _emit_scan_report(
     # that gap gets explained -- so it must fire whenever *either* renderer
     # in play is `text`, not only when the primary one is.
     if fmt != "json" or secondary_fmt == "text":
-        from .contract_coverage_exit import coverage_diagnostic_from_summary
+        from .workflows.gate import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in
         # by `_run_baseline_compare`, so passing it would make the notice
@@ -652,26 +499,89 @@ def _emit_scan_report(
         sys.exit(outcome.exit_code)
 
 
-def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
-    """``--artifact-set`` value → ``(paths, explicit)`` (ADR-056).
+def _emit_scan_abort_report(
+    axis: ScanAbortAxis,
+    fmt: str,
+    output: Path | None,
+    *,
+    prior_decision: dict[str, object] | None = None,
+    secondary_fmt: str | None = None,
+    secondary_output: Path | None = None,
+) -> None:
+    """Give ``scan --format json`` a real report on a `_BudgetOverflow`/
+    `_EvidenceContractError` abort, instead of empty stdout (ADR-064 stage
+    1b, native-CLI half). Before this, a ``--format json`` invocation that
+    aborted here produced no stdout content at all -- so a consumer parsing
+    it as JSON was already broken; this only adds content where none
+    existed, it does not change either abort's exit code or its existing
+    stderr message. `--format text` still gets no JSON *report* from this
+    function -- inventing one is a separate design question this function
+    does not attempt (the `_EvidenceContractError` catch site now prints its
+    own stable stderr marker instead, independent of `fmt`; see that catch
+    site's own comment for why a report render isn't the fix here).
+    Shaped as a real (if minimal) ``ScanOutcome.to_dict()``-compatible
+    envelope -- top-level ``verdict``/``exit_code``, the exit decision under
+    ``diff.exit`` -- rather than `scan_abort_result_fields`'s own ``report``
+    nesting (that shape is the *typed API's* ``ScanResult.report`` field,
+    a different envelope): `workflows/aggregate/gate.py`'s
+    `GateInfo.from_scan_report` requires a top-level `exit_code` and raises
+    `_MalformedGate` without one, so a consumer that saved this abort's
+    `--format json` output and fed it to `aggregate` would crash rather than
+    read the budget/evidence decision it carries (Codex review, fresh
+    evidence). `diff.exit` matches where `NOT_COMPARABLE`/a baseline compare
+    already publish theirs, so a severity-unaware reader's raw-`exit_code`
+    fallback path applies unchanged.
 
-    A single existing directory is expanded to every discoverable shared
-    library in it (``explicit=False`` — an unsupported file found this way is
-    silently skipped, mirroring ``build_bundle_snapshot``'s directory-scan
-    behavior); anything else is read as a comma-separated explicit path list
-    (``explicit=True`` — every named member must resolve and must look like a
-    real library, enforced by :func:`bundle.discover_artifact_set`).
+    *secondary_fmt*/*secondary_output* cover ``--format text --write
+    json=...`` (Codex review, fresh evidence): the GitHub Action's own text
+    primary + JSON secondary combination gets the same abort payload the
+    secondary artifact would have carried had the scan completed, instead
+    of a missing file just because the primary renderer wasn't JSON.
     """
-    from .package import discover_shared_libraries
+    if fmt != "json" and secondary_fmt != "json":
+        return
+    from .report.not_comparable import run_outcome_dict_for_scan
+    from .workflows.scan_abort_result import scan_abort_result_fields
+    fields = scan_abort_result_fields(axis, prior_decision=prior_decision)
+    payload = {
+        "scan_schema_version": fields["report"]["scan_schema_version"],
+        "verdict": fields["verdict"],
+        "exit_code": fields["exit_code"],
+        "diff": {"exit": fields["report"]["exit"]},
+        "run_outcome": run_outcome_dict_for_scan(fields["verdict"], fields["exit_code"], report=fields["report"]),
+    }
+    text = json.dumps(payload, indent=2)
+    if fmt == "json":
+        if output:
+            _safe_write_output(output, text)
+            click.echo(f"Report written to {output}", err=True)
+        else:
+            click.echo(text)
+    if secondary_fmt == "json" and secondary_output:
+        _safe_write_output(secondary_output, text)
+        click.echo(f"Secondary report written to {secondary_output}", err=True)
 
-    candidate = Path(spec)
-    if "," not in spec and candidate.is_dir():
-        return discover_shared_libraries(candidate), False
-    parts = [p.strip() for p in spec.split(",") if p.strip()]
-    if not parts:
-        raise click.UsageError("--artifact-set must not be empty.")
+
+def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
+    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
+
+    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
+    cleanup phase two, PR 5 -- the comma-separated single-string form this
+    replaced is gone, no alias). A single value naming a directory expands
+    to every discoverable shared library in it (``explicit=False`` -- an
+    unsupported file found this way is silently skipped, mirroring
+    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
+    an explicit path list, one member per occurrence, every member of which
+    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
+    """
+    from .workflows.extraction import discover_shared_libraries
+
+    if len(spec) == 1:
+        candidate = Path(spec[0])
+        if candidate.is_dir():
+            return discover_shared_libraries(candidate), False
     paths: list[Path] = []
-    for part in parts:
+    for part in spec:
         p = Path(part)
         if not p.exists():
             raise click.UsageError(f"--artifact-set member not found: {part}")
@@ -807,7 +717,8 @@ def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
 
 def _run_artifact_set(
     *,
-    artifact_set: str,
+    artifact_set: tuple[str, ...],
+    dry_run: bool,
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -836,17 +747,44 @@ def _run_artifact_set(
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
 ) -> None:
-    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
-
-    No old side (no ``--against``): discovers the declared set, scans each
-    member (the same always-on tier + pinned level every single-binary scan
-    runs), and adds one cross-library bundle-audit pass over the whole set.
-    Deliberately does not thread ``--dry-run`` through yet — see G34's
-    status for what's still deferred from this first slice.
+    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one,
+    no old side. Discovers the set, scans each member (the same tier +
+    pinned level a single-binary scan runs), adds one cross-library
+    bundle-audit pass. ``--dry-run`` previews it (``frontends.cli.artifact_set_dry_run``).
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
-    from .service_scan import run_scan_set
+    from .service_scan import _resolve_member_scan_level, run_scan_set
+    from .workflows.plan import scan_bazel_scoping_failure
+
+    # Checked before discovery via the real resolved eff_depth/collect_mode
+    # (same primitive estimate_artifact_set's --dry-run totals use).
+    changed, changed_src, seeded = _resolve_changed_seed(
+        changed_paths_opt, since, sources
+    )
+    try:
+        _, _, _, _, _, _, eff_depth, collect_mode = _resolve_member_scan_level(
+            ScanRequest(
+                mode="audit",
+                source_method=SourceMethod.AUTO.value if depth is None else None,
+                depth=depth,
+                changed_paths=changed,
+                seeded=seeded,
+                risk_rules_path=risk_rules_path,
+            )
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    if _bf := scan_bazel_scoping_failure(
+        header_pairs,
+        eff_depth,
+        collect_mode,
+        build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
+    ):
+        raise click.UsageError(str(_bf))
 
     paths, explicit = _resolve_artifact_set_paths(artifact_set)
     try:
@@ -891,9 +829,6 @@ def _run_artifact_set(
         compiler_option_tokens=compiler_option_tokens,
     )
 
-    changed, changed_src, seeded = _resolve_changed_seed(
-        changed_paths_opt, since, sources
-    )
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -908,11 +843,9 @@ def _run_artifact_set(
         build_info=build_info,
         baseline=None,
         mode="audit",
-        # The unset dial means 'auto' (ADR-037 D5), same as the single-binary
-        # path: only when --depth was omitted entirely does a member opt into
-        # risk-driven method selection -- a pinned --depth stays deterministic
-        # (Codex review: this was hard-coded to None, silently disabling
-        # --since/--changed-path risk-driven selection for every member).
+        # Unset means 'auto' (ADR-037 D5): only an omitted --depth opts a
+        # member into risk-driven method selection; a pinned --depth stays
+        # deterministic (Codex review: was hard-coded to None).
         source_method=SourceMethod.AUTO.value if depth is None else None,
         depth=depth,
         changed_paths=changed,
@@ -930,25 +863,39 @@ def _run_artifact_set(
         changed_src=changed_src,
         build_targets=build_targets,
     )
+
+    if dry_run:
+        from .bundle import check_artifact_set_soname_collisions
+        from .dry_run import emit_dry_run
+        from .frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
+        from .service_scan import estimate_artifact_set
+        try:
+            # run_scan_set() rejects an ambiguous duplicate-DT_SONAME set (exit
+            # 64) and a malformed --risk-rules profile the same way -- fail
+            # loud here too, not a "successful" preview of a rejected request.
+            check_artifact_set_soname_collisions(discovered)
+            totals, notes, blocker, unknown_layers = estimate_artifact_set(
+                req, list(discovered.values())
+            )
+        except (ArtifactSetError, ValueError) as exc:
+            raise click.UsageError(str(exc)) from exc
+        emit_dry_run(
+            render_artifact_set_dry_run(
+                req,
+                discovered=discovered,
+                explicit=explicit,
+                header_backend=header_backend,
+                fmt=fmt,
+                totals=totals,
+                notes=notes,
+                blocker=blocker,
+                unknown_layers=unknown_layers,
+            )
+        )
     try:
-        # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
-        # too (e.g. an ambiguous duplicate-SONAME set, only detectable after
-        # parsing every member's ELF metadata) -- propagated rather than
-        # degraded to a "successful" bundle_incomplete result (Codex
-        # review), surfaced here the same way discover_artifact_set's own
-        # ArtifactSetError already is above.
-        #
-        # ValueError: run_scan_set() loads --risk-rules via
-        # _load_risk_rules_for_service(), which is deliberately click-free
-        # (service_scan.py has no click dependency -- it's also reachable
-        # from the MCP server/Python API) and converts the single-binary
-        # path's own click.ClickException into ValueError instead. The
-        # single-binary path never needs a try/except for this because it
-        # calls the click-raising _load_risk_rules() directly, letting
-        # Click's own top-level handler render it; this service-layer call
-        # must translate that ValueError back into a usage error itself, or
-        # a malformed/unreadable --risk-rules file surfaces as an
-        # unhandled Python traceback and exit 1 instead (Codex review).
+        # ArtifactSetError (ambiguous duplicate-SONAME set) and ValueError
+        # (malformed --risk-rules, service_scan.py is click-free) both
+        # translate to a usage error here, not an unhandled traceback.
         result = run_scan_set(req)
     except (ArtifactSetError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc
@@ -1107,7 +1054,7 @@ def _discover_scan_project_config(
     a config the user never explicitly bound to shouldn't fail a run it wasn't
     asked to affect.
     """
-    from .buildsource.inline import discover_build_config
+    from .workflows.extraction import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
@@ -1123,7 +1070,7 @@ def _discover_scan_project_config(
     _project_sha256: str | None = None
     if cfg_path is not None:
         try:
-            from .buildsource.build_config_io import load_build_config_with_digest
+            from .workflows.extraction import load_build_config_with_digest
 
             project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
@@ -1225,14 +1172,14 @@ def _discover_scan_project_config(
 @click.option(
     "--against",
     "against",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Previous native library or saved ABI dump to compare ARTIFACT "
-    "against (a single file -- not a directory or package; for those use "
-    "`abicheck compare OLD_PACKAGE NEW_PACKAGE`). Without --against, scan "
-    "runs a one-build audit/hygiene/source consistency scan only; with it, "
-    "scan also compares ARTIFACT against this (the two modes are not "
-    "separate flags -- --against alone selects between them).",
+    "against (a single file, or a real ProjectSnapshot package directory -- "
+    "not a plain directory or package archive; use `abicheck compare "
+    "OLD_PACKAGE NEW_PACKAGE` for those). Without --against, scan runs a "
+    "one-build audit/hygiene/source consistency scan only; with it, scan "
+    "also compares ARTIFACT against this (not a separate flag).",
 )
 @click.option(
     "--depth",
@@ -1408,7 +1355,7 @@ def _discover_scan_project_config(
 @compile_context_options()  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     artifact: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -1482,6 +1429,9 @@ def scan_cmd(
       5  --budget overflow
       6  NOT_COMPARABLE (ADR-050 D2): ARTIFACT and --against were not
          extracted under a comparable profile/scope contract
+      7  evidence-contract error (ADR-037 D5): a pinned --depth/
+         --source-method had no source evidence, or --abi3 targeted a
+         non-CPython-extension binary. No comparison ever ran
 
     \b
     With --against, --severity-preset/--exit-code-scheme (or
@@ -1491,8 +1441,8 @@ def scan_cmd(
     --severity-preset info-only can exit 0 on a breaking comparison, and an
     error-level addition or quality finding can exit 1 on an otherwise
     compatible one. The report states which — a `severity gate:` line in the
-    text output, a `diff.severity` block in --format json. 5/6 are unaffected
-    (both are decided before the comparison runs).
+    text output, a `diff.severity` block in --format json. 5/6/7 are
+    unaffected (decided before or independent of the comparison).
 
     \b
     Examples:
@@ -1502,7 +1452,6 @@ def scan_cmd(
       abicheck scan new.so -H include/ --depth source --since origin/main
     """
     from .dry_run import reject_dry_run_with_output
-    from .package import is_package
 
     _setup_verbosity(verbose)
 
@@ -1510,26 +1459,30 @@ def scan_cmd(
     # ARTIFACT, with --against (audit-only -- no old side for a set), and
     # --bundle-system-providers is meaningless without --artifact-set.
     #
-    # An empty ``--artifact-set ""`` must count as *supplied* (and be
-    # rejected outright), not as "not set": the exclusivity check below
-    # used to test truthiness (`bool(artifact_set)`, False for "") while
-    # the branch just after it tested `is not None` (True for "") -- with
-    # ARTIFACT also given, that mismatch let both pass the exclusivity
-    # check and then silently ignored ARTIFACT, resolving the empty string
-    # to Path("") == Path(".") and auditing the whole CWD instead of
-    # erroring (CodeRabbit review).
+    # --artifact-set is now a repeatable option (CLI cleanup phase two, PR
+    # 5): `artifact_set` is the tuple Click collects, empty when unset, so
+    # "supplied" is exactly `bool(artifact_set)` -- a bare `--artifact-set
+    # ""` is still the truthy `("",)`, correctly "supplied" and rejected by
+    # `reject_incoherent_scan_operands`'s own empty-member check. The old
+    # comma-string form needed a `bool()`/`is not None` distinction here
+    # because an empty *string* was falsy but not `None`, which is what let
+    # ARTIFACT and an empty --artifact-set both pass exclusivity and
+    # silently resolve to `Path("") == Path(".")` (CodeRabbit review,
+    # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
-        dry_run=dry_run, bundle_system_providers=bundle_system_providers,
+        bundle_system_providers=bundle_system_providers,
     )
     _reject_incoherent_secondary_output(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
         secondary_output=secondary_output, artifact_set=artifact_set,
     )
-    if artifact_set is not None:
+    if artifact_set:
+        reject_dry_run_with_output(dry_run, output)
         _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
         _run_artifact_set(
             artifact_set=artifact_set,
+            dry_run=dry_run,
             bundle_system_providers=bundle_system_providers,
             header_pairs=header_pairs,
             include_pairs=include_pairs,
@@ -1566,20 +1519,9 @@ def scan_cmd(
     assert artifact is not None
 
     reject_dry_run_with_output(dry_run, output)
-    # --against's help text documents "a single file -- not a directory or
-    # package", but `dir_okay=False` on the option itself only rejects
-    # directories -- a package archive (.deb/.rpm/.tar.gz/...) still passes
-    # Click validation and previously reached resolve_input(), which cannot
-    # extract packages, so it failed later with an opaque "cannot detect
-    # input format" instead of a clear, immediate usage error (Codex
-    # review). Checked before the --dry-run branch so dry-run and the real
-    # run agree.
-    if against is not None and is_package(against):
-        raise click.UsageError(
-            f"--against does not accept a package archive ({against}); "
-            "packages are not supported here -- use `abicheck compare "
-            "OLD_PACKAGE NEW_PACKAGE` for package-to-package comparisons."
-        )
+    from .frontends.cli.scan_against import reject_unsupported_against_operand
+
+    reject_unsupported_against_operand(against)
     start = time.monotonic()
 
     # Side-aware --header/--include (ADR-040): a bare value applies to both the
@@ -1758,7 +1700,7 @@ def scan_cmd(
         contract_mode, click.get_current_context()
     )
 
-    from .errors import AbicheckError
+    from .errors import AbicheckError, PlanningError
     from .service import load_env_matrix
 
     try:
@@ -1857,15 +1799,61 @@ def scan_cmd(
     )
     effective_build_info = build_info
 
+    # Validates the same combo `_build_new_snapshot` rejects for real.
+    from .workflows.plan import scan_bazel_scoping_failure
+
+    if _bf := scan_bazel_scoping_failure(
+        headers,
+        eff_depth_enum,
+        collect_mode,
+        effective_build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
+    ):
+        raise click.UsageError(str(_bf))
+
     if dry_run:
         from .dry_run import emit_dry_run
+        from .frontends.cli.scan_dry_run import render_scan_dry_run
+        from .service_scan import Budget, ScanRequest, estimate_scan
+
+        # Computed here, not inside render_scan_dry_run: that module is a
+        # canonical frontends/cli/ file, which must not import service_scan
+        # directly -- doing so once already grew the large, already-accepted
+        # CLI-registration import cycle (AI-readiness import-cycle-growth,
+        # fresh evidence), the same reason artifact_set_dry_run.py takes its
+        # own totals/notes as already-computed data instead of calling
+        # estimate_artifact_set itself.
+        try:
+            estimate_req = ScanRequest(
+                binaries=[artifact],
+                headers=list(headers),
+                includes=list(includes),
+                sources=sources,
+                build_info=effective_build_info,
+                mode="pr",
+                source_method=resolved.value,
+                depth=eff_depth_enum.value,
+                changed_paths=list(changed),
+                seeded=seeded,
+                budget=Budget(total_timeout=budget_s),
+                lang=lang,
+                build_targets=build_targets,
+                build_config=build_config,
+            )
+            estimates = estimate_scan(
+                estimate_req, resolved_level=(resolved, eff_depth_enum)
+            )
+            estimate_error = None
+        except Exception as exc:  # pragma: no cover - best-effort probe
+            estimates = None
+            estimate_error = str(exc)
 
         emit_dry_run(
             render_scan_dry_run(
                 artifact=artifact,
                 against=against,
-                headers=list(headers),
-                includes=list(includes),
                 sources=sources,
                 effective_build_info=effective_build_info,
                 changed=changed,
@@ -1875,13 +1863,14 @@ def scan_cmd(
                 eff_depth_enum=eff_depth_enum,
                 resolved=resolved,
                 collect_mode=collect_mode,
-                budget_s=budget_s,
-                lang=lang,
                 header_backend=header_backend,
                 fmt=fmt,
                 build_targets=build_targets,
                 scheme_label=scheme_label,
                 sev_config=sev_config_for_preview,
+                abi3_floor=abi3_floor,
+                estimates=estimates,
+                estimate_error=estimate_error,
             )
         )
 
@@ -1969,17 +1958,35 @@ def scan_cmd(
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
+        _emit_scan_abort_report(
+            "budget_overflow",
+            fmt,
+            output,
+            prior_decision=bo.prior_decision,
+            secondary_fmt=secondary_fmt,
+            secondary_output=secondary_output,
+        )
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
-        # A pinned depth that can't collect its evidence is a usage contract
-        # violation → a clean CLI error (exit 1), distinct from the verdict codes
-        # (2/4) and the budget code (5).
-        raise click.ClickException(ce.message) from ce
+        # A pinned depth that can't collect its evidence is a usage-contract
+        # violation with its own dedicated exit code -- see
+        # `_EXIT_EVIDENCE_CONTRACT_ERROR`'s own comment for why.
+        click.echo(f"Error: {ce.message}", err=True)
+        _emit_scan_abort_report(
+            "evidence_contract_error",
+            fmt,
+            output,
+            secondary_fmt=secondary_fmt,
+            secondary_output=secondary_output,
+        )
+        sys.exit(_EXIT_EVIDENCE_CONTRACT_ERROR)
+    except PlanningError as exc:
+        raise click.UsageError(str(exc)) from exc
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
         # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)
         # so a removal/unlock error never aborts the rest nor masks the real outcome.
-        from .buildsource.build_query import drain_build_dir_cleanups
+        from .workflows.extraction import drain_build_dir_cleanups
 
         drain_build_dir_cleanups(build_dir_cleanups)
 

@@ -1,6 +1,5 @@
 """Tests for baseline pinning: provenance metadata (schema v4)."""
 
-import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -29,7 +28,7 @@ def _sample_snap(**kwargs) -> AbiSnapshot:
 
 class TestSchemaV4:
     def test_schema_version_is_current(self):
-        assert SCHEMA_VERSION == 25
+        assert SCHEMA_VERSION == 43
 
     def test_provenance_fields_roundtrip(self):
         snap = _sample_snap(
@@ -84,7 +83,9 @@ class TestSchemaV4:
         try:
             save_snapshot(snap, tmp)
             # Verify JSON on disk has provenance
-            raw = json.loads(tmp.read_text())
+            from abicheck.serialization import load_snapshot_document
+
+            raw = load_snapshot_document(tmp)
             assert raw["git_commit"] == "deadbeef"
             assert raw["schema_version"] == SCHEMA_VERSION
 

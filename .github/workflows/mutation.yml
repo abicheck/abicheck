@@ -34,7 +34,15 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # Event name spelled out explicitly rather than relied on implicitly: a PR
+  # groups (and cancels) by PR number, so a new push supersedes the stale
+  # run for the *same* PR — the case cancellation exists for. schedule/
+  # workflow_dispatch each key off github.run_id, which is unique per run,
+  # so they were never at risk of colliding with each other or with a PR run
+  # even before this — this only makes that isolation legible in the group
+  # name (mutation-schedule-<run_id>, mutation-workflow_dispatch-<run_id>)
+  # instead of leaving a reader to re-derive it from run_id's uniqueness.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -86,6 +94,8 @@ jobs:
               - 'abicheck/finding_identity.py'
               - 'abicheck/name_classification.py'
               - 'abicheck/suppression.py'
+              - 'abicheck/policy/selectors.py'
+              - 'abicheck/policy/selectors_namespace_glob.py'
               - 'abicheck/snapshot_io.py'
               - 'abicheck/serialization.py'
               # The lane's own infrastructure. Without these a change to
@@ -127,6 +137,8 @@ jobs:
               - 'tests/test_finding_identity*.py'
               - 'tests/test_name_classification*.py'
               - 'tests/test_suppression*.py'
+              - 'tests/test_selectors*.py'
+              - 'tests/test_selectors_namespace_glob*.py'
               - 'tests/test_snapshot_io*.py'
               - 'tests/test_serialization*.py'
       - name: Decide whether to run
@@ -168,7 +180,25 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The full baseline took just over two hours when this was first set to
+    # 240 minutes (2x headroom over that). `only_mutate` has grown since
+    # (identity, suppression and serialization joined diff_*/checker_policy),
+    # and the weekly `schedule` run (job 99506019384, 2026-08-31) ran the
+    # full 240 minutes and was cancelled by this exact timeout before
+    # producing a receipt -- confirmed via its own "Run mutation testing
+    # (baseline drift)" step, which the job log shows starting and then
+    # nothing until being killed at the wall-clock limit. 360 minutes is
+    # GitHub-hosted runners' own hard per-job ceiling (not configurable
+    # higher), so this raises the budget to platform maximum minus a few
+    # minutes of buffer for the surrounding checkout/install/save/upload
+    # steps in the same job -- not a guarantee this now always fits (the
+    # weekly run genuinely may still need more than a single job's
+    # ceiling allows, in which case scoping `only_mutate` down or splitting
+    # the run across multiple scheduled invocations is the real fix, not a
+    # bigger number). The "Flag a cancelled or incomplete run" step below
+    # already turns a repeat of this into a loud, greppable step-summary
+    # warning rather than a silent gap.
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v6
         with:
@@ -226,6 +256,7 @@ jobs:
             require="--require-baseline"
           fi
           python scripts/check_mutation_score.py --run --diff-scoped \
+            --scope-run-to-diff \
             --base-ref "origin/$BASE_REF" \
             $require \
             --json mutation-receipt.json
@@ -263,3 +294,31 @@ jobs:
             mutation-receipt.json
             mutation-baseline.json
           if-no-files-found: ignore
+      - name: Flag a cancelled or incomplete run
+        # A cancelled scheduled run leaves the per-module baseline drift
+        # gate unchecked for that week with no failing status anywhere a
+        # human would notice — GitHub shows "cancelled" the same neutral
+        # grey as a run nobody was watching for. This makes that silence a
+        # loud, greppable line in the run's own step summary instead,
+        # naming exactly what did not happen and why it matters, for
+        # whichever event produced it.
+        if: always() && cancelled()
+        env:
+          # Through `env`, not expanded into the script — see this
+          # workflow's own zizmor template-injection precedent above.
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          {
+            echo "## :warning: Mutation lane cancelled"
+            echo
+            echo "This \`$EVENT_NAME\` run of the mutation lane was"
+            echo "cancelled before producing a receipt."
+            if [ "$EVENT_NAME" = "schedule" ]; then
+              echo
+              echo "The weekly per-module baseline drift check did **not**"
+              echo "run this week — a regression introduced since the last"
+              echo "successful scheduled run will not be caught until the"
+              echo "next one does complete. Re-run this workflow manually"
+              echo "(workflow_dispatch) if that gap matters before then."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

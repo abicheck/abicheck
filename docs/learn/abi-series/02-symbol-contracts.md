@@ -1,3 +1,13 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/diff_symbols.py
+lifecycle: active
+generated: false
+---
 # Part 2 — Symbol Contract Breaks
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -7,8 +17,7 @@
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md) ·
-> [Detecting Breaks](08-detection.md)
+> [7. Designing for Stability](07-designing-for-stability.md)
 
 **What you'll learn on this page**
 
@@ -57,6 +66,16 @@ way:
 ---
 
 ## 1. Removing or renaming symbols
+
+The cheapest comparison there is already sees this family — two binaries,
+no headers, no debug information:
+
+```bash
+abicheck compare libfoo.so.1.old libfoo.so.1.new
+```
+
+[case01](../../reference/examples/case01_symbol_removal.md) is the removal
+that comparison reports as `BREAKING`.
 
 ### The mechanism
 
@@ -283,3 +302,7 @@ shifting one offset is a whole second family of silent breaks.
 *See also:* [ABI Cheat Sheet](../abi-cheat-sheet.md) ·
 [Verdicts](../verdicts.md) ·
 [BREAKING examples](../../reference/examples/by-verdict/breaking.md)
+
+---
+
+**Ladder:** ← [What Is Part of Your ABI Surface?](../abi-surface.md) · Step 3 · How Breaks Happen · [Part 3 — Type Layout Breaks](03-type-layout.md) →

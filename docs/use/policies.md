@@ -255,7 +255,7 @@ the strongest they reach is `API_BREAK`.
 Several detectors — the internal-leak walk, reachability-aware suppression
 (see [Suppressions § Reachability-aware suppression](suppressions.md#reachability-aware-suppression)),
 and the L5 call-graph reachability walk (see
-[the ABI guide § The L5 graph](../learn/abi-api-handling.md#the-l5-graph-reachability-not-just-structure))
+[Unified Impact Assessment](../learn/impact-analysis.md))
 — need to recognize which namespaces are your project's private-implementation
 convention, so a change inside one is a candidate for demotion/suppression
 instead of a hard break. The default token set is `detail`/`impl`/`internal`/

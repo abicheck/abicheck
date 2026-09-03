@@ -26,414 +26,72 @@ from collections.abc import Iterable, Mapping
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
-from .model import Function, RecordType
+from .model import Fact, Function, RecordType
+from .model.availability import FactStatus
 
-_ASCII_DIGITS = "0123456789"
-
-# Fixed Itanium operator-function codes (a leaf, like a source-name). Used so
-# operator overloads group (e.g. `operator[](int)` / `operator[](long)` both
-# `ix`). Deliberately excludes `cv` (conversion-to-T — carries a type and is not
-# an overload of other conversions) and variable forms (`li` literal, vendor).
-_ITANIUM_OPERATORS = frozenset(
-    {
-        "nw",
-        "na",
-        "dl",
-        "da",
-        "ng",
-        "ad",
-        "de",
-        "co",
-        "pl",
-        "mi",
-        "ml",
-        "dv",
-        "rm",
-        "an",
-        "or",
-        "eo",
-        "aS",
-        "pL",
-        "mI",
-        "mL",
-        "dV",
-        "rM",
-        "aN",
-        "oR",
-        "eO",
-        "ls",
-        "rs",
-        "lS",
-        "rS",
-        "eq",
-        "ne",
-        "lt",
-        "gt",
-        "le",
-        "ge",
-        "ss",
-        "nt",
-        "aa",
-        "oo",
-        "pp",
-        "mm",
-        "cm",
-        "pm",
-        "pt",
-        "cl",
-        "ix",
-        "qu",
-        "aw",
-    }
+# The Itanium/MSVC mangled-name scope-component parsers' real home is
+# model/mangled_name.py (ADR-061 D1): pure string decoding with no I/O,
+# needed by extract (dumper_clang_expr.py, dumper_hybrid.py) and by
+# buildsource's own extract-destined modules (ctor_export_match.py,
+# virtual_dispatch_graph.py) as well as by this module's own remaining
+# name-derivation helpers below. Re-exported by value for back-compat.
+from .model.mangled_name import (
+    _ASCII_DIGITS as _ASCII_DIGITS,
+    _itanium_strip_prefix as _itanium_strip_prefix,
+    _parse_ctor_dtor_component as _parse_ctor_dtor_component,
+    _parse_source_name_component as _parse_source_name_component,
+    _skip_template_args as _skip_template_args,
+    itanium_scope_components as itanium_scope_components,
+    itanium_scope_components_with_template_positions as itanium_scope_components_with_template_positions,
+    msvc_scope_components as msvc_scope_components,
 )
-
-
-def _read_length_prefixed_name(s: str, i: int) -> tuple[str | None, int]:
-    """Read a ``<len><identifier>`` source-name at ``s[i]``.
-
-    Returns ``(name, next_index)`` or ``(None, i)`` if malformed. Only ASCII
-    digits count as the length prefix — Python's ``str.isdigit()`` also accepts
-    Unicode digits (e.g. ``²``) that ``int()`` then rejects, so a fuzzed symbol
-    must not be allowed to reach ``int()`` with a non-ASCII digit.
-    """
-    j = i
-    while j < len(s) and s[j] in _ASCII_DIGITS:
-        j += 1
-    if j == i:
-        return None, i
-    n = int(s[i:j])
-    name = s[j : j + n]
-    if len(name) != n:
-        return None, i  # truncated / malformed
-    return name, j + n
-
-
-def _skip_template_args(s: str, i: int) -> int | None:
-    """``s[i] == 'I'``: return the index past the matching ``E``, or ``None``.
-
-    Tracks nested template-argument (``I``) and nested-name (``N``) openers so
-    the inner ``E`` of e.g. ``Box<ns::T>`` does not close the outer list early,
-    skips length-prefixed names so their literal ``I``/``N``/``E`` letters are
-    not miscounted, and consumes ``L<type><value>E`` literal operands as a unit
-    (non-type template args, e.g. ``Array<4>`` → ``ILi4EE``) so their value
-    digits aren't read as a length and their closing ``E`` isn't counted.
-    Pathological encodings (e.g. substitutions whose base-36 index contains
-    ``E``) may mis-balance; the caller treats ``None`` as "unparseable" and falls
-    back, so a wrong guess never produces a finding.
-    """
-    depth = 0
-    n = len(s)
-    while i < n:
-        c = s[i]
-        if c in _ASCII_DIGITS:
-            name, i = _read_length_prefixed_name(s, i)
-            if name is None:
-                return None
-            continue
-        if c == "L":
-            # Literal operand `L <type> <value> E` — consume through its own
-            # terminating E (literal values never contain an uppercase E).
-            close = s.find("E", i + 1)
-            if close == -1:
-                return None
-            i = close + 1
-            continue
-        if c in ("I", "N"):
-            depth += 1
-            i += 1
-        elif c == "E":
-            depth -= 1
-            i += 1
-            if depth == 0:
-                return i
-        else:
-            i += 1  # builtin type, qualifier, or substitution character
-    return None
-
-
-def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
-    """Strip ``_Z`` and optional nested-name prefix from a mangled symbol.
-
-    Returns ``(body, is_nested)`` where *body* is the string starting at the
-    first component and *is_nested* indicates whether a ``N`` nested-name
-    wrapper was opened (and must be closed by ``E``). Returns ``None`` when
-    the symbol does not carry the ``_Z`` Itanium prefix.
-
-    A Mach-O direct-clang mangled name carries an extra platform leading
-    underscore (Codex review, fresh evidence: confirmed via
-    ``dumper_clang.py``'s own ``_visibility()`` docstring — clang's
-    ``mangledName`` is ``"__ZN3lib3addEii"`` on macOS, not the plain
-    Itanium ``"_ZN3lib3addEii"``), so a bare ``mangled.startswith("_Z")``
-    check rejects every symbol on that platform. Normalized away here by
-    stripping one leading underscore before the check, mirroring
-    ``dumper_clang.py``'s own ``_symbol_candidates()`` de-prefixing
-    approach for the identical Mach-O quirk.
-    """
-    if mangled.startswith("__Z"):
-        mangled = mangled[1:]
-    if not mangled.startswith("_Z"):
-        return None
-    s = mangled[2:]
-    nested = s.startswith("N")
-    if nested:
-        s = s[1:]
-        # Skip CV-qualifiers (r/V/K) and ref-qualifiers (R/O) on the implicit
-        # object parameter, e.g. NK… (const), NR… (lvalue &), NO… (rvalue &&).
-        while s[:1] in ("r", "V", "K", "R", "O"):
-            s = s[1:]
-    return s, nested
-
-
-def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
-    """Parse a length-prefixed source-name component (with optional template args
-    and GNU ABI tags) starting at ``s[i]``.
-
-    Returns ``(name, next_index)`` where *name* includes any directly-attached
-    ``I…E`` template-argument list and ``B<tag>`` GNU ABI tags, or
-    ``(None, i)`` on any parse failure.
-    """
-    name, i = _read_length_prefixed_name(s, i)
-    if name is None:
-        return None, i
-    n = len(s)
-    # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag, or a
-    # user `__attribute__((abi_tag(...)))`) attach to the unqualified name
-    # itself and are mangled *before* any template-argument list — verified
-    # against a real compiled `template <typename T> struct
-    # __attribute__((abi_tag("tag"))) C { C(); };` instantiated as `C<int>`:
-    # `nm`/`c++filt` show `_ZN1CB3tagIiEC1Ev` (Codex review, fresh
-    # evidence) -- name "C", then tag "B3tag", then template-args "IiE",
-    # not the reverse. Checking template-args first (the previous order)
-    # left a real ABI-tagged class template's own "IiE" unconsumed after
-    # the tag loop only found "B3tag" first, which made every caller of
-    # this component parser -- including :func:`itanium_scope_components`
-    # and :func:`itanium_ctor_dtor_marker_span` -- fail outright on this
-    # real, non-synthetic case instead of just mis-grouping it.
-    while i < n and s[i] == "B":
-        tag, j = _read_length_prefixed_name(s, i + 1)
-        if tag is None:
-            break
-        # Delimited as "[abi:tag]" -- not the raw "B<tag>" the mangling
-        # itself uses -- so a flattened identity can't collide with an
-        # unrelated, plainly-spelled class merely starting with the same
-        # letters (Codex review, fresh evidence): `C[abi_tag("tag")]<int>`
-        # (mangled ...CB3tagIiE...) and a class literally named `CBtag<int>`
-        # (mangled ...CBtagIiE...) both flattened to the identical
-        # "CBtagIiE" before this fix, confirmed against two real compiled
-        # symbols -- `_ZN1CB3tagIiE1fEv` vs. `_ZN5CBtagIiE1fEv`, genuinely
-        # different classes' own `f()`. No real C++ identifier can contain
-        # `[`/`:`/`]`, so this delimiter can never collide with a real name.
-        name = f"{name}[abi:{tag}]"
-        i = j
-    # A directly-attached template-argument list belongs to this
-    # component; keep it raw so Box<int> and Box<float> stay distinct.
-    if i < n and s[i] == "I":
-        end = _skip_template_args(s, i)
-        if end is None:
-            return None, i
-        name = name + s[i:end]
-        i = end
-    return name, i
-
-
-def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
-    """Parse a constructor (``C1``/``C2``/…) or destructor (``D0``/``D1``/…) at ``s[i]``.
-
-    Returns ``("{ctor}", i+2)``, ``("{dtor}", i+2)``, or ``(None, i)`` if
-    ``s[i:]`` does not start a ctor/dtor encoding.
-    """
-    c = s[i] if i < len(s) else ""
-    next_char = s[i + 1] if i + 1 < len(s) else ""
-    if c == "C" and next_char in "12345":
-        return "{ctor}", i + 2
-    if c == "D" and next_char in "012345":
-        return "{dtor}", i + 2
-    return None, i
-
-
-def _parse_operator_component(s: str, i: int) -> tuple[str | None, int]:
-    """Parse an Itanium operator-function code at ``s[i]``.
-
-    Returns ``("{op:XX}", i+2)`` for a known 2-char operator code,
-    ``("{op:cv:<raw remainder>}", len(s))`` for a conversion operator (see
-    below), or ``(None, i)`` if ``s[i:i+2]`` is not a recognized operator
-    code.
-
-    A conversion operator's own Itanium code, ``cv``, is deliberately kept
-    out of ``_ITANIUM_OPERATORS`` for *signature-identity* purposes (a
-    fixed 2-char code there is used so operator overloads group together,
-    but every conversion operator carries a different target type and is
-    never an overload of another one) — handled separately here instead of
-    folded into that set, since it needs different treatment for *scope
-    recovery*: a direct-clang snapshot stores a conversion operator's own
-    ``Function.name`` bare (e.g. ``"operator Bar"``, confirmed via a real
-    ``clang -ast-dump``, no owning-class prefix at all — the same
-    unqualified-leaf convention CastXML uses for ordinary methods), so
-    ``owner_class_of()``'s mangled-name fallback is the only way to
-    recover the owner, and it previously failed outright here (Codex
-    review, fresh evidence): ``cv`` is immediately followed by the full
-    Itanium encoding of the conversion's target type (e.g.
-    ``cvN2ns3BarE`` for ``operator ns::Bar()``), which is not a simple
-    length-prefixed name — parsing an arbitrary Itanium ``<type>``
-    production (builtin codes, pointers, nested names, substitutions, ...)
-    is a much larger grammar than this structural parser attempts
-    elsewhere. Recovering the *scope* doesn't need the target type parsed
-    at all: ``cv`` is always this member's own leaf component (a
-    conversion operator can't itself enclose further nested-name
-    components), so it is safe to stop parsing immediately after
-    recognizing it — see the ``done`` override in
-    :func:`_step_next_component` — rather than attempt (and risk
-    mis-parsing) the type that follows.
-
-    The leaf *label* embeds the raw, unparsed remainder of the mangled
-    string after ``cv`` rather than a fixed placeholder (Codex review,
-    fresh evidence): ``diff_types._overload_group_key()`` uses
-    ``itanium_qualified_name()`` — which chains this label onto the scope
-    prefix — to decide whether two declarations are genuine overloads of
-    one another. A fixed placeholder made every conversion operator on a
-    class produce the *same* qualified name regardless of target (e.g.
-    both ``operator int()`` and ``operator double()`` on the same class
-    reduced to ``"Foo::{op:cv}"``), which collapsed two conversion
-    operators that are never overloads of each other (each is a distinct,
-    unambiguous conversion function — there is no shared ``&Foo::operator
-    T`` to become ambiguous) into one group, producing a false
-    ``OVERLOAD_ADDED`` — confirmed empirically:
-    ``_diff_overload_additions()`` fired for exactly this case before this
-    fix. The target type's mangled encoding is itself deterministic (the
-    same target always mangles identically, distinct targets always
-    mangle differently), so embedding the raw, un-decoded remainder
-    verbatim is sufficient to keep distinct targets in distinct groups and
-    identical targets in the same group, without needing to parse the
-    arbitrary ``<type>`` grammar it contains. Advances ``i`` to
-    ``len(s)`` (nothing meaningful follows for this parser's purposes
-    anyway, since :func:`_step_next_component` always stops immediately
-    after a ``cv`` component regardless of nesting).
-    """
-    code = s[i : i + 2]
-    if code == "cv":
-        return f"{{op:cv:{s[i + 2 :]}}}", len(s)
-    if code in _ITANIUM_OPERATORS:
-        # Keep the code so operator overloads group (e.g. operator[](int)/(long))
-        # while distinct operators stay distinct. Conversion operators (`cv`) are
-        # excluded — they carry a target type and are not overloads of each other.
-        return f"{{op:{code}}}", i + 2
-    return None, i
-
-
-def _parse_non_source_name_component(s: str, i: int) -> tuple[str | None, int]:
-    """Parse a constructor, destructor, or operator component at ``s[i]``.
-
-    Tries ctor/dtor first, then operator codes. Returns ``(label, next_index)``
-    or ``(None, i)`` when none of those forms match (e.g. conversion operator,
-    substitution, vendor encoding — caller should return ``None``).
-    """
-    label, new_i = _parse_ctor_dtor_component(s, i)
-    if label is None:
-        label, new_i = _parse_operator_component(s, i)
-    return label, new_i
-
-
-def _step_next_component(
-    s: str, i: int, nested: bool
-) -> tuple[str | None, int, bool] | None:
-    """Advance one component in the Itanium nested-name body ``s`` at position ``i``.
-
-    Returns ``(label, next_i, done)`` on success:
-
-    - *label* is the parsed component string, or ``None`` when the position
-      holds the nested-name ``E`` terminator (no component to append, just stop).
-    - *next_i* is the index to continue from.
-    - *done* is ``True`` when the caller should stop iterating (``E`` reached
-      for a nested name, or a free-function's single component was consumed).
-
-    Returns ``None`` (not a 3-tuple) when the component cannot be parsed at all
-    (an unrecognized/vendor operator, substitution, truncated source name) so
-    the caller propagates failure by returning ``None`` from its own scope.
-    """
-    c = s[i]
-    if nested and c == "E":
-        # Normal terminator of the ``N…E`` nested-name wrapper; no component.
-        return None, i + 1, True
-    if c in _ASCII_DIGITS:
-        name, new_i = _parse_source_name_component(s, i)
-        if name is None:
-            return None  # malformed source name — propagate failure
-        return name, new_i, not nested
-    label, new_i = _parse_non_source_name_component(s, i)
-    if label is None:
-        return None  # conversion operator / substitution / vendor — not modelled
-    if label.startswith("{op:cv:"):
-        # A conversion operator's own leaf component is always last; its
-        # target type follows immediately and is deliberately not parsed
-        # (see _parse_operator_component) so stop right here regardless of
-        # nesting, rather than attempt to step into that unparsed type.
-        return label, new_i, True
-    return label, new_i, not nested
-
-
-def itanium_scope_components(mangled: str) -> list[str] | None:
-    """Scope components of an Itanium-mangled C++ symbol, parsed structurally.
-
-    Decoding the nested-name encoding directly avoids any dependency on an
-    external demangler (``c++filt`` / ``cxxfilt``), which is not installed on
-    every platform — so this works identically on Linux, macOS, and Windows and
-    never shells out. Handles the common length-prefixed forms, including
-    class-template specializations (the raw template-argument encoding is kept so
-    distinct specializations stay distinct)::
-
-        _Z4drawi                       -> ["draw"]                  (free function)
-        _ZN1C3barEv                    -> ["C", "bar"]              (member)
-        _ZNK1C3barEv                   -> ["C", "bar"]              (const member)
-        _ZN3lib12experimental4sortEv   -> ["lib", "experimental", "sort"]
-        _ZN3BoxIiE4sizeEv              -> ["BoxIiE", "size"]        (Box<int>::size)
-        _ZSt5touchv                    -> ["std", "touch"]          (std::touch(), no wrapper)
-        _ZNSt6detail3fooEv             -> ["std", "detail", "foo"]  (std::detail::foo())
-
-    The Itanium ABI mandates the 2-character substitution ``St`` for the
-    *first* occurrence of the ``std::`` scope prefix in a mangled name —
-    confirmed empirically against two real GCC-compiled symbols:
-    ``namespace std { void touch() {} }`` mangles to the bare ``_ZSt5touchv``
-    (``St`` directly after ``_Z``, no ``N…E`` nested-name wrapper needed for
-    a single trailing component), while ``namespace std { namespace detail {
-    void foo() {} } }`` mangles to ``_ZNSt6detail3fooEv`` (``St`` right after
-    the ``N`` nested-name marker, with further components following before
-    ``E``). Recognized only as the very first component (this parser does
-    not attempt general substitution-table resolution for the other
-    Itanium substitution abbreviations — ``Sa``/``Sb``/``Ss``/``Si``/``So``/
-    ``Sd`` — which stand for a complete template *type*, not a scope prefix
-    that can have more components appended, and are irrelevant to "what
-    scope is this declaration in").
-
-    Returns ``None`` for forms it does not model (constructors/operators,
-    other substitutions, non-Itanium or unmangled names) so callers fall
-    back.
-    """
-    prefix = _itanium_strip_prefix(mangled)
-    if prefix is None:
-        return None
-    s, nested = prefix
-    components: list[str] = []
-    i = 0
-    n = len(s)
-    if s[i : i + 2] == "St":
-        components.append("std")
-        i += 2
-    while i < n:
-        step = _step_next_component(s, i, nested)
-        if step is None:
-            return None  # unmodelled or malformed component
-        label, i, done = step
-        if label is not None:
-            components.append(label)
-        if done:
-            break
-    return components or None
 
 
 def itanium_qualified_name(mangled: str) -> str | None:
     """Fully scope-qualified name (``ns::C::bar``) from a mangled symbol, or None."""
     comps = itanium_scope_components(mangled)
     return "::".join(comps) if comps else None
+
+
+def component_embeds_template_args(component: str) -> bool:
+    """Whether *component* -- one entry from
+    :func:`qualified_name_scope_components` (a demangled or already
+    pretty-printed spelling) -- embeds a template-argument list, rather than
+    naming a bare namespace/class/function segment.
+
+    A pretty-printed spelling keeps the human-readable ``<...>`` form (e.g.
+    ``"Box<int>"``), so a literal ``<`` anywhere in *component* is a sound,
+    exact signal for this shape: no ordinary C++ identifier can contain
+    ``<``.
+
+    This is deliberately a TEXT-ONLY heuristic and is NOT used for an
+    Itanium-mangled component: :func:`itanium_scope_components` keeps a
+    directly-attached template-argument list RAW -- see
+    :func:`_parse_source_name_component`'s own docstring, "keep it raw so
+    ``Box<int>`` and ``Box<float>`` stay distinct" -- so ``Box<int>`` there
+    is the component ``"BoxIiE"``, containing no literal ``<`` at all, and a
+    naive scan for a raw ``I...E`` block is unsound: an ordinary identifier
+    like ``"ICE"`` or ``"IWidgetE"`` parses as a balanced template-args
+    block purely by coincidental spelling (Codex review, fresh evidence --
+    this function itself carried exactly that guessing branch until this
+    fix, and it produced a real false positive: a genuine namespace move of
+    a class spelled e.g. ``ICE`` -> ``ACE`` was silently skipped). The sound
+    answer for an Itanium mangling is the STRUCTURAL one,
+    :func:`itanium_scope_components_with_template_positions`, which knows
+    at parse time -- from :func:`_parse_source_name_component`'s own
+    return value -- whether a template-argument list was actually consumed,
+    rather than guessing it back out of the assembled text. Every caller of
+    *this* function must therefore route an Itanium-mangled component
+    through that structural answer instead (see
+    :mod:`diff_symbols_renames`'s ``_scope_components``, this function's
+    only production consumer).
+
+    Deliberately conservative like every other guard in this module: an
+    unrecognized shape returns ``False`` (not template-bearing) rather than
+    risking a false positive that would suppress a genuine namespace-move
+    finding.
+    """
+    return "<" in component
 
 
 def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
@@ -486,7 +144,7 @@ def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
         if c == "E":
             return None  # nested name closed with no ctor/dtor component found
         if c in _ASCII_DIGITS:
-            _name, new_i = _parse_source_name_component(s, i)
+            _name, new_i, _template_attached = _parse_source_name_component(s, i)
             if new_i == i:
                 return None  # malformed source name
             i = new_i
@@ -498,64 +156,573 @@ def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
     return None
 
 
-def msvc_scope_components(mangled: str) -> list[str] | None:
-    """Scope components of an MSVC-mangled C++ symbol, parsed structurally.
-
-    Direct-clang snapshots taken with ``clang-cl`` (or any ``--target=
-    *-windows-msvc`` invocation) record ``mangledName`` in the proprietary
-    Microsoft C++ ABI scheme, not Itanium — confirmed empirically::
-
-        ?run@Foo@@QEAAXXZ            -> ["Foo", "run"]        (Foo::run())
-        ?freefunc@ns@@YAXXZ          -> ["ns", "freefunc"]    (ns::freefunc())
-        ?method@Box@inner@outer@@... -> ["outer", "inner", "Box", "method"]
-        ?instantiate@@YAXXZ          -> ["instantiate"]       (free function)
-
-    The qualified name is written ``<leaf>@<scope1>@<scope2>...@@<type-enc>``
-    with scope components listed *innermost first*, terminated by the first
-    ``@@`` — the reverse order and terminator convention Itanium uses, so this
-    is a genuinely separate parser, not a reuse of ``itanium_scope_components``.
-
-    Returns ``None`` for forms it does not model, mirroring
-    ``itanium_scope_components``'s "return None, let the caller fall back"
-    contract:
-
-    * Special member functions and operators (constructors ``??0``,
-      destructors ``??1``/``??_D``, ``operator=`` ``??4``, ...) all mangle
-      with a *second* ``?`` immediately after the first — the "name" slot
-      is an operator code, not a plain identifier, so the simple
-      leaf/scope split below does not apply.
-    * Template classes/functions (``?$Name@Args@``) embed the template
-      argument list inside the same ``@``-delimited region as the scope
-      chain using the identical separator, and argument encodings can
-      themselves be arbitrary nested type strings — a naive split cannot
-      tell an argument token from a scope token, so any component
-      starting with ``?`` (the template marker ``?$`` or the anonymous-
-      namespace marker ``?A``) is rejected rather than mis-parsed.
-    * A bare-digit component is a name-backreference into MSVC's
-      per-symbol substitution table, not a literal identifier — no real
-      C++ identifier is all-digits, so this is an unambiguous signal to
-      bail rather than resolve it wrong.
-    """
-    if not mangled.startswith("?") or mangled[1:2] == "?":
-        return None
-    idx = mangled.find("@@")
-    if idx == -1:
-        return None
-    head = mangled[1:idx]
-    if not head:
-        return None
-    parts = head.split("@")
-    if any(not p or p.startswith("?") or p.isdigit() for p in parts):
-        return None
-    name = parts[0]
-    scope = list(reversed(parts[1:]))
-    return [*scope, name]
-
-
 def msvc_qualified_name(mangled: str) -> str | None:
     """Fully scope-qualified name (``ns::C::bar``) from an MSVC-mangled symbol, or None."""
     comps = msvc_scope_components(mangled)
     return "::".join(comps) if comps else None
+
+
+#: Symbol-operator spellings that carry a literal ``<``/``>`` as part of the
+#: operator token itself (stream insertion/extraction, relational, C++20
+#: three-way comparison) rather than as template-argument delimiters --
+#: longest-first so ``"<<="`` matches before the shorter ``"<<"``/``"<"``
+#: prefixes it also starts with.
+_OPERATOR_ANGLE_TOKENS = ("<<=", ">>=", "<=>", "<<", ">>", "<=", ">=", "<", ">")
+
+
+def _operator_angle_token_len(qualified: str, i: int) -> int:
+    """Length of a symbol-operator angle token at *qualified[i:]* immediately
+    following a literal ``"operator"`` (checked by the caller), or 0.
+
+    ``ns::Stream::operator<<`` has no space after ``operator`` -- unlike a
+    conversion operator (``operator ns::Bar``), so it never matches the
+    ``"::operator "`` marker above -- and its own ``<``/``>`` are the
+    operator's spelling, not template-argument delimiters. Without
+    recognizing this, the depth tracker below would see an unmatched ``<``
+    (or two, for ``operator<<``) with no closing ``>`` anywhere in the
+    string, reporting "unbalanced nesting" and rejecting an otherwise
+    perfectly ordinary qualified name (Codex/CodeRabbit review, fresh
+    evidence).
+    """
+    for tok in _OPERATOR_ANGLE_TOKENS:
+        if qualified.startswith(tok, i):
+            return len(tok)
+    return 0
+
+
+def _operator_keyword_precedes(qualified: str, i: int) -> bool:
+    """Whether ``qualified[i-8:i] == "operator"`` is the COMPLETE leaf
+    token, not merely a suffix of a longer identifier.
+
+    A bare suffix match alone is unsound: ``lib::myoperator<old::A>::f`` also
+    ends in the eight characters ``"operator"`` immediately before its ``<``,
+    but the real identifier is ``myoperator`` -- a legal (if unusual) class
+    name, not an overloaded-operator declaration. Requires the character
+    immediately before ``"operator"`` to be a scope/token boundary (start of
+    string, or anything that isn't an identifier character) rather than
+    assuming one (Codex review, fresh evidence).
+    """
+    if i < 8:
+        return False
+    if qualified[i - 8 : i] != "operator":
+        return False
+    before = i - 8
+    return before == 0 or not (
+        qualified[before - 1].isalnum() or qualified[before - 1] == "_"
+    )
+
+
+def _is_template_opening_angle(qualified: str, i: int) -> bool:
+    """Whether ``qualified[i] == "<"`` is a real template-opening delimiter,
+    as opposed to an unparenthesized ``<`` comparison in a dependent
+    non-type template argument.
+
+    Unlike ``>`` (see :func:`qualified_name_scope_components`'s own
+    docstring -- a bare ``>`` there is a genuine, unparenthesized-forbidden
+    compile error), a bare ``<`` comparison is legal C++ and a real
+    compiler's parser disambiguates it via name lookup, which this scanner
+    has no access to. Falls back to a spacing signal instead, confirmed
+    against real clang output: a template-opening ``<`` is always rendered
+    immediately after its name with no preceding space, while a binary
+    comparison operator is always rendered with a space on both sides
+    regardless of the original source's own spacing.
+    """
+    return i == 0 or not qualified[i - 1].isspace()
+
+
+#: Multi-character ``<``-led expression-operator tokens (as opposed to a
+#: lone ``<``, which needs :func:`_is_template_opening_angle`'s spacing
+#: signal). Longest-first so ``<<=`` matches before ``<<``.
+_LESS_THAN_LED_OPERATOR_TOKENS = ("<<=", "<=>", "<<", "<=")
+
+
+def _less_than_led_operator_token_len(qualified: str, i: int) -> int:
+    """Length of a multi-character ``<``-led expression-operator token
+    (``<<=``, ``<=>``, ``<<``, ``<=``) at ``qualified[i:]``, or 0.
+
+    Unlike a lone ``<`` (see :func:`_is_template_opening_angle`), ANY
+    multi-character ``<``-led token is structurally guaranteed to be a
+    real operator, never two adjacent template-opening delimiters: a
+    template-argument-list can never begin with a bare ``<`` or ``=`` (no
+    expression or type-id starts with either), so two consecutive ``<``
+    characters, or a ``<`` immediately followed by ``=``, cannot be two
+    independent delimiters -- they can only be this operator's own
+    spelling. Confirmed against real clang: ``operator B<N << M>``
+    compiles and is pretty-printed verbatim for an uninstantiated member
+    (Codex review, fresh evidence -- the second ``<`` of ``<<`` is not
+    preceded by whitespace, so :func:`_is_template_opening_angle`'s
+    per-character spacing signal alone misclassified it as a template
+    opener). No whitespace check needed here, unlike the lone-``<`` case:
+    the grammar guarantee is unconditional.
+    """
+    for tok in _LESS_THAN_LED_OPERATOR_TOKENS:
+        if qualified.startswith(tok, i):
+            return len(tok)
+    return 0
+
+
+def qualified_name_scope_components(qualified: str) -> list[str] | None:
+    """Scope components of an already-demangled, ``::``-qualified name.
+
+    A structural counterpart to :func:`itanium_scope_components`/
+    :func:`msvc_scope_components` for callers that hold a plain qualified
+    spelling rather than a mangled symbol — e.g. a header-tier snapshot key
+    that was never mangled at all (a synthesized constructor/destructor
+    identity, a plain-C fallback name) but is already scope-qualified text::
+
+        "ns::Class::method" -> ["ns", "Class", "method"]
+        "Class::method"     -> ["Class", "method"]
+        "freefunc"          -> ["freefunc"]              (no scope to split)
+
+    Splits only at TOP-LEVEL ``"::"`` — bracket/paren nesting depth is
+    tracked (mirroring ``clang_layout_tool._bare_base_name``'s identical
+    concern) so a template argument's own ``"::"`` is never mistaken for a
+    scope separator. Without this, ``"lib::foo<old::A>"`` would split into
+    ``["lib", "foo<old", "A>"]`` — the fabricated middle component
+    ``"foo<old"`` can then coincidentally collide with an unrelated
+    ``"foo<new"`` from a different instantiation, producing a false
+    namespace-move grouping between two type arguments that were never
+    renamed at all (Codex review, fresh evidence: exactly this happened for
+    ``lib::foo<old::A>``/``lib::foo<old::B>`` vs.
+    ``lib::foo<new::A>``/``lib::foo<new::B>``, reported as a spurious
+    BREAKING ``symbol_renamed_batch``)::
+
+        "lib::foo<old::A>" -> ["lib", "foo<old::A>"]   (not ["lib", "foo<old", "A>"])
+
+    A conversion operator's own target type can itself carry ``"::"``
+    (``"api::C::operator old::X"`` for `operator old::X()`) — without special
+    handling, the target's own scope separator would be treated as an
+    enclosing-scope boundary too, splitting into
+    ``["api", "C", "operator old", "X"]`` instead of the correct
+    ``["api", "C", "operator old::X"]``. That fabricated middle component
+    can then collide with an unrelated target sharing the same "operator
+    <prefix>" spelling, producing a false namespace-move grouping (Codex
+    review, fresh evidence — mirrors the identical concern
+    :func:`owner_class_of` already documents for exactly this shape).
+    Recognized the same way that function already does: a top-level
+    ``"::operator "`` marker is the true scope/leaf boundary, and
+    everything from ``"operator "`` onward (including the target's own
+    ``"::"``) is kept as ONE opaque leaf component, never split further.
+
+    Deliberately conservative: returns ``None`` for an empty string, a
+    component list with any empty segment (a leading/trailing/doubled
+    top-level ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``), or unbalanced
+    bracket/paren nesting, rather than silently dropping or fabricating a
+    component, mirroring the "return ``None``, let the caller fall back"
+    contract the mangled-name parsers above use. That conservatism applies
+    to the WHOLE string, including a conversion operator's own target past
+    the ``"::operator "`` marker -- the scan below keeps tracking depth
+    through the opaque leaf and rejects the whole input if it ends
+    unbalanced, rather than stopping at the marker and silently accepting a
+    malformed target like ``"api::C::operator old::X<"`` (CodeRabbit
+    review, fresh evidence: the earlier revision broke out of the loop the
+    moment the marker was found, so nothing past it was ever validated).
+
+    Angle-bracket (``<``/``>``) and paren (``(``/``)``) nesting are tracked
+    as two INDEPENDENT counters, not one shared ``depth`` -- a real,
+    demangled non-type template argument can legitimately contain a bare
+    ``<``/``>`` comparison, e.g. ``operator
+    std::integral_constant<bool, (sizeof(T) > 1)>`` for
+    ``std::integral_constant<bool, (sizeof(T) > 1)>`` (Codex review, fresh
+    evidence: an earlier revision used one shared counter for both bracket
+    kinds, so the comparison's ``>`` was miscounted as closing the
+    ``integral_constant<`` template, driving the counter negative and
+    rejecting a perfectly well-formed target). This is not a heuristic: the
+    C++ grammar itself requires such a comparison to be parenthesized
+    wherever it appears as a non-type template argument, specifically to
+    remove this exact ambiguity for any parser -- so a compiler's own
+    demangled/pretty-printed text is guaranteed to already carry the
+    disambiguating parens around it. A ``>`` character can therefore only be
+    a REAL template-closing delimiter while no paren is currently open
+    (``paren_depth == 0``); while a paren is open, it is guaranteed by that
+    same grammar rule to be part of an expression, never a delimiter, so it
+    is left untouched rather than folded into a bracket-kind-blind counter.
+
+    That grammar guarantee is ONE-SIDED, though: only a ``>``-bearing
+    expression must be parenthesized as a non-type template argument (a
+    bare, unparenthesized ``>`` there is a genuine, confirmed compile
+    error) -- an unparenthesized ``<`` comparison is perfectly legal and
+    unambiguous to a real parser, which disambiguates it via *name lookup*
+    (is the identifier immediately to its left a known template name?), not
+    via any textual rule this scanner could replicate. Confirmed directly
+    against real clang: ``template<int N, int M> struct C { operator
+    B<N < M>() const; };`` compiles cleanly, and clang's own AST dump
+    prints the *unparenthesized* comparison verbatim as ``operator B<N <
+    M>`` for the uninstantiated (template-parameter-dependent) member --
+    exactly the shape :func:`qualified_name_scope_components` receives from
+    this codebase's own castxml/clang-derived declaration names (Codex
+    review, fresh evidence: an earlier revision treated every ``<`` at
+    ``paren_depth == 0`` as a real template opener unconditionally, so this
+    exact input drove ``angle_depth`` one too high and never came back
+    down, rejecting valid input). Since a `<` cannot be soundly resolved by
+    grammar alone, a ``<`` at ``paren_depth == 0`` is instead treated as a
+    real template-opening delimiter only when it is NOT preceded by
+    whitespace -- confirmed, empirically, against real clang output: a
+    template-opening ``<`` is always rendered immediately after its name
+    with no space (``Other<D>``, ``B<N < M>``'s own leading ``<``), while a
+    binary comparison operator is always rendered with a space on both
+    sides (``N < M``) REGARDLESS of the source's own spacing (confirmed by
+    compiling the identical construct spelled ``N<M`` with no spaces at
+    all -- clang's pretty-printer still re-inserts them). This is not
+    airtight for arbitrary hand-crafted text, but it is sound for every
+    real input this function actually receives, which originates from a
+    compiler's own canonical printer, never from hand-written source.
+
+    Brace (``{``/``}``) nesting is tracked as a THIRD independent counter,
+    for a different reason than the ``<``/``>``/``(``/``)`` cases above:
+    C++20 allows a captureless lambda closure as a non-type template
+    argument, and its body is a full, self-contained statement grammar --
+    a ``>``/``<`` inside it is not required to be parenthesized the way a
+    bare comparison directly in the template-argument-list is, because it
+    is not at that grammar production at all. Confirmed directly against
+    real clang: ``operator B<[]{ return N > M; }>()`` (a lambda-typed
+    conversion target) compiles under ``-std=c++20`` and is pretty-printed
+    verbatim, unparenthesized comparison included, sometimes spanning
+    multiple lines (Codex review, fresh evidence). Unlike the angle-bracket
+    cases, this needs no heuristic at all: braces always balance
+    unconditionally in valid C++ (no ambiguity like ``<``/``>`` ever
+    applies to them), so once a brace opens, every character up to its
+    matching close -- regardless of what it looks like -- is treated as
+    fully opaque interior, untouched by any other counter in this
+    function.
+
+    Bracket (``[``/``]``) nesting is tracked as a FOURTH independent
+    counter, for the same reason: a subscript expression used inside a
+    non-type template argument (e.g. ``operator B<A[N > M]>()``, confirmed
+    to compile) carries a ``>`` that needs no parenthesization either --
+    ``]``, not ``>``, closes the subscript, so it carries none of the
+    top-level template-argument ambiguity a bare ``>`` would (Codex review,
+    fresh evidence). Treated exactly like a brace: once a bracket opens,
+    its entire interior is opaque, and this needs no heuristic either,
+    since ``[``/``]`` always balance unconditionally in valid C++ too.
+
+    A lambda's trailing-return-type arrow (``[]() -> bool { ... }``,
+    confirmed to compile and pretty-print verbatim as a non-type template
+    argument) needs its own check, unrelated to brace/bracket tracking:
+    the ``->`` sits in the lambda's OWN declarator, between its parameter
+    list and its body, so it is not inside any brace/bracket this function
+    already tracks as opaque. Unlike every other ``>`` case above, this
+    one needs no heuristic and no depth-awareness at all: by the C++
+    lexical grammar's own maximal-munch rule, a ``-`` immediately adjacent
+    to a ``>`` can ONLY ever tokenize as the single ``->`` token, never as
+    two separate ``-`` and ``>`` tokens -- if the source meant a
+    subtraction immediately followed by a separate closing ``>`` with
+    zero characters between them, the compiler's own lexer would already
+    have misread that as ``->`` too, so this exact adjacency cannot
+    represent two separate tokens in any valid, compiled C++ program
+    (Codex review, fresh evidence). A ``>`` immediately preceded by ``-``
+    is therefore always skipped as part of ``->``, unconditionally.
+
+    Known, accepted limitation (Codex review, fresh evidence): the brace/
+    bracket "opaque interior" scan above is a raw character count, not a
+    real tokenizer -- it does not skip over string/char-literal content or
+    comments, so a brace, bracket, paren, or angle-bracket CHARACTER
+    embedded inside a string literal within a lambda body (e.g. ``operator
+    B<[]{ return sizeof("}"); }>()``, confirmed to compile and to be
+    pretty-printed verbatim by clang) desynchronizes the corresponding
+    counter and this function rejects otherwise-valid input. Closing this
+    for real needs an actual lexical scanner for the brace/bracket
+    interior -- string/char-literal quoting and escape-sequence handling
+    (including raw string literals, ``R"delim(...)delim"``, whose
+    terminator is itself data-dependent), plus line (``//``) and block
+    (``/* */``) comment recognition -- which is a materially different,
+    larger piece of work than "track one more independently-balancing
+    bracket kind" (the pattern every fix in this function's history above
+    has been). Deliberately not attempted here: this is the sixth
+    consecutive real-but-increasingly-exotic C++ grammar shape found in
+    this function across as many review rounds, and a string/char literal
+    containing bracket-like characters *inside a lambda body used as a
+    conversion-operator's own non-type template argument* is deep into
+    adversarially-constructed territory -- vanishingly unlikely to appear
+    in any real-world header this tool would actually be pointed at,
+    unlike every shape fixed above (each was a plain, if less common,
+    construct a real codebase could plausibly contain). Per this
+    codebase's own "known gaps over risky reactive patches" convention:
+    the input this function was built to defend against in the first
+    place is a genuinely MALFORMED synthetic key, and no valid, real-world
+    header-tier declaration this codebase has ever actually needed to
+    parse has required this. A caller reaching this gap gets the existing,
+    documented conservative fallback (``None``, no namespace-move pairing
+    for that one declaration) -- a missed roll-up for one input, not a
+    wrong one.
+    """
+    if not qualified:
+        return None
+    marker = "::operator "
+    angle_depth = 0
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    i = 0
+    n = len(qualified)
+    marker_idx = -1
+    while i < n:
+        ch = qualified[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                return None
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            # Opaque interior of a brace-delimited lambda body (a legal
+            # C++20 non-type template argument, e.g. "B<[]{ return N > M;
+            # }>") or a bracketed subscript expression (e.g. "B<A[N >
+            # M]>", confirmed to compile: a ">" nested inside "[...]" is
+            # unambiguous to the parser -- "]", not ">", closes the
+            # subscript, so it carries none of the top-level
+            # template-argument ambiguity a bare ">" would). Both are a
+            # full expression/statement grammar unrelated to the
+            # enclosing template-argument-list's own bracket balance. See
+            # this function's own docstring for why braces/brackets need
+            # no whitespace heuristic, unlike angle brackets.
+            i += 1
+            continue
+        if ch == ">" and i > 0 and qualified[i - 1] == "-":
+            # A lambda's trailing-return-type arrow ("[]() -> bool {...}",
+            # confirmed to compile as a non-type template argument and be
+            # pretty-printed verbatim) -- unlike the other ">" cases, this
+            # needs no heuristic or brace/bracket-depth awareness at all:
+            # by the C++ lexical grammar's own maximal-munch rule, a "-"
+            # character immediately adjacent to a ">" can ONLY ever
+            # tokenize as the single "->" token, never as two separate
+            # "-" and ">" tokens -- if the source meant a subtraction
+            # immediately followed by a separate closing ">" with zero
+            # characters between them, the compiler's own lexer would
+            # already have misread THAT as "->" too, so this adjacency
+            # cannot represent two separate tokens in any valid, compiled
+            # C++ program (Codex review, fresh evidence).
+            i += 1
+            continue
+        if ch in "<>" and _operator_keyword_precedes(qualified, i):
+            tok_len = _operator_angle_token_len(qualified, i)
+            if tok_len:
+                i += tok_len
+                continue
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
+                return None
+        elif (
+            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
+        ):
+            angle_depth += 1
+        elif ch == ">" and paren_depth == 0:
+            angle_depth -= 1
+            if angle_depth < 0:
+                return None
+        elif (
+            angle_depth == 0
+            and paren_depth == 0
+            and marker_idx == -1
+            and qualified[i : i + len(marker)] == marker
+        ):
+            marker_idx = i
+        i += 1
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
+        return None
+    if marker_idx != -1:
+        head = qualified[:marker_idx]
+        leaf = qualified[marker_idx + 2 :]  # keep the "operator ..." target whole
+        head_comps = qualified_name_scope_components(head)
+        if head_comps is None:
+            return None
+        return [*head_comps, leaf]
+    if qualified.startswith("operator "):
+        # A bare-recorded conversion operator with no owning-class prefix at
+        # all (no "::operator " marker to find) can still carry a qualified
+        # target ("operator ns::Bar") whose own "::" is not a scope
+        # separator -- the same shape owner_class_of's docstring documents.
+        # There is no scope to substitute here regardless, so treat the
+        # whole thing as one leaf rather than guessing at a split.
+        return [qualified]
+    comps: list[str] = []
+    angle_depth = 0
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    start = 0
+    i = 0
+    while i < n:
+        ch = qualified[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                return None
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            i += 1
+            continue
+        if ch == ">" and i > 0 and qualified[i - 1] == "-":
+            # A lambda's trailing-return-type arrow -- see this function's
+            # own docstring / the sibling scan above for why this needs
+            # no heuristic at all.
+            i += 1
+            continue
+        if ch in "<>" and _operator_keyword_precedes(qualified, i):
+            tok_len = _operator_angle_token_len(qualified, i)
+            if tok_len:
+                i += tok_len
+                continue
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
+                return None
+        elif (
+            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
+        ):
+            angle_depth += 1
+        elif ch == ">" and paren_depth == 0:
+            angle_depth -= 1
+            if angle_depth < 0:
+                return None
+        elif angle_depth == 0 and paren_depth == 0 and qualified[i : i + 2] == "::":
+            comps.append(qualified[start:i])
+            i += 2
+            start = i
+            continue
+        i += 1
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
+        return None
+    comps.append(qualified[start:])
+    if any(not c for c in comps):
+        return None
+    return comps
+
+
+def strip_trailing_top_level_parameter_list(text: str) -> str:
+    """Strip a trailing ``(...)`` parameter list, at TOP-LEVEL template
+    nesting only.
+
+    A synthesized constructor key (``__abicheck_ctor__<scope>(<params>)``)
+    needs its parameter-list suffix removed before the ``<scope>`` prefix is
+    handed to :func:`qualified_name_scope_components` — but a naive
+    ``text.find("(")`` matches the FIRST ``(`` anywhere, including one
+    belonging to a function-type template argument nested inside the scope
+    itself (e.g. ``ns::Holder<void(int)>``), truncating the scope at that
+    inner paren instead of the real, top-level parameter list (Codex/
+    CodeRabbit review, fresh evidence). Tracks ``<``/``>`` nesting depth —
+    mirroring :func:`qualified_name_scope_components`'s own concern — and
+    only treats a ``(`` at depth 0 as the parameter list's start::
+
+        "ns::Holder<void(int)>(int)" -> "ns::Holder<void(int)>"
+        "ns::graph"                  -> "ns::graph"              (no paren at all)
+
+    Returns *text* unchanged when no top-level ``(`` is found (e.g. unbalanced
+    nesting, or genuinely no parameter list) rather than guessing.
+
+    Angle-bracket depth is only tracked while no paren is currently open —
+    the identical concern :func:`qualified_name_scope_components` documents
+    for the same reason: a non-type template argument can legitimately
+    contain a parenthesized ``<``/``>`` comparison (``Holder<(A > B),
+    void(int)>``), and the C++ grammar itself guarantees a ``>``-bearing
+    comparison must be parenthesized wherever it appears as a template
+    argument. A ``>`` seen while a paren is open is therefore guaranteed to
+    be part of that expression, never a real template delimiter, so folding
+    it into the angle-bracket counter would close the enclosing template
+    one character too early and let a later, still-nested ``(`` (a
+    function-type template argument's own parameter list, not the real
+    trailing one) be mistaken for the top-level split point. That grammar
+    guarantee does NOT cover ``<``, though -- an unparenthesized ``<``
+    comparison is legal C++ (e.g. a class template's own scope carrying an
+    uninstantiated ``Holder<N < M>``), so a ``<`` is only counted as a real
+    template opener via :func:`_is_template_opening_angle`'s spacing signal,
+    the same one :func:`qualified_name_scope_components` uses.
+    """
+    depth = 0
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth = max(0, brace_depth - 1)
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            # Opaque lambda-body/subscript interior -- see
+            # qualified_name_scope_components's identical concern.
+            i += 1
+            continue
+        if ch == ">" and i > 0 and text[i - 1] == "-":
+            # A lambda's trailing-return-type arrow -- see
+            # qualified_name_scope_components's identical concern.
+            i += 1
+            continue
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(text, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
+        if ch == "(":
+            if depth == 0 and paren_depth == 0:
+                return text[:i]
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif ch == "<" and paren_depth == 0 and _is_template_opening_angle(text, i):
+            depth += 1
+        elif ch == ">" and paren_depth == 0:
+            depth = max(0, depth - 1)
+        i += 1
+    return text
 
 
 def owner_class_of(f: Function) -> str | None:
@@ -749,7 +916,11 @@ def _owner_descends_from(
     t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
     if t is None:
         return False
-    bases = _transitive_bases(t, types)
+    # This call site's own evidence-gap handling belongs to the dedicated
+    # vtable/vptr_offset_bits slice (ADR-063 Phase 5B) `_owner_descends_from`
+    # feeds via `vtable_slot_is_override_reuse` — unchanged here, only the
+    # completeness flag `virtual_method_addition` added is discarded.
+    bases, _walk_complete = _transitive_bases(t, types)
     # A qualified `ancestor` matching a `bases` entry exactly is unambiguous
     # (both are fully-qualified spellings of the same string). But when
     # `ancestor` is a bare leaf, an exact match against `bases` is NOT
@@ -784,7 +955,7 @@ def vtable_slot_is_override_reuse(
     ``virtual_method_addition()`` already withholds ``VIRTUAL_METHOD_ADDED``
     for exactly this situation — a same-signature override of an inherited
     virtual — by comparing ``virtual_signature_key``. The per-type vtable diff
-    (``diff_types._diff_type_vtable``) independently compares each class's
+    (``diff_types_vtable._diff_type_vtable``) independently compares each class's
     raw vtable entry list, so without this check it disagrees with that
     exemption: the slot's mangled name textually changes (``Base::paint`` ->
     ``Derived::paint``) even though the slot index, order, and call signature
@@ -845,19 +1016,86 @@ def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]
     return sigs
 
 
+def _fact_str_list(fact: Fact[list[str]] | None) -> list[str]:
+    """Read a ``Fact[list[str]]`` sibling the owning dataclass's own
+    ``__post_init__`` guarantees is never ``None`` (ADR-063 Phase 0 —
+    ``RecordType.bases_fact``/``virtual_bases_fact``/``vtable_fact``, see
+    ``model/fact.py``'s ``bridge_legacy_and_fact``). The ``assert`` states
+    that runtime invariant for mypy, which cannot see it through the
+    dataclass field's declared ``Fact[...] | None`` type; the trailing
+    ``or []`` only removes the *type-level* ``None`` mypy still carries for
+    ``.value`` (a real ``PRESENT`` fact for these fields is never
+    constructed with a ``None`` value) and is a no-op for an actually-empty
+    list.
+    """
+    assert fact is not None
+    value = fact.value if fact.is_present else []
+    return value or []
+
+
+def _fact_str_list_confirmed(fact: Fact[list[str]] | None) -> tuple[list[str], bool]:
+    """Like :func:`_fact_str_list`, plus whether the value is safe to treat
+    as the *complete* base-class list (ADR-063 Phase 5B).
+
+    The value itself is preserved for both ``PRESENT`` and ``PARTIAL`` —
+    exactly :func:`_fact_str_list`'s own value-preserving read — since
+    :func:`_owner_descends_from` also calls :func:`_transitive_bases` and
+    only ever reads this function's *set* of names, discarding the
+    completeness flag entirely (that call site's own evidence-gap handling
+    is scoped to the separate vtable/vptr_offset_bits slice). Dropping a
+    ``PARTIAL`` fact's known entries here, rather than just refusing to
+    call them *complete*, would silently lose a real ``Derived -> Base``
+    relationship `_owner_descends_from` used to see via `_fact_str_list`
+    before this function existed (Codex review on this PR: a same-signature
+    override slot rename with `PARTIAL` `bases_fact` evidence stopped
+    resolving through `vtable_slot_is_override_reuse`, fabricating a
+    `TYPE_VTABLE_CHANGED` for what may be a compatible override).
+
+    Only the completeness flag treats ``PARTIAL`` as unsafe, and only a
+    ``PRESENT`` status earns ``True`` there — the same discipline
+    :func:`abicheck.compare.base_class_diff.diff_bases` applies to this
+    identical field pair: this is a full-list *membership* question (does
+    some transitive base declare a matching virtual signature?), and a
+    ``PARTIAL`` fact's uncovered remainder could hold exactly the base that
+    would have proven an override. :func:`virtual_method_addition` — the
+    one caller that actually reads this flag — declines to trust the walk
+    when it is ``False``, rather than trusting a truncated value; it does
+    not need this function to also truncate the value for it.
+    """
+    assert fact is not None
+    value = fact.value if fact.is_present else []
+    return (value or []), fact.status is FactStatus.PRESENT
+
+
 def _transitive_bases(
     start: RecordType | None, types: Mapping[str, RecordType]
-) -> set[str]:
-    """All (transitive) base-class names reachable from record ``start``.
+) -> tuple[set[str], bool]:
+    """All (transitive) base-class names reachable from record ``start``,
+    plus whether the walk saw only confirmed-complete ``bases``/
+    ``virtual_bases`` evidence at every node it visited.
 
     Walks ``bases`` / ``virtual_bases``, resolving each base name through the
     record map with a leaf-name fallback (CastXML records and base names are
     leaf-only, while DWARF uses qualified names). Tolerant of missing records.
+
+    The second return value is ``False`` as soon as *any* visited record's
+    ``bases_fact``/``virtual_bases_fact`` is not ``PRESENT`` (ADR-063 Phase
+    5B) — an incomplete evidence gap anywhere along the walk means a real
+    base this record actually has may be missing from the result, which
+    :func:`virtual_method_addition` must not silently read as "no override
+    exists here" (the same "decline rather than fabricate" default
+    ``diff_types_vtable._vtable_transition_is_evidenced`` and
+    :func:`~abicheck.compare.base_class_diff.diff_bases` already apply to
+    their own evidence gaps).
     """
     seen: set[str] = set()
+    complete = True
     if start is None:
-        return seen
-    stack = [*start.bases, *start.virtual_bases]
+        return seen, complete
+    start_bases, ok1 = _fact_str_list_confirmed(start.bases_fact)
+    start_virtual_bases, ok2 = _fact_str_list_confirmed(start.virtual_bases_fact)
+    complete = complete and ok1 and ok2
+    stack = [*start_bases, *start_virtual_bases]
     while stack:
         b = stack.pop()
         if b in seen:
@@ -865,8 +1103,11 @@ def _transitive_bases(
         seen.add(b)
         rec = types.get(b) or types.get(b.rsplit("::", 1)[-1])
         if rec is not None:
-            stack.extend((*rec.bases, *rec.virtual_bases))
-    return seen
+            rec_bases, ok1 = _fact_str_list_confirmed(rec.bases_fact)
+            rec_virtual_bases, ok2 = _fact_str_list_confirmed(rec.virtual_bases_fact)
+            complete = complete and ok1 and ok2
+            stack.extend((*rec_bases, *rec_virtual_bases))
+    return seen, complete
 
 
 def virtual_method_addition(
@@ -910,7 +1151,9 @@ def virtual_method_addition(
     t_new = _resolve_owner_type(owner, new_types, old_owner_classes)
     if t_old is None or t_new is None:
         return None  # no pre-existing record on both sides → compatible / out of scope
-    if t_old.vtable != t_new.vtable:
+    old_vtable = _fact_str_list(t_old.vtable_fact)
+    new_vtable = _fact_str_list(t_new.vtable_fact)
+    if old_vtable != new_vtable:
         return None  # TYPE_VTABLE_CHANGED covers this case
     # An override of an inherited virtual reuses that base's slot — no new slot,
     # no relayout. If any transitive base already declared a virtual with the
@@ -918,7 +1161,16 @@ def virtual_method_addition(
     # override and stay silent; a different-signature same-name virtual is a new
     # slot and still fires.
     sig = virtual_signature_key(f_new)
-    bases = _transitive_bases(t_new, new_types) | _transitive_bases(t_old, old_types)
+    new_bases, new_complete = _transitive_bases(t_new, new_types)
+    old_bases, old_complete = _transitive_bases(t_old, old_types)
+    if not (new_complete and old_complete):
+        # ADR-063 Phase 5B: an incomplete bases_fact/virtual_bases_fact
+        # anywhere along either walk means a real override-providing base
+        # may simply be missing from `bases` — the walk cannot rule out an
+        # override, so this must decline rather than fabricate a
+        # VIRTUAL_METHOD_ADDED against what may really be a plain override.
+        return None
+    bases = new_bases | old_bases
     if any(sig in old_virtual_sigs.get(b, ()) for b in bases):
         return None
     return make_change(
@@ -926,4 +1178,5 @@ def virtual_method_addition(
         symbol=f_new.mangled,
         detail=owner,
         new=f_new.name,
+        entity_id=f_new.entity_id,
     )

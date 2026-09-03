@@ -1857,14 +1857,14 @@ class TestDwarfSnapshotFallbacks:
         assert size == 0
 
     def test_access_from_dwarf(self):
-        """_access_from_dwarf static method."""
-        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        """access_from_dwarf (ADR-063 Phase 2: moved to extract/dwarf_records.py)."""
+        from abicheck.extract.dwarf_records import access_from_dwarf
         from abicheck.model import AccessLevel
 
-        assert _DwarfSnapshotBuilder._access_from_dwarf(0) == AccessLevel.PUBLIC
-        assert _DwarfSnapshotBuilder._access_from_dwarf(1) == AccessLevel.PUBLIC
-        assert _DwarfSnapshotBuilder._access_from_dwarf(2) == AccessLevel.PROTECTED
-        assert _DwarfSnapshotBuilder._access_from_dwarf(3) == AccessLevel.PRIVATE
+        assert access_from_dwarf(0) == AccessLevel.PUBLIC
+        assert access_from_dwarf(1) == AccessLevel.PUBLIC
+        assert access_from_dwarf(2) == AccessLevel.PROTECTED
+        assert access_from_dwarf(3) == AccessLevel.PRIVATE
 
     def test_compute_type_name_depth_limit(self):
         """_die_to_type_name with depth > 8 returns ('...', 0)."""

@@ -193,7 +193,9 @@ def test_serialization_roundtrip(snap: AbiSnapshot):
     json_str = snapshot_to_json(snap)
 
     # Verify it's valid JSON
-    parsed = json.loads(json_str)
+    from abicheck.storage.sectioned_document import from_sectioned_document
+
+    parsed = from_sectioned_document(json.loads(json_str))
     assert isinstance(parsed, dict)
     assert parsed["library"] == snap.library
     assert parsed["version"] == snap.version

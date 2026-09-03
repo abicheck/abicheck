@@ -1,3 +1,13 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+depends_on:
+  - abicheck/environment_matrix.py
+lifecycle: active
+generated: false
+---
 # Dependency & Runtime Floors
 
 The [ABI/API handling series](abi-api-handling.md) treats compatibility as a
@@ -207,3 +217,7 @@ established fixes keep both audiences:
 | ELF symbol versioning fundamentals | [Part 5 — Linker & ELF](abi-series/05-linker-elf.md) |
 | Per-platform loader/versioning parallels | [Platform Support](../reference/platforms.md) |
 | The full change-kind taxonomy | [Change Kind Reference](../reference/change-kinds.md) |
+
+---
+
+**Ladder:** ← [How System Libraries Stay Compatible](system-library-discipline.md) · Step 8 · At Scale · [Environment & Toolchain Drift](environment-drift.md) →

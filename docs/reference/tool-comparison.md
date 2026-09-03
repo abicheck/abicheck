@@ -13,7 +13,7 @@ This document explains how each ABI checking tool works, what it measured on the
 >   [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary-2026-07-18-74-case-subset)
 >   (marked historical, superseded by the full-catalog benchmark below).
 > - A **full-catalog sweep** scoring every case, with SKIP/ERROR/TIMEOUT counted
->   as misses. See [Full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases).
+>   as misses. See [Full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases).
 >
 > **Which denominator is which.** Of the 197 catalog cases, **159** are
 > compilable `v1`/`v2` shared-library (`.so`) pairs that abidiff/ABICC can also
@@ -68,7 +68,7 @@ interpretation rather than a second manual snapshot.
 | Release headers | catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; false-positive guard passed |
 | Stripped headers | catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; known signal-loss rows remain visible there |
 | Build/source proof | fixed 10-case proof set | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Blocking fixed-set proof: every expected result must be present and `PASS` |
-| Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below | Competitor `.so` lane only; the 38 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
+| Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below | Competitor `.so` lane only; the 38 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
 | Scan-depth matrix | not independently re-run this pass | `abicheck scan --depth {binary,headers,build,source,full}` | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 
 The volatile catalog-lane status is intentionally maintained in the canonical
@@ -193,7 +193,7 @@ modules), and finally to ELF symbol names only when no debug info is present.
 
 For our benchmark, all `.so` files are built with `-g` so DWARF is used throughout.
 
-**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below.
+**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below.
 abidiff misses anything that is not directly a symbol removal or a change that DWARF
 fully describes. Specifically:
 - Struct layout, vtable, return type changes → DWARF often marks as COMPATIBLE because
@@ -247,7 +247,7 @@ It does not improve detection of semantic changes.
 **Header requirement:** Optional (pass `-public-headers` to filter to public API).
 **Compiler requirement:** None. Debug build (`-g`) required.
 
-**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below. The abi-dumper workflow
+**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below. The abi-dumper workflow
 still times out or errors on specific C++ cases and can leave runaway
 `abi-compliance-checker` child processes if the outer wrapper is interrupted.
 
@@ -277,7 +277,7 @@ v2.xml (headers dir + .so path) ──┘
 **Current mitigation:** Pass a specific header file path instead of a directory
 in `<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
 
-**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below.
+**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below.
 
 ---
 
@@ -439,7 +439,7 @@ for tier in ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']:
 > is a discoverability *floor* (the weakest source that reaches the correct
 > verdict per case, credited from `ground_truth.json` labels); it does not
 > penalize a tier for *over-calling* elsewhere in the catalog. The
-> [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases) below is the stricter,
+> [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below is the stricter,
 > empirically-measured number — it scores all 193 cases including false
 > positives, which is why `L3-L5` reads 99.5% there rather than the 100%
 > this table's `L5` row shows (the full-catalog run also treats `SKIP` on
@@ -466,7 +466,7 @@ Two directions matter, not just one:
 
 ---
 
-## Full-catalog benchmark (2026-07-18, all 195 cases)
+## Full-catalog benchmark (2026-07-18, all 193 cases)
 
 Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
 misses** — a tool that hung, crashed, or simply has no mode for a case shape
@@ -583,7 +583,7 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 
 ## Pinned vendor benchmark summary (2026-07-18, 74-case subset)
 
-> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-195-cases)
+> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases)
 > above, which covers all 193 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
 > count as misses) plus an FP/FN breakdown. Kept here because the original
 > 74-case release-pinned methodology stays useful as a small, fast, stable

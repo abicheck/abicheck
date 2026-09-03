@@ -114,18 +114,20 @@ class TestDemangleTriState:
         )
         assert "_Z3foov" in result.output
 
-    def test_html_keeps_mangled_by_default(self, tmp_path, monkeypatch):
-        # HTML is NOT in the demangle default set: its renderer emits symbols
-        # structurally and demangling the HTML string would inject unescaped
-        # C++ '<'/'>'/'&'. Even with the demangler stubbed, html stays mangled.
+    def test_html_demangles_by_default(self, tmp_path, monkeypatch):
+        # HTML *is* in the demangle default set (code-review report item 8):
+        # html_report.py demangles a symbol before escaping it for HTML, so
+        # a demangled C++ signature's own '<'/'>'/'&' render safely rather
+        # than injecting unescaped markup. The mangled name is preserved
+        # too, as the visible symbol's tooltip (`<abbr title="...">`).
         self._patch_demangler(monkeypatch)
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
             ["compare", str(old_p), str(new_p), "--format", "html"],
         )
-        assert "_Z3foov" in result.output
-        assert "foo()" not in result.output
+        assert "foo()" in result.output
+        assert '<abbr title="_Z3foov">foo()</abbr>' in result.output
 
     def test_no_demangle_override_on_markdown(self, tmp_path, monkeypatch):
         self._patch_demangler(monkeypatch)
@@ -596,41 +598,45 @@ class TestCompareReleaseExitFloors:
         )
 
 
+def _gate(preset, abi=None, potential=None, quality=None, addition=None, scheme=None):
+    """Build a :class:`~abicheck.cli_compare_release_helpers.GateOptions` the
+    way :func:`~abicheck.cli_compare_release_helpers.resolve_release_gate_options`
+    would (minus pack folding, irrelevant to these unit tests) -- since
+    ADR-064's rewrite, ``_compute_release_severity_exit_code``/
+    ``_fold_release_global_severity`` take the resolved object, not the six
+    raw preset/category/scheme strings directly."""
+    from abicheck.cli_compare_release_helpers import (
+        GateOptions,
+        _resolve_release_severity_config,
+    )
+
+    severity = _resolve_release_severity_config(
+        preset, abi, potential, quality, addition
+    )
+    return GateOptions(
+        exit_code_scheme=scheme, severity_preset=preset, severity=severity
+    )
+
+
 class TestComputeReleaseSeverityExitCode:
     def test_none_without_flags(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
-        assert (
-            _compute_release_severity_exit_code([], None, None, None, None, None)
-            is None
-        )
+        assert _compute_release_severity_exit_code([], _gate(None)) is None
 
     def test_zero_with_flag_and_no_changes(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
-        assert (
-            _compute_release_severity_exit_code([], "info-only", None, None, None, None)
-            == 0
-        )
+        assert _compute_release_severity_exit_code([], _gate("info-only")) == 0
 
     def test_aggregates_breaking_change(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
         entry = {"library": "libtest.so", "_diff_result": _breaking_diff()}
         # default preset: abi_breaking == error -> exit 4.
-        assert (
-            _compute_release_severity_exit_code(
-                [entry], "default", None, None, None, None
-            )
-            == 4
-        )
+        assert _compute_release_severity_exit_code([entry], _gate("default")) == 4
         # info-only downgrades everything below error -> exit 0.
-        assert (
-            _compute_release_severity_exit_code(
-                [entry], "info-only", None, None, None, None
-            )
-            == 0
-        )
+        assert _compute_release_severity_exit_code([entry], _gate("info-only")) == 0
 
 
 class TestReleaseSeverityPolicyAndGlobal:
@@ -651,12 +657,7 @@ class TestReleaseSeverityPolicyAndGlobal:
             lambda: (empty, empty, all_kinds, empty),
         )
         entry = {"_diff_result": diff}
-        assert (
-            _compute_release_severity_exit_code(
-                [entry], "default", None, None, None, None
-            )
-            == 0
-        )
+        assert _compute_release_severity_exit_code([entry], _gate("default")) == 0
 
     def test_per_library_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a kind
@@ -686,12 +687,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         # default preset: abi_breaking == error. Without the policy_file floor
         # this would wrongly exit 0 (the override demotes FUNC_REMOVED to
         # COMPATIBLE); the frozen guard must keep it at its raw BREAKING exit.
-        assert (
-            _compute_release_severity_exit_code(
-                [entry], "default", None, None, None, None
-            )
-            == 4
-        )
+        assert _compute_release_severity_exit_code([entry], _gate("default")) == 4
 
     def test_format_release_junit_forwards_severity_config(self):
         """Codex review on #549: `compare-release --format junit` with a
@@ -752,12 +748,7 @@ class TestReleaseSeverityPolicyAndGlobal:
 
         # Per-library clean (base 0), but a matrix DiffResult carries a break.
         matrix = _breaking_diff()
-        assert (
-            _fold_release_global_severity(
-                0, None, matrix, "default", None, None, None, None
-            )
-            == 4
-        )
+        assert _fold_release_global_severity(0, None, matrix, _gate("default")) == 4
 
     def test_fold_bundle_break_raises_exit(self):
         import types
@@ -766,13 +757,10 @@ class TestReleaseSeverityPolicyAndGlobal:
 
         change = _breaking_diff().changes[0]
         finding = types.SimpleNamespace(to_change=lambda: change)
-        bundle = types.SimpleNamespace(bundle_findings=[finding], policy="strict_abi")
-        assert (
-            _fold_release_global_severity(
-                0, bundle, None, "default", None, None, None, None
-            )
-            == 4
+        bundle = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
         )
+        assert _fold_release_global_severity(0, bundle, None, _gate("default")) == 4
 
     def test_fold_bundle_honors_the_bundle_result_own_policy(self):
         # G38 stabilization Phase 10 (Codex review, fresh evidence): this
@@ -799,46 +787,71 @@ class TestReleaseSeverityPolicyAndGlobal:
         finding = types.SimpleNamespace(to_change=lambda: change)
 
         strict_bundle = types.SimpleNamespace(
-            bundle_findings=[finding], policy="strict_abi"
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
         )
-        assert (
-            _fold_release_global_severity(
-                0, strict_bundle, None, "default", None, None, None, None
-            )
-            == 4
-        )
+        code = _fold_release_global_severity(0, strict_bundle, None, _gate("default"))
+        assert code == 4
 
         plugin_bundle = types.SimpleNamespace(
-            bundle_findings=[finding], policy="plugin_abi"
+            bundle_findings=[finding], policy="plugin_abi", policy_file=None
         )
-        assert (
-            _fold_release_global_severity(
-                0, plugin_bundle, None, "default", None, None, None, None
-            )
-            == 0
+        code = _fold_release_global_severity(0, plugin_bundle, None, _gate("default"))
+        assert code == 0
+
+    def test_fold_bundle_honors_the_bundle_result_own_policy_file(self):
+        # G38 Phase 16 (Codex review, fresh evidence): the fold above
+        # started forwarding `bundle_result.policy` -- but not
+        # `bundle_result.policy_file` -- so a `--policy custom.yaml`
+        # override demoting a bundle_* kind to `ignore` already changed
+        # the *displayed* `BundleDiffResult.bundle_verdict` (its own
+        # `.policy_file`-aware property) while the severity-aware process
+        # exit still scored the unmodified bare-policy classification,
+        # letting the two disagree in the identical way Phase 10 already
+        # fixed for `.policy` alone.
+        import types
+
+        from abicheck.checker_policy import ChangeKind, Verdict
+        from abicheck.checker_types import Change
+        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.policy_file import PolicyFile
+
+        change = Change(
+            kind=ChangeKind.BUNDLE_INTRA_DEP_REMOVED,
+            symbol="core_fn",
+            description="removed",
+            old_value="present",
+            new_value="absent",
         )
+        finding = types.SimpleNamespace(to_change=lambda: change)
+
+        unmodified = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        )
+        code = _fold_release_global_severity(0, unmodified, None, _gate("default"))
+        assert code == 4
+
+        overridden = types.SimpleNamespace(
+            bundle_findings=[finding],
+            policy="strict_abi",
+            policy_file=PolicyFile(
+                overrides={ChangeKind.BUNDLE_INTRA_DEP_REMOVED: Verdict.COMPATIBLE}
+            ),
+        )
+        code = _fold_release_global_severity(0, overridden, None, _gate("default"))
+        assert code == 0
 
     def test_fold_info_only_does_not_escalate(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 
         matrix = _breaking_diff()
         # info-only downgrades the matrix break below error -> base 0 preserved.
-        assert (
-            _fold_release_global_severity(
-                0, None, matrix, "info-only", None, None, None, None
-            )
-            == 0
-        )
+        code = _fold_release_global_severity(0, None, matrix, _gate("info-only"))
+        assert code == 0
 
     def test_fold_no_extras_returns_base(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 
-        assert (
-            _fold_release_global_severity(
-                2, None, None, "default", None, None, None, None
-            )
-            == 2
-        )
+        assert _fold_release_global_severity(2, None, None, _gate("default")) == 2
 
     def test_resolve_config_none_without_flags(self):
         from abicheck.cli_compare_release import _resolve_release_severity_config
@@ -874,7 +887,7 @@ class TestCompareReleaseParallelOrdering:
     def test_parallel_results_in_matched_keys_order(self, monkeypatch):
         from pathlib import Path as _P
 
-        import abicheck.cli_compare_release as _cr
+        import abicheck.cli_compare_release_pairwise as _cr
 
         monkeypatch.setattr(
             _cr,

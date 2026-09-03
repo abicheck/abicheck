@@ -7,7 +7,7 @@ level: intermediate
 canonical_for:
   - baseline-lifecycle
 depends_on:
-  - abicheck/model.py
+  - abicheck/model/snapshot.py
   - abicheck/serialization.py
   - abicheck/product_baseline.py
   - abicheck/bundle.py

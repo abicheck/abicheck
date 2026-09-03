@@ -95,8 +95,16 @@ for a library set, not a change to its existing single-artifact form:
 ```text
 abicheck scan ARTIFACT               # unchanged: exactly one artifact
 abicheck scan --artifact-set DIR     # new: every discoverable shared library in DIR
-abicheck scan --artifact-set a.so,b.so,c.so   # new: explicit comma-separated path form
+abicheck scan --artifact-set a.so --artifact-set b.so --artifact-set c.so   # new: explicit path form
 ```
+
+**Superseded (2026-08-28, CLI cleanup phase two, PR 5):** the third line
+above originally showed a comma-separated `--artifact-set a.so,b.so,c.so`
+value; the flag is now a repeatable option instead (shown above), with no
+comma-separated alias — see
+`docs/contribute/plans/cli-cleanup-phase-two.md`'s PR 5 section. This ADR's
+own decision (an alternate operand shape for `scan`, D2 through D5 below)
+is unaffected; only the value syntax for multiple explicit paths changed.
 
 `scan`'s positional `ARTIFACT` is a required `@click.argument` in
 `abicheck/cli_scan.py` (the actual module the `scan` command is registered

@@ -468,12 +468,8 @@ def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
 def _combined_option_tokens(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
 ) -> list[str]:
-    """``gcc_option_tokens`` followed by a shlex-split ``gcc_options`` string
-    (snapshot provenance, schema v15) — the one place both forwarded-option
-    spellings are merged into a single ordered token list, shared by every
-    caller below so the split behavior can't drift between them (see
-    :func:`abicheck._compiler_options.split_gcc_options` for its platform
-    dispatch on ``os.name``)."""
+    """``gcc_option_tokens`` then split ``gcc_options`` (schema v15's
+    ``ast_compile_args``) -- reversed order, unlike ``_extract_explicit_std_value``."""
     tokens = list(gcc_option_tokens)
     if gcc_options:
         tokens.extend(split_gcc_options(gcc_options))
@@ -483,16 +479,20 @@ def _combined_option_tokens(
 def _extract_explicit_std_value(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
 ) -> str | None:
-    """Pull the literal value out of an explicit ``-std=``/``--std=``/``/std:``
-    token, or ``None`` if none is present (snapshot provenance, schema v15)."""
-    tokens = _combined_option_tokens(gcc_options, gcc_option_tokens)
+    """Pull the literal ``-std=``/``--std=``/``/std:`` value, or ``None``
+    (schema v15). Last-wins over real command order (``gcc_options`` then
+    ``gcc_option_tokens``) -- unlike ``_combined_option_tokens``'s reversed
+    order + first-match, wrong once ``gcc_options`` merges into ``gcc_option_tokens``."""
+    tokens = list(split_gcc_options(gcc_options)) if gcc_options else []
+    tokens += gcc_option_tokens
+    value: str | None = None
     for token in tokens:
         t = token[1:] if token.startswith("--") else token
         if t.startswith("-std="):
-            return t[len("-std=") :]
-        if t.lower().startswith("/std:"):
-            return t[len("/std:") :]
-    return None
+            value = t[len("-std=") :]
+        elif t.lower().startswith("/std:"):
+            value = t[len("/std:") :]
+    return value
 
 
 #: Prefix distinguishing a *probed* default standard (never asserted by the

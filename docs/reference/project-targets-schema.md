@@ -91,7 +91,7 @@ Common optional fields for `kind: library`:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `public_headers` | list of string | Public header roots for this target. |
+| `public_headers` | list of string | Public header roots for this target, forwarded as `check-target`'s own `header` input for this target's generated cells (newline-joined, so a header root containing whitespace survives `action/run.sh`'s `add_flag()` intact) — see [`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)'s `header` field and [`reusable-workflows.md`](reusable-workflows.md#shared-analysis-options)'s per-cell-override exception. Not yet honored for a `kind: bundle` member (no per-bundle-member header staging exists). |
 | `bundle` | string | The `bundles:` entry this target belongs to. Must be declared under `bundles:`, and that bundle's own `targets:` list must include this target back (the two must agree). |
 | `bundle_only` | boolean, default `false` | When `true`, this target is checked only as a bundle member, never standalone. Requires `bundle` to be set, and must **not** declare its own `checks:` — a `bundle_only` target's own checks would never run standalone, so declare the policy under `bundles:<id>.checks` instead. |
 | `checks` | list of check tuple | See [`checks:`](#checks) below. |
@@ -107,10 +107,10 @@ Common optional fields for `kind: library`:
 ### `checks:`
 
 Each `targets:<id>.checks[]` entry is a `{channel, depth, required,
-gate_mode, profiles, allow_new_target}` tuple — the assignment ADR-047 §3
-itself identifies as missing from the plain `targets:`/`baseline: channels:`
-excerpt: declaring which channels *exist* doesn't say which channel/depth/
-policy a given target actually runs.
+gate_mode, profiles, allow_new_target, id, analysis}` tuple — the assignment
+ADR-047 §3 itself identifies as missing from the plain `targets:`/`baseline:
+channels:` excerpt: declaring which channels *exist* doesn't say which
+channel/depth/policy a given target actually runs.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
@@ -120,6 +120,8 @@ policy a given target actually runs.
 | `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (ADR-047 §8's S5 row: "Advisory by default"). Set `gate_mode` explicitly to override either default. |
 | `profiles` | list of string | *(unset)* | An **explicit** profile-id selector — see [Profile scoping](#profile-scoping-for-checks) below. A profile with `contract: false` may only be named here by a `channel: "none"` audit check — a real-channel check can never resolve a baseline on a lane that's documented to never get one (S17). |
 | `allow_new_target` | boolean | `false` | Forwarded as `check-target`'s `allow-new-target` input — `true` turns a target genuinely absent from this check's otherwise-resolved baseline-set into the advisory `new_target` outcome instead of `ambiguous` (e.g. a new library's first release). Pair with `required: false`, or a required-coverage gate would still block on the target's first appearance. Rejected at validation time for any [`bundles:` check](#bundles) — a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. See [Baseline Management → A new library's first release](../use/baseline-management.md#a-new-librarys-first-release). |
+| `id` | string | *(unset)* | (G42) An explicit, project-owned logical id for this check, appended to the generated `check_id` as a `~<id>` tail. Two `checks[]` entries that would otherwise generate the identical `target@profile#channel@depth` string (most commonly two entries differing only in `analysis:`) must each declare a distinct `id:` — `abicheck project plan` rejects an unresolved collision outright, naming which entries collide and pointing at `id:` as the fix. |
+| `analysis` | mapping | *(unset)* | (G42) `{evidence, policy, assurance}`, each an optional identifier string. `evidence` names which extraction/comparison method produced this check's facts (e.g. `replay` vs. `clang-plugin`); `policy`/`assurance` reference the already-existing policy-profile and assurance mechanisms. At this phase these are distinguishing/reporting labels only — carried through to `run-plan.json` and (via `id`'s `~<id>` tail) into the report's `check_id`, but nothing yet selects a different extraction pipeline or policy based on them. |
 
 ### Profile scoping for `checks:`
 
@@ -166,6 +168,23 @@ and `channel` may not be `"none"` (a bundle's candidate is always a staged
 directory of member binaries, which the root Action's `scan` mode — the
 no-baseline routing — rejects outright). Both are rejected at validation
 time.
+
+**A bundle spanning multiple mandatory build-toolchain variants (e.g. a
+CPU build and a DPC++ build of the same release) must give its check an
+explicit `profiles:` selector naming every required profile** —
+`checks: [{channel: release, depth: binary, profiles: [cpu, dpc]}]`, not a
+bare `checks: [{channel: release, depth: binary}]`. [Profile scoping](#profile-scoping-for-checks)'s
+implicit sweep (`profiles:` omitted) is for "run this bundle wherever it
+happens to apply," and treats a profile that doesn't build every member as
+a silent, valid skip for that profile — correct for a genuinely
+profile-specific bundle, wrong for one where every listed variant is
+mandatory. With an explicit selector, a profile missing any member (or
+missing a `build-output.json` entirely) is a hard `abicheck project plan`
+error instead, which is what makes "the DPC++ variant went missing between
+releases" a loud CI failure rather than a silently-incomplete run. G30
+(`run_plan.py`'s cell generation, one independent `RunPlanCheck` per
+`(bundle, profile)` pair) is what already makes this true — see
+`tests/test_run_plan_bundle_multi_profile.py` for the worked example.
 
 ## `profiles:`
 
@@ -242,12 +261,17 @@ profiles:
 `compile:`'s do, into their own separate pair —
 [`consumer_compile_gcc_path`/`consumer_compile_gcc_options`](run-plan-schema.md#runplancheck-fields)
 — never falling back to the producer overlay's own resolved values when
-absent. **Not yet wired:** actually applying `consumer_compile:` to a
-separate header-AST (L2) extraction pass and merging it with the producer
-toolchain's binary (L0/L1) facts — this schema slice only projects the
-config axis into `run-plan.json`; see
+absent. **Applied, for the candidate side only:** `check-project.yml` runs
+a separate `dump` of the (unchanged) candidate binary under this overlay's
+frontend/binding/options, and the comparison consumes that materialized
+snapshot as the candidate's entire new side — see the
+`compile.frontend`/`consumer_compile.frontend` section immediately below
+for how that separate dump is wired, and its "Known gap" note for what
+still isn't covered (the baseline/old side). This is a real, working
+extraction pass, not the L0/L1-producer-plus-L2-consumer merge originally
+scoped in
 [`docs/contribute/plans/g34-producer-consumer-compiler-profile-separation.md`](../contribute/plans/g34-producer-consumer-compiler-profile-separation.md)'s
-Phase 0 for the remaining extraction/merge integration.
+Phase 0 — see that plan for the design this superseded.
 
 ### `compile.frontend` / `consumer_compile.frontend` — per-profile AST frontend (G34 Phase B)
 
@@ -282,10 +306,26 @@ example above genuinely runs its producer pass under castxml. The one
 exception is a `kind: bundle` check, whose operand is a staging *directory*
 — the root Action rejects any non-`auto` frontend there, so such a cell
 keeps resolving the workflow-global value.
-`consumer_compile.frontend`, by contrast, is still projection only — it
-describes the header-AST pass of the two-pass producer/consumer extraction
-that `consumer_compile:` itself has not built yet, so nothing forwards it;
-see the G34 plan doc's Phase B and Phase 0 for what remains.
+`consumer_compile.frontend` drives a separate candidate dump in the native
+`check-project` pipeline. The dump reads the same producer binary but parses
+its public headers with the consumer overlay's frontend, compiler binding,
+and options; the comparison then consumes that materialized snapshot instead
+of parsing the candidate headers again under the producer context.
+
+**Known gap:** only the *candidate* side is dumped under the consumer
+context today. The baseline (old) side of a real (non-`none`)
+`baseline-channel` comparison is produced hours or days earlier by
+`publish-baseline.yml`/`update-main-baseline.yml`, which read only
+`build-output.json` and have no way to apply a `consumer_compile:` overlay
+to that dump. Comparing a consumer-context candidate against a
+producer-context baseline usually differs enough in extraction-profile
+fingerprint that `compare`'s own comparability gate refuses the pair as
+`NOT_COMPARABLE`/`ProfileMismatchError` rather than silently comparing
+mismatched contexts — so `consumer_compile:` combined with a real baseline
+channel does not yet work end to end. It is unaffected when
+`baseline-channel: none` (an audit-only scan has no baseline snapshot to
+mismatch against). See `abicheck/buildsource/run_plan.py`'s own docstring
+and the G34 plan doc's Phase 0 for what closing this needs.
 
 ### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)
 
@@ -398,6 +438,48 @@ override: `project plan`'s former `--gate-missing-required`/
 `--gate-unexpected-target` flags were removed (no CLI alias, same "no
 deprecation window" stance as the rest of this cleanup) — set the policy
 here instead.
+
+## Known limitations of the declarative topology
+
+The declarative `targets:`/`bundles:`/`profiles:`/`baseline:` path is not
+yet a drop-in replacement for every project. `abicheck compare` on
+directory/package inputs, driven directly from your own workflow, remains
+the path every project can use today (see
+[Multi-Binary Releases](../use/multi-binary.md); note that its
+cross-library findings — removed dependencies, provider changes — are
+**ELF/Linux-only**, a Windows/macOS release gets per-library results with
+bundle analysis skipped). Before adopting the
+declarative topology, confirm none of these apply to you:
+
+- **`bundles:` checks run at one depth only** — see the [`bundles:`
+  section](#bundles) above for the allowed depth and what `project
+  validate` rejects. If a bundle-level check needs header-scope evidence,
+  it can't run through a `bundles:` entry today.
+- **Per-target `public_headers:` is not honored for a `kind: bundle`
+  member** — see the `public_headers` row of the `targets:` field table
+  above for the one authoritative statement of that gap.
+- **Stored-facts bundle comparison (`BundleFacts`) has no run-plan /
+  composite-Action / `check-project.yml` wiring** — it is reachable from
+  the Python API and from `compare --old-bundle-facts`, not from the
+  declarative CI surface.
+- **`publish-baseline.yml` expects one `build-output.json` per contract
+  profile** (G30 P1.1). A build system that doesn't emit a per-profile
+  manifest in that shape needs to add one first — see the
+  [`build-output.json` reference](build-output-schema.md).
+- **`profiles:` describes a build *lane* (compiler/flags), not a library** —
+  one profile's `targets[]` can list several libraries built under it, but
+  a project needs one profile *per distinct build configuration*: e.g. a
+  release with a SYCL-built subset needs one profile for that subset and
+  another for the rest, not one profile per library.
+
+None of these block `compare`-based CI — they are gaps in the declarative
+topology specifically. The design history for the bundle-depth restriction
+and the `build-output.json` contract lives in the
+[G30 GitHub Actions integration plan](../contribute/plans/g30-github-actions-integration-model.md),
+and for stored-facts bundle comparison in the
+[G38 bundle-facts plan](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md).
+Neither lists these as scheduled work, so check the code itself before
+relying on a gap having closed.
 
 ## Validation
 

@@ -18,8 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .dwarf_advanced import AdvancedDwarfMetadata
-from .dwarf_metadata import DwarfMetadata
+from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 
 
 def cheap_dwarf_presence_metadata(so_path: Path) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:

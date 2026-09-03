@@ -45,7 +45,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=RuntimeError("boom"),
         ):
             entry = _compare_one_library(
@@ -78,7 +78,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=click.ClickException("nope"),
         ):
             entry = _compare_one_library(
@@ -111,7 +111,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=ScopeMismatchError("scope drift"),
         ):
             entry = _compare_one_library(
@@ -146,7 +146,7 @@ class TestCompareReleaseErrorPaths:
         output_dir.mkdir()
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=ProfileMismatchError("profile drift"),
         ):
             _compare_one_library(
@@ -357,7 +357,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             result, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -383,7 +383,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             _, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -411,7 +411,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             _, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -439,7 +439,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             result, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -649,8 +649,12 @@ class TestCompareReleaseErrorPaths:
         new_pkg.write_bytes(b"not-a-tarball")
 
         runner = CliRunner()
-        with patch("abicheck.package.is_package", return_value=True), \
-             patch("abicheck.package.detect_extractor", return_value=None):
+        # cli_compare_release.py imports is_package/detect_extractor from the
+        # workflows.extraction facade (a fresh function-local import per call,
+        # per ADR-061), not from abicheck.package directly -- patch there,
+        # matching workflows/extraction.py's own documented gotcha.
+        with patch("abicheck.workflows.extraction.is_package", return_value=True), \
+             patch("abicheck.workflows.extraction.detect_extractor", return_value=None):
             result = runner.invoke(main, [
                 "compare", str(old_pkg), str(new_pkg),
             ])

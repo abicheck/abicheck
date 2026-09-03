@@ -582,7 +582,7 @@ jobs:
       # operational error instead.
       - name: Download build-output artifact
         id: download_build_output
-        if: matrix.baseline_channel != 'none' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
+        if: matrix.baseline_channel != 'none' || matrix.requested_depth == 'build' || matrix.requested_depth == 'source' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
         uses: actions/download-artifact@v8
         with:
           name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
@@ -750,7 +750,123 @@ jobs:
                   print('consumer-binary=')
 
           build_output_path = 'build-output/build-output.json'
-          print(f'build-output={build_output_path}' if os.path.isfile(build_output_path) else 'build-output=')
+          if os.path.isfile(build_output_path):
+              print(f'build-output={build_output_path}')
+              # build-output.json is the authority for target-scoped source
+              # evidence.  Resolve the library target represented by this
+              # cell (redirected contract checks use baseline_target) rather
+              # than forwarding one workflow-global pack to every target.
+              with open(build_output_path, encoding='utf-8') as f:
+                  build_output = json.load(f)
+              target_id = cell.get('baseline_target') or cell.get('name')
+              target = next(
+                  (t for t in build_output.get('targets', []) if t.get('id') == target_id),
+                  None,
+              )
+              target_evidence = (target or {}).get('evidence')
+              if isinstance(target_evidence, dict):
+                  # validate_build_output() must run whenever the target
+                  # declares an evidence OBJECT at all, not only once it
+                  # happens to carry a non-empty path -- gating validation
+                  # on a truthy path let a malformed claim (e.g.
+                  # projection: declared with an empty/missing path, which
+                  # validate_build_output() would reject as \"not a readable
+                  # abicheck_inputs pack\") silently fall through to the
+                  # sources-based-evidence fallback below instead of
+                  # failing closed (Codex review).
+                  #
+                  # Path confinement alone only proves evidence_path
+                  # *points* somewhere safe -- it says nothing about
+                  # whether the build-output.json making this 'declared'
+                  # claim is actually trustworthy (e.g. two targets
+                  # sharing one pack, or a pack whose own manifest.library
+                  # names a different target). validate_build_output() is
+                  # the same check 'project validate-build' runs, and
+                  # 'project plan' never calls it -- run it here, before
+                  # this target's evidence is treated as scoped to it,
+                  # rather than inferring validity from path confinement
+                  # alone (Codex review).
+                  from abicheck.buildsource.build_output import validate_build_output
+
+                  # validate_build_output() only reports structural findings
+                  # (a shared pack, a manifest/target mismatch, ...) via its
+                  # returned report -- it still raises FileNotFoundError/
+                  # ValueError outright for a build-output.json that isn't
+                  # even readable as one (missing/wrong schema, non-object
+                  # JSON), matching load_build_output()'s own contract. Catch
+                  # both here so an untrusted, malformed artifact fails with
+                  # the same clean ::error:: shape as every other guard in
+                  # this script, instead of an uncaught Python traceback.
+                  try:
+                      validation = validate_build_output('build-output')
+                      validation_errors = validation.errors
+                  except (FileNotFoundError, ValueError) as exc:
+                      validation_errors = [str(exc)]
+                  if validation_errors:
+                      print(f'::error::target {target_id!r}: build-output.json failed validation, so its evidence.path cannot be trusted as scoped to this target: {\"; \".join(validation_errors)}', file=sys.stderr)
+                      sys.exit(1)
+                  # A 'declared' claim means the build itself asserts this
+                  # pack belongs to exactly this target -- validate_build_output()
+                  # above already confirmed it is not shared with another
+                  # 'declared' target. An 'inferred' claim is different: two
+                  # targets legitimately reference the SAME build-wide pack
+                  # and rely on evidence.attribution_path plus this target's
+                  # id to filter which TUs actually belong to it. Nothing in
+                  # this workflow -- nor any real dump/compare CLI caller of
+                  # inputs_pack.ingest_inputs_pack() -- currently threads that
+                  # attribution/target-id filtering through, so forwarding an
+                  # inferred pack unfiltered would let one target's build/
+                  # source check silently incorporate every other target
+                  # sharing the same pack (Codex review). Reject rather than
+                  # analyze it as if it were scoped, until that filtering is
+                  # actually wired up end to end.
+                  projection = target_evidence.get('projection', '')
+                  if projection == 'inferred':
+                      print(f'::error::target {target_id!r}: evidence.projection is \'inferred\', but no dump/compare entry point yet filters an inferred packs TUs by attribution_path/target id before analysis -- forwarding it here would let this target incorporate every other targets evidence too. Rejecting until attribution-based filtering is wired end to end; use a per-target \'declared\' evidence pack instead', file=sys.stderr)
+                      sys.exit(1)
+                  evidence_path = target_evidence.get('path', '')
+                  if evidence_path:
+                      if os.path.isabs(evidence_path) or '..' in evidence_path.replace('\\\\', '/').split('/'):
+                          print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} is absolute or escapes the build-output artifact', file=sys.stderr)
+                          sys.exit(1)
+                      resolved_evidence = os.path.realpath(os.path.join('build-output', evidence_path))
+                      build_output_root = os.path.realpath('build-output')
+                      if os.path.commonpath([build_output_root, resolved_evidence]) != build_output_root:
+                          print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} escapes the build-output artifact', file=sys.stderr)
+                          sys.exit(1)
+                      if not os.path.exists(resolved_evidence):
+                          print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} does not exist in the downloaded build-output artifact', file=sys.stderr)
+                          sys.exit(1)
+                      if '\\n' in resolved_evidence or '\\r' in resolved_evidence:
+                          print(f'::error::target {target_id!r}: evidence.path contains a newline character', file=sys.stderr)
+                          sys.exit(1)
+                      print(f'evidence-pack={resolved_evidence}')
+                      producer = build_output.get('evidence_producer', {})
+                      producer_kind = producer.get('kind', '') if isinstance(producer, dict) else ''
+                      if not isinstance(producer_kind, str):
+                          producer_kind = ''
+                      # producer_kind is read from an untrusted build artifact
+                      # and written straight to the line-oriented \$GITHUB_OUTPUT
+                      # file below -- an embedded newline/carriage-return could
+                      # inject or override a later output line the same way an
+                      # embedded newline in a resolved candidate path could
+                      # above (Codex review). Reject outright, matching that
+                      # same defensive pattern, rather than trusting a value
+                      # this script never controlled.
+                      if '\\n' in producer_kind or '\\r' in producer_kind:
+                          print(f'::error::target {target_id!r}: build-output.json evidence_producer.kind contains a newline character', file=sys.stderr)
+                          sys.exit(1)
+                      print(f'evidence-producer={producer_kind}')
+                  else:
+                      print('evidence-pack=')
+                      print('evidence-producer=')
+              else:
+                  print('evidence-pack=')
+                  print('evidence-producer=')
+          else:
+              print('build-output=')
+              print('evidence-pack=')
+              print('evidence-producer=')
           " >> "$GITHUB_OUTPUT"
 
       # Closes the G30 P1.4 known gap tracked by issue #628 (the plan doc's
@@ -783,6 +899,7 @@ jobs:
           MATRIX_PROFILE_ID: ${{ matrix.profile_id }}
           MATRIX_BASELINE_CHANNEL: ${{ matrix.baseline_channel }}
           MATRIX_REQUESTED_DEPTH: ${{ matrix.requested_depth }}
+          MATRIX_EXPLICIT_ID: ${{ matrix.explicit_id || '' }}
           MATRIX_GATE_MODE: ${{ matrix.gate_mode }}
           PROJECT: ${{ inputs.project != '' && inputs.project || github.repository }}
           HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
@@ -808,6 +925,7 @@ jobs:
             --profile-id "$MATRIX_PROFILE_ID" \
             --baseline-channel "$MATRIX_BASELINE_CHANNEL" \
             --requested-depth "$MATRIX_REQUESTED_DEPTH" \
+            --explicit-id "$MATRIX_EXPLICIT_ID" \
             --gate-mode "$MATRIX_GATE_MODE" \
             --resolve-outcome "ambiguous" \
             --resolve-message "$MESSAGE" \
@@ -870,16 +988,35 @@ jobs:
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
           allow-new-target: ${{ matrix.allow_new_target || 'false' }}
           requested-depth: ${{ matrix.requested_depth }}
+          explicit-id: ${{ matrix.explicit_id || '' }}
           gate-mode: ${{ matrix.gate_mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}
-          evidence-producer: ${{ inputs.evidence-producer }}
-          evidence-pack-path: ${{ inputs.evidence-pack-path }}
+          # A build-emitted target pack carries its producer identity with
+          # it. Keep the workflow input only for replay/legacy callers that
+          # have no target evidence entry in build-output.json.
+          evidence-producer: ${{ steps.candidate.outputs.evidence-producer || inputs.evidence-producer }}
+          # Never fall back to the workflow-global pack here: a project cell
+          # without declared target evidence must not consume another
+          # target's build-wide pack.
+          evidence-pack-path: ${{ steps.candidate.outputs.evidence-pack }}
           new-library: ${{ steps.candidate.outputs.new-library }}
           consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.consumer-binary || '' }}
           contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
-          header: ${{ inputs.header }}
+          # RunPlanCheck.header (run_plan.py's own field docstring): a
+          # target's `public_headers:` (ADR-047's own worked example),
+          # space-joined -- the same per-cell-first precedence as
+          # ast-frontend/gcc-path/gcc-options above/below (`matrix.header ||
+          # inputs.header`, never merged with the workflow-global value).
+          # Gated on `kind != 'bundle'` for the identical reason those three
+          # already are: RunPlanCheck.header is never set for a bundle cell
+          # (per-bundle-member header staging doesn't exist yet -- see
+          # BUNDLE_CHECK_DEPTHS's own docstring), so this expression is a
+          # no-op for one today, but the explicit guard keeps this cell's
+          # behaviour pinned to "falls back to the workflow-global input"
+          # rather than silently depending on the field always being empty.
+          header: ${{ matrix.kind != 'bundle' && matrix.header || inputs.header }}
           old-header: ${{ inputs.old-header }}
           new-header: ${{ inputs.new-header }}
           include: ${{ inputs.include }}
@@ -893,12 +1030,6 @@ jobs:
           # GCC profile's cell can resolve `castxml` while a Clang/DPC++
           # profile's cell in the same run resolves `clang`, which one
           # workflow-global --ast-frontend cannot express.
-          #
-          # `consumer_compile.frontend` has no counterpart here on purpose.
-          # It describes the *consumer* half of the two-pass L2 extraction
-          # Phase 0 has not built yet, so there is no second invocation for
-          # it to steer; forwarding it onto this one would silently apply a
-          # consumer overlay to the producer pass.
           #
           # Gated on `kind != 'bundle'` (Codex review): a bundle cell's
           # new-library is the `bundle-staging` *directory* it stages its
@@ -915,6 +1046,39 @@ jobs:
           # non-`auto` value -- declining to add a new source of the error
           # is this line's job, not silencing the existing one.
           ast-frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
+          # An omitted consumer_compile FIELD defers to the caller's
+          # workflow-global input, the same as an omitted producer compile
+          # field does two lines up -- not to the empty string, which would
+          # silently apply the frontend/binding/options *default* instead of
+          # the caller's actual selection whenever a profile's
+          # consumer_compile: overlay sets some fields but not others (e.g.
+          # only `standard:`) (Codex review). That fallback is gated on
+          # `matrix.consumer_compile_active` (the overlay's own presence,
+          # independent of what its fields resolve to) rather than firing
+          # whenever any of these three expressions is merely non-empty --
+          # without that gate, a profile with NO consumer_compile: overlay
+          # at all would still get a non-empty consumer-ast-frontend/
+          # gcc-path/gcc-options the moment the caller sets any
+          # workflow-global --ast-frontend/--gcc-path/--gcc-options, which
+          # would activate check-target's separate consumer-context dump
+          # (and its "replace the candidate snapshot" behavior) for every
+          # cell, not just the ones that actually declare an overlay
+          # (Codex review, second round).
+          consumer-ast-frontend: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_ast_frontend || inputs.ast-frontend) || '' }}
+          consumer-gcc-path: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_path || inputs.gcc-path) || '' }}
+          consumer-gcc-options: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_options || inputs.gcc-options) || '' }}
+          # An overlay declaring only e.g. `binding:` with no matching
+          # --toolchain-bindings entry (and no workflow-global compiler
+          # input to fall back to above) resolves all three fields above to
+          # the empty string even though the profile genuinely declared a
+          # consumer_compile: overlay -- check-target's own activation
+          # condition previously required at least one of those three
+          # fields to be non-empty, so this cell would silently skip the
+          # separate consumer dump and let the producer's own compiler
+          # options (e.g. its `-std=`) leak into what the schema documents
+          # as an isolated client view (Codex review). Forward the marker
+          # itself so check-target can activate on it directly.
+          consumer-compile-active: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && 'true' || 'false' }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-
@@ -964,7 +1128,25 @@ jobs:
           gcc-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.gcc-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
-          build-info: ${{ inputs.build-info }}
+          # check-target's own build-info gate only converts evidence-pack-path
+          # into --build-info for evidence-producer: wrapper/clang-plugin --
+          # for replay (or no producer at all), a per-target pack this cell
+          # resolved from build-output.json above would otherwise never
+          # reach dump/compare, silently losing source-only evidence for
+          # exactly the build/source-depth cells this resolution exists for
+          # (Codex review). build-info's own docs already cover this case
+          # ("set it directly ... for a producer-first build/source-depth
+          # check that already has an out-of-band pack") -- forward the
+          # resolved pack there directly rather than widening check-target's
+          # own evidence-producer-gated conversion. Must test the SAME
+          # resolved producer the evidence-producer field below actually
+          # forwards (steps.candidate.outputs.evidence-producer, falling
+          # back to the legacy workflow-global input only when this cell
+          # resolved none) -- testing the bare global input here let a
+          # target whose build-output.json names 'replay' but whose caller
+          # still passes the legacy wrapper/clang-plugin default silently
+          # skip forwarding its resolved pack at all (Codex review).
+          build-info: ${{ ((steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'wrapper' && (steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'clang-plugin' && steps.candidate.outputs.evidence-pack != '') && steps.candidate.outputs.evidence-pack || inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           policy: ${{ inputs.policy }}

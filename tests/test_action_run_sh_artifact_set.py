@@ -62,7 +62,7 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+def _run_cmd(env_extra: dict[str, str], *, cwd: Path | None = None) -> list[str]:
     """Source the real mode-branch region with *env_extra* set, return CMD."""
     script = (
         _mode_branches_region()
@@ -78,7 +78,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True, text=True, encoding="utf-8", env=env, cwd=cwd,
         )
     finally:
         os.unlink(script_path)
@@ -114,14 +114,109 @@ def _run_raw(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanArtifactSetForwarding:
     def test_new_library_set_maps_to_artifact_set_flag(self) -> None:
+        # CLI cleanup phase two, PR 5: the native `scan --artifact-set` CLI
+        # flag is now repeatable-only, but the Action's own `new-library-set`
+        # input keeps its comma-separated contract (action.yml) -- run.sh
+        # splits it into one `--artifact-set` occurrence per member so
+        # Action callers never see the CLI's syntax change.
         cmd = _run_cmd(
             {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}
         )
         assert "scan" in cmd
+        assert cmd.count("--artifact-set") == 2
         i = cmd.index("--artifact-set")
-        assert cmd[i + 1] == "a.so,b.so"
-        # The positional single-artifact form must NOT also be present.
-        assert "a.so,b.so" not in cmd[:i]
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+        # The literal comma-joined value must NOT be forwarded verbatim, and
+        # the positional single-artifact form must NOT also be present.
+        assert "a.so,b.so" not in cmd
+
+    def test_new_library_set_single_directory_passes_through_unsplit(self) -> None:
+        # A bare directory (ADR-056's other --artifact-set form) has no
+        # comma to split on and must reach the CLI as one value, unchanged.
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "libs/"}
+        )
+        assert cmd.count("--artifact-set") == 1
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "libs/"
+
+    def test_new_library_set_trims_directory_form_trailing_newline(self) -> None:
+        # CodeRabbit review: a YAML block-scalar directory value commonly
+        # carries a trailing newline even with no comma at all (e.g.
+        # "libs/\n"); the no-comma branch must trim it too, or the CLI
+        # treats it as a nonexistent explicit member instead of discovering
+        # "libs/".
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "libs/\n"}
+        )
+        assert cmd.count("--artifact-set") == 1
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "libs/"
+
+    def test_new_library_set_skips_blank_members(self) -> None:
+        # A stray leading/trailing/double comma must not forward an empty
+        # --artifact-set member (which the CLI now rejects outright).
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": " a.so ,, b.so "}
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+
+    def test_new_library_set_handles_embedded_newlines(self) -> None:
+        # P2 regression (Codex review): a YAML block-scalar new-library-set
+        # value can carry an embedded newline (e.g. "a.so,\nb.so"); a naive
+        # `read -ra ... <<<` reads only the first line and silently drops
+        # every member after it. The old Python parser split the whole
+        # string on comma with no such line limit.
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,\nb.so"}
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+
+    def test_new_library_set_handles_newline_only_separation(self) -> None:
+        # CodeRabbit review: a YAML block-scalar value with no comma at all
+        # (e.g. "new-library-set: |\n  a.so\n  b.so") previously fell through
+        # to the single-value branch (only the *,* check triggered the
+        # comma/newline IFS split), forwarding the whole multi-line string
+        # as one nonexistent --artifact-set path.
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so\nb.so"}
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+
+    def test_new_library_set_does_not_glob_expand_members(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review, security-relevant): an unquoted array
+        # assignment word-splits *then* pathname-expands each word, so a
+        # member containing a glob metacharacter (e.g. "*.so") would
+        # otherwise silently expand against whatever happens to match in the
+        # working directory instead of being forwarded literally. A decoy
+        # file that *would* match if globbing fired proves the negative.
+        (tmp_path / "decoy.so").touch()
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "*.so,z.so"},
+            cwd=tmp_path,
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "*.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "z.so"
+        assert "decoy.so" not in cmd
 
     def test_new_library_set_forwards_bundle_system_providers(self) -> None:
         cmd = _run_cmd(

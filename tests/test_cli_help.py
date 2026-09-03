@@ -1,4 +1,4 @@
-"""Tests for :mod:`abicheck.cli_help`'s cross-platform help rendering.
+"""Tests for :mod:`abicheck.frontends.cli.help`'s cross-platform help rendering.
 
 ``_ensure_utf8_streams`` fixes a real crash: ``python -m abicheck.cli --help``
 raised ``UnicodeEncodeError`` and exited non-zero on Windows CI, because help
@@ -14,8 +14,8 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from abicheck import cli_help
 from abicheck.cli import main
+from abicheck.frontends.cli import help as cli_help
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import snapshot_to_json
 

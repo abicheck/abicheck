@@ -93,6 +93,33 @@ different":
    describes for single-method static checkers, just moved to a different
    axis: sampled coverage instead of missing evidence tiers.
 
+## One check per row, as a shell line
+
+This page names no scanner command, by design: the table is about what the
+*other* methods prove. Each row is nonetheless a concrete job, and stated
+as one it is harder to skip:
+
+```bash
+# consumer rebuild: the consumer's own build against the new headers
+cmake --build consumer-build --target all && ctest --test-dir consumer-build
+# binary swap: the already-built consumer against the new library
+LD_LIBRARY_PATH=new/lib ./consumer-prebuilt --self-test
+# reverse swap: the new consumer against the old library
+LD_LIBRARY_PATH=old/lib ./consumer-new --self-test
+# host x plugin matrix: every supported pair
+for h in host-1.4 host-1.5; do for p in plugin-2.0 plugin-2.1; do ./$h --load ./$p.so --smoke; done; done
+# oldest-supported-OS load test
+docker run --rm -v "$PWD/new/lib:/lib/foo" rockylinux:8 ldd /lib/foo/libfoo.so.1
+# golden outputs, written by the old version, replayed against the new one
+./tool-new --replay golden/ | diff - golden/expected.txt
+# old-reader/new-writer and the reverse
+./tool-new --write out.bin && ./tool-old --read out.bin && ./tool-old --write out2.bin && ./tool-new --read out2.bin
+# ASan-instrumented lifecycle test
+ASAN_OPTIONS=detect_leaks=1 ./consumer-asan --lifecycle-test
+# TSan under a contending workload
+TSAN_OPTIONS=halt_on_error=1 ./consumer-tsan --threads 16 --stress
+```
+
 ## Where to go next
 
 - [Detecting Breaks](abi-series/08-detection.md) — the static-checking side
@@ -110,3 +137,7 @@ different":
 - [CI Gating Pipeline](../use/ci-gating.md) — wiring abicheck's own static
   check into a release pipeline; the assurance methods above are the
   complementary jobs that sit alongside it, not inside it.
+
+---
+
+**Ladder:** ← [Detecting Breaks](abi-series/08-detection.md) · Step 6 · Detect Breaks · [Where in the Pipeline](where-in-the-pipeline.md) →

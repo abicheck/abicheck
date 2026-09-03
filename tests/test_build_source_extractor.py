@@ -845,6 +845,7 @@ def _run_collect(
     import datetime as _dt
 
     from abicheck import __version__ as _abicheck_version
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli_buildsource_helpers import (
@@ -883,7 +884,7 @@ def _run_collect(
     )
     if has_build:
         pack.build_evidence = merged
-    pack.write()
+    pack_io.write(pack)
 
     _enforce_strict_mode(extractors, merged, collection_mode)
     return pack, merged, extractors
@@ -1055,7 +1056,7 @@ def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
     # A failed external extractor's invalid normalized output must not be hashed
     # into the pack's artifact digests (the ledger row legitimately still records
     # the failed run, but its invalid evidence must be isolated) (Codex P2).
-    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource import pack_io
 
     # An extractor whose normalized output is valid JSON but invalid BuildEvidence.
     bad = (
@@ -1070,7 +1071,7 @@ def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
     manifest = _dump(tmp_path, data, name="poll.yaml")
     out = tmp_path / "pack"
     _run_collect(tmp_path, manifests=(manifest,), output=out)
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     rec = next(e for e in pack.manifest.extractors if e.name == "polluter")
     assert rec.status == "failed"
     # The invalid normalized output is purged and contributes no artifact digest.
@@ -1138,7 +1139,7 @@ def test_cli_strict_mode_fails_on_skipped_extractor(tmp_path):
         _run_collect(tmp_path, manifests=(manifest,), output=out, collection_mode="strict")
     # `_enforce_strict_mode` is only reached (and only raises) *after* the pack
     # has already been written by `_run_collect` — the original CLI's ordering
-    # (`pack.write()` before `_enforce_strict_mode`) meant a strict failure never
+    # (`pack_io.write(pack)` before `_enforce_strict_mode`) meant a strict failure never
     # first echoed a contradictory "Evidence pack written" success line, because
     # that message came from `_echo_collection_summary`, which the CLI called
     # only *after* `_enforce_strict_mode` succeeded — i.e. never on this path.

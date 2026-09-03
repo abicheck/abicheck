@@ -71,6 +71,8 @@ from ..model import (
     ScopeOrigin,
     Variable,
 )
+from ..model.graph_facts import GraphNode
+from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
 
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
@@ -90,14 +92,11 @@ from .export_accounting import (
     _library_self_names,
     _linked_library_names,
 )
-from .source_graph import (
+from .source_graph_query import (
     DECL_NODE_KINDS,
-    DEPENDENCY_EDGE_KINDS,
     INTERNAL_VISIBILITIES,
     PUBLIC_VISIBILITIES,
     UNANNOTATED_VISIBILITIES,
-    GraphNode,
-    SourceGraphSummary,
     decl_declaring_files,
     is_internal_dependency_node,
     is_public_dependency_node,

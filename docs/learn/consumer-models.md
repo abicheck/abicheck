@@ -61,6 +61,24 @@ model — while the struct-layout question itself stayed exactly the same.
 | **Static-linked consumer** | Your object code, linked directly into its own binary at build time — no runtime symbol resolution, no SONAME | In the ordinary full rebuild-and-relink case: the same source-incompatible header changes that break a recompiled-source consumer (a removed declaration or incompatible signature simply fails to compile) — [Static & Header-Only Contracts](static-and-header-only.md) preserves source compatibility as a real part of this shape's contract, not just a formality. Separately: a consumer that keeps *precompiled* object files and only relinks them against a new archive still has the old layout baked into those objects. An ordinary linker only resolves symbol names, not layout compatibility, so the link itself still succeeds; the mismatch is the same silent runtime corruption a dynamically-linked application has, just triggered the next time the program runs after this relink rather than after a `dlopen` | [Static & Header-Only Contracts](static-and-header-only.md) |
 | **Bundle / product-release component** | Not just your library's own contract, but the *intra-bundle* relationships — which other components provide symbols it needs, which SONAMEs/versions it was released alongside | A sibling component's change that breaks a relationship your library itself never touched | [Part 6 — Transitive Breaks](abi-series/06-transitive-breaks.md), [Multi-Binary Releases](../use/multi-binary.md) |
 
+Two of the shapes have a command of their own. A **dynamically-linked
+application** scopes the comparison to what that application actually
+imports, so a removal it never calls is reported but does not decide the
+verdict:
+
+```bash
+abicheck compare old.so new.so -H include/ --used-by ./app
+```
+
+A **host loading plugins** states the entry points it will resolve by
+name, and the comparison is scoped to that explicit contract:
+
+```bash
+abicheck compare old-host.so new-host.so --required-symbol plugin_init --required-symbol plugin_shutdown
+```
+
+The mechanics of both are owned by [Plugin Systems](../use/plugin-systems.md).
+
 Two of these are worth naming as the genuine edge cases they are:
 
 - **A hand-maintained or frozen FFI binding has no regeneration step at
@@ -138,3 +156,7 @@ _See also: [Part 0 — Compatibility as a Product Contract](abi-series/00-produc
 [Compatibility Direction](compatibility-direction.md) ·
 [Static & Header-Only Contracts](static-and-header-only.md) ·
 [Plugin Systems](../use/plugin-systems.md)._
+
+---
+
+**Ladder:** ← [Compatibility Direction](compatibility-direction.md) · Step 5 · Define Your Contract · [Build Profile Comparability](build-profile-comparability.md) →

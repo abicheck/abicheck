@@ -35,17 +35,15 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
-from .compat.abicc_dump_import import looks_like_perl_dump
 from .errors import SnapshotError
-from .header_utils import iter_directory_headers
+from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .service_scan import CompileContext
+    from .workflows.extraction import DumpManifest
 
 
 def _click_notify(message: str) -> None:
@@ -101,13 +99,8 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
 
 
 def _sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return 'json', 'perl', or 'unknown'.
-
-    ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded
-    decoded prefix, mirroring ``service.sniff_text_format`` (kept as a
-    separate copy here rather than importing that one, matching this
-    module's existing "no cross-import for this exact helper" shape)."""
-    from .snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
+    """Read a small header chunk and return 'json', 'perl', 'symvers', or 'unknown'. ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded decoded prefix, mirroring ``service.sniff_text_format`` (kept as a separate copy here rather than importing that one, matching this module's existing "no cross-import for this exact helper" shape)."""
+    from .workflows.storage import bounded_decoded_prefix, detect_snapshot_compression
 
     try:
         compression = detect_snapshot_compression(path)
@@ -126,13 +119,15 @@ def _sniff_text_format(path: Path) -> str:
         head = raw.decode("utf-8", errors="replace").lstrip()
     except OSError:
         return "unknown"
+    from .workflows.extraction import looks_like_perl_dump, looks_like_symvers
+
     # Check Perl dump BEFORE JSON — a Perl dump can start with $VAR1 = {
     # which would incorrectly match the JSON heuristic after the '{'
     if looks_like_perl_dump(head):
         return "perl"
     if head.startswith("{"):
         return "json"
-    return "unknown"
+    return "symvers" if looks_like_symvers(head) else "unknown"
 
 
 def _detect_binary_format(path: Path) -> str | None:
@@ -140,7 +135,7 @@ def _detect_binary_format(path: Path) -> str | None:
 
     Returns 'elf', 'pe', 'macho', or None for non-binary / unknown.
     """
-    from .binary_utils import detect_binary_format
+    from .workflows.extraction import detect_binary_format
 
     return detect_binary_format(path)
 
@@ -153,7 +148,7 @@ def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     even when no target file could be located); ``resolved_path`` is the first
     ``INPUT()``/``GROUP()`` member that exists next to the script, or *None*.
     """
-    from .binary_utils import resolve_linker_script
+    from .workflows.extraction import resolve_linker_script
 
     return resolve_linker_script(path)
 
@@ -207,7 +202,7 @@ def _apply_native_provenance(
     See ``service._apply_native_provenance``'s identical parameter for why
     (Codex review, fresh evidence).
     """
-    from .provenance import apply_provenance
+    from .workflows.extraction import apply_provenance
 
     return apply_provenance(
         snap,
@@ -421,7 +416,7 @@ def _is_supported_compare_input(path: Path) -> bool:
     To add support for a new ABI snapshot format, edit ``abicheck/classify.py``
     rather than this function.
     """
-    from .classify import is_supported_compare_input
+    from .workflows.extraction import is_supported_compare_input
 
     return is_supported_compare_input(path)
 
@@ -439,7 +434,7 @@ def _looks_like_application(path: Path) -> bool:
     """
     import struct
 
-    from .package import (
+    from .workflows.extraction import (
         _ELF_MAGIC,
         _ET_DYN,
         _has_interp_segment,
@@ -485,13 +480,14 @@ def classify_compare_operand(path: Path) -> str:
     * ``"directory"`` — a plain directory of libraries; also a set input.
     * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
       ``compare`` cannot pair as a library (hint the user at ``appcompat``).
-    * ``"file"``      — a single ``.so`` / JSON snapshot / Perl dump: the default
-      single-pair path, unchanged.
+    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a ``--project-
+      snapshot-dir`` package dir (storage-v2, ADR-062/063).
     """
-    from .package import is_package
+    from .workflows.extraction import is_package
+    from .workflows.storage import is_project_snapshot_package_dir
 
     if path.is_dir():
-        return "directory"
+        return "file" if is_project_snapshot_package_dir(path) else "directory"
     if is_package(path):
         return "package"
     norm, fmt = _normalize_binary_input(path)
@@ -598,7 +594,7 @@ def _resolve_compare_snapshots(
     this path always has.
     """
     from .api_types import CompareRequest, InputSpec
-    from .errors import SnapshotError, ValidationError
+    from .errors import PlanningError, SnapshotError, ValidationError
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
         # The per-side --ast-frontend old=/new= rides on that side's own
@@ -656,7 +652,7 @@ def _resolve_compare_snapshots(
         pair = service.resolve_compare_request(
             request, notify=_click_notify, allow_parallel=False
         )
-    except ValidationError as exc:
+    except (ValidationError, PlanningError) as exc:  # PlanningError: ADR-063 Phase 4
         raise click.UsageError(str(exc)) from exc
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -684,38 +680,37 @@ def _resolve_compare_snapshots(
 # under one shared context) — so it stays rejected below.
 
 
-#: Build/source evidence flags (param dest → flag). ``depth`` is the
-#: evidence-depth dial; the four per-side --sources/--build-info are the
-#: inline evidence inputs.
+#: Build/source evidence *input* flags (param dest → flag): the four
+#: per-side --sources/--build-info. ``--depth`` deliberately isn't here
+#: (D1): see :func:`~abicheck.cli_compare_options._reject_depth_for_set_inputs`.
 #: ADR-040 L1: keyed on the *side-aware* CLI param dests (``sources`` /
 #: ``build_info``) — the rejection runs on the raw Click params (before the
 #: sided values are normalised into per-side kwargs), so it must check the
 #: dest the user actually typed to.
 _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
-    "depth": "--depth",
     "sources": "--sources",
     "build_info": "--build-info",
     "dump_manifest": "--dump-manifest",
 }
 
 
-def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
+def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
     """Reject inline build/source evidence flags for directory/package compares.
 
-    The release fan-out forwards only release-comparison kwargs, so
-    ``--depth`` and the per-side ``--old/new-sources`` / ``--old/new-build-info``
-    would be accepted and silently dropped (no L3-L5 collected). Fail loudly
-    so the user knows to compare libraries individually to collect deep
-    evidence (Codex review).
+    The release fan-out forwards only release-comparison kwargs, so the
+    per-side ``--old/new-sources`` / ``--old/new-build-info`` would be
+    accepted and silently dropped (no L3-L5 collected). Fail loudly so the
+    user knows to compare libraries individually to collect deep evidence
+    (Codex review). ``--depth`` is handled separately (D1, moved to
+    :mod:`abicheck.cli_compare_options`); its return is returned here too.
 
-    G29 Phase A: the L2 header-only semantic graph no longer has a CLI flag
-    to reject here — it is structurally skipped for directory/package
-    (set-input) compares instead, since the per-library fan-out never calls
-    ``resolve_input``/``run_dump`` with a graph-attaching single-pair path in
-    the first place (unchanged from before this change); see
-    ``docs/contribute/plans/g31-header-graph-default-on-followup.md`` for
-    the Phase B+ plan to extend graph coverage to set inputs.
+    G29 Phase A: the L2 header-only semantic graph is structurally skipped
+    for directory/package (set-input) compares instead of rejected here,
+    since the fan-out never calls a graph-attaching single-pair path
+    (unchanged); see ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
     """
+    from .cli_compare_options import _reject_depth_for_set_inputs
+
     used = [
         flag
         for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()
@@ -731,6 +726,7 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
             "Compare the libraries individually (or pre-dump snapshots with "
             "`dump --sources/--build-info`) to collect L3-L5 evidence."
         )
+    return _reject_depth_for_set_inputs(ctx)
 
 
 def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:

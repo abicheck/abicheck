@@ -155,7 +155,7 @@ class TestArtifactSetCliValidation:
         self, runner: CliRunner, snap_a: Path
     ) -> None:
         result = runner.invoke(
-            main, ["scan", str(snap_a), "--artifact-set", "x,y"]
+            main, ["scan", str(snap_a), "--artifact-set", "x", "--artifact-set", "y"]
         )
         assert result.exit_code != 0
         assert "exactly one of ARTIFACT or --artifact-set" in result.output
@@ -204,7 +204,7 @@ class TestArtifactSetCliValidation:
         monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
 
         result = runner.invoke(
-            main, ["scan", "--artifact-set", f"{p1},{p2}"]
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
         )
         assert result.exit_code != 0
         assert "ambiguous duplicate SONAME" in result.output
@@ -214,7 +214,7 @@ class TestArtifactSetCliValidation:
     ) -> None:
         result = runner.invoke(
             main,
-            ["scan", "--artifact-set", "x,y", "--against", str(snap_a)],
+            ["scan", "--artifact-set", "x", "--artifact-set", "y", "--against", str(snap_a)],
         )
         assert result.exit_code != 0
         assert "--against is not supported with --artifact-set" in result.output
@@ -250,7 +250,7 @@ class TestArtifactSetCliValidation:
         _write_elf_shared_object_stub(p1)
         _write_elf_shared_object_stub(p2)
         result = runner.invoke(
-            main, ["scan", "--artifact-set", f"{p1},{p2}"]
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
         )
         assert result.exit_code != 0
         assert "colliding library identities" in result.output
@@ -287,7 +287,7 @@ class TestArtifactSetCompileContextForwarding:
             main,
             [
                 "scan",
-                "--artifact-set", f"{p1},{p2}",
+                "--artifact-set", str(p1), "--artifact-set", str(p2),
                 "--compiler", "/usr/bin/my-cross-gcc",
                 "--sysroot", str(sysroot_dir),
                 "--nostdinc",
@@ -329,7 +329,9 @@ class TestArtifactSetSourceMethodSelection:
         _write_elf_shared_object_stub(p2)
         captured = self._capture_req(monkeypatch)
 
-        result = runner.invoke(main, ["scan", "--artifact-set", f"{p1},{p2}"])
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
+        )
         assert result.exit_code == 0, result.output
         assert captured["req"].source_method == "auto"
 
@@ -343,7 +345,8 @@ class TestArtifactSetSourceMethodSelection:
         captured = self._capture_req(monkeypatch)
 
         result = runner.invoke(
-            main, ["scan", "--artifact-set", f"{p1},{p2}", "--depth", "binary"]
+            main,
+            ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2), "--depth", "binary"],
         )
         assert result.exit_code == 0, result.output
         assert captured["req"].source_method is None
@@ -1225,10 +1228,8 @@ class TestArtifactSetComparisonOnlyFlagsRejected:
             main,
             [
                 "scan",
-                "--artifact-set",
-                f"{p1},{p2}",
-                "--suppress",
-                str(suppress_file),
+                "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--suppress", str(suppress_file),
             ],
         )
         assert result.exit_code != 0
@@ -1248,10 +1249,8 @@ class TestArtifactSetComparisonOnlyFlagsRejected:
             main,
             [
                 "scan",
-                "--artifact-set",
-                f"{p1},{p2}",
-                "--env-matrix",
-                str(matrix_file),
+                "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--env-matrix", str(matrix_file),
             ],
         )
         assert result.exit_code != 0
@@ -1279,7 +1278,7 @@ class TestArtifactSetMalformedRiskRules:
 
         result = runner.invoke(
             main,
-            ["scan", "--artifact-set", f"{p1},{p2}", "--risk-rules", str(bad)],
+            ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2), "--risk-rules", str(bad)],
         )
         assert result.exit_code != 0
         assert result.exception is None or isinstance(result.exception, SystemExit)

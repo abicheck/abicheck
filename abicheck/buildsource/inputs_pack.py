@@ -684,10 +684,8 @@ def ingest_inputs_pack(
 
     graph = None
     if surface is not None or has_build:
-        from .source_graph import (
-            build_source_graph,
-            mark_source_edges_extractor_coverage,
-        )
+        from .source_graph_build import build_source_graph
+        from .source_graph_build_source_abi import mark_source_edges_extractor_coverage
 
         graph = build_source_graph(
             build_evidence or BuildEvidence(), source_abi=surface
@@ -737,3 +735,35 @@ def ingest_inputs_pack(
     return IngestedInputs(
         manifest=manifest, pack=pack, tu_count=len(tus), diagnostics=diagnostics
     )
+
+
+def is_inputs_pack_dir(path: Path | None) -> bool:
+    """The ``None``/``is_dir`` guard around :func:`is_inputs_pack` (ADR-035 D5).
+
+    :func:`is_inputs_pack` assumes a real directory; nearly every caller has a
+    ``Path | None`` that may name anything. That guard was copied privately
+    into three modules (``cli_buildsource_helpers``, ``buildsource/l2_seed``,
+    ``cli_dump_dry_run_build_query``) because the original lived in the CLI
+    layer and engine-side code could not import upward. ADR-061 Phase 3 moved
+    it here, beside the predicate it guards.
+    """
+    if path is None or not path.is_dir():
+        return False
+    return is_inputs_pack(path)
+
+
+def is_any_pack_dir(path: Path | None) -> bool:
+    """True for either pack shape — a classic ``BuildSourcePack`` or a Flow-2 pack.
+
+    The named form of the ``is_pack_dir(p) or is_inputs_pack_dir(p)`` idiom,
+    which callers were re-spelling at seven sites. They overwhelmingly want
+    "is this pre-collected evidence to load, rather than a tree to extract
+    from", and that question does not care which shape answered it.
+
+    Lives here rather than in ``pack_shape`` beside ``is_pack_dir`` because
+    this module may depend on that leaf but not the reverse — see
+    ``pack_shape``'s own docstring for the cycle that forces the direction.
+    """
+    from .pack_shape import is_pack_dir
+
+    return is_pack_dir(path) or is_inputs_pack_dir(path)

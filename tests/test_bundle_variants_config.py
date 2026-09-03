@@ -208,6 +208,71 @@ class TestRunBundleVariantPairing:
         assert result.missing_required_variants == []
 
 
+class TestRunBundleVariantPairingVerifyFingerprints:
+    def test_disabled_by_default_ignores_mismatched_fingerprints(self) -> None:
+        # No coordinates declared -> spec.fingerprint() == "default", but
+        # the facts below carry an unrelated sentinel -- with verification
+        # off (the default), this must not raise.
+        specs = parse_bundle_variants_config({"cpu": {"required": False}})
+        old = {"cpu": _facts("fp-cpu", ("libcore.so",))}
+        new = {"cpu": _facts("fp-cpu", ("libcore.so",))}
+
+        result = run_bundle_variant_pairing(specs, old, new)
+
+        assert result.findings == []
+
+    def test_matching_fingerprint_passes_verification(self) -> None:
+        from abicheck.bundle_multibuild import variant_fingerprint
+
+        spec_raw = {
+            "cpu": {"target_triple": "x86_64-linux-gnu", "compiler_family": "gcc"}
+        }
+        specs = parse_bundle_variants_config(spec_raw)
+        fp = variant_fingerprint(
+            target_triple="x86_64-linux-gnu", compiler_family="gcc"
+        )
+        old = {"cpu": _facts(fp, ("libcore.so",))}
+        new = {"cpu": _facts(fp, ("libcore.so",))}
+
+        result = run_bundle_variant_pairing(
+            specs, old, new, verify_fingerprints=True
+        )
+
+        assert result.findings == []
+
+    def test_mismatched_fingerprint_raises(self) -> None:
+        specs = parse_bundle_variants_config(
+            {"cpu": {"target_triple": "x86_64-linux-gnu", "compiler_family": "gcc"}}
+        )
+        old = {"cpu": _facts("wrong-fingerprint", ("libcore.so",))}
+        new: dict[str, BundleFacts] = {}
+
+        with pytest.raises(BundleVariantsConfigError, match="bundle_variants.cpu"):
+            run_bundle_variant_pairing(specs, old, new, verify_fingerprints=True)
+
+    def test_default_sentinel_fingerprint_never_flagged(self) -> None:
+        from abicheck.bundle_facts import DEFAULT_VARIANT_FINGERPRINT
+
+        specs = parse_bundle_variants_config(
+            {"cpu": {"target_triple": "x86_64-linux-gnu", "compiler_family": "gcc"}}
+        )
+        old = {"cpu": _facts(DEFAULT_VARIANT_FINGERPRINT, ("libcore.so",))}
+        new: dict[str, BundleFacts] = {}
+
+        # No raise: an un-variant-tagged capture has nothing to verify
+        # against, so it degrades to the un-verified pairing behavior.
+        result = run_bundle_variant_pairing(specs, old, new, verify_fingerprints=True)
+        assert len(result.findings) == 1
+
+    def test_undeclared_variant_skips_verification(self) -> None:
+        old = {"undeclared": _facts("fp-x", ("libcore.so",))}
+        new: dict[str, BundleFacts] = {}
+
+        result = run_bundle_variant_pairing({}, old, new, verify_fingerprints=True)
+
+        assert len(result.findings) == 1
+
+
 class TestLoadBundleFactsByVariant:
     def test_loads_each_named_path(self, tmp_path: Path) -> None:
         cpu_path = tmp_path / "cpu.bundlefacts.json"

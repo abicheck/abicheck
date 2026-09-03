@@ -533,12 +533,12 @@ class TestResolveExecuteDumpRequestSplit:
     def test_execute_falls_back_to_conservative_label_on_gated_source_label_error(
         self, snap_path: Path, monkeypatch
     ):
-        """The ``except (TypeError, ValueError)`` around ``_gated_source_label``
+        """The ``except (TypeError, ValueError)`` around ``gated_source_label``
         in ``execute_dump_request`` is a defensive backstop for any failure
-        mode beyond the one ``_l4_source_abi_was_attempted`` itself now
-        handles -- still reachable if ``_gated_source_label`` raises for a
+        mode beyond the one ``l4_source_abi_was_attempted`` itself now
+        handles -- still reachable if ``gated_source_label`` raises for a
         different reason."""
-        from abicheck import cli_dump_helpers
+        from abicheck import evidence_depth
         from abicheck.service_dump_pipeline import (
             execute_dump_request,
             resolve_dump_request,
@@ -547,10 +547,10 @@ class TestResolveExecuteDumpRequestSplit:
         def _boom(*args, **kwargs):
             raise ValueError("simulated unexpected failure")
 
-        # execute_dump_request imports _gated_source_label locally, re-reading
-        # the module attribute on every call -- patch it there, not on
-        # service_dump_pipeline itself.
-        monkeypatch.setattr(cli_dump_helpers, "_gated_source_label", _boom)
+        # Patch the owning leaf (ADR-061 Phase 3), not the cli_dump_helpers
+        # compat alias the engine no longer reads -- patching the alias makes
+        # this vacuous: the un-raised path also satisfies the assertion.
+        monkeypatch.setattr(evidence_depth, "gated_source_label", _boom)
         result = execute_dump_request(
             resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         )
@@ -559,7 +559,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_dump_result_effective_depth_matches_gated_source_label(
         self, snap_path: Path
     ):
-        from abicheck.cli_dump_helpers import _gated_source_label
+        from abicheck.evidence_depth import gated_source_label
         from abicheck.service_dump_pipeline import (
             execute_dump_request,
             resolve_dump_request,
@@ -567,7 +567,7 @@ class TestResolveExecuteDumpRequestSplit:
 
         request = DumpRequest(input=InputSpec(path=snap_path))
         result = execute_dump_request(resolve_dump_request(request))
-        assert result.effective_depth == _gated_source_label(
+        assert result.effective_depth == gated_source_label(
             result.snapshot.build_source, result.snapshot
         )
 
@@ -1034,10 +1034,11 @@ class TestRawSourceUnderHybridIsRejected:
     ):
         # Only a *raw* tree needs real extraction; a prebuilt pack never feeds
         # L4, so it must not be swept up by the same guard.
-        from abicheck import cli_buildsource, service
+        from abicheck import service
+        from abicheck.buildsource import embed as embed_mod
 
         monkeypatch.setattr(
-            cli_buildsource, "embed_build_source", lambda snap, **kwargs: None
+            embed_mod, "embed_build_source", lambda snap, **kwargs: None
         )
         # A real pack is identified by manifest *content* -- the
         # BuildSourcePack version marker -- not by the file merely existing.
@@ -1055,31 +1056,6 @@ class TestRawSourceUnderHybridIsRejected:
         assert "hybrid" not in str(exc.value)
 
 
-class TestMalformedPackIsTranslated:
-    """`embed_build_source` raises `click.ClickException` on a malformed pack —
-    a CLI concept with no place in this Tier-2 API's contract, so the
-    resolver translates it to `SnapshotError`.
-    """
-
-    def test_click_exception_becomes_snapshot_error(
-        self, snap_path: Path, tmp_path: Path, monkeypatch
-    ):
-        import click
-
-        from abicheck import cli_buildsource, service
-
-        def _boom(snap, **kwargs):
-            raise click.ClickException("build pack is malformed")
-
-        monkeypatch.setattr(cli_buildsource, "embed_build_source", _boom)
-        sources = tmp_path / "src"
-        sources.mkdir()
-        with pytest.raises(SnapshotError, match="build pack is malformed"):
-            service.run_dump_request(
-                DumpRequest(input=InputSpec(path=snap_path, sources=sources))
-            )
-
-
 class TestSourceReplayUsesTheSelectedCompiler:
     """L4 source-ABI replay invokes the compiler the request selected.
 
@@ -1093,11 +1069,11 @@ class TestSourceReplayUsesTheSelectedCompiler:
 
     @pytest.fixture
     def replayed_with(self, monkeypatch):
-        from abicheck import cli_buildsource
+        from abicheck.buildsource import embed as embed_mod
 
         captured: dict[str, object] = {}
         monkeypatch.setattr(
-            cli_buildsource,
+            embed_mod,
             "embed_build_source",
             lambda snap, **kwargs: captured.update(kwargs),
         )
@@ -1325,12 +1301,13 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     snapshot's own evidence layers could silently describe two different
     builds. _resolve_side_snapshot_impl computes the allow_build_query gate
     once and forwards the identical (gated) values to both."""
-    from abicheck import (
-        service,
-        service_input_resolution as sir,
-    )
+    # ADR-061 Phase 3: patch the implementation owner
+    # (`workflows.artifact.execute`), not the `service_input_resolution`
+    # facade -- the caller reads the owner's reference, never the facade's.
+    from abicheck import service
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "h.h"
     header.write_text("void f();\n", encoding="utf-8")
@@ -1885,8 +1862,9 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
     def test_cleanups_run_after_the_parse_and_before_the_embed(
         self, monkeypatch, tmp_path: Path
     ) -> None:
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import service
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1899,9 +1877,7 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
             events.append("seed")
             return [], None, False, [lambda: events.append("cleanup")]
 
-        monkeypatch.setattr(
-            sir, "_seeded_includes_and_compile_context", _fake_seed
-        )
+        monkeypatch.setattr(sir, "_seeded_includes_and_compile_context", _fake_seed)
 
         def _fake_resolve(*_a, **_k):
             events.append("parse")
@@ -1941,9 +1917,9 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
         backstop. Neither may run the same already-handed-off thunk twice."""
         import pytest
 
-        from abicheck import service, service_input_resolution as sir
-        from abicheck.errors import SnapshotError
+        from abicheck import service
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")

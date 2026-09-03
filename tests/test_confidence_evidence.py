@@ -436,3 +436,429 @@ class TestDetectorResults:
         assert len(disabled) > 0
         for dr in disabled:
             assert dr.coverage_gap  # should explain why it was disabled
+
+
+class TestNoteIfSameBinaryCompared:
+    """Item 4 of the abicheck code-review report: a comparison against a
+    byte-identical binary silently produces a clean NO_CHANGE report with
+    no signal that the comparison couldn't have caught anything either
+    way -- the correct verdict and "nothing was actually compared" read
+    identically without this warning."""
+
+    def _result(self, old_sha=None, new_sha=None, evidence_tiers=None):
+        from abicheck.checker import DiffResult
+        from abicheck.checker_types import LibraryMetadata
+
+        result = DiffResult(old_version="1.0", new_version="2.0", library="lib")
+        if old_sha is not None:
+            result.old_metadata = LibraryMetadata(
+                path="/a/old.so", sha256=old_sha, size_bytes=100
+            )
+        if new_sha is not None:
+            result.new_metadata = LibraryMetadata(
+                path="/b/new.so", sha256=new_sha, size_bytes=100
+            )
+        if evidence_tiers is not None:
+            result.evidence_tiers = evidence_tiers
+        return result
+
+    def test_identical_sha256_appends_warning(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha="a" * 64)
+        note_if_same_binary_compared(result)
+        assert any("byte-identical" in w for w in result.coverage_warnings), (
+            result.coverage_warnings
+        )
+
+    def test_no_header_evidence_keeps_the_cannot_detect_claim(self):
+        """No header/AST evidence was analyzed alongside the identical
+        binaries -- the strong "this comparison cannot detect a change"
+        claim is accurate for this case."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(
+            old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "dwarf"]
+        )
+        note_if_same_binary_compared(result)
+        assert any(
+            "cannot detect a change" in w for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_header_evidence_present_qualifies_the_claim(self):
+        """Codex review: the binaries being byte-identical says nothing
+        about whether a real API/source-level change could still be
+        caught when header/AST evidence was also analyzed (e.g. distinct
+        --old-header/--new-header or --build-info content) -- the warning
+        must not claim this comparison "cannot detect a change" when
+        header evidence genuinely could."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(
+            old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "header"]
+        )
+        note_if_same_binary_compared(result)
+        assert any(
+            "cannot detect a change" not in w and "byte-identical" in w
+            for w in result.coverage_warnings
+        ), result.coverage_warnings
+        assert any(
+            "header/build evidence" in w for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_different_sha256_appends_nothing(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha="b" * 64)
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_real_findings_without_header_tier_also_qualify_the_claim(self):
+        """Codex review, fresh evidence: L3-L5 build/source-pack evidence
+        can detect and report a real change without ever setting "header"
+        in evidence_tiers (that list only reflects snapshot-level elf/
+        dwarf/header/pe/macho facts) -- a non-empty result.changes already
+        contradicts "cannot detect a change" regardless of which tier
+        produced it."""
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(
+            old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "dwarf"]
+        )
+        result.changes = [
+            Change(ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
+        ]
+        note_if_same_binary_compared(result)
+        assert any(
+            "cannot detect a change" not in w and "byte-identical" in w
+            for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_symvers_manifest_appends_no_warning_at_all(self, tmp_path):
+        """Codex review, fresh evidence: two identical `Module.symvers`
+        kABI manifests are not binaries at all, so `collect_metadata` must
+        read `None` for them the same way it already does for a JSON/Perl
+        snapshot -- this predicate must never claim "old and new binaries
+        are byte-identical" for a comparison with no binary artifact."""
+        from abicheck.service import collect_metadata
+
+        text = "0x12345678\tfoo\tvmlinux\tEXPORT_SYMBOL\n"
+        old_p = tmp_path / "old.symvers"
+        new_p = tmp_path / "new.symvers"
+        old_p.write_text(text)
+        new_p.write_text(text)
+        assert collect_metadata(old_p) is None
+        assert collect_metadata(new_p) is None
+
+    def test_missing_old_metadata_is_a_noop(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha=None, new_sha="a" * 64)
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_missing_new_metadata_is_a_noop(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha=None)
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_both_metadata_absent_is_a_noop(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result()
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_end_to_end_through_the_real_cli_compare_command(
+        self, tmp_path, monkeypatch
+    ):
+        """Public-surface test: exercised through the real `compare` CLI
+        entry point (same path/dump-mocking pattern as
+        TestUsedByScopedOnlyChange in test_cli_compare_audit_suppressions.py),
+        not only the internal helper directly."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["compare", str(so_path), str(so_path)])
+        assert "byte-identical" in result.stdout, result.stdout
+
+    def test_oneline_profile_still_surfaces_the_warning_on_stderr(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review: `--profile quick` renders through
+        `service_render.to_stat`, a fixed one-line summary with no room for
+        a `coverage_warnings` entry -- every other format already surfaces
+        it inline (JSON/SARIF/markdown/HTML), so this format silently
+        dropped a same-binary warning entirely, mirroring the identical gap
+        already fixed for `scan --against`'s own text renderer."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["compare", "--profile", "quick", str(so_path), str(so_path)]
+        )
+        assert "byte-identical" in result.output, result.output
+
+    def test_oneline_profile_still_omits_unrelated_coverage_warnings(
+        self, tmp_path
+    ):
+        """Codex review, fresh evidence: an earlier revision of the fix
+        above echoed *every* `coverage_warnings` entry in `--profile
+        quick`, not just the same-binary one -- breaking the pre-existing,
+        tested one-line contract for the common case of comparing two
+        JSON snapshots with no binary metadata (which appends a "no
+        binary metadata available" warning, unrelated to this feature).
+        Only the same-binary warning may ever reach the one-line output."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        snap = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[
+                Function(
+                    name="foo", mangled="_Z3foov", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--profile", "quick"]
+        )
+        assert result.exit_code == 0, result.output
+        # stdout, not the stderr-mixed `result.output`: `quick`'s
+        # `depth=binary` (ADR-063 Phase 8's ceiling fix) means this
+        # unscoped-headers fixture no longer resolves a public-header
+        # surface at that depth either, and that scope-fallback warning is
+        # by design routed to stderr so it never corrupts this contract.
+        assert result.stdout.strip().count("\n") == 0, result.output
+        assert "Warning:" not in result.stdout, result.output
+
+    def test_native_compare_cli_hashes_through_a_multi_hop_linker_script_chain(
+        self, tmp_path, monkeypatch
+    ):
+        """Follow-up (Codex review): `_normalize_binary_input` (called ahead
+        of `_finalize_compare_result` in `cli_compare_helpers.py`) only ever
+        resolves one linker-script hop, while `resolve_input()` follows the
+        whole chain recursively -- so a script pointing at another script
+        still hashed the intermediate script, not the final target, and the
+        warning was omitted even though both sides resolve to the same
+        binary."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        real_so = tmp_path / "libfoo.so.1.2.3"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        middle_script = tmp_path / "libfoo.so.1"
+        middle_script.write_text("INPUT(libfoo.so.1.2.3)\n")
+        outer_script = tmp_path / "libfoo.so"
+        outer_script.write_text("INPUT(libfoo.so.1)\n")
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["compare", str(real_so), str(outer_script)])
+        assert "byte-identical" in result.stdout, result.stdout
+
+    def test_typed_compare_request_hashes_through_a_linker_script(
+        self, tmp_path, monkeypatch
+    ):
+        """Follow-up (Codex review): the typed ``CompareRequest``/
+        ``run_compare_request`` path -- shared by the Python API and any
+        other Tier-2 caller -- collected metadata from the caller's
+        original operand path, not the artifact ``resolve_side_snapshot()``
+        actually resolved through. A GNU ld linker script named as one side
+        against its own resolved target DSO on the other therefore never
+        warned, even though both sides resolve to the same binary."""
+        from unittest.mock import MagicMock
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import run_compare_request
+
+        real_so = tmp_path / "libfoo.so.1"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        script_so = tmp_path / "libfoo.so"
+        script_so.write_text("INPUT(libfoo.so.1)\n")
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        request = CompareRequest(
+            old=InputSpec.of(real_so), new=InputSpec.of(script_so)
+        )
+        result = run_compare_request(request)
+        assert any("byte-identical" in w for w in result.diff.coverage_warnings), (
+            result.diff.coverage_warnings
+        )
+
+    def test_typed_compare_request_snapshot_matching_linker_script_regex_does_not_warn(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, fresh evidence: the typed `CompareRequest` path had
+        the identical snapshot-misclassified-as-linker-script gap already
+        fixed for `scan --against` -- a JSON snapshot whose own serialized
+        text matches the INPUT()/GROUP() probe must never be resolved as a
+        linker script pointing at a same-named real DSO."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.serialization import snapshot_to_json
+        from abicheck.service_compare_pipeline import run_compare_request
+
+        real_so = tmp_path / "libfoo.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = AbiSnapshot(library="INPUT(libfoo.so)", version="1.0", functions=[])
+        old_path = tmp_path / "old.abicheck.json"
+        old_path.write_text(snapshot_to_json(old_snap), encoding="utf-8")
+        new_path = tmp_path / "new.abicheck.json"
+        new_snap = AbiSnapshot(library="INPUT(libfoo.so)", version="1.0", functions=[])
+        new_path.write_text(snapshot_to_json(new_snap), encoding="utf-8")
+
+        request = CompareRequest(old=InputSpec.of(old_path), new=InputSpec.of(new_path))
+        result = run_compare_request(request)
+        assert not any(
+            "byte-identical" in w for w in result.diff.coverage_warnings
+        ), result.diff.coverage_warnings
+
+    def test_native_compare_cli_hashes_the_pre_embed_paths(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review: `--old/new-sources` naming a raw checkout (or a raw
+        `--build-info`) makes `_embed_inline_source_sides` rewrite
+        `old_input`/`new_input` to a temporary embedded-snapshot `.abi.json`
+        path *before* `_report_compare_result` calls `_finalize_compare_
+        result` -- which must still hash the two real, original binaries,
+        not the rewritten JSON snapshot path `_collect_metadata` always
+        reads as non-hashable, or the warning silently vanishes for every
+        deep-compare-folded-into-compare run even when both real binaries
+        are byte-identical. Exercised through the real `compare` CLI entry
+        point (`run_compare`'s actual call-site wiring), with only the
+        inline-embed dump itself stubbed out -- the wiring under test is
+        which path pair reaches `_finalize_compare_result`, not the dump
+        machinery `_embed_inline_source_side` would otherwise invoke."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        import abicheck.cli_compare_helpers as cch
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        real_so = tmp_path / "lib.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_sources = tmp_path / "old-src"
+        old_sources.mkdir()
+        embedded = tmp_path / "old.abi.json"
+        embedded.write_text(
+            json.dumps(
+                {
+                    "library": "libfoo.so",
+                    "version": "1.0",
+                    "functions": [],
+                }
+            )
+        )
+
+        def _fake_embed(ctx, *, old_input, new_input, **kwargs):
+            # Simulates the real _embed_inline_source_side rewriting the
+            # --old-sources side's operand to a temporary snapshot path,
+            # without needing a real inline dump toolchain.
+            return embedded, None, None, new_input, kwargs["new_sources"], kwargs["new_build_info"]
+
+        monkeypatch.setattr(cch, "_embed_inline_source_sides", _fake_embed)
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "compare", str(real_so), str(real_so),
+                "--sources", f"old={old_sources}",
+            ],
+        )
+        assert "byte-identical" in result.stdout, result.output
+
+    def test_native_compare_cli_excludes_symvers_manifests(self, tmp_path):
+        """Codex review, fresh evidence: `_finalize_compare_result`'s own
+        `_collect_metadata` (a separate, frontends-layer copy of
+        `service.collect_metadata`) still excluded only JSON/Perl -- two
+        identical `Module.symvers` manifests, not binaries at all, still
+        produced a false "old and new binaries are byte-identical" claim
+        through the native `compare` CLI."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        text = "0x12345678\tfoo\tvmlinux\tEXPORT_SYMBOL\n"
+        old_p = tmp_path / "old.symvers"
+        new_p = tmp_path / "new.symvers"
+        old_p.write_text(text)
+        new_p.write_text(text)
+
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "byte-identical" not in result.output, result.output
+
+    def test_finalize_compare_result_does_not_hash_a_json_snapshot_path(
+        self, tmp_path
+    ):
+        """Sanity check for the fix above: confirms `_collect_metadata`
+        really does treat a `.abi.json` snapshot path as non-hashable (the
+        precondition that makes the bug this fix closes possible), so a
+        caller that mistakenly passed the post-embed operand here would see
+        the warning silently vanish rather than this test passing
+        vacuously."""
+        from abicheck.checker import DiffResult
+        from abicheck.frontends.cli.runtime import _finalize_compare_result
+
+        embedded_snapshot = tmp_path / "old.abi.json"
+        embedded_snapshot.write_text(json.dumps({"library": "libfoo.so"}))
+        real_so = tmp_path / "libfoo.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        result = DiffResult(old_version="1.0", new_version="1.0", library="lib")
+        _finalize_compare_result(
+            result,
+            embedded_snapshot,
+            real_so,
+            show_redundant=False,
+            show_filtered=False,
+        )
+        assert result.coverage_warnings == []

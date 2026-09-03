@@ -18,11 +18,11 @@ Split out of :mod:`source_graph` to keep that module under its line-count cap
 (ADR-041 growth via the type/call-graph dependency work pushed it past 2000
 lines). This module owns Phase 5's finding-emission logic exclusively —
 :func:`diff_source_graph_findings` and its per-family helpers, which turn a
-:class:`~abicheck.buildsource.source_graph.SourceGraphSummary` pair into
+:class:`~abicheck.model.source_graph.SourceGraphSummary` pair into
 ``ChangeKind`` findings. The graph *schema* and *construction*
 (:class:`GraphNode`/:class:`GraphEdge`/:class:`SourceGraphSummary`,
-:func:`~abicheck.buildsource.source_graph.build_source_graph`, the structural
-:func:`~abicheck.buildsource.source_graph.diff_source_graph`) stay in
+:func:`~abicheck.buildsource.source_graph_build.build_source_graph`, the structural
+:func:`~abicheck.buildsource.source_graph_compare.diff_source_graph`) stay in
 ``source_graph.py``; ``diff_source_graph_findings`` is re-exported there for
 callers that still import it from the original module path.
 
@@ -35,19 +35,17 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
+from ..model.graph_facts import GraphEdge
+from ..model.source_graph import EVIDENCE_TIER_L5, SourceGraphSummary
 from .header_graph import (
     HEADER_CALL_GRAPH_PASS,
     HEADER_INCLUDE_GRAPH_PASS,
     HEADER_TYPE_GRAPH_PASS,
 )
-from .source_graph import (
+from .source_graph_compare import _kind_map, _label_map
+from .source_graph_query import (
     _TYPE_ENTITY_KINDS,
-    EVIDENCE_TIER_L5,
     PUBLIC_VISIBILITIES,
-    GraphEdge,
-    SourceGraphSummary,
-    _kind_map,
-    _label_map,
     decl_declaring_files,
     is_internal_dependency_node,
     is_public_dependency_node,

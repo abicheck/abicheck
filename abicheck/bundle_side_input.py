@@ -78,7 +78,10 @@ if TYPE_CHECKING:
     from .bundle_manifest import InstantiationManifest
     from .bundle_models import BundleDiffResult, BundleSignatureEvidence, BundleSnapshot
     from .checker_types import DiffResult
+    from .compile_context import CompileContext
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
+    from .workflows.suppression import SuppressionList
 
 
 @dataclass(frozen=True)
@@ -111,9 +114,17 @@ class StoredBundleFactsInput:
     :class:`~abicheck.bundle_facts.BundleFacts` file (G38 Phase 2/13).
 
     No binaries are read -- see ``bundle_facts.bundle_snapshot_from_facts``.
+
+    *max_json_object_nodes*, when given, overrides
+    ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` for this side's load --
+    forwarded to ``serialization.load_bundle_facts``. A real per-library
+    facts blob can legitimately need well over the default budget to decode
+    (see that constant's own docstring); ``None`` (the default) uses the
+    library default, unchanged from before this field existed.
     """
 
     path: Path
+    max_json_object_nodes: int | None = None
 
 
 #: A bundle side is either a live, on-disk library set or a stored,
@@ -147,7 +158,7 @@ def resolve_bundle_side(side: BundleSideInput) -> ResolvedBundleSide:
     from .serialization import load_bundle_facts
 
     if isinstance(side, StoredBundleFactsInput):
-        facts = load_bundle_facts(side.path)
+        facts = load_bundle_facts(side.path, max_json_object_nodes=side.max_json_object_nodes)
         return ResolvedBundleSide(
             snapshot=bundle_snapshot_from_facts(facts),
             signature_evidence=dict(facts.per_library_snapshots),
@@ -169,6 +180,7 @@ def compare_bundle_sides(
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison over any live/stored pairing of *old*/*new*.
 
@@ -208,6 +220,7 @@ def compare_bundle_sides(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        policy_file=policy_file,
         old_signature_evidence=old_resolved.signature_evidence or None,
         new_signature_evidence=new_resolved.signature_evidence or None,
     )
@@ -219,14 +232,23 @@ def compare_release_against_bundle_facts(
     *,
     headers: list[Path] | None = None,
     includes: list[Path] | None = None,
+    header_backend: str = "auto",
+    compile: CompileContext | None = None,
+    per_library_headers: dict[str, list[Path]] | None = None,
+    per_library_includes: dict[str, list[Path]] | None = None,
+    per_library_compile: dict[str, CompileContext] | None = None,
     new_version: str = "",
     lang: str = "c++",
+    lang_explicit: bool = False,
     include_private_dso: bool = False,
     manifest_path: Path | None = None,
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    suppress: SuppressionList | None = None,
     include_dependencies: bool = False,
+    max_json_object_nodes: int | None = None,
 ) -> BundleDiffResult:
     """End-to-end driver: a stored OLD-side ``BundleFacts`` file compared
     against a live NEW-side directory/package extraction root (G38 Phase 13).
@@ -253,13 +275,75 @@ def compare_release_against_bundle_facts(
     accounting, which stays a CLI-only concern.
 
     Only the ELF-only per-library evidence a bundle comparison actually
-    needs is resolved (no debug-info package resolution, no PDB, no header
-    scoping beyond *headers*/*includes* applied uniformly to every matched
-    library) -- the plan's own Phase 2 status note names exactly this
-    narrowing ("most of compare's ~40 release-fan-out flags ... lose their
-    old-side meaning once the old side is already a resolved snapshot") as
-    why this is a genuinely smaller surface than ``compare_release_cmd``,
-    not an oversight.
+    needs is resolved (no debug-info package resolution, no PDB) -- the
+    plan's own Phase 2 status note names exactly this narrowing ("most of
+    compare's ~40 release-fan-out flags ... lose their old-side meaning
+    once the old side is already a resolved snapshot") as why this is a
+    genuinely smaller surface than ``compare_release_cmd``, not an
+    oversight.
+
+    *header_backend*/*compile* forward straight to ``service.resolve_input``
+    (both were previously silently dropped: this driver called
+    ``resolve_input`` without either kwarg, so a header-scoped NEW side always
+    resolved under ``header_backend="auto"`` -- which, absent a real castxml
+    on the host, means ``resolve_input`` picks castxml anyway and dies on a
+    clang/icpx-only host rather than falling back). A caller with a
+    resolved, working ``CompileContext`` (compiler binding, frontend,
+    extra flags -- e.g. a SYCL/DPC++ host that needs
+    ``CompileContext(gcc_path="icpx", frontend="clang", ...)``) can now pass
+    it directly instead of monkeypatching this module.
+
+    *lang_explicit* (Codex review, fresh evidence): whether *lang* reflects
+    a genuinely explicit ``--lang`` on the command line rather than the
+    identical, indistinguishable Click default -- forwarded straight to
+    ``service.resolve_input()``'s own parameter of the same name. Left at
+    the default ``False`` (this function's own pre-existing behavior)
+    silently forces ``resolve_input``'s auto-detection to run even when a
+    caller explicitly asked for ``lang="c++"`` on a language-ambiguous
+    header, which can change the extracted API and findings.
+
+    *headers*/*includes*/*compile* are the **uniform** fallback applied to
+    every matched library -- correct only when every library in the bundle
+    shares one header tree and one compile configuration, which does not
+    hold for a mixed-toolchain release (e.g. oneDAL's ``daal``/``oneapi::dal``
+    libraries built as plain C++ alongside a ``dpc`` library built
+    ``-fsycl``/``icpx``): resolving *every* library with the same
+    ``headers``/``includes``/``compile`` in that case parses each library's
+    headers under whichever single configuration was supplied, which is
+    correct for at most one of them. *per_library_headers*/
+    *per_library_includes*/*per_library_compile* are optional
+    ``{canonical_name: ...}`` overrides, consulted before the uniform
+    fallback for each matched library -- a library with no entry in a given
+    per-library map still falls back to that map's uniform sibling
+    (*headers*/*includes*/*compile* respectively), so a caller only needs to
+    override the libraries that actually differ. A comparison run entirely
+    with the uniform fallback (no per-library overrides) remains a **cost
+    proof**, not a **correctness proof**, for a mixed-toolchain bundle: it
+    demonstrates the driver runs to completion in reasonable time/memory,
+    not that every library was parsed under its own real compile
+    configuration -- use the per-library maps once any library's headers
+    need flags another library's don't.
+
+    *policy_file*, when given, is forwarded to each per-library
+    ``service.compare_snapshots()`` call alongside *policy* -- exactly the
+    same ``(policy, policy_file)`` pair the native ``compare``/``scan`` CLIs
+    already pass through together (a ``policy_file`` never replaces
+    *policy*; ``PolicyFile.base_policy``/``overrides``/reclassify rules are
+    applied on top of whichever base *policy* set the per-library kind
+    classification uses). Previously dropped entirely: this driver forwarded
+    only *policy* (a bare base-policy name) to ``service.compare_snapshots``,
+    so a caller's ``--policy-file``-shaped reclassify/override rules (kind
+    overrides, ``ReclassifyRule`` selectors) never reached the per-library
+    diff this function computes, regardless of whether the caller's own
+    ``.abicheck.yml``/policy document declared any -- silently scoring every
+    matched library under the unmodified base policy alone (Codex review;
+    the highest-leverage gap in this driver, since a real policy file's
+    reclassify rules can be the difference between a library reading
+    COMPATIBLE_WITH_RISK and BREAKING). Omitted (the default): behavior is
+    unchanged from before this fix. Also forwarded to the final
+    ``compare_bundle_from_facts`` call, so ``BundleDiffResult.bundle_verdict``
+    (the ``BUNDLE_*``-kind aggregate) is scored under it too, not just the
+    per-library diffs (Codex review, same PR).
 
     *include_dependencies* (default ``False``) mirrors ``--include-system-
     declarations``'s own Click default (``cli_options.
@@ -276,28 +360,74 @@ def compare_release_against_bundle_facts(
     AGENTS.md's dependency-scoping entry). Pass ``True`` only when
     *old_facts_path* was itself captured with ``--include-system-
     declarations``.
+
+    *max_json_object_nodes*, when given, overrides ``bundle_facts.
+    DEFAULT_MAX_JSON_OBJECT_NODES`` for loading *old_facts_path* -- a real
+    per-library facts blob (especially a G40 archive-format file for a
+    SYCL/DPC++-heavy library with a large template instantiation surface)
+    can legitimately need well over the default budget to decode; see
+    ``bundle_facts.read_bundle_facts_archive``'s own docstring. ``None``
+    (the default) uses the library default, matching this driver's
+    pre-existing behavior.
+
+    *suppress*, when given, is forwarded to each per-library
+    ``service.compare_snapshots()`` call as its own *suppression* argument
+    -- the same object the native ``compare``/``compare-release`` CLIs pass
+    (``--suppress``). Previously this driver had no way to honor a caller's
+    suppression list at all: every matched library was scored with every
+    known/intentional change still live, unlike every other comparison
+    entry point in this codebase. Omitted (the default): behavior is
+    unchanged from before this parameter existed. Not applied to
+    *bundle_findings* (the cross-library ``BUNDLE_*`` aggregate) -- the
+    native release fan-out does not apply per-library suppression there
+    either, since a suppression rule is authored against one library's own
+    symbol/type identity, not a cross-library relationship.
     """
     from . import service
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
-    from .cli_helpers_compare import _build_match_map
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
+    from .workflows.bundle_facts_library_overrides import (
+        validate_matched_library_overrides,
+    )
+    from .workflows.extraction import build_match_map
 
-    old_facts = load_bundle_facts(old_facts_path)
+    old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
 
     if new_dir.is_dir():
         new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
     else:
         new_files = [new_dir]
     # Version-aware duplicate resolution (the same rule the live release
-    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`
-    # call), rather than a plain last-write-wins dict build: a directory
-    # carrying more than one version of a library (e.g. `libfoo.so.9` and
-    # `libfoo.so.10`) must not silently resolve to whichever sorts last
-    # lexicographically (Codex review).
-    new_map, _match_warnings = _build_match_map(new_files)
+    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`,
+    # itself now a thin `click.ClickException`-translating wrapper over this
+    # same `binary_utils.build_match_map` primitive), rather than a plain
+    # last-write-wins dict build: a directory carrying more than one version
+    # of a library (e.g. `libfoo.so.9` and `libfoo.so.10`) must not silently
+    # resolve to whichever sorts last lexicographically (Codex review). Calls
+    # the pure, Click-free primitive directly (ADR-061: this module is
+    # classified `workflows`, which may not import the `frontends`-legacy
+    # `cli_helpers_compare.py`) -- an `AmbiguousLibraryMatchError` here
+    # propagates as a plain Python exception, appropriate for a module with
+    # callers outside any Click command.
+    new_map, _match_warnings = build_match_map(new_files)
+
+    # Codex review, fresh evidence: the actual validation logic lives in
+    # workflows/bundle_facts_library_overrides.py (a `workflows`-classified
+    # module), not here -- this grandfathered flat-root module only
+    # computes *matched_keys* (the one piece of data that function needs
+    # and cannot get any other way, since it's derived from this
+    # function's own already-loaded `old_facts`/`new_map`, with no second
+    # OLD_FACTS load) and delegates the actual check.
+    matched_keys = set(old_facts.per_library_snapshots) & set(new_map)
+    validate_matched_library_overrides(
+        per_library_headers=per_library_headers,
+        per_library_includes=per_library_includes,
+        per_library_compile=per_library_compile,
+        matched_keys=matched_keys,
+    )
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
@@ -305,15 +435,29 @@ def compare_release_against_bundle_facts(
         new_path = new_map.get(key)
         if new_path is None:
             continue
+        # Per-library overrides win over the uniform fallback -- a library
+        # absent from a given override map still falls back to that map's
+        # own uniform sibling (headers/includes/compile respectively), so a
+        # caller only needs to name the libraries that actually differ. See
+        # the docstring above for why a uniform-only invocation is a cost
+        # proof, not a correctness proof, for a mixed-toolchain bundle.
+        lib_headers = (per_library_headers or {}).get(key, headers)
+        lib_includes = (per_library_includes or {}).get(key, includes)
+        lib_compile = (per_library_compile or {}).get(key, compile)
         new_snapshot = service.resolve_input(
             new_path,
-            headers=headers,
-            includes=includes,
+            headers=lib_headers,
+            includes=lib_includes,
             version=new_version,
             lang=lang,
+            lang_explicit=lang_explicit,
+            header_backend=header_backend,
+            compile=lib_compile,
             include_dependencies=include_dependencies,
         )
-        diff = service.compare_snapshots(old_snapshot, new_snapshot, policy=policy)
+        diff = service.compare_snapshots(
+            old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
+        )
         per_library_results.append(diff)
         new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)
 
@@ -334,5 +478,6 @@ def compare_release_against_bundle_facts(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
     )

@@ -233,6 +233,7 @@ def test_estimate_header_change_fans_out_to_all_tus(
 def test_estimate_counts_collect_pack_tus(snap_path: Path, tmp_path: Path) -> None:
     # A --build-info pointed at an `abicheck collect` pack dir must count the
     # pack's build_evidence compile units, not report 0 (Codex review).
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
 
@@ -243,7 +244,7 @@ def test_estimate_counts_collect_pack_tus(snap_path: Path, tmp_path: Path) -> No
             for i in range(4)
         ]
     )
-    BuildSourcePack(root=pack_dir, build_evidence=be).write()
+    pack_io.write(BuildSourcePack(root=pack_dir, build_evidence=be))
 
     req = ScanRequest(binaries=[snap_path], build_info=pack_dir, mode="baseline")
     l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
@@ -908,7 +909,9 @@ def test_run_scan_pinned_depth_without_evidence_is_contract_error(
     from abicheck.service import run_scan
 
     res = run_scan(ScanRequest(binaries=[snap_path], depth="source"))
-    assert res.exit_code == 1
+    # 7, not the generic ClickException code 1 -- cli_scan.py's dedicated
+    # _EXIT_EVIDENCE_CONTRACT_ERROR (2026-09-03).
+    assert res.exit_code == 7
     assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
 
 

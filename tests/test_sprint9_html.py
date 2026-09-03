@@ -400,6 +400,18 @@ def test_write_passes_old_symbol_count(tmp_path: Path) -> None:
     assert "98.0%" in content  # (50-1)/50 * 100
 
 
+def test_write_passes_demangle_through(tmp_path: Path) -> None:
+    """Codex review, fresh evidence: write_html_report() had no way to opt
+    out of demangling the way the CLI's own --no-demangle does -- it always
+    called generate_html_report() with the implicit True default."""
+    r = _result(changes=[_ch("func_removed", symbol="_ZN3FooC1Ev")])
+    out = tmp_path / "report.html"
+    write_html_report(r, out, demangle=False)
+    content = out.read_text()
+    assert "_ZN3FooC1Ev" in content
+    assert "Foo::Foo()" not in content
+
+
 # ---------------------------------------------------------------------------
 # Verdict colours
 # ---------------------------------------------------------------------------
@@ -849,3 +861,21 @@ def test_correlation_note_hidden_when_show_only_filters_out_the_target() -> None
     # The original Change objects are never mutated by the filtered render.
     assert layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
     assert "See also" in generate_html_report(r)
+
+
+def test_verdict_only_stub_does_not_require_the_full_diffresult_api() -> None:
+    """Codex review (abicheck/abicheck#984): a lightweight duck-typed
+    result -- exposing `_effective_verdict_for_change` but none of
+    `policy`/`policy_file`/`_effective_kind_sets` -- is a supported shape
+    for this function (see the neighboring `SimpleNamespace`-based tests in
+    this file). ADR-061 Phase 2 item 4b's ReportFinding path must not
+    assume the full policy API is present just because the verdict
+    callback is; it must fall back to calling the callback directly
+    instead of raising AttributeError from report_findings_for.
+    """
+    from abicheck.checker import Verdict
+
+    r = _result(changes=[_ch("func_added")])
+    r._effective_verdict_for_change = lambda change: Verdict.COMPATIBLE
+    out = generate_html_report(r)
+    assert "func_added" in out

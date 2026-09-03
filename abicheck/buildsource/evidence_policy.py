@@ -25,8 +25,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import click
-
 from .model import CoverageStatus, DataLayer, LayerCoverage
 
 if TYPE_CHECKING:
@@ -193,18 +191,27 @@ def finding_bucket_counts(
     return out
 
 
-def echo_evidence_metrics(metrics: dict[str, object]) -> None:
-    """Print the ADR-033 D6 timing / D9 metrics summary to stderr (all formats)."""
+def evidence_metrics_lines(metrics: dict[str, object]) -> list[str]:
+    """Render the ADR-033 D6 timing / D9 metrics summary, one string per line.
+
+    ADR-061 Phase 3: this used to be ``echo_evidence_metrics``, and it was the
+    *only* reason this engine module imported ``click`` -- one
+    ``engine-cli-boundary`` allowlist entry held open by four ``click.echo``
+    calls. Rendering to a list instead lets the caller own the stream (the CLI
+    adapter writes these to stderr so they cover every output format), which is
+    what an engine module wanting no output stream needs. An empty ``metrics``
+    renders nothing, preserving the previous no-op.
+    """
     if not metrics:
-        return
+        return []
     duration = metrics.get("extractor.duration_seconds")
-    click.echo("Evidence metrics:", err=True)
+    lines = ["Evidence metrics:"]
     if duration is not None:
-        click.echo(f"  collection time            {duration}s", err=True)
-    click.echo(
+        lines.append(f"  collection time            {duration}s")
+    lines.append(
         "  findings                   "
         f"artifact-backed={metrics.get('findings.artifact_backed.count', 0)}, "
         f"source-only={metrics.get('findings.source_only.count', 0)}, "
-        f"build-context-drift={metrics.get('findings.build_context_drift.count', 0)}",
-        err=True,
+        f"build-context-drift={metrics.get('findings.build_context_drift.count', 0)}"
     )
+    return lines
