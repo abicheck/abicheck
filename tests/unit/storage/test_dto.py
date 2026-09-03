@@ -473,6 +473,16 @@ class TestGraphSectionDTO:
         with pytest.raises(ValueError, match="must be a mapping"):
             GraphSection.from_document(["not", "a", "mapping"])  # type: ignore[arg-type]
 
+    def test_constructor_refuses_a_non_mapping_surface_graph_directly(self) -> None:
+        """Codex review, PR #1044: a caller constructing `GraphSection`
+        directly (bypassing `from_document`'s own validation) with a
+        `list`/sequence `surface_graph` must be rejected, not silently
+        coerced by `dict(...)` into an empty or fabricated graph."""
+        with pytest.raises(ValueError, match="must be a mapping"):
+            GraphSection(surface_graph=[])  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="must be a mapping"):
+            GraphSection(surface_graph=[("nodes", [])])  # type: ignore[arg-type]
+
     def test_from_document_refuses_a_non_mapping_surface_graph_value(self) -> None:
         with pytest.raises(ValueError, match="must carry a 'surface_graph' mapping"):
             GraphSection.from_document({"surface_graph": "not-a-mapping"})

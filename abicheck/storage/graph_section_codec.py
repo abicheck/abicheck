@@ -106,6 +106,20 @@ class GraphSection:
     surface_graph: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # `isinstance` before `dict(...)`, not after (Codex review, PR #1044):
+        # `dict(self.surface_graph)` silently accepts a `list`/sequence of
+        # pairs too, so a caller constructing `GraphSection(surface_graph=[])`
+        # directly (bypassing `from_document`'s own validation) would
+        # otherwise get an *empty* graph rather than a rejection, and a
+        # non-empty pair sequence would fabricate one -- the same "reject a
+        # non-mapping value, don't silently coerce it" discipline
+        # `sparse_section_codec._SparseSectionMixin._freeze_extra` already
+        # applies for its own `extra` field.
+        if not isinstance(self.surface_graph, Mapping):
+            raise ValueError(
+                f"GraphSection.surface_graph must be a mapping, not "
+                f"{type(self.surface_graph).__name__}"
+            )
         object.__setattr__(
             self, "surface_graph", _freeze(canonical_form(dict(self.surface_graph)))
         )
