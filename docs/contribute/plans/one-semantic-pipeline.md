@@ -12610,7 +12610,7 @@ resolving the identical values must hash identically). Pure composition: it
 re-derives nothing from `AnalysisPlan`, `CompatibilityEvaluationConfig`, or
 `CompileContext`, and (like `compatibility_evaluation_frontend.py` before
 it) is landed with its own primitive-level test suite
-(`tests/test_resolved_execution_context.py`) and no live caller yet -- the
+(`tests/unit/workflows/test_resolved_execution_context.py`) and no live caller yet -- the
 type, tested, before any command is migrated to build or consume one.
 
 **The "requested/effective/available depth" axis is now closed too, via a

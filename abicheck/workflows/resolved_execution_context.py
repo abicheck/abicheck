@@ -49,8 +49,9 @@ would be exactly the "two independently constructible representations of
 the same fact" shape the Governing Invariant forbids. :class:`EvidenceView`
 resolves this by construction rather than by omission: it always carries
 ``requested_depth`` (knowable pre-execution) and ``available_depths`` (the
-static four-rung ``--depth`` ladder,
-:data:`~abicheck.buildsource.scan_levels.USER_DEPTHS` restated as plain
+static four-rung ``--depth`` ladder, read through
+:data:`~abicheck.evidence_depth.DEPTH_RANK` (the shared leaf
+`workflows/AGENTS.md` names for this vocabulary) and restated as plain
 values -- build-time vocabulary, not a per-run computed fact, so stating it
 here duplicates nothing); ``effective_depth``/``depth_satisfied`` stay
 ``None`` until :meth:`EvidenceView.from_assurance` copies them verbatim off
@@ -98,7 +99,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from ..buildsource.scan_levels import USER_DEPTHS
+from ..evidence_depth import DEPTH_RANK
 
 if TYPE_CHECKING:
     from ..compatibility_evaluation_config import (
@@ -110,12 +111,19 @@ if TYPE_CHECKING:
 
 __all__ = ["EvidenceView", "ResolvedExecutionContext"]
 
-#: The public ``--depth`` ladder, restated as plain string values --
-#: build-time vocabulary derived from the one authority
-#: (:data:`abicheck.buildsource.scan_levels.USER_DEPTHS`), not a per-run
-#: computed fact. Module-level so it is computed once, not once per
+#: The public ``--depth`` ladder, restated as plain string values -- read
+#: through :mod:`abicheck.evidence_depth` (Codex review, PR #1027, fifth
+#: round), the one shared leaf `workflows/AGENTS.md` names for this exact
+#: vocabulary ("Shared vocabulary ... lives in leaves any layer may depend
+#: on: `abicheck/evidence_depth.py` (the depth ladder) ... Prefer them over
+#: re-deriving") -- not `buildsource.scan_levels.USER_DEPTHS` directly, which
+#: would restore the workflow-to-buildsource coupling that module exists to
+#: isolate. `DEPTH_RANK`'s keys are already this exact ordered ladder (that
+#: module derives it from `USER_DEPTHS` itself, once); a plain `dict`
+#: preserves insertion order, so `tuple(DEPTH_RANK)` is the ladder's values in
+#: rank order, verbatim. Module-level so it is computed once, not once per
 #: :class:`EvidenceView` construction.
-_AVAILABLE_DEPTHS: tuple[str, ...] = tuple(depth.value for depth in USER_DEPTHS)
+_AVAILABLE_DEPTHS: tuple[str, ...] = tuple(DEPTH_RANK)
 
 
 def _canonical_repr(obj: object) -> str:
@@ -217,7 +225,7 @@ class EvidenceView:
     *requested_depth* is knowable pre-execution (the same value
     :attr:`abicheck.workflows.plan.AnalysisPlan.requested_depth` already
     carries). *available_depths* is the static four-rung public ladder
-    (:data:`abicheck.buildsource.scan_levels.USER_DEPTHS`) -- always
+    (read through :data:`abicheck.evidence_depth.DEPTH_RANK`) -- always
     populated, since it names what a request *could* have asked for, not
     what this run resolved; a **read-only property**, not a constructor
     parameter or dataclass field (Codex review, PR #1027, fourth round) --
