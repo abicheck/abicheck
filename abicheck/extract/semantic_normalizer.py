@@ -152,12 +152,34 @@ normalizer produces no *more* loss than the legacy
 ``functions``/``variables``/``types``/``enums`` fields already have for a
 manifest dump (all read from the identical, already-merged lists), but it
 also does not yet realize the IR's fuller multi-occurrence potential for
-that case. Closing this needs per-TU-fragment normalization *before*
-``merge_fragments`` collapses identities, threading a real TU-context
-disambiguator through — materially more than either slice's "project
-already-parsed output" scope. A single-header (non-manifest) dump is
-unaffected: there is only one translation unit, so there is nothing for
-``merge_fragments`` to collapse ahead of this function in the first place.
+that case.
+
+**Investigated and set aside, not merely unattempted.** The obvious close
+— normalize each ``TuFragment`` *before* ``merge_fragments`` collapses
+identities, threading a real TU-context disambiguator through — was
+traced through and found to be a no-op for the one pair
+``merge_fragments`` itself treats as a *compatible*, trivial merge (its
+own docstring): a record's forward-declaration/full-definition split.
+None of ``CanonicalEntity``'s four fields actually differ between the two
+occurrences that approach would produce — ``canonical_spelling``/
+``template_arguments`` both derive from the record's own qualified-name
+text, identical whether forward-declared or fully defined;
+``cv_qualification`` is ``NOT_COLLECTED`` for every record regardless
+(never populated for types, only for functions/variables); and
+``producer`` cannot legitimately differ within one successful merge (a
+per-fragment AST-producer mismatch is ``HETEROGENEOUS_ABI_CONTEXT``, a
+hard ``TuMergeError`` raised before any merge completes). Per-TU
+normalization would therefore build two ``OccurrenceId``\\ s mapping to two
+byte-identical ``CanonicalEntity`` values — pure duplication, not the
+"fuller multi-occurrence potential" the paragraph above names. Genuinely
+realizing it needs ``CanonicalEntity`` to grow a real completeness/
+availability discriminator it does not carry today — a model extension
+with its own persistence/comparability implications (Phase 0's
+``Fact[T]`` discipline, ``AbiSnapshot.semantic_ir``'s schema-v38 envelope),
+not a caller-ordering fix, and out of this normalizer's own scope. A
+single-header (non-manifest) dump is unaffected: there is only one
+translation unit, so there is nothing for ``merge_fragments`` to collapse
+ahead of this function in the first place.
 
 Backend-agnostic by construction: ``dumper_castxml.py`` and
 ``dumper_clang.py`` already expose the identical

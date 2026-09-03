@@ -13640,13 +13640,43 @@ incomplete-vs-complete pair spread across two TUs never reaches
 `SemanticIR.occurrences` as two occurrences there -- no *more* loss than the
 legacy `functions`/`variables`/`types`/`enums` fields already have for a
 manifest dump (all read the identical merged lists), but not yet the IR's
-fuller multi-occurrence potential either. Closing this needs per-TU-fragment
-normalization before the merge collapses identities, with a real TU-context
-disambiguator threaded through -- materially more than either slice's scope;
-a single-header dump is unaffected (nothing for the merge to collapse ahead
-of it). See `extract/semantic_normalizer.py`'s own docstring for the same
-note. The original Design/Files/Tests/Acceptance-criteria sections below
-are kept verbatim as the phase's full target shape -- each slice is a step
+fuller multi-occurrence potential either.
+
+**Investigated, not landed: the naive fix is a no-op with today's
+`CanonicalEntity` fields.** The obvious close -- normalize each
+`TuFragment` before `merge_fragments` collapses identities, keyed by a real
+per-TU disambiguator -- was investigated and set aside, because it would
+produce zero observable difference for the exact case this gap names,
+not merely a smaller one. `merge_fragments`'s own trivial-merge rule (this
+module's own docstring, above) already restricts a compatible merge to a
+forward-declaration/full-definition pair, a declaration/redeclaration
+pair, or an added-default-argument difference -- and for a `RecordType`,
+none of `CanonicalEntity`'s four fields (`canonical_spelling`,
+`template_arguments`, `cv_qualification`, `producer`) vary across that
+specific split: `canonical_spelling`/`template_arguments` both derive from
+the record's own qualified name text, which a forward declaration and its
+definition share byte-for-byte; `cv_qualification` is `NOT_COLLECTED` for
+every record regardless (this normalizer never populates it for types,
+only for functions/variables); and `producer` cannot legitimately differ
+within one successful merge (a per-fragment AST-producer mismatch is
+`HETEROGENEOUS_ABI_CONTEXT`, a hard `TuMergeError` raised before any
+merge completes). Normalizing per-fragment and keying by a TU
+disambiguator would therefore build two `OccurrenceId`s mapping to two
+byte-identical `CanonicalEntity` values -- pure duplication with no
+information the single merged occurrence didn't already carry, for the
+one pair `merge_fragments` itself allows through as "compatible". Actually
+distinguishing the two would need a genuine model extension --
+`CanonicalEntity` growing a completeness/availability discriminator (e.g.
+"this occurrence is a forward declaration" vs. "this occurrence is the
+full definition") that does not exist today -- which is a real schema
+change with its own persistence/comparability implications (ADR-063
+Phase 0's `Fact[T]` discipline, `AbiSnapshot.semantic_ir`'s schema-v38
+envelope), not a caller-ordering fix, and is out of scope for a
+without-review speculative addition. A single-header dump remains
+unaffected either way (nothing for the merge to collapse ahead of it).
+See `extract/semantic_normalizer.py`'s own docstring for the same note.
+The original Design/Files/Tests/Acceptance-criteria sections below are
+kept verbatim as the phase's full target shape -- each slice is a step
 toward that target, not a redefinition of it.
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
