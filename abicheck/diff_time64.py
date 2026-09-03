@@ -131,7 +131,19 @@ def _seed_surface_tokens(snap: AbiSnapshot) -> set[str]:
 
 
 def _fold_record_tokens(tokens: set[str], rec: RecordType) -> None:
-    """Fold a reachable record's field and base-class type spellings into *tokens*."""
+    """Fold a reachable record's field and base-class type spellings into *tokens*.
+
+    ADR-063 Phase 5B audit note: ``bases_fact``/``virtual_bases_fact`` stay
+    on the plain ``resolved_fact_value(..., [])`` bridge deliberately. This
+    is a single-snapshot reachability walk, folded into
+    ``_public_surface_tokens(old) | _public_surface_tokens(new)`` by
+    ``_diff_time64_abi`` below — a *union* of both sides, so an evidence gap
+    on either side only narrows the surface-token set, which can miss a
+    real ``time64`` roll-up (a false negative, already an accepted
+    limitation of this token-reachability heuristic) but never fabricates
+    one. No old/new pair exists at this call site for
+    :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
+    """
     for fld in rec.fields:
         _add_tokens(tokens, getattr(fld, "type", ""))
     # Inherited layout is public layout: fold base-class names in

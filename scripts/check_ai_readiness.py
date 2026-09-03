@@ -102,6 +102,7 @@ from learning_nav_order import check_learning_nav_order  # noqa: E402
 from no_inline_gate_computation import (  # noqa: E402
     check_no_inline_gate_computation,
 )
+from semantic_ir_cutover import check_semantic_ir_cutover  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -3345,6 +3346,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "fact-detector-misuse": check_fact_detector_misuse,
     "fact-field-readers": check_fact_field_readers,
     "fact-registry-completeness": check_fact_registry_completeness,
+    "semantic-ir-cutover": check_semantic_ir_cutover,
     "no-inline-gate-computation": check_no_inline_gate_computation,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,

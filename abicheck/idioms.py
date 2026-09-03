@@ -615,6 +615,15 @@ def _collect_base_targets(
     suppress a *newly introduced* public factory risk for the same Base in
     _emit_new_antipatterns(). When no public-header set was supplied every
     record is UNKNOWN, which is treated as in-surface (no behaviour change).
+
+    ADR-063 Phase 5B audit note: ``bases_fact`` stays on the plain
+    ``resolved_fact_value(..., [])`` bridge deliberately. This is a
+    single-snapshot (ADR-027 "surface-report") anti-pattern scan, not an
+    old/new comparison — a ``bases_fact`` evidence gap here only shrinks
+    ``base_targets``, which can miss a real
+    ``POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR`` (a false negative) but can never
+    fabricate one, so it carries none of the two-sided fabrication risk
+    :func:`~abicheck.compare.fact_comparison.compare_facts` exists to gate.
     """
     base_targets: set[str] = set()
     for rec in graph.snapshot.types:

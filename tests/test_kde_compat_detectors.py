@@ -43,6 +43,7 @@ from abicheck.diff_cxx_rules import (
 )
 from abicheck.model import (
     AbiSnapshot,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -80,7 +81,21 @@ def _method(
 
 
 def _cls(name: str, *, vtable: list[str] | None = None) -> RecordType:
-    return RecordType(name=name, kind="class", size_bits=64, vtable=vtable or [])
+    # ADR-063 Phase 5B: `bases`/`virtual_bases` are stated explicitly (an
+    # empty list, not omitted) so `bases_fact`/`virtual_bases_fact` read
+    # PRESENT — the same "always stated, even when empty" shape every real
+    # producer (`dwarf_snapshot.py` et al.) already constructs, and what
+    # `diff_cxx_rules.virtual_method_addition`'s evidence-completeness check
+    # now requires before it will trust a transitive-bases walk that reaches
+    # this record.
+    return RecordType(
+        name=name,
+        kind="class",
+        size_bits=64,
+        vtable=vtable or [],
+        bases=[],
+        virtual_bases=[],
+    )
 
 
 def _kinds(result) -> set[ChangeKind]:
@@ -273,7 +288,12 @@ class TestVirtualMethodAdded:
         slot — ABI-compatible, not a new slot. Must not fire."""
         base = _cls("Base")
         derived = RecordType(
-            name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"]
+            name="Derived",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases=["Base"],
+            virtual_bases=[],
         )
         old = _snap(
             functions=[
@@ -302,7 +322,12 @@ class TestVirtualMethodAdded:
         not an override — must still fire."""
         base = _cls("Base")
         derived = RecordType(
-            name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"]
+            name="Derived",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases=["Base"],
+            virtual_bases=[],
         )
         old = _snap(
             functions=[
@@ -342,7 +367,12 @@ class TestVirtualMethodAdded:
         leaf-only records) must resolve bases and stay compatible."""
         base = _cls("Base")  # CastXML stores ns::Base as leaf "Base"
         derived = RecordType(
-            name="Derived", kind="class", size_bits=64, vtable=[], bases=["Base"]
+            name="Derived",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases=["Base"],
+            virtual_bases=[],
         )
         old = _snap(
             functions=[
@@ -377,6 +407,122 @@ class TestVirtualMethodAdded:
         )
         result = compare(old, new)
         assert ChangeKind.VIRTUAL_METHOD_ADDED not in _kinds(result)
+
+    def test_incomplete_bases_evidence_declines_rather_than_fabricates(self):
+        """ADR-063 Phase 5B: a class whose ``bases``/``virtual_bases``
+        evidence never arrived (``NOT_COLLECTED``, not confirmed-empty) must
+        not be read as "no bases, therefore no possible override" — that
+        gap could just as easily be hiding the very base that would make
+        this an ABI-compatible override, not a genuine new virtual slot.
+        Declining is the safe default (a missed VIRTUAL_METHOD_ADDED, not a
+        fabricated one), the same "decline rather than fabricate" discipline
+        already applied to ``bases``/``virtual_bases``/``is_va_list`` at
+        their primary finding-emitting call sites.
+        """
+        derived = RecordType(
+            name="Derived",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases_fact=Fact.not_collected(),
+            virtual_bases_fact=Fact.not_collected(),
+        )
+        old = _snap(
+            functions=[
+                _method("Derived::help", "_ZN7Derived4helpEv"),
+            ],
+            types=[derived],
+        )
+        new = _snap(
+            functions=[
+                _method("Derived::help", "_ZN7Derived4helpEv"),
+                _method("Derived::resize", "_ZN7Derived6resizeEv", is_virtual=True),
+            ],
+            types=[derived],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED not in _kinds(result)
+
+    def test_partial_virtual_bases_evidence_declines(self):
+        """Sibling case: ``PARTIAL`` (not ``NOT_COLLECTED``) is incomplete
+        too — the uncovered remainder of a partially-covered virtual-bases
+        list could hold the very base that makes this an override."""
+        derived = RecordType(
+            name="Derived",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases_fact=Fact.present([]),
+            virtual_bases_fact=Fact.partial([]),
+        )
+        old = _snap(
+            functions=[_method("Derived::help", "_ZN7Derived4helpEv")],
+            types=[derived],
+        )
+        new = _snap(
+            functions=[
+                _method("Derived::help", "_ZN7Derived4helpEv"),
+                _method("Derived::resize", "_ZN7Derived6resizeEv", is_virtual=True),
+            ],
+            types=[derived],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED not in _kinds(result)
+
+    def test_incomplete_evidence_on_transitive_base_declines(self):
+        """Sibling case: the owner's own ``bases``/``virtual_bases`` are
+        fully confirmed, but a base reached *transitively* (one level
+        further out) has incomplete evidence — the walk-wide completeness
+        tracking must catch this too, not just the immediate owner's own
+        facts."""
+        base = RecordType(
+            name="Base",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases_fact=Fact.not_collected(),  # Base's own ancestry is unknown
+            virtual_bases_fact=Fact.not_collected(),
+        )
+        derived = RecordType(
+            name="Derived",
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            bases=["Base"],
+            virtual_bases=[],
+        )
+        old = _snap(
+            functions=[_method("Derived::help", "_ZN7Derived4helpEv")],
+            types=[base, derived],
+        )
+        new = _snap(
+            functions=[
+                _method("Derived::help", "_ZN7Derived4helpEv"),
+                _method("Derived::resize", "_ZN7Derived6resizeEv", is_virtual=True),
+            ],
+            types=[base, derived],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED not in _kinds(result)
+
+    def test_complete_empty_bases_evidence_still_fires(self):
+        """The control for the previous test: a *confirmed*-empty
+        ``bases``/``virtual_bases`` (``PRESENT`` status, empty list — what
+        every real producer emits for a base-less class) is fully trusted,
+        same as before this evidence-completeness check existed."""
+        old = _snap(
+            functions=[_method("Derived::help", "_ZN7Derived4helpEv")],
+            types=[_cls("Derived")],
+        )
+        new = _snap(
+            functions=[
+                _method("Derived::help", "_ZN7Derived4helpEv"),
+                _method("Derived::resize", "_ZN7Derived6resizeEv", is_virtual=True),
+            ],
+            types=[_cls("Derived")],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED in _kinds(result)
 
 
 # ── OVERLOAD_ADDED ───────────────────────────────────────────────────────────

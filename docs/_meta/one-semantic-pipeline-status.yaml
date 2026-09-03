@@ -72,14 +72,25 @@ concepts:
       compare_facts()/FactComparison primitive, wired into two of the five
       named fields' primary finding-emitting call sites (bases/
       virtual_bases in diff_types._diff_type_bases, is_va_list in
-      diff_param_qualifiers.param_va_list_changes). Not yet closed: vtable/
+      diff_param_qualifiers.param_va_list_changes). Second slice landed
+      2026-09-03 (the "lower-risk batch"): every *other* bases/
+      virtual_bases-reading call site was audited — diff_cxx_rules.py's
+      _transitive_bases (the one genuine old/new pairwise fabrication risk
+      among them, feeding virtual_method_addition's override check) is now
+      evidence-completeness-gated the same way; diff_stdlib_impl.py,
+      diff_time64.py, idioms.py, buildsource/header_graph.py, and
+      surface_graph.py (already gated) are single-snapshot reachability/
+      classification aids with no old/new pair to gate — each now carries
+      an explicit ADR-063 Phase 5B docstring note recording why the plain
+      resolved_fact_value() collapse is safe there (an evidence gap only
+      narrows a closure or omits a graph edge, it cannot fabricate a
+      finding). is_va_list has no other readers. Not yet closed: vtable/
       vptr_offset_bits (diff_types_vtable.py/diff_layout.py/
       diff_vtable_layout.py's own pre-existing, individually-reasoned
-      evidence-gap heuristics — deliberately left alone pending their own
-      dedicated slice) and every other reader of the two converted fields
-      (diff_cxx_rules.py, diff_stdlib_impl.py, diff_time64.py, idioms.py,
-      surface_graph.py, buildsource/header_graph.py, diff_cpp_patterns.py)
-      — see the plan's own 5B note for detail.
+      evidence-gap heuristics, plus their downstream readers in
+      diff_cxx_rules.py's own vtable comparison, idioms.py, and
+      diff_cpp_patterns.py — deliberately left alone pending their own
+      dedicated slice, per the plan's own 5B note).
 
   identity:
     primitive: complete
@@ -87,12 +98,31 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Phase 2B (identity-consumer-migration), not started: diff_filtering.py
-      and type_reachability.py's string-suffix/substring identity logic
-      must still be migrated onto EntityId; a StableEntityId/
-      SnapshotLocalIdentity split must still land so the entity: alias can
-      be promoted into a real match tier without risking cross-release
-      suppression-id drift. Separately, producers remain partial: both
+      Phase 2B (identity-consumer-migration), partial as of 2026-09-03:
+      the StableEntityId/SnapshotLocalIdentity split landed
+      (abicheck/model/identity_tiers.py), and two post-parse consumers
+      migrated onto it -- diff_filtering.py's opaque-type suppression
+      (now compare/opaque_types.OpaqueTypeIndex, matching on
+      StableEntityId first and the RecordType.name spelling second) and
+      type_reachability.py's closure-walk record-tracking keys (now
+      SnapshotLocalIdentity rather than bare str). Still open: the
+      opaque-type index does not yet NARROW -- the bare-RecordType.name
+      collision remains reachable through its spelling tier, because
+      making the stable tier authoritative would drop a real suppression
+      whenever two sides' producers disagree about whether an identity
+      was resolved; that needs stable-tier completeness on both sides
+      first. type_reachability.py's own spelling-matching machinery
+      (_spelling_index/_stripped_signature_spelling/
+      _non_stdlib_signature_spellings and _record_identity's three call
+      sites) is deliberately NOT migrated: those strings are spellings
+      that must appear inside a rendered Function.return_type/Param.type,
+      not opaque identities -- the same conclusion Phase 2's ninth slice
+      reached and recorded. And the entity: alias is still not promoted
+      into a real match tier: StableEntityId makes the gate
+      un-forgettable but does not by itself establish that changing what
+      report_canonical_finding_id hashes is safe for already-stored
+      suppression rules, which needs explicit maintainer sign-off.
+      Separately, producers remain partial: both
       PDB and BTF/CTF now populate entity_id for struct/enum types only
       (types only, 2026-09-03) -- PDB via extract/pdb_scope.py (an
       unverified-against-real-MSVC namespace-vs-record heuristic; no MSVC
@@ -118,13 +148,29 @@ concepts:
   semantic_ir:
     primitive: complete
     producers: partial
-    consumers: not_started
-    authority: legacy
+    consumers: partial
+    authority: mixed
     removal_gate: >-
-      Phase 6B (semantic-ir-checker-cutover): at least one detector
-      family reads SemanticIR through a shared read index instead of
-      AbiSnapshot.functions/types/..., with an architecture-gate rule
-      forbidding a direct legacy-collection read for that family.
+      Phase 6B (semantic-ir-checker-cutover), first cohort landed
+      2026-09-03: the TYPEDEF family now reads SemanticIR through
+      SemanticIRIndex (abicheck/compare/typedefs.py), with a
+      legacy-flat-snapshot adapter
+      (abicheck/model/semantic_ir_legacy_adapter.py) producing the same
+      read shape for a snapshot carrying no SemanticIR, and a new
+      semantic-ir-cutover AI-readiness check (scripts/semantic_ir_cutover.py,
+      a real AST scan, no allowlist) forbidding that module from reading
+      AbiSnapshot.typedefs/typedefs_qualified/typedef_entity_ids. Which
+      backing is used is decided by a fidelity gate requiring the IR's own
+      rendered display names to reproduce the comparison's alias maps
+      exactly on BOTH sides, so the cutover is behavior-preserving by
+      construction. EVERY OTHER detector family remains unmigrated and
+      still reads the legacy collections directly -- deliberately, per
+      this phase's own non-goal of not widening coverage until one full
+      vertical slice is proven; each further cohort needs its own
+      MIGRATED_COHORTS entry. SemanticIRIndex.references() is still
+      unimplemented (it names a graph traversal belonging with the
+      public-surface reference index, ADR-063 D5 / plan Phase 3), so the
+      typedef cohort does not use it.
       Producers remain partial regardless (CanonicalEntity.template_arguments
       is populated for records but not for function templates, and clang
       produces no occurrence at all for a template specialization).

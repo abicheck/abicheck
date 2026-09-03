@@ -21,6 +21,11 @@ from collections import deque
 
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
+from .compare.opaque_types import (
+    find_by_value_types,
+    find_opaque_types,
+    is_impl_source,
+)
 from .diff_helpers import (
     canonicalize_record_symbol,
     cross_tier_transition,
@@ -31,6 +36,17 @@ from .diff_helpers import (
 from .diff_symbols import _PUBLIC_VIS, _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
+
+# Back-compat aliases: the ADR-063 Phase 2 migration moved the opaque-type
+# index and its construction into their `compare/` owner, but
+# `tests/test_cov95_diff_filtering.py` imports all three from here by their
+# private names. Module-level bindings rather than `as`-aliased imports,
+# since ruff only recognizes the identical-name form as an intentional
+# re-export.
+_find_opaque_types = find_opaque_types
+_find_by_value_types = find_by_value_types
+_is_impl_source = is_impl_source
+
 
 # ── Post-processing: enrich and deduplicate ────────────────────────────────
 
@@ -1594,79 +1610,6 @@ _STRUCTURAL_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
 
 
 # Source file extensions that indicate an implementation (non-header) file.
-_IMPL_EXTENSIONS = frozenset({".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm"})
-
-
-def _is_impl_source(source_location: str | None) -> bool:
-    """Check if a source_location path refers to an implementation file."""
-    if not source_location:
-        return False
-    # source_location may be "foo.c:42" — strip line number
-    path = source_location.split(":")[0] if ":" in source_location else source_location
-    # Get file extension
-    dot = path.rfind(".")
-    if dot < 0:
-        return False
-    ext = path[dot:].lower()
-    return ext in _IMPL_EXTENSIONS
-
-
-def _find_opaque_types(snap: AbiSnapshot) -> set[str]:
-    """Find types that are opaque to consumers.
-
-    A type is opaque when:
-
-    1. castxml marks it as ``incomplete`` (``is_opaque=True``) — the public
-       header has only a forward declaration, OR
-    2. The type definition is in an implementation file (.c/.cpp) AND all
-       public-API references use pointers (never by value).  This handles
-       DWARF mode where castxml is not used but DWARF's ``DW_AT_decl_file``
-       reveals the type is implementation-private.
-    """
-    opaque: set[str] = set()
-
-    for t in snap.types:
-        if t.is_opaque:
-            opaque.add(t.name)
-        elif _is_impl_source(t.source_location):
-            # Type is defined in an implementation file — only consider it
-            # opaque if all API references are through pointers.
-            opaque.add(t.name)
-
-    if not opaque:
-        return set()
-
-    by_value_types = _find_by_value_types(snap, opaque)
-
-    return opaque - by_value_types
-
-
-def _find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
-    """Return the subset of *opaque* types that any public function/variable uses by value."""
-    by_value_types: set[str] = set()
-    for func in snap.functions:
-        if func.visibility not in _PUBLIC_VIS:
-            continue
-        rt = func.return_type.strip()
-        for tname in opaque:
-            if tname in rt and not (rt.endswith("*") or "* " in rt):
-                by_value_types.add(tname)
-        for param in func.params:
-            pt = param.type.strip()
-            for tname in opaque:
-                if tname in pt and param.pointer_depth == 0 and not pt.endswith("*"):
-                    by_value_types.add(tname)
-    # Also check variables — a public variable of this type means it's by-value
-    for var in snap.variables:
-        if var.visibility not in _PUBLIC_VIS:
-            continue
-        vt = var.type.strip()
-        for tname in opaque:
-            if tname in vt and not (vt.endswith("*") or "* " in vt):
-                by_value_types.add(tname)
-    return by_value_types
-
-
 def _downgrade_opaque_type_changes(
     changes: list[Change],
     old: AbiSnapshot,
@@ -1678,11 +1621,31 @@ def _downgrade_opaque_type_changes(
     in headers, or defined in an implementation file with pointer-only API),
     consumers never see its layout.  Size/field changes are invisible and
     should not be classified as BREAKING.
+
+    **Identity-tiered since ADR-063 Phase 2's post-parse consumer
+    migration.** A change is matched against the opaque index by its own
+    :class:`~abicheck.model.identity_tiers.StableEntityId` first and by its
+    display spelling second (:meth:`~abicheck.compare.opaque_types.OpaqueTypeIndex.contains`). The stable
+    tier closes a real false *negative*: ``Change.symbol`` for a type
+    finding is rendered bare on some paths and qualified on others, while
+    ``RecordType.name`` is bare on the header backends and namespace-baked
+    on DWARF, so a string compare could miss a declaration both sides agree
+    on -- where two matching stable ``EntityId``s prove it.
+
+    **What this deliberately does not yet do**, stated rather than implied:
+    it does not *narrow*. The bare-``RecordType.name`` collision the plan
+    names for this site (two unrelated types sharing a leaf spelling in
+    different scopes, one opaque, both suppressed) is still reachable
+    through the spelling tier. Making the stable tier authoritative --
+    matching *only* on it whenever the change carries one -- would close
+    that collision, but silently drops a real suppression whenever the two
+    sides' producers disagree about whether an identity was resolved at all
+    (a mixed header-AST/DWARF comparison), which is a live false-positive
+    risk against this repo's FP-rate gate. Closing the collision needs the
+    stable tier to be complete on both sides first; that is a separate,
+    separately-reviewable step, not a drive-by here.
     """
-    opaque_old = _find_opaque_types(old)
-    opaque_new = _find_opaque_types(new)
-    # Type must be opaque in BOTH snapshots to suppress changes
-    opaque = opaque_old & opaque_new
+    opaque = _find_opaque_types(old).intersect(_find_opaque_types(new))
 
     if not opaque:
         return changes
@@ -1691,8 +1654,7 @@ def _downgrade_opaque_type_changes(
     for c in changes:
         if c.kind in _STRUCTURAL_TYPE_CHANGE_KINDS:
             # Extract type name from symbol (may be "TypeName" or "ns::TypeName::field")
-            type_name = _root_type_name(c)
-            if type_name in opaque:
+            if opaque.contains(c, _root_type_name(c)):
                 # Suppress entirely: the type is opaque (forward-declared only)
                 # so layout changes are invisible to consumers.
                 continue

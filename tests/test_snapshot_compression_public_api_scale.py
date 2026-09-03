@@ -16,13 +16,21 @@
 (bug-class-regression-testing.md Phase 7).
 
 Split out of ``test_snapshot_compression.py`` (already at that file's own
-1500-line AI-readiness soft cap) rather than grown in place -- reuses
-``_graph_heavy_snapshot`` from there, the same fixture builder
+1500-line AI-readiness soft cap) rather than grown in place -- like that
+module, reuses the shared, cached production-scale fixtures in the leaf
+helper module ``_production_scale_snapshot.py``
+(``graph_heavy_snapshot_at_scale()``/``graph_heavy_snapshot_at_scale_json_
+bytes()``/``graph_heavy_snapshot_at_scale_compressed_bytes()``,
+``functools``-cached around ``graph_heavy_snapshot``, the underlying
+fixture builder), the same >8 MiB serialized snapshot
 ``test_zstd_round_trip_at_production_scale_and_level``/
-``test_gzip_round_trip_at_production_scale`` already use to produce a real,
->8 MiB serialized snapshot (the threshold where zstd's auto-selected window
-actually reproduces the real oneDAL-scale ADR-059 §12 regression, rather
-than collapsing to the content size the way a toy-scale fixture would).
+``test_gzip_round_trip_at_production_scale`` already use (the threshold
+where zstd's auto-selected window actually reproduces the real oneDAL-scale
+ADR-059 §12 regression, rather than collapsing to the content size the way a
+toy-scale fixture would) -- cached and shared rather than each test/
+parametrize case here independently rebuilding, re-serializing, and
+re-compressing its own ~8600-entry copy, since the content is identical and
+pure/deterministic either way (see that module's own docstring).
 
 Those two existing tests are real and already go through the true public
 entry point *one layer down* -- ``abicheck.snapshot_io.write_snapshot_bytes``/
@@ -61,30 +69,64 @@ silently returned the same truncated/default snapshot for both operands
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
+from _production_scale_snapshot import (
+    graph_heavy_snapshot_at_scale,
+    graph_heavy_snapshot_at_scale_compressed_bytes,
+    graph_heavy_snapshot_at_scale_json_bytes,
+)
 from click.testing import CliRunner
-from test_snapshot_compression import _graph_heavy_snapshot
 
 from abicheck.cli import main
 from abicheck.model import Function, Visibility
-from abicheck.serialization import load_snapshot, save_snapshot, snapshot_to_dict
+from abicheck.serialization import load_snapshot, save_snapshot
 from abicheck.service import resolve_input
-from abicheck.snapshot_io import SnapshotCompression, detect_snapshot_compression
+from abicheck.snapshot_io import (
+    ZSTD_LEVEL_BASELINE,
+    SnapshotCompression,
+    detect_snapshot_compression,
+)
 
 _MARKER_NAME = "brand_new_marker_fn"
 _MARKER_MANGLED = "_Z20brand_new_marker_fnv"
 
 
-def _production_scale_bytes(snap) -> int:
-    """Sanity-checks and returns the serialized size, matching the >8 MiB
-    threshold the sibling module's own production-scale tests assert --
-    the point past which zstd's auto-selected window stops collapsing to
-    the content size and actually reproduces the real ADR-059 §12 shape."""
-    size = len(json.dumps(snapshot_to_dict(snap)).encode())
-    assert size > 8 * 1024 * 1024
-    return size
+def _write_cached_production_scale_file(path, suffix: str) -> None:
+    """Writes the shared cached compressed bytes for *suffix*'s algorithm
+    directly to *path* -- byte-identical to what a real
+    ``save_snapshot(graph_heavy_snapshot_at_scale(), path)`` call would
+    produce (see ``graph_heavy_snapshot_at_scale_compressed_bytes``'s own
+    docstring for why that's a safe substitution), without repeating the
+    compression work ``test_save_load_snapshot_round_trips_at_production_
+    scale`` already proves end-to-end via the real ``save_snapshot`` entry
+    point. Use this only for a file whose content is the unmodified shared
+    fixture -- a caller with genuinely different content (the CLI test's
+    ``new_snap``) must still go through a real ``save_snapshot`` call."""
+    compression = _compression_for_suffix(suffix)
+    zstd_level = (
+        ZSTD_LEVEL_BASELINE if compression is SnapshotCompression.ZSTD else None
+    )
+    path.write_bytes(
+        graph_heavy_snapshot_at_scale_compressed_bytes(compression, zstd_level)
+    )
+
+
+def _production_scale_size() -> int:
+    """The shared, cached production-scale content's serialized length --
+    every test below drives a different public entry point over the *same*
+    cached ~8600-entry graph (`_production_scale_snapshot.py`'s
+    `graph_heavy_snapshot_at_scale()`/`graph_heavy_snapshot_at_scale_
+    json_bytes()`) rather than each independently rebuilding and
+    re-serializing its own copy, so this is the >8 MiB threshold every test
+    here relies on (the point past which zstd's auto-selected window stops
+    collapsing to the content size and actually reproduces the real
+    ADR-059 §12 shape) -- computed lazily, on first call from an actual
+    (`slow`-marked) test body, not at collection/import time, so a run that
+    never executes these tests never pays for it."""
+    return len(graph_heavy_snapshot_at_scale_json_bytes())
 
 
 def _assert_realistic_zstd_window(zstandard, p) -> None:
@@ -133,8 +175,8 @@ def test_save_load_snapshot_round_trips_at_production_scale(tmp_path, suffix):
         else None
     )
 
-    original = _graph_heavy_snapshot(n=8600)
-    _production_scale_bytes(original)
+    original = graph_heavy_snapshot_at_scale()
+    assert _production_scale_size() > 8 * 1024 * 1024
 
     p = tmp_path / f"production_scale{suffix}"
     save_snapshot(original, p)
@@ -170,15 +212,22 @@ def test_service_resolve_input_round_trips_a_compressed_snapshot_at_production_s
     ``zstandard`` is only ever imported for the zstd case -- the gzip case
     must not be skipped just because that optional dependency is absent
     (CodeRabbit review, PR #911).
+
+    The file itself is written via the shared cached compressed bytes
+    (``_write_cached_production_scale_file``), not a fresh ``save_snapshot``
+    call -- byte-identical either way (see that helper's own docstring); the
+    real write path is what
+    ``test_save_load_snapshot_round_trips_at_production_scale`` proves, this
+    test's job is the *read* path.
     """
     is_zstd = _compression_for_suffix(suffix) is SnapshotCompression.ZSTD
     zstandard = pytest.importorskip("zstandard") if is_zstd else None
 
-    original = _graph_heavy_snapshot(n=8600)
-    _production_scale_bytes(original)
+    original = graph_heavy_snapshot_at_scale()
+    assert _production_scale_size() > 8 * 1024 * 1024
 
     p = tmp_path / f"production_scale{suffix}"
-    save_snapshot(original, p)
+    _write_cached_production_scale_file(p, suffix)
 
     if zstandard is not None:
         _assert_realistic_zstd_window(zstandard, p)
@@ -218,26 +267,47 @@ def test_compare_cli_diffs_compressed_snapshots_at_production_scale(tmp_path, su
     ``zstandard`` is only ever required for the zstd case -- the gzip case
     must not be skipped just because that optional dependency is absent
     (CodeRabbit review, PR #911).
+
+    ``old_p`` is written from the shared cached compressed bytes rather than
+    a fresh ``save_snapshot`` call (see ``_write_cached_production_scale_
+    file``'s docstring); ``new_p`` -- genuinely distinct content -- still
+    goes through a real ``save_snapshot`` call, same as before.
     """
     if _compression_for_suffix(suffix) is SnapshotCompression.ZSTD:
         pytest.importorskip("zstandard")
 
-    old_snap = _graph_heavy_snapshot(n=8600)
-    _production_scale_bytes(old_snap)
+    old_snap = graph_heavy_snapshot_at_scale()
+    assert _production_scale_size() > 8 * 1024 * 1024
 
-    new_snap = _graph_heavy_snapshot(n=8600)
-    new_snap.functions.append(
-        Function(
-            name=_MARKER_NAME,
-            mangled=_MARKER_MANGLED,
-            return_type="void",
-            visibility=Visibility.PUBLIC,
-        )
+    # dataclasses.replace(), not `new_snap.functions.append(...)`: `old_snap`
+    # is the shared, process-wide cached fixture (see its own docstring) --
+    # mutating it in place would corrupt every other test in this worker
+    # process that reads it afterwards. This derives a distinct AbiSnapshot
+    # with a new `functions` list (old_snap's own ~8600 Function objects,
+    # reused by reference since they're never mutated, plus the one marker)
+    # without rebuilding or deep-copying the underlying graph.
+    new_snap = dataclasses.replace(
+        old_snap,
+        functions=[
+            *old_snap.functions,
+            Function(
+                name=_MARKER_NAME,
+                mangled=_MARKER_MANGLED,
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
     )
 
     old_p = tmp_path / f"old{suffix}"
     new_p = tmp_path / f"new{suffix}"
-    save_snapshot(old_snap, old_p)
+    # `old_p` is the unmodified shared fixture's content -- write the cached
+    # compressed bytes (see `_write_cached_production_scale_file`'s
+    # docstring) rather than recompressing it a third time. `new_p` is
+    # genuinely distinct content (one added function), so it still needs a
+    # real compression -- via the real `save_snapshot` entry point, same as
+    # before.
+    _write_cached_production_scale_file(old_p, suffix)
     save_snapshot(new_snap, new_p)
 
     result = CliRunner().invoke(
