@@ -62,6 +62,10 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
     "pytest-xdist>=3.0",
+    # Per-test hang safety valve (see [tool.pytest.ini_options]'s `timeout`
+    # below) -- not a perf gate, see that setting's own comment for the
+    # distinction.
+    "pytest-timeout>=2.3",
     "filelock>=3.0",
     "hypothesis>=6.0",
     # Pinned exactly, and kept in lockstep with .pre-commit-config.yaml's
@@ -273,6 +277,24 @@ markers = [
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
 ]
+# Global per-test hang safety valve (pytest-timeout), not a perf regression
+# gate -- CI's own "Test-time report" step already says a *hard* wall-time
+# gate would be flaky given CI-runner variance, and this isn't one: 600s is
+# ~3x the slowest legitimate test observed in this suite (the production-
+# scale snapshot-compression round trips in
+# tests/test_snapshot_compression_public_api_scale.py, ~90-195s each), so it
+# should never fire on ordinary CI variance. What it exists to catch is a
+# genuine stuck test -- e.g. the real incident this was added for, where a
+# macOS unit-tests leg sat inside a single non-`slow` compression test for
+# ~20 minutes with no progress until the whole 30-minute job was cancelled,
+# producing zero diagnostic signal about which test or why. pytest-timeout
+# kills (or, under `-n`/xdist, reports and moves past) just that one test and
+# dumps its stack, so the job's other tests still run and the log names the
+# actual offender instead of a bare "operation was canceled". Uses
+# pytest-timeout's own platform default `timeout_method` (`signal` on
+# Linux/macOS -- the two platforms that actually hit this -- `thread` on
+# Windows) rather than forcing one globally.
+timeout = 600
 
 [tool.setuptools.packages.find]
 include = ["abicheck*"]
@@ -465,7 +487,24 @@ pytest_add_cli_args = [
     "--ignore=tests/test_publish_baseline_upload_step_generation.py",
     "--ignore=tests/test_restore_git_mtimes.py",
     "--ignore=tests/test_reusable_workflows.py",
-    # Third member of the same re-entrant-subprocess class as the two
+    # Same re-entrant-subprocess class as `test_reusable_workflows.py`
+    # immediately above and `test_reusable_workflows_project_evidence.py`
+    # below -- `test_precheck_script_threads_explicit_id_into_check_id`
+    # drives check-project.yml's "Synthesize pre-check operational-error
+    # report" step via a real `subprocess.run(["bash", "-c", script],
+    # cwd=tmp_path, env={**os.environ, ...})`, so it inherits mutmut's own
+    # PYTHONPATH into that scratch cwd the identical way. First surfaced by
+    # PR #1033 (this PR touched enough `tests/` paths to trip
+    # `--scope-run-to-diff`'s "refuse to scope" fallback to a full,
+    # unscoped run, same discovery path as the `test_agent_evals.py` entry
+    # below) as a bare `KeyError: 'check-id'` aborting `mutmut run`'s
+    # baseline collection before a single mutant was measured -- this file
+    # was simply added after its two siblings and missed here. Free
+    # exclusion, no `_ACCEPTED_KILL_LOSS` entry needed: it imports no
+    # `only_mutate` module, directly or via `test_reusable_workflows`
+    # (confirmed by grep), the same as the sibling immediately above.
+    "--ignore=tests/test_reusable_workflows_explicit_id.py",
+    # Fourth member of the same re-entrant-subprocess class as the three
     # entries above: test_resolver_selects_only_the_current_targets_evidence
     # runs check-project.yml's "Resolve candidate binary/binaries" step
     # from a scratch cwd, and that step's own child imports `abicheck` --

@@ -265,9 +265,21 @@ jobs:
         run: |
           pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run slow tests (hypothesis / property-based)
+        # -n auto --dist worksteal, matching every other step in this job:
+        # this step ran fully serial (no `-n`) while its siblings didn't,
+        # and the `slow`-marked tests it selects are independent
+        # (Hypothesis/property-based suites plus the production-scale
+        # snapshot-compression round trips in
+        # tests/test_snapshot_compression_public_api_scale.py, individually
+        # 90-195s), so running them one at a time was pure wasted wall time
+        # on a multi-core runner and a real contributor to this leg
+        # repeatedly running past its own timeout-minutes (see that
+        # comment's own incident history above). pytest-cov's xdist
+        # integration combines per-worker coverage automatically, so
+        # --cov-append here still lands in one coverage-slow.xml.
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/ -v --tb=short -m "slow" -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner
