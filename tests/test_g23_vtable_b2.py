@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """G23 Phase B2 — L1 DWARF vtable-group reconstruction detector."""
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -69,16 +70,41 @@ class TestSecondaryVtableGroup:
     def test_stable_hierarchy_not_flagged(self):
         old = self._hierarchy(b_is_poly=True)
         new = self._hierarchy(b_is_poly=True)
-        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(compare(old, new))
+        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(
+            compare(old, new)
+        )
+
+    def test_legacy_unreliable_snapshot_suppresses_the_finding(self):
+        # Codex review, this slice: a whole-snapshot clang_vtable_facts_
+        # reliable=False (the legacy pre-v21 direct-clang shape) must
+        # suppress the finding even though the per-record vtable_fact
+        # reads confirmed (this test constructs it that way on purpose --
+        # a real legacy load always keeps the two in sync via storage.
+        # fact_backfill, but this defense-in-depth check does not assume a
+        # caller does).
+        old = self._hierarchy(b_is_poly=False)
+        old.clang_vtable_facts_reliable = False
+        new = self._hierarchy(b_is_poly=True)
+        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(
+            compare(old, new)
+        )
 
     def test_primary_only_base_change_not_flagged(self):
         # Only the primary base A is polymorphic on both sides → no secondary
         # groups → nothing to report even if A's own vtable churns.
-        old = _snap(_poly("A", vtable=["_ZN1A1fEv"]), _poly("B"),
-                    _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"]))
-        new = _snap(_poly("A", vtable=["_ZN1A1fEv", "_ZN1A1hEv"]), _poly("B"),
-                    _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"]))
-        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(compare(old, new))
+        old = _snap(
+            _poly("A", vtable=["_ZN1A1fEv"]),
+            _poly("B"),
+            _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"]),
+        )
+        new = _snap(
+            _poly("A", vtable=["_ZN1A1fEv", "_ZN1A1hEv"]),
+            _poly("B"),
+            _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"]),
+        )
+        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(
+            compare(old, new)
+        )
 
     def test_indeterminate_base_skips_finding(self):
         # B is absent from the new snapshot → polymorphism indeterminate →
@@ -87,15 +113,23 @@ class TestSecondaryVtableGroup:
         a = _poly("A", vtable=["_ZN1A1fEv"])
         d = _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"])
         new = _snap(a, d)  # no B
-        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(compare(old, new))
+        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(
+            compare(old, new)
+        )
 
     def test_moved_base_left_to_position_detector(self):
         # When the derived class's OWN base list reorders, the secondary-group
         # detector stays quiet (base_class_position_changed owns that case).
-        old = _snap(_poly("A", vtable=["_ZN1A1fEv"]), _poly("B", vtable=["_ZN1B1gEv"]),
-                    _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"]))
-        new = _snap(_poly("A", vtable=["_ZN1A1fEv"]), _poly("B", vtable=["_ZN1B1gEv"]),
-                    _poly("D", vtable=["_ZN1D1fEv"], bases=["B", "A"]))
+        old = _snap(
+            _poly("A", vtable=["_ZN1A1fEv"]),
+            _poly("B", vtable=["_ZN1B1gEv"]),
+            _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"]),
+        )
+        new = _snap(
+            _poly("A", vtable=["_ZN1A1fEv"]),
+            _poly("B", vtable=["_ZN1B1gEv"]),
+            _poly("D", vtable=["_ZN1D1fEv"], bases=["B", "A"]),
+        )
         ks = _kinds(compare(old, new))
         assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in ks
         assert ChangeKind.BASE_CLASS_POSITION_CHANGED in ks
@@ -107,19 +141,23 @@ class TestSecondaryVtableGroup:
 class TestVirtualBaseOffset:
     def test_virtual_base_reorder_detected(self):
         # class D : virtual A, virtual B  →  virtual B, virtual A
-        old = _snap(_poly("A"), _poly("B"),
-                    _poly("D", vtable=["_ZN1D1fEv"], virtual_bases=["A", "B"]))
-        new = _snap(_poly("A"), _poly("B"),
-                    _poly("D", vtable=["_ZN1D1fEv"], virtual_bases=["B", "A"]))
+        old = _snap(
+            _poly("A"),
+            _poly("B"),
+            _poly("D", vtable=["_ZN1D1fEv"], virtual_bases=["A", "B"]),
+        )
+        new = _snap(
+            _poly("A"),
+            _poly("B"),
+            _poly("D", vtable=["_ZN1D1fEv"], virtual_bases=["B", "A"]),
+        )
         r = compare(old, new)
         assert ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED in _kinds(r)
         assert r.verdict == Verdict.BREAKING
 
     def test_same_order_not_flagged(self):
-        old = _snap(_poly("A"), _poly("B"),
-                    _poly("D", virtual_bases=["A", "B"]))
-        new = _snap(_poly("A"), _poly("B"),
-                    _poly("D", virtual_bases=["A", "B"]))
+        old = _snap(_poly("A"), _poly("B"), _poly("D", virtual_bases=["A", "B"]))
+        new = _snap(_poly("A"), _poly("B"), _poly("D", virtual_bases=["A", "B"]))
         assert ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED not in _kinds(compare(old, new))
 
     def test_single_virtual_base_not_flagged(self):
@@ -131,19 +169,28 @@ class TestVirtualBaseOffset:
     def test_virtual_base_set_change_left_to_base_detectors(self):
         # Adding/removing a virtual base (set change) is not a pure reorder, so
         # this detector stays quiet and the base-set detectors handle it.
-        old = _snap(_poly("A"), _poly("B"),
-                    _poly("D", virtual_bases=["A", "B"]))
-        new = _snap(_poly("A"), _poly("B"), _poly("C"),
-                    _poly("D", virtual_bases=["A", "B", "C"]))
+        old = _snap(_poly("A"), _poly("B"), _poly("D", virtual_bases=["A", "B"]))
+        new = _snap(
+            _poly("A"),
+            _poly("B"),
+            _poly("C"),
+            _poly("D", virtual_bases=["A", "B", "C"]),
+        )
         assert ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED not in _kinds(compare(old, new))
 
     def test_stdlib_owner_reorder_not_flagged(self):
         # A virtual-base reorder inside a debug-only std:: record (not this
         # library's own ABI surface) must not surface as a BREAKING finding.
-        old = _snap(_poly("A"), _poly("B"),
-                    _poly("std::D", vtable=["_ZNSt1D1fEv"], virtual_bases=["A", "B"]))
-        new = _snap(_poly("A"), _poly("B"),
-                    _poly("std::D", vtable=["_ZNSt1D1fEv"], virtual_bases=["B", "A"]))
+        old = _snap(
+            _poly("A"),
+            _poly("B"),
+            _poly("std::D", vtable=["_ZNSt1D1fEv"], virtual_bases=["A", "B"]),
+        )
+        new = _snap(
+            _poly("A"),
+            _poly("B"),
+            _poly("std::D", vtable=["_ZNSt1D1fEv"], virtual_bases=["B", "A"]),
+        )
         assert ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED not in _kinds(compare(old, new))
 
 
@@ -191,8 +238,10 @@ class TestReconstruction:
 
     def test_secondary_groups_indeterminate_virtual_base(self):
         # A concrete primary base, but a missing virtual base → indeterminate.
-        types = {"A": _poly("A", vtable=["_ZN1A1fEv"]),
-                 "D": _poly("D", bases=["A"], virtual_bases=["Gone"])}
+        types = {
+            "A": _poly("A", vtable=["_ZN1A1fEv"]),
+            "D": _poly("D", bases=["A"], virtual_bases=["Gone"]),
+        }
         assert _secondary_groups(types["D"], types, {}) is None
 
     def test_secondary_groups_include_polymorphic_virtual_base(self):
@@ -258,6 +307,24 @@ class TestReconstructionFactStatus:
         # changes behavior.
         types = {"P": _poly("P")}
         assert _is_polymorphic("P", types, {}) is False
+
+    def test_vtable_facts_reliable_false_is_indeterminate_even_when_confirmed(
+        self,
+    ):
+        # Codex review, this slice: defense in depth alongside the per-record
+        # FactStatus check -- a whole-snapshot vtable_facts_reliable=False
+        # (the flag diff_layout/diff_types_vtable already thread) must not be
+        # overridden by a record whose own vtable_fact happens to read
+        # PRESENT (e.g. a hand-constructed snapshot where the two are out of
+        # sync -- storage.fact_backfill keeps them in sync on every real
+        # load path, but this function does not assume that of its caller).
+        types = {"P": _poly("P")}
+        assert _is_polymorphic("P", types, {}, vtable_facts_reliable=False) is None
+
+    def test_vtable_facts_reliable_true_is_the_default(self):
+        # Positive control: omitting the flag keeps today's behavior.
+        types = {"P": _poly("P")}
+        assert _is_polymorphic("P", types, {}, vtable_facts_reliable=True) is False
 
     def test_partial_empty_vtable_is_indeterminate_not_confirmed_false(self):
         """Codex review, this slice: a ``PARTIAL`` empty vtable means only

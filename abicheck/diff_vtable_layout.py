@@ -70,6 +70,8 @@ def _is_polymorphic(
     name: str,
     types: dict[str, RecordType],
     memo: dict[str, bool | None],
+    *,
+    vtable_facts_reliable: bool = True,
 ) -> bool | None:
     """Whether class *name* is polymorphic (owns/inherits a vtable).
 
@@ -109,6 +111,18 @@ def _is_polymorphic(
     list, so its own ``PARTIAL`` reading carries no "uncovered remainder"
     risk — is ever partial), but this function does not assume that stays
     true.
+
+    *vtable_facts_reliable* (Codex review, this slice) is the same
+    whole-snapshot flag (``AbiSnapshot.clang_vtable_facts_reliable``)
+    ``diff_layout``/``diff_types_vtable`` already thread through their own
+    vtable reads — layered *alongside* the per-record ``FactStatus`` check
+    above, not instead of it. In every real pipeline the two agree (a
+    legacy pre-v21 clang-producer load's ``storage.fact_backfill`` always
+    corrects every affected record's ``vtable_fact`` to ``NOT_COLLECTED``
+    in the same pass that sets this flag ``False``, and no other code path
+    sets it ``False`` at all), so this is defense in depth for a
+    hand-constructed or future snapshot that could set the two out of
+    sync, not a fix for an observed gap.
     """
     if name in memo:
         return memo[name]
@@ -122,7 +136,7 @@ def _is_polymorphic(
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact
-    own_vtable_confirmed_empty = (
+    own_vtable_confirmed_empty = vtable_facts_reliable and (
         vtable_fact is None or vtable_fact.status is FactStatus.PRESENT
     )
     # Guard against inheritance cycles (malformed input): assume non-polymorphic
@@ -130,7 +144,9 @@ def _is_polymorphic(
     memo[name] = False
     bases = resolved_fact_value(rec.bases_fact, [])
     for base in bases:
-        sub = _is_polymorphic(base, types, memo)
+        sub = _is_polymorphic(
+            base, types, memo, vtable_facts_reliable=vtable_facts_reliable
+        )
         if sub is None:
             memo[name] = None
             return None
@@ -147,6 +163,8 @@ def _secondary_groups(
     rec: RecordType,
     types: dict[str, RecordType],
     memo: dict[str, bool | None],
+    *,
+    vtable_facts_reliable: bool = True,
 ) -> list[str] | None:
     """Ordered list of base names that own a *secondary* vtable group.
 
@@ -155,13 +173,18 @@ def _secondary_groups(
     polymorphic direct non-virtual base, then every polymorphic virtual base,
     contributes a secondary group in that order. Returns ``None`` if any base's
     polymorphism is indeterminate.
+
+    *vtable_facts_reliable* is threaded straight into ``_is_polymorphic`` —
+    see that function's own docstring.
     """
     primary_taken = False
     groups: list[str] = []
     bases = resolved_fact_value(rec.bases_fact, [])
     virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
     for base in bases:  # direct, non-virtual, in declaration order
-        poly = _is_polymorphic(base, types, memo)
+        poly = _is_polymorphic(
+            base, types, memo, vtable_facts_reliable=vtable_facts_reliable
+        )
         if poly is None:
             return None
         if not poly:
@@ -171,7 +194,9 @@ def _secondary_groups(
             continue
         groups.append(base)
     for vbase in virtual_bases:
-        poly = _is_polymorphic(vbase, types, memo)
+        poly = _is_polymorphic(
+            vbase, types, memo, vtable_facts_reliable=vtable_facts_reliable
+        )
         if poly is None:
             return None
         if poly:
@@ -244,8 +269,18 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # tracking to resolve, and the *real* change (if any) is independently
         # reported on the base type itself.
         if o_bases == n_bases and o_virtual_bases == n_virtual_bases:
-            og = _secondary_groups(o, old_types, old_memo)
-            ng = _secondary_groups(n, new_types, new_memo)
+            og = _secondary_groups(
+                o,
+                old_types,
+                old_memo,
+                vtable_facts_reliable=old.clang_vtable_facts_reliable,
+            )
+            ng = _secondary_groups(
+                n,
+                new_types,
+                new_memo,
+                vtable_facts_reliable=new.clang_vtable_facts_reliable,
+            )
             if og is not None and ng is not None and og != ng:
                 changes.append(
                     make_change(
