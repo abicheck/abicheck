@@ -108,13 +108,25 @@ concepts:
       (now compare/opaque_types.OpaqueTypeIndex, matching on
       StableEntityId first and the RecordType.name spelling second) and
       type_reachability.py's closure-walk record-tracking keys (now
-      SnapshotLocalIdentity rather than bare str). Still open: the
-      opaque-type index does not yet NARROW -- the bare-RecordType.name
-      collision remains reachable through its spelling tier, because
-      making the stable tier authoritative would drop a real suppression
-      whenever two sides' producers disagree about whether an identity
-      was resolved; that needs stable-tier completeness on both sides
-      first. type_reachability.py's own spelling-matching machinery
+      SnapshotLocalIdentity rather than bare str). Bare-name-collision
+      narrowing landed 2026-09-03: OpaqueTypeIndex.complete tracks, per
+      comparison, whether every opaque declaration on BOTH sides resolved
+      a stable identity (computed over the raw per-declaration walk, not
+      derived from the deduplicated stable/local set sizes, since a
+      collision itself can make len(stable) > len(local)); only when that
+      holds does contains(..., strict=True) trust a stable-tier miss as
+      proof of non-opacity rather than falling back to the collision-prone
+      spelling tier. Investigation for this slice found the completeness
+      precondition already holds for every current producer's own output
+      (castxml/clang/DWARF/PDB all populate RecordType.entity_id
+      unconditionally, BTF/CTF inherits it via the shared DWARF builder) --
+      the realistic incompleteness case is producer-version/schema skew
+      (an archived pre-entity_id baseline, or a genuinely mixed
+      header-AST/DWARF comparison), which the completeness gate degrades
+      safely for. Still open: a change carrying no resolvable entity_id at
+      all still falls through to the spelling tier unconditionally (no
+      identity for strict to narrow). type_reachability.py's own
+      spelling-matching machinery
       (_spelling_index/_stripped_signature_spelling/
       _non_stdlib_signature_spellings and _record_identity's three call
       sites) is deliberately NOT migrated: those strings are spellings

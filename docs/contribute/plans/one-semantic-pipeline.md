@@ -182,12 +182,78 @@ when a first PR lands against a sub-phase:
 
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
-| **2B — Identity consumer migration** | in progress | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted). The `StableEntityId`/`SnapshotLocalIdentity` split landed (`abicheck/model/identity_tiers.py`), and two post-parse consumers migrated onto it — `diff_filtering.py`'s opaque-type suppression (`compare/opaque_types.OpaqueTypeIndex`, matching on `StableEntityId` first and the `RecordType.name` spelling second) and `type_reachability.py`'s closure-walk record-tracking keys (`SnapshotLocalIdentity` rather than bare `str`); see the ledger's `identity` concept for what remains open (bare-name-collision narrowing and the `entity:` alias promotion both need their own sign-off first) |
+| **2B — Identity consumer migration** | in progress | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted). The `StableEntityId`/`SnapshotLocalIdentity` split landed (`abicheck/model/identity_tiers.py`), and two post-parse consumers migrated onto it — `diff_filtering.py`'s opaque-type suppression (`compare/opaque_types.OpaqueTypeIndex`, matching on `StableEntityId` first and the `RecordType.name` spelling second) and `type_reachability.py`'s closure-walk record-tracking keys (`SnapshotLocalIdentity` rather than bare `str`). Bare-name-collision narrowing landed (2026-09-03, see the note below the table): `OpaqueTypeIndex.complete` gates `contains(..., strict=...)` on both sides' stable tier being provably complete for the comparison at hand, closing the collision exactly when doing so cannot drop a real suppression. Still open: the `entity:` alias promotion in `finding_identity.resolve_change_identity`/`report_canonical_finding_id`, which needs its own sign-off first — see the ledger's `identity` concept |
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+
+**2B's bare-name-collision narrowing landed (2026-09-03).** The gap
+`compare/opaque_types.py`'s own docstring named as still-open since the
+opaque-type suppression migration: two unrelated types sharing a bare leaf
+spelling in different scopes (`ns1::Handle` opaque, `ns2::Handle` a
+different, visible declaration) could both be suppressed through the
+spelling tier, since the pre-existing design deliberately fell back to
+spelling on *any* stable-tier miss rather than trusting a miss as proof of
+non-opacity.
+
+*Why a miss couldn't simply be trusted before this slice.* Trusting it
+unconditionally would have traded a real bug for a worse one: a mixed
+header-AST/DWARF comparison, or one side loaded from an archived baseline
+predating `RecordType.entity_id` population, would leave one side's stable
+tier incomplete — a real, still-opaque declaration failing to resolve an
+identity on just one side reads identically to "not the opaque one" under
+an unconditional-trust rule, silently dropping a genuine suppression and
+reporting a purely private layout change as breaking (a live false-positive
+risk against this repo's FP-rate gate).
+
+*The fix: gate narrowing on a completeness signal, not on producer
+identity.* `OpaqueTypeIndex.complete` tracks, during `find_opaque_types`'s
+own per-declaration walk, whether *every* opaque declaration resolved a
+stable identity — computed over the raw declaration list before
+deduplication, since the deduplicated `stable`/`local` set *sizes* can't
+answer this (a bare-name collision itself can make `len(stable) >
+len(local)`, so a size comparison would say "complete" exactly when a
+collision is present and say "incomplete" for unrelated reasons). `intersect()`
+ANDs the two sides' flags, and `_downgrade_opaque_type_changes` reads it
+straight off the already-intersected index: `opaque.contains(c, ...,
+strict=opaque.complete)`. `strict=True` only changes what happens on a
+stable-tier *miss* (never a hit, and never when the change carries no
+resolvable identity at all) — so this is additive, both-or-neither-gated
+capability layered on the existing permissive default, the identical
+discipline `compare/typedefs.py`'s and `compare/constants.py`'s own
+fidelity gates already established for the `SemanticIR` cutover.
+
+*Investigation finding worth recording: the completeness precondition
+already holds far more often than the original "needs its own slice"
+caution assumed.* Checking each current producer found `RecordType.entity_id`
+populated unconditionally by castxml, clang, DWARF, and PDB (all via
+`entity_id_for_type`), and BTF/CTF inherits it for free by routing through
+`dwarf_snapshot.py`'s shared builder (`to_dwarf_metadata()`). The realistic
+incompleteness case today is narrower than "some current producer never
+resolves one" — it is producer *version/schema* skew: an archived baseline
+`.abi.json` from before this population existed, or a genuinely mixed
+header-AST/DWARF comparison. `OpaqueTypeIndex.complete` degrades safely to
+the pre-narrowing permissive behavior in exactly that case, so this
+finding motivated implementing the gate rather than skipping it — it did
+not remove the need for one.
+
+*What remains open, explicitly.* A change that carries no resolvable
+`entity_id` at all still falls straight through to the spelling tier,
+collision and all — `tests/test_opaque_identity_tiers.py`'s
+`TestKnownGapStaysDocumented` pins this narrower residual case, not the
+general collision (now closed by `TestBareNameCollisionNarrowing`).
+
+*Verification.* `tests/test_opaque_identity_tiers.py`'s new
+`TestBareNameCollisionNarrowing` class: the collision-closing case, the
+completeness-decline case (proving the gate actually degrades rather than
+silently narrowing anyway), and a hit-is-unaffected case. Full fast unit
+lane green; `ruff check`/`mypy abicheck/` clean; `check_fp_rate.py` 0 FP /
+0 FN, both deltas 0; `check_tier_accuracy.py` OK (top-tier correct,
+under-call monotonic).
+
+---
 
 **5B's first PR landed (2026-09-03).** `abicheck.compare.fact_comparison.
 compare_facts` is the shared primitive (moved there from `model/fact.py`
