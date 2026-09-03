@@ -15,4 +15,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   now builds one from the same `AnalysisPlan` it already resolves, closing
   sub-phase 4B's "no live caller wired yet" gap for the `compare` path. Purely
   additive and behavior-preserving — no existing consumer reads the new field,
-  and no CLI/API output changes for any existing invocation.
+  and no CLI/API output changes for any existing invocation. `ResolvedExecutionContext.from_plan`
+  now lower-cases `AnalysisPlan.requested_depth` before building the
+  `EvidenceView`, so a case-insensitively spelled depth (e.g. a typed-API
+  caller's `"HEADERS"`) matches `resolution_digest()`/`available_depths`
+  the same way its lower-case spelling does, instead of silently falling
+  outside the depth ladder.

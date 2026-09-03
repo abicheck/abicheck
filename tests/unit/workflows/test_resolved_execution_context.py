@@ -15,9 +15,11 @@
 """Primitive-level tests for :mod:`abicheck.workflows.resolved_execution_context`
 -- ``one-semantic-pipeline.md``'s plan, "PR 1". Pins the type's shape and its
 composition-only contract directly (construct a few contexts by hand), the
-way ``model/semantic_ir.py`` was pinned before any consumer migrated onto it
--- this module has no live caller yet, so these tests are the only thing
-guarding its shape.
+way ``model/semantic_ir.py`` was pinned before any consumer migrated onto it.
+``service_compare_pipeline.resolve_compare_request`` is now the first real
+call site (see ``TestResolvedExecutionContextWiring`` in
+``tests/test_service_compare_pipeline.py``); these tests still cover the
+primitive directly, unit-style, rather than only through that one caller.
 """
 
 from __future__ import annotations
@@ -520,6 +522,36 @@ class TestResolvedExecutionContextEvidenceIntegration:
         ctx = ResolvedExecutionContext.from_plan(plan)
         assert ctx.evidence.requested_depth == "source"
         assert ctx.evidence.effective_depth is None
+
+    def test_from_plan_lower_cases_a_case_insensitive_plan_depth(self):
+        """A typed-API caller can spell a valid ``--depth`` value
+        case-insensitively (e.g. ``"HEADERS"``) and ``AnalysisPlan`` itself
+        does not normalize it -- ``service_compare_pipeline.classify_
+        compare_pair`` only normalizes ``DiffResult.requested_depth`` later,
+        after this context already exists. Without normalizing here too,
+        the mixed-case value both fails to appear in its own
+        ``available_depths`` (the ladder is lower-case) and hashes
+        differently from an equivalent lower-case request in
+        ``resolution_digest()`` (Codex review, PR #1031)."""
+        plan = _plan(requested_depth="HEADERS")
+        ctx = ResolvedExecutionContext.from_plan(plan)
+        assert ctx.evidence.requested_depth == "headers"
+        assert ctx.evidence.requested_depth in ctx.evidence.available_depths
+
+        lower_ctx = ResolvedExecutionContext.from_plan(_plan(requested_depth="headers"))
+        assert ctx.resolution_digest() == lower_ctx.resolution_digest()
+
+    def test_from_plan_normalized_depth_is_the_from_assurance_fallback(self):
+        """The lower-cased plan depth also feeds ``EvidenceView.from_assurance``'s
+        fallback (used when *assurance* itself carries no ``requested_depth``,
+        e.g. a ``not_comparable`` short-circuit) -- so that path can't
+        reintroduce the same mixed-case leak through the back door."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        plan = _plan(requested_depth="HEADERS")
+        assurance = AnalysisAssurance(requested_depth=None, effective_depth=None)
+        ctx = ResolvedExecutionContext.from_plan(plan, assurance=assurance)
+        assert ctx.evidence.requested_depth == "headers"
 
     def test_from_plan_with_assurance_builds_the_full_post_execution_view(self):
         from abicheck.analysis_assurance import AnalysisAssurance

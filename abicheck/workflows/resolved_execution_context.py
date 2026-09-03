@@ -380,8 +380,9 @@ class ResolvedExecutionContext:
         """Compose a context from an already-resolved
         :class:`~abicheck.workflows.plan.AnalysisPlan` plus whatever
         evaluation config / compile contexts the caller separately resolved
-        for the same run. Reads *plan.operation*/*plan.requested_depth*
-        verbatim -- it does not re-run planning, and it does not require
+        for the same run. Reads *plan.operation* verbatim and
+        *plan.requested_depth* case-normalized (see below) -- it does not
+        re-run planning, and it does not require
         *plan* to be the source of the other two arguments (a caller that
         has not resolved a compile context for every side, or any
         evaluation config at all, simply omits them). *assurance*, when
@@ -395,11 +396,25 @@ class ResolvedExecutionContext:
         fallback, so a ``not_comparable`` assurance (whose own
         ``requested_depth`` reads ``None``) doesn't discard the genuinely
         known, already-resolved request (Codex review, PR #1027, fourth
-        round -- see that method's own docstring)."""
+        round -- see that method's own docstring). *plan.requested_depth*
+        is lower-cased here first (Codex review, PR #1031) -- unlike
+        *plan.operation*, ``AnalysisPlan.requested_depth`` is not itself
+        normalized (a typed-API caller can spell a valid depth
+        case-insensitively, e.g. ``"HEADERS"``, the same way
+        :func:`~abicheck.service_compare_pipeline.classify_compare_pair`'s
+        ``result.requested_depth = request.depth.lower()`` normalizes it for
+        ``DiffResult`` before this context exists), and this class's own
+        ``_AVAILABLE_DEPTHS``/:meth:`resolution_digest` are case-sensitive:
+        an unnormalized depth would both fail to appear in its own
+        :attr:`EvidenceView.available_depths` and hash differently from an
+        equivalent lower-case request."""
+        normalized_depth = (
+            plan.requested_depth.lower() if plan.requested_depth is not None else None
+        )
         evidence = (
-            EvidenceView.from_assurance(assurance, requested_depth=plan.requested_depth)
+            EvidenceView.from_assurance(assurance, requested_depth=normalized_depth)
             if assurance is not None
-            else EvidenceView.for_request(plan.requested_depth)
+            else EvidenceView.for_request(normalized_depth)
         )
         return cls(
             operation=plan.operation,
