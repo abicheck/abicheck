@@ -69,7 +69,7 @@ concepts:
 
   identity:
     primitive: complete
-    producers: complete
+    producers: partial
     consumers: partial
     authority: mixed
     removal_gate: >-
@@ -78,7 +78,10 @@ concepts:
       must still be migrated onto EntityId; a StableEntityId/
       SnapshotLocalIdentity split must still land so the entity: alias can
       be promoted into a real match tier without risking cross-release
-      suppression-id drift.
+      suppression-id drift. Separately, producers remain partial: PDB/BTF/
+      CTF backends still do not populate entity_id at all (AGENTS.md's own
+      Phase 6 note), so this concept's evidence is incomplete for those
+      three backends independent of the consumer-migration gate above.
 
   semantic_ir:
     primitive: complete
