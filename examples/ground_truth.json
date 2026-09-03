@@ -4292,7 +4292,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
-    "overload-added"
+    "constructor-overload-ambiguity"
    ],
    "rule_slug": null,
    "variant_of": null

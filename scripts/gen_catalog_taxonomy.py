@@ -121,7 +121,9 @@ RELATED_RULES: dict[str, list[str]] = {
         "tag-struct-renamed",
     ],
     "case110_concurrent_unordered_map_api_drift": ["exported-function-removed"],
-    "case111_enumerable_thread_specific_lambda_ambiguity": ["overload-added"],
+    "case111_enumerable_thread_specific_lambda_ambiguity": [
+        "constructor-overload-ambiguity"
+    ],
     # -- SYCL case studies --
     "case82_sycl_overload_set_removed": [
         "exported-function-removed",

@@ -206,7 +206,19 @@ Phase 4 in particular touches every consumer that currently assumes
   branch's (`git diff <base> -- examples/ground_truth.json` touches only
   the new `taxonomy` key), so the frozen competitor results this stamp
   guards remain valid — nothing about the case fixtures or expected
-  verdicts they were computed against has changed.
+  verdicts they were computed against has changed. This leaves the file's
+  own `frozen_at`/`git_commit` fields pointing at the original 2026-07-18
+  run rather than this PR's commits — deliberate, not an oversight: those
+  fields record *when the competitor tools actually ran*, and rewriting
+  them to today's date/commit on a taxonomy-only touch would falsely claim
+  a fresh run happened. `_merge_frozen_into_results()` only trusts
+  `ground_truth_sha256`, precisely so a metadata-only touch like this one
+  doesn't require re-running abidiff/ABICC — narrowing that digest to
+  cover only `verdicts` (so a `taxonomy`-only change never needs this
+  stamp bumped at all) would be a real improvement, but it's a shared
+  computation with `tests/validate_examples.py`'s own independent
+  whole-file digest and `tests/test_example_shards.py`'s cross-shard
+  agreement check, so it's a separate, wider change than this PR's scope.
 
 ## Tests
 
