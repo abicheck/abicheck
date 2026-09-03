@@ -96,15 +96,26 @@ extern "C" int c_api(int x) { return x * 2; }
 """
 
 
-def _require_tools() -> None:
-    required = ("g++", "castxml", "clang")
-    if not all(shutil.which(t) for t in required):
-        pytest.skip("g++, castxml, and clang are all required")
+def _require_compiler() -> None:
+    if not shutil.which("g++"):
+        pytest.skip("g++ is required to build the fixture library")
+
+
+def _require_backend(backend: str) -> None:
+    """Skip *this one* parametrization when its own backend tool is
+    missing, rather than gating the whole module on every backend's tool
+    at once -- a runner with only castxml (this repo's documented
+    integration-marker prerequisite) must still get the castxml cases,
+    and one with only clang must still get the clang cases (Codex review).
+    """
+    tool = "castxml" if backend == "castxml" else "clang"
+    if not shutil.which(tool):
+        pytest.skip(f"{tool} is required for the {backend!r} backend")
 
 
 @pytest.fixture(scope="module")
 def match_lib(tmp_path_factory: pytest.TempPathFactory):
-    _require_tools()
+    _require_compiler()
     tmp_path = tmp_path_factory.mktemp("semantic_ir_function_parity")
     header = tmp_path / "match.h"
     header.write_text(_HEADER)
@@ -123,6 +134,7 @@ def match_lib(tmp_path_factory: pytest.TempPathFactory):
 def test_index_functions_matches_legacy_function_list_exactly(
     match_lib, backend: str
 ) -> None:
+    _require_backend(backend)
     so, header = match_lib
     snap = dump(so, [header], header_backend=backend)
     assert snap.semantic_ir is not None
@@ -143,6 +155,7 @@ def test_distinct_mangled_names_never_collapse_onto_one_entity_id(
     """The legacy join key (``Function.mangled``) is distinct for the two
     overloads and the extern "C" function; ``EntityId``-keyed matching must
     never merge what the mangled-name key keeps apart."""
+    _require_backend(backend)
     so, header = match_lib
     snap = dump(so, [header], header_backend=backend)
 
@@ -176,6 +189,7 @@ def test_distinct_mangled_names_never_collapse_onto_one_entity_id(
 
 @pytest.mark.parametrize("backend", ["castxml", "clang"])
 def test_index_entity_lookup_is_deterministic(match_lib, backend: str) -> None:
+    _require_backend(backend)
     so, header = match_lib
     snap = dump(so, [header], header_backend=backend)
     index = SemanticIRIndex(snap.semantic_ir)
