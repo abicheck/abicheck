@@ -71,6 +71,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
+    entity_is_record_member as entity_is_record_member,
 )
 from .errors import TuMergeError
 from .model import (
@@ -236,22 +237,33 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     sharing a bare name in different TUs therefore reach this branch and
     fall to ``fn.is_static`` -- ordinarily ``False`` for a non-static
     method, so ``is_local`` is wrongly ``False`` and the two land in the
-    same ``entity_key`` bucket. If their signatures happen to differ (the
-    common case) :func:`_merge_functions` raises a spurious
-    ``INCONSISTENT_DECLARATION``; if their signatures happen to coincide,
-    they silently merge into one function despite being unrelated. Fixing
-    this precisely needs a way to tell "genuinely unmangled, e.g. plain
-    C/`extern "C"`" apart from "C++ but clang produced no mangled name" at
-    this call site -- :class:`Function` carries no such signal today
-    (unlike :class:`RecordType`'s ``is_template_pattern``, there is no
-    per-function equivalent, and nothing here links a ``Function`` back to
-    its enclosing template even if there were) -- so, like the MSVC gap
-    above, this needs a producer-side model/schema addition rather than a
-    guess at this call site, and is documented rather than fixed this
-    round.
+    same ``entity_key`` bucket regardless of the fix below (``False and
+    anything`` is still ``False``); this NON-static-method collision
+    remains open, for the identical reason originally stated: a
+    return-type-independent (here, bare-name) collision between two
+    UNRELATED templates needs entity identity sharper than a mangled
+    string, which is a producer-side/model addition, not a fix at this
+    call site.
+
+    **What PR #1024's fresh evidence (Codex/CodeRabbit review) DID close**
+    is the sibling STATIC-member sub-case of this same "mangled == name is
+    not proof of plain-C" gap: a **static** member function of an
+    uninstantiated template (or, more commonly, :func:`_variable_key`'s
+    own static DATA member case below) has ``is_static=True``, so it used
+    to satisfy ``fn.is_static`` and get wrongly TU-qualified as internal
+    linkage, even though a static member is an ordinarily externally-
+    linked declaration, not TU-local at all. Unlike the non-static case
+    above, this ATTRIBUTE-based fallback is closeable at this call site:
+    ``fn.entity_id.scope`` -- populated from the real AST scope walk
+    regardless of whether mangling succeeded -- carries a trailing
+    :class:`~abicheck.model.identity.Record` segment for a record member,
+    a signal independent of mangled-name availability the way
+    ``is_static`` is not.
+    :func:`~abicheck.extract.headers.scope_segments.entity_is_record_member`
+    withholds trust in the ``is_static`` fallback for exactly this case.
     """
     if fn.mangled == fn.name:
-        is_local = fn.is_static
+        is_local = fn.is_static and not entity_is_record_member(fn.entity_id)
     else:
         is_local = _has_local_linkage_mangling(fn.mangled)
     name = f"{tu_name}::{fn.mangled}" if is_local else fn.mangled
@@ -287,9 +299,25 @@ def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
     applied at all), ``var.is_static`` is now an unambiguous, purely-C
     linkage signal, mirroring :func:`_function_key`'s identical branch for
     the identical reason.
+
+    **Second known, accepted limitation, closed on arrival** (Codex/
+    CodeRabbit review, fresh evidence, same round as the fix above): the
+    ``is_static`` fallback just described is not itself proof of file-scope
+    C linkage -- a ``static`` DATA MEMBER of an *uninstantiated* class
+    template (``template<class T> struct A { static int x; };``) also gets
+    no ``mangledName`` from clang (mangling a member needs a concrete
+    instantiation, exactly the shape :func:`_function_key`'s own
+    template-method gap already documents), so it satisfies
+    ``var.mangled == var.name`` too, with ``is_static=True`` -- but is an
+    ordinarily externally-linked member, not TU-local. Gated the identical
+    way :func:`_function_key` now is:
+    :func:`~abicheck.extract.headers.scope_segments.entity_is_record_member`
+    checks whether ``var.entity_id.scope`` ends in a
+    :class:`~abicheck.model.identity.Record` segment, which is populated
+    from the real scope walk regardless of mangling success.
     """
     if var.mangled == var.name:
-        is_local = var.is_static
+        is_local = var.is_static and not entity_is_record_member(var.entity_id)
     else:
         is_local = _has_local_linkage_mangling(var.mangled)
     name = f"{tu_name}::{var.mangled}" if is_local else var.mangled

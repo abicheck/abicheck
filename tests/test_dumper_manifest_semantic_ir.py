@@ -389,3 +389,80 @@ def test_single_tu_proto_and_def_collapses_like_the_non_manifest_path(
     )
     (occ_id,) = occurrences
     assert occ_id.disambiguator == ""
+
+
+def test_uninstantiated_template_static_data_member_not_tu_qualified(
+    tmp_path: Path,
+) -> None:
+    """Codex review, second round, fresh evidence: clang's header AST has
+    no `mangledName` for a static DATA MEMBER of an *uninstantiated* class
+    template either (mangling a member requires a concrete instantiation
+    that does not exist yet -- confirmed empirically: `VarDecl` for `x`
+    below carries `storageClass: "static"` and no `mangledName` key at
+    all), the identical shape the sibling function-template case already
+    covers. `mangled == name` therefore held for this member the same way
+    it does for a genuine plain-C file-scope static, and `is_static=True`
+    used to make `_is_locally_linked_variable` wrongly TU-qualify it --
+    but a class member is never file-scope-static-linked. Two TUs
+    including the identical, unmodified header must collapse to ONE
+    Variable/occurrence, neither TU-qualified."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("template<class T> struct A { static int x; };\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    member_vars = [v for v in merged.variables if v.name == "x"]
+    assert len(member_vars) == 1, (
+        "an uninstantiated template's static data member must collapse "
+        "across identical TUs, not TU-qualify as internal linkage"
+    )
+    entity_id = member_vars[0].entity_id
+    assert entity_id is not None
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 1
+    (occ_id,) = occurrences
+    assert not occ_id.disambiguator.startswith("tu_a:")
+    assert not occ_id.disambiguator.startswith("tu_b:")
+
+
+def test_uninstantiated_template_static_method_not_tu_qualified(
+    tmp_path: Path,
+) -> None:
+    """The sibling function-side case of the static-data-member fix above:
+    a static MEMBER FUNCTION of an uninstantiated class template also gets
+    no `mangledName` from clang (`CXXMethodDecl` for `run` below carries
+    `storageClass: "static"` and no `mangledName`, confirmed empirically),
+    so it used to satisfy the same `mangled == name` fallback with
+    `is_static=True` and get wrongly TU-qualified -- even though a static
+    member function is an ordinarily externally-linked declaration, not
+    TU-local. Two TUs including the identical, unmodified header must
+    collapse to ONE Function/occurrence, neither TU-qualified."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("template<class T> struct A { static void run(T); };\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    method_fns = [f for f in merged.functions if f.name == "run"]
+    assert len(method_fns) == 1, (
+        "an uninstantiated template's static method must collapse across "
+        "identical TUs, not TU-qualify as internal linkage"
+    )
+    entity_id = method_fns[0].entity_id
+    assert entity_id is not None
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 1
+    (occ_id,) = occurrences
+    assert not occ_id.disambiguator.startswith("tu_a:")
+    assert not occ_id.disambiguator.startswith("tu_b:")

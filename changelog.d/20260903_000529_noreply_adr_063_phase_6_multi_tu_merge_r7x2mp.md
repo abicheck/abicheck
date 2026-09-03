@@ -101,3 +101,32 @@
   patch-coverage gap the review round's own fix left, split into its own
   file since `test_dumper_scoping.py` has no `architecture/debt.yaml`
   adoption-debt entry and is at the AI-readiness `new-test-size` cap.
+
+  A third review round found `_variable_key`'s new `Variable.is_static`
+  fallback (item 2 in the second round above) had the identical class of
+  gap `_function_key`'s own pre-existing, documented "Second known,
+  accepted limitation" already named for template methods: `mangled ==
+  name` is not proof of plain-C linkage -- clang's header AST also has no
+  `mangledName` for a STATIC member (function or data) of an
+  *uninstantiated* class template, since mangling a member requires a
+  concrete instantiation that does not exist yet (confirmed empirically:
+  `template<class T> struct A { static int x; };`/`static void run(T);`
+  both parse with no `mangledName` for their member). That previously made
+  `_variable_key` wrongly TU-qualify an ordinarily externally-linked
+  static member as internal linkage, and would have done the identical
+  thing for a static member FUNCTION once `_function_key`'s own
+  `is_static` fallback saw the same shape. New
+  `extract/headers/scope_segments.entity_is_record_member` checks whether
+  an `EntityId`'s own scope ends in a `Record` segment -- populated from
+  the real AST scope walk regardless of whether mangling succeeded, unlike
+  `is_static` -- and both `_function_key`/`_variable_key` (and their
+  `manifest_semantic_ir` mirrors) now withhold trust in the `is_static`
+  fallback for a record member. This closes the newly-reported static-
+  data-member gap and, as a side effect, the static-member-function
+  variant of `_function_key`'s own older, previously-accepted-as-
+  unfixable limitation from PR #635 round 12 (the sibling NON-static
+  method cross-template bare-name collision that limitation also named
+  remains open -- `is_static` is already `False` there, so this fix does
+  not reach it; still needs the return-type-independent identity that
+  limitation's own text describes). Verified against real clang output
+  for both the static-data-member and static-member-function shapes.

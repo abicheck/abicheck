@@ -134,6 +134,7 @@ from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from ..tu_fragment import TuFragment
 from .headers.castxml.names import _mangled_name_is_local_linkage
+from .headers.scope_segments import entity_is_record_member
 from .semantic_normalizer import normalize_header_ast
 
 if TYPE_CHECKING:
@@ -152,18 +153,23 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
 
 def _is_locally_linked_function(fn: Function) -> bool:
     """See ``tu_merge._function_key``'s own docstring for the full
-    reasoning behind each branch -- reused, not reinvented."""
+    reasoning behind each branch -- reused, not reinvented, including the
+    ``entity_is_record_member`` gate closing that function's static-
+    member-function sub-case (its sibling non-static-method collision
+    remains a separately-documented, still-open limitation)."""
     if fn.mangled == fn.name:
-        return fn.is_static
+        return fn.is_static and not entity_is_record_member(fn.entity_id)
     return _has_local_linkage_mangling(fn.mangled)
 
 
 def _is_locally_linked_variable(var: Variable) -> bool:
     """See ``tu_merge._variable_key``'s own docstring -- including the
     plain-C ``var.mangled == var.name`` fallback branch, closed by
-    ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review)."""
+    ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review), and the
+    ``entity_is_record_member`` gate closing that same function's
+    uninstantiated-template-static-data-member gap."""
     if var.mangled == var.name:
-        return var.is_static
+        return var.is_static and not entity_is_record_member(var.entity_id)
     return _has_local_linkage_mangling(var.mangled)
 
 

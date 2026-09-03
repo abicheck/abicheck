@@ -93,6 +93,9 @@ from .extract.headers.castxml.names import (
     is_synthetic_ctor_key as is_synthetic_ctor_key,
     is_synthetic_dtor_key as is_synthetic_dtor_key,
 )
+from .extract.headers.scope_segments import (
+    entity_is_record_member as entity_is_record_member,
+)
 from .model import (
     AccessLevel,
     EnumType,
