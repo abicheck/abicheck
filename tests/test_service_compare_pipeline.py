@@ -112,3 +112,85 @@ class TestResolveSidesSequentially:
         assert len(spans) == 2
         (_old_v, _old_start, old_end), (_new_v, new_start, _new_end) = spans
         assert new_start >= old_end
+
+
+class TestResolvedExecutionContextWiring:
+    """One Semantic Pipeline PR 1, sub-phase 4B: :func:`resolve_compare_request`
+    now attaches a real :class:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext` built from the same :class:`~abicheck.workflows.
+    plan.AnalysisPlan` the function already resolves for its pre-flight
+    check, rather than discarding it. This is the "real, callable projection
+    function with a real call site" requirement -- not a type nothing ever
+    constructs outside its own tests -- landed additively: nothing here reads
+    the new field back to change behaviour, so it must never affect
+    ``old``/``new``/``old_fmt``/``new_fmt``/``old_evidence``/``new_evidence``.
+    """
+
+    def _request(self, tmp_path, *, depth=None):
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        return CompareRequest(
+            old=InputSpec(path=old_p, version="old"),
+            new=InputSpec(path=new_p, version="new"),
+            depth=depth,
+        )
+
+    def _resolve(self, request, monkeypatch):
+        from abicheck import service as service_mod
+        from abicheck.service import resolve_compare_request
+
+        def _fake_resolve(path, headers, includes, version, lang, **kwargs):
+            return AbiSnapshot(library="libtest", version=version)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
+        return resolve_compare_request(request)
+
+    def test_pair_carries_a_populated_resolved_execution_context(
+        self, tmp_path, monkeypatch
+    ):
+        from abicheck.workflows.resolved_execution_context import (
+            ResolvedExecutionContext,
+        )
+
+        pair = self._resolve(self._request(tmp_path), monkeypatch)
+
+        assert isinstance(pair.resolved_execution_context, ResolvedExecutionContext)
+        assert pair.resolved_execution_context.operation == "compare"
+
+    @pytest.mark.parametrize("depth", [None, "binary"])
+    def test_requested_depth_matches_the_request(self, tmp_path, monkeypatch, depth):
+        # Only depths the fake binary-only `resolve_input` stand-in can
+        # actually satisfy -- `enforce_requested_depth`'s floor check (see
+        # its own docstring) rejects `headers`/`build`/`source` here for the
+        # identical reason it would reject them against a real ELF-only
+        # snapshot; that check is orthogonal to what this test verifies.
+        pair = self._resolve(self._request(tmp_path, depth=depth), monkeypatch)
+
+        assert pair.resolved_execution_context.requested_depth == depth
+        assert pair.resolved_execution_context.evidence.requested_depth == depth
+
+    def test_no_evaluation_config_or_compile_contexts_resolved_here(
+        self, tmp_path, monkeypatch
+    ):
+        """This seam resolves before ADR-049 D7 evaluation config exists for
+        the native CLI (see the field's own docstring on ``ResolvedComparePair``)
+        -- asserted explicitly so a future change that starts silently
+        fabricating either is caught rather than passing by accident."""
+        pair = self._resolve(self._request(tmp_path), monkeypatch)
+
+        assert pair.resolved_execution_context.evaluation_config is None
+        assert dict(pair.resolved_execution_context.compile_contexts) == {}
+
+    def test_wiring_does_not_change_the_resolved_snapshots_or_formats(
+        self, tmp_path, monkeypatch
+    ):
+        """Behaviour-preservation: attaching the new field changes nothing
+        about what the pair already carried."""
+        pair = self._resolve(self._request(tmp_path), monkeypatch)
+
+        assert pair.old.library == "libtest"
+        assert pair.new.library == "libtest"
+        assert pair.old.version == "old"
+        assert pair.new.version == "new"
