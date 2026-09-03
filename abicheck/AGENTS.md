@@ -51,9 +51,15 @@ in that area belongs — `architecture/modules.yaml`'s `legacy_paths` is the
 machine-checked version this table must stay consistent with:
 
 - `cli.py`, `cli_*.py`, `compat/cli.py` -> `frontends`.
-- `service*.py`, `scan_engine.py` -> `workflows`.
-- `dumper*.py`, platform/debug metadata parsers, `buildsource` extraction -> `extract`.
-- `diff_*.py`, comparability, reachability, bundle detectors -> `compare`.
+- `service*.py`, `scan_engine.py`, `bundle.py` and most other `bundle_*.py`
+  orchestration/detection modules, `dumper_hybrid.py` -> `workflows`. This is
+  not a whole-family rule: `dumper_cache.py` is `storage` and
+  `bundle_manifest.py` is `model` — check `architecture/modules.yaml`'s
+  `legacy_paths` for a specific file rather than assuming its prefix.
+- most `dumper_*.py` parsing/AST-config modules, platform/debug metadata
+  parsers, `buildsource` extraction -> `extract` (again excluding
+  `dumper_cache.py`/`dumper_hybrid.py` above).
+- `diff_*.py`, comparability, reachability -> `compare`.
 - policy, suppression, severity, contract evaluation -> `policy`.
 - `reporter*.py`, `html_report.py`, `sarif.py`, `junit_report.py` -> `report`.
 - serialization, snapshot I/O, caches, schemas -> `storage`.

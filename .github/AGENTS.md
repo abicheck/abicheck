@@ -17,8 +17,7 @@ bucket it's in:
 
 | Workflow | Required on every PR? | Notes |
 |----------|------------------------|-------|
-| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane), `packaging` jobs | The core gate. `unit-tests`' `integration-tests`/`windows-msvc` sibling jobs in the same workflow have their own rules below. |
-| `module-architecture.yml` | **Yes** — `module-architecture` | Unconditional bounded-module growth and dependency-direction gate; invokes the canonical `verify.py` catalog against the PR head and merge base. |
+| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane), `packaging` jobs | The core gate. `unit-tests`' `integration-tests`/`windows-msvc` sibling jobs in the same workflow have their own rules below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. |
 | `changelog-check.yml` | Yes, only when the diff touches `abicheck/**/*.py` | Bypass with the `skip-changelog` label |
 | `cli-interface-check.yml` | Yes, when the CLI surface changes | Diffs `dump_cli_surface.py` output old vs. new |
 | `dependency-review.yml` | Yes | GitHub's built-in dependency-review action |
@@ -95,12 +94,11 @@ not a required companion piece.
 
 ## Local equivalence (CLAUDE.md "M0-3")
 
-`ci.yml`'s always-required jobs (`ai-readiness`, `fair-metadata`,
-`lint-and-types`, and the canonical `unit-tests` Linux/3.13 lane), plus the
-unconditional `module-architecture.yml` job, are reproducible through
+`ci.yml`'s always-required jobs (`ai-readiness` — which includes the
+ADR-061 architecture step — `fair-metadata`, `lint-and-types`, and the
+canonical `unit-tests` Linux/3.13 lane) are reproducible through
 `python scripts/verify.py --profile pr` — `tests/test_verify_profiles.py`
-asserts the core `ci.yml` catalog stays in sync, and the architecture workflow
-selects its two named catalog entries directly. **Don't add a new required
+asserts the core `ci.yml` catalog stays in sync. **Don't add a new required
 check without adding the matching `Step` to `scripts/verify.py`'s catalog** —
 an agent that only runs the local `pr` profile and gets a clean result should
 never be surprised by a required CI job it had no way to reproduce.
