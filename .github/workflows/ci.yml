@@ -265,9 +265,18 @@ jobs:
         run: |
           pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run slow tests (hypothesis / property-based)
+        # tests/test_performance.py and tests/test_perf_binary_scan.py assert
+        # real wall-clock budgets, so they run in a separate, serial,
+        # uninstrumented invocation: coverage.py's fallback from the sysmon
+        # core to the trace-based one pushed
+        # test_serialization_roundtrip_under_2_seconds to 6-8s against a 2s
+        # ceiling with no product change (PR #1033, #1040). Ported from
+        # PR #1036, which owns the full rationale; identical lines so the
+        # merge no-ops once main carries it.
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_perf_binary_scan.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m "slow"
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner
