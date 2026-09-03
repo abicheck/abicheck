@@ -45,14 +45,21 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "29"
-# v29: a BTF/CTF-sourced, headerless ELF snapshot now also populates
+_SNAPSHOT_CACHE_VERSION: str = "30"
+# v30: a BTF/CTF-sourced, headerless ELF snapshot now also populates
 # AbiSnapshot.semantic_ir for its struct/enum types (ADR-063 Phase 6,
 # BTF/CTF slice). An auto-detected BTF/CTF dump's cache-key inputs
 # (headers/includes/version/lang/extra) are unaffected by this change --
 # debug_format stays None for the auto-detect path -- so a snapshot cached
 # by an older abicheck build would otherwise silently keep serving
 # semantic_ir=None forever for identical cache-key inputs.
+# v29: PDB record/enum types now get a real entity_id and populate
+# AbiSnapshot.semantic_ir (ADR-063 Phase 6, PDB slice) via the PE
+# header-scoping fallback path in service_dump_native_pe.py. That path is
+# cacheable, so a snapshot cached by an older abicheck build for the
+# identical cache-key inputs (headers/includes/version/lang/``extra``)
+# would otherwise keep serving PDB model types with no entity_id and
+# semantic_ir=None forever (Codex review, PR #1025, fresh evidence).
 # v28: AbiSnapshot.semantic_ir's record occurrences now also carry
 # CanonicalEntity.template_arguments (ADR-063 Phase 6, sixth slice). A
 # snapshot cached by an older abicheck build would otherwise silently keep

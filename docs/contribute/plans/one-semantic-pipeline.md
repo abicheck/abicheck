@@ -183,7 +183,7 @@ when a first PR lands against a sub-phase:
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
-| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). The type is now fully shaped per its own original description — no live caller wired yet, so the sub-phase's own gap (downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
+| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
 | **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
@@ -12639,16 +12639,35 @@ for a caller resolving the context after a run has already completed.
 fingerprint of the resolved *input* (pinned by
 `test_unaffected_by_effective_depth_alone`).
 
-**Still open, and not attempted here:** wiring a real call site
-(`cli_compare_receipt.resolve_and_apply`/`resolve_dump_request` are the
-two places an `AnalysisPlan` and a resolved `CompatibilityEvaluationConfig`
-are both already available in the same call, but neither is changed to
-construct a `ResolvedExecutionContext` yet, nor does anything call
-`with_assurance()` once a real `AnalysisAssurance` exists), and everything
-the review's "PR 2"-onward sequence describes (a semantic consumer
-cutover, `FactStatus`-aware detectors, and the rest) — this slice closes
-the "one resolved context type exists, fully shaped, and is tested" step
-for real, not consumer migration.
+**A first real call site landed in a follow-up slice** (independent
+verification pass over this plan, 2026-09-03): `service_compare_pipeline.
+resolve_compare_request` — the one resolution implementation every front
+end (`compare`'s native CLI, the typed Python API, and directory/package
+fan-out) already calls through — now builds a `ResolvedExecutionContext`
+via `ResolvedExecutionContext.from_plan()` from the same `AnalysisPlan` it
+already resolves for its ADR-063 Phase 4 pre-flight check (previously
+discarded), and attaches it on the new `ResolvedComparePair.
+resolved_execution_context` field. This is additive and behavior-preserving
+— the field is optional, nothing downstream reads it, and no existing
+invocation's output changes — but it closes the literal "a type nothing
+outside its own tests constructs" gap for the `compare` path specifically:
+every real `compare` now builds one from real production inputs, not only
+from a hand-built `AnalysisPlan` inside a test.
+
+**Still open, and not attempted here:** the context built at this seam
+carries no `evaluation_config`/`compile_contexts` (this resolution runs
+before ADR-049 D7's evaluation config exists for the native CLI, and before
+any per-side `CompileContext` is captured back out of
+`resolve_side_snapshot`'s own internals — see the field's own docstring on
+`ResolvedComparePair`); nothing calls `with_assurance()` once a real
+`AnalysisAssurance` exists; `resolve_dump_request` remains fully unwired
+(its own `ResolvedDumpRequest` object has its own deliberately-scoped
+exclusions documented in its docstring, so folding this in needs the same
+kind of considered pass, not a copy-paste of this slice); and everything the
+review's "PR 2"-onward sequence describes (a semantic consumer cutover,
+`FactStatus`-aware detectors, and the rest) is still future work. This
+slice closes one real call site for `compare`, not consumer migration or
+full wiring.
 
 ---
 
@@ -13881,6 +13900,90 @@ mangled-name argument decoder, not a compound-spelling text split) than
 this slice attempted. An enum/typedef/variable can never itself be a
 template entity at all in the vocabulary this codebase's model tracks.
 
+**Seventh slice landed: PDB, types only (`RecordType`/`EnumType` via TPI).**
+The identical Phase 2 `EntityId` treatment DWARF's fifth slice needed, but
+structurally harder to apply: PDB's own TPI type records carry no scope
+tree at all to walk (unlike DWARF's DIE tree or the two header-AST
+backends' AST trees) -- CodeView names each struct/class/union/enum with
+its own FLAT, already-`"::"`-qualified spelling as one string
+(`"NS::Outer::Inner"`), with no separate parent-scope reference. The new
+`extract/pdb_scope.py` therefore does the reverse of `extract/
+dwarf_scope.py`'s/the header-AST backends' own scope-construction modules:
+it PARSES a qualified name string back into typed `ScopePath` segments,
+rather than building one while walking a tree.
+
+That parsing itself needed a shared primitive `extract` could actually
+import: `qualified_name_segments.raw_segments` already had the exact
+bracket-depth-aware `"::"`-splitting algorithm needed, but that module
+belongs to the `compare` layer, which `extract` may not depend on (ADR-061
+-- the identical constraint `extract/headers/scope_segments.py`'s own
+docstring already documents for that module's `version_suffix`). Rather
+than reimplementing the same fiddly splitting loop a second time -- exactly
+the "two independently constructible representations of the same fact"
+shape this codebase's own governing invariant forbids elsewhere -- the
+primitive itself moved down to a new leaf module,
+`model/qualified_name_split.py`, which both `qualified_name_segments.
+raw_segments` (now a one-line delegate) and `extract/pdb_scope.py` build
+on. `raw_segments`'s own existing 152-test coverage (lambda-identity,
+scope-segments, semantic_ir-template-args, qualified-type-matching) all
+passed unchanged against the delegating version, confirming the move
+preserved behavior exactly.
+
+The one genuinely new judgment call: given a qualified name's flat text
+alone, is an enclosing segment a namespace or a nested class? CodeView's
+spelling carries no direct signal either way. `pdb_scope.py` resolves it
+by checking whether the ACCUMULATED prefix up to that segment is itself a
+name this same PDB separately recorded as a struct/class/union (the
+caller's own `DwarfMetadata.structs` key set, already computed and
+in hand -- no second pass needed) -- a `Record` segment if so, `Namespace`
+otherwise. **This heuristic is UNVERIFIED against real MSVC output**: this
+environment has no MSVC/`cl.exe` toolchain (the `windows-msvc` CI lane's
+own `msvc`-marker gate is the only place that exists), so it is covered
+only by hand-built qualified-name-string tests -- the identical "no
+compiler needed" discipline `tests/test_pdb_parser.py`'s synthetic
+MSF/TPI/DBI byte-stream fixtures already establish for this backend,
+applied one layer up (post-parse qualified-name strings, not raw TPI
+bytes). Its own documented, accepted limitation: a purely
+forward-declared-and-never-defined enclosing class would not appear in
+the known-record-names set (`pdb_metadata._is_user_visible` filters
+forward-ref-only entries out entirely) and would misclassify as a
+namespace -- an edge case the qualified-name text alone cannot resolve,
+matching the DWARF/header-AST backends' own practice of documenting an
+evidence gap explicitly rather than guessing past it. No anonymous-type
+handling either: CodeView synthesizes an internal name for an unnamed
+struct/union/enum rather than leaving it genuinely anonymous the way a
+DWARF DIE or a Clang/castxml AST node can be, and `_is_user_visible`
+already filters those compiler-internal names out before they ever reach
+this module.
+
+`pdb_model.py`'s `_record_from_layout`/`_enum_from_info` now stamp a real
+`entity_id` via this module, and the new `pdb_model.pdb_semantic_ir()`
+calls the existing, UNMODIFIED `normalize_header_ast` -- no PDB-specific
+`Fact`-carve-out module needed for this types-only slice (unlike DWARF's
+fifth slice, which needed `extract/semantic_normalizer_dwarf.py` for its
+own cv_qualification gaps): the normalizer's `types`/`enums` loop never
+touches `cv_qualification` at all (a functions/variables-only fact this
+slice does not populate for PDB), so `producer="pdb"` needs no new
+producer-dispatch branch there. Wired into the real production call chain
+(`service_dump_native_pe._dump_pe`'s existing header-scoping fallback
+branch -- the same narrow "headers requested, castxml could not resolve a
+surface" path `pdb_model.py`'s own pre-existing docstring already
+describes, not a new call site) and verified end to end through that real
+chain (`tests/test_pdb_provenance.py::TestDumpPeFallbackBuildsPdbTypes`),
+not only in isolation.
+
+**Still not landed on the PDB side**: PDB's own function/variable
+identity. The DBI module symbol streams -- where CodeView's
+`S_GPROC32`/`S_LPROC32`/`S_GDATA32`/`S_LDATA32` records live, the PDB
+analogue of `DW_TAG_subprogram`/`DW_TAG_variable` -- are parsed by
+NOTHING today (`pdb_parser.py`'s own DBI header fields for these streams
+are read but never acted on), so there is no PDB-native `Function`/
+`Variable` at all to attach an `EntityId` to yet. Giving PDB function/
+variable identity is therefore not "add an `entity_id=` field to an
+existing extraction path" the way DWARF's third slice was -- it needs
+genuinely new parser work first, a materially larger, separate project
+this types-only slice does not attempt.
+
 **Eighth slice landed: BTF/CTF, types only.** Both `btf_metadata.
 parse_btf_metadata` and `ctf_metadata.parse_ctf_metadata` reduce their own
 richer, format-specific parse to the shared `DwarfMetadata` shape (via
@@ -13909,11 +14012,11 @@ nested anonymous aggregates) have a BTF/CTF analogue, and none needed
 inventing here.
 
 **Deliberately does not widen `AbiSnapshot.types`/`.enums`.** Every prior
-Phase 6 slice (DWARF, and PDB once it lands) only ever adds `entity_id`/
-`SemanticIR` normalization on top of a model-type bridge that already
-existed *independently* of Phase 6, for other reasons (DWARF's own
-DIE-walk builder predates this phase entirely; PDB's own `pdb_model.py`
-bridge, wired into the PE header-scoping fallback so those types reach
+Phase 6 slice (DWARF and PDB) only ever adds `entity_id`/`SemanticIR`
+normalization on top of a model-type bridge that already existed
+*independently* of Phase 6, for other reasons (DWARF's own DIE-walk
+builder predates this phase entirely; PDB's own `pdb_model.py` bridge,
+wired into the PE header-scoping fallback so those types reach
 `AbiSnapshot.types`/`.enums` and, from there, `surface.py`/vtable/
 internal-leak detection, likewise predates this phase). BTF/CTF never had
 such a bridge at all, so building one that newly feeds `.types`/`.enums`
@@ -13935,20 +14038,17 @@ even carried across either format's own `to_dwarf_metadata()` conversion
 `EntityId`-bearing evidence reaching the normalizer for those kinds at
 all, not a case this slice silently drops.
 
-**BTF/CTF landed a "types only" slice (above); still not
-landed, and therefore this phase is not complete:** the PDB backend
-produces no IR at all (does not populate `entity_id` yet -- this
-normalizer canonicalizes evidence a backend already resolved identity
-for, it does not resolve identity itself, so extending it to PDB is
-gated on giving it the Phase 2 `EntityId` treatment first, the identical
-prerequisite DWARF's own fifth slice and BTF/CTF's own eighth slice each
-closed for their own producer -- DWARF via Phase 2's fourteenth slice
-populating `entity_id` on `dwarf_snapshot.py`'s `RecordType`/`EnumType`/
-`Function`/`Variable`/typedefs, then Phase 6's own fifth slice assembling
-`SemanticIR` on top of it, the first non-header-AST producer to reach it);
-`service.py`'s PDB path (a fifth production assembler this phase's own
-Files list names) remains
-unwired for the same reason; and the phase's own acceptance criteria (a
+**Still not landed, and therefore this phase is not complete:**
+`service.py`'s own BTF/CTF dispatch (a third production assembler this
+phase's own "not the only production assembly call sites" note above
+names -- the separate call site around where it parses a raw BTF/CTF blob
+and constructs an `AbiSnapshot` directly from `btf.to_dwarf_metadata()`/
+`_typeinfo_functions(btf.func_protos)`/`dict(btf.typedefs)`, and the
+identical CTF branch beside it, NOT the `dumper_elf_fallback.py` path this
+slice wires) remains
+unwired for the same reason PDB's own `service.py`-adjacent dispatch was
+until this phase's seventh slice wired it (`service_dump_native_pe._dump_pe`'s
+existing header-scoping fallback branch, above); and the phase's own acceptance criteria (a
 closure-parameterized template fixture) remain only PARTIALLY met --
 castxml's own occurrence now really does decompose and canonicalize a
 closure-typed template argument end to end, but clang produces no

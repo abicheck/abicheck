@@ -235,10 +235,24 @@ Core pipeline (in order of data flow):
    `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
    identifier spellings a castxml `init` text could genuinely carry
    verbatim, so the exception applies only to clang's own artifact, not to
-   every occurrence of those two strings. PDB remains fully unmigrated: it
-   does not populate `entity_id` at all yet. **BTF/CTF's own slice landed,
-   types only:** `extract/debug_layout_semantic_ir.py` bridges the shared
-   `DwarfMetadata` shape both formats reduce to
+   every occurrence of those two strings. Both PDB and BTF/CTF now have
+   their own Phase 6 slice landed, types only, each with function/variable
+   identity explicitly out of scope. **PDB's own slice:**
+   `extract/pdb_scope.py` parses CodeView's flat, already-`"::"`-qualified
+   struct/class/union/enum names back into typed `ScopePath` segments (the
+   reverse of DWARF's/the header-AST backends' own tree-walk construction
+   — CodeView carries no parent-scope tree to walk), disambiguating an
+   enclosing segment as a `Record` only when the accumulated prefix up to
+   it is itself a name PDB separately recorded as a struct/class/union,
+   defaulting to `Namespace` otherwise — an unverified heuristic (no MSVC
+   toolchain in this environment to check it against). A named declaration
+   nested inside a CodeView-synthesized anonymous scope (e.g.
+   `N::<unnamed-tag>::Inner`) still reaches the model with its layout
+   facts, but its `entity_id` is left unset (`extract/pdb_scope.py` builds
+   no `Anonymous` scope segment at all). See ADR-063 Phase 6's PDB slice
+   for the full account, including its documented, accepted limitations.
+   **BTF/CTF's own slice:** `extract/debug_layout_semantic_ir.py` bridges
+   the shared `DwarfMetadata` shape both formats reduce to
    (`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) into
    transient, `entity_id`-bearing `RecordType`/`EnumType` objects — no
    scope heuristic needed at all (both are pure-C formats with no
@@ -249,8 +263,8 @@ Core pipeline (in order of data flow):
    (only `semantic_ir` gains occurrences) — widening what other
    `.types`-consuming detectors see is a separate, larger design question
    this slice does not attempt. Function/variable/typedef identity remains
-   unimplemented (neither format's own richer parse carries that evidence
-   across its own `to_dwarf_metadata()` conversion at all).
+   unimplemented for both formats (neither's own richer parse carries that
+   evidence across its own `to_dwarf_metadata()` conversion at all).
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info

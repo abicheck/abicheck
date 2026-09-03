@@ -14,10 +14,23 @@
 
 """Shared qualified-name segmentation and versioned inline-namespace helpers.
 
-Leaf module (its only ``abicheck`` import is its own sibling
-``qualified_name_segments_walk.py``, itself a leaf) so it can be shared
-between ``diff_namespaces.py`` (which owns the segment-splitting logic this
-module was extracted from) and any other detector that needs to recognize a
+Leaf module: its ``abicheck`` imports are its own sibling
+``qualified_name_segments_walk.py`` (itself a leaf) and
+``model.qualified_name_split`` -- the bracket-depth-aware ``"::"``-splitting
+primitive :func:`raw_segments` delegates to, AND (since PR #1025, Codex
+review) the *recognition* half of the versioned/ABI-tag inline-namespace
+helpers, :func:`version_suffix`/:func:`is_inline_abi_namespace_segment`
+themselves: both are re-exported here unchanged for every existing call
+site, but now defined in ``model/`` so ``extract``-adjacent code that may
+not import this, `compare`-layer, module (``extract -> model`` only, per
+ADR-061; see that module's own docstring for exactly which two independent
+needs motivated the move) can use them too. What stays here,
+:func:`version_strip_segments`/:func:`strip_inline_abi_namespaces`, is the
+genuinely ``compare``-layer *decision* built on top of that recognition --
+that two differently-spelled qualified names identify the same declaration
+for diffing purposes. So this module can be shared between
+``diff_namespaces.py`` (which owns the segment-splitting logic this module
+was extracted from) and any other detector that needs to recognize a
 versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) without
 re-implementing the same regex.
 
@@ -67,6 +80,11 @@ from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
 # `from .qualified_name_segments import _walk_rewrite_strings` call site
 # (this module's own use below, plus tests exercising the walk directly) is
 # unaffected.
+from .model.qualified_name_split import (
+    is_inline_abi_namespace_segment as is_inline_abi_namespace_segment,
+    split_top_level_scopes as _split_top_level_scopes,
+    version_suffix as version_suffix,
+)
 from .qualified_name_segments_walk import (
     _PAYLOAD_FIELD_EXCLUSIONS as _PAYLOAD_FIELD_EXCLUSIONS,
     _collect_strings as _collect_strings,
@@ -75,12 +93,6 @@ from .qualified_name_segments_walk import (
 )
 
 _SnapshotT = _TypeVar("_SnapshotT")
-
-# Matches segment-name shapes commonly used as a versioned inline
-# namespace: ``_V1``, ``__v2``, ``v3``, ``__1``. Anchored to whole
-# segment match (caller passes a single segment string). Captures the
-# integer suffix for ordering checks.
-_VERSION_NS_RE = _re.compile(r"^_{0,2}[Vv]?(\d+)$")
 
 
 def segments(qualified: str) -> list[str]:
@@ -130,19 +142,6 @@ def segments(qualified: str) -> list[str]:
     return [s for s in out if s]
 
 
-def version_suffix(segment: str) -> int | None:
-    """Return the integer suffix if *segment* looks like a versioned
-    inline-namespace tag (``_V1``, ``__1``, ``v2``, ...); else ``None``.
-    """
-    m = _VERSION_NS_RE.match(segment)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except ValueError:
-        return None
-
-
 def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None]:
     """Strip any one versioned-*namespace* segment and return
     ``(stripped_segments, version_int)``.
@@ -166,28 +165,6 @@ def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None
         if v is not None:
             return tuple(segs[:i] + segs[i + 1 :]), v
     return tuple(segs), None
-
-
-#: Toolchain *ABI-tag* inline namespaces that are not version-number-shaped
-#: and therefore invisible to :func:`version_suffix`: libstdc++'s dual-ABI
-#: ``std::__cxx11`` and the Android NDK's ``std::__ndk1``. Both are inline
-#: namespaces — transparent for name lookup — so a declaration gaining or
-#: losing one is the *same* entity spelled two ways, exactly like the
-#: ``v1``/``__1`` family ``version_suffix`` already recognizes.
-_ABI_TAG_NS_RE = _re.compile(r"^__(?:cxx|ndk)\d+$")
-
-
-def is_inline_abi_namespace_segment(segment: str) -> bool:
-    """True when *segment* names an inline namespace used as an ABI tag.
-
-    Union of the version-number family (``v1``, ``__1``, ``_V2`` — see
-    :func:`version_suffix`) and the named toolchain tags (``__cxx11``,
-    ``__ndk1``). Deliberately not a general "looks like an implementation
-    detail" test: a segment such as ``detail``, ``impl`` or oneTBB's ``d1``
-    is an *ordinary* namespace whose rename is a real move of the
-    declarations inside it, so it must not be stripped.
-    """
-    return version_suffix(segment) is not None or bool(_ABI_TAG_NS_RE.match(segment))
 
 
 def strip_inline_abi_namespaces(qualified: str) -> tuple[str, ...]:
@@ -225,35 +202,12 @@ def raw_segments(qualified: str) -> list[str]:
 
     Splits on ``::`` at template-nesting depth zero only, so
     ``ns::Map<std::pair<int, int>>::iterator`` yields three segments and the
-    ``::`` inside the argument list is not a separator.
+    ``::`` inside the argument list is not a separator. Delegates to
+    :func:`~abicheck.model.qualified_name_split.split_top_level_scopes` --
+    see that module's own docstring for why the splitting primitive itself
+    lives in ``model/`` rather than here.
     """
-    if not qualified:
-        return []
-    if "::" not in qualified and "<" not in qualified:
-        return [qualified]
-    out: list[str] = []
-    buf: list[str] = []
-    depth = 0
-    i = 0
-    n = len(qualified)
-    while i < n:
-        ch = qualified[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            if depth > 0:
-                depth -= 1
-        elif depth == 0 and ch == ":" and i + 1 < n and qualified[i + 1] == ":":
-            if buf:
-                out.append("".join(buf).strip())
-                buf = []
-            i += 2
-            continue
-        buf.append(ch)
-        i += 1
-    if buf:
-        out.append("".join(buf).strip())
-    return [s for s in out if s]
+    return _split_top_level_scopes(qualified)
 
 
 # ---------------------------------------------------------------------------

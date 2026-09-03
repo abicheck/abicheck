@@ -38,10 +38,11 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of merge commit b2d8eaaf (PR #1024, the multi-TU manifest occurrence-
-# detail fix), which itself carries forward bb14e8e (PR #1021) plus PR
-# #1019's own status-sync fixes. Update this file in the same PR that
-# changes a concept's landed status.
+# as of merge commit fd197d59 (PR #1025, the PDB EntityId/SemanticIR
+# slice), which itself carries forward b2d8eaaf (PR #1024, the multi-TU
+# manifest occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
+# status-sync fixes. Update this file in the same PR that changes a
+# concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -52,7 +53,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: b2d8eaaf
+as_of_commit: fd197d59
 as_of_date: "2026-09-03"
 
 concepts:
@@ -80,16 +81,28 @@ concepts:
       must still be migrated onto EntityId; a StableEntityId/
       SnapshotLocalIdentity split must still land so the entity: alias can
       be promoted into a real match tier without risking cross-release
-      suppression-id drift. Separately, producers remain partial: the PDB
-      backend still does not populate entity_id at all (AGENTS.md's own
-      Phase 6 note), so this concept's evidence is incomplete for that
-      backend independent of the consumer-migration gate above. BTF/CTF
-      now populate entity_id for struct/enum types (types only,
-      2026-09-03, extract/debug_layout_semantic_ir.py) -- no scope
-      heuristic needed, since both are pure-C formats with no namespace/
-      class nesting; function/variable/typedef identity remains
-      unimplemented for both (neither format's own richer parse carries
-      that evidence across its own to_dwarf_metadata() conversion).
+      suppression-id drift. Separately, producers remain partial: both
+      PDB and BTF/CTF now populate entity_id for struct/enum types only
+      (types only, 2026-09-03) -- PDB via extract/pdb_scope.py (an
+      unverified-against-real-MSVC namespace-vs-record heuristic; no MSVC
+      toolchain available to check it against), BTF/CTF via
+      extract/debug_layout_semantic_ir.py (no scope heuristic needed at
+      all, since both are pure-C formats with no namespace/class
+      nesting). Function/variable/typedef identity remains unimplemented
+      for all three backends (neither BTF's nor CTF's own richer parse
+      carries that evidence across its own to_dwarf_metadata()
+      conversion; PDB's own DBI module-symbol-stream parsing prerequisite
+      is not attempted here). PDB also cannot distinguish a user-declared
+      inline namespace from an ordinary one (CodeView's flat TPI names
+      carry no source-level `inline` marker, unlike DWARF's
+      DW_AT_export_symbols or Clang's isInline) and always emits a plain
+      Namespace segment, a live EntityId mismatch against a header-AST
+      backend's InlineNamespace for any declaration nested inside one --
+      a structural, accepted gap (matching castxml's own documented
+      inability to produce InlineNamespace at all), documented as
+      extract/pdb_scope.py's 4th limitation, not expected to close
+      without new evidence of a CodeView record this module does not
+      parse today.
 
   semantic_ir:
     primitive: complete
@@ -101,8 +114,7 @@ concepts:
       family reads SemanticIR through a shared read index instead of
       AbiSnapshot.functions/types/..., with an architecture-gate rule
       forbidding a direct legacy-collection read for that family.
-      Producers remain partial regardless (the PDB backend populates no
-      entity_id or SemanticIR at all; CanonicalEntity.template_arguments
+      Producers remain partial regardless (CanonicalEntity.template_arguments
       is populated for records but not for function templates, and clang
       produces no occurrence at all for a template specialization).
       DWARF's own SemanticIR gap closed 2026-09-02 (Phase 6's fifth
@@ -111,12 +123,16 @@ concepts:
       contributing TU's raw, pre-merge fragment is now normalized
       independently and disambiguated by cross-fragment source-location
       variance and TU-local (internal) linkage, rather than reading
-      tu_merge.merge_fragments's already-folded output. BTF/CTF's own
-      SemanticIR gap closed 2026-09-03 (Phase 6's eighth slice, types
-      only, via the new extract/debug_layout_semantic_ir.py) --
-      deliberately does not widen AbiSnapshot.types/.enums for a
-      BTF/CTF-sourced snapshot; function/variable/typedef identity
-      remains unimplemented for both formats.
+      tu_merge.merge_fragments's already-folded output. PDB's own
+      SemanticIR gap closed 2026-09-03 (Phase 6's seventh slice, types
+      only) via the new extract/pdb_scope.py -- PDB function/variable
+      identity remains unimplemented (needs new DBI module-symbol-stream
+      parsing). BTF/CTF's own SemanticIR gap closed 2026-09-03 (Phase 6's
+      eighth slice, types only, via the new
+      extract/debug_layout_semantic_ir.py) -- deliberately does not widen
+      AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
+      function/variable/typedef identity remains unimplemented for both
+      formats.
 
   public_surface:
     primitive: complete
@@ -139,7 +155,13 @@ concepts:
       Phase 4B (resolved-execution-context): a ResolvedExecutionContext
       built for real (non-dry-run) execution, carrying resolved
       policy/pack/contract/evidence-depth state so downstream code stops
-      independently re-resolving each of them per call site.
+      independently re-resolving each of them per call site. A first real
+      call site landed 2026-09-03: service_compare_pipeline.
+      resolve_compare_request builds one from its own already-resolved
+      AnalysisPlan and attaches it on ResolvedComparePair, additive and
+      unread by any consumer -- resolve_dump_request remains unwired, and
+      no evaluation_config/compile_contexts/with_assurance() caller exists
+      yet, so this gate stays open.
 
   run_outcome:
     primitive: complete
