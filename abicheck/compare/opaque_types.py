@@ -144,11 +144,11 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
     spellings against rendered signature text -- a spelling question, not
     an identity one, and ``EntityId`` has nothing to contribute to it --
     but now also tries the name's unqualified leaf spelling alongside the
-    full one (see :func:`_by_value_scan_spellings`), since a qualification
-    mismatch there used to be silently absorbed by an equally spelling-based
-    join and no longer is once :class:`OpaqueTypeIndex`'s stable tier can
-    join across exactly that mismatch. Only the *result* is re-expressed
-    as identities.
+    full one (see :func:`_type_is_by_value_referenced`), since a
+    qualification mismatch there used to be silently absorbed by an equally
+    spelling-based join and no longer is once :class:`OpaqueTypeIndex`'s
+    stable tier can join across exactly that mismatch. Only the *result* is
+    re-expressed as identities.
     """
     opaque: set[str] = set()
     declarations: dict[str, list[RecordType]] = {}
@@ -178,8 +178,56 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
     return OpaqueTypeIndex(stable=frozenset(stable), local=frozenset(local))
 
 
-def _by_value_scan_spellings(tname: str) -> tuple[str, ...]:
-    """The spelling(s) of *tname* to search a rendered signature string for.
+def _references_type_token(spelling: str, text: str) -> bool:
+    """Whether *text* references *spelling* as a whole type-name token,
+    never as part of a longer identifier.
+
+    A plain ``spelling in text`` substring test (this scan's original
+    behavior) matches ``Handle`` inside an unrelated ``OtherHandle`` just as
+    readily as inside a real ``ns::Handle`` reference -- harmless for a
+    full, already-qualified name (a C/C++ identifier can never be a
+    substring of another one without an intervening non-identifier
+    character on both sides, so this predicate changes nothing for that
+    candidate), but a real false-positive risk for the *leaf* spelling
+    :func:`_type_is_by_value_referenced` widens the scan with (Codex review
+    on PR #1041): matching ``Handle`` inside ``OtherHandle`` would wrongly mark
+    the genuinely opaque ``ns::Handle`` as by-value exposed, dropping it
+    from both identity tiers and reporting a private layout change as
+    breaking. Boundaries are ``\\w``/non-``\\w`` only, via ``re``'s own
+    zero-width lookaround.
+
+    This alone does **not** stop a leaf spelling from matching inside a
+    *different* qualified reference (``other::Handle`` still contains a
+    token-bounded ``Handle``, since ``::`` is non-word on both sides) -- see
+    :func:`_references_unqualified_type_token`, which the leaf candidate
+    uses instead, for that closing half."""
+    pattern = r"(?<!\w)" + re.escape(spelling) + r"(?!\w)"
+    return re.search(pattern, text) is not None
+
+
+def _references_unqualified_type_token(spelling: str, text: str) -> bool:
+    """As :func:`_references_type_token`, plus refusing a match immediately
+    preceded by ``::`` -- i.e. *spelling* must appear bare, never as the
+    trailing segment of a different qualified name.
+
+    This is what the *leaf* candidate in :func:`_type_is_by_value_referenced`
+    scans with, instead of the plain token check: ``ns::Handle``'s leaf
+    fallback ``Handle`` matching a real ``other::Handle`` reference would
+    wrongly treat an unrelated scope's declaration as exposing ``ns::Handle``,
+    dropping the genuinely opaque type out of both identity tiers and
+    reporting its private layout change as breaking (Codex review on
+    PR #1041, following up on the embedded-substring case
+    :func:`_references_type_token` alone closes). The full, already-qualified
+    candidate is unaffected -- it is never scanned through this function --
+    so a genuine ``ns::Handle`` reference still matches regardless of what
+    precedes it."""
+    pattern = r"(?<!\w)(?<!:)" + re.escape(spelling) + r"(?!\w)"
+    return re.search(pattern, text) is not None
+
+
+def _type_is_by_value_referenced(tname: str, text: str) -> bool:
+    """Whether *text* references *tname* as a by-value type, trying both
+    the full name and (when applicable) its unqualified leaf spelling.
 
     *tname* is ``RecordType.name`` -- which may be qualified
     (``"ns::Handle"``) even when the signature text this function scans
@@ -195,44 +243,22 @@ def _by_value_scan_spellings(tname: str) -> tuple[str, ...]:
     ``opaque``, and the stable tier then suppresses the resulting finding
     with no spelling mismatch left to (accidentally) save it.
 
-    Returns *tname* itself plus its unqualified leaf spelling (the segment
-    after the last ``"::"``) when the two differ -- never only the leaf, so
-    an already-bare name is unaffected and this stays a pure widening of
-    what the old single-spelling scan already caught. The *leaf* spelling
-    is deliberately more collision-prone than the full name (``Handle`` can
-    legitimately name an unrelated type in another scope) -- see
-    :func:`_references_type_token`, the caller's own match predicate, for
-    the boundary check that keeps that widening from over-matching."""
+    The full name is checked via :func:`_references_type_token`; an
+    unqualified leaf spelling (the segment after the last ``"::"``, tried
+    only when it differs from the full name -- an already-bare name gets no
+    second candidate) is checked via the *stricter*
+    :func:`_references_unqualified_type_token`, which additionally refuses a
+    match immediately preceded by ``::`` -- otherwise the leaf widening
+    would treat a real, separately-scoped ``other::Handle`` reference as
+    exposing ``ns::Handle`` too."""
+    if _references_type_token(tname, text):
+        return True
     if "::" not in tname:
-        return (tname,)
+        return False
     leaf = tname.rsplit("::", 1)[-1]
-    return (tname, leaf) if leaf and leaf != tname else (tname,)
-
-
-def _references_type_token(spelling: str, text: str) -> bool:
-    """Whether *text* references *spelling* as a whole type-name token,
-    never as part of a longer identifier.
-
-    A plain ``spelling in text`` substring test (this scan's original
-    behavior, kept only for the full, already-qualified name) matches
-    ``Handle`` inside an unrelated ``OtherHandle`` just as readily as inside
-    a real ``ns::Handle`` reference -- harmless for a full name (a C/C++
-    identifier can never be a substring of another one without an
-    intervening non-identifier character on both sides, so this predicate
-    changes nothing for that candidate), but a real false-positive risk for
-    the *leaf* spelling :func:`_by_value_scan_spellings` widens the scan
-    with (Codex review on PR #1041): matching ``Handle`` inside
-    ``OtherHandle`` would wrongly mark the genuinely opaque ``ns::Handle``
-    as by-value exposed, dropping it from both identity tiers and reporting
-    a private layout change as breaking. Boundaries are ``\\w``/non-``\\w``
-    only, via ``re``'s own zero-width lookaround -- ``::`` either side of a
-    qualified reference (``other::Handle``) is non-word, so a same-spelling
-    reference in an unrelated *scope* still matches (a separate, documented,
-    still-open gap; see ``TestKnownGapStaysDocumented`` in
-    ``tests/test_opaque_identity_tiers.py``), which is unrelated to the
-    embedded-substring case this predicate closes."""
-    pattern = r"(?<!\w)" + re.escape(spelling) + r"(?!\w)"
-    return re.search(pattern, text) is not None
+    if not leaf or leaf == tname:
+        return False
+    return _references_unqualified_type_token(leaf, text)
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
@@ -245,10 +271,9 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if any(
-                _references_type_token(spelling, rt)
-                for spelling in _by_value_scan_spellings(tname)
-            ) and not (rt.endswith("*") or "* " in rt):
+            if _type_is_by_value_referenced(tname, rt) and not (
+                rt.endswith("*") or "* " in rt
+            ):
                 by_value_types.add(tname)
         for param in func.params:
             pt = param.type.strip()
@@ -256,10 +281,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
                 if tname in by_value_types:
                     continue
                 if (
-                    any(
-                        _references_type_token(spelling, pt)
-                        for spelling in _by_value_scan_spellings(tname)
-                    )
+                    _type_is_by_value_referenced(tname, pt)
                     and param.pointer_depth == 0
                     and not pt.endswith("*")
                 ):
@@ -272,9 +294,8 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if any(
-                _references_type_token(spelling, vt)
-                for spelling in _by_value_scan_spellings(tname)
-            ) and not (vt.endswith("*") or "* " in vt):
+            if _type_is_by_value_referenced(tname, vt) and not (
+                vt.endswith("*") or "* " in vt
+            ):
                 by_value_types.add(tname)
     return by_value_types

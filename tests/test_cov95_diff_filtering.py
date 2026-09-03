@@ -550,16 +550,19 @@ def test_find_by_value_types_leaf_widening_ignores_an_embedded_collision():
     assert _find_by_value_types(snap, opaque) == set()
 
 
-def test_find_by_value_types_leaf_widening_still_matches_a_real_scope_collision():
-    """The converse of the case above, and a documented, still-open gap
-    (mirroring ``TestKnownGapStaysDocumented`` in
-    ``tests/test_opaque_identity_tiers.py``): a *real*, separately-scoped
-    ``other::Handle`` reference still matches the ``ns::Handle`` leaf
-    spelling, since token-boundary matching cannot itself distinguish two
-    different scopes sharing a leaf name -- only an entity-identity based
-    join can. Pinned so a future tightening of this predicate doesn't
-    silently start relying on token boundaries to solve a problem they
-    were never meant to solve."""
+def test_find_by_value_types_leaf_widening_ignores_a_real_scope_collision():
+    """Regression for the second-round Codex review on PR #1041: a *real*,
+    separately-scoped ``other::Handle`` reference must not match the
+    ``ns::Handle`` leaf spelling either. Plain token-boundary matching
+    alone cannot tell the two scopes apart (``::`` is non-word on both
+    sides, so ``Handle`` in ``other::Handle`` is still a token-bounded
+    match) -- the leaf candidate additionally refuses a match immediately
+    preceded by ``::`` (`_references_unqualified_type_token`), since only
+    the trailing segment of a *different* qualified name can be preceded
+    that way. The full, already-qualified candidate is unaffected: a real
+    ``ns::Handle`` reference still matches regardless of what precedes it
+    (see ``test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name``
+    above for that positive case)."""
     opaque = {"ns::Handle"}
     snap = _snap(
         functions=[
@@ -571,7 +574,18 @@ def test_find_by_value_types_leaf_widening_still_matches_a_real_scope_collision(
             )
         ]
     )
-    assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
+    assert _find_by_value_types(snap, opaque) == set()
+
+
+def test_type_is_by_value_referenced_handles_an_empty_leaf_spelling():
+    """A degenerate ``RecordType.name`` ending in ``"::"`` (empty leaf
+    after the split) must not raise or fall through to an empty-string
+    match -- the defensive floor `_type_is_by_value_referenced` falls back
+    to False. `find_by_value_types` never constructs such a name itself, so
+    this exercises the guard directly."""
+    from abicheck.compare.opaque_types import _type_is_by_value_referenced
+
+    assert not _type_is_by_value_referenced("ns::", "ns::Handle used here")
 
 
 def test_find_by_value_types_does_not_match_a_name_embedded_in_a_longer_identifier():
