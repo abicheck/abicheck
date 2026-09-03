@@ -812,7 +812,12 @@ class TestAlreadyCanonicalHelpers:
     ) -> None:
         from abicheck.storage.canonical import semantic_digest_of_canonical_form
 
-        canonical = canonical_form(value)
+        # `strip_capture_metadata`, not bare `canonical_form`: `semantic_digest`
+        # strips the root capture-metadata block before hashing, so the input
+        # here must match what `InMemoryObjectStore.put()` actually feeds this
+        # helper (CodeRabbit review) -- otherwise a generated `value` carrying
+        # a root `"capture"` key would make this assertion false.
+        canonical = strip_capture_metadata(value)
         assert semantic_digest_of_canonical_form(
             canonical, algorithm="sha256"
         ) == semantic_digest(value)
