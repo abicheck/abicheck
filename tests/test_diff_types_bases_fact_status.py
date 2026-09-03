@@ -161,6 +161,30 @@ class TestBaseClassChangesEvidenceGating:
         r = compare(_snap([t_old]), _snap([t_new]))
         assert ChangeKind.TYPE_BASE_CHANGED in _kinds(r)
 
+    def test_virtual_only_change_does_not_duplicate_an_already_emitted_type_base_changed(
+        self,
+    ) -> None:
+        """When a plain base-set change already appended TYPE_BASE_CHANGED,
+        a co-occurring virtual-base-only set change (old_virt_set !=
+        new_virt_set, but neither became_virtual nor lost_virtual --
+        because the base itself was removed entirely, not merely toggled)
+        must not append a second, duplicate TYPE_BASE_CHANGED."""
+        t_old = RecordType(
+            name="Derived",
+            kind="class",
+            bases=["A", "B"],
+            virtual_bases=["B"],
+        )
+        t_new = RecordType(
+            name="Derived",
+            kind="class",
+            bases=["A"],
+            virtual_bases=[],
+        )
+        r = compare(_snap([t_old]), _snap([t_new]))
+        base_changed = [c for c in r.changes if c.kind == ChangeKind.TYPE_BASE_CHANGED]
+        assert len(base_changed) == 1
+
     def test_partial_bases_does_not_fabricate_base_removed(self) -> None:
         """Codex review, PR #1033: PARTIAL means the uncovered part of the
         scope is unknown, not empty -- a base absent from a PARTIAL-covered
