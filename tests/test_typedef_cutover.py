@@ -331,6 +331,11 @@ class TestSemanticIrCutoverGate:
             'x = getattr(snap, "typedefs", {})',
             "from builtins import getattr as g\nx = g(snap, 'typedefs')",
             "g = getattr\nx = g(snap, 'typedefs_qualified')",
+            # The evasion through an aliased `builtins` module rather than
+            # an aliased `getattr` name -- `func` is an `ast.Attribute`
+            # (`b.getattr`), not an `ast.Name`, so it needs its own check.
+            "import builtins as b\nx = b.getattr(snap, 'typedefs')",
+            "import builtins\nx = builtins.getattr(snap, 'typedefs_qualified')",
         ):
             found = legacy_collection_reads(ast.parse(source), forbidden)
             assert found, f"gate missed: {source!r}"
@@ -351,5 +356,8 @@ class TestSemanticIrCutoverGate:
             "typedefs = {}\nx = typedefs",
             "build(snapshot, typedefs=alias_map)",
             'x = getattr(snap, "something_else")',
+            # A `.getattr(...)` method call on something that is not the
+            # `builtins` module must not be mistaken for the builtin.
+            'x = some_object.getattr(snap, "typedefs")',
         ):
             assert legacy_collection_reads(ast.parse(source), forbidden) == []

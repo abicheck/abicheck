@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -40,7 +41,9 @@ read those collections — not to punch a hole here.
   flagged (any attribute access whose attribute name is a forbidden one);
 * `getattr(snap, "typedefs")` and `getattr(snap, "typedefs", {})` are
   flagged too — the same evasion `fact-field-readers` already learned to
-  close, including through a resolved `getattr` alias;
+  close, including through a resolved `getattr` alias and through the
+  builtin reached off an aliased `builtins` module
+  (`import builtins as b; b.getattr(snap, "typedefs")`);
 * a *local variable* named `typedefs` is not flagged (it is a `Name`, not
   an `Attribute`), because renaming a local is not un-migrating anything;
 * a keyword argument spelled `typedefs=` is not flagged, since that is the
@@ -100,6 +103,28 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
 _GETATTR_NAMES = frozenset({"getattr"})
 
 
+def _builtins_module_aliases(tree: ast.AST) -> frozenset[str]:
+    """Every local name bound to the `builtins` module itself in *tree*
+    (`import builtins`, `import builtins as b`), so `b.getattr(...)` is
+    recognized as the same evasion as a bare `getattr(...)` call.
+
+    A plain `getattr(obj, "name")` call is an `ast.Call` whose `func` is an
+    `ast.Name` -- but nothing stops a caller from reaching the identical
+    builtin through an attribute instead
+    (`import builtins as b; b.getattr(snap, "typedefs")`), which is an
+    `ast.Call` whose `func` is an `ast.Attribute`. `_getattr_aliases` alone
+    never sees that shape, since it only tracks names bound to the
+    `getattr` *function*, not names bound to the *module* it lives on.
+    """
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "builtins":
+                    aliases.add(alias.asname or alias.name)
+    return frozenset(aliases)
+
+
 def _getattr_aliases(tree: ast.AST) -> frozenset[str]:
     """Every local name bound to `getattr` in *tree*, plus `getattr` itself.
 
@@ -123,23 +148,46 @@ def _getattr_aliases(tree: ast.AST) -> frozenset[str]:
     return frozenset(aliases)
 
 
+def _is_getattr_call(
+    node: ast.Call, getattr_aliases: frozenset[str], module_aliases: frozenset[str]
+) -> bool:
+    """Whether *node* invokes `getattr` under any resolved spelling: a bare
+    `getattr(...)`/alias call (`func.id` resolved against *getattr_aliases*),
+    or `<builtins-module-alias>.getattr(...)` (`func.value.id` resolved
+    against *module_aliases*, the names bound to the `builtins` module
+    itself)."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id in getattr_aliases
+    if isinstance(func, ast.Attribute) and func.attr == "getattr":
+        base = func.value
+        return isinstance(base, ast.Name) and base.id in module_aliases
+    return False
+
+
 def legacy_collection_reads(
     tree: ast.AST, forbidden: frozenset[str]
 ) -> list[tuple[int, str]]:
     """Every `(lineno, attribute)` read of a *forbidden* collection in *tree*.
 
     Both spellings a real evasion would use: a direct attribute access, and
-    a `getattr(obj, "<name>")` call through any resolved alias. A bare
-    `Name` is never reported -- a local variable that happens to share the
-    field's name is not a read of the field.
+    a `getattr(obj, "<name>")` call through any resolved alias -- including
+    the same builtin reached through an attribute
+    (`import builtins as b; b.getattr(obj, "<name>")`), not only a bare
+    `Name` call. A bare `Name` attribute is never reported -- a local
+    variable that happens to share the field's name is not a read of the
+    field.
     """
-    aliases = _getattr_aliases(tree)
+    getattr_aliases = _getattr_aliases(tree)
+    module_aliases = _builtins_module_aliases(tree)
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in forbidden:
             found.append((node.lineno, node.attr))
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id not in aliases or len(node.args) < 2:
+        elif isinstance(node, ast.Call):
+            if not _is_getattr_call(node, getattr_aliases, module_aliases):
+                continue
+            if len(node.args) < 2:
                 continue
             name_arg = node.args[1]
             if (
