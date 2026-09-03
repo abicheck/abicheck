@@ -65,6 +65,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
@@ -248,6 +250,36 @@ def test_exit_1_artifact_set_evidence_contract_error_beats_cli_error_stub():
     )
     assert result.returncode == 0, result.stderr
     assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "hostile_verdict",
+    [
+        "EVIDENCE_CONTRACT_ERROR ",  # trailing space
+        " EVIDENCE_CONTRACT_ERROR",  # leading space
+        "evidence_contract_error",  # wrong case
+        "EVIDENCE_CONTRACT_ERRORX",  # extra trailing char
+        "not EVIDENCE_CONTRACT_ERROR really",  # embedded, not the whole value
+        "EVIDENCE_CONTRACT_ERROR\nVERDICT=EVIDENCE_CONTRACT_ERROR",  # injected newline
+    ],
+)
+def test_exit_1_hostile_verdict_string_does_not_trigger_the_bucket(
+    hostile_verdict: str,
+) -> None:
+    """Malicious-fixture negative control (a `--artifact-set` member's JSON
+    report is derived from an attacker-influenced library/build, so its
+    `compat_verdict` field must not be trusted as anything but data): the
+    dispatch compares `$_verdict` to the literal string
+    `EVIDENCE_CONTRACT_ERROR` with bash `[[ ... == ... ]]`, not a substring
+    or regex match, so no near-miss spelling, embedded value, or injected
+    line can reach the `EVIDENCE_CONTRACT_ERROR` bucket -- it must still
+    classify as a plain CLI error (this harness's `_is_cli_error` stub
+    default) or `ERROR`, never the axis a crafted fixture is trying to
+    forge."""
+    result = _run_exit_mapping(1, is_cli_error=True, report_verdict=hostile_verdict)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" not in result.stdout
+    assert "VERDICT=ERROR" in result.stdout
 
 
 def test_evidence_contract_error_still_fails_the_step():
