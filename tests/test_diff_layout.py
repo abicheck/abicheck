@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import BREAKING_KINDS, RISK_KINDS, ChangeKind
-from abicheck.model import AbiSnapshot, RecordType, TypeField
+from abicheck.model import AbiSnapshot, Fact, RecordType, TypeField
 
 
 def _snap(version: str, *, types: list[RecordType]) -> AbiSnapshot:
@@ -92,6 +92,63 @@ class TestLayoutDescriptorDiff:
         old = _snap("1", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=None)])
         new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
         assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_old_sides_vtable_fact_uncollected(self) -> None:
+        """ADR-063 Phase 5B (vtable/vptr_offset_bits slice): a direct
+        ``FactStatus`` read, additive to the pre-existing
+        ``vtable_facts_reliable`` snapshot-wide flag. The old side's own
+        ``vtable``/``vptr_offset_bits`` read empty/None -- same *value* as a
+        genuinely non-polymorphic class (``test_vptr_introduced`` above) --
+        but the fact backing that reading was never actually collected, so
+        it must not be trusted as confirmed non-polymorphic.
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_old_sides_vptr_offset_bits_fact_uncollected(
+        self,
+    ) -> None:
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_still_flagged_when_old_side_confirmed_non_polymorphic(self) -> None:
+        # Unaffected: an explicit Fact.present(...) confirming genuine
+        # absence still fires, exactly like the pre-existing
+        # test_vptr_introduced case above (this pins the same behavior when
+        # the fact is stated explicitly rather than left to backfill).
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.present([]),
+                    vptr_offset_bits_fact=Fact.present(None),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
 
     def test_trivially_copyable_lost(self) -> None:
         old = _snap("1", types=[_rec(is_trivially_copyable=True)])

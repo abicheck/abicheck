@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_vtable_layout import _is_polymorphic, _secondary_groups
-from abicheck.model import AbiSnapshot, RecordType
+from abicheck.model import AbiSnapshot, Fact, RecordType
 
 
 def _snap(*types: RecordType) -> AbiSnapshot:
@@ -203,3 +203,58 @@ class TestReconstruction:
         }
         # A is primary (non-virtual), V is a polymorphic virtual base → secondary.
         assert _secondary_groups(types["D"], types, {}) == ["V"]
+
+
+class TestReconstructionFactStatus:
+    """ADR-063 Phase 5B (vtable/vptr_offset_bits slice): ``_is_polymorphic``
+    reads ``vtable_fact.status`` directly rather than trusting an empty
+    ``vtable`` value alone -- see that function's own docstring.
+    """
+
+    @staticmethod
+    def _uncollected(name: str, *, bases=None, virtual_bases=None) -> RecordType:
+        """A record whose own vtable evidence was never collected -- the
+        real shape a legacy pre-v21 direct-clang snapshot's own
+        ``apply_legacy_fact_backfill`` produces for every record
+        (``storage/fact_backfill.py``), unlike ``_poly``'s always-confirmed
+        ``Fact.present([])``.
+        """
+        return RecordType(
+            name=name,
+            kind="class",
+            size_bits=64,
+            bases=bases or [],
+            virtual_bases=virtual_bases or [],
+            vtable_fact=Fact.not_collected(),
+        )
+
+    def test_own_uncollected_vtable_with_no_bases_is_indeterminate(self):
+        # No bases to fall back on, and the class's own vtable evidence was
+        # never actually collected -- must not read as confirmed False.
+        types = {"P": self._uncollected("P")}
+        assert _is_polymorphic("P", types, {}) is None
+
+    def test_own_uncollected_vtable_with_non_polymorphic_bases_is_indeterminate(
+        self,
+    ):
+        types = {
+            "Base": _poly("Base"),  # confirmed non-polymorphic
+            "D": self._uncollected("D", bases=["Base"]),
+        }
+        assert _is_polymorphic("D", types, {}) is None
+
+    def test_uncollected_vtable_does_not_hide_a_real_base_signal(self):
+        # A positive signal from the transitive base walk still settles the
+        # question, regardless of this record's own vtable_fact status.
+        types = {
+            "Base": _poly("Base", vtable=["_ZN4Base1fEv"]),
+            "D": self._uncollected("D", bases=["Base"]),
+        }
+        assert _is_polymorphic("D", types, {}) is True
+
+    def test_confirmed_empty_vtable_still_reads_false(self):
+        # A genuinely confirmed-empty vtable (Fact.present([]), what _poly
+        # always constructs) is unaffected -- only an uncollected fact
+        # changes behavior.
+        types = {"P": _poly("P")}
+        assert _is_polymorphic("P", types, {}) is False

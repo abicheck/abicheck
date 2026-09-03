@@ -1141,6 +1141,36 @@ def virtual_method_addition(
     rather than adding one — those are ABI-compatible, not breaks. Matching is by
     full signature, so a same-named virtual with *different* parameters (a new
     slot, e.g. ``Derived::paint(double)`` over ``Base::paint(int)``) still fires.
+
+    ADR-063 Phase 5B (vtable/vptr_offset_bits slice) re-verified this
+    function's own ``old_vtable != new_vtable`` deferral against the new
+    per-record ``FactStatus`` checks that slice added to
+    ``diff_layout._check_vptr_introduced``/``diff_vtable_layout._is_
+    polymorphic`` — deliberately **not** extended here. ``_fact_str_list``
+    still collapses an uncollected ``vtable_fact`` to ``[]`` on purpose:
+    when both sides read that way (this function's own documented blind
+    spot — a DWARF/symbol-only snapshot that never captures vtable layout
+    at all), the arrays compare equal and this function proceeds to be the
+    *only* signal, exactly as designed. Declining here whenever either
+    side's ``vtable_fact`` is merely ``NOT_COLLECTED``/``FAILED`` (rather
+    than genuinely differing) would silently drop that blind-spot coverage
+    -- and would also desynchronize from ``diff_types_vtable.
+    _vtable_transition_is_evidenced``, which for the identical case (one
+    side uncollected, the other side newly populated) still finds real
+    evidence via its own class's-own-virtual-functions/size-delta
+    heuristics and correctly emits ``TYPE_VTABLE_CHANGED`` — the deferral
+    above is only safe *because* that sibling detector still fires there.
+    Making ``_vtable_transition_is_evidenced`` decline outright on an
+    uncollected ``vtable_fact`` (the more literal reading of "direct
+    ``FactStatus`` reads") would break exactly that coupling and leave
+    *neither* detector firing; doing so safely would need this function to
+    consult the sibling detector's own evidenced/not-evidenced verdict
+    before deciding whether to defer, which ``diff_types_vtable.py`` cannot
+    expose back to this module without an import cycle (this module already
+    supplies ``diff_types_vtable`` with ``vtable_slot_is_override_reuse``).
+    See ``diff_types_vtable.py``'s own module docstring for the full
+    accounting; recorded here per this repo's own "say so explicitly and
+    record the gap" convention rather than silently left implicit.
     """
     if not f_new.is_virtual:
         return None

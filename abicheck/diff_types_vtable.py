@@ -26,6 +26,52 @@ only symbol this module exports). Everything else here
 unresolved_evidence``/``_layout_evidence_is_unverifiable``/
 ``_owned_virtual_signatures``/``_owned_virtual_signatures_for_record``) is
 private to this cluster and was already only ever called from within it.
+
+**ADR-063 Phase 5B (vtable/vptr_offset_bits slice) re-audit, landed.** The
+plan's own "Deliberately not attempted" note (5B's first PR) flagged this
+cluster's evidence-gap guards -- built before ``Fact[T]`` existed, inferring
+"evidence missing" indirectly from ``size_bits``/virtual-signature
+heuristics rather than reading ``FactStatus`` directly -- as needing "its
+own dedicated slice with equal scrutiny." That scrutiny landed a genuine,
+safe direct-``FactStatus`` improvement in the two *sibling* vtable
+detectors this cluster correlates with (``diff_layout._check_vptr_
+introduced``'s own per-record old-side check; ``diff_vtable_layout._is_
+polymorphic``'s own per-record check) -- both self-contained, with no
+other detector's coverage assumption riding on their exact decline
+condition.
+
+**This cluster's own two guards were re-verified and deliberately left
+unchanged.** ``_vtable_transition_is_evidenced``'s "both sides captured
+something" branch and its class's-own-virtual-functions/size-delta
+fallbacks are not, on inspection, a stand-in for a direct ``FactStatus``
+check the way ``diff_layout``'s snapshot-wide ``vtable_facts_reliable``
+flag was: DWARF's own vtable extraction (``dwarf_snapshot.py``) reports
+``Fact.present([])`` -- genuinely ``PRESENT``, not ``NOT_COLLECTED`` --
+for a class whose virtual methods happen to live in a translation unit
+only the *other* side's debug info covers (the exact false-positive this
+guard's own docstring documents fixing). ``FactStatus`` cannot see that
+gap at all: from DWARF's own local perspective, per-TU coverage loss is
+indistinguishable from a genuinely non-polymorphic class, so both sides
+read ``PRESENT`` either way. A direct ``vtable_fact.status`` pre-check
+would therefore not replace the heuristic here -- it would only catch the
+disjoint case of a genuinely *uncollected* fact (``NOT_COLLECTED``/
+``FAILED``), and adding it as an unconditional decline was found, on
+tracing the actual call graph, to be **unsafe**: ``diff_cxx_rules.
+virtual_method_addition`` defers to this cluster ("``TYPE_VTABLE_CHANGED``
+covers this case") precisely in the one-side-uncollected/other-side-
+populated shape, relying on today's heuristic (not a ``FactStatus`` read)
+to still find real evidence there and fire. Declining outright on
+``NOT_COLLECTED`` would silently desynchronize the two detectors and drop
+coverage neither would then provide -- see ``virtual_method_addition``'s
+own docstring for the full trace, including why fixing it properly (making
+that function consult this cluster's own evidenced/not-evidenced verdict
+before deferring) needs an import this leaf module's own no-cycle
+constraint (above) does not allow without further restructuring. Recorded
+here, not silently left implicit, per this repo's own "say so explicitly
+and record the gap" convention -- the sub-phase's own "vtable/
+vptr_offset_bits, all five fields gated" removal gate is therefore still
+open for this specific cluster, even though the two sibling detectors it
+correlates with are now gated.
 """
 
 from __future__ import annotations
