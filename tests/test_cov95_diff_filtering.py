@@ -637,8 +637,8 @@ def test_find_by_value_types_relational_angle_in_a_template_argument_is_not_a_br
 
 def test_is_indirect_spelling_tolerates_unbalanced_brackets():
     """Defensive-floor coverage for `_is_indirect_spelling`'s bracket-depth
-    tracking: a stray closing `)` or `>` with no matching opener must not
-    drive either depth counter negative (which would then wrongly mask a
+    tracking: a stray closing `)`, `]`, or `>` with no matching opener must
+    not drive any depth counter negative (which would then wrongly mask a
     later, genuinely top-level sigil as still "nested"). No real,
     well-formed C/C++ declarator produces an unbalanced spelling, but the
     guard exists precisely because this scan runs on rendered text from
@@ -647,6 +647,7 @@ def test_is_indirect_spelling_tolerates_unbalanced_brackets():
     from abicheck.compare.opaque_types import _is_indirect_spelling
 
     assert _is_indirect_spelling("Handle)*") is True
+    assert _is_indirect_spelling("Handle]&") is True
     assert _is_indirect_spelling("Handle>&") is True
 
 

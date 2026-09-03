@@ -525,34 +525,34 @@ def fact_same_producer_qualified(
 def depth_aware_bare_name(qualified: str) -> str:
     """The innermost, fully-unqualified leaf of a ``::``-qualified name.
 
-    Splits only on a depth-zero ``"::"`` (tracking ``<``/``>`` nesting), so
-    a template argument's own qualification is never mistaken for a
-    namespace boundary -- ``rsplit("::", 1)[-1]`` on
-    ``"Wrapper<dep::Tag>"`` wrongly extracts ``"Tag>"`` instead of the
-    whole (unqualified, since it has no depth-zero ``"::"``) name itself
-    (Codex review, fresh evidence: found in both this module's own
-    ``record_canonical_names`` and ``diff_filtering._enum_canonical_names``,
-    each scanning a fully-qualified DWARF key for its bare leaf).
+    Splits only on a depth-zero ``"::"``, tracking ``<``/``>`` nesting (so
+    ``"Wrapper<dep::Tag>"``'s own ``::`` isn't mistaken for the outer
+    boundary), with ``()``/``[]`` nesting additionally suspending that
+    tracking so a relational ``>`` inside either -- e.g.
+    ``S<arr[1 > 0], dep::Tag>`` -- isn't mistaken for a real closing ``>``
+    (Codex review on PR #1041; same fix as opaque_types._is_indirect_spelling).
 
     A small, local duplicate of ``type_reachability_spelling._bare_type_name``
-    rather than an import of it: that module imports ``diff_cxx_rules``,
-    which imports this one, so importing it here (even lazily -- the
-    ``import-cycle-growth`` gate tracks every ``from .x import y``
-    regardless of nesting) would add a real cycle edge back into this
-    module.
-    """
+    rather than an import of it -- that module imports ``diff_cxx_rules``,
+    which imports this one, so importing it here would add a real cycle."""
     depth = 0
+    suspend = 0  # inside "(...)"/"[...]"
     last_split = 0
     i, n = 0, len(qualified)
     while i < n:
         ch = qualified[i]
-        if ch == "<":
+        if ch in "([":
+            suspend += 1
+        elif ch in ")]":
+            suspend = max(0, suspend - 1)
+        elif suspend == 0 and ch == "<":
             depth += 1
-        elif ch == ">":
-            depth -= 1
-        elif ch == ":" and depth == 0 and i + 1 < n and qualified[i + 1] == ":":
-            last_split = i + 2
-            i += 1
+        elif suspend == 0 and ch == ">":
+            depth = max(0, depth - 1)
+        elif suspend == 0 and ch == ":" and qualified[i + 1 : i + 2] == ":":
+            if depth == 0:
+                last_split = i + 2
+                i += 1
         i += 1
     return qualified[last_split:]
 

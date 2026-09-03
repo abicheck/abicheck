@@ -32,9 +32,10 @@ import pytest
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_filtering import (
     _downgrade_opaque_type_changes,
+    _find_by_value_types,
     _find_opaque_types,
 )
-from abicheck.model import AbiSnapshot, RecordType
+from abicheck.model import AbiSnapshot, Function, Param, RecordType, Variable
 from abicheck.model.identity import (
     Anonymous,
     EntityKind,
@@ -278,3 +279,33 @@ class TestByValueExposureAcrossAQualificationMismatch:
 
         change = _size_change("ns::Handle", _STABLE_ID)
         assert _survivors([change], snap, snap) == ["ns::Handle"]
+
+
+def test_find_by_value_types_array_subscript_relational_angle_is_not_a_bracket():
+    """Regression for the sixth-round Codex review on PR #1041: an
+    array-subscript comparison (`arr[1 > 0]`) needs no surrounding parens
+    to be valid C++, unlike a bare relational non-type template argument,
+    so tracking parenthesis nesting alone still let this shape's stray
+    `>` close the outer template one `>` early, leaving the
+    genuinely-nested `&h` wrongly read as top-level indirection. Square-
+    bracket nesting is now tracked the same way parenthesis nesting is."""
+    template_spelling = "S<arr[1 > 0], &h>"
+    opaque = {"S"}
+    snap = _snap(
+        [RecordType(name="S", kind="struct", is_opaque=True)],
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        types=snap.types,
+        functions=[
+            Function(
+                name="f",
+                mangled="f",
+                return_type=template_spelling,
+                params=[Param(name="p", type=template_spelling, pointer_depth=0)],
+            )
+        ],
+        variables=[Variable(name="g", mangled="g", type=template_spelling)],
+    )
+    assert "S" in _find_by_value_types(snap, opaque)

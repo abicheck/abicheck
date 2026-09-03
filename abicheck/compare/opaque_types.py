@@ -340,21 +340,43 @@ def _is_indirect_spelling(text: str) -> bool:
     nesting -- and only letting ``<``/``>`` affect the angle depth while
     parenthesis depth is zero -- resolves the ambiguity precisely: a
     relational operator's ``<``/``>`` always sits inside at least one
-    open paren, a real template delimiter never does."""
+    open paren, a real template delimiter never does.
+
+    An array-subscript comparison needs no such parens, though --
+    ``S<arr[1 > 0], &h>``'s bracketed ``1 > 0`` is valid C++ with no
+    surrounding paren at all, so tracking parenthesis nesting alone still
+    let this exact shape close the outer template early on the
+    subscript's own stray ``>`` (Codex review on PR #1041, fourth
+    follow-up round). Square-bracket nesting is tracked the same way
+    parenthesis nesting is -- a ``<``/``>``/``*``/``&`` only counts while
+    both parenthesis and bracket depth are zero -- since a subscript's own
+    relational ``<``/``>`` always sits inside an open bracket, a real
+    template delimiter never does."""
     angle_depth = 0
     paren_depth = 0
+    bracket_depth = 0
     for ch in text:
         if ch == "(":
             paren_depth += 1
         elif ch == ")":
             if paren_depth > 0:
                 paren_depth -= 1
-        elif paren_depth == 0 and ch == "<":
+        elif ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+        elif paren_depth == 0 and bracket_depth == 0 and ch == "<":
             angle_depth += 1
-        elif paren_depth == 0 and ch == ">":
+        elif paren_depth == 0 and bracket_depth == 0 and ch == ">":
             if angle_depth > 0:
                 angle_depth -= 1
-        elif angle_depth == 0 and paren_depth == 0 and (ch == "*" or ch == "&"):
+        elif (
+            angle_depth == 0
+            and paren_depth == 0
+            and bracket_depth == 0
+            and (ch == "*" or ch == "&")
+        ):
             return True
     return False
 
