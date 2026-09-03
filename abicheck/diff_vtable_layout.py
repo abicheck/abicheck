@@ -54,6 +54,7 @@ from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import (
     AbiSnapshot,
+    FactStatus,
     RecordType,
     is_non_abi_surface_type,
     resolved_fact_value,
@@ -78,23 +79,36 @@ def _is_polymorphic(
 
     An empty own ``vtable``/``virtual_bases`` also reads as indeterminate
     (not confidently ``False``) when *this record's own* ``vtable_fact``
-    wasn't actually collected (ADR-063 Phase 5B — direct ``FactStatus``
-    read, replacing an implicit reliance on the value alone). This closes a
-    real, previously-unguarded gap: a persisted, pre-v21 direct-clang
-    snapshot's ``vtable`` is unconditionally ``[]`` for *every* record
-    regardless of real polymorphism (``AbiSnapshot.clang_vtable_facts_
-    reliable``'s own docstring; ``diff_types_vtable``/``diff_layout`` already
-    gate their own vtable reads on that flag, but this module never did) —
-    without this check, a genuinely-polymorphic base read from such a
-    snapshot silently contributed no secondary vtable group here, with
-    nothing to catch it. ``virtual_bases_fact`` carries no equivalent
-    known-unreliable-producer history (unlike ``vtable_fact``, no producer
-    has ever been shown to emit a placeholder value for it), so only
-    ``vtable_fact`` needs this direct check — a real positive read from
-    either field (or from the transitive base walk below) still settles the
-    question regardless of this record's own ``vtable_fact`` status, since
-    that positive evidence doesn't depend on the record's own vtable being
-    trustworthy at all.
+    wasn't actually confirmed complete (ADR-063 Phase 5B — direct
+    ``FactStatus`` read, replacing an implicit reliance on the value
+    alone). This closes a real, previously-unguarded gap: a persisted,
+    pre-v21 direct-clang snapshot's ``vtable`` is unconditionally ``[]``
+    for *every* record regardless of real polymorphism (``AbiSnapshot.
+    clang_vtable_facts_reliable``'s own docstring; ``diff_types_vtable``/
+    ``diff_layout`` already gate their own vtable reads on that flag, but
+    this module never did) — without this check, a genuinely-polymorphic
+    base read from such a snapshot silently contributed no secondary
+    vtable group here, with nothing to catch it. ``virtual_bases_fact``
+    carries no equivalent known-unreliable-producer history (unlike
+    ``vtable_fact``, no producer has ever been shown to emit a placeholder
+    value for it), so only ``vtable_fact`` needs this direct check — a
+    real positive read from either field (or from the transitive base walk
+    below) still settles the question regardless of this record's own
+    ``vtable_fact`` status, since that positive evidence doesn't depend on
+    the record's own vtable being trustworthy at all.
+
+    Only a ``PRESENT`` status earns the empty reading trust — ``PARTIAL``
+    does not (Codex review, this slice): an empty *partial* vtable list
+    means only the observed portion is empty, not that the class owns no
+    virtuals at all, the same discipline ``diff_cxx_rules.
+    _fact_str_list_confirmed`` already applies to ``bases``/
+    ``virtual_bases`` for the identical reason (a list-typed fact's
+    uncovered remainder could hold the very entry that would answer the
+    question). No real producer emits ``Fact.partial(...)`` for
+    ``vtable_fact`` today (only ``vptr_offset_bits_fact`` — a scalar, not a
+    list, so its own ``PARTIAL`` reading carries no "uncovered remainder"
+    risk — is ever partial), but this function does not assume that stays
+    true.
     """
     if name in memo:
         return memo[name]
@@ -108,7 +122,9 @@ def _is_polymorphic(
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact
-    own_vtable_confirmed_empty = vtable_fact is None or vtable_fact.is_present
+    own_vtable_confirmed_empty = (
+        vtable_fact is None or vtable_fact.status is FactStatus.PRESENT
+    )
     # Guard against inheritance cycles (malformed input): assume non-polymorphic
     # while resolving, overwrite below.
     memo[name] = False

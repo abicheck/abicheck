@@ -258,3 +258,18 @@ class TestReconstructionFactStatus:
         # changes behavior.
         types = {"P": _poly("P")}
         assert _is_polymorphic("P", types, {}) is False
+
+    def test_partial_empty_vtable_is_indeterminate_not_confirmed_false(self):
+        """Codex review, this slice: a ``PARTIAL`` empty vtable means only
+        the *observed* portion is empty -- the uncovered remainder could
+        still hold a virtual method -- so it must not be trusted as
+        confirmed non-polymorphic, unlike a genuine ``Fact.present([])``.
+        """
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.partial([]),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None

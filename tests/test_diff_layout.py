@@ -150,6 +150,46 @@ class TestLayoutDescriptorDiff:
         new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
         assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
 
+    def test_vptr_not_flagged_when_old_sides_vtable_fact_partial_empty(self) -> None:
+        """Codex review, this slice: a ``PARTIAL`` empty ``vtable_fact`` --
+        only the observed portion confirmed empty, not the whole list --
+        must not be trusted as confirmed non-polymorphic either, unlike a
+        genuine ``Fact.present([])`` (see the still-flagged case above).
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.partial([]),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_still_flagged_when_old_sides_vptr_offset_bits_fact_partial(
+        self,
+    ) -> None:
+        # Unlike vtable_fact above, vptr_offset_bits_fact is a scalar heuristic
+        # derivation (the direct-clang header-AST backend's own
+        # Fact.partial(0 if vtable else None)) -- PARTIAL there is a real
+        # signal, not an evidence gap, so it must not block this detector.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.present([]),
+                    vptr_offset_bits_fact=Fact.partial(None),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
     def test_trivially_copyable_lost(self) -> None:
         old = _snap("1", types=[_rec(is_trivially_copyable=True)])
         new = _snap("2", types=[_rec(is_trivially_copyable=False)])

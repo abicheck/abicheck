@@ -53,7 +53,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import build_type_map, lookup_matched_type, make_change
-from .model import resolved_fact_value
+from .model import FactStatus, resolved_fact_value
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -212,27 +212,42 @@ def _check_vptr_introduced(
     -- it cannot see a gap scoped to this one record. ADR-063 Phase 5B adds
     a direct, per-record ``FactStatus`` check alongside it: the old side is
     only trusted as "confirmed non-polymorphic" when its own
-    ``vtable_fact``/``vptr_offset_bits_fact`` were actually collected
-    (``.is_present``), not merely defaulted to their falsy resting value by
-    ``resolved_fact_value``. This is additive, never a relaxation -- it can
-    only make the guard decline *more* often, exactly like the whole-
-    snapshot flag it sits beside, and it catches what that flag can't: a
-    record whose own evidence is genuinely missing (``Fact.not_collected()``/
-    ``Fact.failed(...)``) even inside an otherwise-reliable snapshot (e.g. a
-    hybrid/mixed-producer dump, or a future producer that can leave an
-    individual record's layout facts uncollected). The new side needs no
-    equivalent check: a ``NOT_COLLECTED``/``FAILED`` new-side fact already
-    reads as empty/``None`` via ``resolved_fact_value``, which already fails
-    this function's own positive-evidence requirement below, so it cannot
+    ``vtable_fact``/``vptr_offset_bits_fact`` were actually collected, not
+    merely defaulted to their falsy resting value by ``resolved_fact_value``.
+    This is additive, never a relaxation -- it can only make the guard
+    decline *more* often, exactly like the whole-snapshot flag it sits
+    beside, and it catches what that flag can't: a record whose own evidence
+    is genuinely missing (``Fact.not_collected()``/``Fact.failed(...)``)
+    even inside an otherwise-reliable snapshot (e.g. a hybrid/mixed-producer
+    dump, or a future producer that can leave an individual record's layout
+    facts uncollected). The new side needs no equivalent check: a
+    ``NOT_COLLECTED``/``FAILED`` new-side fact already reads as empty/
+    ``None`` via ``resolved_fact_value``, which already fails this
+    function's own positive-evidence requirement below, so it cannot
     manufacture a false "gained a vptr" reading either way.
+
+    The two facts need *different* thresholds (Codex review, this slice):
+    ``old_vtable_fact`` is a list, so only ``PRESENT`` earns the empty
+    reading trust -- a ``PARTIAL`` empty vtable means only the *observed*
+    portion is empty, not that the class owns no virtuals at all (the same
+    discipline ``diff_cxx_rules._fact_str_list_confirmed`` already applies
+    to ``bases``/``virtual_bases``, and ``diff_vtable_layout._is_
+    polymorphic`` now applies to its own ``vtable_fact`` read). ``old_vptr_
+    fact`` is a scalar heuristic derivation (the direct-clang header-AST
+    backend's own ``Fact.partial(0 if vtable else None)`` -- see that
+    backend's own comment), not a list with a possibly-nonempty uncovered
+    remainder, so ``PARTIAL`` there is a real signal, not a gap: requiring
+    ``PRESENT`` for it too would make this whole detector permanently inert
+    for every clang-header-AST-sourced comparison, since that backend never
+    emits anything but ``PARTIAL`` for this field.
     """
     if not vtable_facts_reliable:
         return []
     old_vtable_fact = old_rec.vtable_fact
     old_vptr_fact = old_rec.vptr_offset_bits_fact
-    if (old_vtable_fact is not None and not old_vtable_fact.is_present) or (
-        old_vptr_fact is not None and not old_vptr_fact.is_present
-    ):
+    if (
+        old_vtable_fact is not None and old_vtable_fact.status is not FactStatus.PRESENT
+    ) or (old_vptr_fact is not None and not old_vptr_fact.is_present):
         return []
     old_vtable = resolved_fact_value(old_rec.vtable_fact, [])
     new_vtable = resolved_fact_value(new_rec.vtable_fact, [])
