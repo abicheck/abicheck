@@ -38,9 +38,10 @@ safe.
 from __future__ import annotations
 
 import functools
+import json
 
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
-from abicheck.serialization import snapshot_to_json
+from abicheck.serialization import snapshot_to_dict, snapshot_to_json
 from abicheck.snapshot_io import (
     ZSTD_LEVEL_BASELINE,
     SnapshotCompression,
@@ -126,6 +127,40 @@ def graph_heavy_snapshot_at_scale_json_bytes() -> bytes:
     stop being the regression coverage those tests claim to provide."""
     encoded = snapshot_to_json(graph_heavy_snapshot_at_scale()).encode()
     assert len(encoded) > 8 * 1024 * 1024  # past the single-segment collapse point
+    return encoded
+
+
+@functools.lru_cache(maxsize=1)
+def graph_heavy_snapshot_at_scale_flat_json_bytes() -> bytes:
+    """A *cheap* >8 MiB serialization of :func:`graph_heavy_snapshot_at_scale`
+    -- the legacy flat ``json.dumps(snapshot_to_dict(...))`` shape, not the
+    real ``save_snapshot``/``write_snapshot`` sectioned-document envelope
+    :func:`graph_heavy_snapshot_at_scale_json_bytes` produces.
+
+    For a narrow, deliberate reason (Codex review, fresh evidence): the two
+    callers of *this* function --
+    ``test_zstd_round_trip_at_production_scale_and_level``/
+    ``test_gzip_round_trip_at_production_scale`` in
+    ``test_snapshot_compression.py`` -- each pass hand-built bytes directly
+    to ``write_snapshot_bytes``/``read_snapshot_bytes`` (see their own
+    docstrings: "no manual compression params ... exactly what dump/
+    write_snapshot call", "no knowledge of zstd's internal APIs required").
+    They exist to prove the *compression* boundary at realistic scale, not
+    ``save_snapshot``'s envelope shape -- envelope fidelity is
+    :func:`graph_heavy_snapshot_at_scale_json_bytes`'s job, for the callers
+    that actually need it (``resolve_input``/compare-CLI shortcuts in the
+    sibling module).
+
+    That distinction matters here because the second of those two callers,
+    ``test_gzip_round_trip_at_production_scale``, is deliberately *not*
+    ``slow``-marked so it stays in the default/fast lane -- and the real
+    envelope's ``snapshot_to_json()`` (pretty-printed, sectioned) measured
+    ~7x slower to produce than this flat shape for the same content (~16s
+    vs ~2s), which would have silently pushed a "cheap to run" fast-lane
+    test's cost up by that same margin. Still >8 MiB -- the same realistic-
+    scale premise the sibling function asserts, checked here too."""
+    encoded = json.dumps(snapshot_to_dict(graph_heavy_snapshot_at_scale())).encode()
+    assert len(encoded) > 8 * 1024 * 1024  # same realistic scale as the sibling
     return encoded
 
 

@@ -29,7 +29,7 @@ import os
 import pytest
 from _production_scale_snapshot import (
     graph_heavy_snapshot as _graph_heavy_snapshot,
-    graph_heavy_snapshot_at_scale_json_bytes,
+    graph_heavy_snapshot_at_scale_flat_json_bytes,
 )
 
 from abicheck.errors import SnapshotError
@@ -590,7 +590,7 @@ def test_zstd_round_trip_at_production_scale_and_level(tmp_path):
     covered by CI's dedicated `-m slow` lane (`ci.yml`)."""
     zstandard = pytest.importorskip("zstandard")
 
-    original_bytes = graph_heavy_snapshot_at_scale_json_bytes()
+    original_bytes = graph_heavy_snapshot_at_scale_flat_json_bytes()
 
     # The real production chokepoint: no manual CompressionParameters, no
     # explicit window -- exactly what `dump`/`write_snapshot` call.
@@ -630,7 +630,7 @@ def test_gzip_round_trip_at_production_scale(tmp_path):
     actually true for every supported algorithm, not because a gzip-specific
     bug is already known. Cheap to run (gzip compresses this size in well
     under a second, unlike zstd level 19), so no `slow` marker needed."""
-    original_bytes = graph_heavy_snapshot_at_scale_json_bytes()
+    original_bytes = graph_heavy_snapshot_at_scale_flat_json_bytes()
 
     p = tmp_path / "production_scale.abicheck.json.gz"
     result = write_snapshot_bytes(
