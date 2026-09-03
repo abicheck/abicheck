@@ -168,11 +168,9 @@ _EXIT_BUDGET_OVERFLOW = 5
 
 #: Exit code for scan's own evidence-contract abort (ADR-037 D5,
 #: ``_EvidenceContractError``) -- a dedicated code, not the generic
-#: ClickException code (1). Earlier stderr/marker-file signals for this
-#: axis were each shown forgeable by a PR-controlled build script running
-#: as part of this scan's own evidence collection (three Codex rounds, PR
-#: #1032); this process's own exit code, reported to its parent by the OS
-#: kernel, is the one channel nothing this run spawns can forge. See
+#: ClickException code (1). Earlier stderr/marker-file signals for this axis
+#: were each shown forgeable by a PR-controlled build script; a process's own
+#: exit code, reported to its parent by the OS kernel, cannot be. See
 #: ADR-064. Distinct from every other value scan uses (0/1/2/4/5/6/64).
 _EXIT_EVIDENCE_CONTRACT_ERROR = 7
 
@@ -1431,6 +1429,9 @@ def scan_cmd(
       5  --budget overflow
       6  NOT_COMPARABLE (ADR-050 D2): ARTIFACT and --against were not
          extracted under a comparable profile/scope contract
+      7  evidence-contract error (ADR-037 D5): a pinned --depth/
+         --source-method had no source evidence, or --abi3 targeted a
+         non-CPython-extension binary. No comparison ever ran
 
     \b
     With --against, --severity-preset/--exit-code-scheme (or
@@ -1440,8 +1441,8 @@ def scan_cmd(
     --severity-preset info-only can exit 0 on a breaking comparison, and an
     error-level addition or quality finding can exit 1 on an otherwise
     compatible one. The report states which — a `severity gate:` line in the
-    text output, a `diff.severity` block in --format json. 5/6 are unaffected
-    (both are decided before the comparison runs).
+    text output, a `diff.severity` block in --format json. 5/6/7 are
+    unaffected (decided before or independent of the comparison).
 
     \b
     Examples:

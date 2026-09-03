@@ -2843,24 +2843,41 @@ elif [[ "$MODE" == "scan" ]]; then
     case $ABICHECK_EXIT in
       0) _resolve_clean_exit_verdict ;;
       1)
-        # `scan` exit 1 has three possible sources, not one: it used to be
+        # `scan` exit 1 has four possible sources, not one: it used to be
         # coverage-only ("scan's own verdict codes are 0/2/4/5, so 1 can
         # only come from the orthogonal contract-coverage axis"), but a
         # severity-scheme `scan --against` gates natively at 1 on an
         # error-level addition/quality finding — so that reasoning would
         # publish ERROR for a severity-policy result, or drop the severity
         # gate when coverage happened to contribute too (Codex review).
-        # A crash also exits 1 and must still stay ERROR. (ADR-037 D5's
-        # evidence-contract axis used to share this code too, indistinguishable
-        # from a crash/bad-flag CLI error by stderr shape alone -- it now has
-        # its own dedicated exit code, 7, checked in its own arm below; see
-        # `cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR` for why.)
+        # A crash also exits 1 and must still stay ERROR.
+        #
+        # ADR-037 D5's evidence-contract axis moved off this code for a
+        # *single* ARTIFACT (its own dedicated exit code, 7, checked in its
+        # own arm below -- see `cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_
+        # ERROR` for why), but `--artifact-set` still floors *its* own exit
+        # code at 1 for exactly this axis
+        # (`service_scan._aggregate_scan_set_verdict`, since a member's own
+        # abort is caught inside `_run_scan_one_member` and never reaches
+        # `cli_scan.py`'s single-binary catch site at all -- a separate,
+        # not-yet-closed half of this same gap, see ADR-064). Only the JSON
+        # report can tell that case apart from a real CLI error at exit 1
+        # (Codex review, fresh evidence -- restoring the check an earlier
+        # revision of this fix dropped entirely, regressing the
+        # `--artifact-set` case): `_json_report_src`/`_report_query` are the
+        # same primitives every other exit-1 disambiguation here already
+        # uses, so this needs no new helper.
         #
         # Resolved the same way, and in the same order, as the compare branch
         # below: the report's pre-fold `severity.exit_code` tells the axes
         # apart rather than a guess.
         _sev_exit=$(_severity_gate_exit)
-        if _is_cli_error; then
+        _src=$(_json_report_src)
+        _verdict=$(_report_query "$_src" compat_verdict)
+        if [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]; then
+          VERDICT="EVIDENCE_CONTRACT_ERROR"
+          echo "::error::abicheck scan aborted: at least one --artifact-set member's evidence contract could not be satisfied (ADR-037 D5, exit code 1). This is NOT a CLI usage error and NOT an ABI/API break — see the JSON report's per_artifact entries for which member and why."
+        elif _is_cli_error; then
           VERDICT="ERROR"
           echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
         elif [[ "$_sev_exit" != "0" && -n "$_sev_exit" ]]; then
@@ -2894,7 +2911,13 @@ elif [[ "$MODE" == "scan" ]]; then
         # (Codex review). ERROR is left alone -- that is an operational
         # failure, not a gated compatibility result, and `_verdict_rank`
         # ranks it 0 only because it must never be escalated *from* here.
-        if [[ "$VERDICT" != "ERROR" ]]; then
+        # EVIDENCE_CONTRACT_ERROR (the restored --artifact-set case above)
+        # is the same shape: no comparison ever ran, so there is no
+        # compatibility verdict to escalate to (harmless either way, since
+        # `_escalate_verdict_to_report`'s own guard only fires on a
+        # BREAKING/API_BREAK report -- excluded here for the same reason
+        # ERROR is, not because it would misbehave).
+        if [[ "$VERDICT" != "ERROR" && "$VERDICT" != "EVIDENCE_CONTRACT_ERROR" ]]; then
           _escalate_verdict_to_report
         fi
         ;;
@@ -3374,15 +3397,18 @@ _maybe_post_pr_comment() {
   # (Codex review, fresh evidence): unlike BUDGET_OVERFLOW, this verdict
   # can still have a real JSON report worth reusing.
   #
-  # Update (2026-09-03): this verdict is now set directly from
-  # `ABICHECK_EXIT == 7` (`cli_scan.py`'s own dedicated
-  # `_EXIT_EVIDENCE_CONTRACT_ERROR` -- see that arm's own comment for why),
-  # not from finding a JSON report, so -- unlike the superseded
-  # `_evidence_contract_gated`-based design this comment used to describe
-  # -- reaching this verdict no longer *proves* a report exists (a
+  # Update (2026-09-03): this verdict now has two independent sources. A
+  # single ARTIFACT sets it directly from `ABICHECK_EXIT == 7` (`cli_scan.
+  # py`'s own dedicated `_EXIT_EVIDENCE_CONTRACT_ERROR` -- see that arm's
+  # own comment for why), not from finding a JSON report -- for that
+  # source, reaching this verdict does NOT prove a report exists (a
   # `--format text` run with no JSON secondary output produces none at
-  # all). Falling through to the normal reuse-or-rerun path below still
-  # does the right thing either way: `_can_reuse_primary_json` finds and
+  # all). A `--artifact-set` member abort, by contrast, still sets it via
+  # the exit-1 arm's own JSON-verdict check (restored after a Codex review
+  # caught its removal as a real regression), which -- like the pre-round-4
+  # design this comment originally described -- *does* prove a report
+  # exists. Falling through to the normal reuse-or-rerun path below does
+  # the right thing either way: `_can_reuse_primary_json` finds and
   # reuses a report when one exists (JSON primary, or a text primary with
   # a JSON `--write` secondary), and the `else` branch below re-runs for
   # JSON when none does -- exactly the same reuse-or-rerun contract every

@@ -4348,10 +4348,24 @@ found by review, fresh evidence against `scan_engine.py`:**
 - `run_scan_core` raises `_EvidenceContractError` during evidence collection
   — before a candidate/baseline comparison is even attempted — whenever a
   pinned (non-`auto`) `--depth`/`--source-method` has no source evidence to
-  satisfy it (ADR-037 D5). `cli_scan.py` maps it to a `click.ClickException`
-  (exit `1`); `service_scan.py` maps it to `ScanResult(verdict=
-  "EVIDENCE_CONTRACT_ERROR", exit_code=1)`. Distinct from usage error `64`
-  (a bad flag combination) and from the gate's own `1` (a severity-scheme
+  satisfy it (ADR-037 D5). **As of the 2026-09-03 fourth round (PR G2's own
+  "still open" item, since closed for the single-binary case):**
+  `cli_scan.py` maps it to its own dedicated exit code
+  (`_EXIT_EVIDENCE_CONTRACT_ERROR = 7`, a real `sys.exit(7)` rather than a
+  generic `click.ClickException`); `service_scan.py`'s single-run typed API
+  maps it to `ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=7)`
+  (`workflows/scan_abort_result.py`) — the same reasoning that split it off
+  `1`: exit `1` is shared by too many other unrelated axes (a crash, a
+  severity-scheme error-level gate, `--artifact-set`'s own coverage floor)
+  for a stderr/marker-based signal to disambiguate reliably, and a
+  process's own exit code is the one channel nothing this run spawns can
+  forge (see ADR-064's own account of the four iterations this went
+  through). **`--artifact-set` did not move**: a member's own abort is
+  caught inside `_run_scan_one_member` and never reaches `cli_scan.py`'s
+  single-binary catch site at all, so `_aggregate_scan_set_verdict` still
+  floors the *set's* own exit code at `1` for this axis — a separate,
+  not-yet-closed half of the same gap. Distinct from usage error `64` (a bad
+  flag combination) and from the gate's own `1` (a severity-scheme
   error-level finding) — it's "the evidence contract this run pinned itself
   to could not be met," always scan-only, and an earlier draft of this table
   omitted it entirely.

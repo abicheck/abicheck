@@ -234,7 +234,15 @@ scan budget exceeded            (scan only, exit 5 — ONLY the candidate-
                                  the evidence-contract check below, so an
                                  overflow here preempts it — see "Budget
                                  exceeded is not one precedence slot" below)
-scan evidence-contract error    (scan only, exit 1 — ADR-037 D5)
+scan evidence-contract error    (scan only, exit 7 for a single ARTIFACT —
+                                 ADR-037 D5, cli_scan.py's own dedicated
+                                 _EXIT_EVIDENCE_CONTRACT_ERROR, 2026-09-03
+                                 fourth round; still exit 1 for an
+                                 --artifact-set member's abort, since that
+                                 path never reaches cli_scan.py's
+                                 single-binary catch site at all — see the
+                                 "deliberately not attempted in this slice"
+                                 note further down)
 scan budget exceeded            (scan only, exit 5 — the baseline-compare
   (later stages)                 deadline or the final, unconditional check;
                                  both run only once the evidence-contract

@@ -154,11 +154,17 @@ def _run_exit_mapping(
     *,
     is_cli_error: bool = False,
     severity_exit: str = "0",
+    report_verdict: str = "",
 ) -> subprocess.CompletedProcess:
     # Stub every helper the extracted case-block calls -- this test is
     # scoped to the mapping itself. No `_evidence_contract_gated` stub any
     # more: exit 7 is its own `case` arm, dispatched purely on the numeric
-    # exit code, with no predicate to stub.
+    # exit code, with no predicate to stub. `_json_report_src`/`_report_query`
+    # are the pair exit 1's `--artifact-set` EVIDENCE_CONTRACT_ERROR check
+    # reads (see `test_exit_1_artifact_set_evidence_contract_error_from_
+    # json_report` below) -- stubbed here too so every exit-1 test in this
+    # module exercises the real dispatch order, not just the tests that care
+    # about this one branch.
     stubs = f"""
 _resolve_clean_exit_verdict() {{ VERDICT="COMPATIBLE"; }}
 _severity_gate_exit() {{ echo "{severity_exit}"; }}
@@ -166,6 +172,8 @@ _is_cli_error() {{ return {0 if is_cli_error else 1}; }}
 _coverage_gated() {{ return 1; }}
 _assurance_gated() {{ return 1; }}
 _escalate_verdict_to_report() {{ :; }}
+_json_report_src() {{ echo "/tmp/stub-report.json"; }}
+_report_query() {{ echo "{report_verdict}"; }}
 """
     script = (
         stubs
@@ -213,6 +221,33 @@ def test_exit_1_severity_error_unaffected():
     result = _run_exit_mapping(1, is_cli_error=False, severity_exit="2")
     assert result.returncode == 0, result.stderr
     assert "VERDICT=SEVERITY_ERROR" in result.stdout
+
+
+def test_exit_1_artifact_set_evidence_contract_error_from_json_report():
+    """`--artifact-set` still floors *its own* exit code at 1 for a
+    member's evidence-contract abort (`service_scan._aggregate_scan_set_
+    verdict`, since a member's own abort is caught inside
+    `_run_scan_one_member` and never reaches `cli_scan.py`'s single-binary
+    exit-7 catch site) -- the JSON report's `compat_verdict` is the only
+    signal that tells this case apart from a genuine CLI error at exit 1,
+    so it must win the exit-1 dispatch. This is the regression Round-6
+    review caught: an earlier revision of the exit-7 redesign deleted the
+    whole JSON-verdict check without noticing `--artifact-set` still needed
+    it, silently reclassifying every such abort as generic ERROR."""
+    result = _run_exit_mapping(1, report_verdict="EVIDENCE_CONTRACT_ERROR")
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+def test_exit_1_artifact_set_evidence_contract_error_beats_cli_error_stub():
+    """The JSON-verdict check runs before `_is_cli_error` in the real
+    dispatch order -- even a (wrongly) true `_is_cli_error` stub must not
+    override a report that already says EVIDENCE_CONTRACT_ERROR."""
+    result = _run_exit_mapping(
+        1, is_cli_error=True, report_verdict="EVIDENCE_CONTRACT_ERROR"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
 
 
 def test_evidence_contract_error_still_fails_the_step():

@@ -383,3 +383,38 @@ class TestInvalidExitCodeScheme:
                     exit_code_scheme="legacy ",
                 )
             )
+
+    def test_compare_request_rejects_bad_scheme_before_extraction_runs(self) -> None:
+        """Round-6 review (Codex, fresh evidence): the fix above closed the
+        gap for `resolve_release_gate_options` itself, but
+        `classify_compare_pair` only calls it *after*
+        `resolve_compare_request` has already resolved both sides -- real
+        extraction, which can be slow or run a project-controlled build
+        step. A `CompareRequest` must fail on the bad scheme before that
+        work starts, not after.
+
+        Proven by pointing both sides at paths that don't exist: extraction
+        would raise `SnapshotError`/`OSError` long before any gate option is
+        resolved, so seeing `ValidationError` (raised from
+        `CompareRequest.validate()`, the first line of
+        `resolve_compare_request`) instead of a filesystem error is direct
+        evidence validation ran first -- not just that it eventually runs
+        somewhere in the pipeline."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.abi.json")
+        missing_new = Path("/nonexistent/new.abi.json")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="exit_code_scheme"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    severity_preset="info-only",
+                    exit_code_scheme="legacy ",
+                )
+            )

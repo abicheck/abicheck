@@ -785,6 +785,23 @@ class CompareRequest:
                 )
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
+        # Fail fast on a misspelled exit_code_scheme (Codex review, Round 6):
+        # `resolve_release_gate_options` already rejects an unknown scheme,
+        # but `classify_compare_pair` only calls it *after*
+        # `resolve_compare_request` has already run extraction — a project-
+        # controlled build/source step that can be slow or side-effecting.
+        # Checking the same set here means a bad value is a Tier-2
+        # ValidationError before any of that runs, for every front end that
+        # calls `validate()`/`validation_errors()` (native `compare` CLI
+        # included, via `cli_compare_receipt.py`).
+        if self.exit_code_scheme is not None:
+            from .policy.release_gate_options import _VALID_EXIT_CODE_SCHEMES
+
+            if self.exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES:
+                errors.append(
+                    f"invalid exit_code_scheme {self.exit_code_scheme!r}; "
+                    f"must be one of {_VALID_EXIT_CODE_SCHEMES} or None"
+                )
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
