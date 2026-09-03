@@ -4216,6 +4216,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compat-addition",
     "compatible-type-added",
     "exported-function-removed",
     "exported-type-removed",

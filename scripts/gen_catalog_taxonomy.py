@@ -119,6 +119,7 @@ RELATED_RULES: dict[str, list[str]] = {
         "exported-type-removed",
     ],
     "case108_task_class_removed": [
+        "compat-addition",
         "compatible-type-added",
         "exported-function-removed",
         "exported-type-removed",
