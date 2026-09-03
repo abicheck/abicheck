@@ -191,6 +191,7 @@ Both sides of a comparison, resolved and ready to classify.
 | `new_fmt` | `str \| None` | *(required)* |
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
+| `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
 
 ## `ScanArtifactResult`
 
