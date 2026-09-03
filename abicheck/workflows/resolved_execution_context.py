@@ -255,14 +255,24 @@ class ResolvedExecutionContext:
         whose dataclass equality already ignores insertion order, so two
         configs a resolver treats as equal must not hash differently
         depending on which order their entries happened to be inserted in.
+
+        *compile_contexts* is hashed as one mapping through
+        :func:`_canonical_repr` too, not as a delimiter-joined string of
+        ``label=value`` parts (Codex review, PR #1027, second round): a
+        side *label* is caller-supplied and this class documents it as
+        arbitrary (see the class docstring), so nothing rules out a label
+        that itself contains ``=`` or the join delimiter -- a hand-rolled
+        join over unescaped labels is exactly the non-injective encoding
+        :func:`abicheck.effective_config_digest._json_list`'s own
+        docstring already documents and avoids for the identical reason
+        (an arbitrary namespace/selector string can legally contain a
+        delimiter). ``repr()`` of a Python `str` escapes its own quote and
+        backslash characters, which is what makes the mapping encoding
+        injective over its *keys* the join was not.
         """
-        compile_context_parts = [
-            f"{label}={_canonical_repr(self.compile_contexts[label])}"
-            for label in sorted(self.compile_contexts)
-        ]
         return _sha256_of(
             self.operation,
             self.requested_depth or "",
             _canonical_repr(self.evaluation_config),
-            "\x1f".join(compile_context_parts),
+            _canonical_repr(dict(self.compile_contexts)),
         )

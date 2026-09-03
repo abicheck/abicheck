@@ -274,6 +274,28 @@ class TestResolutionDigest:
         b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
         assert a.resolution_digest() == b.resolution_digest()
 
+    def test_compile_context_labels_are_encoded_injectively(self):
+        """Codex review, PR #1027, second round: a hand-rolled
+        ``"\\x1f".join(f"{label}={value!r}" for ...)`` encoding is not
+        injective when *label* is caller-supplied and unrestricted -- a
+        crafted single-entry mapping whose one label itself contains the
+        join delimiter and an ``=``-joined encoding of a real two-entry
+        mapping's first part can reproduce that mapping's own joined
+        string byte-for-byte. Confirms the two distinct mappings this
+        exact construction identifies no longer collide."""
+        from abicheck.workflows.resolved_execution_context import _canonical_repr
+
+        c1 = CompileContext(gcc_path="/usr/bin/gcc")
+        c2 = CompileContext(gcc_path="/usr/bin/g++")
+        two_entries = ResolvedExecutionContext(
+            operation="compare", compile_contexts={"a": c1, "b": c2}
+        )
+        crafted_label = "a=" + _canonical_repr(c1) + "\x1fb"
+        one_entry = ResolvedExecutionContext(
+            operation="compare", compile_contexts={crafted_label: c2}
+        )
+        assert two_entries.resolution_digest() != one_entry.resolution_digest()
+
     def test_still_changes_when_a_mappings_content_actually_differs(self):
         """The order-independence fix must not collapse a real difference --
         only equal mappings should hash equal."""
