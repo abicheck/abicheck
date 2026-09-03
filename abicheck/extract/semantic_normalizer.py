@@ -564,6 +564,7 @@ def _add_occurrence(
     producer: str,
     cv_qualification: Fact[tuple[str, ...]] | None = None,
     template_arguments: Fact[tuple[str, ...]] | None = None,
+    disambiguator: str = "",
 ) -> None:
     """Record one occurrence, first-observation-wins on a key collision.
 
@@ -577,21 +578,16 @@ def _add_occurrence(
     clang backfill during hybrid merge, since ``merge_semantic_ir`` only
     backfills a *non*-present base fact).
 
-    Neither header-AST backend supplies a per-occurrence disambiguator
-    today (``model/occurrence.py``'s own docstring: an empty disambiguator
-    is the overwhelming common case), so two declarations that genuinely
-    share one ``EntityId`` within a single backend's own output — a forward
-    declaration alongside its definition, most plausibly — collide on the
-    identical ``OccurrenceId`` and cannot be told apart here. Keeping the
-    first is a documented limitation of this slice, not a silent
-    swallow: :class:`~abicheck.model.semantic_ir.SemanticIR` itself is
-    built to hold every occurrence once a real disambiguator exists (see
-    that module's own docstring), so closing this gap is a matter of
-    threading one through, not a shape change to this function.
+    *disambiguator* defaults to ``""``: a single-TU normalize call never
+    passes one, so two declarations sharing one ``EntityId`` within a
+    single backend's own output still collide on one ``OccurrenceId`` there
+    — a documented limitation, not a silent swallow. See
+    :func:`normalize_header_ast`'s *disambiguate_by_source_location* for
+    the caller that supplies one.
     """
     if entity_id is None:
         return
-    occ_id = OccurrenceId(entity_id)
+    occ_id = OccurrenceId(entity_id, disambiguator)
     if occ_id in occurrences:
         return
     occurrences[occ_id] = CanonicalEntity(
@@ -621,9 +617,23 @@ def normalize_header_ast(
     variables: Iterable[Variable] = (),
     constants: Mapping[str, str] = {},
     constant_entity_ids: Mapping[str, EntityId] = {},
+    disambiguate_by_source_location: bool = False,
 ) -> SemanticIR:
     """Build a :class:`SemanticIR` from one header-AST backend's already-
     parsed output.
+
+    *disambiguate_by_source_location* is ``False`` for every existing
+    caller, preserving prior behavior byte-for-byte. Set ``True`` only for
+    ONE translation unit's own raw, pre-merge candidates (ADR-063 Phase 6's
+    multi-TU slice — see ``dumper_manifest._manifest_semantic_ir``): each
+    occurrence's ``OccurrenceId`` is then disambiguated by the
+    declaration's own ``source_location`` (``""`` when absent), so a
+    genuine cross-TU split (public forward declaration, private full
+    definition, two locations) yields two occurrences, while a
+    declaration observed redundantly via a shared ``#include`` collapses
+    to one (an unmodified declaration reports the same ``file:line``
+    everywhere). Typedefs/constants carry no ``source_location`` at all,
+    so they are unaffected either way.
 
     *types*/*enums* are the backend's ``parse_types()``/``parse_enums()``
     return values; *typedefs_qualified*/*typedef_entity_ids* are its
@@ -656,6 +666,10 @@ def normalize_header_ast(
     read-only, best-effort relationship to its inputs) is likewise skipped.
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+
+    def _location_disambiguator(source_location: str | None) -> str:
+        return (source_location or "") if disambiguate_by_source_location else ""
+
     for rt in types:
         rt_name = rt.qualified_name or rt.name
         _add_occurrence(
@@ -664,6 +678,7 @@ def normalize_header_ast(
             Fact.present(rt_name),
             producer=producer,
             template_arguments=Fact.present(split_template_arguments(rt_name) or ()),
+            disambiguator=_location_disambiguator(rt.source_location),
         )
     for et in enums:
         _add_occurrence(
@@ -671,6 +686,7 @@ def normalize_header_ast(
             et.entity_id,
             Fact.present(et.qualified_name or et.name),
             producer=producer,
+            disambiguator=_location_disambiguator(et.source_location),
         )
     for qualified_name, entity_id in typedef_entity_ids.items():
         underlying = typedefs_qualified.get(qualified_name)
@@ -701,6 +717,7 @@ def normalize_header_ast(
             _function_spelling_fact(fn, producer),
             producer=producer,
             cv_qualification=_function_cv_qualification_fact(fn, producer),
+            disambiguator=_location_disambiguator(fn.source_location),
         )
     for var in variables:
         _add_occurrence(
@@ -709,6 +726,7 @@ def normalize_header_ast(
             _variable_spelling_fact(var, producer),
             producer=producer,
             cv_qualification=_variable_cv_qualification_fact(var, producer),
+            disambiguator=_location_disambiguator(var.source_location),
         )
     for qualified_name, entity_id in constant_entity_ids.items():
         value = constants.get(qualified_name)

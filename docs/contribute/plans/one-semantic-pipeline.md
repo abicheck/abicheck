@@ -13631,20 +13631,14 @@ castxml's own occurrence now really does decompose and canonicalize a
 closure-typed template argument end to end, but clang produces no
 comparable occurrence to agree with it at all (above), and a function
 template's own template-argument list remains a separate, unattempted
-gap (also above). A manifest (`--dump-manifest`) dump is a
-further, real gap (Codex review, PR #1001), unchanged by the third and
-fourth slices' additions: `tu_merge.merge_fragments` already collapses
-same-identity declarations across translation units into one representative
-entry before `normalize_header_ast` ever runs, so a real ODR-duplicate/
-incomplete-vs-complete pair spread across two TUs never reaches
-`SemanticIR.occurrences` as two occurrences there -- no *more* loss than the
-legacy `functions`/`variables`/`types`/`enums` fields already have for a
-manifest dump (all read the identical merged lists), but not yet the IR's
-fuller multi-occurrence potential either.
+gap (also above). A manifest (`--dump-manifest`) dump's own occurrence-
+detail loss (Codex review, PR #1001) is now closed -- see the corrected
+account below, kept in full for the institutional-memory reasons the
+paragraph itself explains.
 
-**Investigated, not landed -- and a first analysis of this gap was itself
-corrected by review (Codex, PR #1024, fresh evidence), which is worth
-recording precisely rather than quietly fixing.** An earlier revision of
+**Multi-TU manifest occurrence detail: two wrong analyses, then the real
+fix (Codex, PR #1024) -- recorded precisely rather than quietly
+corrected a third time.** An earlier revision of
 this section argued the obvious close (normalize each `TuFragment` before
 `merge_fragments` collapses identities, keyed by a real per-TU
 disambiguator) was a no-op, reasoning that a `RecordType`'s forward-
@@ -13660,39 +13654,53 @@ exists precisely to preserve occurrence COUNT independent of whether two
 payloads happen to coincide -- so the "pure duplication" framing, and the
 model-extension conclusion drawn from it, were both wrong.
 
-**The real blocker is sharper, and still unresolved: nothing today
-distinguishes a genuine cross-TU declaration split from the ordinary,
-far more common case of the identical declaration observed redundantly
-because many TUs `#include` the same header.** Both shapes fold through
-the identical `tu_merge.merge_fragments`/`_merge_group` machinery to one
-successful merge result -- the per-key candidate list `_merge_group`
-builds internally (grouping each key's per-TU representative candidates
-before folding them) is exactly the signal that would distinguish the two
-cases, but it is discarded once folding completes; nothing surfaces it to
-a caller today. Naively disambiguating every manifest-dump occurrence by
-its originating TU, without that signal, would not repair the genuine-
-split case -- it would multiply the shared-header case (the overwhelming
-majority of entities in any real multi-TU dump) into one redundant
-occurrence per including TU, trading a real but narrow loss for a much
-larger one. The narrower-seeming alternative -- disambiguating only when
-the raw per-TU candidates are not literally equal -- is not obviously
-correct either without verification against real fixtures: a purely
-per-TU-incidental difference (e.g. only the TU that happens to include an
-annotated redeclaration sees a `[[deprecated]]` attribute the others
-don't) would trip that test too, even though `merge_fragments` itself
-already treats that shape as one compatible declaration via
-`_merge_identical_modulo_provenance`'s own provenance-blanking equality,
-not a real split. Genuinely closing this needs `tu_merge.py` to expose,
-per merged entity, a new trivial-vs-genuine-variance signal it does not
-have today -- a real design question in `tu_merge.py`'s own heavily-
-reviewed merge lattice (that module's docstring records a long history of
-narrow, fixture-driven corrections to its own compatible-merge rules),
-not a caller-ordering change in the normalizer, and one this codebase's
-own identity-heuristic history (AGENTS.md's "Primitive-level property
-tests" section) says deserves real scrutiny against fixtures before being
-trusted, not a first guess shipped untested. A single-header dump remains
-unaffected either way (nothing for the merge to collapse ahead of it).
-See `extract/semantic_normalizer.py`'s own docstring for the same note.
+**A second analysis then claimed the blocker was sharper still: that
+nothing today distinguishes a genuine cross-TU declaration split from the
+ordinary, far more common case of the identical declaration observed
+redundantly because many TUs `#include` the same header, and that closing
+it needed `tu_merge.py` to expose a new per-entity trivial-vs-genuine-
+variance signal it does not have today.** This was also wrong, and a
+second Codex review round on PR #1024 pointed at the fix directly: the
+distinguishing signal already exists, on the pre-merge candidates
+themselves, and does not need `tu_merge.py` to expose anything new.
+`RecordType`/`EnumType`/`Function`/`Variable` (both header-AST backends)
+already carry their own `source_location` (`"file:line"`) from parsing --
+a genuine cross-TU split (a public header's forward declaration, a
+private header's full definition) reports two *different* locations,
+while the ordinary redundant-`#include` case reports the *identical*
+location from every including TU, since it is literally the same file and
+line. That is exactly the distinction the second analysis said did not
+exist.
+
+**The actual fix, landed:** `extract/manifest_semantic_ir.py`'s new
+`manifest_semantic_ir(fragments)` normalizes each contributing TU's own
+raw, pre-merge `TuFragment` independently (never reading
+`merge_fragments`'s already-folded output at all) and unions the
+resulting per-fragment `SemanticIR.occurrences` maps (first-fragment-wins
+on a key collision, fragments ordered by `tu_name` to stay deterministic).
+`extract/semantic_normalizer.normalize_header_ast` gained a
+`disambiguate_by_source_location: bool = False` parameter (default
+preserves every existing caller's behavior unchanged); when true, each
+type/enum/function/variable occurrence's `OccurrenceId.disambiguator` is
+set to that declaration's own `source_location`. Typedefs/constants carry
+no `source_location` in this codebase's model at all (neither has an
+"incomplete" form to begin with), so this pass leaves them exactly as
+`merge_fragments`'s own flat fields already do. `dumper_manifest.
+run_tu_loop` calls `manifest_semantic_ir(fragments)` and attaches the
+result to `MergedTuFragments.semantic_ir` (a new field);
+`resolve_header_ast_result` prefers that richer value when present,
+falling back to the legacy single-pass `normalize_header_ast` call only
+when a caller's `MergedTuFragments` never set it. Verified against real
+clang output in `tests/test_dumper_manifest_semantic_ir.py`: a genuine
+two-TU forward-declaration/full-definition split produces exactly two
+occurrences with two distinct `source_location`-derived disambiguators,
+and three TUs sharing one unmodified header collapse to exactly one
+occurrence -- confirming both the fix and that it does not regress the
+overwhelmingly common shared-header case into per-TU noise. A single-TU
+manifest dump is unaffected either way (nothing for the merge to collapse
+ahead of it, and the resulting IR matches a single-header dump's own
+shape). See `extract/semantic_normalizer.py`'s and
+`extract/manifest_semantic_ir.py`'s own docstrings for the same account.
 The original Design/Files/Tests/Acceptance-criteria sections below are
 kept verbatim as the phase's full target shape -- each slice is a step
 toward that target, not a redefinition of it.

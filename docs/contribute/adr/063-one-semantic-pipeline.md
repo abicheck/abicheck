@@ -575,14 +575,15 @@
   header-AST normalizer for records/enums/typedefs, functions and
   variables, and constants across every header-AST-backed platform
   (castxml/clang, ELF/PE/Mach-O, `--ast-frontend hybrid` included), DWARF
-  (the first non-header-AST producer), and now `CanonicalEntity.
-  template_arguments` for records; it is
+  (the first non-header-AST producer), and `CanonicalEntity.
+  template_arguments` for records; plus the `--dump-manifest` multi-TU
+  occurrence-detail fix. It is
   **not yet complete**: the PDB/BTF/CTF backends still produce no IR at all,
   clang produces no occurrence at all for a concrete template
   specialization (so `template_arguments` cross-backend agreement remains
-  unexercised there), a function template's own argument list is unattempted,
-  and a `--dump-manifest` multi-TU dump loses occurrence detail. See this
-  bullet's own "Still not landed" paragraph below for the exact account.
+  unexercised there), and a function template's own argument list is
+  unattempted. See this bullet's own "Still not landed" paragraph below
+  for the exact account.
   **First slice — the IR itself, its persistence,
   and the hybrid merge's reconciliation of it — and no parser narrowing.**
   That ordering is the plan's own: `SemanticIR` is defined and tested
@@ -777,29 +778,31 @@
   scope/base-lookup purposes) — a real, separately-scoped extraction-side
   project given its own blast radius across `dumper_clang.py`'s entire
   existing test suite, not a normalizer-only change; a function template's
-  own argument list (above) is a further, separate, unattempted gap; and a
-  `--dump-manifest` multi-TU dump loses occurrence detail, because
-  `tu_merge.merge_fragments()` collapses same-identity declarations across
-  TUs into one *before* `normalize_header_ast` ever runs, so a real
-  ODR-duplicate/incomplete-declaration pair spread across two TUs never
-  reaches `SemanticIR.occurrences` as two occurrences the way one spread
-  across two header-AST parses of a single TU already does. **Investigated,
-  not merely unattempted — and a first analysis of it was itself corrected
-  (Codex review, PR #1024, fresh evidence)**: normalizing each TU fragment
-  before the merge collapses identities is not a no-op — two occurrences
-  with identical `CanonicalEntity` payloads are still two real
-  declarations, and `SemanticIR.occurrences` exists precisely to preserve
-  that count regardless of payload equality. The real, still-open blocker
-  is sharper: nothing today distinguishes a genuine cross-TU declaration
-  split from a declaration merely observed redundantly because many TUs
-  `#include` the same header — both shapes fold through the identical
-  `tu_merge.merge_fragments` machinery, and naively disambiguating every
-  occurrence by its originating TU would multiply the (far more common)
-  shared-header case into noise rather than fix the (rare) genuine-split
-  case. Closing this needs `tu_merge.py` to expose a new per-entity
-  trivial-vs-genuine-variance signal it does not have today. See the
-  plan's own "Still not landed, and therefore this phase is not complete"
-  list for the full analysis.
+  own argument list (above) is a further, separate, unattempted gap.
+  **The `--dump-manifest` multi-TU occurrence-detail loss is now closed**
+  (PR #1024, after two rounds of Codex review corrected the analysis
+  twice): `tu_merge.merge_fragments()` collapses same-identity
+  declarations across TUs into one representative entry *before* a naive
+  normalization pass would see them, which would have silently discarded
+  a genuine ODR-duplicate/incomplete-declaration pair spread across two
+  TUs down to one occurrence. The fix does not try to make
+  `tu_merge.merge_fragments`'s own folded output distinguish the two
+  cases; instead `extract/manifest_semantic_ir.py`'s `manifest_semantic_ir`
+  normalizes each contributing TU's own **raw, pre-merge** fragment
+  independently and unions the resulting per-fragment occurrence maps, and
+  `extract/semantic_normalizer.normalize_header_ast`'s new
+  `disambiguate_by_source_location` parameter keys each `OccurrenceId` by
+  the declaration's own `source_location` — a field `RecordType`/
+  `EnumType`/`Function`/`Variable` already carry from both header-AST
+  backends, so no new signal needed inventing. A genuine cross-TU split
+  (e.g. a public header's forward declaration and a private header's full
+  definition) reports two different `file:line` locations and survives as
+  two distinct occurrences; the far more common case — many TUs
+  `#include` the identical, unmodified header — reports the identical
+  `file:line` from every including TU and correctly collapses to one.
+  Verified end-to-end against real clang output for both cases
+  (`tests/test_dumper_manifest_semantic_ir.py`). See the plan's own
+  corresponding entry for the full account.
 - **Phase 7** (`RunOutcome` and the last inline exit-code computation, D6)
   is **implemented**: `abicheck/policy/outcome.py` (new) defines
   `RunOutcome` (`compatibility: Verdict | None`, `assurance: object | None`
