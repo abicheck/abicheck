@@ -12672,6 +12672,31 @@ projections, and proving the two agree via a parity test before any read
 path is removed) is still the next, larger, not-yet-attempted step this
 paragraph's own "still open" list already named.
 
+**Preparation step, same PR-2 umbrella: real-fixture parity between
+`SemanticIRIndex` and the legacy function-matching key.** Before any
+matcher rewrite, `tests/test_semantic_ir_index_function_parity.py` proves,
+on a real compiled fixture (two overloads plus one `extern "C"` function,
+both header-AST backends), the concrete fact a cutover of
+`diff_symbols._match_old_function`'s exact-key join would depend on:
+`SemanticIRIndex.functions()` sees *exactly* the same identity set as
+`AbiSnapshot.functions` (no function invisible to the index, no phantom
+entity absent from the legacy list), and two functions the legacy
+`Function.mangled`-keyed join keeps apart never collapse onto one
+`EntityId`. **Explicitly not claimed by this preparation step**: the
+extern "C" *alias-fallback* tier (`SymbolIdentityIndex.unique_alias_match`,
+`_match_old_function`'s `name:` join) is not shown to already agree with
+`EntityId` equality in general — that fallback joins on a bare, unscoped
+display name, while `entity_id_for_function`'s own `extern_c` tag is
+scope-qualified (see `model/identity.py`'s own docstring and
+`test_model_identity.py::test_extern_c_ignores_param_types`). A real
+fixture's extern "C" function sits at global scope on both sides, so this
+asymmetry does not surface in the case tested — it is recorded here as an
+open question the eventual matcher must resolve (either widen the
+extern-C `EntityId` tag to be scope-oblivious, matching production's
+unscoped alias join, or keep the alias-fallback tier as a distinct,
+non-`EntityId` join even after the exact-key tier cuts over), not silently
+assumed away by this step.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
