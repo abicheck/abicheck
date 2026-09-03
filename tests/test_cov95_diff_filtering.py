@@ -606,6 +606,50 @@ def test_find_by_value_types_still_recognizes_a_trailing_pointer_after_a_templat
     assert _find_by_value_types(snap, {"Box"}) == set()
 
 
+def test_find_by_value_types_relational_angle_in_a_template_argument_is_not_a_bracket():
+    """Regression for the fifth-round Codex review on PR #1041: a flat
+    ``<``/``>`` counter is fooled by a *relational* comparison used as a
+    non-type template argument -- ``ns::S<(N > 0), &handler>``'s
+    parenthesized ``N > 0`` contains a stray ``>`` that is not a real
+    template delimiter, but the naive counter closed the outer template
+    one ``>`` early on it, leaving the genuinely-nested ``&handler``
+    wrongly read as top-level indirection. A relational comparison used
+    as a non-type template argument must be parenthesized to be valid
+    C++, so tracking parenthesis depth alongside angle-bracket depth --
+    and only letting a `<`/`>` inside zero open parens affect the angle
+    depth -- resolves the ambiguity: the type is genuinely passed by
+    value at the outer declarator, so it must be detected as such."""
+    template_spelling = "ns::S<(N > 0), &handler>"
+    opaque = {"ns::S"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type=template_spelling,
+                params=[Param(name="p", type=template_spelling, pointer_depth=0)],
+            )
+        ],
+        variables=[Variable(name="g", mangled="g", type=template_spelling)],
+    )
+    assert "ns::S" in _find_by_value_types(snap, opaque)
+
+
+def test_is_indirect_spelling_tolerates_unbalanced_brackets():
+    """Defensive-floor coverage for `_is_indirect_spelling`'s bracket-depth
+    tracking: a stray closing `)` or `>` with no matching opener must not
+    drive either depth counter negative (which would then wrongly mask a
+    later, genuinely top-level sigil as still "nested"). No real,
+    well-formed C/C++ declarator produces an unbalanced spelling, but the
+    guard exists precisely because this scan runs on rendered text from
+    multiple producers rather than parsing it -- exercised directly since
+    `find_by_value_types` never constructs such text itself."""
+    from abicheck.compare.opaque_types import _is_indirect_spelling
+
+    assert _is_indirect_spelling("Handle)*") is True
+    assert _is_indirect_spelling("Handle>&") is True
+
+
 def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
     """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
     ``RecordType.name``, which may be qualified (``ns::Handle``), while a

@@ -323,15 +323,38 @@ def _is_indirect_spelling(text: str) -> bool:
     depth zero* -- outside any ``<...>`` nesting -- is evidence of the
     outer declarator's own indirection; depth tracking mirrors
     :func:`~abicheck.diff_helpers.depth_aware_bare_name`'s own ``<``/``>``
-    bracket counting."""
-    depth = 0
+    bracket counting.
+
+    A flat ``<``/``>`` counter is itself fooled by a non-type template
+    argument containing a *relational* ``>``/``<`` rather than a real
+    bracket -- ``ns::S<(N > 0), &handler>`` closes the parenthesized
+    comparison's stray ``>`` as if it were the outer template's own
+    closing delimiter, dropping the tracked depth back to zero one
+    ``>`` early, so the genuinely-nested ``&handler`` is then wrongly
+    read as top-level indirection (Codex review on PR #1041, third
+    follow-up round). A relational comparison used as a non-type
+    template argument must itself be parenthesized to be valid C++ (an
+    unparenthesized bare ``<``/``>`` there is a syntax error, which is
+    exactly why every real-world spelling of this shape already carries
+    the parens), so tracking parenthesis nesting alongside angle-bracket
+    nesting -- and only letting ``<``/``>`` affect the angle depth while
+    parenthesis depth is zero -- resolves the ambiguity precisely: a
+    relational operator's ``<``/``>`` always sits inside at least one
+    open paren, a real template delimiter never does."""
+    angle_depth = 0
+    paren_depth = 0
     for ch in text:
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            if depth > 0:
-                depth -= 1
-        elif depth == 0 and (ch == "*" or ch == "&"):
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            if paren_depth > 0:
+                paren_depth -= 1
+        elif paren_depth == 0 and ch == "<":
+            angle_depth += 1
+        elif paren_depth == 0 and ch == ">":
+            if angle_depth > 0:
+                angle_depth -= 1
+        elif angle_depth == 0 and paren_depth == 0 and (ch == "*" or ch == "&"):
             return True
     return False
 
