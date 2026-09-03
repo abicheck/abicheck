@@ -68,7 +68,18 @@ concepts:
       availability-bearing fact must branch on FactStatus instead of
       resolved_fact_value()'s uniform legacy-default collapse, for at
       least one full fact family, before FactLifecycle.CONSUMED is used
-      anywhere in the registry.
+      anywhere in the registry. First slice landed 2026-09-03: the shared
+      compare_facts()/FactComparison primitive, wired into two of the five
+      named fields' primary finding-emitting call sites (bases/
+      virtual_bases in diff_types._diff_type_bases, is_va_list in
+      diff_param_qualifiers.param_va_list_changes). Not yet closed: vtable/
+      vptr_offset_bits (diff_types_vtable.py/diff_layout.py/
+      diff_vtable_layout.py's own pre-existing, individually-reasoned
+      evidence-gap heuristics — deliberately left alone pending their own
+      dedicated slice) and every other reader of the two converted fields
+      (diff_cxx_rules.py, diff_stdlib_impl.py, diff_time64.py, idioms.py,
+      surface_graph.py, buildsource/header_graph.py, diff_cpp_patterns.py)
+      — see the plan's own 5B note for detail.
 
   identity:
     primitive: complete

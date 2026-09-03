@@ -50,7 +50,7 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper_clang_qualifiers import _clang_param_is_va_list
-from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model import AbiSnapshot, Fact, Function, Param, Visibility
 
 
 def _param_node(qual_type: str, desugared: str | None = None) -> dict:
@@ -333,6 +333,58 @@ class TestParamVaListHybridExcluded:
         old = _snap(ast_producer="hybrid", functions=[_func(True)])
         new = _snap(ast_producer="hybrid", functions=[_func(False)])
         assert ChangeKind.PARAM_LOST_VA_LIST not in _kinds(compare(old, new))
+
+
+def _func_with_fact(fact: Fact[bool]) -> Function:
+    return Function(
+        name="logv",
+        mangled="logv",
+        return_type="void",
+        params=[Param(name="ap", type="va_list", is_va_list_fact=fact)],
+        visibility=Visibility.PUBLIC,
+    )
+
+
+class TestParamVaListFactStatusGating:
+    """ADR-063 Phase 5B: even within an already producer-gated (clang-only,
+    reliable) comparison, a single parameter's own ``is_va_list_fact`` can
+    still be incomplete (e.g. that one parameter's extraction failed) —
+    the snapshot-level ``clang_va_list_facts_reliable`` flag says the
+    producer is trustworthy when it ran, not that it ran for every single
+    parameter. ``param_va_list_changes`` must decline that one parameter
+    rather than read its missing evidence as "confirmed not va_list"."""
+
+    def test_not_collected_on_new_side_does_not_fabricate_became_va_list(
+        self,
+    ) -> None:
+        old = _snap(
+            ast_producer="clang", functions=[_func_with_fact(Fact.present(False))]
+        )
+        new = _snap(
+            ast_producer="clang",
+            functions=[_func_with_fact(Fact.not_collected())],
+        )
+        assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
+
+    def test_failed_on_old_side_does_not_fabricate_lost_va_list(self) -> None:
+        old = _snap(
+            ast_producer="clang",
+            functions=[_func_with_fact(Fact.failed("parse error"))],
+        )
+        new = _snap(
+            ast_producer="clang", functions=[_func_with_fact(Fact.present(False))]
+        )
+        assert ChangeKind.PARAM_LOST_VA_LIST not in _kinds(compare(old, new))
+
+    def test_both_sides_confirmed_present_still_compares_normally(self) -> None:
+        """Behavior-preserving control: a fully-evidenced pair still fires."""
+        old = _snap(
+            ast_producer="clang", functions=[_func_with_fact(Fact.present(False))]
+        )
+        new = _snap(
+            ast_producer="clang", functions=[_func_with_fact(Fact.present(True))]
+        )
+        assert ChangeKind.PARAM_BECAME_VA_LIST in _kinds(compare(old, new))
 
 
 class TestParamVaListHeaderTierGate:

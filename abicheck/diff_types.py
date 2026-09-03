@@ -21,6 +21,7 @@ from collections.abc import Collection, Mapping
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.base_class_diff import diff_bases as _diff_bases
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
@@ -1090,81 +1091,11 @@ def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
 
 
 def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
-    changes: list[Change] = []
-    old_bases = resolved_fact_value(t_old.bases_fact, [])
-    new_bases = resolved_fact_value(t_new.bases_fact, [])
-    old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
-    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
-    entity_id = t_old.entity_id or t_new.entity_id
-
-    # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
-    # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
-    old_bases_set = set(old_bases)
-    new_bases_set = set(new_bases)
-    if old_bases_set == new_bases_set and old_bases != new_bases:
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_POSITION_CHANGED,
-                symbol=name,
-                name=name,
-                old_value=str(old_bases),
-                new_value=str(new_bases),
-                entity_id=entity_id,
-            )
-        )
-    elif old_bases_set != new_bases_set:
-        # General base class set change (add/remove base) → TYPE_BASE_CHANGED
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_BASE_CHANGED,
-                symbol=name,
-                description=f"Base classes changed: {name}",
-                old_value=str(old_bases),
-                new_value=str(new_bases),
-                entity_id=entity_id,
-            )
-        )
-
-    # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
-    old_virt_set = set(old_virtual_bases)
-    new_virt_set = set(new_virtual_bases)
-    # Bases that moved from non-virtual to virtual or vice versa
-    became_virtual = (new_virt_set - old_virt_set) & old_bases_set
-    lost_virtual = (old_virt_set - new_virt_set) & new_bases_set
-    if became_virtual or lost_virtual:
-        desc_parts = []
-        if became_virtual:
-            desc_parts.append(f"became virtual: {sorted(became_virtual)}")
-        if lost_virtual:
-            desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
-                symbol=name,
-                name=name,
-                detail="; ".join(desc_parts),
-                old_value=str(sorted(old_virtual_bases)),
-                new_value=str(sorted(new_virtual_bases)),
-                entity_id=entity_id,
-            )
-        )
-    elif old_virt_set != new_virt_set:
-        # Pure add/remove of a virtual base (not a migration from non-virtual):
-        # e.g. class D : virtual A  →  class D : virtual A, virtual B
-        # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
-        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
-            changes.append(
-                make_change(
-                    ChangeKind.TYPE_BASE_CHANGED,
-                    symbol=name,
-                    description=f"Virtual base classes changed: {name}",
-                    old_value=str(old_virtual_bases),
-                    new_value=str(new_virtual_bases),
-                    entity_id=entity_id,
-                )
-            )
-
-    return changes
+    """Delegation-only facade — see :func:`abicheck.compare.base_class_diff.
+    diff_bases` (Codex review, PR #1033: identifying a raw ``bases``/
+    ``virtual_bases`` change is `compare/`-owned per this repo's own
+    task-routing table, not a `diff_types.py` growth)."""
+    return _diff_bases(name, t_old, t_new)
 
 
 @registry.detector("enums")

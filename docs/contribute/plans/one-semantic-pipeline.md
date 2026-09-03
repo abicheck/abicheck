@@ -184,10 +184,70 @@ when a first PR lands against a sub-phase:
 |---|---|---|---|
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
-| **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
+| **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`) — `vtable`/`vptr_offset_bits` and every other reader of the two converted fields (`diff_cxx_rules.py`, `diff_stdlib_impl.py`, `diff_time64.py`, `idioms.py`, `surface_graph.py`, `buildsource/header_graph.py`, `diff_cpp_patterns.py`) remain on the old collapse, so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+
+**5B's first PR landed (2026-09-03).** `abicheck.compare.fact_comparison.
+compare_facts` is the shared primitive (moved there from `model/fact.py`
+where it first landed — Codex review: deciding "does this differ" is a
+`compare/`-owned question per `model/AGENTS.md`'s own scoped contract, not
+`model/`'s). It
+classifies an `(old_fact, new_fact)` pair into `FactComparability.COMPARABLE`
+/`INCOMPLETE`/`UNSUPPORTED`/`NOT_APPLICABLE` per the review's proposed
+`FactStatus` → detector-meaning table, and returns the resolved
+`old_value`/`new_value` only when `COMPARABLE`. Two of the five named
+fields' primary finding-emitting call sites were migrated onto it:
+`diff_types._diff_type_bases` (`bases_fact`/`virtual_bases_fact` — the two
+comparisons are gated independently, so a comparable `virtual_bases` pair
+with an incomplete `bases` pair still reports a plain hierarchy change,
+just without the finer became/lost-virtual classification) and
+`diff_param_qualifiers.param_va_list_changes` (per-parameter
+`is_va_list_fact` — the old `_fact_bool` present-or-`False` collapse this
+function used is removed; `param_restrict_changes` is unaffected, since
+`is_restrict` has no per-parameter evidence gap on either producer). Each
+migration is behavior-preserving for a pair with fully complete evidence on
+both sides (`PRESENT`, confirmed-empty/confirmed-`False` included — see
+`tests/test_diff_types_bases_fact_status.py`'s and
+`tests/test_clang_param_va_list.py::TestParamVaListFactStatusGating`'s own
+"both sides confirmed" controls) and changes behavior for a pair with
+incomplete evidence on either side, where a finding used to be fabricated
+from the gap and is now withheld instead. `bases`/`virtual_bases`
+additionally decline on a `PARTIAL` fact (Codex review, PR #1033: a base
+absent from a partially-covered list may simply live in the uncovered
+part, so treating the covered portion as the complete set is the identical
+fabrication risk as an incomplete fact); `is_va_list` — a single-parameter
+bool, not a list with an unobserved remainder — still compares normally
+under `PARTIAL`. Both checked against the FP-rate and per-tier-accuracy
+gates (`scripts/check_fp_rate.py`/`scripts/check_tier_accuracy.py`), both
+clean.
+
+**Deliberately not attempted in this PR** — `vtable`/`vptr_offset_bits`
+(`diff_types_vtable.py`/`diff_layout.py`/`diff_vtable_layout.py`): those
+three modules already implement extensive, individually-reasoned
+evidence-gap guards (`_vtable_transition_is_evidenced` and siblings) built
+*before* `Fact[T]` existed, inferring "evidence missing" indirectly from
+`size_bits`/virtual-signature heuristics rather than reading `FactStatus`
+directly, with a documented history of multiple prior false-positive/
+false-negative incidents per guard (see each function's own docstring).
+Replacing that heuristic layer with a direct `FactStatus` read is very
+likely a real improvement — `FactStatus` is strictly better evidence than
+inferring a capture gap from `size_bits`/signature-set heuristics — but it
+needs its own dedicated slice with equal scrutiny (each existing guard's
+own Codex-review history re-verified against the new behavior), not a
+drive-by change bundled into this PR's already-broader scope. Also
+unconverted: every other reader of the two fields this PR *did* migrate
+(`diff_cxx_rules.py`'s `_fact_str_list`, `diff_stdlib_impl.py`,
+`diff_time64.py`, `idioms.py`, `surface_graph.py`,
+`buildsource/header_graph.py`, `diff_cpp_patterns.py`) — these are mostly
+classification/matching aids rather than finding-emitting detectors in
+their own right, so they carry a smaller fabricated-finding risk than the
+two migrated call sites, but 5B's own removal gate ("every detector...
+for at least one full fact family") is not closed until they are covered
+too. Recorded here rather than silently left implicit, per this repo's own
+"say so explicitly and record the gap" convention (`AGENTS.md`
+"Decision-making principles").
 
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
