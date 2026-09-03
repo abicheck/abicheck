@@ -12,6 +12,12 @@
   side purely from the capture gap. Both detectors now gate each comparison
   through a new shared primitive, `abicheck.compare.fact_comparison.compare_facts`
   (ADR-063 Phase 5B's first `FactStatus`-aware detector cohort), and decline
-  to compare when either side's evidence is incomplete instead. A
-  fully-evidenced pair (`PRESENT`/`PARTIAL` on both sides, confirmed-empty
-  included) compares exactly as before.
+  to compare when either side's evidence is incomplete instead. A pair with
+  fully complete evidence on both sides (`PRESENT`, confirmed-empty/
+  confirmed-`False` included) compares exactly as before. `bases`/
+  `virtual_bases` additionally decline on a `PARTIAL` fact on either side
+  (a base absent from a partially-covered list may simply live in the
+  uncovered part, so treating it as complete could fabricate a finding the
+  same way an incomplete fact could); `is_va_list`, a single-parameter bool
+  rather than a list with an unobserved remainder, still compares normally
+  under `PARTIAL`.

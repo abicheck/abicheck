@@ -207,15 +207,21 @@ just without the finer became/lost-virtual classification) and
 `is_va_list_fact` — the old `_fact_bool` present-or-`False` collapse this
 function used is removed; `param_restrict_changes` is unaffected, since
 `is_restrict` has no per-parameter evidence gap on either producer). Each
-migration is behavior-preserving for a fully-evidenced pair (both sides
-`PRESENT`/`PARTIAL`, confirmed-empty/confirmed-`False` included — see
+migration is behavior-preserving for a pair with fully complete evidence on
+both sides (`PRESENT`, confirmed-empty/confirmed-`False` included — see
 `tests/test_diff_types_bases_fact_status.py`'s and
 `tests/test_clang_param_va_list.py::TestParamVaListFactStatusGating`'s own
-"both sides confirmed" controls) and changes behavior only for a pair with
+"both sides confirmed" controls) and changes behavior for a pair with
 incomplete evidence on either side, where a finding used to be fabricated
-from the gap and is now withheld instead — both checked against the FP-rate
-and per-tier-accuracy gates (`scripts/check_fp_rate.py`/
-`scripts/check_tier_accuracy.py`), both clean.
+from the gap and is now withheld instead. `bases`/`virtual_bases`
+additionally decline on a `PARTIAL` fact (Codex review, PR #1033: a base
+absent from a partially-covered list may simply live in the uncovered
+part, so treating the covered portion as the complete set is the identical
+fabrication risk as an incomplete fact); `is_va_list` — a single-parameter
+bool, not a list with an unobserved remainder — still compares normally
+under `PARTIAL`. Both checked against the FP-rate and per-tier-accuracy
+gates (`scripts/check_fp_rate.py`/`scripts/check_tier_accuracy.py`), both
+clean.
 
 **Deliberately not attempted in this PR** — `vtable`/`vptr_offset_bits`
 (`diff_types_vtable.py`/`diff_layout.py`/`diff_vtable_layout.py`): those
