@@ -82,6 +82,7 @@ itself perform.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -97,6 +98,48 @@ if TYPE_CHECKING:
     from .plan import AnalysisPlan
 
 __all__ = ["ResolvedExecutionContext"]
+
+
+def _canonical_repr(obj: object) -> str:
+    """A ``repr()``-like encoding that is order-independent for any
+    ``Mapping`` it finds, recursively -- unlike plain ``repr()``, which
+    preserves a dict's insertion order verbatim. Both composed types this
+    module cares about carry a `Mapping`-typed field
+    (`CompatibilityEvaluationConfig.provenance`,
+    `CompatibilityPolicyConfig.overrides`) whose dataclass ``__eq__``
+    already ignores insertion order -- so two configs a resolver treats as
+    equal (built by different front ends assembling the same fields in a
+    different order, or replayed from a receipt) must not silently produce
+    different digests (Codex review, PR #1027).
+
+    Recurses through dataclasses and tuples/lists to reach every nested
+    mapping (`ValueProvenance.shadowed_legacy` is itself a `ValueProvenance`,
+    `provenance` maps to `ValueProvenance` instances, etc.); a tuple/list's
+    own element order is preserved -- unlike a mapping's key order, it is
+    part of the value being fingerprinted (e.g. `ContractConfig.overlays`,
+    `PolicyFile.reclassify`-style first-match-wins ordering elsewhere in
+    this codebase). Falls back to plain ``repr()`` for anything that is
+    neither a dataclass, a Mapping, nor a tuple/list -- every leaf value
+    here (`str`/`int`/`bool`/`None`/`Enum`/`Path`) already has a stable,
+    deterministic `repr()`.
+    """
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        fields_repr = ", ".join(
+            f"{f.name}={_canonical_repr(getattr(obj, f.name))}"
+            for f in dataclasses.fields(obj)
+        )
+        return f"{type(obj).__name__}({fields_repr})"
+    if isinstance(obj, Mapping):
+        items = sorted(obj.items(), key=lambda kv: repr(kv[0]))
+        body = ", ".join(
+            f"{_canonical_repr(k)}: {_canonical_repr(v)}" for k, v in items
+        )
+        return f"{{{body}}}"
+    if isinstance(obj, (tuple, list)):
+        body = ", ".join(_canonical_repr(item) for item in obj)
+        kind = "[" + body + "]" if isinstance(obj, list) else "(" + body + ")"
+        return kind
+    return repr(obj)
 
 
 def _sha256_of(*parts: str) -> str:
@@ -196,24 +239,30 @@ class ResolvedExecutionContext:
         nothing about whether the run they describe would produce the same
         findings.
 
-        Built from each part's own already-deterministic ``repr()`` --
-        every dataclass this context composes (`CompatibilityEvaluationConfig`
+        Built from each part's own :func:`_canonical_repr` -- every
+        dataclass this context composes (`CompatibilityEvaluationConfig`
         and its namespaces, `CompileContext`) is frozen with plain
-        value/enum/tuple fields, so its default ``repr()`` is a stable,
-        content-only encoding with no memory addresses or nondeterministic
-        ordering, the same property :mod:`abicheck.effective_config_digest`
-        relies on for its own per-field string encodings -- just applied to
-        the whole composed object at once rather than field-by-field, since
-        this fingerprint (unlike that module's) is not trying to remain
-        stable across a schema change to either composed type.
+        value/enum/tuple/mapping fields, so that encoding is a stable,
+        content-only, order-independent-for-mappings encoding with no
+        memory addresses, the same property :mod:`abicheck.
+        effective_config_digest` relies on for its own per-field string
+        encodings -- just applied to the whole composed object at once
+        rather than field-by-field, since this fingerprint (unlike that
+        module's) is not trying to remain stable across a schema change to
+        either composed type. Plain ``repr()`` alone is not enough here
+        (Codex review, PR #1027): `CompatibilityEvaluationConfig.provenance`/
+        `CompatibilityPolicyConfig.overrides` are `Mapping`-typed fields
+        whose dataclass equality already ignores insertion order, so two
+        configs a resolver treats as equal must not hash differently
+        depending on which order their entries happened to be inserted in.
         """
         compile_context_parts = [
-            f"{label}={self.compile_contexts[label]!r}"
+            f"{label}={_canonical_repr(self.compile_contexts[label])}"
             for label in sorted(self.compile_contexts)
         ]
         return _sha256_of(
             self.operation,
             self.requested_depth or "",
-            repr(self.evaluation_config),
+            _canonical_repr(self.evaluation_config),
             "\x1f".join(compile_context_parts),
         )

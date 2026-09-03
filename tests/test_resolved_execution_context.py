@@ -227,6 +227,63 @@ class TestResolutionDigest:
         )
         assert a.resolution_digest() == b.resolution_digest()
 
+    def test_independent_of_provenance_mapping_insertion_order(self):
+        """Codex review, PR #1027: `CompatibilityEvaluationConfig.provenance`
+        is a `Mapping`, and dataclass equality already ignores its insertion
+        order -- so two configs a resolver would treat as equal (the same
+        entries, assembled in a different order by a different front end)
+        must not hash differently."""
+        prov_a = ValueProvenance(
+            layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag"
+        )
+        prov_b = ValueProvenance(
+            layer=SelectorLayer.PROJECT_CONFIG, source_kind="config_file"
+        )
+        cfg_ab = _evaluation_config(
+            provenance={"contract.mode": prov_a, "gate.exit_code_scheme": prov_b}
+        )
+        cfg_ba = _evaluation_config(
+            provenance={"gate.exit_code_scheme": prov_b, "contract.mode": prov_a}
+        )
+        assert cfg_ab == cfg_ba  # sanity: the dataclass itself already agrees
+        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ab)
+        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
+        assert a.resolution_digest() == b.resolution_digest()
+
+    def test_independent_of_policy_overrides_mapping_insertion_order(self):
+        """Same gap, the other `Mapping`-typed field
+        (`CompatibilityPolicyConfig.overrides`)."""
+        from abicheck.change_registry_types import Verdict
+
+        overrides_ab = {
+            "func_removed": Verdict.BREAKING,
+            "func_added": Verdict.COMPATIBLE,
+        }
+        overrides_ba = {
+            "func_added": Verdict.COMPATIBLE,
+            "func_removed": Verdict.BREAKING,
+        }
+        cfg_ab = _evaluation_config(
+            policy=CompatibilityPolicyConfig(base=_identity(), overrides=overrides_ab)
+        )
+        cfg_ba = _evaluation_config(
+            policy=CompatibilityPolicyConfig(base=_identity(), overrides=overrides_ba)
+        )
+        assert cfg_ab == cfg_ba
+        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ab)
+        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
+        assert a.resolution_digest() == b.resolution_digest()
+
+    def test_still_changes_when_a_mappings_content_actually_differs(self):
+        """The order-independence fix must not collapse a real difference --
+        only equal mappings should hash equal."""
+        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag")
+        cfg_with = _evaluation_config(provenance={"contract.mode": prov})
+        cfg_without = _evaluation_config(provenance={})
+        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_with)
+        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_without)
+        assert a.resolution_digest() != b.resolution_digest()
+
     def test_does_not_collide_a_shared_config_across_different_operations(self):
         """Not a `CompatibilityEvaluationConfig`-only fingerprint -- the
         composed object's other fields (here, `operation`) must genuinely
