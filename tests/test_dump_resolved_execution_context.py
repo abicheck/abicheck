@@ -296,3 +296,42 @@ class TestExecuteDumpRequestWithAssurance:
 
         assert result.effective_compile_context == fake_ctx
         assert dict(result.resolved_execution_context.compile_contexts) == {}
+
+    def test_compile_context_excluded_for_a_manifest_driven_dump(
+        self, elf_path, tmp_path, monkeypatch
+    ):
+        """Codex review, PR #1037, fourth round: a manifest-driven dump's
+        real header-AST parse runs under its own manifest-authoritative
+        ``dump_manifest.frontend_context`` (e.g. ``"device"``), not the
+        request/``InputSpec``-derived ``resolution.effective_compile_context``
+        this pipeline resolves independently of the manifest. Reproducing
+        the manifest's own resolution here is a documented gap, not
+        attempted -- recording the request-derived (possibly wrong, e.g.
+        ``"host"``) context instead would actively mislead a consumer,
+        which is worse than the field staying absent for this one input
+        shape."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.dump_manifest import DumpManifest
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        manifest = DumpManifest(base_dir=tmp_path, frontend_context="device")
+        request = DumpRequest(input=InputSpec(path=elf_path, dump_manifest=manifest))
+        resolved = resolve_dump_request(request)
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            return SideResolution(
+                snapshot=_snapshot(from_headers=True),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {}

@@ -736,10 +736,25 @@ def execute_dump_request(
         # is what actually gates a header-AST parse having run here.
         # `DumpResult.effective_compile_context` stays unconditional either
         # way (a separate, pre-existing field).
+        #
+        # `request.input.dump_manifest is None` (fourth Codex round):
+        # `resolution.effective_compile_context` is derived from the
+        # request/InputSpec's own compile settings only, but a manifest-
+        # driven dump's real header-AST parse runs under
+        # `dumper_manifest.resolve_header_ast_result`'s own manifest-
+        # authoritative `dump_manifest.frontend_context` instead (e.g.
+        # `"device"`) -- reproducing that resolution here, rather than
+        # excluding it, risks recording a wrong (`"host"`) context that
+        # actively misleads a consumer, which is worse than the field
+        # staying absent for this one input shape. A documented gap, not
+        # attempted here; the manifest path already has no
+        # `resolved_execution_context.evaluation_config`/other resolved
+        # fields either (see this pipeline's own "Not in scope" notes).
         if (
             resolution.effective_compile_context is not None
             and snap.from_headers
             and resolved.fmt is not None
+            and side.dump_manifest is None
         ):
             resolved_execution_context = dataclasses.replace(
                 resolved_execution_context,
