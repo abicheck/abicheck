@@ -72,14 +72,25 @@ concepts:
       compare_facts()/FactComparison primitive, wired into two of the five
       named fields' primary finding-emitting call sites (bases/
       virtual_bases in diff_types._diff_type_bases, is_va_list in
-      diff_param_qualifiers.param_va_list_changes). Not yet closed: vtable/
+      diff_param_qualifiers.param_va_list_changes). Second slice landed
+      2026-09-03 (the "lower-risk batch"): every *other* bases/
+      virtual_bases-reading call site was audited — diff_cxx_rules.py's
+      _transitive_bases (the one genuine old/new pairwise fabrication risk
+      among them, feeding virtual_method_addition's override check) is now
+      evidence-completeness-gated the same way; diff_stdlib_impl.py,
+      diff_time64.py, idioms.py, buildsource/header_graph.py, and
+      surface_graph.py (already gated) are single-snapshot reachability/
+      classification aids with no old/new pair to gate — each now carries
+      an explicit ADR-063 Phase 5B docstring note recording why the plain
+      resolved_fact_value() collapse is safe there (an evidence gap only
+      narrows a closure or omits a graph edge, it cannot fabricate a
+      finding). is_va_list has no other readers. Not yet closed: vtable/
       vptr_offset_bits (diff_types_vtable.py/diff_layout.py/
       diff_vtable_layout.py's own pre-existing, individually-reasoned
-      evidence-gap heuristics — deliberately left alone pending their own
-      dedicated slice) and every other reader of the two converted fields
-      (diff_cxx_rules.py, diff_stdlib_impl.py, diff_time64.py, idioms.py,
-      surface_graph.py, buildsource/header_graph.py, diff_cpp_patterns.py)
-      — see the plan's own 5B note for detail.
+      evidence-gap heuristics, plus their downstream readers in
+      diff_cxx_rules.py's own vtable comparison, idioms.py, and
+      diff_cpp_patterns.py — deliberately left alone pending their own
+      dedicated slice, per the plan's own 5B note).
 
   identity:
     primitive: complete

@@ -27,6 +27,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .model import Fact, Function, RecordType
+from .model.availability import FactStatus
 
 # The Itanium/MSVC mangled-name scope-component parsers' real home is
 # model/mangled_name.py (ADR-061 D1): pure string decoding with no I/O,
@@ -915,7 +916,11 @@ def _owner_descends_from(
     t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
     if t is None:
         return False
-    bases = _transitive_bases(t, types)
+    # This call site's own evidence-gap handling belongs to the dedicated
+    # vtable/vptr_offset_bits slice (ADR-063 Phase 5B) `_owner_descends_from`
+    # feeds via `vtable_slot_is_override_reuse` — unchanged here, only the
+    # completeness flag `virtual_method_addition` added is discarded.
+    bases, _walk_complete = _transitive_bases(t, types)
     # A qualified `ancestor` matching a `bases` entry exactly is unambiguous
     # (both are fully-qualified spellings of the same string). But when
     # `ancestor` is a bare leaf, an exact match against `bases` is NOT
@@ -1028,20 +1033,53 @@ def _fact_str_list(fact: Fact[list[str]] | None) -> list[str]:
     return value or []
 
 
+def _fact_str_list_confirmed(fact: Fact[list[str]] | None) -> tuple[list[str], bool]:
+    """Like :func:`_fact_str_list`, plus whether the value is safe to treat
+    as the *complete* base-class list (ADR-063 Phase 5B).
+
+    Only a ``PRESENT`` status earns ``True`` — ``PARTIAL`` is deliberately
+    excluded, the same discipline :func:`abicheck.compare.base_class_diff.
+    diff_bases` applies to this identical field pair: this is a full-list
+    *membership* question (does some transitive base declare a matching
+    virtual signature?), and a ``PARTIAL`` fact's uncovered remainder could
+    hold exactly the base that would have proven an override. Reading it as
+    "no more bases here" would be the same fabrication risk ``diff_bases``
+    already declines for the direct-comparison case.
+    """
+    assert fact is not None
+    if fact.status is not FactStatus.PRESENT:
+        return [], False
+    return (fact.value or []), True
+
+
 def _transitive_bases(
     start: RecordType | None, types: Mapping[str, RecordType]
-) -> set[str]:
-    """All (transitive) base-class names reachable from record ``start``.
+) -> tuple[set[str], bool]:
+    """All (transitive) base-class names reachable from record ``start``,
+    plus whether the walk saw only confirmed-complete ``bases``/
+    ``virtual_bases`` evidence at every node it visited.
 
     Walks ``bases`` / ``virtual_bases``, resolving each base name through the
     record map with a leaf-name fallback (CastXML records and base names are
     leaf-only, while DWARF uses qualified names). Tolerant of missing records.
+
+    The second return value is ``False`` as soon as *any* visited record's
+    ``bases_fact``/``virtual_bases_fact`` is not ``PRESENT`` (ADR-063 Phase
+    5B) — an incomplete evidence gap anywhere along the walk means a real
+    base this record actually has may be missing from the result, which
+    :func:`virtual_method_addition` must not silently read as "no override
+    exists here" (the same "decline rather than fabricate" default
+    ``diff_types_vtable._vtable_transition_is_evidenced`` and
+    :func:`~abicheck.compare.base_class_diff.diff_bases` already apply to
+    their own evidence gaps).
     """
     seen: set[str] = set()
+    complete = True
     if start is None:
-        return seen
-    start_bases = _fact_str_list(start.bases_fact)
-    start_virtual_bases = _fact_str_list(start.virtual_bases_fact)
+        return seen, complete
+    start_bases, ok1 = _fact_str_list_confirmed(start.bases_fact)
+    start_virtual_bases, ok2 = _fact_str_list_confirmed(start.virtual_bases_fact)
+    complete = complete and ok1 and ok2
     stack = [*start_bases, *start_virtual_bases]
     while stack:
         b = stack.pop()
@@ -1050,10 +1088,11 @@ def _transitive_bases(
         seen.add(b)
         rec = types.get(b) or types.get(b.rsplit("::", 1)[-1])
         if rec is not None:
-            rec_bases = _fact_str_list(rec.bases_fact)
-            rec_virtual_bases = _fact_str_list(rec.virtual_bases_fact)
+            rec_bases, ok1 = _fact_str_list_confirmed(rec.bases_fact)
+            rec_virtual_bases, ok2 = _fact_str_list_confirmed(rec.virtual_bases_fact)
+            complete = complete and ok1 and ok2
             stack.extend((*rec_bases, *rec_virtual_bases))
-    return seen
+    return seen, complete
 
 
 def virtual_method_addition(
@@ -1107,7 +1146,16 @@ def virtual_method_addition(
     # override and stay silent; a different-signature same-name virtual is a new
     # slot and still fires.
     sig = virtual_signature_key(f_new)
-    bases = _transitive_bases(t_new, new_types) | _transitive_bases(t_old, old_types)
+    new_bases, new_complete = _transitive_bases(t_new, new_types)
+    old_bases, old_complete = _transitive_bases(t_old, old_types)
+    if not (new_complete and old_complete):
+        # ADR-063 Phase 5B: an incomplete bases_fact/virtual_bases_fact
+        # anywhere along either walk means a real override-providing base
+        # may simply be missing from `bases` — the walk cannot rule out an
+        # override, so this must decline rather than fabricate a
+        # VIRTUAL_METHOD_ADDED against what may really be a plain override.
+        return None
+    bases = new_bases | old_bases
     if any(sig in old_virtual_sigs.get(b, ()) for b in bases):
         return None
     return make_change(

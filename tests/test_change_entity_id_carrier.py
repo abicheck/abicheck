@@ -147,8 +147,16 @@ class TestChangeEntityIdCarrier:
         # a separate construction site that must carry entity_id too.
         from abicheck.model import RecordType
 
-        owner = RecordType(name="C", kind="class", size_bits=64, vtable=[])
-        old_owner = RecordType(name="C", kind="class", size_bits=64, vtable=[])
+        # ADR-063 Phase 5B: `bases`/`virtual_bases` stated explicitly (empty,
+        # not omitted) so `virtual_method_addition`'s evidence-completeness
+        # check reads a confirmed-empty transitive-bases walk, matching how
+        # every real producer constructs a base-less RecordType.
+        owner = RecordType(
+            name="C", kind="class", size_bits=64, vtable=[], bases=[], virtual_bases=[]
+        )
+        old_owner = RecordType(
+            name="C", kind="class", size_bits=64, vtable=[], bases=[], virtual_bases=[]
+        )
         eid = entity_id_for_function((), "f", mangled_name="_ZN1C1fEv")
         new_method = _func(
             "C::f",

@@ -209,7 +209,13 @@ def _m_virtual_method_added(tag: int):
     record the growth (DWARF/symbol-only blind spot) → VIRTUAL_METHOD_ADDED."""
     cls_name = f"Cv{tag}"
     n = len(cls_name)  # Itanium source-name length prefix (valid for multi-digit tags)
-    cls = RecordType(name=cls_name, kind="class", size_bits=64, vtable=[])
+    # ADR-063 Phase 5B: `bases`/`virtual_bases` stated explicitly (empty,
+    # not omitted) so `virtual_method_addition`'s evidence-completeness
+    # check reads a confirmed-empty transitive-bases walk, matching how
+    # every real producer constructs a base-less RecordType.
+    cls = RecordType(
+        name=cls_name, kind="class", size_bits=64, vtable=[], bases=[], virtual_bases=[]
+    )
     keep = Function(name=f"{cls_name}::foo", mangled=f"_ZN{n}{cls_name}3fooEv", return_type="void",
                     visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
     new = Function(name=f"{cls_name}::bar", mangled=f"_ZN{n}{cls_name}3barEv", return_type="void",
