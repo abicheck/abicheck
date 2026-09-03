@@ -75,6 +75,7 @@ from collections.abc import Iterator as _Iterator
 __all__ = [
     "is_inline_abi_namespace_segment",
     "iter_top_level_chars",
+    "skip_template_arguments",
     "split_top_level_scopes",
     "version_suffix",
 ]
@@ -224,3 +225,53 @@ def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
         elif not stack:
             yield i, ch
         i += 1
+
+
+def skip_template_arguments(text: str, pos: int) -> int:
+    """If ``text[pos]`` is ``"<"``, return the index just after its
+    matching ``">"``; otherwise return *pos* unchanged.
+
+    Bracket-KIND-aware and quote-aware, mirroring
+    :func:`iter_top_level_chars`'s own stack (the identical ``>>``-is-not-
+    two-closes / real-comparison-inside-parens handling) -- deliberately a
+    *sibling* stack loop rather than a call into that generator, since the
+    two answer different questions (walk every top-level character vs.
+    skip past exactly one bracket group) and forcing one into the other's
+    shape would obscure both.
+
+    For a caller that has just matched a type name and wants to know what
+    declarator sigil (if any) applies to *that occurrence* -- not to
+    whatever sits inside its own template arguments -- the sigil to check
+    is the one immediately after the type name's *own* ``<...>``, not the
+    one immediately after the type name's bare identifier: ``"Box<void
+    (*)()> *"``'s trailing ``*`` genuinely makes ``Box`` a pointer, but it
+    sits only after the whole ``<void (*)()>`` closes, not right after
+    ``"Box"`` itself (Codex review on PR #1041).
+    """
+    if pos >= len(text) or text[pos] != "<":
+        return pos
+    stack = ["<"]
+    quote = ""
+    i, n = pos + 1, len(text)
+    while i < n and stack:
+        ch = text[i]
+        if quote:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "([":
+            stack.append(ch)
+        elif ch in ")]":
+            stack.pop()
+        elif ch == "<":
+            if stack[-1] not in "([":
+                stack.append("<")
+        elif ch == ">":
+            if stack[-1] == "<":
+                stack.pop()
+        i += 1
+    return i

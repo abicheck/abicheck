@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from abicheck.model.qualified_name_split import (
     iter_top_level_chars,
+    skip_template_arguments,
     split_top_level_scopes,
 )
 
@@ -89,9 +90,12 @@ def _top_level(text: str) -> str:
 
 class TestIterTopLevelChars:
     """`iter_top_level_chars` -- the bracket-KIND-aware-stack, quote-aware
-    primitive shared by `diff_helpers.depth_aware_bare_name` and
-    `compare.opaque_types._is_indirect_spelling` (Codex review on
-    PR #1041, several rounds)."""
+    primitive `diff_helpers.depth_aware_bare_name` uses for its top-level
+    `"::"` scope split (Codex review on PR #1041, several rounds).
+    `compare.opaque_types` no longer needs a whole-text sigil scan of its
+    own for indirection classification -- that question is now answered
+    occurrence-relative instead (see `_occurrence_is_indirect`'s own
+    docstring for why a whole-text scan was the wrong question)."""
 
     def test_a_bare_string_is_returned_whole(self) -> None:
         assert _top_level("Handle") == "Handle"
@@ -152,3 +156,65 @@ class TestIterTopLevelChars:
         """A backslash as the very last character inside an (unterminated)
         quoted literal must not attempt to skip past the end of *text*."""
         assert _top_level("'\\") == ""
+
+
+class TestSkipTemplateArguments:
+    """`skip_template_arguments` -- the sibling stack loop
+    `compare.opaque_types._occurrence_is_indirect` uses to skip a matched
+    type name's own `<...>` template arguments as one unit (Codex review
+    on PR #1041)."""
+
+    def test_a_non_angle_character_is_returned_unchanged(self) -> None:
+        assert skip_template_arguments("Handle", 0) == 0
+        assert skip_template_arguments("Handle *", 6) == 6
+
+    def test_a_position_past_the_end_is_returned_unchanged(self) -> None:
+        assert skip_template_arguments("Handle", 6) == 6
+
+    def test_skips_a_simple_template_argument_list(self) -> None:
+        text = "Box<int> *"
+        assert skip_template_arguments(text, 3) == 8
+        assert text[8] == " "
+
+    def test_skips_nested_parens_and_brackets_inside_the_arguments(self) -> None:
+        """The bracket-KIND-aware stack must treat a nested `(...)`/`[...]`
+        as its own group, not mistake either for a template close."""
+        text = "Box<void (*)(int[3])> *"
+        end = skip_template_arguments(text, 3)
+        assert text[end:] == " *"
+
+    def test_skips_a_quoted_literal_inside_the_arguments(self) -> None:
+        text = "S<'>', &h> *"
+        end = skip_template_arguments(text, 1)
+        assert text[end:] == " *"
+
+    def test_a_backslash_escaped_quote_inside_the_arguments_does_not_end_it_early(
+        self,
+    ) -> None:
+        text = "S<'\\'', &h> *"
+        end = skip_template_arguments(text, 1)
+        assert text[end:] == " *"
+
+    def test_a_real_right_shift_inside_parens_is_not_two_closes(self) -> None:
+        text = "S<(N >> 1), &h> *"
+        end = skip_template_arguments(text, 1)
+        assert text[end:] == " *"
+
+    def test_a_less_than_inside_parens_is_a_real_comparison_not_a_template_open(
+        self,
+    ) -> None:
+        text = "S<(N < 0), &h> *"
+        end = skip_template_arguments(text, 1)
+        assert text[end:] == " *"
+
+    def test_skips_a_nested_template_argument_list(self) -> None:
+        """A genuinely nested `<...>` template argument (as opposed to a
+        real `>>` shift/comparison operator inside parens) must still push
+        its own stack level, so the outer template's own close isn't
+        mistaken for the inner one's."""
+        text = "Box<Inner<int>> *"
+        end = skip_template_arguments(text, 3)
+        assert text[end:] == " *"
+
+    def test_an_unterminated_template_argument_list_consumes_the_rest(self) -> None:
+        assert skip_template_arguments("Box<unterminated", 3) == len("Box<unterminated")

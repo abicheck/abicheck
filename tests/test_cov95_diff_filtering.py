@@ -635,22 +635,6 @@ def test_find_by_value_types_relational_angle_in_a_template_argument_is_not_a_br
     assert "ns::S" in _find_by_value_types(snap, opaque)
 
 
-def test_is_indirect_spelling_tolerates_unbalanced_brackets():
-    """Defensive-floor coverage for `_is_indirect_spelling`'s bracket-depth
-    tracking: a stray closing `)`, `]`, or `>` with no matching opener must
-    not drive any depth counter negative (which would then wrongly mask a
-    later, genuinely top-level sigil as still "nested"). No real,
-    well-formed C/C++ declarator produces an unbalanced spelling, but the
-    guard exists precisely because this scan runs on rendered text from
-    multiple producers rather than parsing it -- exercised directly since
-    `find_by_value_types` never constructs such text itself."""
-    from abicheck.compare.opaque_types import _is_indirect_spelling
-
-    assert _is_indirect_spelling("Handle)*") is True
-    assert _is_indirect_spelling("Handle]&") is True
-    assert _is_indirect_spelling("Handle>&") is True
-
-
 def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
     """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
     ``RecordType.name``, which may be qualified (``ns::Handle``), while a
@@ -703,7 +687,7 @@ def test_find_by_value_types_leaf_widening_ignores_a_real_scope_collision():
     alone cannot tell the two scopes apart (``::`` is non-word on both
     sides, so ``Handle`` in ``other::Handle`` is still a token-bounded
     match) -- the leaf candidate additionally refuses a match immediately
-    preceded by ``::`` (`_references_unqualified_type_token`), since only
+    preceded by ``::`` (`_unqualified_type_token_match`), since only
     the trailing segment of a *different* qualified name can be preceded
     that way. The full, already-qualified candidate is unaffected: a real
     ``ns::Handle`` reference still matches regardless of what precedes it

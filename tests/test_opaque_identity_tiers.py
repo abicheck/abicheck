@@ -341,3 +341,56 @@ def test_find_by_value_types_quoted_literal_angle_is_not_a_bracket():
         variables=[Variable(name="g", mangled="g", type=template_spelling)],
     )
     assert "S" in _find_by_value_types(snap, opaque)
+
+
+def test_occurrence_is_indirect_recognizes_a_pointer_nested_in_a_function_pointer():
+    """Regression for the Codex review on PR #1041 that replaced the old
+    whole-text `_is_indirect_spelling` scan with an occurrence-relative
+    check: an implementation record named `ns::Handle` referenced only
+    through a public function-pointer parameter/return like
+    `"void (*)(Handle*)"` must be recognized as pointer-only (not by
+    value) -- the `*` genuinely applies to `Handle`, even though it sits
+    inside the function-pointer's own nested parameter-list parens, which
+    the old whole-text top-level scan wrongly ignored as belonging to a
+    different part of the declarator."""
+    opaque = {"ns::Handle"}
+    template = "void (*)(Handle*)"
+
+    return_snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[Function(name="f", mangled="f", return_type=template)],
+    )
+    assert _find_by_value_types(return_snap, opaque) == set()
+
+    param_snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        functions=[
+            Function(
+                name="f",
+                mangled="f",
+                return_type="void",
+                params=[Param(name="p", type=template, pointer_depth=0)],
+            )
+        ],
+    )
+    assert _find_by_value_types(param_snap, opaque) == set()
+
+    var_snap = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        variables=[Variable(name="g", mangled="g", type=template)],
+    )
+    assert _find_by_value_types(var_snap, opaque) == set()
+
+
+def test_occurrence_is_indirect_handles_unbalanced_template_arguments():
+    """Defensive-floor coverage for `skip_template_arguments`'s bracket
+    stack: an unterminated `<...>` (malformed/adversarial rendered text)
+    must not raise or infinite-loop -- degrades to "consumed the rest of
+    the text", same discipline `iter_top_level_chars` already holds
+    itself to."""
+    from abicheck.compare.opaque_types import _occurrence_is_indirect
+
+    assert _occurrence_is_indirect("Handle<unterminated", 6) is False
