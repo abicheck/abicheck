@@ -1264,6 +1264,10 @@ class _ClangAstParser:
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
                     deprecated=_clang_deprecated_message(node),
+                    # See Variable.is_static's own comment -- mirrors
+                    # `parse_functions`'s identical `storageClass ==
+                    # "static"` read on the AST-JSON node.
+                    is_static=node.get("storageClass") == "static",
                     # ADR-063 Phase 2, same routing/bug-fix as
                     # parse_functions: `mangled_name` is offered only when
                     # `raw_mangled` is genuinely present, not merely when

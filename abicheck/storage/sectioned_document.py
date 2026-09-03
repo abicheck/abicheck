@@ -30,7 +30,7 @@ independently versioned sections, structural completeness checking
 
 ```json
 {
-  "schema_version": 42,
+  "schema_version": 43,
   "sections": {
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {...}},
     "types": {...},

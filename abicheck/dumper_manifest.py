@@ -51,7 +51,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dataclasses_replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,6 +69,7 @@ from .dumper_toolchain import (
     _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind,
 )
+from .extract.manifest_semantic_ir import manifest_semantic_ir
 from .extract.semantic_normalizer import normalize_header_ast
 from .model import EnumType, Function, RecordType, Variable
 from .model.identity import EntityId
@@ -585,11 +586,14 @@ def run_tu_loop(
     contributing_names = {tu.name for tu in tus if tu.contributes_to_abi}
     fragments = [f for f in fragments if f.tu_name in contributing_names]
 
-    return merge_tu_fragments(
+    merged = merge_tu_fragments(
         fragments,
         public_header_paths=explicit_public_paths,
         public_header_dirs=explicit_public_dirs,
     )
+    # ADR-063 Phase 6: built from the raw, pre-merge `fragments`, not
+    # `merged`'s own already-folded flat fields -- see the docstring below.
+    return _dataclasses_replace(merged, semantic_ir=manifest_semantic_ir(fragments))
 
 
 @dataclass(frozen=True)
@@ -760,15 +764,22 @@ def resolve_header_ast_result(
         frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
-        semantic_ir=normalize_header_ast(
-            types=merged.types,
-            enums=merged.enums,
-            typedefs_qualified=merged.typedefs_qualified,
-            typedef_entity_ids=merged.typedef_entity_ids,
-            producer=merged.ast_producer,
-            functions=merged.functions,
-            variables=merged.variables,
-            constants=merged.constants,
-            constant_entity_ids=merged.constant_entity_ids,
+        # `run_tu_loop` already populates a richer semantic_ir for the
+        # manifest branch (see `_manifest_semantic_ir`); the legacy
+        # branch's manually-built MergedTuFragments never sets it.
+        semantic_ir=(
+            merged.semantic_ir
+            if merged.semantic_ir is not None
+            else normalize_header_ast(
+                types=merged.types,
+                enums=merged.enums,
+                typedefs_qualified=merged.typedefs_qualified,
+                typedef_entity_ids=merged.typedef_entity_ids,
+                producer=merged.ast_producer,
+                functions=merged.functions,
+                variables=merged.variables,
+                constants=merged.constants,
+                constant_entity_ids=merged.constant_entity_ids,
+            )
         ),
     )
