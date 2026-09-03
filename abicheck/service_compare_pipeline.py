@@ -37,15 +37,13 @@ the same resolution the typed path uses instead of a second copy.
 
 Two mechanical notes:
 
-* Everything this module needs from ``service`` is looked up **through the
-  module object at call time** (``from . import service`` inside the function),
-  never bound at import time — keeps ``monkeypatch.setattr(service,
-  "resolve_input", ...)`` (and ``compare_snapshots``) affecting this code
-  exactly as when the body lived in ``service.py``. Helpers ``service``
-  itself only *re-exports* are imported straight from their defining module
-  instead — going through a re-export would make them look like public
-  service API (mypy's ``no_implicit_reexport``). The import is function-
-  local so this module does not join ``service``'s import cycle.
+* Everything this module needs from ``service`` is looked up through the
+  module object at call time (``from . import service`` inside the function),
+  never bound at import time — keeps ``monkeypatch.setattr`` affecting this
+  code exactly as when the body lived in ``service.py``. Helpers ``service``
+  only *re-exports* are imported straight from their defining module instead
+  (mypy's ``no_implicit_reexport``); function-local so this module does not
+  join ``service``'s import cycle.
 * This module holds no state and makes no policy decisions of its own; every
   behavioural rule in it moved here verbatim from ``service.run_compare_request``.
 """
@@ -471,12 +469,9 @@ def classify_compare_pair(
     # populated `CompareRequest.pack_policy_overrides`/
     # `pack_internal_namespaces`. See `CompareRequest.pack_policy_overrides`'s
     # own docstring for why this is the one chokepoint to apply it at.
-    # `receipt_pf`: the file *as loaded*, before pack folding -- a
-    # pack-merged `PolicyFile` can't say which `overrides` came from the
-    # file vs. a pack, so folding it here would misattribute pack overrides
-    # as `policy_file_path`-sourced (Codex review). The release fan-out
-    # (today's only caller of these two fields) overwrites that receipt
-    # right after (`cli_compare_receipt.record_release_resolved_config`).
+    # `receipt_pf`: the file as loaded, before pack folding -- a pack-merged
+    # `PolicyFile` can't say which `overrides` came from the file vs. a pack
+    # (Codex review); see `workflows.compare_gate_receipt`'s own docstring.
     receipt_pf = pf
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
@@ -595,8 +590,7 @@ def classify_compare_pair(
         new_pack=getattr(new, "build_source", None),
     )
     # ADR-064/PR G2: resolve severity/exit-code-scheme into the same
-    # `GateOptions` the release fan-out uses, then the canonical
-    # `ExitDecision` (no per-category flags for single-pair `compare`).
+    # `GateOptions` the release fan-out uses, then the canonical decision.
     from .policy.exit_decision import resolve_compare_exit_decision
     from .workflows.gate import resolve_release_gate_options
 
@@ -706,6 +700,8 @@ def run_compare(
     pack_internal_namespaces: tuple[str, ...] | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    severity_preset: str | None = None,
+    exit_code_scheme: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -719,12 +715,10 @@ def run_compare(
     parameter it always did (Codex review, PR #551). ``include_dependencies``
     applies to *both* sides — build a ``CompareRequest`` for a per-side override.
 
-    ``pack_policy_overrides``/``pack_internal_namespaces`` (CLI cleanup phase
-    two, "PR B" slice 1): an already-resolved ``--pack``'s
-    ``policy.overrides``/``surface.internal_namespaces`` contribution --
-    see ``CompareRequest.pack_policy_overrides``'s own docstring for what
-    folds them in and why. ``None``/empty on both is a no-op, matching every
-    pre-existing caller.
+    ``pack_policy_overrides``/``pack_internal_namespaces``: an already-
+    resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
+    contribution -- see ``CompareRequest.pack_policy_overrides``'s own
+    docstring for what folds them in and why. ``None``/empty is a no-op.
 
     ``compile_context`` is a both-sides :class:`~abicheck.compile_context.
     CompileContext` (the L2 cross-toolchain/frontend family --
@@ -737,10 +731,13 @@ def run_compare(
     no-op, matching every pre-existing caller.
 
     ``depth`` forwards straight onto :class:`CompareRequest.depth` -- the
-    same evidence-depth dial the native ``compare`` CLI resolves (D1: the
-    release fan-out's ``_run_compare_pair`` is this shim's other caller, and
-    needed a way to forward its own resolved ``--depth binary`` per pair;
-    every other pre-existing caller keeps passing ``None``, a true no-op).
+    same evidence-depth dial the native ``compare`` CLI resolves (the
+    release fan-out's ``_run_compare_pair`` needed a way to forward its own
+    resolved ``--depth binary`` per pair; every other caller passes ``None``).
+
+    ``severity_preset``/``exit_code_scheme`` (Codex review): forward onto
+    ``CompareRequest``'s identically-named fields -- this *supported* entry
+    point had no way to select the severity-aware gate. ``None`` is a no-op.
 
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
@@ -796,5 +793,7 @@ def run_compare(
         ),
         pack_internal_namespaces=pack_internal_namespaces,
         depth=depth,
+        severity_preset=severity_preset,
+        exit_code_scheme=exit_code_scheme,
     )
     return run_compare_request(request)

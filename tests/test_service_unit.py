@@ -3231,15 +3231,19 @@ class TestContractEvaluationThreading:
         # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
         # two, "PR B" slice 1) were appended after contract_mode in turn,
         # following the same rule; compile_context (both-sides L2 compile
-        # context for the release fan-out), then depth (D1, CLI-audit).
-        assert params[-1] == "depth"
-        assert params[-2] == "compile_context"
-        assert params[-3] == "pack_internal_namespaces"
-        assert params[-4] == "pack_policy_overrides"
-        assert params[-5] == "contract_mode"
-        assert params[-6] == "include_dependencies"
-        assert params[-7] == "contract_evaluation"
-        assert params[-8] == "diagnostic_comparison"
+        # context for the release fan-out), then depth (D1, CLI-audit), then
+        # severity_preset/exit_code_scheme (ADR-064/PR G2, Codex review:
+        # run_compare had no way to forward the severity-aware gate).
+        assert params[-1] == "exit_code_scheme"
+        assert params[-2] == "severity_preset"
+        assert params[-3] == "depth"
+        assert params[-4] == "compile_context"
+        assert params[-5] == "pack_internal_namespaces"
+        assert params[-6] == "pack_policy_overrides"
+        assert params[-7] == "contract_mode"
+        assert params[-8] == "include_dependencies"
+        assert params[-9] == "contract_evaluation"
+        assert params[-10] == "diagnostic_comparison"
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into

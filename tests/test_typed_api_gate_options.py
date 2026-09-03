@@ -376,9 +376,7 @@ class TestCompareRequestContractContextGateReceipt:
         test)."""
         old, new = _write(tmp_path, *_breaking_pair())
         policy_file_path = tmp_path / "policy.yml"
-        policy_file_path.write_text(
-            "base_policy: sdk_vendor\n", encoding="utf-8"
-        )
+        policy_file_path.write_text("base_policy: sdk_vendor\n", encoding="utf-8")
         result = self._run(
             old,
             new,
@@ -412,9 +410,7 @@ class TestCompareRequestContractContextGateReceipt:
             old,
             new,
             policy_file_path=policy_file_path,
-            pack_policy_overrides=(
-                (ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),
-            ),
+            pack_policy_overrides=((ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),),
         )
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         # The file's own override is real receipt content.
@@ -438,9 +434,7 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            pack_policy_overrides=(
-                (ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),
-            ),
+            pack_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
         )
         assert result.diff.verdict.name == "COMPATIBLE"
 
@@ -528,6 +522,51 @@ class TestCompareResultSeverityConfigRenderingParity:
         )
         assert report["exit"]["code"] == result.exit_decision.code == 0
         assert "severity" in report
+
+
+class TestRunCompareForwardsGateOptions:
+    """Codex review, fresh evidence (PR #1032, `service_compare_pipeline.py:
+    606`): ADR-064/PR G2 added `severity_preset`/`exit_code_scheme` to
+    `CompareRequest`/`CompareResult`, but the supported `abicheck.service.
+    run_compare()` kwargs shim never grew matching parameters or forwarded
+    them into the `CompareRequest` it builds -- a caller of this documented
+    entry point had no way to select the severity-aware gate at all: passing
+    the keywords raised `TypeError`, and omitting them silently stayed on
+    the legacy verdict-based exit code."""
+
+    def test_the_keywords_are_accepted_and_change_the_decision(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.service import run_compare
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        legacy = run_compare(old, new)
+        demoted = run_compare(
+            old, new, exit_code_scheme="severity", severity_preset="info-only"
+        )
+        assert legacy.exit_decision.code == 4
+        assert demoted.exit_decision.code == 0
+        assert demoted.severity_config is not None
+
+    def test_agrees_with_run_compare_request_for_equivalent_input(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare, run_compare_request
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        shim_result = run_compare(
+            old, new, exit_code_scheme="severity", severity_preset="info-only"
+        )
+        typed_result = run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old),
+                new=InputSpec(path=new),
+                exit_code_scheme="severity",
+                severity_preset="info-only",
+            )
+        )
+        assert shim_result.exit_decision.code == typed_result.exit_decision.code == 0
 
 
 class TestScanRequestGateOptions:
