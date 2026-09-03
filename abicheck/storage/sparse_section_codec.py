@@ -112,39 +112,69 @@ def _unfreeze(value: Any) -> Any:
     return value
 
 
-#: The four top-level wire shapes a required field can be validated against
-#: (Codex review, PR #1044: `_freeze_required` previously accepted any value
-#: at all for a required field -- a malformed `elf: []` would freeze and
-#: round-trip unchanged, then `serialization.snapshot_from_dict` reads a
-#: non-mapping `elf` as absent, silently turning corrupted evidence into
-#: confirmed-missing evidence). Intentionally shallow -- only the field's
-#: own top-level container type, never its internal structure -- the same
-#: boundary `TypesSection`/`GraphSection` already draw for their own one
-#: field (validate that `types` is a `list`/`surface_graph` is a `Mapping`,
-#: never decode what's inside); deep-decoding a `RecordType`/`ElfMetadata`
-#: entry remains real, separately-scoped future work this module's own
-#: docstring already declines to attempt.
+#: The top-level wire shapes a required *or* optional field can be
+#: validated against (Codex review, PR #1044, two rounds: first
+#: `_freeze_required` accepted any value at all for a required field -- a
+#: malformed `elf: []` would freeze and round-trip unchanged, then
+#: `serialization.snapshot_from_dict` reads a non-mapping `elf` as absent,
+#: silently turning corrupted evidence into confirmed-missing evidence;
+#: second, the identical gap for `extra`'s own optional fields -- e.g.
+#: `BuildSection.from_document({"build_source": []})`). Intentionally
+#: shallow -- only a field's own top-level container type, never its
+#: internal structure -- the same boundary `TypesSection`/`GraphSection`
+#: already draw for their own one field (validate that `types` is a
+#: `list`/`surface_graph` is a `Mapping`, never decode what's inside);
+#: deep-decoding a `RecordType`/`ElfMetadata`/`BuildSourcePack` entry
+#: remains real, separately-scoped future work this module's own docstring
+#: already declines to attempt.
 _MAPPING_OR_NONE = "mapping_or_none"
 _MAPPING = "mapping"
 _LIST = "list"
 _STR = "str"
+_STR_OR_NONE = "str_or_none"
+_BOOL = "bool"
+_BOOL_OR_NONE = "bool_or_none"
+_NUMBER_OR_NONE = "number_or_none"
 
 
-def _check_required_field_shape(
-    section_kind: str, name: str, value: Any, shape: str
-) -> None:
+def _check_field_shape(section_kind: str, name: str, value: Any, shape: str) -> None:
     if shape == _MAPPING_OR_NONE:
         ok = value is None or isinstance(value, Mapping)
     elif shape == _MAPPING:
         ok = isinstance(value, Mapping)
     elif shape == _LIST:
-        ok = isinstance(value, list)
+        # `list`/`tuple`/`set`/`frozenset` alike: several real
+        # `AbiSnapshot` fields this shape covers are `tuple[...]`- or
+        # `set[...]`-typed at the Python attribute level (`ast_compile_args`,
+        # `dwarf_layout_coherence_mismatches`, `build_context_defines`) and
+        # reach this check before any JSON round trip has coerced them to a
+        # `list` -- `storage.canonical.canonical_form`'s own docstring
+        # already establishes these four as one logical "array" shape
+        # ("JSON has one array type... deliberately collapsed, and that is
+        # not a collision"), so treating them differently here would
+        # contradict the very normalization this value is about to go
+        # through. `str`/`bytes` are deliberately excluded even though both
+        # are iterable -- neither is a JSON array.
+        ok = isinstance(value, (list, tuple, set, frozenset))
     elif shape == _STR:
         ok = isinstance(value, str)
-    else:  # pragma: no cover - defensive: every REQUIRED_FIELD_SHAPES entry
-        # below is one of the four constants; a fifth value would be a typo
-        # in this module itself, not reachable from any document content.
-        raise AssertionError(f"unknown required-field shape {shape!r}")
+    elif shape == _STR_OR_NONE:
+        ok = value is None or isinstance(value, str)
+    elif shape == _BOOL:
+        ok = isinstance(value, bool)
+    elif shape == _BOOL_OR_NONE:
+        ok = value is None or isinstance(value, bool)
+    elif shape == _NUMBER_OR_NONE:
+        # `bool` is an `int` subclass in Python -- excluded explicitly, the
+        # same discipline `storage.import_v1`'s own schema_version guards
+        # apply, so a stray `true`/`false` doesn't pass as a timestamp/size.
+        ok = value is None or (
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+        )
+    else:  # pragma: no cover - defensive: every *_FIELD_SHAPES entry below
+        # is one of the constants above; a fifth value would be a typo in
+        # this module itself, not reachable from any document content.
+        raise AssertionError(f"unknown field shape {shape!r}")
     if not ok:
         raise ValueError(
             f"a {section_kind!r} section payload's {name!r} must be a "
@@ -174,13 +204,22 @@ class _SparseSectionMixin:
     #: allows -- genuinely optional, schema-version-dependent. Kept in
     #: `extra`, never defaulted.
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset()
-    #: Each `REQUIRED_FIELDS` entry's own top-level wire shape (one of
-    #: `_MAPPING_OR_NONE`/`_MAPPING`/`_LIST`/`_STR`), checked by
-    #: `_freeze_required` before freezing -- see that constant's own
-    #: docstring for why this stays shallow. A name absent here is not
-    #: shape-checked at all (no subclass currently needs that; every
-    #: `REQUIRED_FIELDS` entry today has a real, always-present type).
+    #: Each `REQUIRED_FIELDS` entry's own top-level wire shape (one of the
+    #: constants above `_check_field_shape`), checked by `_freeze_required`
+    #: before freezing -- see that function's own docstring for why this
+    #: stays shallow. A name absent here is not shape-checked at all (no
+    #: subclass currently needs that; every `REQUIRED_FIELDS` entry today
+    #: has a real, always-present type).
     REQUIRED_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {}
+    #: The identical idea, for `OPTIONAL_FIELDS` -- every key `extra` may
+    #: carry, mapped to its own real `AbiSnapshot` field's top-level shape
+    #: (Codex review, PR #1044, second round: `_freeze_extra` validated only
+    #: which *keys* `extra` may carry, not each key's own value shape, so
+    #: `BuildSection.from_document({"build_source": []})` froze and
+    #: round-tripped a malformed record unchanged). Every `OPTIONAL_FIELDS`
+    #: entry across all six sections has a declared shape here -- unlike
+    #: `REQUIRED_FIELD_SHAPES`, this is meant to be exhaustive.
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {}
 
     #: Declared by every concrete (`@dataclass`) subclass; only annotated
     #: here so mypy can see it through the mixin.
@@ -191,7 +230,7 @@ class _SparseSectionMixin:
             value = getattr(self, name)
             shape = self.REQUIRED_FIELD_SHAPES.get(name)
             if shape is not None:
-                _check_required_field_shape(self.SECTION_KIND, name, value, shape)
+                _check_field_shape(self.SECTION_KIND, name, value, shape)
             object.__setattr__(self, name, _freeze(canonical_form(value)))
 
     def _freeze_extra(self) -> None:
@@ -208,6 +247,10 @@ class _SparseSectionMixin:
                 f"a subset of {sorted(self.OPTIONAL_FIELDS)}, not "
                 f"{sorted(unknown)}"
             )
+        for name, value in extra.items():
+            shape = self.OPTIONAL_FIELD_SHAPES.get(name)
+            if shape is not None:
+                _check_field_shape(self.SECTION_KIND, name, value, shape)
         object.__setattr__(self, "extra", _freeze(canonical_form(dict(extra))))
 
     def to_document(self) -> dict[str, Any]:
@@ -283,6 +326,22 @@ class BinarySection(_SparseSectionMixin):
             "source_size",
         }
     )
+    #: `AbiSnapshot.kabi` is `KabiMetadata | None`; `.platform`/`.build_id`/
+    #: `.source_path` are `str | None`; `.elf_only_mode`/`.source_mtime_epoch`
+    #: are plain `bool`; `.build_mode` is `BuildMode | None` (itself a
+    #: dataclass -- a mapping, not a string); `.source_mtime` is
+    #: `float | None`; `.source_size` is `int | None`.
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "kabi": _MAPPING_OR_NONE,
+        "platform": _STR_OR_NONE,
+        "elf_only_mode": _BOOL,
+        "build_id": _STR_OR_NONE,
+        "build_mode": _MAPPING_OR_NONE,
+        "source_path": _STR_OR_NONE,
+        "source_mtime": _NUMBER_OR_NONE,
+        "source_mtime_epoch": _BOOL,
+        "source_size": _NUMBER_OR_NONE,
+    }
 
     elf: Any
     pe: Any
@@ -337,6 +396,20 @@ class DeclarationsSection(_SparseSectionMixin):
             "numpy_capi",
         }
     )
+    #: `.typedefs_qualified`/`.constants` are `dict[str, str]`;
+    #: `.typedef_entity_ids`/`.constant_entity_ids` are `dict[str, EntityId]`
+    #: (still a mapping at the top level, the only level checked here);
+    #: `.python_ext`/`.python_api`/`.numpy_capi` are each `XxxMetadata |
+    #: None`.
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "typedefs_qualified": _MAPPING,
+        "typedef_entity_ids": _MAPPING,
+        "constants": _MAPPING,
+        "constant_entity_ids": _MAPPING,
+        "python_ext": _MAPPING_OR_NONE,
+        "python_api": _MAPPING_OR_NONE,
+        "numpy_capi": _MAPPING_OR_NONE,
+    }
 
     functions: Any
     variables: Any
@@ -379,6 +452,18 @@ class LayoutSection(_SparseSectionMixin):
             "dependency_scope",
         }
     )
+    #: `.dwarf_layout_coherence`/`.scope_fallback`/`.dependency_scope` are
+    #: `str | None`; `.dwarf_layout_coherence_mismatches` is
+    #: `tuple[str, ...]` (a JSON list); `.conditional_fields` is a nested
+    #: `dict`; `.contract` is `ExtractionContract | None`.
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "dwarf_layout_coherence": _STR_OR_NONE,
+        "dwarf_layout_coherence_mismatches": _LIST,
+        "scope_fallback": _STR_OR_NONE,
+        "conditional_fields": _MAPPING,
+        "contract": _MAPPING_OR_NONE,
+        "dependency_scope": _STR_OR_NONE,
+    }
 
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -431,6 +516,42 @@ class DebugSection(_SparseSectionMixin):
             "build_context_defines",
         }
     )
+    #: Each mapped to `AbiSnapshot`'s own declared type: `.from_headers`/
+    #: `.parsed_with_build_context` and the seven `*_facts_reliable` flags
+    #: are plain `bool`; `.ast_toolchain_supported` is `bool | None`;
+    #: `.ast_producer`/`.ast_fallback_reason`/`.frontend_context_kind`/
+    #: `.ast_resolved_standard`/`.ast_cplusplus_macro`/`.ast_sysroot` are
+    #: `str | None`; `.ast_toolchain`/`.fact_provenance` are
+    #: `dict[str, str]`; `.ast_toolchain_unsupported_reasons` is
+    #: `list[str]`; `.ast_compile_args` is `tuple[str, ...]` (a JSON list);
+    #: `.build_context_defines` is a `set[str]` (also a JSON list --
+    #: `serialization.py` round-trips it via `set(d.get(...))`);
+    #: `.ast_resolved_standard_fact` is `Fact[str | None] | None`, encoded
+    #: as `null` or a mapping (`storage/fact_codec.py`).
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "from_headers": _BOOL,
+        "ast_producer": _STR_OR_NONE,
+        "ast_toolchain": _MAPPING,
+        "ast_fallback_reason": _STR_OR_NONE,
+        "ast_toolchain_supported": _BOOL_OR_NONE,
+        "ast_toolchain_unsupported_reasons": _LIST,
+        "frontend_context_kind": _STR_OR_NONE,
+        "ast_resolved_standard": _STR_OR_NONE,
+        "ast_resolved_standard_fact": _MAPPING_OR_NONE,
+        "ast_cplusplus_macro": _STR_OR_NONE,
+        "ast_compile_args": _LIST,
+        "ast_sysroot": _STR_OR_NONE,
+        "fact_provenance": _MAPPING,
+        "header_cv_facts_reliable": _BOOL,
+        "clang_deprecation_facts_reliable": _BOOL,
+        "clang_field_initializer_facts_reliable": _BOOL,
+        "clang_vtable_facts_reliable": _BOOL,
+        "clang_restrict_facts_reliable": _BOOL,
+        "clang_va_list_facts_reliable": _BOOL,
+        "castxml_var_access_facts_reliable": _BOOL,
+        "parsed_with_build_context": _BOOL,
+        "build_context_defines": _LIST,
+    }
 
     dwarf: Any
     dwarf_advanced: Any
@@ -461,6 +582,15 @@ class BuildSection(_SparseSectionMixin):
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {"build_source_pack", "build_source", "evidence_pack"}
     )
+    #: `.build_source_pack` is `BuildSourceRef | None`, `.build_source` is
+    #: `BuildSourcePack | None` -- both dataclasses, so a mapping or `null`.
+    #: `.evidence_pack` is the pre-schema-v8 spelling of the same field
+    #: (this class's own docstring), so it shares the identical shape.
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "build_source_pack": _MAPPING_OR_NONE,
+        "build_source": _MAPPING_OR_NONE,
+        "evidence_pack": _MAPPING_OR_NONE,
+    }
 
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -498,6 +628,21 @@ class ProvenanceSection(_SparseSectionMixin):
             "dump_provenance",
         }
     )
+    #: `.language_profile`/`.git_commit`/`.git_tag`/`.created_at` are
+    #: `str | None`; `.dependency_info` is `DependencyInfo | None`.
+    #: `.dump_provenance` is not an `AbiSnapshot` field at all -- it's
+    #: unconditionally assigned a `dict` literal by `cli_dump_helpers
+    #: .fold_dump_provenance_into_dict` whenever it adds the key at all
+    #: (`legacy_sections._SECTION_FIELDS`'s own comment on this key), so it
+    #: is always a mapping, never `None`.
+    OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "language_profile": _STR_OR_NONE,
+        "dependency_info": _MAPPING_OR_NONE,
+        "git_commit": _STR_OR_NONE,
+        "git_tag": _STR_OR_NONE,
+        "created_at": _STR_OR_NONE,
+        "dump_provenance": _MAPPING,
+    }
 
     library: Any
     version: Any

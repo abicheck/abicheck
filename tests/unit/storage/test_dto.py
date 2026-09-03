@@ -575,7 +575,7 @@ _SPARSE_SECTION_CASES = [
             "typedefs": {"MyInt": "int"},
             "sycl": None,
         },
-        {"constants": [{"name": "C", "value": "1"}]},
+        {"constants": {"C": "1"}},
         id="declarations",
     ),
     pytest.param(
@@ -584,7 +584,7 @@ _SPARSE_SECTION_CASES = [
         layout_to_dto,
         layout_from_dto,
         {},
-        {"contract": {"scope": "public"}, "scope_fallback": ["a", "b"]},
+        {"contract": {"scope": "public"}, "scope_fallback": "elf-symbols"},
         id="layout",
     ),
     pytest.param(
@@ -611,7 +611,7 @@ _SPARSE_SECTION_CASES = [
         provenance_to_dto,
         provenance_from_dto,
         {"library": "libfoo.so.1", "version": "1.0.0"},
-        {"git_commit": "abc123", "dependency_info": ["libbar.so.1"]},
+        {"git_commit": "abc123", "dependency_info": {"nodes": [], "edges": []}},
         id="provenance",
     ),
 ]
@@ -871,3 +871,45 @@ class TestSparseSectionDTOs:
         validation machinery is inert for them, not merely untested."""
         assert LayoutSection.REQUIRED_FIELD_SHAPES == {}
         assert BuildSection.REQUIRED_FIELD_SHAPES == {}
+
+    @pytest.mark.parametrize(
+        "cls,kind,required,extra",
+        [
+            (BuildSection, BUILD_SECTION_KIND, {}, {"build_source": []}),
+            (
+                DebugSection,
+                DEBUG_SECTION_KIND,
+                {"dwarf": None, "dwarf_advanced": None},
+                {"fact_provenance": []},
+            ),
+        ],
+    )
+    def test_from_document_refuses_a_malformed_optional_field(
+        self, cls: Any, kind: str, required: dict, extra: dict
+    ) -> None:
+        """Codex review, PR #1044, second round: the exact reproduction
+        cases named in the finding -- `_freeze_extra` previously validated
+        only which *keys* `extra` may carry, not each key's own value
+        shape, so a malformed optional field would freeze and round-trip
+        unchanged instead of being rejected."""
+        with pytest.raises(ValueError, match="must be a mapping"):
+            cls.from_document({**required, **extra})
+
+    @pytest.mark.parametrize(
+        "cls",
+        [
+            BinarySection,
+            DeclarationsSection,
+            LayoutSection,
+            DebugSection,
+            BuildSection,
+            ProvenanceSection,
+        ],
+    )
+    def test_every_optional_field_has_a_declared_shape(self, cls: Any) -> None:
+        """`OPTIONAL_FIELD_SHAPES` is meant to be exhaustive (unlike
+        `REQUIRED_FIELD_SHAPES`, which only covers fields that need it) --
+        pin that no `OPTIONAL_FIELDS` entry was missed across all six
+        sections, so a newly-added optional field fails this test rather
+        than silently reaching `extra` unchecked."""
+        assert set(cls.OPTIONAL_FIELD_SHAPES) == cls.OPTIONAL_FIELDS
