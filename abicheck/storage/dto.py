@@ -282,7 +282,12 @@ def migrate_section_dto(dto: SectionDTO) -> SectionDTO:
     version = dto.section_schema_version
     seen: set[int] = set()
     while version != current:
-        if version in seen:
+        if version in seen:  # pragma: no cover - defensive: version strictly
+            # increases by 1 every iteration (see the unconditional
+            # `version += 1` below), so no value can ever repeat -- this
+            # guards against a *future* migration step's own bug (e.g. one
+            # that doesn't actually advance the version), not a reachable
+            # path in this build.
             raise ValueError(
                 f"migration chain for section kind {dto.section_kind!r} cycles "
                 f"at version {version}"

@@ -207,6 +207,27 @@ class TestMigrateSectionDTO:
         with pytest.raises(ValueError):
             migrate_section_dto(dto)
 
+    def test_a_registered_migration_step_actually_runs(self, monkeypatch) -> None:
+        """`_MIGRATIONS` is empty for every real section kind today (no
+        section has shipped a second version yet -- see this module's own
+        docstring), so the loop body that actually calls a registered step
+        and advances `version` is otherwise dead code in this build.
+        Registering a throwaway step here is the only way to exercise it."""
+        import abicheck.storage.dto as dto_module
+
+        monkeypatch.setitem(
+            dto_module._MIGRATIONS,
+            "graph",
+            {1: lambda payload: {**payload, "migrated": True}},
+        )
+        monkeypatch.setitem(dto_module.SECTION_SCHEMA_VERSIONS, "graph", 2)
+        dto = SectionDTO(
+            section_kind="graph", section_schema_version=1, payload={"a": 1}
+        )
+        migrated = migrate_section_dto(dto)
+        assert migrated.section_schema_version == 2
+        assert migrated.payload == {"a": 1, "migrated": True}
+
 
 def _entity(spelling: str) -> CanonicalEntity:
     return CanonicalEntity(canonical_spelling=Fact.present(spelling))
@@ -251,6 +272,16 @@ class TestLegacySectionDTO:
         with pytest.raises(ValueError, match="not a legacy section kind"):
             legacy_section_to_dto(SEMANTIC_IR_SECTION_KIND, {})
 
+    def test_encoding_an_unknown_section_kind_is_refused(self) -> None:
+        """The sibling of `test_decoding_an_unknown_section_kind_is_refused`
+        below, for the encode direction -- `not_a_real_kind` isn't in
+        `SECTION_SCHEMA_VERSIONS` at all, so this exercises the *first*
+        operand of the `or` short-circuiting True on its own, distinct from
+        every other test here (which all reach this check via the second
+        operand, a genuinely-known-but-specialized kind)."""
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto("not_a_real_kind", {})
+
     def test_decoding_a_semantic_ir_kind_dto_is_refused(self) -> None:
         dto = SectionDTO(
             section_kind=SEMANTIC_IR_SECTION_KIND,
@@ -261,7 +292,9 @@ class TestLegacySectionDTO:
             legacy_section_from_dto(dto)
 
     def test_decoding_an_unknown_section_kind_is_refused(self) -> None:
-        dto = SectionDTO(section_kind="not_a_real_kind", section_schema_version=1, payload={})
+        dto = SectionDTO(
+            section_kind="not_a_real_kind", section_schema_version=1, payload={}
+        )
         with pytest.raises(ValueError, match="not a legacy section kind"):
             legacy_section_from_dto(dto)
 
@@ -295,6 +328,22 @@ class TestTypesSectionDTO:
         reloaded = SectionDTO.from_dict(dto.to_dict())
         section2 = types_from_dto(reloaded)
         assert section2 == section
+
+    def test_from_document_refuses_a_non_mapping_payload(self) -> None:
+        with pytest.raises(ValueError, match="must be a mapping"):
+            TypesSection.from_document(["not", "a", "mapping"])  # type: ignore[arg-type]
+
+    def test_from_document_refuses_a_non_list_types_value(self) -> None:
+        with pytest.raises(ValueError, match="must carry a 'types' list"):
+            TypesSection.from_document({"types": "not-a-list"})
+
+    def test_from_document_refuses_a_missing_types_key(self) -> None:
+        with pytest.raises(ValueError, match="must carry a 'types' list"):
+            TypesSection.from_document({})
+
+    def test_from_document_refuses_extra_keys(self) -> None:
+        with pytest.raises(ValueError, match="may only carry 'types'"):
+            TypesSection.from_document({"types": [], "extra": 1})
 
     def test_wrong_section_kind_is_refused(self) -> None:
         dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
