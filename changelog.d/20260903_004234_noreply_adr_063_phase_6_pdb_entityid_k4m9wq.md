@@ -18,3 +18,12 @@
   moved down to `model/` so `extract`-layer code (which may not import
   the `compare`-layer `qualified_name_segments` module) can reuse it
   instead of duplicating it.
+
+### Fixed
+
+- **`pdb_metadata._is_user_visible` now rejects a compiler-internal or
+  anonymous name embedded anywhere in a qualified spelling, not just as
+  the whole string's own prefix** (Codex review) — CodeView can emit a
+  fully-qualified name for a nested anonymous aggregate too (e.g.
+  `"N::O::<unnamed-tag>"`), which the previous whole-string check let
+  through as an ordinary named leaf.

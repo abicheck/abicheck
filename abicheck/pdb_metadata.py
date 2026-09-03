@@ -47,6 +47,7 @@ from .model.dwarf_facts import (
     StructLayout,
     ToolchainInfo,
 )
+from .model.qualified_name_split import split_top_level_scopes
 from .pdb_parser import (
     CvEnumerator,
     CvMember,
@@ -84,13 +85,25 @@ def _machine_name(machine_code: int) -> str:
 def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     """Return True if a PDB type should be included in metadata.
 
-    Filters out forward references, unnamed types, and compiler-internal names.
+    Filters out forward references, unnamed types, and compiler-internal
+    names. Checks every top-level ``"::"``-separated segment, not just the
+    whole string: CodeView emits a fully-qualified name for a nested
+    anonymous aggregate too (e.g. ``"N::O::<unnamed-tag>"`` for an unnamed
+    struct/union nested inside ``N::O``), so a check against only the whole
+    name's own prefix would admit that leaf as an ordinary named type
+    (Codex review, PR #1025) — recorded under ``known_record_names`` and
+    handed to `extract/pdb_scope.py` as a plain leaf, disagreeing with the
+    ``Anonymous`` identity another producer would give the same
+    declaration.
     """
     if is_forward_ref:
         return False
     if not name:
         return False
-    if name.startswith("<") or name.startswith("__"):
+    if any(
+        segment.startswith("<") or segment.startswith("__")
+        for segment in split_top_level_scopes(name)
+    ):
         return False
     return True
 

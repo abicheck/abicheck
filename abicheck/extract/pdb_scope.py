@@ -58,10 +58,53 @@ synthesized by MSVC with an internal, compiler-generated name (not left
 genuinely anonymous the way a DWARF DIE or a Clang/castxml AST node can
 be), and ``pdb_metadata._is_user_visible`` already filters those
 compiler-internal (``"<...>"``/``"__..."``-prefixed) names out entirely
-before they ever reach this module. A real anonymous nested aggregate
-that MSVC spells some other, unfiltered way is an unverified gap (see the
-module docstring above on the lack of a real MSVC toolchain here), not a
-case this module claims to handle.
+before they ever reach this module — checking every top-level ``"::"``-
+segment of the qualified name, not just its own leading prefix, so a
+nested anonymous aggregate embedded partway through an otherwise-named
+qualified spelling (e.g. ``"N::O::<unnamed-tag>"`` for an unnamed
+struct/union nested inside ``N::O``, or a named member's own qualified
+name if it is itself nested inside one, e.g.
+``"N::<unnamed-tag>::Inner"``) is excluded too (Codex review, PR #1025).
+The consequence is exclusion, not a wrong identity: a declaration whose
+own qualified name embeds an anonymous segment anywhere never reaches
+this module at all (dropped from ``pdb_metadata``'s ``structs``/``enums``
+dicts entirely), rather than being assigned a plain named
+:class:`~abicheck.model.identity.Record`/:class:`~abicheck.model.identity.Namespace`
+segment for a scope CodeView never actually gave a real name. A real
+anonymous nested aggregate that MSVC spells some other, unfiltered way is
+an unverified gap (see the module docstring above on the lack of a real
+MSVC toolchain here), not a case this module claims to handle.
+
+**Function-local scopes are indistinguishable from namespaces here, and
+this module does not attempt to tell them apart (Codex review, PR
+#1025).** CodeView can, in principle, qualify a type declared inside a
+function body by that function's own name (e.g. ``"f::Local"`` for a
+``struct Local`` declared inside ``void f()``), which the real cross-
+backend identity vocabulary represents as
+:class:`~abicheck.model.identity.LocalToFunction`, not
+:class:`~abicheck.model.identity.Namespace` — but this slice's own
+*known_record_names* lookup only has struct/class/union names to check
+an accumulated prefix against (this codebase's ``DwarfMetadata`` carries
+no function inventory for PDB at all; the DBI stream's own function
+records are, per this ADR's own scope, not parsed here), so there is no
+signal available to recognize ``"f"`` as a function rather than a
+namespace. Every ambiguous segment therefore defaults to
+:class:`~abicheck.model.identity.Namespace`, which is wrong for a genuine
+function-local declaration and would disagree with the
+:class:`~abicheck.model.identity.LocalToFunction` identity a DWARF/
+header-AST occurrence of the identical declaration would carry. Not
+fixed in this slice: constructing a correct
+:class:`~abicheck.model.identity.LocalToFunction` segment needs the
+owning function's own :class:`~abicheck.model.identity.EntityId` (not
+merely its name — see that class's own docstring) plus a per-parent
+block ordinal, neither obtainable from a flat qualified-name string
+alone; it needs the DBI function-parsing prerequisite this slice
+explicitly does not attempt (per the module docstring's own "types
+only" scope), not a heuristic guess here. Left as a documented,
+accepted limitation rather than a guess this codebase's own identity-
+heuristic-history caution (AGENTS.md) says deserves real fixture
+verification first — matching the forward-declared-enclosing-class
+limitation immediately above.
 
 Leaf module: depends on ``model`` (allowed: ``extract -> model``, ADR-061),
 ``model.qualified_name_split`` (the shared, dependency-free ``"::"``-

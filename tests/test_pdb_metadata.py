@@ -26,7 +26,7 @@ import pytest
 
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-from abicheck.pdb_metadata import parse_pdb_debug_info
+from abicheck.pdb_metadata import _is_user_visible, parse_pdb_debug_info
 
 # Import test helpers from test_pdb_parser
 from tests.test_pdb_parser import (
@@ -358,6 +358,45 @@ class TestPdbToAdvancedDwarfMetadata:
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
         assert "Vec3" in adv.all_struct_names
         assert "Data" in adv.all_struct_names
+
+
+# ---------------------------------------------------------------------------
+# _is_user_visible -- compiler-internal / anonymous name filtering
+# ---------------------------------------------------------------------------
+
+class TestIsUserVisible:
+    """``_is_user_visible`` must reject a compiler-internal/anonymous name
+    wherever it appears in a qualified name, not just as the whole string's
+    own prefix (Codex review, PR #1025) -- CodeView emits a fully-qualified
+    name for a nested anonymous aggregate too, e.g. ``"N::O::<unnamed-tag>"``
+    for an unnamed struct/union nested inside ``N::O``."""
+
+    def test_forward_ref_rejected(self) -> None:
+        assert _is_user_visible("Widget", is_forward_ref=True) is False
+
+    def test_none_name_rejected(self) -> None:
+        assert _is_user_visible(None, is_forward_ref=False) is False
+
+    def test_ordinary_qualified_name_accepted(self) -> None:
+        assert _is_user_visible("NS::Widget", is_forward_ref=False) is True
+
+    def test_whole_name_compiler_internal_rejected(self) -> None:
+        assert _is_user_visible("<unnamed-tag>", is_forward_ref=False) is False
+        assert _is_user_visible("__vc_attributes", is_forward_ref=False) is False
+
+    def test_nested_anonymous_leaf_rejected(self) -> None:
+        """The bug this test guards against: only the leaf segment is
+        compiler-internal, but the qualified name as a whole does not start
+        with ``<``/``__``."""
+        assert _is_user_visible("N::O::<unnamed-tag>", is_forward_ref=False) is False
+
+    def test_nested_anonymous_middle_segment_rejected(self) -> None:
+        """The same defect could also hide in a *middle* segment, not just
+        the leaf -- e.g. a named type nested inside an anonymous union
+        that is itself nested inside a named enclosing type."""
+        assert (
+            _is_user_visible("N::<unnamed-tag>::Inner", is_forward_ref=False) is False
+        )
 
 
 # ---------------------------------------------------------------------------
