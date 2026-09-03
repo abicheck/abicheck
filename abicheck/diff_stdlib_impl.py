@@ -129,7 +129,21 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
 
 
 def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
-    """Record types reachable from public ABI roots through by-value edges."""
+    """Record types reachable from public ABI roots through by-value edges.
+
+    ADR-063 Phase 5B audit note: ``bases``/``virtual_bases`` are read below
+    via the ordinary ``resolved_fact_value(..., [])`` present-or-default
+    bridge, not :func:`~abicheck.compare.fact_comparison.compare_facts` —
+    deliberately. This is a single-snapshot reachability walk (called once
+    per side, never as an old/new *pair*), and its only caller ORs the two
+    sides' booleans together (see ``_diff_stdlib_implementation`` below): a
+    ``bases_fact`` evidence gap on one side only ever *narrows* that side's
+    own closure, which can under-escalate the finding's description (a real
+    by-value embedding missed) but never fabricates one — the other side's
+    independent closure, or a later run with better evidence, still catches
+    it. There is no pairwise comparison here for
+    :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
+    """
     from .model import RecordType, Visibility, resolved_fact_value
     from .surface import _type_identifiers
 
