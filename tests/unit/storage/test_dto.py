@@ -308,12 +308,16 @@ class TestTypesSectionDTO:
         `payload` attribute directly, or a type entry's own nested list
         (e.g. a `RecordType`'s `bases`) would round-trip as a `tuple` while
         a freshly-dumped comparison side holds a plain `list`, producing a
-        spurious mismatch a downstream detector reads as a real change."""
+        spurious mismatch a downstream detector reads as a real change.
+        `TypesSection.types` is itself frozen internally (mirroring
+        `SectionDTO.payload`), so the ordinary-`dict`/`list` assertion below
+        goes through the public `to_document()` accessor, not `.types`
+        directly."""
         section = TypesSection(types=({"name": "Foo", "bases": ["Base"]},))
         dto = types_to_dto(section)
         reloaded = SectionDTO.from_dict(dto.to_dict())
         section2 = types_from_dto(reloaded)
-        entry = section2.types[0]
+        entry = section2.to_document()["types"][0]
         assert isinstance(entry, dict)
         assert isinstance(entry["bases"], list)
         # json.dumps must accept the reconstructed document -- a leftover
@@ -321,6 +325,23 @@ class TestTypesSectionDTO:
         import json
 
         json.dumps(section2.to_document())
+
+    def test_types_field_is_frozen_against_caller_mutation(self) -> None:
+        """Codex review, fresh evidence: a `frozen=True` dataclass whose one
+        field is a plain `tuple` of ordinary `dict`/`list` entries is not
+        actually immutable -- the caller's own entry objects (or a document
+        `to_document()` hands back) stay reachable and mutable, so mutating
+        either could silently change a `TypesSection`'s own content after
+        construction. `__post_init__` freezes every entry the same way
+        `SectionDTO.__post_init__` already freezes its own `payload`."""
+        original_entry = {"name": "Foo", "bases": ["Base"]}
+        section = TypesSection(types=(original_entry,))
+        original_entry["bases"].append("Mutated")
+        assert section.to_document()["types"][0]["bases"] == ["Base"]
+
+        document = section.to_document()
+        document["types"][0]["bases"].append("Mutated")
+        assert section.to_document()["types"][0]["bases"] == ["Base"]
 
     def test_legacy_section_to_dto_refuses_the_types_kind(self) -> None:
         with pytest.raises(ValueError, match="not a legacy section kind"):

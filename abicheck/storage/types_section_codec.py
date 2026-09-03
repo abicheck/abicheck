@@ -53,9 +53,46 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
+from .canonical import canonical_form
+
 __all__ = ["TypesSection"]
+
+
+def _freeze(value: Any) -> Any:
+    """*value* — already `canonical_form`'s output, so a tree of only
+    `dict`/`list`/`str`/`int`/`float`/`bool`/`None` — rebuilt so nothing
+    reachable from a `TypesSection` after construction is mutable.
+
+    Mirrors `storage.dto._freeze` exactly (a private sibling this module
+    may not import), for the identical reason that function exists: a
+    `frozen=True` dataclass whose one field is a plain `tuple` of ordinary,
+    mutable `dict`/`list` entries is not actually immutable -- the caller's
+    own entry objects (or a document later handed back by `to_document`)
+    stay reachable and mutable, so a caller mutating either one could
+    silently change this `TypesSection`'s own content after construction
+    (Codex review, fresh evidence — the exact two-round aliasing defect
+    `storage.dto.SectionDTO`'s own `_freeze` docstring already documents,
+    reproduced here for this DTO's own untouched field).
+    """
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _unfreeze(value: Any) -> Any:
+    """The inverse of `_freeze` — a fresh, ordinary, mutable `dict`/`list`
+    tree, detached from this DTO's own frozen storage. Mirrors
+    `storage.dto._unfreeze` exactly, for the same reason."""
+    if isinstance(value, MappingProxyType):
+        return {key: _unfreeze(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_unfreeze(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)
@@ -65,13 +102,18 @@ class TypesSection:
     `types` holds the already-serialized `AbiSnapshot.types` list verbatim
     (each entry is a plain JSON dict, one per `RecordType`/`EnumType`/...) --
     see this module's own docstring for why decoding that internal shape
-    further is out of scope here. Stored as a `tuple` (frozen-dataclass
-    convention this package's other DTOs already follow, e.g.
-    `storage.dto.SectionDTO`'s own `_freeze`), converted back to a `list` by
-    `to_document()` for JSON-shaped storage.
+    further is out of scope here. `__post_init__` runs every entry through
+    `canonical_form` + `_freeze` (the identical two-step
+    `storage.dto.SectionDTO.__post_init__` already applies to its own
+    `payload` field), so nothing reachable from a constructed `TypesSection`
+    ever aliases a caller's own mutable objects; `to_document()` deep-thaws
+    it back to ordinary `dict`/`list` for JSON-shaped storage.
     """
 
     types: tuple[Any, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "types", _freeze(canonical_form(list(self.types))))
 
     def to_document(self) -> dict[str, Any]:
         """The `{"types": [...]}` payload shape `storage.dto.types_to_dto`
@@ -79,7 +121,7 @@ class TypesSection:
         `storage.legacy_sections.split_legacy_document` already produces for
         this section, so a round trip through this wrapper changes nothing
         about the stored bytes."""
-        return {"types": list(self.types)}
+        return {"types": _unfreeze(self.types)}
 
     @classmethod
     def from_document(cls, payload: Mapping[str, Any]) -> TypesSection:
@@ -115,4 +157,6 @@ class TypesSection:
             raise ValueError(
                 f"a 'types' section payload may only carry 'types', not {sorted(extra)}"
             )
+        # `__post_init__` freezes this, so the constructor's own tuple(...)
+        # here need not defend against aliasing itself.
         return cls(types=tuple(raw))
