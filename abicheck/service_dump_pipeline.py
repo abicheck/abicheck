@@ -724,14 +724,23 @@ def execute_dump_request(
         # Codex review, PR #1037: `with_assurance()` alone leaves
         # `compile_contexts` empty. `resolution.effective_compile_context`,
         # when the P0.3 fold produced one AND a header-AST parse actually
-        # consumed it (`snap.from_headers`), is what
-        # `ResolvedExecutionContext.compile_contexts`'s own docstring wants
-        # here -- that field is documented absent, not placeholder-valued,
-        # for a binary-only depth (second Codex round: the fold can resolve
-        # a real `CompileContext` from `-p`/`--compile-db` alone even with no
-        # headers in play, which `DumpResult.effective_compile_context` -- a
-        # separate, unconditional field -- still carries either way).
-        if resolution.effective_compile_context is not None and snap.from_headers:
+        # ran *this invocation*, is what `ResolvedExecutionContext.
+        # compile_contexts`'s own docstring wants -- documented absent, not
+        # placeholder-valued, when no header-AST context was resolved.
+        # `snap.from_headers` alone is not enough (third Codex round): a
+        # JSON-snapshot `resolved.fmt is None` input short-circuits straight
+        # to the persisted snapshot in `resolve_input` (no header-AST parse
+        # at all), yet the *loaded* snapshot can itself carry a stale
+        # `from_headers=True` from whatever dump originally produced it --
+        # `resolved.fmt is not None` (a real ELF/PE/Mach-O magic-byte match)
+        # is what actually gates a header-AST parse having run here.
+        # `DumpResult.effective_compile_context` stays unconditional either
+        # way (a separate, pre-existing field).
+        if (
+            resolution.effective_compile_context is not None
+            and snap.from_headers
+            and resolved.fmt is not None
+        ):
             resolved_execution_context = dataclasses.replace(
                 resolved_execution_context,
                 compile_contexts={"input": resolution.effective_compile_context},

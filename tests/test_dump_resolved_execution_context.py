@@ -57,6 +57,17 @@ def snap_path(tmp_path: Path) -> Path:
     return p
 
 
+@pytest.fixture()
+def elf_path(tmp_path: Path) -> Path:
+    """A real ELF magic-byte prefix -- `resolved.fmt` resolves to `"elf"`
+    (distinct from `snap_path`'s JSON, whose `resolved.fmt` is `None`), so a
+    faked `_resolve_side_snapshot_impl` behind it exercises the
+    header-AST-parse-capable path without needing a real toolchain."""
+    p = tmp_path / "lib.so"
+    p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+    return p
+
+
 class TestResolveDumpRequestWiring:
     """``resolve_dump_request`` now attaches a real ``ResolvedExecutionContext``
     (the pre-execution view) built from the same ``AnalysisPlan`` it already
@@ -171,20 +182,24 @@ class TestExecuteDumpRequestWithAssurance:
 
         assert result.resolved_execution_context is None
 
-    def test_result_carries_the_resolved_compile_context(self, snap_path, monkeypatch):
+    def test_result_carries_the_resolved_compile_context(self, elf_path, monkeypatch):
         """Codex review, PR #1037: `with_assurance()` alone leaves
         `compile_contexts` empty even when the P0.3 fold produced a real
         `effective_compile_context` that a header-AST parse actually
-        consumed (`snap.from_headers`) -- `DumpResult.
-        resolved_execution_context` must carry it too, under the `"input"`
-        label, so a consumer reading through the unified context sees the
-        same toolchain `DumpResult.effective_compile_context` itself
-        exposes."""
+        consumed (`snap.from_headers`, `resolved.fmt` a real binary format)
+        -- `DumpResult.resolved_execution_context` must carry it too, under
+        the `"input"` label, so a consumer reading through the unified
+        context sees the same toolchain `DumpResult.effective_compile_context`
+        itself exposes. Uses `elf_path`, not `snap_path`: a JSON-snapshot
+        input's `resolved.fmt is None` is exactly the case a sibling test
+        (`test_compile_context_excluded_for_a_loaded_json_snapshot`) asserts
+        stays excluded."""
         from abicheck.compile_context import CompileContext
         from abicheck.workflows.artifact.execute import SideResolution
 
-        request = DumpRequest(input=InputSpec(path=snap_path))
+        request = DumpRequest(input=InputSpec(path=elf_path))
         resolved = resolve_dump_request(request)
+        assert resolved.fmt == "elf"
         fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
 
         def _fake_resolve(*args, **kwargs):
@@ -207,7 +222,7 @@ class TestExecuteDumpRequestWithAssurance:
         }
 
     def test_compile_context_excluded_for_a_binary_only_depth(
-        self, snap_path, monkeypatch
+        self, elf_path, monkeypatch
     ):
         """Codex review, PR #1037, second round: the P0.3 fold can resolve a
         real `CompileContext` even for a binary-only dump (e.g. from
@@ -216,17 +231,58 @@ class TestExecuteDumpRequestWithAssurance:
         that field as absent, not placeholder-valued, for exactly this case.
         `DumpResult.effective_compile_context` itself stays unconditional
         (a different, pre-existing field), so only the unified context's
-        view is gated here."""
+        view is gated here. Uses `elf_path` (`resolved.fmt == "elf"`), not
+        `snap_path`, so this failure mode (real binary, no headers) stays
+        distinct from the JSON-snapshot-input failure mode a sibling test
+        covers."""
         from abicheck.compile_context import CompileContext
         from abicheck.workflows.artifact.execute import SideResolution
 
-        request = DumpRequest(input=InputSpec(path=snap_path))
+        request = DumpRequest(input=InputSpec(path=elf_path))
         resolved = resolve_dump_request(request)
         fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
 
         def _fake_resolve(*args, **kwargs):
             return SideResolution(
                 snapshot=_snapshot(from_headers=False),
+                effective_includes=(),
+                effective_compile_context=fake_ctx,
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline._resolve_side_snapshot_impl",
+            _fake_resolve,
+        )
+
+        result = execute_dump_request(resolved)
+
+        assert result.effective_compile_context == fake_ctx
+        assert dict(result.resolved_execution_context.compile_contexts) == {}
+
+    def test_compile_context_excluded_for_a_loaded_json_snapshot(
+        self, snap_path, monkeypatch
+    ):
+        """Codex review, PR #1037, third round: a JSON-snapshot input
+        (`resolved.fmt is None` -- no ELF/PE/Mach-O magic bytes) short-
+        circuits straight to the persisted snapshot in `resolve_input`, with
+        no header-AST parse this invocation. The loaded snapshot can itself
+        carry a stale `from_headers=True` from whatever dump originally
+        produced it, so `snap.from_headers` alone is not a safe gate --
+        `resolved.fmt is not None` (a real header-AST-capable binary format)
+        is what must additionally hold."""
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        request = DumpRequest(input=InputSpec(path=snap_path))
+        resolved = resolve_dump_request(request)
+        assert resolved.fmt is None  # the JSON `snap_path` fixture itself
+        fake_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_resolve(*args, **kwargs):
+            # The loaded snapshot's own stale, persisted from_headers=True --
+            # no header-AST parse ran to produce it *this* invocation.
+            return SideResolution(
+                snapshot=_snapshot(from_headers=True),
                 effective_includes=(),
                 effective_compile_context=fake_ctx,
             )
