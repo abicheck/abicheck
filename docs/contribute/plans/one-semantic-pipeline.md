@@ -12590,6 +12590,41 @@ high-risk `--changed-path` seed rather than an unset-vs-set `--depth`
 alone. See `docs/contribute/known-gaps.md`'s matching "thirteenth review
 round" entry for the full account.
 
+**Adjacent, additive infrastructure landed under a separate name --
+`ResolvedExecutionContext` ("PR 1" of a follow-up review of this whole
+plan's own progress).** `abicheck/workflows/resolved_execution_context.py`
+(new): a frozen `ResolvedExecutionContext` composing `AnalysisPlan.
+operation`/`requested_depth` (via `ResolvedExecutionContext.from_plan`)
+with an already-resolved `CompatibilityEvaluationConfig` and a per-side
+`CompileContext` mapping into one typed container, plus a
+`resolution_digest()` fingerprint of that resolved input. Deliberately
+does **not** attempt the review's own literal "requested/effective/
+available depth" field list: "effective depth" already has one authority
+(`analysis_assurance.AnalysisAssurance`, necessarily a *post*-execution
+fact), and a second, pre-execution "effective depth" field here would be
+exactly the "two independently constructible representations of the same
+fact" shape the Governing Invariant forbids -- see the module's own
+docstring for the full reasoning. Likewise does not attempt to replace
+`effective_config_digest.py`'s two-tier digest (that module's own
+docstring already gives a considered reason no single object holds every
+configuration axis for every run; several rich-tier fields are themselves
+comparison *outcomes*, not inputs a pre-execution object could carry) --
+`resolution_digest()` is a separate, narrower, differently-named
+fingerprint of the resolved *input* only. Pure composition: it re-derives
+nothing from either `AnalysisPlan`, `CompatibilityEvaluationConfig`, or
+`CompileContext`, and (like `compatibility_evaluation_frontend.py` before
+it) is landed with its own primitive-level test suite
+(`tests/test_resolved_execution_context.py`) and no live caller yet --
+the type, tested, before any command is migrated to build or consume one.
+**Still open, and not attempted here:** wiring a real call site
+(`cli_compare_receipt.resolve_and_apply`/`resolve_dump_request` are the
+two places an `AnalysisPlan` and a resolved `CompatibilityEvaluationConfig`
+are both already available in the same call, but neither is changed to
+construct a `ResolvedExecutionContext` yet), and everything the review's
+"PR 2"-onward sequence describes (a semantic consumer cutover, `FactStatus`-
+aware detectors, and the rest) — this slice closes only the "one resolved
+context type exists and is tested" step, not consumer migration.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
