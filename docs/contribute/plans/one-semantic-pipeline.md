@@ -379,6 +379,83 @@ are ~2800 lines with their own extensive review history; a shared
 pair-operation executor there needs its own dedicated slice, not a
 drive-by extension of this one).
 
+**7B's release-fan-out investigation landed (2026-09-03) — a dedicated
+slice, per the note above, that reads the ~2800 lines closely rather than
+attempting a rewrite.** The line count itself was stale (`cli_compare_release
+.py`/`cli_compare_release_helpers.py`/`cli_compare_release_matrix.py` are
+now 838/1277/718 lines — a fourth, sibling file the plan text above didn't
+name, `cli_compare_release_pairwise.py` (743 lines, the actual per-pair
+comparison engine: `_run_compare_pair`/`_compare_one_library`/the
+sequential/parallel dispatch), was split out afterward and carries none of
+the duplication this slice found). Reading every concrete axis the plan
+text names against `cli_compare_release_pairwise.py` found most of them
+**already unified**, through mechanisms that landed independently of this
+sub-phase:
+
+- **Depth, suppression, pack policy/namespace overrides, compile context,
+  contract evaluation** — every real per-library pair already routes
+  through `service.run_compare` (`_run_compare_pair`'s own docstring: "the
+  single Tier-2 chokepoint... this is what keeps `compare-release` and
+  `compare` on one classification path"), which folds all five identically
+  for a release pair and a single-pair `compare` invocation of the same
+  library. Nothing to unify here — it already is.
+- **Severity/exit-code-scheme gate resolution** — ADR-064's own
+  `GateOptions`/`resolve_release_gate_options`
+  (`abicheck/policy/release_gate_options.py`) already resolves this exactly
+  once *within* the release fan-out (replacing three independent
+  re-derivations that existed before that ADR — see that module's own
+  docstring), closing the specific drift risk PR B's own note there had
+  flagged as unsafe to fix reactively. What remains is narrower than "not
+  unified": `release_gate_options.py`'s own docstring states plainly that
+  `apply_release_gate_pack` "mirrors [`pack_application.
+  apply_to_compare_config`'s] *logic*... instead" of calling it, because the
+  release fan-out has no `ResolvedCompareConfig`-shaped object of its own to
+  fold packs onto — a full unification is ADR-064's own named, deferred
+  "PR G2" prerequisite work, not this sub-phase's to redo reactively.
+  `tests/test_release_gate_pack_fold_parity.py` (this PR) closes the actual
+  residual risk instead: a Hypothesis property test pinning the two
+  independently-reasoned fold implementations to agree on outcome for every
+  generated pack contribution, so a change to one that silently drifts from
+  the other fails there first — the "primitive-level property test"
+  AGENTS.md calls for when a real unification isn't the safe move for one
+  PR to make reactively.
+- **Report composition** — the release fan-out's per-library
+  `--output-dir` JSON write (`_compare_one_library`'s own `to_json(...)`
+  call) has no shared code with single-pair `compare`'s
+  `_render_compare_report` pipeline, but this is not a maintenance gap:
+  `compare-release` exposes neither `--use-cases` nor a suppression-audit
+  equivalent at all (confirmed by grep — no such flag exists anywhere in
+  the three/four release modules), so there is nothing for a shared
+  executor to fold in that the simpler direct `to_json` call is missing.
+  Unifying this would mean *adding* `--use-cases`/suppression-audit support
+  to `compare-release` first — a real, separate feature request, not a
+  7B-scoped refactor.
+- **The build-config matrix pseudo-pair** (`_collect_matrix_result`,
+  `cli_compare_release_matrix.py`) independently reloads suppression/policy
+  and re-folds packs (`_load_suppression_and_policy`/
+  `policy_file_with_packs` — the same shared helpers a real pair's
+  resolution already goes through, called at a third site, not a second,
+  divergent implementation). This is structurally required, not
+  duplicated-by-oversight: the matrix findings are release-global
+  (`extra_changes` fed to `service.compare_snapshots` against a pair of
+  *empty* snapshots), resolved once for the whole release regardless of how
+  many real library pairs exist — routing it through the real per-pair
+  `_run_compare_pair`/`_compare_one_library` path makes no sense for a
+  pseudo-pair with no actual old/new binaries. Its own docstring already
+  states this reasoning; left as-is.
+
+**Net effect**: the "shared pair-operation executor" the plan text's one-line
+goal names is, on inspection, substantially already real — just distributed
+across several independently-landed mechanisms rather than one function —
+with exactly one concrete, still-open gap (the `apply_to_compare_config`/
+`apply_release_gate_pack` duplication) that has its own named, deferred
+follow-up ("PR G2") and is now guarded by a parity test rather than left to
+silent drift in the meantime. Recorded here per this repo's own "say so
+explicitly and record the gap" convention rather than closing 7B's own
+status row on an incomplete account, or forcing a premature rewrite of
+carefully-built, recently-landed code (`GateOptions`) to manufacture a
+bigger diff.
+
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
 through `storage.dto.types_to_dto`/`types_from_dto` in place of the generic
