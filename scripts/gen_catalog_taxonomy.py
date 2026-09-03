@@ -39,9 +39,8 @@ are orthogonal to implementation language and independent of the physical
                      | "bundle"
     validation_owner the runner family that exercises this case (mirrors
                      examples/CLAUDE.md's "owner families" list)
-    related_rules   rule slugs a scenario composes (only populated for the
-                     handful of scenarios explicitly named in the design doc
-                     so far -- an incomplete but honest starting set)
+    related_rules   rule slugs a scenario composes -- populated for every
+                     scenario case (see RELATED_RULES below)
     rule_slug       canonical slug for a rule family -- set on every
                      "rule"-entity case (mechanically derived by default,
                      see _default_rule_slug; a hand-reviewed shared slug for
@@ -78,17 +77,85 @@ ONEMKL_CASE_STUDIES = {112}
 LINUX_KERNEL_CASE_STUDIES = {121, 175, 176}
 
 # Scenarios' related_rules -- hand-curated per the design doc's own worked
-# examples. Deliberately small: only the cases the design doc names get a
-# relation recorded here; the rest carry an empty list until a future pass
-# reviews them (see the module docstring's "Known gaps" pointer).
+# examples, extended to every scenario case in this pass (the design doc's
+# "Known gaps" -- only 4 of 30 scenarios carried a relation before this).
+# Each entry names the generic, ecosystem-neutral compatibility rule(s) the
+# scenario composes -- reusing an existing rule-entity case's own `rule_slug`
+# when the same underlying mechanism already has one (e.g.
+# "exported-function-removed", "public-api-gains-internal-dependency"), and
+# otherwise a mechanically-parallel conceptual slug in the same style (mostly
+# the scenario's own dominant `expected_kinds` entry, kebab-cased) for a
+# mechanism no single-library rule case demonstrates on its own yet -- the
+# same asymmetry the four original entries already establish (e.g.
+# "virtual-dispatch-contract-removed" and "empty-tag-type-gains-state" name
+# no catalog rule_slug either). `related_rules` is deliberately not
+# validated against the rule_slug set for this reason -- see
+# tests/test_catalog_taxonomy.py's own `test_related_rules_are_non_empty_strings`.
 RELATED_RULES: dict[str, list[str]] = {
+    # -- oneTBB case studies --
+    "case78_task_arena_attach_tag": [
+        "exported-function-removed",
+        "exported-type-removed",
+    ],
+    "case94_empty_tag_gained_state": ["empty-tag-type-gains-state"],
+    "case107_task_scheduler_init_removed": [
+        "exported-function-removed",
+        "exported-type-removed",
+    ],
     "case108_task_class_removed": [
         "exported-function-removed",
         "virtual-dispatch-contract-removed",
     ],
-    "case112_lp64_ilp64": ["public-integer-model-width-changed"],
+    "case109_flow_graph_policy_renames": [
+        "public-typedef-removed",
+        "tag-struct-renamed",
+    ],
+    "case110_concurrent_unordered_map_api_drift": ["exported-function-removed"],
+    "case111_enumerable_thread_specific_lambda_ambiguity": ["overload-added"],
+    # -- SYCL case studies --
+    "case82_sycl_overload_set_removed": ["overload-set-removed"],
     "case126_sycl_device_impl_ptr": ["public-class-representation-changed"],
-    "case94_empty_tag_gained_state": ["empty-tag-type-gains-state"],
+    # -- oneMKL case study --
+    "case112_lp64_ilp64": ["public-integer-model-width-changed"],
+    # -- Linux kernel case studies --
+    "case121_kernel_btf_struct_field_added": ["embedded-type-size-increased"],
+    "case175_kabi_crc_changed": ["symbol-type-signature-hash-changed"],
+    "case176_kabi_symbol_namespace_changed": ["symbol-export-namespace-changed"],
+    # -- multi-library bundle project-topology scenarios --
+    "case84_bundle_soname_skew": ["soname-inconsistent"],
+    "case90_bundle_intra_dep_removed": ["exported-function-removed"],
+    "case91_bundle_intra_signature_drift": ["param-type-change"],
+    "case92_bundle_provider_changed": ["symbol-source-owner-changed"],
+    "case93_bundle_manifest_drift": ["missing-template-instantiation"],
+    # -- G20 capability/audit scenarios --
+    "case147_scan_depth_ladder": ["audit-private-header-leak"],
+    "case148_xcheck_header_build_mismatch": ["header-build-context-mismatch"],
+    "case149_xcheck_odr_variant": ["odr-type-variant"],
+    "case150_xcheck_export_public_pair": [
+        "audit-accidental-export",
+        "audit-public-not-exported",
+    ],
+    "case151_xcheck_provider_matrix": ["audit-private-header-leak"],
+    # -- call-graph / header-graph reconciliation capability scenarios --
+    "case191_header_only_graph_field_type": [
+        "embedded-type-size-increased",
+        "public-api-gains-internal-dependency",
+    ],
+    "case192_call_graph_break_survives_suppression": [
+        "exported-function-removed",
+        "public-api-gains-internal-dependency",
+    ],
+    "case193_ordinary_exported_fn_call_not_reachable": ["exported-function-removed"],
+    "case194_header_graph_rename_reconciled": [
+        "public-api-gains-internal-dependency"
+    ],
+    "case195_header_graph_ambiguous_rename_not_reconciled": [
+        "public-api-gains-internal-dependency"
+    ],
+    "case196_header_graph_move_reconciled": ["public-api-gains-internal-dependency"],
+    "case197_header_graph_identity_reconciled": [
+        "public-api-gains-internal-dependency"
+    ],
 }
 
 # Rule/variant consolidation (Phase 2). Every `rule`-entity case gets a

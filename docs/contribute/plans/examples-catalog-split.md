@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2's rule/variant classification pass complete (every `rule`-entity case now carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded); Phases 3-6 not started.
+**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded, and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phases 3-6 not started.
 
 ## Problem
 
@@ -133,21 +133,30 @@ addition vs. template-instantiation layout shift); `case97`/`182`
 transition, different lesson). See `scripts/gen_catalog_taxonomy.py`'s
 `RULE_FAMILIES` docstring for the same list with the read behind each call.
 
-`related_rules` on scenario entities remains incomplete (only the handful
-the design discussion named explicitly) — see "Known gaps" below.
+**`related_rules` is now populated for every scenario entity** — the
+original design discussion named `case108`, `case112`, `case126`, and
+`case94` explicitly; this pass reviewed each of the remaining 26 scenario
+cases' own README ("Verdict and consumer impact" + `expected_kinds`) and
+recorded the generic rule(s) it composes, reusing an existing rule case's
+`rule_slug` wherever the scenario's underlying mechanism is the same one a
+single-library rule case already demonstrates (e.g. `case90_bundle_intra_dep_removed`
+→ `exported-function-removed`, `case92_bundle_provider_changed` →
+`symbol-source-owner-changed`, five of the seven header-graph-reconciliation
+capability cases → `public-api-gains-internal-dependency`), and otherwise a
+conceptual slug in the same ecosystem-neutral style the four original
+entries already used for a mechanism no rule case demonstrates alone yet
+(e.g. `case175_kabi_crc_changed` → `symbol-type-signature-hash-changed`,
+`case148_xcheck_header_build_mismatch` → `header-build-context-mismatch`).
+`related_rules` is deliberately not validated against the live `rule_slug`
+set for this reason — see `tests/test_catalog_taxonomy.py`'s
+`test_related_rules_are_non_empty_strings` and `gen_catalog_taxonomy.py`'s
+`RELATED_RULES` table for the full case-by-case list and the read behind
+each entry.
 
 ## Known gaps / remaining phases
 
 Not attempted in this change (from the original six-phase migration):
 
-- **Phase 2, `related_rules` on scenario entities** — only the handful of
-  scenarios the design discussion named explicitly (`case108`, `case112`,
-  `case126`, `case94`) carry `related_rules`; the other ~26 scenario cases
-  (bundles, the remaining oneTBB/SYCL case studies, the G20
-  capability/audit cases) don't yet declare which rules they compose. The
-  rule/variant classification pass itself (every `rule`-entity case's
-  `rule_slug`, and the 13-cluster/37-case duplicate review) is done — see
-  "What Phase 2 implements" above.
 - **Phase 3** — make every path resolver in the codebase
   (`benchmark_comparison.py`, `gen_examples_docs.py`,
   `check_ai_readiness.py`, the various validators) go through a declarative
