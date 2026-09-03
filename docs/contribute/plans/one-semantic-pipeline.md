@@ -10514,6 +10514,219 @@ bundled into the slice that first makes the primitive available. A
 precondition for any future promotion — see the module's own docstring
 for what a real consumer still has to establish beyond it.
 
+**Landed (fourteenth slice, 2026-09-03): the `StableEntityId`/
+`SnapshotLocalIdentity` split, and the first two post-parse consumer
+migrations (item (b)) — not all of item (b), and not the collision
+narrowing.** This is the slice the twelfth slice's own "Still genuinely
+deferred" note and the thirteenth's `identity_stability.py` paragraph both
+pointed at, taken in the shape the plan asks for rather than as another
+attempt at a globally-stable ordinal (the two reverted designs stay
+reverted; nothing here re-proposes a third).
+
+*The primitive.* `abicheck/model/identity_tiers.py` (new leaf, depends only
+on `model.identity`/`model.identity_stability`) defines two frozen types and
+three constructors. `StableEntityId` wraps an `EntityId` that
+`entity_id_is_cross_snapshot_stable` admits, and is only ever constructible
+through `stable_entity_id()`, which answers `None` rather than wrapping one
+that fails — so the type itself carries the guarantee and a holder needs no
+second check. `SnapshotLocalIdentity` is keyed on a caller-chosen *spelling*
+with the (possibly unstable) `EntityId` carried alongside as a
+`field(compare=False)` payload: excluding it from equality is load-bearing,
+since an entity whose ordinal shifted between two parses must still match
+itself by spelling, which is the entire fallback this tier provides. The two
+are distinct dataclasses and therefore **never compare equal**, so a set of
+one tier can never be satisfied by a lookup in the other — a consumer wanting
+both must state a precedence order explicitly, which is the decision this
+module deliberately refuses to make on anyone's behalf.
+`tests/test_identity_tiers.py` states that contract as Hypothesis properties
+over the whole input space (the wrapper agrees with the predicate exactly for
+every input; no unstable ordinal at any depth can enter the stable tier; the
+anonymous-self `extra` marker is refused independent of scope; keys stay
+injective and never collide across tiers; the payload never affects equality
+or hash).
+
+*Consumer 1 — `diff_filtering.py`'s opaque-type suppression.* The bare
+`set[str]` of `RecordType.name` this phase's Design section names by name is
+gone, replaced by `compare/opaque_types.OpaqueTypeIndex` (relocated to its
+ADR-061 owner rather than grown in place — `diff_filtering.py` sits on a
+zero-slack `debt.yaml` no-growth pin, and the index is a matching concern,
+not a filtering one). Every opaque declaration contributes to the index's
+*local* tier keyed on the same `RecordType.name` spelling as before; one with
+a stable `EntityId` additionally contributes to the *stable* tier.
+`intersect()` is per-tier, and `contains()` consults stable first, then
+spelling. That closes a real false **negative**: `Change.symbol` is rendered
+bare on some paths and qualified on others while `RecordType.name` is bare on
+the header backends and namespace-baked on DWARF, so a string compare could
+miss a declaration both sides agree on — where two matching stable
+`EntityId`s prove it.
+
+*What this consumer deliberately does NOT do, stated rather than implied: it
+does not narrow.* The bare-name collision (two unrelated types sharing a leaf
+spelling in different scopes, one opaque, both suppressed) is still reachable
+through the spelling tier. Making the stable tier authoritative — matching
+*only* on it whenever the change carries one — would close that collision but
+silently drop a real suppression whenever the two sides' producers disagree
+about whether an identity was resolved at all (a mixed header-AST/DWARF
+comparison), which is a live false-positive risk against the FP-rate gate.
+Closing it needs stable-tier completeness on both sides first, which is its
+own separately-reviewable step. The gap is pinned as an executable test
+(`tests/test_opaque_identity_tiers.py::TestKnownGapStaysDocumented`) rather
+than left as prose, so a later slice that closes it has to change an
+assertion, not merely delete a paragraph.
+
+*Consumer 2 — `type_reachability.py`'s closure walk.* The six pieces of
+record-tracking state inside `_StdlibReferenceScan` (`_reached_records`,
+`_worklist`, `_record_pending`, `_record_direct`, `_record_typedef_origins`,
+`_record_walked`) plus `reach_record`/`mark_record_walked`/
+`record_provenance`/`next_reached_record`/`_walk_reached_records`'s own
+`non_stdlib_records` keys are now typed `SnapshotLocalIdentity` rather than
+bare `str`. Behavior is bit-for-bit unchanged (equality on the wrapped
+spelling is string equality); what changes is that the walk's node-key domain
+is now *named* as valid-within-one-snapshot, and separated at the type level
+from the spelling domain it sits next to. The conversion happens at one
+boundary in `_run_stdlib_reference_scan` rather than by widening
+`_partition_snapshot_types`'s shared contract, since two of that helper's
+three return values feed `_spelling_index`'s substring machinery where an
+opaque identity would be meaningless.
+
+*What was investigated and deliberately not migrated.* The rest of
+`type_reachability.py`/`type_reachability_spelling.py` — `_record_identity`'s
+three call sites, `_spelling_index`, `_typedef_spelling_targets`,
+`_namespace_suffix_spellings`, `_stripped_signature_spelling` — stays on raw
+strings, which is the identical conclusion the **ninth slice** reached and
+recorded, re-verified here rather than taken on trust. Those strings are not
+opaque identities: they must appear *inside* a rendered
+`Function.return_type`/`Param.type`/`TypeField.type`, and mixing `EntityId`
+keys into that domain breaks the matching algorithm for any type that happens
+to carry a populated `entity_id`. Wrapping them in an identity type and
+unwrapping at every use would add ceremony without closing a bug class. This
+phase's Acceptance criteria ("their string-based helpers are deleted") is
+therefore satisfied for the *identity* helpers and explicitly not for the
+*spelling* helpers, which were never identity helpers in the first place.
+
+*Also still open, unchanged by this slice.* Promoting the `entity:` alias in
+`finding_identity.resolve_change_identity` into a real alias-match
+reconciliation tier: `StableEntityId` makes the stability gate
+un-forgettable, but it does not by itself establish that changing what
+`report_canonical_finding_id` hashes is safe for a user's already-stored
+`finding_id:` suppression rules — the same backward-compatibility call the
+thirteenth slice declined to make unilaterally, and this slice does not make
+either.
+
+*Verification.* Full fast unit lane green; `ruff check`/`mypy abicheck/`
+clean; `python scripts/check_architecture.py` 0 errors (both new pieces given
+a real `compare/` owner rather than raising a `debt.yaml` baseline — the
+"move responsibility out" answer AGENTS.md prescribes);
+`python scripts/check_ai_readiness.py` 0 errors;
+`python scripts/check_fp_rate.py` 0 FP / 0 FN, both deltas 0;
+`python scripts/check_tier_accuracy.py` OK (top-tier correct, under-call
+monotonic).
+
+---
+
+**Landed (2026-09-03): Phase 6B's first real checker cutover — the typedef
+family, the legacy adapter, and the closing architecture gate.** "PR 2"'s
+first slice landed `SemanticIRIndex` deliberately with no live caller; this
+slice gives it one, which is what turns the whole `SemanticIR` line of work
+from "producers exist and are round-trip-tested" into "something a user's
+verdict depends on actually reads it".
+
+*Why typedefs.* Phase 6's own non-goal is not to keep widening producer
+coverage until one full vertical slice is proven, so the first cohort had to
+be one the IR already covers *completely* rather than one whose migration
+would really be extraction work. Typedefs are the only family where the IR
+carries exactly what the detector needs and nothing it does not: identity
+(`EntityId`, resolved by both header-AST backends since the twelfth slice)
+plus one payload fact (`CanonicalEntity.canonical_spelling` — for a typedef,
+its resolved underlying type, precisely the value the detector compares).
+Records carry layout facts the IR does not model; functions need a canonical
+signature spelling whose cross-backend agreement is its own open question;
+constants' payload is a value literal, not a type spelling.
+
+*The adapter, and why it was the actual blocker.* A detector reading only
+through the index would see **nothing at all** on a snapshot carrying no
+`SemanticIR` (DWARF-only, PE-only, or any pre-v38 reload) — silently losing a
+whole detector family. `abicheck/model/semantic_ir_legacy_adapter.py` removes
+that by projecting the legacy typedef collections into a *real* `SemanticIR`,
+so the same `SemanticIRIndex` reads both and a migrated detector cannot tell
+which it was handed. Producing a real IR rather than a parallel "index-like"
+type is the point: a second read shape would be a second thing to keep in
+agreement with the first.
+
+*Fidelity gating rather than optimism.* `render_display_name()` is the one
+projection between the IR's `EntityId` keys and the legacy collections' flat
+qualified keys, and it answers `None` — never a best-effort string — for an
+identity whose scope contains an `Anonymous`/`LocalToFunction` segment, since
+any string for those would be an invention and two distinct such declarations
+would render alike. `typedef_index_pair()` then hands back the IR-backed
+index only when its own rendered display-name key set *exactly* equals the
+alias maps the comparison already resolved, **on both sides**; anything else
+— an unrenderable anonymous scope, a producer that resolved identity for only
+some typedefs, a DWARF-only side, a pre-v38 reload — falls back to the
+adapter for both. Both-or-neither is not tidiness: pairing an IR-backed old
+side with an adapted new side compares two differently-derived key spaces,
+fabricating a removal or addition out of a projection difference. Set
+equality is checked, never a count.
+
+*Synthetic identity is marked, not hidden.* A legacy declaration whose
+producer resolved no `EntityId` still needs one to key an occurrence by, so
+the adapter derives one from the display spelling and tags it
+`SYNTHETIC_IDENTITY_EXTRA`; `producer_entity_id()` answers `None` for it. The
+detector stamps `Change.entity_id` only from that predicate, because
+`resolve_change_identity` folds that field into an `entity:` alias real
+stored suppression rules match against — passing the index's own bookkeeping
+off as backend evidence would change which suppressions fire.
+
+*The detector.* `diff_types._diff_typedefs` keeps only the comparison-level
+half (stdlib-namespace exclusion, RD2-5's unconfirmed-removals flag, and
+which alias map the pair trusts) and delegates to
+`abicheck/compare/typedefs.py`, which reads only through the index. One
+behavior detail worth not rediscovering: `extract/semantic_normalizer.py`
+records an unfollowable typedef chain as `Fact.failed(...)` where the legacy
+path carried the literal `"?"`, so the migrated detector maps a non-present
+spelling back onto that same placeholder — otherwise an
+unresolved-vs-unresolved pair would stop reading as "unchanged".
+`_is_version_stamped_typedef` moved with the family (its regex copied
+verbatim, not re-derived) and is re-exported from `diff_types` under its
+original private name so `checker.py` and
+`tests/test_typedef_version_sentinel.py` are unaffected.
+
+*The closing gate.* `scripts/semantic_ir_cutover.py` (`semantic-ir-cutover`,
+wired into `check_ai_readiness.py`) is a real AST scan forbidding a migrated
+cohort's modules from reading the legacy collections they were migrated off —
+direct attribute access, `getattr(obj, "name")`, and a resolved `getattr`
+alias alike, while never flagging a same-named local or an inbound
+`typedefs=` keyword. Deliberately **not** an allowlist-and-shrink baseline
+like `KNOWN_UNMIGRATED_READERS`: a cohort is only added at the moment it is
+migrated, so a grandfathered reader cannot exist, and there is no per-site
+exemption. `tests/test_typedef_cutover.py` exercises the gate against real
+source for every forbidden spelling *and* for the two shapes it must not
+flag, rather than asserting its allowlist is empty — a gate that cannot be
+shown to fail proves nothing.
+
+*What remains open, explicitly.* **Every other detector family** still reads
+the legacy collections directly, by design — each further cohort needs its
+own `MIGRATED_COHORTS` entry and its own equivalence evidence.
+`SemanticIRIndex.references()` is still unimplemented (it names a graph
+traversal belonging with the public-surface reference index, ADR-063 D5 /
+Phase 3), so this cohort does not use it, and the index's own accessor set is
+otherwise unchanged by this slice. `CanonicalEntity.template_arguments`
+remains unpopulated for function templates, and clang still produces no
+occurrence for a template specialization — both unchanged here.
+
+*Verification.* `tests/test_typedef_cutover.py` states the cutover's central
+property as a Hypothesis equivalence over generated typedef map pairs (add/
+remove/change/unchanged across bare, singly and doubly qualified aliases and
+five underlying spellings including the unresolved placeholder): the same
+comparison run through a real `SemanticIR` and through the adapter must
+produce identical findings, with the adapter path — the pre-migration
+behavior — as the oracle. Plus `tests/test_semantic_ir_legacy_adapter.py`'s
+property tests for `render_display_name`'s round-trip and refusal contract
+and the selector's both-or-neither rule. Full fast unit lane green;
+`ruff check`/`mypy abicheck/` clean; `check_architecture.py` 0 errors;
+`check_ai_readiness.py` 0 errors; FP-rate gate 0 FP / 0 FN; tier-accuracy
+gate OK.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
