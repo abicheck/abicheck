@@ -365,11 +365,19 @@ class TestPdbToAdvancedDwarfMetadata:
 # ---------------------------------------------------------------------------
 
 class TestIsUserVisible:
-    """``_is_user_visible`` must reject a compiler-internal/anonymous name
-    wherever it appears in a qualified name, not just as the whole string's
-    own prefix (Codex review, PR #1025) -- CodeView emits a fully-qualified
-    name for a nested anonymous aggregate too, e.g. ``"N::O::<unnamed-tag>"``
-    for an unnamed struct/union nested inside ``N::O``."""
+    """``_is_user_visible`` must check every top-level ``"::"``-separated
+    segment of a qualified name, not just the whole string's own prefix
+    (Codex review, PR #1025) -- CodeView emits a fully-qualified name for a
+    nested anonymous aggregate too, e.g. ``"N::O::<unnamed-tag>"`` for an
+    unnamed struct/union nested inside ``N::O``. A compiler-internal LEAF
+    segment (the declaration's own name) is always rejected -- it names
+    nothing real. A ``"<...>"``-prefixed NON-LEAF (enclosing) segment is
+    admitted rather than rejecting the whole declaration (Codex review, PR
+    #1025, fresh evidence): the leaf underneath it is still a real, named
+    declaration with real layout facts worth keeping, even though
+    ``extract/pdb_scope.py`` cannot build a real identity through that
+    anonymous enclosing scope (see that module's
+    ``has_anonymous_enclosing_scope``)."""
 
     def test_forward_ref_rejected(self) -> None:
         assert _is_user_visible("Widget", is_forward_ref=True) is False
@@ -390,13 +398,18 @@ class TestIsUserVisible:
         with ``<``/``__``."""
         assert _is_user_visible("N::O::<unnamed-tag>", is_forward_ref=False) is False
 
-    def test_nested_anonymous_middle_segment_rejected(self) -> None:
-        """The same defect could also hide in a *middle* segment, not just
-        the leaf -- e.g. a named type nested inside an anonymous union
-        that is itself nested inside a named enclosing type."""
-        assert (
-            _is_user_visible("N::<unnamed-tag>::Inner", is_forward_ref=False) is False
-        )
+    def test_nested_anonymous_middle_segment_admitted(self) -> None:
+        """A NAMED leaf nested inside an anonymous middle segment (e.g. a
+        named type nested inside an anonymous union that is itself nested
+        inside a named enclosing type) is a real, user-visible declaration
+        with real layout facts -- it must be admitted, not dropped, even
+        though the enclosing anonymous scope has no name
+        ``extract/pdb_scope.py`` can build an identity from (Codex review,
+        PR #1025, fresh evidence: dropping it entirely lost real layout
+        facts for no benefit -- see that module's own
+        ``has_anonymous_enclosing_scope``, which is what leaves the type's
+        ``entity_id`` unset for exactly this shape instead)."""
+        assert _is_user_visible("N::<unnamed-tag>::Inner", is_forward_ref=False) is True
 
     def test_compiler_internal_middle_segment_still_rejected(self) -> None:
         """A genuinely compiler-internal ``__``-prefixed segment (MSVC's own

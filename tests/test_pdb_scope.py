@@ -28,6 +28,7 @@ from __future__ import annotations
 from abicheck.extract.headers.scope_segments import namespace_segment
 from abicheck.extract.pdb_scope import (
     enum_entity_id,
+    has_anonymous_enclosing_scope,
     record_entity_id,
     scope_path_for_qualified_name,
 )
@@ -113,6 +114,48 @@ def test_record_and_enum_of_the_same_qualified_name_get_distinct_entity_ids() ->
     enum_id = enum_entity_id("NS::Thing", frozenset())
     assert record_id != enum_id
     assert record_id.kind is not enum_id.kind
+
+
+# ---------------------------------------------------------------------------
+# Named descendants of an anonymous PDB record (Codex review, PR #1025,
+# fresh evidence): `pdb_metadata._is_user_visible` now ADMITS a named leaf
+# nested inside an anonymous ("<...>"-prefixed) enclosing scope instead of
+# dropping the whole declaration -- the leaf's own layout facts are real and
+# worth keeping. What this module still cannot do is build a real identity
+# through that anonymous scope, so `record_entity_id`/`enum_entity_id` leave
+# `entity_id` unset (None) for exactly this shape.
+# ---------------------------------------------------------------------------
+
+
+def test_has_anonymous_enclosing_scope_true_for_middle_segment() -> None:
+    assert has_anonymous_enclosing_scope("N::<unnamed-tag>::Inner") is True
+
+
+def test_has_anonymous_enclosing_scope_false_for_ordinary_name() -> None:
+    assert has_anonymous_enclosing_scope("NS::Widget") is False
+
+
+def test_has_anonymous_enclosing_scope_false_when_only_the_leaf_is_anonymous() -> None:
+    """The leaf itself being anonymous is a different, already-handled case
+    (`pdb_metadata._is_user_visible` rejects it outright, so it never
+    reaches this module at all) -- this predicate is about ENCLOSING scopes
+    only, matching `scope_path_for_qualified_name`'s own `segments[:-1]`
+    split between scope-building segments and the leaf."""
+    assert has_anonymous_enclosing_scope("N::O::<unnamed-tag>") is False
+
+
+def test_record_entity_id_unset_for_named_leaf_under_anonymous_scope() -> None:
+    assert record_entity_id("N::<unnamed-tag>::Inner", frozenset()) is None
+
+
+def test_enum_entity_id_unset_for_named_leaf_under_anonymous_scope() -> None:
+    assert enum_entity_id("N::<unnamed-tag>::Inner", frozenset()) is None
+
+
+def test_record_entity_id_still_resolved_when_no_anonymous_scope_present() -> None:
+    """Guard against a check that's accidentally too broad -- an ordinary
+    qualified name must still resolve a real EntityId, not None."""
+    assert record_entity_id("N::O::Inner", frozenset()) is not None
 
 
 # ---------------------------------------------------------------------------

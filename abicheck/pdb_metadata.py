@@ -104,6 +104,28 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     ``Anonymous`` identity another producer would give the same
     declaration.
 
+    A ``"<...>"``-prefixed NON-LEAF segment (an anonymous struct/union/enum
+    embedded partway through an otherwise-named qualified spelling, e.g.
+    ``"N::<unnamed-tag>::Inner"`` for a NAMED ``Inner`` nested inside an
+    anonymous union that is itself nested inside ``N``) is admitted, not
+    rejected (Codex review, PR #1025, fresh evidence): the leaf itself
+    (``"Inner"``) is a real, user-visible declaration with real layout
+    facts, and dropping it entirely because an ENCLOSING scope happens to
+    be anonymous would lose those facts for no benefit — the identical
+    "recoverable noise beats silent data loss" principle the ABI-tag
+    admit-by-default rule below already applies. What is genuinely
+    unrepresentable is not the leaf's inclusion but its *identity*:
+    ``extract/pdb_scope.py`` builds no ``Anonymous`` scope segment (see
+    that module's own docstring), so ``record_entity_id``/``enum_entity_id``
+    leave ``entity_id`` unset (``None``) for such a qualified name instead
+    of guessing a plain ``Namespace``/``Record`` segment for a scope
+    CodeView never gave a real name — a type/enum with no ``entity_id``
+    already contributes no ``SemanticIR`` occurrence but keeps its layout
+    facts (``extract/semantic_normalizer.py``'s own documented contract),
+    the same graceful degradation this case now uses. Only the LEAF segment
+    itself being anonymous still means "this declaration has no real name
+    to record" and is rejected outright, below.
+
     A ``__``-prefixed NON-LEAF segment is admitted by default, UNLESS it is
     positively known to be compiler-synthesized
     (:data:`_KNOWN_COMPILER_INTERNAL_NAMESPACES`, currently just MSVC's own
@@ -148,7 +170,9 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     last_index = len(segments) - 1
     for index, segment in enumerate(segments):
         if segment.startswith("<"):
-            return False
+            if index == last_index:
+                return False
+            continue
         if not segment.startswith("__"):
             continue
         if index == last_index or segment in _KNOWN_COMPILER_INTERNAL_NAMESPACES:

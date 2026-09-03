@@ -278,6 +278,25 @@ class TestModelBridge:
         ids = {r.entity_id for r in records}
         assert len(ids) == 2
 
+    def test_named_descendant_of_anonymous_scope_keeps_layout_but_not_identity(
+        self,
+    ) -> None:
+        """Codex review, PR #1025, fresh evidence: a NAMED type nested
+        inside an anonymous ("<...>"-prefixed) enclosing scope must still
+        reach the model with its real layout facts -- ``pdb_metadata.
+        _is_user_visible`` now admits this shape instead of dropping the
+        declaration entirely -- but its ``entity_id`` is left unset, since
+        ``extract/pdb_scope.py`` builds no ``Anonymous`` scope segment to
+        represent the enclosing scope correctly."""
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["N::<unnamed-tag>::Inner"] = StructLayout(
+            name="N::<unnamed-tag>::Inner", byte_size=4
+        )
+        records, _ = model_types_from_dwarf_metadata(meta)
+        assert len(records) == 1
+        assert records[0].size_bits == 32
+        assert records[0].entity_id is None
+
 
 class TestHeaderScopeFallback:
     """The structured ``scope_fallback`` signal (ADR-024 §D5.3) returned by

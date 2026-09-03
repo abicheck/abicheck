@@ -74,3 +74,19 @@
   currently just MSVC's own `__vc_attributes`) -- the deliberately safer
   failure direction, since an extra namespace scope is recoverable noise
   while a silently-dropped declaration is not.
+- **`_is_user_visible` no longer drops a named declaration just because an
+  ENCLOSING scope segment is anonymous** (Codex review, fourth round, fresh
+  evidence): `"N::<unnamed-tag>::Inner"` was being rejected in full,
+  losing `Inner`'s real layout facts, even though only the middle segment
+  is compiler-synthesized. A `"<...>"`-prefixed non-leaf segment is now
+  admitted the same way an unrecognized `__`-prefixed one already is; only
+  a `"<...>"`-prefixed LEAF segment (the declaration's own name) still
+  means "this declaration has no real name" and is rejected. Since
+  `extract/pdb_scope.py` still builds no `Anonymous` scope segment, its new
+  `has_anonymous_enclosing_scope` predicate makes `record_entity_id`/
+  `enum_entity_id` leave `entity_id` unset for exactly this shape instead
+  of guessing a plain `Namespace`/`Record` segment for a scope CodeView
+  never gave a real name — the type still reaches the model with its
+  layout facts but contributes no `SemanticIR` occurrence, matching
+  `extract/semantic_normalizer.py`'s existing "no `entity_id` means no
+  occurrence" contract.

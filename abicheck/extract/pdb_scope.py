@@ -56,24 +56,29 @@ this module builds no :class:`~abicheck.model.identity.Anonymous` segment
 at all — CodeView type records for an unnamed struct/union/enum are
 synthesized by MSVC with an internal, compiler-generated name (not left
 genuinely anonymous the way a DWARF DIE or a Clang/castxml AST node can
-be), and ``pdb_metadata._is_user_visible`` already filters those
-compiler-internal (``"<...>"``/``"__..."``-prefixed) names out entirely
-before they ever reach this module — checking every top-level ``"::"``-
-segment of the qualified name, not just its own leading prefix, so a
-nested anonymous aggregate embedded partway through an otherwise-named
-qualified spelling (e.g. ``"N::O::<unnamed-tag>"`` for an unnamed
-struct/union nested inside ``N::O``, or a named member's own qualified
-name if it is itself nested inside one, e.g.
-``"N::<unnamed-tag>::Inner"``) is excluded too (Codex review, PR #1025).
-The consequence is exclusion, not a wrong identity: a declaration whose
-own qualified name embeds an anonymous segment anywhere never reaches
-this module at all (dropped from ``pdb_metadata``'s ``structs``/``enums``
-dicts entirely), rather than being assigned a plain named
+be). ``pdb_metadata._is_user_visible`` rejects a declaration whose own LEAF
+(final) segment is one of those compiler-internal (``"<...>"``-prefixed)
+names outright — that declaration has no real name to record at all — but
+now ADMITS a qualified name whose leaf is a real, named declaration even
+when some ENCLOSING segment is anonymous (e.g. ``"N::<unnamed-tag>::Inner"``
+for a named ``Inner`` nested inside an anonymous union nested inside ``N``;
+Codex review, PR #1025, fresh evidence): the declaration's own layout facts
+are real and worth keeping even though the scope surrounding it is not one
+this module can name. What this module still cannot do is build a correct
+identity through that anonymous enclosing scope — :func:`record_entity_id`/
+:func:`enum_entity_id` detect this shape via
+:func:`has_anonymous_enclosing_scope` and leave ``entity_id`` unset
+(``None``) for it, rather than guessing a plain named
 :class:`~abicheck.model.identity.Record`/:class:`~abicheck.model.identity.Namespace`
-segment for a scope CodeView never actually gave a real name. A real
-anonymous nested aggregate that MSVC spells some other, unfiltered way is
-an unverified gap (see the module docstring above on the lack of a real
-MSVC toolchain here), not a case this module claims to handle.
+segment for a scope CodeView never actually gave a real name. The
+consequence is a missing identity (and, downstream, no ``SemanticIR``
+occurrence — ``extract/semantic_normalizer.py``'s own documented,
+pre-existing "no entity_id contributes no occurrence" contract), not a lost
+declaration: unlike the leaf-anonymous case above, the type/enum itself
+still reaches ``pdb_metadata``'s ``structs``/``enums`` dicts and the model.
+A real anonymous nested aggregate that MSVC spells some other, unfiltered
+way is an unverified gap (see the module docstring above on the lack of a
+real MSVC toolchain here), not a case this module claims to handle.
 
 **Function-local scopes are indistinguishable from namespaces here, and
 this module does not attempt to tell them apart (Codex review, PR
@@ -206,7 +211,38 @@ from .headers.scope_segments import (
     record_segment as _record_segment,
 )
 
-__all__ = ["enum_entity_id", "record_entity_id", "scope_path_for_qualified_name"]
+__all__ = [
+    "enum_entity_id",
+    "record_entity_id",
+    "scope_path_for_qualified_name",
+    "has_anonymous_enclosing_scope",
+]
+
+
+def has_anonymous_enclosing_scope(qualified: str) -> bool:
+    """Whether *qualified* embeds a CodeView-synthesized anonymous segment
+    (e.g. ``"<unnamed-tag>"``) anywhere OTHER than its own leaf (final)
+    segment.
+
+    ``pdb_metadata._is_user_visible`` already admits this shape rather than
+    rejecting it outright (Codex review, PR #1025, fresh evidence): a named
+    leaf nested inside an anonymous struct/union/enum is a real declaration
+    with real layout facts, worth keeping, even though the enclosing
+    anonymous scope itself has no name this module can build a
+    :class:`~abicheck.model.identity.Record`/``Namespace`` segment from (see
+    this module's own "No anonymous-type handling" docstring section). This
+    predicate is what :func:`record_entity_id`/:func:`enum_entity_id` use to
+    leave ``entity_id`` unset for exactly that case, instead of guessing a
+    plain named segment for a scope CodeView never actually gave a real
+    name.
+
+    >>> has_anonymous_enclosing_scope("N::<unnamed-tag>::Inner")
+    True
+    >>> has_anonymous_enclosing_scope("NS::Widget")
+    False
+    """
+    segments = split_top_level_scopes(qualified)
+    return any(segment.startswith("<") for segment in segments[:-1])
 
 
 def scope_path_for_qualified_name(
@@ -244,14 +280,31 @@ def scope_path_for_qualified_name(
     return tuple(scope), leaf
 
 
-def record_entity_id(qualified: str, known_record_names: AbstractSet[str]) -> EntityId:
-    """``EntityId`` for a PDB struct/class/union named *qualified*."""
+def record_entity_id(
+    qualified: str, known_record_names: AbstractSet[str]
+) -> EntityId | None:
+    """``EntityId`` for a PDB struct/class/union named *qualified*.
+
+    Returns ``None`` when :func:`has_anonymous_enclosing_scope` is True for
+    *qualified* -- an enclosing scope this module cannot represent (no
+    ``Anonymous`` segment; see module docstring) -- rather than building an
+    ``EntityId`` from a guessed ``Record``/``Namespace`` segment for a scope
+    CodeView never gave a real name. The caller still keeps the type's
+    layout facts; only its ``entity_id`` (and, downstream, its ``SemanticIR``
+    occurrence) is left unset.
+    """
+    if has_anonymous_enclosing_scope(qualified):
+        return None
     scope, leaf = scope_path_for_qualified_name(qualified, known_record_names)
     return entity_id_for_type(scope, leaf)
 
 
-def enum_entity_id(qualified: str, known_record_names: AbstractSet[str]) -> EntityId:
+def enum_entity_id(
+    qualified: str, known_record_names: AbstractSet[str]
+) -> EntityId | None:
     """``EntityId`` for a PDB enum named *qualified*. See
     :func:`record_entity_id`."""
+    if has_anonymous_enclosing_scope(qualified):
+        return None
     scope, leaf = scope_path_for_qualified_name(qualified, known_record_names)
     return entity_id_for_enum(scope, leaf)
