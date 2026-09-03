@@ -16,11 +16,14 @@ from abicheck.model.identity import Namespace, Record, entity_id_for_type
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.snapshot import AbiSnapshot
+from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.canonical import canonical_form
 from abicheck.storage.dto import (
+    GRAPH_SECTION_KIND,
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
+    graph_from_dto,
     semantic_ir_from_dto,
 )
 from abicheck.storage.import_v1 import (
@@ -45,7 +48,16 @@ def _snapshot_with_ir() -> AbiSnapshot:
     occ = OccurrenceId(eid, disambiguator="tu-a")
     entity = CanonicalEntity(canonical_spelling=Fact.present("ns::Outer::Inner"))
     ir = SemanticIR(occurrences={occ: entity})
-    return AbiSnapshot(library="libfoo.so.1", version="1.0.0", semantic_ir=ir)
+    return AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0.0",
+        semantic_ir=ir,
+        # A populated `surface_graph` exercises the `"graph"` section's own
+        # `GraphSection` DTO branch in `test_export_round_trips_a_full_
+        # document` below, the same way `semantic_ir` already exercises its
+        # own specialized section here.
+        surface_graph=SourceGraphSummary(graph_id="sha256:full-doc"),
+    )
 
 
 class TestImportLegacySnapshot:
@@ -88,6 +100,29 @@ class TestImportLegacySnapshot:
         dto = SectionDTO.from_dict(store.get(sections[SEMANTIC_IR_SECTION_KIND].digest))
         ir, _conflicts = semantic_ir_from_dto(dto)
         assert ir == snap.semantic_ir
+
+    def test_graph_round_trips_through_its_own_section(self) -> None:
+        """ADR-063 Track 4 (8B), second slice: the `"graph"` section is
+        stored via `GraphSection`/`graph_to_dto`, not the generic
+        `legacy_section_to_dto` pass-through -- verified the same way
+        `test_semantic_ir_round_trips_through_its_own_section` verifies its
+        own specialized section, by reading the stored `SectionDTO` back and
+        decoding it through the dedicated decoder."""
+        snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0.0",
+            surface_graph=SourceGraphSummary(graph_id="sha256:abc"),
+        )
+        doc = snapshot_to_dict(snap)
+        assert "surface_graph" in doc
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        sections = manifest.artifact_refs[0].sections
+        assert GRAPH_SECTION_KIND in sections
+        dto = SectionDTO.from_dict(store.get(sections[GRAPH_SECTION_KIND].digest))
+        assert dto.section_kind == GRAPH_SECTION_KIND
+        section = graph_from_dto(dto)
+        assert section.to_document() == {"surface_graph": doc["surface_graph"]}
 
     def test_the_legacy_sections_exclude_the_promoted_keys(self) -> None:
         doc = snapshot_to_dict(_snapshot_with_ir())

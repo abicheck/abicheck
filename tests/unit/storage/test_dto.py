@@ -18,10 +18,13 @@ from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import (
+    GRAPH_SECTION_KIND,
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
     TYPES_SECTION_KIND,
     SectionDTO,
+    graph_from_dto,
+    graph_to_dto,
     legacy_section_from_dto,
     legacy_section_to_dto,
     migrate_section_dto,
@@ -30,6 +33,7 @@ from abicheck.storage.dto import (
     types_from_dto,
     types_to_dto,
 )
+from abicheck.storage.graph_section_codec import GraphSection
 from abicheck.storage.types_section_codec import TypesSection
 
 
@@ -265,7 +269,11 @@ class TestLegacySectionDTO:
     `legacy_section_to_dto` refusal that already existed)."""
 
     def test_round_trips(self) -> None:
-        dto = legacy_section_to_dto("graph", {"a": 1})
+        # "layout" -- a still-generic legacy section kind. "graph" moved to
+        # its own dedicated `GraphSection` DTO this ADR-063 Track 4 (8B)
+        # slice, so it is no longer a valid stand-in here (see
+        # `TestGraphSectionDTO` below for its own dedicated coverage).
+        dto = legacy_section_to_dto("layout", {"a": 1})
         assert legacy_section_from_dto(dto) == {"a": 1}
 
     def test_encoding_a_semantic_ir_kind_is_refused(self) -> None:
@@ -401,6 +409,84 @@ class TestTypesSectionDTO:
             section_kind=TYPES_SECTION_KIND,
             section_schema_version=SECTION_SCHEMA_VERSIONS[TYPES_SECTION_KIND],
             payload={"types": []},
+        )
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_from_dto(dto)
+
+
+class TestGraphSectionDTO:
+    """ADR-063 Track 4 (8B), second slice: `GraphSection`, the `"graph"` D8
+    legacy section's own typed DTO."""
+
+    def test_round_trips_through_a_dict_document(self) -> None:
+        section = GraphSection(surface_graph={"nodes": [], "edges": []})
+        dto = graph_to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = graph_from_dto(reloaded)
+        assert section2 == section
+
+    def test_from_document_refuses_a_non_mapping_payload(self) -> None:
+        with pytest.raises(ValueError, match="must be a mapping"):
+            GraphSection.from_document(["not", "a", "mapping"])  # type: ignore[arg-type]
+
+    def test_from_document_refuses_a_non_mapping_surface_graph_value(self) -> None:
+        with pytest.raises(ValueError, match="must carry a 'surface_graph' mapping"):
+            GraphSection.from_document({"surface_graph": "not-a-mapping"})
+
+    def test_from_document_refuses_a_missing_surface_graph_key(self) -> None:
+        with pytest.raises(ValueError, match="must carry a 'surface_graph' mapping"):
+            GraphSection.from_document({})
+
+    def test_from_document_refuses_extra_keys(self) -> None:
+        with pytest.raises(ValueError, match="may only carry 'surface_graph'"):
+            GraphSection.from_document({"surface_graph": {}, "extra": 1})
+
+    def test_wrong_section_kind_is_refused(self) -> None:
+        dto = SectionDTO(section_kind="types", section_schema_version=1, payload={})
+        with pytest.raises(ValueError):
+            graph_from_dto(dto)
+
+    def test_nested_lists_are_deep_unfrozen_not_left_as_tuples(self) -> None:
+        """Mirrors `TestTypesSectionDTO`'s identical test: `SectionDTO
+        .payload` freezes every nested mapping/list recursively -- reading
+        back must go through `to_dict()`'s own deep `_unfreeze`, not the
+        frozen `payload` attribute directly, or a nested list would
+        round-trip as a `tuple` while a freshly-dumped comparison side holds
+        a plain `list`."""
+        section = GraphSection(surface_graph={"nodes": ["a", "b"]})
+        dto = graph_to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = graph_from_dto(reloaded)
+        document = section2.to_document()
+        assert isinstance(document["surface_graph"], dict)
+        assert isinstance(document["surface_graph"]["nodes"], list)
+        import json
+
+        json.dumps(document)
+
+    def test_surface_graph_field_is_frozen_against_caller_mutation(self) -> None:
+        """Mirrors `TestTypesSectionDTO`'s identical test for `TypesSection
+        .types`: a `frozen=True` dataclass whose one field is a plain
+        `dict`/`list` tree is not actually immutable unless
+        `__post_init__` freezes every reachable container too."""
+        original = {"nodes": ["a"]}
+        section = GraphSection(surface_graph=original)
+        original["nodes"].append("mutated")
+        assert section.to_document()["surface_graph"]["nodes"] == ["a"]
+
+        document = section.to_document()
+        document["surface_graph"]["nodes"].append("mutated")
+        assert section.to_document()["surface_graph"]["nodes"] == ["a"]
+
+    def test_legacy_section_to_dto_refuses_the_graph_kind(self) -> None:
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto(GRAPH_SECTION_KIND, {"surface_graph": {}})
+
+    def test_legacy_section_from_dto_refuses_a_graph_kind_dto(self) -> None:
+        dto = SectionDTO(
+            section_kind=GRAPH_SECTION_KIND,
+            section_schema_version=SECTION_SCHEMA_VERSIONS[GRAPH_SECTION_KIND],
+            payload={"surface_graph": {}},
         )
         with pytest.raises(ValueError, match="not a legacy section kind"):
             legacy_section_from_dto(dto)

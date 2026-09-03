@@ -59,6 +59,7 @@ from typing import Any
 
 from ..model.semantic_ir import SemanticIR
 from .canonical import canonical_form
+from .graph_section_codec import GraphSection
 from .guards import (
     identity_text as _identity_text,
     mapping as _mapping,
@@ -70,10 +71,13 @@ from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_documen
 from .types_section_codec import TypesSection
 
 __all__ = [
+    "GRAPH_SECTION_KIND",
     "SECTION_SCHEMA_VERSIONS",
     "SEMANTIC_IR_SECTION_KIND",
     "TYPES_SECTION_KIND",
     "SectionDTO",
+    "graph_from_dto",
+    "graph_to_dto",
     "legacy_section_from_dto",
     "legacy_section_to_dto",
     "migrate_section_dto",
@@ -104,10 +108,21 @@ SEMANTIC_IR_SECTION_KIND = "semantic_ir"
 #: membership in that vocabulary.
 TYPES_SECTION_KIND = "types"
 
+#: ADR-063 Track 4 (8B), second slice: the second `LEGACY_SECTION_KINDS`
+#: member with a real, dedicated DTO (`GraphSection`) instead of the generic
+#: `legacy_section_to_dto` pass-through -- see `graph_section_codec.py`'s
+#: own module docstring for why `"graph"` is the next section promoted by
+#: `types_section_codec.py`'s own heuristic. Like `TYPES_SECTION_KIND`
+#: above, this name IS one of `LEGACY_SECTION_KINDS`; only its DTO encoding
+#: function is specialized here.
+GRAPH_SECTION_KIND = "graph"
+
 #: Section kinds `legacy_section_to_dto`/`legacy_section_from_dto` must
 #: refuse -- each has its own dedicated codec instead of the generic
 #: pass-through envelope those two functions provide.
-_SPECIALIZED_SECTION_KINDS = frozenset({SEMANTIC_IR_SECTION_KIND, TYPES_SECTION_KIND})
+_SPECIALIZED_SECTION_KINDS = frozenset(
+    {SEMANTIC_IR_SECTION_KIND, TYPES_SECTION_KIND, GRAPH_SECTION_KIND}
+)
 
 #: Every section kind this module knows how to encode, and the current DTO
 #: version each one is written at today — `StorageVersions.
@@ -433,3 +448,35 @@ def types_from_dto(dto: SectionDTO) -> TypesSection:
     payload = current.to_dict()["payload"]
     assert isinstance(payload, dict)
     return TypesSection.from_document(payload)
+
+
+def graph_to_dto(section: GraphSection) -> SectionDTO:
+    """The domain `GraphSection` (ADR-063 Track 4 / 8B, second slice) as a
+    `SectionDTO` -- built on `GraphSection.to_document`, never `asdict`,
+    mirroring `types_to_dto`'s own "version stamp over an existing,
+    reviewed encoding" shape for its own single-field payload."""
+    return SectionDTO(
+        section_kind=GRAPH_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[GRAPH_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def graph_from_dto(dto: SectionDTO) -> GraphSection:
+    """The inverse of `graph_to_dto` — migrates *dto* to the current version
+    first, then decodes via `GraphSection.from_document`.
+
+    Reads `current.to_dict()["payload"]`, never `current.payload` directly
+    -- identical reasoning to `types_from_dto`'s own docstring: `SectionDTO
+    .payload` is recursively frozen, so `surface_graph`'s own nested lists
+    would otherwise round-trip as tuples while a freshly-dumped comparison
+    side holds plain lists.
+    """
+    if dto.section_kind != GRAPH_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {GRAPH_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return GraphSection.from_document(payload)

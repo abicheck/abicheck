@@ -406,6 +406,26 @@ sections (`binary`/`declarations`/`layout`/`debug`/`build`/`graph`/
 baseline-set/`BundleFacts` into sections all remain open, per this
 sub-phase's own stated scope.
 
+**8B's second PR landed (2026-09-03).** `storage.graph_section_codec
+.GraphSection` promotes the `"graph"` D8 legacy section the same way, chosen
+next by the identical heuristic: `_SECTION_FIELDS["graph"]` is exactly one
+field (`surface_graph`), and `split_legacy_document` only ever creates a
+`"graph"` section when that field is present (a section with none of its
+fields present is omitted entirely, and `"graph"` has no other field it
+could carry) — so a present `"graph"` section's payload has exactly one
+possible shape, the same guarantee `"types"` relies on. This holds even
+though `_REQUIRED_SECTION_FIELDS["graph"]` is empty: that table is derived
+from schema v1 alone, and `surface_graph` postdates v1 (ADR-063 Phase 3 D5,
+schema v29), so its absence there reflects the field's introduction date,
+not genuine per-section optionality. Wired through `storage.dto
+.graph_to_dto`/`graph_from_dto` and `storage.import_v1`, mirroring
+`types_to_dto`/`types_from_dto`'s wiring exactly; on-disk shape unchanged.
+The remaining six legacy sections (`binary`/`declarations`/`layout`/`debug`/
+`build`/`provenance`) all carry the genuinely sparse, schema-version-
+dependent optional-field profile the first PR's note above describes, and
+still need that design problem solved before they can follow the same
+pattern.
+
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
 gap 6B's own migration would otherwise trip on, and 6B is what actually

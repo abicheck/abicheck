@@ -90,10 +90,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from .dto import (
+    GRAPH_SECTION_KIND,
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
     TYPES_SECTION_KIND,
     SectionDTO,
+    graph_from_dto,
+    graph_to_dto,
     legacy_section_from_dto,
     legacy_section_to_dto,
     semantic_ir_from_dto,
@@ -101,6 +104,7 @@ from .dto import (
     types_from_dto,
     types_to_dto,
 )
+from .graph_section_codec import GraphSection
 from .guards import mapping as _mapping
 from .legacy_sections import (
     SCHEMA_VERSION_KEY,
@@ -257,13 +261,15 @@ def import_legacy_snapshot(
     sections: dict[str, ObjectRef] = {}
     section_schema_versions: dict[str, int] = {}
     for section_kind, payload in legacy_sections.items():
-        # ADR-063 Track 4 (8B): `"types"` has its own dedicated DTO
-        # (`TypesSection`) instead of the generic pass-through every other
-        # legacy section still uses -- see `types_section_codec.py`'s own
-        # module docstring for why this is the section this promotion
-        # landed for first.
+        # ADR-063 Track 4 (8B): `"types"`/`"graph"` each have their own
+        # dedicated DTO (`TypesSection`/`GraphSection`) instead of the
+        # generic pass-through every other legacy section still uses -- see
+        # `types_section_codec.py`/`graph_section_codec.py`'s own module
+        # docstrings for why these are the sections promoted so far.
         if section_kind == TYPES_SECTION_KIND:
             section_dto = types_to_dto(TypesSection.from_document(payload))
+        elif section_kind == GRAPH_SECTION_KIND:
+            section_dto = graph_to_dto(GraphSection.from_document(payload))
         else:
             section_dto = legacy_section_to_dto(section_kind, payload)
         sections[section_kind] = ObjectRef(
@@ -368,6 +374,11 @@ def export_legacy_snapshot(
             # IS its one required field), so there is nothing further to
             # check before merging it into the rebuilt document.
             document.update(types_from_dto(dto).to_document())
+        elif section_kind == GRAPH_SECTION_KIND:
+            # Identical reasoning to the `TYPES_SECTION_KIND` branch above:
+            # `GraphSection.from_document`'s own validation already refuses
+            # a missing/malformed `surface_graph` mapping structurally.
+            document.update(graph_from_dto(dto).to_document())
         else:
             payload = legacy_section_from_dto(dto)
             # A section whose *object* hashes and decodes fine can still
