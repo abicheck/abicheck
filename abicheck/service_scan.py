@@ -252,6 +252,8 @@ class ScanRequest:
     # (checker_types.py's public-dataclass convention) so a positional insert
     # can't rebind a later field (Codex review).
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    exit_code_scheme: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1159,6 +1161,8 @@ _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "contract_evaluation": lambda r: r.contract_evaluation,
     "contract_mode": lambda r: r.contract_mode is not None,
     "max_findings": lambda r: r.max_findings is not None,
+    "severity_preset": lambda r: r.severity_preset is not None,  # ADR-064/PR G2
+    "exit_code_scheme": lambda r: r.exit_code_scheme is not None,
 }
 
 
@@ -1270,16 +1274,8 @@ def _scan_request_config(req: ScanRequest) -> Any:
                 # letting the key resolve as "not stated" by omission (which
                 # is what the declared-params guard exists to prevent).
                 "pack_paths": (),
-                # A `ScanRequest` has no severity-preset/exit-code-scheme
-                # field either (CLI cleanup phase two, "PR B" -- these two
-                # keys joined `SCAN_CONFIG_PARAMS` so a selected gate pack
-                # cannot override an *explicit* `--severity-preset`/
-                # `--exit-code-scheme` on the CLI path); the API path has no
-                # such CLI flag to be explicit about, so both resolve as
-                # "not stated" here, same as every other field this request
-                # shape does not carry.
-                "severity_preset": None,
-                "exit_code_scheme": None,
+                "severity_preset": req.severity_preset,  # ADR-064/PR G2
+                "exit_code_scheme": req.exit_code_scheme,
             },
             typed={"policy", "scope_public_headers"},
             policy_file=req.policy_file,
@@ -1317,6 +1313,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         run_scan_core,
     )
     from .workflows.scan_config import public_provenance_set as _public_provenance_set
+    from .workflows.scan_gate_options import resolve_scan_gate_options  # ADR-064/PR G2
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
@@ -1398,6 +1395,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # preprocessor phase (which runs `clang -E` with a compile unit's `directory`
     # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
     build_dir_cleanups: list[Callable[[], None]] = []
+    gate = resolve_scan_gate_options(req)
     try:
         core = run_scan_core(
             start=_time.monotonic(),
@@ -1447,6 +1445,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
             abi3_floor=req.abi3_floor,
             max_findings=req.max_findings,
             build_targets=req.build_targets,
+            sev_config=gate.severity,
+            exit_code_scheme="severity" if gate.severity is not None else "legacy",
         )
     except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

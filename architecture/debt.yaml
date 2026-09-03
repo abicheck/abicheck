@@ -13,12 +13,12 @@
     },
     {
       "path": "abicheck/api_types.py",
-      "baseline_lines": 1008,
+      "baseline_lines": 1013,
       "target": "model",
       "rule": "no_growth",
       "category": "legacy_model_or_catalog_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1008 -> 1013, CLI cleanup phase two PR G2's typed-API parity slice (ADR-064): CompareRequest gained severity_preset/exit_code_scheme fields and CompareResult gained exit_decision (an ExitDecision, type-only imported under TYPE_CHECKING to avoid a new runtime dependency on the policy package) -- the minimum, already-comment-trimmed footprint for CompareRequest/CompareResult to carry the same severity/exit-code-scheme configuration and resolved decision the native compare CLI's report exit block already carries (abicheck.policy.release_gate_options.GateOptions, abicheck.policy.exit_decision.resolve_compare_exit_decision, both reused unchanged from service_compare_pipeline.classify_compare_pair). These are real typed-request/response fields, not incidental growth, so there is no responsibility to move elsewhere in this file -- CompareRequest/CompareResult are already this package's canonical home for exactly this kind of field.",
       "review_by": "2026-11-30"
     },
     {

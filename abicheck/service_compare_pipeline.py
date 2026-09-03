@@ -586,11 +586,44 @@ def classify_compare_pair(
         old_pack=getattr(old, "build_source", None),
         new_pack=getattr(new, "build_source", None),
     )
+    # ADR-064/PR G2 typed-API parity slice: resolve *request*'s severity/
+    # exit-code-scheme fields into the identical `GateOptions` object the
+    # release fan-out resolves its own gate configuration from
+    # (`pack_application=None` -- a `CompareRequest` has no gate-pack field,
+    # only the policy/surface halves of `--pack`, see
+    # `pack_policy_overrides`'s own docstring), then the canonical
+    # `ExitDecision` every real `compare` report's own `exit` block already
+    # comes from. Only `severity_preset`/`exit_code_scheme` -- like `scan
+    # --against`, single-pair `compare` has no per-category `--severity-
+    # <category>` CLI flags either (those reach a run only via
+    # `.abicheck.yml`), so `CompareRequest` carries no per-category fields.
+    from .policy.exit_decision import resolve_compare_exit_decision
+    from .workflows.gate import resolve_release_gate_options
+
+    gate = resolve_release_gate_options(
+        None,
+        release_exit_code_scheme=request.exit_code_scheme,
+        severity_preset=request.severity_preset,
+        severity_abi_breaking=None,
+        severity_potential_breaking=None,
+        severity_quality_issues=None,
+        severity_addition=None,
+    )
+    exit_decision = resolve_compare_exit_decision(
+        result,
+        gate.severity,
+        "severity" if gate.severity is not None else "legacy",
+    )
+
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
     # list this call already resolved instead of loading it a second time.
     return CompareResult(
-        diff=result, old_snapshot=old, new_snapshot=new, suppression=suppression
+        diff=result,
+        old_snapshot=old,
+        new_snapshot=new,
+        suppression=suppression,
+        exit_decision=exit_decision,
     )
 
 

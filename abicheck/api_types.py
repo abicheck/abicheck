@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
+    from .policy.exit_decision import ExitDecision
     from .suppression import SuppressionList
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
@@ -703,6 +704,8 @@ class CompareRequest:
     pack_internal_namespaces: tuple[str, ...] | None = field(
         default=None, kw_only=True
     )
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    exit_code_scheme: str | None = field(default=None, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -976,6 +979,8 @@ class CompareResult:
     old_snapshot: AbiSnapshot
     new_snapshot: AbiSnapshot
     suppression: SuppressionList | None = None
+    # ADR-064/PR G2, see classify_compare_pair.
+    exit_decision: ExitDecision | None = None
 
     def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
         """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.

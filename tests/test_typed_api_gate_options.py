@@ -1,0 +1,292 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""CLI cleanup phase two, PR G2's "typed-API half of the parity pass"
+(ADR-064): `CompareRequest`/`ScanRequest` now carry real
+`severity_preset`/`exit_code_scheme` fields (exactly the two flags
+single-pair `compare`/`scan --against` themselves expose -- neither has a
+per-category `--severity-<category>` CLI flag, only the release fan-out
+does, so neither typed request carries a per-category field either),
+resolved through the identical `abicheck.policy.release_gate_options.
+GateOptions` object the directory/package release fan-out resolves its own
+gate configuration from (`resolve_release_gate_options(None, ...)`), rather
+than each front end computing its own answer.
+
+Before this: `CompareRequest` had no severity/exit-code-scheme field at
+all -- a typed caller always classified through the legacy verdict-based
+exit code, with no way to reach the severity-aware scheme `compare
+--severity-preset` already gives the CLI. `ScanRequest` had the fields'
+CLI-flag counterparts explicitly rejected as "not stated" in its own
+receipt-resolution comment, and `run_scan`'s own `run_scan_core` call never
+passed `sev_config`/`exit_code_scheme` at all (always the function's own
+`None`/`"legacy"` defaults), regardless of `--against`.
+
+Two things are proven per request type, per the "bug fix's regression test
+targets the bug class" contract (AGENTS.md):
+
+1. **The severity fields actually change the exit-code decision** (not just
+   resolve into a receipt nobody reads) -- a real regression assertion, not
+   a resolution-shaped one alone.
+2. **The typed-API result agrees with the CLI's own exit code for
+   equivalent input** -- the parity claim itself, checked against the real
+   `compare`/`scan` CLI through `CliRunner`, not against the same helper
+   the implementation uses internally.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from abicheck.cli import main
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.serialization import snapshot_to_json
+
+
+def _fn(name: str, mangled: str) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type="int",
+        visibility=Visibility.PUBLIC,
+    )
+
+
+def _elf(*names: str) -> ElfMetadata:
+    return ElfMetadata(symbols=[ElfSymbol(name=n) for n in names])
+
+
+def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A removed public function -- a hard ABI break under every default."""
+    common = {"library": "libfoo.so.1", "from_headers": True}
+    fns_old = [_fn("pub_a", "_Z5pub_av"), _fn("pub_b", "_Z5pub_bv")]
+    fns_new = [_fn("pub_a", "_Z5pub_av")]
+    return (
+        AbiSnapshot(
+            version="1.0",
+            functions=fns_old,
+            elf=_elf("_Z5pub_av", "_Z5pub_bv"),
+            **common,
+        ),
+        AbiSnapshot(version="2.0", functions=fns_new, elf=_elf("_Z5pub_av"), **common),
+    )
+
+
+def _write(tmp_path: Path, old: AbiSnapshot, new: AbiSnapshot) -> tuple[Path, Path]:
+    old_p = tmp_path / "old.json"
+    new_p = tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+    return old_p, new_p
+
+
+class TestCompareRequestGateOptions:
+    """`CompareRequest.severity_preset`/`exit_code_scheme` ->
+    `CompareResult.exit_decision` (`service_compare_pipeline.
+    classify_compare_pair`)."""
+
+    def _run(self, old: Path, new: Path, **kwargs):
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        return run_compare_request(
+            CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new), **kwargs)
+        )
+
+    def test_default_reproduces_the_legacy_verdict_based_exit(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(old, new)
+        assert result.exit_decision is not None
+        assert result.exit_decision.code == 4
+        assert result.diff.verdict.name == "BREAKING"
+
+    def test_severity_scheme_actually_changes_the_decision(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression assertion #1: setting the fields is not a no-op."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        legacy = self._run(old, new)
+        demoted = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+        )
+        assert legacy.exit_decision.code == 4
+        assert demoted.exit_decision.code == 0
+        from abicheck.policy.exit_decision import ExitReason
+
+        assert demoted.exit_decision.reasons == (ExitReason.CLEAN,)
+
+    def test_severity_preset_strict_keeps_the_same_decision(
+        self, tmp_path: Path
+    ) -> None:
+        """The `strict` preset floors everything at error -- proving the
+        preset alone selects the severity axis and scores it correctly,
+        not just "any config demotes"."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="strict",
+        )
+        assert result.exit_decision.code == 4
+
+    def test_agrees_with_the_cli_for_equivalent_input(self, tmp_path: Path) -> None:
+        """Regression assertion #2: the parity claim itself, against the
+        real `compare` CLI (not the same helper the implementation uses)."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        api_result = self._run(
+            old,
+            new,
+            exit_code_scheme="severity",
+            severity_preset="info-only",
+        )
+        cli_result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--severity-preset",
+                "info-only",
+                "--exit-code-scheme",
+                "severity",
+                "--format",
+                "json",
+            ],
+        )
+        assert cli_result.exit_code == 0, cli_result.output
+        report = json.loads(cli_result.stdout[cli_result.stdout.index("{") :])
+        assert api_result.exit_decision.code == report["exit"]["code"] == 0
+
+    def test_default_severity_fields_leave_the_pre_existing_behaviour_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        """Both fields default to `None` -- a `CompareRequest` built before
+        they existed keeps resolving the identical decision."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        explicit_none = self._run(
+            old,
+            new,
+            severity_preset=None,
+            exit_code_scheme=None,
+        )
+        omitted = self._run(old, new)
+        assert explicit_none.exit_decision.code == omitted.exit_decision.code == 4
+
+
+class TestScanRequestGateOptions:
+    """`ScanRequest.severity_preset`/`exit_code_scheme` -> `run_scan`'s
+    `sev_config`/`exit_code_scheme` forward into `run_scan_core` (only
+    meaningful with `baseline` set, matching `cli_scan.py`'s own
+    `_COMPARISON_ONLY_FLAGS` rule for the identical two CLI flags)."""
+
+    def _pair(self, tmp_path: Path) -> tuple[Path, Path]:
+        return _write(tmp_path, *_breaking_pair())
+
+    def test_default_reproduces_the_legacy_exit_code(self, tmp_path: Path) -> None:
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        old, new = self._pair(tmp_path)
+        result = run_scan(ScanRequest(binaries=[new], baseline=old))
+        assert result.exit_code == 4
+
+    def test_severity_scheme_actually_changes_the_exit_code(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression assertion #1: not a no-op field."""
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        old, new = self._pair(tmp_path)
+        legacy = run_scan(ScanRequest(binaries=[new], baseline=old))
+        demoted = run_scan(
+            ScanRequest(
+                binaries=[new],
+                baseline=old,
+                exit_code_scheme="severity",
+                severity_preset="info-only",
+            )
+        )
+        assert legacy.exit_code == 4
+        assert demoted.exit_code == 0
+
+    def test_agrees_with_the_cli_for_equivalent_input(self, tmp_path: Path) -> None:
+        """Regression assertion #2: parity against the real `scan --against`
+        CLI invocation, not the implementation's own helper."""
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        old, new = self._pair(tmp_path)
+        api_result = run_scan(
+            ScanRequest(
+                binaries=[new],
+                baseline=old,
+                exit_code_scheme="severity",
+                severity_preset="info-only",
+            )
+        )
+        cli_result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(new),
+                "--against",
+                str(old),
+                "--severity-preset",
+                "info-only",
+                "--exit-code-scheme",
+                "severity",
+            ],
+        )
+        assert cli_result.exit_code == 0, cli_result.output
+        assert api_result.exit_code == cli_result.exit_code == 0
+
+    def test_rejected_without_a_baseline_like_the_cli_flags(
+        self, tmp_path: Path
+    ) -> None:
+        """Mirrors `cli_scan._COMPARISON_ONLY_FLAGS`'s identical rejection
+        of `--severity-preset`/`--exit-code-scheme` with no `--against`."""
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        _, new = self._pair(tmp_path)
+        with pytest.raises(ValidationError, match="severity_preset"):
+            run_scan(ScanRequest(binaries=[new], severity_preset="strict"))
+        with pytest.raises(ValidationError, match="exit_code_scheme"):
+            run_scan(ScanRequest(binaries=[new], exit_code_scheme="severity"))
+
+    def test_default_severity_fields_leave_the_pre_existing_behaviour_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        old, new = self._pair(tmp_path)
+        explicit_none = run_scan(
+            ScanRequest(
+                binaries=[new],
+                baseline=old,
+                severity_preset=None,
+                exit_code_scheme=None,
+            )
+        )
+        omitted = run_scan(ScanRequest(binaries=[new], baseline=old))
+        assert explicit_none.exit_code == omitted.exit_code == 4

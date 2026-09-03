@@ -3817,6 +3817,50 @@ second top-level spelling of the same fact.
 > separate, not-yet-scoped piece of work), and the typed-API half of the
 > parity pass.
 
+> **Update (2026-09-03): the typed-API half of the parity pass closed.**
+> `CompareRequest`/`ScanRequest` gained `severity_preset`/`exit_code_scheme`
+> fields — exactly the two flags single-pair `compare`/`scan --against`
+> themselves expose (neither has a per-category `--severity-<category>` CLI
+> flag; only the release fan-out does, via `.abicheck.yml` for the other
+> two, so neither typed request carries a per-category field either).
+> Resolved through `abicheck.policy.release_gate_options.GateOptions` via
+> `resolve_release_gate_options(None, ...)` — the identical function/object
+> the release fan-out resolves its own gate configuration from, called with
+> no pack (`pack_application=None`; a typed request's own `gate.*` pack
+> field is still a separate, open item, same as it always was for
+> `pack_policy_overrides`/`pack_internal_namespaces`) — not a second,
+> parallel resolution. `ScanRequest`'s two fields join
+> `_COMPARISON_ONLY_FIELD_PREDICATES` (baseline-only, mirroring
+> `cli_scan._COMPARISON_ONLY_FLAGS`) and `service_scan._scan_request_config`'s
+> ADR-049 receipt now reads their real values instead of always claiming
+> "not stated". `run_scan`'s own `run_scan_core` call now actually passes
+> `sev_config`/`exit_code_scheme` (previously never wired at all, regardless
+> of `--against` — a real, previously-undetected gap: a typed
+> `ScanRequest(..., baseline=..., severity_preset=..., exit_code_scheme=
+> "severity")` silently classified through the legacy scheme). `CompareResult`
+> gained `exit_decision` (the canonical `ExitDecision`,
+> `abicheck.policy.exit_decision.resolve_compare_exit_decision`, the same
+> resolver the native `compare` CLI's own report `exit` block uses), built
+> in `service_compare_pipeline.classify_compare_pair`.
+> `abicheck/workflows/scan_gate_options.py` is a new leaf module holding
+> `ScanRequest`'s own resolution (`service_scan.py` sits at its own
+> `architecture/debt.yaml` `no_growth` baseline, so the new logic could not
+> live there); `api_types.py`'s baseline moved 1008 -> 1013 for the three
+> genuinely new typed fields (see that debt entry's own rationale). Tests:
+> `tests/test_typed_api_gate_options.py` — per request type, both that the
+> fields are not a no-op (a demoted/raised exit code) and that the typed
+> result agrees with the real CLI's exit code for equivalent input
+> (`CliRunner`, not the same helper the implementation uses). **Still open,
+> deliberately not attempted in this slice:** a typed request's own
+> `gate.*` pack field (`--pack` stays a CLI-only selector, ADR-049 D8,
+> unchanged by this slice), and the `--artifact-set` member-level
+> evidence-contract signal above — both left for a future session; per-
+> category `severity_<category>` fields were investigated and deliberately
+> **not** added to either typed request, since neither `compare` nor `scan
+> --against` itself exposes them as CLI flags (only `.abicheck.yml` does,
+> which a typed caller has no equivalent of) — adding them would have been
+> new surface beyond CLI parity, not parity itself.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects
@@ -4840,14 +4884,19 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        _EvidenceContractError, matched by
                                        action/run.sh's own stderr fallback --
                                        see PR 4's own section for the full
-                                       account); still open: the typed-API
-                                       half of the parity pass, a real
-                                       --artifact-set member-level
-                                       evidence-contract signal for the
-                                       Action (the --format text gap's
-                                       remaining half -- a member's abort
-                                       never reaches the single-binary catch
-                                       site's stderr marker at all)
+                                       account); the typed-API half of the
+                                       parity pass closed 2026-09-03
+                                       (CompareRequest/ScanRequest severity_
+                                       preset/exit_code_scheme fields, both
+                                       resolved through the identical
+                                       GateOptions object; see PR 4's own
+                                       section for the full account); still
+                                       open: a real --artifact-set
+                                       member-level evidence-contract signal
+                                       for the Action (the --format text
+                                       gap's remaining half -- a member's
+                                       abort never reaches the single-binary
+                                       catch site's stderr marker at all)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;

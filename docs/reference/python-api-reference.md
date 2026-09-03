@@ -54,6 +54,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `lang_explicit` | `bool` | `False` |
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
+| `severity_preset` | `str \| None` | `None` |
+| `exit_code_scheme` | `str \| None` | `None` |
 
 ## `CompareResult`
 
@@ -67,6 +69,7 @@ What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
 | `old_snapshot` | `AbiSnapshot` | *(required)* |
 | `new_snapshot` | `AbiSnapshot` | *(required)* |
 | `suppression` | `SuppressionList \| None` | `None` |
+| `exit_decision` | `ExitDecision \| None` | `None` |
 
 ## `CompileContext`
 
@@ -247,6 +250,8 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `changed_src` | `str` | `'run_scan_set'` |
 | `max_findings` | `int \| None` | `None` |
 | `build_targets` | `tuple[str, ...]` | `()` |
+| `severity_preset` | `str \| None` | `None` |
+| `exit_code_scheme` | `str \| None` | `None` |
 
 ## `ScanResult`
 

@@ -92,12 +92,31 @@ moving the signal off stderr entirely onto a private marker file
 (`$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`, never from any `INPUT_*` value)
 — see `cli_scan_helpers.write_evidence_contract_marker`'s own docstring for
 the full account of both rounds. The stderr marker line is still printed
-for human debugging but is no longer consulted for classification. Still
-open: the rest of the cross-front-end parity pass (typed API; the
-`--artifact-set` member-level evidence-contract signal, the one remaining
-half of the `--format text` gap — a member's abort never reaches the
-single-binary catch site this update fixed); and **stage 2**, the
-`--exit-code-scheme` removal itself. See
+for human debugging but is no longer consulted for classification. **Update
+(2026-09-03): the typed-API half of the parity pass closed.**
+`CompareRequest`/`ScanRequest` gained `severity_preset`/`exit_code_scheme`
+fields, resolved through the identical `abicheck.policy.
+release_gate_options.GateOptions` object (`resolve_release_gate_options(
+None, ...)`) the release fan-out already resolves its own gate
+configuration from — not a second, parallel resolution — so a typed
+`compare`/`scan` caller now reaches the same severity-aware exit-code scheme
+`--severity-preset`/`--exit-code-scheme` already give the native CLI.
+`CompareResult` gained `exit_decision` (the canonical `ExitDecision`, same
+resolver the `compare` CLI's own report `exit` block uses). Neither typed
+request gained per-category `severity_<category>` fields — investigated and
+deliberately not added, since neither `compare` nor `scan --against` itself
+exposes them as CLI flags (only the directory/package release fan-out does,
+and only `.abicheck.yml` for the other two, which a typed caller has no
+equivalent of); adding them would have been new surface beyond CLI parity,
+not parity itself. See
+[cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4" section, own 2026-09-03 update, for
+the full account, including the new `abicheck/workflows/scan_gate_options.py`
+leaf module and the `api_types.py` debt-baseline move this needed. Still
+open: a typed request's own `gate.*` pack field (`--pack` stays a CLI-only
+selector, ADR-049 D8); the `--artifact-set` member-level evidence-contract
+signal, the one remaining half of the `--format text` gap — a member's
+abort never reaches the single-binary catch site the prior update fixed;
+and **stage 2**, the `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
