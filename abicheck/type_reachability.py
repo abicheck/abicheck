@@ -94,6 +94,7 @@ from typing import TYPE_CHECKING
 
 from .diff_cxx_rules import owner_class_of
 from .model import ScopeOrigin
+from .model.identity_tiers import SnapshotLocalIdentity, snapshot_local_identity
 
 # Every name below is imported with the redundant `as X` self-alias, the
 # standard ruff/mypy-recognized "this import is an intentional re-export"
@@ -240,8 +241,24 @@ class _StdlibReferenceScan:
         self._referenced_trusted: set[str] = set()
         self._trusted_via_alias: dict[str, set[str]] = {}
         self._remaining = set(stdlib_identities)
-        self._reached_records: set[str] = set()
-        self._worklist: list[str] = []
+        # Record-tracking state, typed as `SnapshotLocalIdentity` rather
+        # than bare `str` (ADR-063 Phase 2's post-parse consumer migration).
+        # These six members are the closure walk's own node-key domain: a
+        # token queued, popped, and looked up, never matched against
+        # rendered signature text. That is what separates them from the
+        # *spelling* domain this module's `_spelling_index`/
+        # `_stripped_signature_spelling` machinery operates in, which is why
+        # only these migrated -- see this class's own note below.
+        #
+        # Snapshot-local, not stable, by construction and not by omission:
+        # a record is reached here by matching a *spelling* inside some
+        # other declaration's field/base text, so no `RecordType` (and
+        # therefore no resolved `EntityId`) is in scope at the reaching
+        # site at all, and one identity string can name several
+        # declarations. The `entity_id` payload is left unset for exactly
+        # that reason.
+        self._reached_records: set[SnapshotLocalIdentity] = set()
+        self._worklist: list[SnapshotLocalIdentity] = []
         # Identities currently sitting in `_worklist`, awaiting their next
         # pop -- lets `reach_record` tell "already queued for a rescan, no
         # need to add another entry" apart from "not queued, must append"
@@ -252,7 +269,7 @@ class _StdlibReferenceScan:
         # distinct aliases queued ~800 duplicate entries, each pop
         # rescanning under every accumulated alias -- quadratic). Discarded
         # in :meth:`next_reached_record` the moment an identity is popped.
-        self._record_pending: set[str] = set()
+        self._record_pending: set[SnapshotLocalIdentity] = set()
         self._resolved_typedefs: set[str] = set()
         # Every reach of a record, accumulated -- not just the *first*
         # (Codex review, fresh evidence, two rounds). Reaching a record is
@@ -276,14 +293,14 @@ class _StdlibReferenceScan:
         # every seed-level reach of a record is already accumulated here by
         # the time that record's own fields are scanned -- see
         # ``_record_direct``/``_record_typedef_origins`` below.
-        self._record_direct: set[str] = set()
-        self._record_typedef_origins: dict[str, set[str]] = {}
+        self._record_direct: set[SnapshotLocalIdentity] = set()
+        self._record_typedef_origins: dict[SnapshotLocalIdentity, set[str]] = {}
         # Which reached records have already had their own fields/bases
         # scanned at least once -- lets a later provenance upgrade
         # discovered *during the record walk itself* (not just during
         # seeding) requeue an already-walked record for a rescan (Codex
         # review, fresh evidence: see :meth:`reach_record`'s own docstring).
-        self._record_walked: set[str] = set()
+        self._record_walked: set[SnapshotLocalIdentity] = set()
         # Per-alias cache of exact/any-spelling stdlib identities reachable
         # from that alias's own target chain, memoized once per alias
         # (Codex review, fresh evidence): the previous version re-walked an
@@ -421,7 +438,9 @@ class _StdlibReferenceScan:
                     # record_pattern loop.
                     for record_identity in records:
                         self.reach_record(
-                            record_identity, via_typedef=True, origin_alias=this_origin
+                            snapshot_local_identity(record_identity),
+                            via_typedef=True,
+                            origin_alias=this_origin,
                         )
 
     def _scan_stdlib_and_records(
@@ -478,7 +497,9 @@ class _StdlibReferenceScan:
             for match in _finditer_allow_nested(self._record_pattern, type_string):
                 for identity in self._record_index.get(match.group(0), ()):
                     self.reach_record(
-                        identity, via_typedef=via_typedef, origin_alias=origin_alias
+                        snapshot_local_identity(identity),
+                        via_typedef=via_typedef,
+                        origin_alias=origin_alias,
                     )
 
     def _reachable_stdlib(
@@ -574,7 +595,7 @@ class _StdlibReferenceScan:
 
     def reach_record(
         self,
-        identity: str,
+        identity: SnapshotLocalIdentity,
         *,
         via_typedef: bool = False,
         origin_alias: str | None = None,
@@ -663,13 +684,15 @@ class _StdlibReferenceScan:
             self._worklist.append(identity)
             self._record_pending.add(identity)
 
-    def mark_record_walked(self, identity: str) -> None:
+    def mark_record_walked(self, identity: SnapshotLocalIdentity) -> None:
         """Record that *identity*'s own fields/bases were just scanned,
         so a later provenance upgrade (see :meth:`reach_record`) knows to
         requeue it for a rescan instead of assuming it's still pending."""
         self._record_walked.add(identity)
 
-    def record_provenance(self, identity: str) -> tuple[bool, frozenset[str]]:
+    def record_provenance(
+        self, identity: SnapshotLocalIdentity
+    ) -> tuple[bool, frozenset[str]]:
         """``(is_direct, typedef_origins)`` -- every trust level *identity*
         (a reached record) has ever been reached under. ``is_direct`` is
         ``True`` as soon as *any* reach was ``via_typedef=False``
@@ -684,7 +707,7 @@ class _StdlibReferenceScan:
             frozenset(self._record_typedef_origins.get(identity, ())),
         )
 
-    def next_reached_record(self) -> str | None:
+    def next_reached_record(self) -> SnapshotLocalIdentity | None:
         """Pop the next queued record identity, or ``None`` when the queue
         is empty. Clears the popped identity's pending flag (see
         ``_record_pending``'s own docstring on ``__init__``), so a further
@@ -803,7 +826,7 @@ def _seed_scan_from_public_declarations(
             scan.scan(param.type)
         owner = owner_class_of(fn)
         if owner is not None and owner in non_stdlib_identities:
-            scan.reach_record(owner)
+            scan.reach_record(snapshot_local_identity(owner))
 
     for var in snapshot.variables:
         if stop_when_exhausted and scan.exhausted:
@@ -819,7 +842,7 @@ def _seed_scan_from_public_declarations(
 
 def _walk_reached_records(
     scan: _StdlibReferenceScan,
-    non_stdlib_records: dict[str, list[RecordType]],
+    non_stdlib_records: dict[SnapshotLocalIdentity, list[RecordType]],
     *,
     exclude_export_only: bool = False,
     stop_when_exhausted: bool = True,
@@ -938,11 +961,24 @@ def _run_stdlib_reference_scan(
     :func:`_seed_scan_from_public_declarations`'s own ``stop_when_exhausted``
     docstring for the failure mode this closes).
     """
-    stdlib_identities, non_stdlib_identities, non_stdlib_records = (
+    stdlib_identities, non_stdlib_identities, non_stdlib_record_spellings = (
         _partition_snapshot_types(snapshot)
     )
     if not stdlib_identities:
         return None
+
+    # Re-key the record map into the walk's own node-key domain (ADR-063
+    # Phase 2). `_partition_snapshot_types` keeps returning spelling-keyed
+    # maps on purpose: two of its three return values (`stdlib_identities`,
+    # `non_stdlib_identities`) feed `_spelling_index`'s substring-matching
+    # machinery, where an opaque identity object would be meaningless. Only
+    # the third -- the map the closure walk pops through -- is an identity
+    # domain, so only it is converted, here at the boundary rather than by
+    # widening that shared helper's contract.
+    non_stdlib_records = {
+        snapshot_local_identity(spelling): records
+        for spelling, records in non_stdlib_record_spellings.items()
+    }
 
     # Threaded into the scan's own record_index construction (Codex review,
     # fresh evidence) so a record reached only via a bare spelling that

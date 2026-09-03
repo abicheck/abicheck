@@ -22,6 +22,11 @@ from collections.abc import Collection, Mapping
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
+from .compare.typedefs import (
+    diff_typedefs,
+    is_version_stamped_typedef as is_version_stamped_typedef,
+    typedef_index_pair,
+)
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
@@ -98,6 +103,14 @@ from .model import (
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
 from .model.identity import EntityId
+
+#: Back-compat alias: the ADR-063 Phase 6 typedef cutover moved this
+#: predicate into ``diff_typedefs.py`` with the rest of its family, but
+#: ``checker.py`` and ``tests/test_typedef_version_sentinel.py`` both import
+#: it from here by its private name. A module-level binding rather than an
+#: ``as``-aliased import, since ruff only recognizes the identical-name form
+#: as an intentional re-export.
+_is_version_stamped_typedef = is_version_stamped_typedef
 
 
 def _field_type_genuinely_changed(
@@ -1473,105 +1486,35 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-_VERSION_STAMPED_TYPEDEF_RE = re.compile(r"^(.*?)_version_\d+_\d+_\d+$", re.IGNORECASE)
-"""Pattern for version-stamped compile-time sentinel typedefs.
-
-Some libraries (e.g. libpng) define typedefs whose names encode the library
-version, e.g. ``typedef char* png_libpng_version_1_6_46``.  The name changes
-every release by design — this is NOT a binary ABI break because the typedef
-is never exported as an ELF symbol; it exists solely to produce a
-compile-time error if headers from different versions are mixed.
-
-When such a typedef disappears (``typedef_removed``), abicheck would
-otherwise report BREAKING.  This guard downgrades the change to
-TYPEDEF_VERSION_SENTINEL (COMPATIBLE) instead.
-"""
-
-
-def _is_version_stamped_typedef(name: str) -> bool:
-    """Return True if *name* looks like a version-stamped sentinel typedef."""
-    return bool(_VERSION_STAMPED_TYPEDEF_RE.match(name))
-
-
-def _has_version_family_successor(name: str, new_typedefs: dict[str, str]) -> bool:
-    """Return True if *new_typedefs* contains another version-stamped typedef
-    with the same family prefix (e.g. ``png_libpng_version_``).
-
-    This distinguishes a sentinel rotation (old version removed, new version
-    added) from a genuine typedef removal where the name happens to match the
-    version-stamp pattern.
-    """
-    m = _VERSION_STAMPED_TYPEDEF_RE.match(name)
-    if not m:
-        return False
-    prefix = m.group(1).lower()
-    # Require a non-empty family prefix to avoid matching unrelated sentinels
-    # when the name itself starts with _version_ (e.g. ``_version_1_0_0``).
-    if not prefix:
-        return False
-    prefix = prefix + "_version_"
-    return any(k.lower().startswith(prefix) for k in new_typedefs)
-
-
 @registry.detector("typedefs")
 def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    # RD2-5: don't manufacture phantom TYPEDEF_REMOVED when the new side is stripped.
-    suppress_removed = _removals_are_unconfirmed(old, new)
+    """The typedef family, migrated onto the ``SemanticIR`` read index
+    (ADR-063 Phase 6's first checker cutover).
+
+    What stays here is only the *comparison-level* half: the two
+    snapshot-wide decisions a typedef cannot answer for itself
+    (stdlib-namespace exclusion, and RD2-5's "the new side is stripped, so
+    removals are unconfirmed"), plus which alias map the pair trusts
+    (``_typedef_diff_maps``). Detection itself moved to
+    ``compare.typedefs.diff_typedefs``, which reads only through
+    :class:`~abicheck.model.semantic_ir_index.SemanticIrIndex` and is
+    forbidden by ``scripts/semantic_ir_cutover.py`` from touching a legacy
+    typedef collection at all.
+
+    ``typedef_index_pair`` hands back the ``SemanticIR``-backed index when
+    its own rendered display names exactly reproduce those alias maps on
+    both sides, and the legacy adapter otherwise -- so this is a real read
+    of the IR wherever the IR is faithful, and bit-for-bit the previous
+    behavior everywhere else.
+    """
     old_typedefs, new_typedefs = _typedef_diff_maps(old, new)
-    for alias, old_type in old_typedefs.items():
-        # Full alias: correct for both legacy-DWARF's and the qualified map's keys.
-        if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
-            continue
-        # symbol/name stay bare like _diff_types (else _enrich_affected_symbols
-        # breaks); qualified_suffix disambiguates description so dedup can't collapse collisions.
-        bare_alias = alias.rsplit("::", 1)[-1]
-        qualified_suffix = f" ({alias})" if alias != bare_alias else ""
-        new_type = new_typedefs.get(alias)
-        if new_type is None and suppress_removed:
-            continue
-        eid = old.typedef_entity_ids.get(alias) or new.typedef_entity_ids.get(alias)
-        if new_type is None:
-            # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
-            # compile-time sentinels that change every release by design and
-            # are never exported as ELF symbols -- not a binary ABI break.
-            # Require a same-family successor to avoid hiding a genuine
-            # TYPEDEF_REMOVED for a name that merely matches the pattern.
-            if _is_version_stamped_typedef(alias) and _has_version_family_successor(
-                alias, new_typedefs
-            ):
-                changes.append(
-                    make_change(
-                        ChangeKind.TYPEDEF_VERSION_SENTINEL,
-                        symbol=bare_alias,
-                        name=bare_alias,
-                        old_value=old_type,
-                        entity_id=eid,
-                    )
-                )
-                continue
-            # Typedef removed — breaking for consumers that used the alias
-            changes.append(
-                make_change(
-                    ChangeKind.TYPEDEF_REMOVED,
-                    symbol=bare_alias,
-                    name=bare_alias,
-                    old_value=old_type,
-                    entity_id=eid,
-                    description=f"Typedef removed: {bare_alias}{qualified_suffix}",
-                )
-            )
-        elif new_type != old_type:
-            changes.append(
-                make_change(
-                    ChangeKind.TYPEDEF_BASE_CHANGED,
-                    symbol=bare_alias,
-                    name=bare_alias,
-                    old_value=old_type,
-                    new_value=new_type,
-                    entity_id=eid,
-                    description=f"Typedef base type changed: {bare_alias}{qualified_suffix}",
-                )
-            )
-    return changes
+    old_index, new_index = typedef_index_pair(
+        old, new, old_typedefs=old_typedefs, new_typedefs=new_typedefs
+    )
+    return diff_typedefs(
+        old_index,
+        new_index,
+        exclude_stdlib_namespaces=_exclude_stdlib_namespaces(old, new),
+        suppress_removed=_removals_are_unconfirmed(old, new),
+        is_non_abi_surface_type=_is_non_abi_surface_type,
+    )

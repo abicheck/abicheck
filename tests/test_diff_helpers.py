@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Unit tests for the reusable diff building blocks in ``diff_helpers``."""
+
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
@@ -20,6 +21,7 @@ from abicheck.checker_types import Change
 from abicheck.diff_helpers import (
     bool_transition,
     build_type_map,
+    depth_aware_bare_name,
     diff_by_key,
     fact_known_qualified,
     lookup_matched_type,
@@ -53,7 +55,9 @@ class TestBoolTransition:
 
     def test_values_are_carried_through(self) -> None:
         out = bool_transition(
-            False, True, "sym",
+            False,
+            True,
+            "sym",
             added=ADDED,
             added_values=("non-virtual", "virtual"),
         )
@@ -62,7 +66,9 @@ class TestBoolTransition:
 
     def test_removed_values_are_carried_through(self) -> None:
         out = bool_transition(
-            True, False, "sym",
+            True,
+            False,
+            "sym",
             removed=REMOVED,
             removed_values=("virtual", "non-virtual"),
         )
@@ -93,7 +99,8 @@ class TestDiffByKey:
         old = {"a": 1, "b": 2}
         new = {"b": 2, "c": 3}
         out = diff_by_key(
-            old, new,
+            old,
+            new,
             on_removed=lambda k, v: [self._change(f"removed:{k}")],
             on_added=lambda k, v: [self._change(f"added:{k}")],
             on_common=lambda k, o, n: [self._change(f"common:{k}")],
@@ -112,7 +119,8 @@ class TestDiffByKey:
         old = {"a": 1, "b": 2}
         new = {"a": 1, "c": 3}
         out = diff_by_key(
-            old, new,
+            old,
+            new,
             on_removed=lambda k, v: [self._change(f"removed:{k}")],
             on_added=lambda k, v: [self._change(f"added:{k}")],
         )
@@ -136,7 +144,8 @@ class TestDiffByKey:
         old = {"a": 0}
         new = {"a": 0}
         out = diff_by_key(
-            old, new,
+            old,
+            new,
             on_removed=lambda k, v: [self._change(f"removed:{k}")],
             on_common=lambda k, o, n: [self._change(f"common:{k}")],
         )
@@ -241,7 +250,9 @@ class TestLookupMatchedType:
     def test_fresh_side_against_legacy_other_falls_back_to_bare(self) -> None:
         t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
         own = build_type_map([t])
-        legacy_counterpart = RecordType(name="Handle", qualified_name=None, kind="class")
+        legacy_counterpart = RecordType(
+            name="Handle", qualified_name=None, kind="class"
+        )
         other = build_type_map([legacy_counterpart])
 
         assert lookup_matched_type(own, other, t) is legacy_counterpart
@@ -249,7 +260,9 @@ class TestLookupMatchedType:
     def test_direct_qualified_hit_needs_no_fallback(self) -> None:
         t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
         own = build_type_map([t])
-        counterpart = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        counterpart = RecordType(
+            name="Handle", qualified_name="ns::Handle", kind="class"
+        )
         other = build_type_map([counterpart])
 
         assert lookup_matched_type(own, other, t) is counterpart
@@ -313,8 +326,14 @@ class TestFactKnownQualified:
         old_map = build_type_map([t])
         new_map = build_type_map([t])
         assert fact_known_qualified(
-            old, new, old_map, new_map, "Foo",
-            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+            old,
+            new,
+            old_map,
+            new_map,
+            "Foo",
+            "type:ns::Foo:deprecated",
+            "type:ns::Foo:deprecated",
+            "type:Foo:deprecated",
         )
 
     def test_legacy_bare_key_falls_back_when_unambiguous(self) -> None:
@@ -325,8 +344,14 @@ class TestFactKnownQualified:
         old_map = build_type_map([t])
         new_map = build_type_map([t])
         assert fact_known_qualified(
-            old, new, old_map, new_map, "Foo",
-            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+            old,
+            new,
+            old_map,
+            new_map,
+            "Foo",
+            "type:ns::Foo:deprecated",
+            "type:ns::Foo:deprecated",
+            "type:Foo:deprecated",
         )
 
     def test_ambiguous_bare_name_does_not_fall_back(self) -> None:
@@ -340,8 +365,14 @@ class TestFactKnownQualified:
         old_map = build_type_map([a_foo, b_foo])
         new_map = build_type_map([a_foo])
         assert not fact_known_qualified(
-            old, new, old_map, new_map, "Foo",
-            "type:a::Foo:deprecated", "type:a::Foo:deprecated", "type:Foo:deprecated",
+            old,
+            new,
+            old_map,
+            new_map,
+            "Foo",
+            "type:a::Foo:deprecated",
+            "type:a::Foo:deprecated",
+            "type:Foo:deprecated",
         )
 
     def test_genuinely_unknown_stays_unknown(self) -> None:
@@ -351,8 +382,14 @@ class TestFactKnownQualified:
         old_map = build_type_map([t])
         new_map = build_type_map([t])
         assert not fact_known_qualified(
-            old, new, old_map, new_map, "Foo",
-            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+            old,
+            new,
+            old_map,
+            new_map,
+            "Foo",
+            "type:ns::Foo:deprecated",
+            "type:ns::Foo:deprecated",
+            "type:Foo:deprecated",
         )
 
     def test_asymmetric_qualified_identity_probes_each_side_independently(self) -> None:
@@ -368,8 +405,101 @@ class TestFactKnownQualified:
         old_map = build_type_map([old_color])
         new_map = build_type_map([new_color])
         assert fact_known_qualified(
-            old, new, old_map, new_map, "Color",
+            old,
+            new,
+            old_map,
+            new_map,
+            "Color",
             "type:Color:deprecated",  # old's own type_map_key() -- bare
             "type:ns::Color:deprecated",  # new's own type_map_key() -- qualified
             "type:Color:deprecated",
         )
+
+
+class TestDepthAwareBareName:
+    """`depth_aware_bare_name` splits a qualified name at its outermost
+    (depth-zero) `"::"` only, never inside a template argument's own
+    qualification or nested expression brackets."""
+
+    def test_bare_name_is_returned_unchanged(self) -> None:
+        assert depth_aware_bare_name("Handle") == "Handle"
+
+    def test_splits_at_a_plain_scope_boundary(self) -> None:
+        assert depth_aware_bare_name("ns::Handle") == "Handle"
+
+    def test_does_not_split_inside_a_qualified_template_argument(self) -> None:
+        """Regression for the Codex review on PR #1041: a naive
+        `rsplit("::", 1)` on `"api::Wrapper<dep::Tag>"` wrongly extracts
+        `"Tag>"` instead of the real leaf `"Wrapper<dep::Tag>"`."""
+        assert depth_aware_bare_name("api::Wrapper<dep::Tag>") == "Wrapper<dep::Tag>"
+
+    def test_does_not_split_on_a_parenthesized_relational_angle(self) -> None:
+        """A relational `>` used as a parenthesized non-type template
+        argument (`S<(N > 0), dep::Tag>`) is not a real template delimiter
+        -- the depth-zero `::` before `Tag` must still be found only
+        *inside* the template, not read as the outer scope boundary."""
+        assert (
+            depth_aware_bare_name("api::S<(N > 0), dep::Tag>") == "S<(N > 0), dep::Tag>"
+        )
+
+    def test_does_not_split_on_an_array_subscript_relational_angle(self) -> None:
+        """Regression for the Codex review on PR #1041, fourth follow-up
+        round: an array-subscript comparison (`arr[1 > 0]`) needs no
+        surrounding parens to be valid C++, so parenthesis tracking alone
+        still let this shape's stray `>` close the outer template early,
+        splitting inside `dep::Tag` instead of returning the whole
+        unqualified leaf."""
+        assert (
+            depth_aware_bare_name("api::S<arr[1 > 0], dep::Tag>")
+            == "S<arr[1 > 0], dep::Tag>"
+        )
+
+    def test_splits_after_a_bracketed_template_argument(self) -> None:
+        """Complement of the bracket-nesting fix: a genuine depth-zero
+        `::` *after* the templated segment closes must still split."""
+        assert depth_aware_bare_name("ns::S<arr[1 > 0], dep::Tag>::Inner") == "Inner"
+
+    def test_does_not_split_on_a_quoted_literal_angle(self) -> None:
+        """Regression for the Codex review on PR #1041, seventh follow-up
+        round: a quoted character literal used as a non-type template
+        argument (`S<'>', dep::Tag>`, valid C++, retained verbatim by
+        clang) has the same problem one level down from the parenthesized/
+        bracketed relational cases: the `>` inside the literal sits at
+        neither paren nor bracket depth, so it still closed the outer
+        template early, splitting inside `dep::Tag` instead of returning
+        the whole unqualified leaf."""
+        assert depth_aware_bare_name("api::S<'>', dep::Tag>") == "S<'>', dep::Tag>"
+
+    def test_handles_a_right_shift_inside_a_parenthesized_non_type_argument(
+        self,
+    ) -> None:
+        """The bracket-KIND-aware stack `iter_top_level_chars` shares with
+        `extract.semantic_normalizer_artifacts.has_unresolved_component`
+        also resolves a case no round of this fix set out to close
+        directly: a real `>>` shift/comparison operator inside a
+        parenthesized non-type template argument (`S<(N >> 1), dep::Tag>`)
+        is not two template closers, so it must not split inside
+        `dep::Tag` either."""
+        assert (
+            depth_aware_bare_name("api::S<(N >> 1), dep::Tag>")
+            == "S<(N >> 1), dep::Tag>"
+        )
+
+    def test_does_not_split_on_a_braced_structural_template_argument(self) -> None:
+        """A C++20 structural non-type template argument's own braced
+        initializer (`S<A{1 < 2}>`, which clang can render verbatim) must
+        have its internal `<` tracked as nested like a paren/bracket, not
+        mistaken for a template opener that would prematurely close the
+        outer template and split inside it (Codex review on PR #1041,
+        follow-up round)."""
+        assert depth_aware_bare_name("api::S<A{1 < 2}>::Inner") == "Inner"
+
+    def test_tolerates_unbalanced_brackets(self) -> None:
+        """Defensive-floor coverage for the paren/bracket/angle depth
+        guards: a stray closing `)`, `]`, or `>` with no matching opener
+        must not drive any depth counter negative. No real, well-formed
+        qualified name produces an unbalanced spelling, but this scan runs
+        on rendered text from multiple producers rather than parsing it."""
+        assert depth_aware_bare_name("ns)::Handle") == "Handle"
+        assert depth_aware_bare_name("ns]::Handle") == "Handle"
+        assert depth_aware_bare_name("ns>::Handle") == "Handle"
