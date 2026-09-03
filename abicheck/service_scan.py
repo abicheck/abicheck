@@ -1129,7 +1129,7 @@ def estimate_artifact_set(
         blocker = (
             f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
             "and --build-config declares no build.query -- the real run "
-            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1), not run as "
+            "would fail with EVIDENCE_CONTRACT_ERROR (exit 7), not run as "
             "priced below."
         )
     for member_path in member_paths:

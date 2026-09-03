@@ -3886,6 +3886,44 @@ second top-level spelling of the same fact.
 > five-minute patch. Left for a future session alongside the two items
 > above.
 
+> **Update (2026-09-03, fourth round): the single-binary `--format text`
+> gap closed for good, via a dedicated exit code, not a hardened marker.**
+> Three further Codex review rounds on the landing PR (#1032) each found
+> the prior fix's stderr/marker-file signal forgeable in a new way: round
+> 2 — an unanchored `grep -q` match spoofed by a diagnostic merely
+> containing the marker text (fixed with whole-line `grep -Fxq`); round 3
+> — even that whole-line match spoofed by a crafted path with an embedded
+> newline, echoed into a wholly unrelated error message (fixed by moving
+> the signal to a private marker-file path, `$ABICHECK_EVIDENCE_CONTRACT_
+> MARKER_FILE`, that `action/run.sh` creates and names itself); round 4 —
+> that path itself leaked as an inherited environment variable to every
+> subprocess `abicheck` spawns during evidence collection (build-tool
+> queries over the *analyzed* checkout), letting a PR-controlled build
+> script read it and forge the marker directly — and even after popping
+> the variable from `os.environ` at import time, it stayed recoverable via
+> `/proc/<pid>/environ`, which reflects a process's *initial* environment
+> regardless of later mutation. No channel derived from text or the
+> environment closes this class of forgery. The final fix replaces the
+> whole mechanism with a dedicated process exit code
+> (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR = 7`, matched by
+> `workflows/scan_abort_result.py`'s `_SCAN_ABORT_VERDICTS` and
+> `policy/exit_decision_precedence.py`'s `resolve_scan_exit_decision`
+> default) — this process's own choice, reported to its trusted parent
+> shell by the OS kernel via `wait()`, which no subprocess this run spawns
+> can alter. `_evidence_contract_gated()`, `write_evidence_contract_
+> marker()`, and the marker-file/env-var machinery are deleted outright;
+> `action/run.sh`'s `case $ABICHECK_EXIT in ... 7) ...` dispatches
+> unconditionally, with no predicate, no JSON report, and no stderr/
+> environment signal needed. This closes the single-binary half of the
+> `--format text` gap completely, not just hardens it further.
+> `tests/test_action_run_sh_scan_evidence_contract_error.py` was rewritten
+> for the new mechanism (its own module docstring has the condensed
+> four-round account); `docs/reference/exit-codes.md` and this repo's
+> `AGENTS.md` gained the new `7` row. **Still open, unchanged by this
+> round:** the `--artifact-set` member-level signal — whether the
+> exit-code approach generalizes to it is its own, separate design
+> question, not attempted here — and the typed-API `gate.*` pack field.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects
@@ -4289,7 +4327,11 @@ reason — Codex review, fresh evidence against `scan_engine.py`)**:
 
 ```text
 usage/config error            (outside the report entirely — 64 everywhere)
-scan evidence-contract error  (scan only, exit 1 — see below)
+scan evidence-contract error  (scan only, exit 7 as of 2026-09-03 — a
+                                dedicated code, no longer the generic
+                                exit 1 the paragraph below still describes
+                                as the contemporary state when written;
+                                see PR G2's own "fourth round" update above)
 scan budget exceeded          (scan only, exit 5 — see below; dominates
                                 not-comparable when both would apply)
 not comparable                (dominates the gate/coverage/assurance axes
@@ -4904,12 +4946,15 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        cli_compare_release_helpers.py through
                                        workflows/gate.py's facade); the
                                        single-binary half of the scan
-                                       --format text gap closed 2026-09-03
-                                       (a stable stderr marker on
-                                       _EvidenceContractError, matched by
-                                       action/run.sh's own stderr fallback --
-                                       see PR 4's own section for the full
-                                       account); the typed-API half of the
+                                       --format text gap closed 2026-09-03,
+                                       for good, via a dedicated process
+                                       exit code on _EvidenceContractError
+                                       (7 -- three further review rounds
+                                       each found a stderr/marker-file
+                                       signal forgeable in a new way; see
+                                       PR 4's own section for the full
+                                       four-round account); the typed-API
+                                       half of the
                                        parity pass closed 2026-09-03
                                        (CompareRequest/ScanRequest severity_
                                        preset/exit_code_scheme fields, both
@@ -4921,7 +4966,7 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        for the Action (the --format text
                                        gap's remaining half -- a member's
                                        abort never reaches the single-binary
-                                       catch site's stderr marker at all)
+                                       catch site's own exit code at all)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;

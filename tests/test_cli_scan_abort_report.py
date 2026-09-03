@@ -138,12 +138,17 @@ def test_evidence_contract_error_json_report_has_exit_block(
             "json",
         ],
     )
-    assert res.exit_code != 0, res.output
+    # 7, not 1: `cli_scan.py`'s dedicated `_EXIT_EVIDENCE_CONTRACT_ERROR`
+    # (2026-09-03) -- see that constant's own comment for why a generic
+    # ClickException exit code was replaced (three Codex review rounds
+    # each found the prior stderr/marker-file signals for this axis
+    # forgeable by a PR-controlled build script).
+    assert res.exit_code == 7, res.output
     payload = _abort_payload(res)
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
     assert payload["verdict"] == "EVIDENCE_CONTRACT_ERROR"
-    assert payload["exit_code"] == 1
-    assert payload["diff"]["exit"]["code"] == 1
+    assert payload["exit_code"] == 7
+    assert payload["diff"]["exit"]["code"] == 7
     assert payload["diff"]["exit"]["reasons"] == ["evidence_contract_error"]
 
 
@@ -154,14 +159,16 @@ def test_evidence_contract_error_text_format_has_no_json_report(
         main,
         ["scan", str(new_snap_compatible), "--depth", "source"],
     )
-    assert res.exit_code != 0, res.output
+    # Update (2026-09-03, fourth round): this axis's classification signal
+    # is now its own dedicated process exit code (7), un-spoofable by
+    # anything a subprocess this run spawns could do -- see
+    # `_EXIT_EVIDENCE_CONTRACT_ERROR`'s own comment in `cli_scan.py` for
+    # the full four-round account. No JSON report on `--format text`
+    # (unchanged), and no special stderr marker either any more: the exit
+    # code alone is the signal `action/run.sh` now dispatches on.
+    assert res.exit_code == 7, res.output
     assert "{" not in res.output
-    # Update (2026-09-03, closing the "--format text gap" ADR-064 named as
-    # still open): no JSON *report*, but a stable stderr marker is now
-    # always printed on this abort -- the signal `action/run.sh`'s
-    # `_evidence_contract_gated()` stderr fallback greps for when there is
-    # no JSON report to read at all.
-    assert "abicheck: scan aborted — evidence-contract error (ADR-037 D5)" in res.output
+    assert res.output.startswith("Error: ")
 
 
 def test_budget_overflow_writes_secondary_json_report(
@@ -207,11 +214,11 @@ def test_evidence_contract_error_writes_secondary_json_report(
             f"json={secondary}",
         ],
     )
-    assert res.exit_code != 0, res.output
+    assert res.exit_code == 7, res.output
     payload = json.loads(secondary.read_text())
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
     assert payload["verdict"] == "EVIDENCE_CONTRACT_ERROR"
-    assert payload["exit_code"] == 1
+    assert payload["exit_code"] == 7
     assert payload["diff"]["exit"]["reasons"] == ["evidence_contract_error"]
 
 

@@ -775,41 +775,30 @@ outputs:
       that isn't a recognisable CPython extension module -- see the
       command's own error message for which one applied. Like
       NOT_COMPARABLE, this fails the step unconditionally and is
-      distinct from ERROR, which covers a genuine CLI/config error --
-      only published as this distinct verdict when a JSON report exists
-      for this Action to read it from -- whether one was produced this
-      run depends on the *effective* invocation, not any one input
-      considered alone: an auto-injected `--write json=...` sidecar, the
-      run's own extra-args already naming one via `--write`, this
-      Action's own `format: json` input, or extra-args overriding
-      `--format` in either direction (`--format json` under `format:
-      text`, or `--format text` under `format: json` -- both directions
-      ARE detected, via `_effective_format`, so `format: json` alone is
-      not a reliable guarantee any more than `format: text` alone is a
-      reliable disqualifier, but the override itself is not a gap: this
-      Action's JSON-detection sites gate on the effective value, not the
-      nominal one). This description does not attempt to enumerate
-      every format/pr-comment/extra-args combination that does or
-      doesn't produce one, since five successive review rounds each
-      found the previous claim incomplete (pr-comment: false; an
-      --artifact-set scan; extra-args already owning --write for a
-      non-JSON format; extra-args overriding a text primary format to
-      JSON; extra-args overriding a JSON primary format back to text --
-      the last two are mirror images of the same "the effective
-      invocation, not the configured input, decides" root cause, and are
-      the ones the override detection above now closes);
-      action/run.sh's own JSON-detection logic (`_json_report_src` and
-      the `_STDOUT_JSON_FILE` capture immediately above it -- search that
-      file for either name, plus `_effective_format`) is the one
-      authoritative source, with no shortcut claim in this description
-      standing in for it. Whenever no JSON report exists at all (no
-      sidecar, no `--write`, no JSON-format primary output, effective or
-      otherwise), this still reads as the generic ERROR, a documented,
-      unclosed gap.
-      new-library-set (--artifact-set) scans are a stricter case of the
-      same gap: the JSON sidecar is never auto-requested for that mode
-      regardless of pr-comment, so a JSON report requires either
-      format: json or the run's own extra-args to have written one --
+      distinct from ERROR, which covers a genuine CLI/config error.
+      For a single ARTIFACT (not --artifact-set), published unconditionally
+      as of 2026-09-03 -- the scan process's own dedicated exit code
+      (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`, 7) makes this axis
+      unambiguous to `action/run.sh`'s exit-code dispatch regardless of
+      format, pr-comment setting, or extra-args, closing a gap four
+      successive review rounds found in three earlier signaling designs
+      (a stderr marker line, then a marker-file path, each shown forgeable
+      by a PR-controlled build script the scan's own evidence collection
+      spawns -- see ADR-064 for the full account). Whether a JSON report
+      also exists for this Action to read (auto-injected `--write
+      json=...` sidecar, extra-args naming one, `format: json`, or
+      extra-args overriding `--format` in either direction, detected via
+      `_effective_format`) still decides only whether the sticky PR
+      comment and JSON-consuming outputs have structured detail to show,
+      not whether this verdict/exit-code publish at all.
+      new-library-set (--artifact-set) scans are the one case this fix does
+      not reach: a member's `_EvidenceContractError` is caught inside
+      `service_scan._run_scan_one_member` and converted to a per-member
+      `ScanResult` there, never reaching the single-binary catch site or
+      its dedicated exit code -- a documented, unclosed gap, and the JSON
+      sidecar is never auto-requested for that mode regardless of
+      pr-comment, so a JSON report requires either format: json or the
+      run's own extra-args to have written one --
       AND, even when a JSON report does exist, ScanSetResult's own aggregation
       (service_scan._aggregate_scan_set_verdict) reports this verdict at
       the set's top level only when it is the *worst* outcome across the
@@ -862,19 +851,19 @@ outputs:
       incomplete contract coverage, or incomplete analysis assurance with
       the require-complete-analysis input -- as on compare, the three
       share the code and are told apart the same way, one level down
-      under diff; independently of --against, also an unsatisfied
-      evidence contract (ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR --
-      either a pinned --depth/--source-method whose required source
-      evidence was never collected, or --abi3 targeting a binary that
-      isn't a recognisable CPython extension module) -- reachable on an
-      audit-only scan too, since the underlying precondition checks run
-      regardless of whether a baseline comparison follows, but only
-      published as that distinct verdict when a JSON report exists to
-      carry it -- see the verdict output's own description above for
-      exactly which format/pr-comment/extra-args combinations produce
-      one; otherwise this still exits 1 as the generic ERROR),
+      under diff),
       2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
-      candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE).
+      candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE),
+      7 (evidence-contract error, ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR
+      -- either a pinned --depth/--source-method whose required source
+      evidence was never collected, or --abi3 targeting a binary that
+      isn't a recognisable CPython extension module; reachable on an
+      audit-only scan too, since the underlying precondition checks run
+      regardless of whether a baseline comparison follows; this process's
+      own dedicated exit code as of 2026-09-03, published unconditionally
+      for a single ARTIFACT -- see the verdict output's own description
+      above for the one remaining gap, --artifact-set member-level
+      aborts).
       deps-compare: 0 (pass), 1 (warn),
       4 (fail). deps-tree: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.

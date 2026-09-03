@@ -33,7 +33,6 @@ import-cycles gate flags.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,92 +42,6 @@ from .buildsource.scan_levels import EvidenceDepth
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import SourceMethod
-
-# Captured -- and immediately stripped from THIS process's environment --
-# at import time. See `write_evidence_contract_marker`'s own docstring
-# ("round 3") for why: this module is one of the first things `cli.py`'s
-# unconditional command-registration import block loads, for every
-# `abicheck` invocation, well before any subcommand body runs and so before
-# this process could have spawned any subprocess of its own. `os.environ`
-# mutations apply to every subsequent `subprocess`/`Popen` call in this
-# process (the default `env=None` copies the *current* `os.environ`, not a
-# snapshot from process start), so popping it here -- rather than reading
-# it later, at exception time, via `os.environ.get(...)` -- means no
-# build-tool child this process goes on to spawn (cmake/make/the compiler
-# probes `deadline.run_bounded` launches, none of which pass a restricted
-# `env=`) ever inherits it. `write_evidence_contract_marker` reads this
-# captured value, never `os.environ` directly.
-_EVIDENCE_CONTRACT_MARKER_FILE: str | None = os.environ.pop(
-    "ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE", None
-)
-
-
-def write_evidence_contract_marker() -> None:
-    """Signal an ``_EvidenceContractError`` abort (ADR-037 D5) to
-    ``action/run.sh`` over a non-forgeable channel, when the Action set one
-    up.
-
-    The one genuine side effect in this otherwise click-free/side-effect-
-    free module (see the module docstring) -- deliberately isolated here
-    rather than inlined at ``cli_scan.py``'s call site, both to keep that
-    (near the 2000-line hard cap) module's own except-block terse and so
-    this security property has exactly one place to read/audit.
-
-    History (three Codex review rounds on PR #1032, each closing a
-    different way the previous version stayed forgeable):
-
-    - Round 1: the first version printed a fixed marker line to stderr for
-      ``action/run.sh``'s ``_evidence_contract_gated()`` to grep when no
-      JSON report exists (``--format text``, no JSON secondary output) --
-      an unanchored substring match (``grep -q``), so a diagnostic that
-      merely *contained* the marker text could spoof it. Fixed with a
-      whole-line match (``grep -Fxq``).
-    - Round 2: even a whole-line match on ``$STDERR_CONTENT`` stayed
-      forgeable, since a legal Unix filename may itself contain embedded
-      newlines -- a crafted ``INPUT_NEW_LIBRARY`` path echoed verbatim into
-      a wholly unrelated "Failed to load --binary" error (a different raise
-      site than this axis's own) could still produce a standalone stderr
-      line identical to the marker text. No anchoring closes that class,
-      since the shared stream's content is itself attacker-influenced.
-      Fixed by moving the signal off stderr entirely, onto
-      ``$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`` -- a private temp-file
-      path ``action/run.sh`` creates and names itself (via ``mktemp``,
-      never from any ``INPUT_*``/PR-controlled value).
-    - Round 3: that path was still passed as an *inherited* environment
-      variable, and this process spawns build-tool subprocesses of its own
-      during evidence collection (``deadline.run_bounded``'s ``Popen``
-      calls, none of which restrict ``env=``) over the *analyzed* checkout
-      -- a PR-controlled build script could read the variable and write the
-      marker itself, forging an ``EVIDENCE_CONTRACT_ERROR`` classification
-      for an unrelated failure (a severity/coverage gate, a crash) later in
-      the same run. Fixed by popping the variable out of ``os.environ`` at
-      this module's import time (see the module-level capture above) --
-      before any subprocess this process spawns can inherit it -- rather
-      than reading it live at exception time.
-
-    Neither half of the signal is attacker-reachable any more: the *path*
-    is chosen solely by the trusted wrapper script and never re-enters this
-    process's own environment past import time, and the *content* written
-    here is a fixed literal with no interpolated diagnostic text --
-    nothing else in this process ever writes to that path, so no unrelated
-    error or subprocess can produce a false positive on it. A stderr
-    marker line is still printed alongside this (unchanged, for human
-    debugging in the Action's log) but is no longer consulted for
-    classification.
-
-    No-op (silently) when the env var wasn't set at import time -- true for
-    every direct CLI invocation outside the composite Action, and for the
-    Action's own non-``scan`` modes, which never raise this exception.
-    Best-effort: a write failure (unwritable path, out of disk) must never
-    mask the real ``_EvidenceContractError`` it's reporting alongside."""
-    if not _EVIDENCE_CONTRACT_MARKER_FILE:
-        return
-    try:
-        Path(_EVIDENCE_CONTRACT_MARKER_FILE).write_text(
-            "evidence_contract_error\n", encoding="utf-8"
-        )
-    except OSError:
-        pass
 
 
 # --- operand/flag validation (click-free, no ScanOutcome dependency) --------

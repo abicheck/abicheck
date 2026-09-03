@@ -119,7 +119,6 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     render_verdict_lines,
     resolve_effective_allow_query,
     scan_pattern_roots,
-    write_evidence_contract_marker,
 )
 from .frontends.cli.help import scan_help_options
 from .frontends.cli.options.params import (
@@ -166,6 +165,16 @@ _merge_compile_config = merge_compile_config
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
 #: generic error code (1) so CI can tell a budget overflow from a real break.
 _EXIT_BUDGET_OVERFLOW = 5
+
+#: Exit code for scan's own evidence-contract abort (ADR-037 D5,
+#: ``_EvidenceContractError``) -- a dedicated code, not the generic
+#: ClickException code (1). Earlier stderr/marker-file signals for this
+#: axis were each shown forgeable by a PR-controlled build script running
+#: as part of this scan's own evidence collection (three Codex rounds, PR
+#: #1032); this process's own exit code, reported to its parent by the OS
+#: kernel, is the one channel nothing this run spawns can forge. See
+#: ADR-064. Distinct from every other value scan uses (0/1/2/4/5/6/64).
+_EXIT_EVIDENCE_CONTRACT_ERROR = 7
 
 #: Suffixes ``time``-style duration strings accept (``15m``, ``900s``, ``1h``).
 _DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
@@ -1958,18 +1967,10 @@ def scan_cmd(
         )
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
-        # A pinned depth that can't collect its evidence is a usage contract
-        # violation → a clean CLI error (exit 1), distinct from the verdict
-        # codes (2/4) and the budget code (5). Signals the Action over a
-        # private marker file when one is configured -- see
-        # `write_evidence_contract_marker`'s own docstring for the full
-        # rationale (closes ADR-064's "--format text gap" without the
-        # stderr-parsing forgery class two review rounds found there).
-        write_evidence_contract_marker()
-        click.echo(
-            "abicheck: scan aborted — evidence-contract error (ADR-037 D5)",
-            err=True,
-        )
+        # A pinned depth that can't collect its evidence is a usage-contract
+        # violation with its own dedicated exit code -- see
+        # `_EXIT_EVIDENCE_CONTRACT_ERROR`'s own comment for why.
+        click.echo(f"Error: {ce.message}", err=True)
         _emit_scan_abort_report(
             "evidence_contract_error",
             fmt,
@@ -1977,7 +1978,7 @@ def scan_cmd(
             secondary_fmt=secondary_fmt,
             secondary_output=secondary_output,
         )
-        raise click.ClickException(ce.message) from ce
+        sys.exit(_EXIT_EVIDENCE_CONTRACT_ERROR)
     except PlanningError as exc:
         raise click.UsageError(str(exc)) from exc
     finally:

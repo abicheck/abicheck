@@ -90,10 +90,18 @@ verbatim into a wholly unrelated "Failed to load --binary" error). Fixed by
 moving the signal off stderr entirely onto a private marker file
 `action/run.sh` creates and names itself
 (`$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`, never from any `INPUT_*` value)
-— see `cli_scan_helpers.write_evidence_contract_marker`'s own docstring for
-the full account of both rounds. The stderr marker line is still printed
-for human debugging but is no longer consulted for classification. **Update
-(2026-09-03): the typed-API half of the parity pass closed.**
+— see `cli_scan_helpers.write_evidence_contract_marker`'s own docstring (as
+it stood before round 4, below) for the full account of both rounds. The
+stderr marker line is still printed for human debugging but is no longer
+consulted for classification. **Update (2026-09-03, third round):** that
+marker-file path itself leaked — passed as an inherited environment
+variable, it stayed visible to every subprocess `abicheck` spawns during
+evidence collection (build-tool queries over the *analyzed* checkout), so
+a PR-controlled build script could read it and forge the marker directly.
+Fixed by popping the variable out of this process's own `os.environ` at
+`cli_scan_helpers`' import time — before `scan`'s own body, and so before
+any subprocess of this run, ever executes — rather than reading it live at
+exception time. **Update (2026-09-03): the typed-API half of the parity pass closed.**
 `CompareRequest`/`ScanRequest` gained `severity_preset`/`exit_code_scheme`
 fields, resolved through the identical `abicheck.policy.
 release_gate_options.GateOptions` object (`resolve_release_gate_options(
@@ -111,12 +119,35 @@ equivalent of); adding them would have been new surface beyond CLI parity,
 not parity itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4" section, own 2026-09-03 update, for
 the full account, including the new `abicheck/workflows/scan_gate_options.py`
-leaf module and the `api_types.py` debt-baseline move this needed. Still
-open: a typed request's own `gate.*` pack field (`--pack` stays a CLI-only
-selector, ADR-049 D8); the `--artifact-set` member-level evidence-contract
-signal, the one remaining half of the `--format text` gap — a member's
-abort never reaches the single-binary catch site the prior update fixed;
-and **stage 2**, the `--exit-code-scheme` removal itself. See
+leaf module and the `api_types.py` debt-baseline move this needed.
+**Update (2026-09-03, fourth round — the single-binary `--format text` gap
+closed for good):** a fourth Codex review round on the same PR found the
+marker-file design (round 2/3) unsound at its root, not merely
+under-hardened — `/proc/<pid>/environ` reflects a process's *initial*
+environment block regardless of any later `os.environ`/`unsetenv`
+mutation, so even popping the variable at import time (round 3) left it
+recoverable by a child process reading its own ancestor's `/proc` entry.
+No channel derived from text (stderr) or from the environment can close
+this class; the fix replaces the whole marker mechanism with a dedicated
+process exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR = 7`,
+`workflows/scan_abort_result.py`'s `_SCAN_ABORT_VERDICTS` and
+`policy/exit_decision_precedence.py`'s `resolve_scan_exit_decision`
+default updated to match) — this process's own choice, made once at its
+own `sys.exit()` call and reported to its trusted parent shell by the OS
+kernel via `wait()`, which no subprocess this run spawns can alter.
+`action/run.sh`'s `_evidence_contract_gated()` helper and the whole
+marker-file apparatus (`write_evidence_contract_marker`,
+`$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`) are deleted outright — the
+`case $ABICHECK_EXIT in ... 7) ...` dispatch needs no predicate, no JSON
+report, and no stderr/environment signal at all. This closes the
+single-binary half of the `--format text` gap completely (not just
+hardens it further); the `--artifact-set` member-level signal (below)
+remains a separate, open question — the case-code approach may or may not
+generalize to it, and that design question has not been attempted here.
+Still open: a typed request's own `gate.*` pack field (`--pack` stays a
+CLI-only selector, ADR-049 D8); the `--artifact-set` member-level
+evidence-contract signal; and **stage 2**, the `--exit-code-scheme`
+removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -1065,6 +1096,35 @@ lands in two stages rather than one atomic change:
       `--write json=...` injection) -- a separate, not-yet-scoped piece of
       work. The typed-API half of the parity pass also remains open,
       unchanged.
+
+      **Superseded (2026-09-03, rounds 2-4):** the stderr-marker mechanism
+      described immediately above is gone. Round 2 (Codex) found the
+      unanchored `grep -q` match forgeable by a diagnostic merely
+      *containing* the marker text; tightened to a whole-line `grep -Fxq`.
+      Round 3 (Codex) found even that forgeable, since a legal Unix
+      filename may embed a newline -- a crafted path echoed into a wholly
+      unrelated error message could still produce a standalone line
+      identical to the marker; the signal moved to a private marker-file
+      path (`$ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`) `action/run.sh`
+      creates and names itself. Round 4 (Codex) found *that* forgeable
+      too, at the root: the path leaked as an inherited environment
+      variable to every subprocess this scan spawns during evidence
+      collection, and even popping it from `os.environ` at import time
+      left it recoverable via `/proc/<pid>/environ`, which reflects a
+      process's initial environment regardless of later mutation. No
+      channel derived from text or environment closes this class. The
+      final design replaces all of it with a dedicated process exit code
+      (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR = 7`) -- `_evidence_
+      contract_gated()`, `write_evidence_contract_marker()`, and the
+      marker-file/env-var machinery are deleted outright; the
+      `case $ABICHECK_EXIT in ... 7) ...` dispatch needs no predicate, no
+      JSON report, and no stderr/environment signal. This closes the
+      single-binary half of the gap completely. `test_action_run_sh_
+      scan_evidence_contract_error.py`'s own module docstring has the
+      condensed four-round account; this section's own status header
+      (above) has the rest. The `--artifact-set` member-level signal
+      remains open and unattempted -- whether the exit-code approach
+      generalizes to it is its own, separate design question.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
