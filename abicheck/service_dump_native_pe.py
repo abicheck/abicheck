@@ -179,10 +179,13 @@ def _dump_pe(
     # signal to classify against. Bounded so default PE diffs are unaffected.
     pdb_types: list[RecordType] = []
     pdb_enums: list[EnumType] = []
+    pdb_ir = None
     if headers and dwarf_meta is not None:
-        from .pdb_model import model_types_from_dwarf_metadata
+        from .pdb_model import model_types_from_dwarf_metadata, pdb_semantic_ir
 
         pdb_types, pdb_enums = model_types_from_dwarf_metadata(dwarf_meta)
+        if pdb_types or pdb_enums:
+            pdb_ir = pdb_semantic_ir(pdb_types, pdb_enums)
 
     return AbiSnapshot(
         library=path.name,
@@ -195,6 +198,7 @@ def _dump_pe(
         dwarf_advanced=dwarf_adv,
         platform="pe",
         scope_fallback=scope_fallback,
+        semantic_ir=pdb_ir,
     )
 
 
