@@ -542,6 +542,43 @@ check — a hand-built document missing e.g. `provenance.version` entirely
 fails on import rather than passing silently through and only failing
 later, if ever, on export.
 
+**8B's remaining two items investigated (2026-09-03): both explicitly
+blocked, not merely unstarted.** "Multi-artifact `ProjectSnapshot`
+packages" and "baseline-set/`BundleFacts` folded into sections" are not a
+one-line aspiration with no design behind them — `storage-format-v2.md`'s
+own A1.4/A1.5 sections carry a full, concrete design (a `PackageManifest
+.project_sections: Mapping[str, ObjectRef]` field for cross-library
+evidence stored once and shared by every `ArtifactRef` that needs it, a new
+`bundle_facts_store.py` reader/writer reconstructing a `BundleFacts`-shaped
+view so `compare_bundle_from_facts`'s existing tests pass unmodified,
+concrete file/test/acceptance-criteria lists). `PackageManifest.
+artifact_refs`/`.variant_refs` are already generic tuples and
+`__post_init__` already validates an arbitrary-length collection
+(`storage/package.py`) — the *object model* has supported this shape since
+A1.1 landed. What is missing is a producer: every real writer today
+(`import_v1.import_legacy_snapshot`, `project_snapshot_legacy
+.write_legacy_snapshot_package`, `sectioned_document`'s hard-coded single
+artifact/variant id) is wired to exactly one artifact, and no test
+round-trips a genuinely multi-artifact package successfully (only
+duplicate-id/collision *rejection* tests construct more than one
+`ArtifactRef`).
+
+**Why this isn't implemented here anyway.** `storage-format-v2.md`'s own
+"Relationship to G38" section states the constraint directly: this plan's
+Phase 1 and G38's own Phase 2 target the *same* eventual container, "They
+are complementary and must not both grow a container format... **Do not
+implement a third persisted bundle shape**." `one-semantic-pipeline.md`'s
+own Phase 8 text is equally explicit: "any remaining legacy baseline-set/
+`BundleFacts`-only code path once the `ProjectSnapshot` import adapter
+covers it — per ADR-062's own phasing, **not accelerated here**." This is a
+recorded governance decision, not a scope judgment this session is free to
+override — proceeding without the G38-side coordination the design itself
+requires would risk building exactly the "third persisted bundle shape"
+both texts name as the failure mode to avoid. Recorded here, per this
+repo's own "say so explicitly and record the gap" convention, rather than
+attempted against the plan's own stated blocker or left silently
+unaddressed.
+
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
 gap 6B's own migration would otherwise trip on, and 6B is what actually
