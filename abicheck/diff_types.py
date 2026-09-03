@@ -90,6 +90,7 @@ from .model import (
     RecordType,
     TypeField,
     canonicalize_type_name,
+    compare_facts,
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
     is_non_abi_surface_type as _is_non_abi_surface_type,
@@ -1090,79 +1091,118 @@ def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
 
 
 def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+    """``bases``/``virtual_bases`` findings — ADR-063 Phase 5B's first
+    ``FactStatus``-aware cohort.
+
+    Each side's evidence is gated through :func:`compare_facts` *before*
+    the two lists are compared: an incomplete ``bases_fact``/
+    ``virtual_bases_fact`` on either side (``NOT_COLLECTED``/``FAILED``/
+    an ``UNSUPPORTED`` producer) used to fall through
+    ``resolved_fact_value(..., [])`` and read as "this side has no bases" —
+    fabricating ``TYPE_BASE_CHANGED``/``BASE_CLASS_VIRTUAL_CHANGED`` findings
+    against real bases on the other side purely from a capture gap, not a
+    real hierarchy change. This declines to compare instead (the same
+    "decline rather than fabricate" discipline ``diff_types_vtable.
+    _vtable_transition_is_evidenced`` already applies to the sibling vtable
+    signal), rather than changing what a *fully-evidenced* pair reports —
+    behavior-preserving whenever both sides' facts are actually
+    ``PRESENT``/``PARTIAL``.
+
+    The two comparisons are gated independently: a comparable
+    ``virtual_bases`` pair with an incomplete ``bases`` pair still reports a
+    virtual-base-only hierarchy change (just without the finer
+    became-virtual/lost-virtual classification, which needs the
+    non-virtual-base set too) rather than being withheld entirely.
+    """
     changes: list[Change] = []
-    old_bases = resolved_fact_value(t_old.bases_fact, [])
-    new_bases = resolved_fact_value(t_new.bases_fact, [])
-    old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
-    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
     entity_id = t_old.entity_id or t_new.entity_id
 
-    # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
-    # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
-    old_bases_set = set(old_bases)
-    new_bases_set = set(new_bases)
-    if old_bases_set == new_bases_set and old_bases != new_bases:
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_POSITION_CHANGED,
-                symbol=name,
-                name=name,
-                old_value=str(old_bases),
-                new_value=str(new_bases),
-                entity_id=entity_id,
-            )
-        )
-    elif old_bases_set != new_bases_set:
-        # General base class set change (add/remove base) → TYPE_BASE_CHANGED
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_BASE_CHANGED,
-                symbol=name,
-                description=f"Base classes changed: {name}",
-                old_value=str(old_bases),
-                new_value=str(new_bases),
-                entity_id=entity_id,
-            )
-        )
+    bases_cmp = compare_facts(t_old.bases_fact, t_new.bases_fact, [])
+    virtual_bases_cmp = compare_facts(
+        t_old.virtual_bases_fact, t_new.virtual_bases_fact, []
+    )
 
-    # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
-    old_virt_set = set(old_virtual_bases)
-    new_virt_set = set(new_virtual_bases)
-    # Bases that moved from non-virtual to virtual or vice versa
-    became_virtual = (new_virt_set - old_virt_set) & old_bases_set
-    lost_virtual = (old_virt_set - new_virt_set) & new_bases_set
-    if became_virtual or lost_virtual:
-        desc_parts = []
-        if became_virtual:
-            desc_parts.append(f"became virtual: {sorted(became_virtual)}")
-        if lost_virtual:
-            desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
-                symbol=name,
-                name=name,
-                detail="; ".join(desc_parts),
-                old_value=str(sorted(old_virtual_bases)),
-                new_value=str(sorted(new_virtual_bases)),
-                entity_id=entity_id,
+    old_bases_set: set[str] = set()
+    new_bases_set: set[str] = set()
+    if bases_cmp.is_comparable:
+        old_bases = bases_cmp.old_value or []
+        new_bases = bases_cmp.new_value or []
+        # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
+        # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
+        old_bases_set = set(old_bases)
+        new_bases_set = set(new_bases)
+        if old_bases_set == new_bases_set and old_bases != new_bases:
+            changes.append(
+                make_change(
+                    ChangeKind.BASE_CLASS_POSITION_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old_value=str(old_bases),
+                    new_value=str(new_bases),
+                    entity_id=entity_id,
+                )
             )
-        )
-    elif old_virt_set != new_virt_set:
-        # Pure add/remove of a virtual base (not a migration from non-virtual):
-        # e.g. class D : virtual A  →  class D : virtual A, virtual B
-        # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
-        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
+        elif old_bases_set != new_bases_set:
+            # General base class set change (add/remove base) → TYPE_BASE_CHANGED
             changes.append(
                 make_change(
                     ChangeKind.TYPE_BASE_CHANGED,
                     symbol=name,
-                    description=f"Virtual base classes changed: {name}",
-                    old_value=str(old_virtual_bases),
-                    new_value=str(new_virtual_bases),
+                    description=f"Base classes changed: {name}",
+                    old_value=str(old_bases),
+                    new_value=str(new_bases),
                     entity_id=entity_id,
                 )
             )
+
+    if virtual_bases_cmp.is_comparable:
+        old_virtual_bases = virtual_bases_cmp.old_value or []
+        new_virtual_bases = virtual_bases_cmp.new_value or []
+        # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
+        old_virt_set = set(old_virtual_bases)
+        new_virt_set = set(new_virtual_bases)
+        # Bases that moved from non-virtual to virtual or vice versa. Empty
+        # (rather than wrong) when `bases_cmp` was incomplete above: the
+        # intersection against an empty `old_bases_set`/`new_bases_set` is
+        # always empty, so this falls through to the plain hierarchy-change
+        # branch below instead of guessing at a virtuality flip it has no
+        # non-virtual-base evidence to support.
+        became_virtual = (new_virt_set - old_virt_set) & old_bases_set
+        lost_virtual = (old_virt_set - new_virt_set) & new_bases_set
+        if became_virtual or lost_virtual:
+            desc_parts = []
+            if became_virtual:
+                desc_parts.append(f"became virtual: {sorted(became_virtual)}")
+            if lost_virtual:
+                desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
+            changes.append(
+                make_change(
+                    ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
+                    symbol=name,
+                    name=name,
+                    detail="; ".join(desc_parts),
+                    old_value=str(sorted(old_virtual_bases)),
+                    new_value=str(sorted(new_virtual_bases)),
+                    entity_id=entity_id,
+                )
+            )
+        elif old_virt_set != new_virt_set:
+            # Pure add/remove of a virtual base (not a migration from non-virtual):
+            # e.g. class D : virtual A  →  class D : virtual A, virtual B
+            # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
+            if (
+                not changes
+            ):  # don't duplicate if TYPE_BASE_CHANGED already emitted above
+                changes.append(
+                    make_change(
+                        ChangeKind.TYPE_BASE_CHANGED,
+                        symbol=name,
+                        description=f"Virtual base classes changed: {name}",
+                        old_value=str(old_virtual_bases),
+                        new_value=str(new_virtual_bases),
+                        entity_id=entity_id,
+                    )
+                )
 
     return changes
 
