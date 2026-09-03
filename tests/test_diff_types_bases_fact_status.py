@@ -160,3 +160,37 @@ class TestBaseClassChangesEvidenceGating:
         )
         r = compare(_snap([t_old]), _snap([t_new]))
         assert ChangeKind.TYPE_BASE_CHANGED in _kinds(r)
+
+    def test_partial_bases_does_not_fabricate_base_removed(self) -> None:
+        """Codex review, PR #1033: PARTIAL means the uncovered part of the
+        scope is unknown, not empty -- a base absent from a PARTIAL-covered
+        list may simply live in the uncovered part, so this must decline to
+        compare exactly like an incomplete (NOT_COLLECTED/FAILED) pair, not
+        read the partial list as the real, complete base set."""
+        t_old = RecordType(name="Derived", kind="class", bases_fact=Fact.partial([]))
+        t_new = RecordType(name="Derived", kind="class", bases=["Base"])
+        r = compare(_snap([t_old]), _snap([t_new]))
+        assert ChangeKind.TYPE_BASE_CHANGED not in _kinds(r)
+
+    def test_partial_bases_on_new_side_does_not_fabricate_base_removed(self) -> None:
+        t_old = RecordType(name="Derived", kind="class", bases=["Base"])
+        t_new = RecordType(name="Derived", kind="class", bases_fact=Fact.partial([]))
+        r = compare(_snap([t_old]), _snap([t_new]))
+        assert ChangeKind.TYPE_BASE_CHANGED not in _kinds(r)
+
+    def test_partial_virtual_bases_does_not_fabricate_virtual_changed(self) -> None:
+        t_old = RecordType(
+            name="Derived",
+            kind="class",
+            bases=["Base"],
+            virtual_bases_fact=Fact.partial([]),
+        )
+        t_new = RecordType(
+            name="Derived",
+            kind="class",
+            bases=["Base"],
+            virtual_bases=["Base"],
+        )
+        r = compare(_snap([t_old]), _snap([t_new]))
+        assert ChangeKind.BASE_CLASS_VIRTUAL_CHANGED not in _kinds(r)
+        assert ChangeKind.TYPE_BASE_CHANGED not in _kinds(r)

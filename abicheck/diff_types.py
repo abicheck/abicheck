@@ -1105,8 +1105,17 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     "decline rather than fabricate" discipline ``diff_types_vtable.
     _vtable_transition_is_evidenced`` already applies to the sibling vtable
     signal), rather than changing what a *fully-evidenced* pair reports —
-    behavior-preserving whenever both sides' facts are actually
-    ``PRESENT``/``PARTIAL``.
+    behavior-preserving whenever both sides' facts are actually ``PRESENT``.
+
+    A ``degraded`` (``PARTIAL``-backed) comparison is treated the same as
+    incomplete, not as usable: this is a full-list membership/set
+    comparison (a removal is "present old, absent new"), and ``PARTIAL``
+    means the uncovered part of the scope is unknown, not empty (Codex
+    review, PR #1033) — an absent base could simply live in the part this
+    side's producer didn't cover. No current producer emits
+    ``Fact.partial(...)`` for either field, so this is a latent-correctness
+    guard rather than an observed false positive, but the same
+    "decline rather than fabricate" default applies once it does.
 
     The two comparisons are gated independently: a comparable
     ``virtual_bases`` pair with an incomplete ``bases`` pair still reports a
@@ -1124,7 +1133,7 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
 
     old_bases_set: set[str] = set()
     new_bases_set: set[str] = set()
-    if bases_cmp.is_comparable:
+    if bases_cmp.is_comparable and not bases_cmp.degraded:
         old_bases = bases_cmp.old_value or []
         new_bases = bases_cmp.new_value or []
         # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
@@ -1155,7 +1164,7 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
                 )
             )
 
-    if virtual_bases_cmp.is_comparable:
+    if virtual_bases_cmp.is_comparable and not virtual_bases_cmp.degraded:
         old_virtual_bases = virtual_bases_cmp.old_value or []
         new_virtual_bases = virtual_bases_cmp.new_value or []
         # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
