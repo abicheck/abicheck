@@ -54,3 +54,9 @@
   own documented inability to produce `InlineNamespace` at all. Not a
   heuristic fix (no MSVC toolchain available to verify one against);
   pinned with an executable regression test instead.
+- **`_SNAPSHOT_CACHE_VERSION` bumped to 29** (Codex review, second round,
+  fresh evidence): the PE header-scoping fallback path that now produces
+  PDB `entity_id`/`semantic_ir` output (`service_dump_native_pe.py`) is
+  itself cacheable, so a snapshot cached by an older abicheck build for
+  identical cache-key inputs would otherwise keep serving PDB model types
+  with no `entity_id` and `semantic_ir=None` forever.
