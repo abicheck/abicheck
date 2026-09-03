@@ -35,7 +35,6 @@ The first three kinds make existing programs **crash, corrupt data silently, or 
 **abicheck** compares two versions of a library, together with their public headers, debug info, build data, and optionally sources, and tells you exactly which existing consumers will break, why, and what version bump you owe.
 
 ```bash
-pip install abicheck
 abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=include/v2/
 ```
 
@@ -170,22 +169,22 @@ Run against abicheck 0.5.0, libabigail 2.4.0, and ABICC 2.3. The table is pinned
 
 ## Installation
 
-**pip** (pure Python, no native dependencies):
-
-```bash
-pip install abicheck
-```
-
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need [castxml](https://github.com/CastXML/CastXML) in the supported range `>=0.6.11,<0.8.0` with a bundled Clang 18 or newer (abicheck's version gate rejects anything else for an authoritative L2 scan), or a direct clang. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
-
-**conda-forge** (recommended for the full pipeline; bundles a working castxml):
+**Full installation (recommended)**: conda-forge bundles abicheck with a castxml that passes abicheck's own version gate, so header analysis (L2) works out of the box.
 
 ```bash
 conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11,<0.8.0"
 conda activate abicheck
 ```
 
-Pin `castxml>=0.6.11,<0.8.0` as shown: the feedstock's own floor is looser than abicheck's version gate. The canonical per-environment guidance, including the bundled-Clang requirement, is in [Install](https://abicheck.github.io/abicheck/start/install/) and the [environment reference](https://abicheck.github.io/abicheck/reference/environment/).
+Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, which also requires castxml's bundled Clang to be recent. The exact supported bounds live in the [environment reference](https://abicheck.github.io/abicheck/reference/environment/).
+
+**Lightweight/core installation**: the PyPI package is pure Python with no native dependencies.
+
+```bash
+pip install abicheck
+```
+
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range, or a direct clang, on your `PATH`. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
@@ -303,7 +302,7 @@ Snapshots, custom policies, rendering, and the CLI/API parity table: [Python API
 | Platform | Binary + header AST | Debug-info cross-check | CI status |
 |----------|:---:|:---:|-----------|
 | Linux (ELF) | ✅ | ✅ DWARF, BTF, CTF | Fully validated; canonical lane |
-| Windows (PE/COFF) | ✅ | ✅ PDB | MinGW DLLs validated end-to-end; native MSVC+PDB verdicts experimental (non-blocking lane) |
+| Windows (PE/COFF) | ✅ | ✅ PDB (layout depth best-effort) | MinGW DLLs validated end-to-end; native MSVC+PDB verdicts experimental (non-blocking lane) |
 | macOS (Mach-O) | ✅ | — | Apple-clang dylibs validated end-to-end; no debug-info cross-check yet |
 
 Details, including which toolchains each lane exercises: [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/). What abicheck does *not* catch: [Limitations](https://abicheck.github.io/abicheck/learn/limitations/).
@@ -312,7 +311,7 @@ Details, including which toolchains each lane exercises: [Platform Support](http
 
 The [`examples/`](examples/README.md) directory contains **197 real-world ABI/API scenarios** with ground-truth verdicts: 192 single-library cases (most are `v1`/`v2` pairs with a consumer app; the rest are single-snapshot audits and hand-built L3 to L5 evidence-model fixtures for breaks no artifact layer can see) plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
 
-Every release is validated against the full **197-case catalog** (`python scripts/benchmark_comparison.py --suite all`), and the pinned 74-case cross-tool subset is attached to each GitHub Release for apples-to-apples comparison with libabigail and ABICC. The [validation runbook](docs/contribute/examples-validation-runbook.md) describes the full proof matrix.
+CI validates the full **197-case catalog** on every push to `main` and every pull request that touches the engine, the tests, or the examples; `python scripts/benchmark_comparison.py --suite all` runs the same sweep locally. Each GitHub Release additionally runs and attaches the pinned 74-case cross-tool subset for apples-to-apples comparison with libabigail and ABICC. The [validation runbook](docs/contribute/examples-validation-runbook.md) describes the full proof matrix.
 
 ## Documentation
 

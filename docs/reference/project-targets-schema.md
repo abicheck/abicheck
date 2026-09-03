@@ -445,7 +445,10 @@ The declarative `targets:`/`bundles:`/`profiles:`/`baseline:` path is not
 yet a drop-in replacement for every project. `abicheck compare` on
 directory/package inputs, driven directly from your own workflow, remains
 the path every project can use today (see
-[Multi-Binary Releases](../use/multi-binary.md)). Before adopting the
+[Multi-Binary Releases](../use/multi-binary.md); note that its
+cross-library findings — removed dependencies, provider changes — are
+**ELF/Linux-only**, a Windows/macOS release gets per-library results with
+bundle analysis skipped). Before adopting the
 declarative topology, confirm none of these apply to you:
 
 - **`bundles:` checks only run at `depth: binary`** — `headers`/`build`/
