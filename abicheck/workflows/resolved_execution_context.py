@@ -142,6 +142,41 @@ def _canonical_repr(obj: object) -> str:
     return repr(obj)
 
 
+def _evaluation_config_value_repr(cfg: CompatibilityEvaluationConfig | None) -> str:
+    """:func:`_canonical_repr` of *cfg*'s resolved *values* only --
+    ``contract``/``evidence``/``surface``/``assurance``/``policy``/``gate``/
+    ``suppressions`` -- deliberately excluding ``provenance`` (Codex review,
+    PR #1027, third round).
+
+    ``provenance`` records *how* a value was selected (``ValueProvenance.
+    layer``/``source_kind``/``field_location``), not the value itself --
+    the CLI and the typed Python API resolving the identical effective
+    input legitimately produce different provenance (``SelectorLayer.
+    EXPLICIT_CLI`` vs. ``API_REQUEST``, a different ``--flag`` vs. field
+    spelling in ``source_kind``), and
+    :func:`abicheck.compatibility_evaluation_frontend.cross_front_end_differences`
+    already treats that difference as no divergence at all. Hashing
+    ``provenance`` into a fingerprint meant to answer "did the *resolved
+    input* change" would make two front ends resolving the same values
+    hash differently -- defeating the one cross-frontend comparison this
+    digest exists to support, and disagreeing with
+    :mod:`abicheck.effective_config_digest`'s own established practice
+    (its own per-field encodings never read ``provenance`` either)."""
+    if cfg is None:
+        return _canonical_repr(None)
+    return _canonical_repr(
+        (
+            cfg.contract,
+            cfg.evidence,
+            cfg.surface,
+            cfg.assurance,
+            cfg.policy,
+            cfg.gate,
+            cfg.suppressions,
+        )
+    )
+
+
 def _sha256_of(*parts: str) -> str:
     """NUL-delimited SHA-256 over *parts*, prefixed ``sha256:`` (hex) --
     the identical framing :func:`abicheck.effective_config_digest._sha256_of`
@@ -269,10 +304,16 @@ class ResolvedExecutionContext:
         delimiter). ``repr()`` of a Python `str` escapes its own quote and
         backslash characters, which is what makes the mapping encoding
         injective over its *keys* the join was not.
+
+        Reads *evaluation_config* through :func:`_evaluation_config_value_repr`,
+        not directly through :func:`_canonical_repr`, so the digest never
+        includes ``provenance`` (Codex review, PR #1027, third round) -- see
+        that function's own docstring for why a resolved-input fingerprint
+        must not vary with which front end happened to resolve it.
         """
         return _sha256_of(
             self.operation,
             self.requested_depth or "",
-            _canonical_repr(self.evaluation_config),
+            _evaluation_config_value_repr(self.evaluation_config),
             _canonical_repr(dict(self.compile_contexts)),
         )

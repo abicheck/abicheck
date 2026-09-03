@@ -227,27 +227,28 @@ class TestResolutionDigest:
         )
         assert a.resolution_digest() == b.resolution_digest()
 
-    def test_independent_of_provenance_mapping_insertion_order(self):
-        """Codex review, PR #1027: `CompatibilityEvaluationConfig.provenance`
-        is a `Mapping`, and dataclass equality already ignores its insertion
-        order -- so two configs a resolver would treat as equal (the same
-        entries, assembled in a different order by a different front end)
-        must not hash differently."""
-        prov_a = ValueProvenance(
-            layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag"
+    def test_independent_of_provenance_content_entirely(self):
+        """Codex review, PR #1027, third round: `resolution_digest()`
+        deliberately excludes `CompatibilityEvaluationConfig.provenance`
+        altogether, not merely its insertion order -- the CLI and the typed
+        Python API resolving the identical effective input legitimately
+        produce different provenance (`SelectorLayer.EXPLICIT_CLI` vs.
+        `API_REQUEST`, a different flag vs. field spelling in
+        `source_kind`), and `cross_front_end_differences()` already treats
+        that as no divergence at all. Two configs differing *only* in
+        provenance -- one populated, one empty -- must hash identically."""
+        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag")
+        cfg_with_provenance = _evaluation_config(
+            provenance={"contract.mode": prov, "gate.exit_code_scheme": prov}
         )
-        prov_b = ValueProvenance(
-            layer=SelectorLayer.PROJECT_CONFIG, source_kind="config_file"
+        cfg_without_provenance = _evaluation_config(provenance={})
+        assert cfg_with_provenance != cfg_without_provenance  # sanity: genuinely differ
+        a = ResolvedExecutionContext(
+            operation="compare", evaluation_config=cfg_with_provenance
         )
-        cfg_ab = _evaluation_config(
-            provenance={"contract.mode": prov_a, "gate.exit_code_scheme": prov_b}
+        b = ResolvedExecutionContext(
+            operation="compare", evaluation_config=cfg_without_provenance
         )
-        cfg_ba = _evaluation_config(
-            provenance={"gate.exit_code_scheme": prov_b, "contract.mode": prov_a}
-        )
-        assert cfg_ab == cfg_ba  # sanity: the dataclass itself already agrees
-        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ab)
-        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
         assert a.resolution_digest() == b.resolution_digest()
 
     def test_independent_of_policy_overrides_mapping_insertion_order(self):
@@ -298,12 +299,26 @@ class TestResolutionDigest:
 
     def test_still_changes_when_a_mappings_content_actually_differs(self):
         """The order-independence fix must not collapse a real difference --
-        only equal mappings should hash equal."""
-        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag")
-        cfg_with = _evaluation_config(provenance={"contract.mode": prov})
-        cfg_without = _evaluation_config(provenance={})
-        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_with)
-        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_without)
+        only equal mappings should hash equal. Uses `policy.overrides` (a
+        resolved *value*, unlike `provenance`, which the digest now
+        deliberately excludes -- see
+        `test_independent_of_provenance_content_entirely`)."""
+        from abicheck.change_registry_types import Verdict
+
+        cfg_with_override = _evaluation_config(
+            policy=CompatibilityPolicyConfig(
+                base=_identity(), overrides={"func_removed": Verdict.BREAKING}
+            )
+        )
+        cfg_without_override = _evaluation_config(
+            policy=CompatibilityPolicyConfig(base=_identity(), overrides={})
+        )
+        a = ResolvedExecutionContext(
+            operation="compare", evaluation_config=cfg_with_override
+        )
+        b = ResolvedExecutionContext(
+            operation="compare", evaluation_config=cfg_without_override
+        )
         assert a.resolution_digest() != b.resolution_digest()
 
     def test_does_not_collide_a_shared_config_across_different_operations(self):
