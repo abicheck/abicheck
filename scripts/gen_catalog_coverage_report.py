@@ -66,6 +66,22 @@ GENERATED_NOTE = (
     "regenerate. -->"
 )
 
+# Phase 5's target workflow set (docs/contribute/plans/examples-catalog-split.md's
+# own Phase 5 row) -- the single source both the target count and the target
+# list below are derived from, so they can't independently drift from each
+# other. Update this tuple (and the plan doc's Phase 5 row) together if the
+# target set itself ever changes.
+PHASE5_TARGET_WORKFLOWS: tuple[str, ...] = (
+    "compare one library",
+    "audit a release",
+    "multi-library project",
+    "evidence depth",
+    "build/source evidence",
+    "Python API",
+    "suppressions",
+    "GitHub Actions",
+)
+
 
 def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     rules = {k: v for k, v in taxonomy.items() if v["entity"] == "rule"}
@@ -166,11 +182,10 @@ def _workflow_coverage() -> str:
     )
     header = (
         f"**{len(workflows)} workflow example{'' if len(workflows) == 1 else 's'}** "
-        "so far, out of the 8 task-oriented workflows Phase 5 of the "
-        "examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) "
-        "targets: compare one library, audit a release, multi-library "
-        "project, evidence depth, build/source evidence, Python API, "
-        "suppressions, GitHub Actions."
+        f"so far, out of the {len(PHASE5_TARGET_WORKFLOWS)} task-oriented "
+        "workflows Phase 5 of the examples/catalog split "
+        "(`docs/contribute/plans/examples-catalog-split.md`) targets: "
+        f"{', '.join(PHASE5_TARGET_WORKFLOWS)}."
     )
     rows = [f"| `{name}` |" for name in workflows] or ["| _(none yet)_ |"]
     return "\n".join(

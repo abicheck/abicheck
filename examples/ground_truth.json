@@ -7099,7 +7099,9 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
-    "empty-tag-type-gains-state"
+    "embedded-type-size-increased",
+    "empty-tag-type-gains-state",
+    "type-field-added-compatible"
    ],
    "rule_slug": null,
    "variant_of": null

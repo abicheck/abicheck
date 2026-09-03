@@ -106,7 +106,11 @@ RELATED_RULES: dict[str, list[str]] = {
         "exported-function-removed",
         "exported-type-removed",
     ],
-    "case94_empty_tag_gained_state": ["empty-tag-type-gains-state"],
+    "case94_empty_tag_gained_state": [
+        "embedded-type-size-increased",
+        "empty-tag-type-gains-state",
+        "type-field-added-compatible",
+    ],
     "case107_task_scheduler_init_removed": [
         "exported-function-removed",
         "exported-type-removed",
