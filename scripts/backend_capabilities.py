@@ -429,6 +429,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("Variable", "is_const", _FULL, _FULL),
     FactRow(
         "Variable",
+        "is_static",
+        _FULL,
+        _FULL,
+        note=(
+            "PR #1024 review: mirrors Function.is_static exactly (same "
+            'castxml static="1" XML attribute / clang storageClass == '
+            '"static" AST field) -- closes tu_merge._variable_key\'s own '
+            'documented plain-C/extern "C" static-vs-external identity '
+            "gap."
+        ),
+    ),
+    FactRow(
+        "Variable",
         "value",
         _PARTIAL,
         _NONE,
@@ -535,10 +548,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "deprecated_fact",
         _NONE,
         _NONE,
-        note=(
-            "Same shape as Function.deprecated_fact -- see that row's "
-            "own note."
-        ),
+        note=("Same shape as Function.deprecated_fact -- see that row's own note."),
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     FactRow(
@@ -1004,10 +1014,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "deprecated_fact",
         _NONE,
         _NONE,
-        note=(
-            "Same shape as Function.deprecated_fact -- see that row's "
-            "own note."
-        ),
+        note=("Same shape as Function.deprecated_fact -- see that row's own note."),
     ),
     FactRow(
         "RecordType",
@@ -1098,10 +1105,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "deprecated_fact",
         _NONE,
         _NONE,
-        note=(
-            "Same shape as Function.deprecated_fact -- see that row's "
-            "own note."
-        ),
+        note=("Same shape as Function.deprecated_fact -- see that row's own note."),
     ),
     FactRow("EnumType", "qualified_name", _FULL, _FULL),
     FactRow(

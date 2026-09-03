@@ -101,16 +101,21 @@ concepts:
       AbiSnapshot.functions/types/..., with an architecture-gate rule
       forbidding a direct legacy-collection read for that family.
       Producers remain partial regardless (the PDB backend populates no
-      entity_id or SemanticIR at all; --dump-manifest loses occurrence
-      detail; CanonicalEntity.template_arguments is populated for records
-      but not for function templates, and clang produces no occurrence at
-      all for a template specialization). DWARF's own SemanticIR gap
-      closed 2026-09-02 (Phase 6's fifth slice), the first non-header-AST
-      producer to reach it. BTF/CTF's own SemanticIR gap closed
-      2026-09-03 (Phase 6's seventh slice, types only, via the new
-      extract/debug_layout_semantic_ir.py) -- deliberately does not widen
-      AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot; function/
-      variable/typedef identity remains unimplemented for both formats.
+      entity_id or SemanticIR at all; CanonicalEntity.template_arguments
+      is populated for records but not for function templates, and clang
+      produces no occurrence at all for a template specialization).
+      DWARF's own SemanticIR gap closed 2026-09-02 (Phase 6's fifth
+      slice), the first non-header-AST producer to reach it.
+      --dump-manifest's own occurrence-detail loss closed 2026-09-03: each
+      contributing TU's raw, pre-merge fragment is now normalized
+      independently and disambiguated by cross-fragment source-location
+      variance and TU-local (internal) linkage, rather than reading
+      tu_merge.merge_fragments's already-folded output. BTF/CTF's own
+      SemanticIR gap closed 2026-09-03 (Phase 6's eighth slice, types
+      only, via the new extract/debug_layout_semantic_ir.py) --
+      deliberately does not widen AbiSnapshot.types/.enums for a
+      BTF/CTF-sourced snapshot; function/variable/typedef identity
+      remains unimplemented for both formats.
 
   public_surface:
     primitive: complete
