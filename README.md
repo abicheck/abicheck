@@ -219,7 +219,7 @@ Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, 
 pip install abicheck
 ```
 
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range, or a direct clang, on your `PATH`. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `--ast-frontend clang` (or `ABICHECK_AST_FRONTEND=clang`), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
@@ -288,9 +288,9 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 
 | Exit | Verdict | Meaning |
 |:----:|---------|---------|
-| `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | Safe. No binary ABI break |
+| `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | No binary ABI break. `COMPATIBLE_WITH_RISK` still wants a deployment review (a new dependency, a raised runtime floor) |
 | `2` | `API_BREAK` | Source-level break. Consumers must recompile; existing binaries still run |
-| `4` | `BREAKING` | Binary ABI break. Existing binaries will crash or misbehave |
+| `4` | `BREAKING` | Binary ABI break. Existing binaries will crash or misbehave. A multi-library release also exits `4` when one library fails to dump or compare |
 | `8` | any | A library vanished from a multi-library release and `--fail-on-removed-library` is set; under the default scheme, only when no `2`/`4` already applies |
 | `64` | usage error | Bad flags or inputs |
 
