@@ -1938,6 +1938,14 @@ def run_compare(
     # Reporting reads the severity config only under the severity exit scheme;
     # resolved once here rather than re-spelled at each of the five consumers.
     report_severity = sev_config if resolved_cfg.exit_code_scheme == "severity" else None
+    # One Semantic Pipeline plan, 4B: use evaluation_config's resolved
+    # contract.mode -- but only under contract_evaluation itself, since a
+    # --pack-only run resolves a non-None config with a concrete mode too.
+    resolved_contract_mode = (
+        evaluation_config.contract.mode
+        if evaluation_config is not None and contract_evaluation
+        else contract_mode
+    )
     from .service import compare_snapshots, load_env_matrix
     try:
         env_matrix = load_env_matrix(env_matrix_path)
@@ -1957,7 +1965,7 @@ def run_compare(
             reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
+            contract_mode=resolved_contract_mode,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
