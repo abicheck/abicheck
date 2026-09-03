@@ -200,6 +200,27 @@ class TestResolutionDigest:
         )
         assert a.resolution_digest() != b.resolution_digest()
 
+    def test_distinguishes_an_empty_string_requested_depth_from_none(self):
+        """Codex review, PR #1027, sixth round: neither `EvidenceView` nor
+        `AnalysisPlan` rejects an empty-string depth, so
+        `requested_depth=""` is a real, distinct, constructible state from
+        `requested_depth=None` -- a bare `or ""` fallback previously
+        collapsed both onto the identical digest input."""
+        cfg = _evaluation_config()
+        empty_string = ResolvedExecutionContext(
+            operation="compare",
+            evidence=EvidenceView.for_request(""),
+            evaluation_config=cfg,
+        )
+        none = ResolvedExecutionContext(
+            operation="compare",
+            evidence=EvidenceView.for_request(None),
+            evaluation_config=cfg,
+        )
+        assert empty_string.evidence.requested_depth == ""
+        assert none.evidence.requested_depth is None
+        assert empty_string.resolution_digest() != none.resolution_digest()
+
     def test_unaffected_by_effective_depth_alone(self):
         """`resolution_digest()` fingerprints the resolved *input*
         (`evidence.requested_depth`), never the post-execution

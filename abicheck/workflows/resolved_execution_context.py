@@ -461,10 +461,21 @@ class ResolvedExecutionContext:
         includes ``provenance`` (Codex review, PR #1027, third round) -- see
         that function's own docstring for why a resolved-input fingerprint
         must not vary with which front end happened to resolve it.
+
+        *requested_depth* is hashed through :func:`_canonical_repr`, not an
+        ``or ""`` fallback (Codex review, PR #1027, sixth round): neither
+        :class:`EvidenceView` nor
+        :class:`~abicheck.workflows.plan.AnalysisPlan` rejects an empty-string
+        depth, so ``requested_depth=""`` is a real, distinct, constructible
+        state from ``requested_depth=None`` -- ``or ""`` collapsed both onto
+        the identical digest input, hiding that difference from a replay/cache
+        consumer. ``_canonical_repr(None)`` (``"None"``) and
+        ``_canonical_repr("")`` (``"''"``) are distinct strings, so the two
+        states now hash differently too.
         """
         return _sha256_of(
             self.operation,
-            self.requested_depth or "",
+            _canonical_repr(self.requested_depth),
             _evaluation_config_value_repr(self.evaluation_config),
             _canonical_repr(dict(self.compile_contexts)),
         )
