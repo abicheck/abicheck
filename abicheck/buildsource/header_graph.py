@@ -312,17 +312,13 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
             continue
         # Fact[T]-bridged read (ADR-063 Phase 0): value-preserving, see
         # `model.resolved_fact_value`'s own docstring. ADR-063 Phase 5B audit
-        # note: this stays on the plain default-collapse bridge deliberately
-        # — `_flat_structural_type_edges` builds one snapshot's own graph
-        # (called once per side, never as an old/new pair), and every
-        # finding this graph can ultimately feed defaults to API_BREAK_KINDS/
-        # RISK_KINDS, never BREAKING_KINDS, without an artifact diff also
-        # proving the break (this package's own CLAUDE.md, "The one rule
-        # that governs everything here"). A `bases_fact` evidence gap here
-        # only omits an edge (CONF_REDUCED already, the weakest confidence
-        # tier), it cannot fabricate a BREAKING finding the way an
-        # uncompared `bases`/`virtual_bases` pair could at a real
-        # finding-emitting detector.
+        # note (kept short — see this repo's own line-count cap; full
+        # reasoning in docs/contribute/plans/one-semantic-pipeline.md's 5B
+        # section): stays on the plain collapse deliberately — a
+        # single-snapshot graph (never an old/new pair), and this package's
+        # own governing rule already caps everything it feeds at
+        # API_BREAK_KINDS/RISK_KINDS, so a gap here can only omit an edge,
+        # never fabricate a BREAKING finding.
         for base in resolved_fact_value(rt.bases_fact, []):
             emit(rt.name, base, EDGE_TYPE_INHERITS, "base")
         for fld in rt.fields:

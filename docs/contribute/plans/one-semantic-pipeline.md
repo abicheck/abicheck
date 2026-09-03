@@ -315,6 +315,37 @@ multi-round-reviewed evidence-gap heuristic that needs its own dedicated
 slice with equal scrutiny, not a change folded into an otherwise
 lower-risk batch.
 
+**Known gap surfaced by review (Codex security review, this PR, not
+closed): a "decline rather than fabricate" evidence gate can be an
+under-detection lever, not just a fabrication guard, for a detector that is
+the *sole* signal for its ABI-break class.** `virtual_method_addition`'s own
+docstring already states it is the only signal for its specific blind spot
+(a DWARF/symbol-only snapshot whose vtable array cannot show the growth);
+declining when `bases`/`virtual_bases` evidence is incomplete therefore
+doesn't just miss one classification among several redundant ones — for a
+hand-crafted or legacy-schema snapshot with the right shape (`vtable_fact`
+already trivially spoofable pre-existing this PR, plus a `bases`/
+`virtual_bases_fact` at `NOT_COLLECTED`/`FAILED`/`PARTIAL`), it can turn a
+genuinely BREAKING `VIRTUAL_METHOD_ADDED` into a silent, `--require-
+complete-analysis`-invisible `FUNC_ADDED`/`COMPATIBLE`. This is not unique
+to this PR's diff: the identical shape already exists at the first 5B PR's
+own migrated call sites (`diff_bases`, `diff_va_list_params`) — any
+detector using `compare_facts`'s `INCOMPLETE` branch to decline has the
+same property whenever it is (or becomes) a sole signal for its class. A
+real fix threads a detector's own decline into `analysis_assurance.py`'s
+rollup (a genuine new signal that module doesn't compute today — it is
+explicitly "a rollup, not a new probe" over data the pipeline already
+computes) so `--require-complete-analysis` can see it, or gates the
+specific sole-signal detectors more conservatively than the general
+`compare_facts` pattern. Neither is attempted here: it is a cross-cutting
+design question for the whole "decline rather than fabricate" philosophy
+this sub-phase established, not a two-line patch scoped to one call site,
+and reversing just this PR's own decline would only reopen the fabrication
+bug it fixes without closing the class (an attacker would target
+`diff_bases`/`diff_va_list_params` instead). Recorded here per this
+repo's own "say so explicitly and record the gap" convention rather than
+left implicit or rushed.
+
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
 gap 6B's own migration would otherwise trip on, and 6B is what actually
