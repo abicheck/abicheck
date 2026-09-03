@@ -2,7 +2,7 @@
 
 # Catalog coverage by dimension
 
-Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the calibration catalog under `examples/` is 197 `caseNN_*` fixtures, but not 197 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 variants" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json` change.
+Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the calibration catalog under `examples/` is 197 `caseNN_*` fixtures, but not 197 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json` change.
 
 ## Rule coverage
 
