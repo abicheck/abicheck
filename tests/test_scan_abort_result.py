@@ -65,11 +65,13 @@ class TestScanAbortResultFields:
     def test_evidence_contract_error_fields(self):
         fields = scan_abort_result_fields("evidence_contract_error")
         assert fields["verdict"] == "EVIDENCE_CONTRACT_ERROR"
-        assert fields["exit_code"] == 1
+        # 7, not the generic ClickException code 1 -- cli_scan.py's
+        # dedicated `_EXIT_EVIDENCE_CONTRACT_ERROR` (2026-09-03).
+        assert fields["exit_code"] == 7
         exit_block = fields["report"]["exit"]
-        assert exit_block["code"] == 1
+        assert exit_block["code"] == 7
         assert exit_block["reasons"] == ["evidence_contract_error"]
-        assert exit_block["evidence_contract_error_contribution"] == 1
+        assert exit_block["evidence_contract_error_contribution"] == 7
         assert exit_block["budget_overflow_contribution"] == 0
 
     def test_report_matches_resolve_scan_exit_decision_directly(self):
@@ -272,7 +274,7 @@ class TestScanAbortExitReportWiring:
                 "_EvidenceContractError",
                 "source",
                 "EVIDENCE_CONTRACT_ERROR",
-                1,
+                7,  # cli_scan.py's dedicated _EXIT_EVIDENCE_CONTRACT_ERROR
                 "evidence_contract_error",
             ),
         ],
@@ -306,7 +308,7 @@ class TestScanAbortExitReportWiring:
                 "_EvidenceContractError",
                 "source",
                 "EVIDENCE_CONTRACT_ERROR",
-                1,
+                7,  # cli_scan.py's dedicated _EXIT_EVIDENCE_CONTRACT_ERROR
                 "evidence_contract_error",
             ),
         ],

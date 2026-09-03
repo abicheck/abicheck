@@ -341,6 +341,7 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 | `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
 | `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `--format json`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
+| `7` | Evidence-contract error (ADR-037 D5) — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `--format json`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
 | `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than

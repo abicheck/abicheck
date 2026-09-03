@@ -17,7 +17,7 @@
 
 1. Neither ``scan --dry-run`` renderer validated ``--abi3`` applicability, so
    both previewed exit 0 for an invocation the real run would reject with
-   ``EVIDENCE_CONTRACT_ERROR`` (exit 1). Closed via a cheap, binary-only
+   ``EVIDENCE_CONTRACT_ERROR`` (exit 7). Closed via a cheap, binary-only
    extension probe (:func:`abicheck.python_ext.detect_python_extension_from_binary`)
    threaded through both dry-run builders.
 2. A pinned depth backed only by a query-declaring ``--config`` (no

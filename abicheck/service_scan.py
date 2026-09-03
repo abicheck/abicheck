@@ -252,6 +252,8 @@ class ScanRequest:
     # (checker_types.py's public-dataclass convention) so a positional insert
     # can't rebind a later field (Codex review).
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    exit_code_scheme: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1127,8 +1129,9 @@ def estimate_artifact_set(
         blocker = (
             f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
             "and --build-config declares no build.query -- the real run "
-            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1), not run as "
-            "priced below."
+            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1 for this "
+            "--artifact-set member; a single-artifact scan uses exit 7), "
+            "not run as priced below."
         )
     for member_path in member_paths:
         member_req = replace(req, binaries=[member_path], mode="audit")
@@ -1159,6 +1162,8 @@ _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "contract_evaluation": lambda r: r.contract_evaluation,
     "contract_mode": lambda r: r.contract_mode is not None,
     "max_findings": lambda r: r.max_findings is not None,
+    "severity_preset": lambda r: r.severity_preset is not None,  # ADR-064/PR G2
+    "exit_code_scheme": lambda r: r.exit_code_scheme is not None,
 }
 
 
@@ -1270,16 +1275,8 @@ def _scan_request_config(req: ScanRequest) -> Any:
                 # letting the key resolve as "not stated" by omission (which
                 # is what the declared-params guard exists to prevent).
                 "pack_paths": (),
-                # A `ScanRequest` has no severity-preset/exit-code-scheme
-                # field either (CLI cleanup phase two, "PR B" -- these two
-                # keys joined `SCAN_CONFIG_PARAMS` so a selected gate pack
-                # cannot override an *explicit* `--severity-preset`/
-                # `--exit-code-scheme` on the CLI path); the API path has no
-                # such CLI flag to be explicit about, so both resolve as
-                # "not stated" here, same as every other field this request
-                # shape does not carry.
-                "severity_preset": None,
-                "exit_code_scheme": None,
+                "severity_preset": req.severity_preset,  # ADR-064/PR G2
+                "exit_code_scheme": req.exit_code_scheme,
             },
             typed={"policy", "scope_public_headers"},
             policy_file=req.policy_file,
@@ -1317,6 +1314,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         run_scan_core,
     )
     from .workflows.scan_config import public_provenance_set as _public_provenance_set
+    from .workflows.scan_gate_options import resolve_scan_gate_options  # ADR-064/PR G2
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
@@ -1399,6 +1397,20 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
     build_dir_cleanups: list[Callable[[], None]] = []
     try:
+        gate = resolve_scan_gate_options(req)
+    except ValueError as exc:
+        # `resolve_release_gate_options` raises bare `ValueError`
+        # (invalid `exit_code_scheme`) or `PolicyError` (invalid
+        # `severity_preset`, a `ValueError` subclass) for a malformed
+        # request -- neither is `ValidationError`, so a Tier-2 caller
+        # guarding this call with `except ValidationError` (the type
+        # every other malformed-`ScanRequest` field raises) would miss
+        # it and see the raw exception instead. Same translation
+        # `_resolve_scan_contract_config` above already applies to its
+        # own `resolve_scan_config` call (CodeRabbit review, fresh
+        # evidence, PR #1032).
+        raise ValidationError(str(exc)) from exc
+    try:
         core = run_scan_core(
             start=_time.monotonic(),
             binary=binary,
@@ -1447,6 +1459,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
             abi3_floor=req.abi3_floor,
             max_findings=req.max_findings,
             build_targets=req.build_targets,
+            sev_config=gate.severity,
+            exit_code_scheme="severity" if gate.severity is not None else "legacy",
         )
     except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

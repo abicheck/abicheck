@@ -3776,6 +3776,153 @@ second top-level spelling of the same fact.
 > Still open: the typed-API half of the parity pass, the `--format
 > text` gap, and a real `--artifact-set` member-level evidence-contract
 > signal for the Action to consume.
+>
+> **Update (2026-09-03): the single-binary half of the `--format text` gap
+> closed.** `cli_scan.py`'s `_EvidenceContractError` catch site (the one
+> half of "the `--format text` gap" `action/run.sh` actually needed —
+> `_BudgetOverflow` was never ambiguous, since its exit code 5 is unique
+> and the Action's exit-code `case` already maps it straight to
+> `BUDGET_OVERFLOW` with no JSON needed) now always prints a stable stderr
+> marker line ahead of its existing `Error: <message>` text, independent of
+> `fmt`/`secondary_fmt` — deliberately *not* inventing a full text render of
+> the abort (that remains the separate, genuinely open design question
+> `_emit_scan_abort_report`'s own docstring names), just a single greppable
+> line. `action/run.sh`'s `_evidence_contract_gated()` falls back to
+> matching that marker in `STDERR_CONTENT` whenever `_json_report_src`
+> answers nothing — the same shape `_assurance_gated`'s own stderr fallback
+> already established for a sibling gap — so a `format: text` scan step
+> (the Action's documented default) that hits this abort now publishes
+> `EVIDENCE_CONTRACT_ERROR` instead of falling into the generic `ERROR`
+> bucket a bad flag or crash gets. Not the message text itself (`ce.message`
+> differs across this exception's two independent raise sites — a pinned
+> depth with no source evidence, and `--abi3` targeting a binary that isn't
+> a recognisable CPython extension module — so matching either message's
+> own wording would need two independently-drifting patterns); a dedicated
+> marker line the shared `except` clause prints once. Tests:
+> `tests/test_cli_scan_abort_report.py::test_evidence_contract_error_text_format_has_no_json_report`
+> (the marker is now present even though the JSON report still isn't) and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py`'s new
+> `test_evidence_contract_gated_stderr_fallback_*` tests, including one that
+> runs the real native CLI end-to-end and feeds its real stderr into the
+> real bash pipeline — proving the Python-side marker and the bash-side
+> grep pattern actually agree, not two independently-drifting copies of the
+> same literal string. **Still open, deliberately not attempted in this
+> slice:** the `--artifact-set` member-level signal (a member's
+> `_EvidenceContractError` is caught inside `_run_scan_one_member` and never
+> reaches this catch site or its stderr marker at all — `run_scan_set`'s
+> aggregate `ScanSetResult.to_dict()` already surfaces the top-level
+> `EVIDENCE_CONTRACT_ERROR` verdict for `--format json`, but a `format:
+> text` artifact-set step has no analogous stderr signal, and the Action
+> doesn't even attempt a JSON secondary for `--artifact-set` today — a
+> separate, not-yet-scoped piece of work), and the typed-API half of the
+> parity pass.
+
+> **Update (2026-09-03): the typed-API half of the parity pass closed.**
+> `CompareRequest`/`ScanRequest` gained `severity_preset`/`exit_code_scheme`
+> fields — exactly the two flags single-pair `compare`/`scan --against`
+> themselves expose (neither has a per-category `--severity-<category>` CLI
+> flag; only the release fan-out does, via `.abicheck.yml` for the other
+> two, so neither typed request carries a per-category field either).
+> Resolved through `abicheck.policy.release_gate_options.GateOptions` via
+> `resolve_release_gate_options(None, ...)` — the identical function/object
+> the release fan-out resolves its own gate configuration from, called with
+> no pack (`pack_application=None`; a typed request's own `gate.*` pack
+> field is still a separate, open item, same as it always was for
+> `pack_policy_overrides`/`pack_internal_namespaces`) — not a second,
+> parallel resolution. `ScanRequest`'s two fields join
+> `_COMPARISON_ONLY_FIELD_PREDICATES` (baseline-only, mirroring
+> `cli_scan._COMPARISON_ONLY_FLAGS`) and `service_scan._scan_request_config`'s
+> ADR-049 receipt now reads their real values instead of always claiming
+> "not stated". `run_scan`'s own `run_scan_core` call now actually passes
+> `sev_config`/`exit_code_scheme` (previously never wired at all, regardless
+> of `--against` — a real, previously-undetected gap: a typed
+> `ScanRequest(..., baseline=..., severity_preset=..., exit_code_scheme=
+> "severity")` silently classified through the legacy scheme). `CompareResult`
+> gained `exit_decision` (the canonical `ExitDecision`,
+> `abicheck.policy.exit_decision.resolve_compare_exit_decision`, the same
+> resolver the native `compare` CLI's own report `exit` block uses), built
+> in `service_compare_pipeline.classify_compare_pair`.
+> `abicheck/workflows/scan_gate_options.py` is a new leaf module holding
+> `ScanRequest`'s own resolution (`service_scan.py` sits at its own
+> `architecture/debt.yaml` `no_growth` baseline, so the new logic could not
+> live there); `api_types.py`'s baseline moved 1008 -> 1013 for the three
+> genuinely new typed fields (see that debt entry's own rationale). Tests:
+> `tests/test_typed_api_gate_options.py` — per request type, both that the
+> fields are not a no-op (a demoted/raised exit code) and that the typed
+> result agrees with the real CLI's exit code for equivalent input
+> (`CliRunner`, not the same helper the implementation uses). **Still open,
+> deliberately not attempted in this slice:** a typed request's own
+> `gate.*` pack field (`--pack` stays a CLI-only selector, ADR-049 D8,
+> unchanged by this slice), and the `--artifact-set` member-level
+> evidence-contract signal above — both left for a future session; per-
+> category `severity_<category>` fields were investigated and deliberately
+> **not** added to either typed request, since neither `compare` nor `scan
+> --against` itself exposes them as CLI flags (only `.abicheck.yml` does,
+> which a typed caller has no equivalent of) — adding them would have been
+> new surface beyond CLI parity, not parity itself. **A narrower gap found
+> while landing this and deliberately left open, not silently missed:**
+> `compatibility_evaluation_frontend.compare_request_inputs` — the ADR-049
+> D7 resolver behind `CompareRequest(..., contract_evaluation=True)`'s own
+> persisted receipt — still does not read `CompareRequest.severity_preset`/
+> `exit_code_scheme` into `ExplicitCompatibilityInputs` (its own docstring
+> still literally says "a `CompareRequest` carries no severity,
+> exit-code-scheme, or pack inputs", which this slice makes half-false).
+> Cosmetic only, not a functional bug the way the equivalent `scan` gap
+> was (`_scan_request_config`'s history, above): a typed `CompareRequest`
+> has no gate-pack field at all, so there is no pack whose D7 precedence
+> could be silently overridden the way `scan`'s real repro was — the real
+> exit-code decision (`CompareResult.exit_decision`) is unaffected, since it
+> reads the two fields directly, not through this resolver. What's stale is
+> only the `gate.exit_code_scheme`/`gate.severity.*` block inside the
+> `--contract` JSON report's `contract_context.evaluation_context.
+> resolved_config`, for the narrow combination of a typed caller setting
+> both `contract_evaluation=True` and `severity_preset`/`exit_code_scheme`.
+> Not fixed in this slice because `compatibility_evaluation_frontend.py`
+> sits at its own `architecture/debt.yaml` `no_growth` baseline (1996
+> lines, four lines under the file-size hard cap) — the fix needs a design
+> decision this plan's own governing principle asks not to make reactively
+> under a nearly-exhausted line budget (move responsibility to a new leaf
+> module vs. squeeze a few lines out of the existing one), not a
+> five-minute patch. Left for a future session alongside the two items
+> above.
+
+> **Update (2026-09-03, fourth round): the single-binary `--format text`
+> gap closed for good, via a dedicated exit code, not a hardened marker.**
+> Three further Codex review rounds on the landing PR (#1032) each found
+> the prior fix's stderr/marker-file signal forgeable in a new way: round
+> 2 — an unanchored `grep -q` match spoofed by a diagnostic merely
+> containing the marker text (fixed with whole-line `grep -Fxq`); round 3
+> — even that whole-line match spoofed by a crafted path with an embedded
+> newline, echoed into a wholly unrelated error message (fixed by moving
+> the signal to a private marker-file path, `$ABICHECK_EVIDENCE_CONTRACT_
+> MARKER_FILE`, that `action/run.sh` creates and names itself); round 4 —
+> that path itself leaked as an inherited environment variable to every
+> subprocess `abicheck` spawns during evidence collection (build-tool
+> queries over the *analyzed* checkout), letting a PR-controlled build
+> script read it and forge the marker directly — and even after popping
+> the variable from `os.environ` at import time, it stayed recoverable via
+> `/proc/<pid>/environ`, which reflects a process's *initial* environment
+> regardless of later mutation. No channel derived from text or the
+> environment closes this class of forgery. The final fix replaces the
+> whole mechanism with a dedicated process exit code
+> (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR = 7`, matched by
+> `workflows/scan_abort_result.py`'s `_SCAN_ABORT_VERDICTS` and
+> `policy/exit_decision_precedence.py`'s `resolve_scan_exit_decision`
+> default) — this process's own choice, reported to its trusted parent
+> shell by the OS kernel via `wait()`, which no subprocess this run spawns
+> can alter. `_evidence_contract_gated()`, `write_evidence_contract_
+> marker()`, and the marker-file/env-var machinery are deleted outright;
+> `action/run.sh`'s `case $ABICHECK_EXIT in ... 7) ...` dispatches
+> unconditionally, with no predicate, no JSON report, and no stderr/
+> environment signal needed. This closes the single-binary half of the
+> `--format text` gap completely, not just hardens it further.
+> `tests/test_action_run_sh_scan_evidence_contract_error.py` was rewritten
+> for the new mechanism (its own module docstring has the condensed
+> four-round account); `docs/reference/exit-codes.md` and this repo's
+> `AGENTS.md` gained the new `7` row. **Still open, unchanged by this
+> round:** the `--artifact-set` member-level signal — whether the
+> exit-code approach generalizes to it is its own, separate design
+> question, not attempted here — and the typed-API `gate.*` pack field.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4180,7 +4327,11 @@ reason — Codex review, fresh evidence against `scan_engine.py`)**:
 
 ```text
 usage/config error            (outside the report entirely — 64 everywhere)
-scan evidence-contract error  (scan only, exit 1 — see below)
+scan evidence-contract error  (scan only, exit 7 as of 2026-09-03 — a
+                                dedicated code, no longer the generic
+                                exit 1 the paragraph below still describes
+                                as the contemporary state when written;
+                                see PR G2's own "fourth round" update above)
 scan budget exceeded          (scan only, exit 5 — see below; dominates
                                 not-comparable when both would apply)
 not comparable                (dominates the gate/coverage/assurance axes
@@ -4197,10 +4348,24 @@ found by review, fresh evidence against `scan_engine.py`:**
 - `run_scan_core` raises `_EvidenceContractError` during evidence collection
   — before a candidate/baseline comparison is even attempted — whenever a
   pinned (non-`auto`) `--depth`/`--source-method` has no source evidence to
-  satisfy it (ADR-037 D5). `cli_scan.py` maps it to a `click.ClickException`
-  (exit `1`); `service_scan.py` maps it to `ScanResult(verdict=
-  "EVIDENCE_CONTRACT_ERROR", exit_code=1)`. Distinct from usage error `64`
-  (a bad flag combination) and from the gate's own `1` (a severity-scheme
+  satisfy it (ADR-037 D5). **As of the 2026-09-03 fourth round (PR G2's own
+  "still open" item, since closed for the single-binary case):**
+  `cli_scan.py` maps it to its own dedicated exit code
+  (`_EXIT_EVIDENCE_CONTRACT_ERROR = 7`, a real `sys.exit(7)` rather than a
+  generic `click.ClickException`); `service_scan.py`'s single-run typed API
+  maps it to `ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=7)`
+  (`workflows/scan_abort_result.py`) — the same reasoning that split it off
+  `1`: exit `1` is shared by too many other unrelated axes (a crash, a
+  severity-scheme error-level gate, `--artifact-set`'s own coverage floor)
+  for a stderr/marker-based signal to disambiguate reliably, and a
+  process's own exit code is the one channel nothing this run spawns can
+  forge (see ADR-064's own account of the four iterations this went
+  through). **`--artifact-set` did not move**: a member's own abort is
+  caught inside `_run_scan_one_member` and never reaches `cli_scan.py`'s
+  single-binary catch site at all, so `_aggregate_scan_set_verdict` still
+  floors the *set's* own exit code at `1` for this axis — a separate,
+  not-yet-closed half of the same gap. Distinct from usage error `64` (a bad
+  flag combination) and from the gate's own `1` (a severity-scheme
   error-level finding) — it's "the evidence contract this run pinned itself
   to could not be met," always scan-only, and an earlier draft of this table
   omitted it entirely.
@@ -4793,12 +4958,29 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        (abicheck/policy/release_gate_options.py,
                                        reached from the frontends-classified
                                        cli_compare_release_helpers.py through
-                                       workflows/gate.py's facade); still
-                                       open: the typed-API half of the
-                                       parity pass, the scan --format text
-                                       gap, a real --artifact-set member-level
-                                       evidence-contract signal for the
-                                       Action
+                                       workflows/gate.py's facade); the
+                                       single-binary half of the scan
+                                       --format text gap closed 2026-09-03,
+                                       for good, via a dedicated process
+                                       exit code on _EvidenceContractError
+                                       (7 -- three further review rounds
+                                       each found a stderr/marker-file
+                                       signal forgeable in a new way; see
+                                       PR 4's own section for the full
+                                       four-round account); the typed-API
+                                       half of the
+                                       parity pass closed 2026-09-03
+                                       (CompareRequest/ScanRequest severity_
+                                       preset/exit_code_scheme fields, both
+                                       resolved through the identical
+                                       GateOptions object; see PR 4's own
+                                       section for the full account); still
+                                       open: a real --artifact-set
+                                       member-level evidence-contract signal
+                                       for the Action (the --format text
+                                       gap's remaining half -- a member's
+                                       abort never reaches the single-binary
+                                       catch site's own exit code at all)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;

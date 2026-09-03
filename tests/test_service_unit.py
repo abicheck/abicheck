@@ -3231,15 +3231,54 @@ class TestContractEvaluationThreading:
         # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
         # two, "PR B" slice 1) were appended after contract_mode in turn,
         # following the same rule; compile_context (both-sides L2 compile
-        # context for the release fan-out), then depth (D1, CLI-audit).
-        assert params[-1] == "depth"
-        assert params[-2] == "compile_context"
-        assert params[-3] == "pack_internal_namespaces"
-        assert params[-4] == "pack_policy_overrides"
-        assert params[-5] == "contract_mode"
-        assert params[-6] == "include_dependencies"
-        assert params[-7] == "contract_evaluation"
-        assert params[-8] == "diagnostic_comparison"
+        # context for the release fan-out), then depth (D1, CLI-audit), then
+        # severity_preset/exit_code_scheme (ADR-064/PR G2, Codex review:
+        # run_compare had no way to forward the severity-aware gate).
+        assert params[-1] == "exit_code_scheme"
+        assert params[-2] == "severity_preset"
+        assert params[-3] == "depth"
+        assert params[-4] == "compile_context"
+        assert params[-5] == "pack_internal_namespaces"
+        assert params[-6] == "pack_policy_overrides"
+        assert params[-7] == "contract_mode"
+        assert params[-8] == "include_dependencies"
+        assert params[-9] == "contract_evaluation"
+        assert params[-10] == "diagnostic_comparison"
+
+    def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
+        """CodeRabbit review, fresh evidence, PR #1032, then corrected by a
+        P1 Codex finding on the first fix: this docstring has claimed every
+        param from `debuginfod_url` onward is "keyword-only" since PR #551,
+        but no `*` separator ever enforced it -- `severity_preset`/
+        `exit_code_scheme` (ADR-064/PR G2) were added under that same claim
+        and, like every param before them, still silently accepted
+        positional binding. The first fix added `*` before `debuginfod_url`,
+        which closed the gap for the two new params but retroactively made
+        every *pre-existing* param from `debuginfod_url` onward (e.g.
+        `compile_context`, `depth`) keyword-only too -- a public-API break
+        for any real caller still passing one of them positionally, which
+        this same docstring's "keeps binding positionally" guarantee
+        forbids. Corrected by moving the `*` to right before
+        `severity_preset`: only the two newest, never-previously-released
+        params are actually enforced; every older param keeps accepting
+        positional binding exactly as before."""
+        import inspect
+
+        params = inspect.signature(run_compare).parameters
+        assert params["severity_preset"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["exit_code_scheme"].kind is inspect.Parameter.KEYWORD_ONLY
+        for name in (
+            "debuginfod_url",
+            "diagnostic_comparison",
+            "contract_evaluation",
+            "include_dependencies",
+            "contract_mode",
+            "pack_policy_overrides",
+            "pack_internal_namespaces",
+            "compile_context",
+            "depth",
+        ):
+            assert params[name].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into

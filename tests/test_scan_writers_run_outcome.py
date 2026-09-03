@@ -100,7 +100,7 @@ class TestScanWritersEmitStructuredFieldsTakenByTheReader:
             ),
             ScanArtifactResult(
                 artifact=Path("b.so"),
-                result=ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1),
+                result=ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=7),
             ),
         ]
         result = ScanSetResult(

@@ -909,7 +909,9 @@ def test_run_scan_pinned_depth_without_evidence_is_contract_error(
     from abicheck.service import run_scan
 
     res = run_scan(ScanRequest(binaries=[snap_path], depth="source"))
-    assert res.exit_code == 1
+    # 7, not the generic ClickException code 1 -- cli_scan.py's dedicated
+    # _EXIT_EVIDENCE_CONTRACT_ERROR (2026-09-03).
+    assert res.exit_code == 7
     assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
 
 

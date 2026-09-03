@@ -13,12 +13,12 @@
     },
     {
       "path": "abicheck/api_types.py",
-      "baseline_lines": 1008,
+      "baseline_lines": 1083,
       "target": "model",
       "rule": "no_growth",
       "category": "legacy_model_or_catalog_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1008 -> 1013, CLI cleanup phase two PR G2's typed-API parity slice (ADR-064): CompareRequest gained severity_preset/exit_code_scheme fields and CompareResult gained exit_decision (an ExitDecision, type-only imported under TYPE_CHECKING to avoid a new runtime dependency on the policy package) -- the minimum, already-comment-trimmed footprint for CompareRequest/CompareResult to carry the same severity/exit-code-scheme configuration and resolved decision the native compare CLI's report exit block already carries (abicheck.policy.release_gate_options.GateOptions, abicheck.policy.exit_decision.resolve_compare_exit_decision, both reused unchanged from service_compare_pipeline.classify_compare_pair). These are real typed-request/response fields, not incidental growth, so there is no responsibility to move elsewhere in this file -- CompareRequest/CompareResult are already this package's canonical home for exactly this kind of field. Raised again 1013 -> 1030 (2026-09-03, Round 6 review): CompareRequest.validation_errors() now rejects an unknown exit_code_scheme itself, so a typed caller fails fast (Tier-2 ValidationError) before resolve_compare_request runs any extraction, instead of only failing later inside classify_compare_pair's resolve_release_gate_options call once both sides have already been resolved -- this is the same kind of pre-existing, already-explicit fail-fast check every other validation_errors() rule in this method performs (contract_mode, policy_file_path, depth, ...), applied to a field this file already owns. Raised again 1030 -> 1047 (2026-09-03, Round 7 review): the exit_code_scheme fix above left its sibling field, severity_preset, unchecked -- a misspelled preset (e.g. \"strcit\") still only failed later inside resolve_release_gate_options, after extraction had already run. Same fail-fast rule now applied to severity_preset, checked against policy.severity.SEVERITY_PRESETS. Raised again 1047 -> 1058 (2026-09-03, Round 11 review): the policy_file_path fix (compatibility_evaluation_frontend.py) covered the accepted case where a file overrides an unknown policy name, but left the no-file case unchecked -- CompareRequest(policy=\"not_a_policy\") with no policy_file_path still only failed later inside builtin_policy_identity, after extraction had already run. validation_errors() now rejects a policy name outside VALID_BASE_POLICIES when no policy_file_path is given, mirroring stated_policy_base's own file-overrides-name rule. Raised again 1058 -> 1067 (2026-09-03, Codex review on 72fdf5b): CompareResult gained severity_config -- the same resolved GateOptions.severity exit_decision above was scored under -- so a typed caller can pass severity_config=result.severity_config into reporter.render_output/to_json and get a rendered severity block and exit code that agree with exit_decision, instead of the report silently recomputing a None-severity legacy exit that contradicted it. Raised again 1067 -> 1083 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): CompareResult's own fields (diff/old_snapshot/new_snapshot/suppression/exit_decision/severity_config) referenced six of this file's seven TYPE_CHECKING-only names directly, so typing.get_type_hints(CompareResult) raised NameError -- fixed by importing DiffResult/AbiSnapshot/SuppressionList/ExitDecision/SeverityConfig unconditionally (verified no import cycle), leaving only CompileContext/DumpManifest (referenced solely by InputSpec) under TYPE_CHECKING.",
       "review_by": "2026-11-30"
     },
     {
@@ -543,12 +543,12 @@
     },
     {
       "path": "abicheck/compatibility_evaluation_frontend.py",
-      "baseline_lines": 1996,
+      "baseline_lines": 2000,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1996 -> 2000 (the file's own hard cap, Codex review, PR #1032, fresh evidence following CLI cleanup phase two PR G2's typed-API parity slice): compare_request_inputs() now forwards CompareRequest.severity_preset/exit_code_scheme into ExplicitCompatibilityInputs, which already carried fields for them -- without this, a --contract JSON report's persisted gate.* receipt block could disagree with CompareResult.exit_decision (which reads the two fields directly) for a typed caller combining contract_evaluation=True with either field. The minimum, already-comment-trimmed footprint (two keyword arguments plus the docstring correction the omission required); this file is already the canonical D7 resolver for exactly this kind of field, so there is no responsibility to move elsewhere.",
       "review_by": "2026-11-30"
     },
     {
@@ -843,12 +843,12 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1318,
+      "baseline_lines": 1325,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline bumped by 6 lines (ADR-063 Phase 3 D5): the closure-walk helpers this file imports moved from `surface.py` to the new `policy/public_surface.py`/`policy/public_surface_closure.py` pair, and ruff's own import-formatting rules require the resulting two-module import split across more lines than the single prior import block -- a mechanical consequence of the split, not new debt accumulated in this file.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline bumped by 6 lines (ADR-063 Phase 3 D5): the closure-walk helpers this file imports moved from `surface.py` to the new `policy/public_surface.py`/`policy/public_surface_closure.py` pair, and ruff's own import-formatting rules require the resulting two-module import split across more lines than the single prior import block -- a mechanical consequence of the split, not new debt accumulated in this file. Bumped again by 7 lines (2026-09-03, commit 93fe1b9): a docstring-only fix correcting stale ADR-063 Phase 3 traversal/xref claims (the docstrings still described a real `AbiSnapshot.surface_graph` traversal and pointed Sphinx cross-references at already-moved `abicheck.surface.*` symbols) landed without this baseline being bumped alongside it -- caught and closed here rather than left failing `check_architecture.py` for the next PR to trip over.",
       "review_by": "2026-11-30"
     },
     {
@@ -1043,12 +1043,12 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1117,
+      "baseline_lines": 1118,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1111 -> 1116 merging G42 phase 1 (PR #1008) onto ADR-063 Phase 7's already-landed REPORT_SCHEMA_VERSION bump to 2.48 (run_outcome): both PRs independently bumped REPORT_SCHEMA_VERSION on the same base version, a genuine same-line collision the file's own documented \"renumber, don't reuse\" convention (see the 2.32/2.36/2.38 history entries) resolves by renumbering G42's bump to 2.49 and adding its own five-line history entry rather than discarding either PR's change. Raised 1116 -> 1117 (same phase, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.24 -> 1.25 in lockstep with REPORT_SCHEMA_VERSION's 2.49 bump -- a scan-shaped check-target report shares build_check_id() with a compare-shaped one, so the widened check_id lexical contract reaches it too and needs its own feature-detectable version marker.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1111 -> 1116 merging G42 phase 1 (PR #1008) onto ADR-063 Phase 7's already-landed REPORT_SCHEMA_VERSION bump to 2.48 (run_outcome): both PRs independently bumped REPORT_SCHEMA_VERSION on the same base version, a genuine same-line collision the file's own documented \"renumber, don't reuse\" convention (see the 2.32/2.36/2.38 history entries) resolves by renumbering G42's bump to 2.49 and adding its own five-line history entry rather than discarding either PR's change. Raised 1116 -> 1117 (same phase, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.24 -> 1.25 in lockstep with REPORT_SCHEMA_VERSION's 2.49 bump -- a scan-shaped check-target report shares build_check_id() with a compare-shaped one, so the widened check_id lexical contract reaches it too and needs its own feature-detectable version marker. Raised 1117 -> 1118 (CLI cleanup phase two PR G2, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.25 -> 1.26 -- ADR-037 D5's evidence-contract-error abort moved to a dedicated process exit code (cli_scan.py's _EXIT_EVIDENCE_CONTRACT_ERROR = 7), changing the value (1 -> 7) of two already-published fields (exit_code, evidence_contract_error_contribution) for that one abort axis; a consumer pinned to a pre-1.26 version and hard-coding the old value needs a feature-detectable marker.",
       "review_by": "2026-11-30"
     },
     {
@@ -1063,12 +1063,12 @@
     },
     {
       "path": "abicheck/service_scan.py",
-      "baseline_lines": 1933,
+      "baseline_lines": 1947,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines, to the file-size hard cap exactly (ADR-063 Phase 4, Codex review): run_scan_set() -- the typed API's own --artifact-set entry point -- had no Bazel target-scoping pre-flight of its own, so an unsupported request only failed after discover_artifact_set()/check_artifact_set_soname_collisions()/artifact_set_member_exports() had already run for every member. The actual guard logic lives in the new shared workflows.plan.scan_bazel_scoping_failure() (used by scan_engine.run_scan_core too, replacing each call site's own inlined copy and shrinking scan_engine.py in the process) -- this file's own footprint is the minimum call-site glue: one import (its own explanatory comment trimmed onto the import line itself), one resolve call, one guarded raise. No smaller diff was found that still calls the shared guard before the real discovery work below, while landing exactly at (not over) the file-size hard cap. Baseline lowered 2000 -> 1933, closing ADR-063 Phase 4's residual: run_scan_set()'s own scan_bazel_scoping_failure() call still hadn't forwarded sources=/build_config= (the config-sourced, no-explicit---build-target root-target-scope case this same phase's second slice already closed for run_scan_core() and both of cli_scan.py's own pre-flight sites), because the widened call plus its own comment didn't fit this file's line budget at the prior baseline and neither a LARGE_FILE_ALLOWLIST entry nor trimming unrelated content was accepted (see the known-gaps.md entry this baseline bump replaces). Closed instead by moving responsibility, not by raising the baseline: _descendant_pgids()/_kill_process_tree() -- the process-group kill machinery behind run_scan_subprocess()/run_scan_set_subprocess(), with zero dependency on anything scan-specific -- moved to the new abicheck/workflows/scan_subprocess.py (a genuine one-directional edge, mirroring cxx20_pair_dialect.py's own precedent; the worker/harness functions that call back into run_scan()/run_scan_set() stayed here, avoiding the mutual-dependency shape a full move would have created), re-exported for backward compatibility. That bought back ~90 lines of room, used to add the sources=/build_config= forwarding (plus its own explanatory comment) and land at the new, lowered baseline (1933) with real room left below the file-size hard cap (2000), rather than exactly at the cap the way the prior baseline did.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines, to the file-size hard cap exactly (ADR-063 Phase 4, Codex review): run_scan_set() -- the typed API's own --artifact-set entry point -- had no Bazel target-scoping pre-flight of its own, so an unsupported request only failed after discover_artifact_set()/check_artifact_set_soname_collisions()/artifact_set_member_exports() had already run for every member. The actual guard logic lives in the new shared workflows.plan.scan_bazel_scoping_failure() (used by scan_engine.run_scan_core too, replacing each call site's own inlined copy and shrinking scan_engine.py in the process) -- this file's own footprint is the minimum call-site glue: one import (its own explanatory comment trimmed onto the import line itself), one resolve call, one guarded raise. No smaller diff was found that still calls the shared guard before the real discovery work below, while landing exactly at (not over) the file-size hard cap. Baseline lowered 2000 -> 1933, closing ADR-063 Phase 4's residual: run_scan_set()'s own scan_bazel_scoping_failure() call still hadn't forwarded sources=/build_config= (the config-sourced, no-explicit---build-target root-target-scope case this same phase's second slice already closed for run_scan_core() and both of cli_scan.py's own pre-flight sites), because the widened call plus its own comment didn't fit this file's line budget at the prior baseline and neither a LARGE_FILE_ALLOWLIST entry nor trimming unrelated content was accepted (see the known-gaps.md entry this baseline bump replaces). Closed instead by moving responsibility, not by raising the baseline: _descendant_pgids()/_kill_process_tree() -- the process-group kill machinery behind run_scan_subprocess()/run_scan_set_subprocess(), with zero dependency on anything scan-specific -- moved to the new abicheck/workflows/scan_subprocess.py (a genuine one-directional edge, mirroring cxx20_pair_dialect.py's own precedent; the worker/harness functions that call back into run_scan()/run_scan_set() stayed here, avoiding the mutual-dependency shape a full move would have created), re-exported for backward compatibility. That bought back ~90 lines of room, used to add the sources=/build_config= forwarding (plus its own explanatory comment) and land at the new, lowered baseline (1933) with real room left below the file-size hard cap (2000), rather than exactly at the cap the way the prior baseline did. Raised again 1933 -> 1934 (2026-09-03, Round 8 review): estimate_artifact_set's pinned-depth blocker message was corrected to name both the --artifact-set aggregate exit code (1) and the single-artifact exit code (7) it had been conflating, one line longer than the code it replaced. Raised again 1934 -> 1947 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): run_scan's resolve_scan_gate_options(req) call had no exception translation -- an invalid exit_code_scheme/severity_preset raised bare ValueError/PolicyError instead of the ValidationError every other malformed ScanRequest field raises, so a Tier-2 caller guarding with except ValidationError would miss it. Now wrapped in a try/except that translates, mirroring the existing _resolve_scan_contract_config -> resolve_scan_config translation just above it.",
       "review_by": "2026-11-30"
     },
     {
@@ -1513,12 +1513,12 @@
     },
     {
       "path": "tests/test_compatibility_evaluation_frontend.py",
-      "baseline_lines": 1447,
+      "baseline_lines": 1475,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1447 -> 1475 (CLI cleanup phase two PR G2, Codex review, fresh evidence): two new TestApiAdapter cases proving compare_request_inputs()/compatibility_config_from_compare_request() now forward CompareRequest.severity_preset/exit_code_scheme into ExplicitCompatibilityInputs/GateConfig -- verified both fail against the pre-fix code (git stash).",
       "review_by": "2026-11-30"
     },
     {
@@ -2093,12 +2093,12 @@
     },
     {
       "path": "tests/test_service_unit.py",
-      "baseline_lines": 5554,
+      "baseline_lines": 5593,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 5554 -> 5558 (2026-09-03): TestContractEvaluationThreading.test_contract_evaluation_appended_last_preserves_positional_order updated for run_compare's two new trailing severity_preset/exit_code_scheme parameters (Codex review, PR #1032: run_compare had no way to forward CompareRequest's ADR-064/PR G2 gate fields). Raised 5558 -> 5578 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): added test_trailing_params_are_actually_keyword_only, a regression test for run_compare's `*` separator fix (severity_preset/exit_code_scheme silently accepted positional binding, contradicting the docstring's own \"keyword-only\" claim for every param from debuginfod_url onward). Raised 5578 -> 5593 (2026-09-03, Codex P1 review, fresh evidence, PR #1032): that fix over-enforced -- the `*` landed before debuginfod_url, retroactively making every pre-existing param from there on keyword-only too, a public-API break for any real caller still passing one positionally. Renamed/rewrote the test as test_new_gate_params_are_keyword_only_without_breaking_older_ones: asserts severity_preset/exit_code_scheme are KEYWORD_ONLY and every older trailing param (debuginfod_url through depth) stays POSITIONAL_OR_KEYWORD.",
       "review_by": "2026-11-30"
     },
     {

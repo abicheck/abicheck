@@ -348,9 +348,26 @@ def policy_file_with_packs(
     the ``policy`` argument (``effective_policy``). Synthesizing one with the
     dataclass default would silently reset a ``--policy plugin_abi`` run to
     ``strict_abi``: a pack overriding one kind would change the base policy
-    for every other one. It carries no ``source_path``/``source_sha256``
-    because it came from no file; the packs' own identities and digests are
-    already in the receipt, which is where a replay reads them from.
+    for every other one.
+
+    It carries no ``source_path``/``source_sha256`` when synthesized from
+    scratch, because it came from no file -- unchanged from a real, loaded
+    file's own ``source_path``/``source_sha256`` when folding on top of one
+    (Codex review, fresh evidence, three rounds over: clearing a real file's
+    own identity here to avoid crediting it with a pack's contribution threw
+    away the file's own, independently-real provenance along with it).
+    Attributing the *merged* ``overrides``/``internal_namespaces`` correctly
+    when both a file and a pack contribute needs a per-contributor record,
+    not a single path/digest pair -- exactly what
+    ``compatibility_evaluation_frontend._overrides_provenance`` already
+    builds for a real ``--pack <path>`` manifest (naming the file *and*
+    listing each contributing pack's own identity in ``selected_by``).
+    ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces``
+    are the one contributor shape that mechanism cannot describe (no
+    manifest path to read an identity from at all, by this field's own
+    design) -- see ``service_compare_pipeline.classify_compare_pair``'s own
+    comment and ``workflows.compare_gate_receipt``'s docstring for how the
+    receipt installer records that contribution honestly instead.
     """
     if not application.policy_overrides and application.internal_namespaces is None:
         return policy_file
