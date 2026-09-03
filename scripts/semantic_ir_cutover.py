@@ -94,6 +94,12 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         ),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    MigratedCohort(
+        name="constants",
+        modules=("abicheck/compare/constants.py",),
+        forbidden_attributes=frozenset({"constants", "constant_entity_ids"}),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
 )
 
 #: `getattr` spellings that reach an attribute without an `ast.Attribute`

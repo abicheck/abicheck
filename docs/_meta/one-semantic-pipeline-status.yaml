@@ -38,11 +38,12 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of merge commit fd197d59 (PR #1025, the PDB EntityId/SemanticIR
-# slice), which itself carries forward b2d8eaaf (PR #1024, the multi-TU
-# manifest occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
-# status-sync fixes. Update this file in the same PR that changes a
-# concept's landed status.
+# as of merge commit 62679b1 (PR #1041, the typedef family's SemanticIR
+# cutover -- Phase 6B's first detector cohort), which itself carries
+# forward fd197d59 (PR #1025, the PDB EntityId/SemanticIR slice), b2d8eaaf
+# (PR #1024, the multi-TU manifest occurrence-detail fix), bb14e8e
+# (PR #1021), and PR #1019's own status-sync fixes. Update this file in
+# the same PR that changes a concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -53,7 +54,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: fd197d59
+as_of_commit: 62679b1
 as_of_date: "2026-09-03"
 
 concepts:
@@ -228,7 +229,21 @@ concepts:
     removal_gate: >-
       Phase 7B (boundary-consumer-migration): action/run.sh reads
       run_outcome/exit from the machine report instead of decoding the
-      raw process exit code and stderr text itself.
+      raw process exit code and stderr text itself. First PR landed
+      2026-09-03, scoped narrowly after inspection showed most of
+      run.sh's raw-exit-code dispatch is not actually closable this way
+      (the Click-usage-error-vs-real-verdict disambiguation has no
+      run_outcome to read at all, and scan's evidence-contract/budget-
+      overflow/not-comparable exit codes are deliberately exit-code-only
+      by ADR-037 D5's own design): _report_compat_verdict/
+      _severity_gate_exit -- the two shared functions compare and scan
+      alike consult -- now read run_outcome.compatibility/run_outcome.gate
+      first, falling back to the pre-existing verdict/severity.exit_code
+      field only when no run_outcome block is present. The release
+      fan-out's own "independent pair-semantics reimplementation" half of
+      this sub-phase's scope is untouched -- a shared pair-operation
+      executor across cli_compare_release.py/cli_compare_release_helpers.py/
+      cli_compare_release_matrix.py needs its own dedicated slice.
 
   sectioned_storage:
     primitive: complete
@@ -238,7 +253,18 @@ concepts:
     removal_gate: >-
       Phase 8B (multi-artifact-canonical-storage): typed DTOs for every
       section beyond semantic_ir, multi-artifact ProjectSnapshot
-      packages, and baseline-set/BundleFacts folded into sections.
+      packages, and baseline-set/BundleFacts folded into sections. First
+      PR landed 2026-09-03: storage.types_section_codec.TypesSection is
+      the "types" legacy section's own typed DTO (wired through
+      storage.dto.types_to_dto/types_from_dto in place of the generic
+      legacy_section_to_dto pass-through envelope), chosen first because
+      it is the simplest case -- exactly one field, always required when
+      the section is present, with none of the schema-version-dependent
+      optional-field sparsity that made provenance/debug/binary
+      considered-and-deferred. On-disk payload shape is unchanged. The
+      remaining seven legacy sections (binary/declarations/layout/debug/
+      build/graph/provenance), multi-artifact ProjectSnapshot packages,
+      and folding baseline-set/BundleFacts into sections all remain open.
 
   report_document:
     primitive: complete

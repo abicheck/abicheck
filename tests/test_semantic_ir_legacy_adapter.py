@@ -41,6 +41,7 @@ from abicheck.model.identity import (
     LocalToFunction,
     Namespace,
     Record,
+    entity_id_for_constant,
     entity_id_for_typedef,
 )
 from abicheck.model.occurrence import OccurrenceId
@@ -48,6 +49,7 @@ from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.semantic_ir_index import SemanticIRIndex
 from abicheck.model.semantic_ir_legacy_adapter import (
     SYNTHETIC_IDENTITY_EXTRA,
+    legacy_constant_ir,
     legacy_typedef_ir,
     producer_entity_id,
     render_display_name,
@@ -179,6 +181,59 @@ class TestSyntheticIdentity:
         (occ,) = ir.occurrences
         assert producer_entity_id(occ.entity_id) is None
         assert render_display_name(occ.entity_id) == "ns::Alias"
+
+
+# -- the constant cohort's adapter (ADR-063 Phase 6B, cohort 2) ------------
+
+
+class TestLegacyConstantIr:
+    """``legacy_constant_ir`` is ``legacy_typedef_ir`` with a value-literal
+    payload instead of a resolved-type-spelling one -- the same round-trip,
+    fallback, and sidecar-mismatch properties above hold identically, so
+    this is a compact confirmation rather than a full re-derivation. See
+    ``tests/test_constant_cutover.py`` for the family's own detector-level
+    and fidelity-gate coverage."""
+
+    @given(name=st.text(min_size=0, max_size=20), value=_names)
+    def test_a_synthetic_identity_round_trips_its_display_name(
+        self, name: str, value: str
+    ) -> None:
+        ir = legacy_constant_ir(_snap(), {name: value})
+        (occ,) = ir.occurrences
+        assert render_display_name(occ.entity_id) == name
+
+    def test_a_synthetic_identity_is_never_offered_as_producer_evidence(self) -> None:
+        ir = legacy_constant_ir(_snap(), {"X": "1"})
+        (occ,) = ir.occurrences
+        assert tuple(occ.entity_id.extra) == SYNTHETIC_IDENTITY_EXTRA
+        assert producer_entity_id(occ.entity_id) is None
+
+    def test_a_real_backend_identity_is_kept_and_reported_as_producer_evidence(
+        self,
+    ) -> None:
+        real = entity_id_for_constant((Namespace("ns"),), "X")
+        snap = _snap(constant_entity_ids={"ns::X": real})
+        ir = legacy_constant_ir(snap, {"ns::X": "1"})
+        (occ,) = ir.occurrences
+        assert occ.entity_id == real
+        assert producer_entity_id(occ.entity_id) == real
+
+    def test_a_sidecar_id_that_does_not_render_to_its_own_key_is_refused(self) -> None:
+        mismatched = entity_id_for_constant((Namespace("other"),), "X")
+        snap = _snap(constant_entity_ids={"ns::X": mismatched})
+        ir = legacy_constant_ir(snap, {"ns::X": "1"})
+        (occ,) = ir.occurrences
+        assert producer_entity_id(occ.entity_id) is None
+        assert render_display_name(occ.entity_id) == "ns::X"
+
+    def test_the_value_payload_is_the_raw_text_unchanged(self) -> None:
+        """No canonicalization is applied -- matches ``extract/
+        semantic_normalizer.py``'s "Scope of the fourth slice"."""
+        ir = legacy_constant_ir(_snap(), {"X": "0x2A"})
+        (occ,) = ir.occurrences
+        spelling = ir.occurrences[occ].canonical_spelling
+        assert spelling.is_present
+        assert spelling.value == "0x2A"
 
 
 # -- the fidelity gate -----------------------------------------------------
