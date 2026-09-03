@@ -128,7 +128,7 @@ concepts:
       only) via the new extract/pdb_scope.py -- PDB function/variable
       identity remains unimplemented (needs new DBI module-symbol-stream
       parsing). BTF/CTF's own SemanticIR gap closed 2026-09-03 (Phase 6's
-      eighth slice, types only, via the new
+      ninth slice, types only, via the new
       extract/debug_layout_semantic_ir.py) -- deliberately does not widen
       AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
       function/variable/typedef identity remains unimplemented for both

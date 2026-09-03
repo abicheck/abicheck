@@ -13984,7 +13984,7 @@ existing extraction path" the way DWARF's third slice was -- it needs
 genuinely new parser work first, a materially larger, separate project
 this types-only slice does not attempt.
 
-**Eighth slice landed: BTF/CTF, types only.** Both `btf_metadata.
+**Ninth slice landed: BTF/CTF, types only.** Both `btf_metadata.
 parse_btf_metadata` and `ctf_metadata.parse_ctf_metadata` reduce their own
 richer, format-specific parse to the shared `DwarfMetadata` shape (via
 `BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) purely so
