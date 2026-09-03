@@ -40,6 +40,13 @@ API path since that module is a ``cli_*`` sibling the engine-layer compare
 pipeline may not import (``engine-cli-boundary``) -- the same primitives
 (:mod:`abicheck.contract_context`) are used directly here instead of a
 second, diverging implementation.
+
+*policy_file* (Codex review, fresh evidence): the caller passes the
+``PolicyFile`` *as loaded*, before any ``--pack`` folding -- a pack-merged
+object cannot say which of its ``overrides`` came from the file and which
+from a pack, so folding it here would misattribute pack-contributed
+overrides as ``policy_file_path``-sourced. See ``service_compare_pipeline.
+classify_compare_pair``'s own ``receipt_pf`` comment for the full account.
 """
 
 from __future__ import annotations

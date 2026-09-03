@@ -42,12 +42,10 @@ Two mechanical notes:
   never bound at import time — keeps ``monkeypatch.setattr(service,
   "resolve_input", ...)`` (and ``compare_snapshots``) affecting this code
   exactly as when the body lived in ``service.py``. Helpers ``service``
-  itself only *re-exports* (``pair_wide_cxx20_std_override``,
-  ``split_public_header_inputs``, ``populate_pair_dependency_info``) are
-  imported straight from their defining module instead — going through a
-  re-export would make them look like public service API (mypy's
-  ``no_implicit_reexport``). The import is function-local so this module
-  does not join ``service``'s import cycle (AGENTS.md "What NOT to do").
+  itself only *re-exports* are imported straight from their defining module
+  instead — going through a re-export would make them look like public
+  service API (mypy's ``no_implicit_reexport``). The import is function-
+  local so this module does not join ``service``'s import cycle.
 * This module holds no state and makes no policy decisions of its own; every
   behavioural rule in it moved here verbatim from ``service.run_compare_request``.
 """
@@ -473,6 +471,13 @@ def classify_compare_pair(
     # populated `CompareRequest.pack_policy_overrides`/
     # `pack_internal_namespaces`. See `CompareRequest.pack_policy_overrides`'s
     # own docstring for why this is the one chokepoint to apply it at.
+    # `receipt_pf`: the file *as loaded*, before pack folding -- a
+    # pack-merged `PolicyFile` can't say which `overrides` came from the
+    # file vs. a pack, so folding it here would misattribute pack overrides
+    # as `policy_file_path`-sourced (Codex review). The release fan-out
+    # (today's only caller of these two fields) overwrites that receipt
+    # right after (`cli_compare_receipt.record_release_resolved_config`).
+    receipt_pf = pf
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 
@@ -589,10 +594,9 @@ def classify_compare_pair(
         old_pack=getattr(old, "build_source", None),
         new_pack=getattr(new, "build_source", None),
     )
-    # ADR-064/PR G2 typed-API parity: resolve *request*'s severity/exit-
-    # code-scheme fields into the same `GateOptions` the release fan-out
-    # uses, then the canonical `ExitDecision`. Single-pair `compare` has no
-    # per-category `--severity-<category>` flags (`.abicheck.yml` only).
+    # ADR-064/PR G2: resolve severity/exit-code-scheme into the same
+    # `GateOptions` the release fan-out uses, then the canonical
+    # `ExitDecision` (no per-category flags for single-pair `compare`).
     from .policy.exit_decision import resolve_compare_exit_decision
     from .workflows.gate import resolve_release_gate_options
 
@@ -617,7 +621,7 @@ def classify_compare_pair(
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
     install_resolved_gate_receipt(
-        result, request, gate, pf, suppression, effective_scheme
+        result, request, gate, receipt_pf, suppression, effective_scheme
     )
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a

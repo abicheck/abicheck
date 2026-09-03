@@ -70,6 +70,7 @@ What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
 | `new_snapshot` | `AbiSnapshot` | *(required)* |
 | `suppression` | `SuppressionList \| None` | `None` |
 | `exit_decision` | `ExitDecision \| None` | `None` |
+| `severity_config` | `SeverityConfig \| None` | `None` |
 
 ## `CompileContext`
 
@@ -194,6 +195,7 @@ Both sides of a comparison, resolved and ready to classify.
 | `new_fmt` | `str \| None` | *(required)* |
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
+| `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
 
 ## `ScanArtifactResult`
 

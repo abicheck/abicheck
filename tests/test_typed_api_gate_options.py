@@ -388,6 +388,62 @@ class TestCompareRequestContractContextGateReceipt:
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.policy.base.id == "sdk_vendor"
 
+    def test_pack_folded_overrides_do_not_falsely_claim_a_policy_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `classify_compare_pair` folds
+        `CompareRequest.pack_policy_overrides` into the loaded `PolicyFile`
+        *for scoring*, but that merged object cannot say which of its
+        `overrides` came from the file and which from a pack -- passing it
+        to the receipt installer would misattribute the pack's own override
+        as `policy_file_path`-sourced, with the file's real digest
+        (mis)covering content it never actually contained. The receipt must
+        record only the file's own, real overrides -- not the pack's."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        policy_file_path = tmp_path / "policy.yml"
+        policy_file_path.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: ignore\n",
+            encoding="utf-8",
+        )
+        result = self._run(
+            old,
+            new,
+            policy_file_path=policy_file_path,
+            pack_policy_overrides=(
+                (ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),
+            ),
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        # The file's own override is real receipt content.
+        assert cfg.policy.overrides.get("func_removed") == Verdict.COMPATIBLE
+        # The pack's override must NOT appear as if the file stated it --
+        # this is the bug: pre-fix, it did, digested under the file's own
+        # sha256.
+        assert "var_removed" not in cfg.policy.overrides
+
+    def test_pack_folding_still_scores_the_comparison_itself(
+        self, tmp_path: Path
+    ) -> None:
+        """The receipt fix must not regress what actually gets scored --
+        `classify_compare_pair` still classifies through the pack-*folded*
+        `PolicyFile` (a separate variable from the one passed to the
+        receipt), so a pack override still demotes the real verdict."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            pack_policy_overrides=(
+                (ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),
+            ),
+        )
+        assert result.diff.verdict.name == "COMPATIBLE"
+
 
 class TestCompareResultSeverityConfigRenderingParity:
     """Codex review, fresh evidence (PR #1032, commit 72fdf5b, file:line
