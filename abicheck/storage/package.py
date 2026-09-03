@@ -65,9 +65,9 @@ from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
 from .canonical import (
-    canonical_form,
+    copy_of_canonical_form,
     raw_digest,
-    semantic_digest,
+    semantic_digest_of_canonical_form,
     strip_capture_metadata,
 )
 from .guards import (
@@ -777,9 +777,14 @@ class InMemoryObjectStore:
             return digest
         # Normalize once, then hash and store from that same snapshot -- a
         # second independent traversal of a stateful `Mapping` could digest
-        # different content than what gets stored (Codex review).
+        # different content than what gets stored (Codex review). `stripped`
+        # is already `canonical_form`'s output, so hashing goes straight
+        # through `semantic_digest_of_canonical_form` rather than
+        # `semantic_digest`, which would otherwise re-run `canonical_form`
+        # over content that is already canonical -- a second full traversal
+        # of every section on every `put()` call that bought nothing.
         stripped = strip_capture_metadata(content)
-        digest = semantic_digest(stripped, algorithm=algorithm)
+        digest = semantic_digest_of_canonical_form(stripped, algorithm=algorithm)
         if digest not in self._objects:
             self._objects[digest] = stripped
         return digest
@@ -793,8 +798,12 @@ class InMemoryObjectStore:
         if isinstance(stored, bytes):
             return stored  # immutable already -- no copy needed
         # An isolated copy, not the store's own object -- else a caller
-        # could mutate it in place, uncorrectably (Codex review).
-        return canonical_form(stored)
+        # could mutate it in place, uncorrectably (Codex review). `stored`
+        # is already `canonical_form`'s own output (that's exactly what
+        # `put()` stored), so `copy_of_canonical_form` gives the same
+        # isolation without `canonical_form`'s redundant re-sort/re-validate
+        # pass over content that is already known canonical.
+        return copy_of_canonical_form(stored)
 
     def has(self, digest: str) -> bool:
         return _identity_text(digest, "digest") in self._objects

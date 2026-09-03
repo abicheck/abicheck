@@ -47,6 +47,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -56,8 +57,10 @@ __all__ = [
     "CAPTURE_METADATA_KEY",
     "canonical_form",
     "canonical_json",
+    "copy_of_canonical_form",
     "raw_digest",
     "semantic_digest",
+    "semantic_digest_of_canonical_form",
     "strip_capture_metadata",
 ]
 
@@ -176,6 +179,29 @@ def canonical_form(value: Any) -> Any:
         return value
     if isinstance(value, float):
         return _canonical_number(value)
+    # Fast path for the overwhelmingly common concrete `dict`/`list` shapes
+    # (every storage payload is built from these, not from a custom
+    # `Mapping`/`Sequence`), checked by exact `type()` ahead of the general
+    # `isinstance(..., Mapping)`/`isinstance(..., Sequence)` checks below.
+    # `isinstance` against an `abc`-registered protocol walks the class's
+    # MRO/registry on every call (`abc.ABCMeta.__instancecheck__`), which is
+    # measurably more expensive than a `type() is dict` identity check at
+    # the scale a large snapshot's canonical form is computed at — this
+    # changes no observable behavior, since the general branches below still
+    # handle every other `Mapping`/`Sequence` subtype exactly as before.
+    value_type = type(value)
+    if value_type is dict:
+        for raw_key in value:
+            if not isinstance(raw_key, str):
+                raise TypeError(
+                    f"mapping key {raw_key!r} is {type(raw_key).__name__}, not str; "
+                    "canonical storage form does not coerce keys"
+                )
+        return {
+            k: canonical_form(v) for k, v in sorted(value.items(), key=lambda kv: kv[0])
+        }
+    if value_type is list:
+        return [canonical_form(v) for v in value]
     if _is_binary_buffer(value):
         # `bytes` is a Sequence, so without this guard it would fall through
         # and encode as a list of integers — a silent, lossy reinterpretation
@@ -238,6 +264,28 @@ def canonical_form(value: Any) -> Any:
     )
 
 
+def copy_of_canonical_form(value: Any) -> Any:
+    """A fresh, deep copy of *value*, which must already be `canonical_form`'s
+    own output (only `dict`/`list`/`str`/`int`/`float`/`bool`/`None`, dict
+    keys already sorted).
+
+    Used where a caller needs an isolated copy of content it knows is
+    already canonical -- `InMemoryObjectStore.get()`'s "never the store's
+    own object" contract, for one -- without paying `canonical_form`'s own
+    cost again: no re-sorting, no dict-key type validation, and no
+    `isinstance` checks against `Mapping`/`Sequence`/`set`/`frozenset`,
+    since the input's shape is already known and none of that work can
+    change the result. Passing anything that is not already canonical is a
+    programming error; this function does not validate that, unlike
+    `canonical_form`, which is the whole reason it is faster.
+    """
+    if type(value) is dict:
+        return {k: copy_of_canonical_form(v) for k, v in value.items()}
+    if type(value) is list:
+        return [copy_of_canonical_form(v) for v in value]
+    return value
+
+
 def strip_capture_metadata(value: Any) -> Any:
     """Canonical form with the reserved root capture-metadata slot removed.
 
@@ -284,12 +332,20 @@ def canonical_json(
     )
 
 
+#: Compiled once rather than re-walking each string character-by-character
+#: in Python for every call — `_has_surrogate_pair` runs once per string in
+#: the entire document (via `_reject_surrogate_pairs`'s full traversal), so
+#: its per-call cost is directly the cost of hashing a large document. `re`'s
+#: matcher is implemented in C and short-circuits on the first match, same
+#: as the `any(...)` it replaces, with identical semantics: `text[index]` in
+#: `\ud800`-`\udbff` immediately followed by `text[index + 1]` in
+#: `\udc00`-`\udfff`.
+_SURROGATE_PAIR_RE = re.compile("[\ud800-\udbff][\udc00-\udfff]")
+
+
 def _has_surrogate_pair(text: str) -> bool:
     """Whether ``text`` contains a high surrogate followed by a low one."""
-    return any(
-        "\ud800" <= text[index] <= "\udbff" and "\udc00" <= text[index + 1] <= "\udfff"
-        for index in range(len(text) - 1)
-    )
+    return _SURROGATE_PAIR_RE.search(text) is not None
 
 
 def _reject_surrogate_pairs(value: Any) -> None:
@@ -373,9 +429,27 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     which is why it is settled now.
     """
     stripped = strip_capture_metadata(value)
-    _reject_surrogate_pairs(stripped)
+    return semantic_digest_of_canonical_form(stripped, algorithm=algorithm)
+
+
+def semantic_digest_of_canonical_form(
+    canonical_stripped: Any, *, algorithm: str
+) -> str:
+    """:func:`semantic_digest`'s hashing half, given an already-canonical,
+    capture-metadata-stripped value.
+
+    Split out so a caller that has *already* produced this exact form (e.g.
+    `InMemoryObjectStore.put`, which calls :func:`strip_capture_metadata`
+    itself to snapshot what it stores before hashing it -- see that call
+    site's own comment) can hash it without a second, redundant
+    `canonical_form` traversal of content that is already canonical.
+    `semantic_digest` itself still always re-derives the canonical form from
+    whatever it is given, since its public contract is "the digest of this
+    value's canonical form" for an arbitrary, possibly non-canonical input.
+    """
+    _reject_surrogate_pairs(canonical_stripped)
     payload = json.dumps(
-        stripped,
+        canonical_stripped,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
