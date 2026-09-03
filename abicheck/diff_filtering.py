@@ -1636,12 +1636,16 @@ def _downgrade_opaque_type_changes(
     bare-``RecordType.name`` collision the plan names for this site (two
     unrelated types sharing a leaf spelling in different scopes, one opaque,
     both suppressed) is closed **when it is provably safe to close** --
-    ``opaque.complete`` (see :attr:`~abicheck.compare.opaque_types.
-    OpaqueTypeIndex.complete`'s own docstring) is ``True`` only when *every*
-    opaque declaration on *both* sides resolved a stable identity, which is
-    exactly the precondition under which a stable-tier miss can be trusted
-    as proof of non-opacity rather than a mere resolution gap. Passed
-    through as ``opaque.contains(c, ..., strict=opaque.complete)`` --
+    ``opaque.complete`` (computed by :meth:`~abicheck.compare.opaque_types.
+    OpaqueTypeIndex.intersect`, see its own docstring) is ``True`` only when
+    every spelling the two sides agree is opaque is *also* backed by a
+    matching stable-id pair between them -- not merely "each side resolved
+    something", which a producer disagreement about the same declaration's
+    own identity can satisfy while still holding no real match (Codex
+    review on PR #1045). That paired precondition is exactly what makes a
+    stable-tier miss elsewhere trustworthy as proof of non-opacity rather
+    than a mere resolution gap. Passed through as
+    ``opaque.contains(c, ..., strict=opaque.complete)`` --
     ``strict=True`` only narrows a *miss* (the change's own stable identity
     doesn't match any known-opaque one); it never affects a *hit*, and it
     has no effect at all when the change carries no resolvable stable

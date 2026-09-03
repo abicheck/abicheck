@@ -40,6 +40,7 @@ from abicheck.model.identity import (
     Anonymous,
     EntityKind,
     Namespace,
+    Record,
     entity_id_for_type,
 )
 from abicheck.model.identity_tiers import (
@@ -296,6 +297,36 @@ class TestBareNameCollisionNarrowing:
         before, whether or not the comparison happens to be complete."""
         snap = _snap([_opaque("Handle", _STABLE_ID)])
         assert _survivors([_size_change("Handle", _STABLE_ID)], snap, snap) == []
+
+    def test_disagreeing_stable_ids_for_the_same_spelling_do_not_go_strict(
+        self,
+    ) -> None:
+        """Regression for the Codex review on PR #1045: presence alone
+        ("did each side resolve *something*?") is not completeness. Both
+        sides here individually resolve a stable id for their own
+        ``ns1::Handle`` declaration -- so a naive whole-index "every
+        declaration resolved something" flag reads ``True`` on both sides --
+        but the two ids *disagree* (mirroring two producers that scope the
+        same enclosing declaration differently, e.g. namespace vs. record).
+        ``self.stable & other.stable`` holds no match for it, yet the
+        *local* (spelling) tier still correctly proves ``ns1::Handle`` is
+        opaque on both sides. A completeness signal computed from bare
+        presence would still go strict here and treat the resulting
+        stable-tier miss on a change about that SAME (still-opaque)
+        declaration as proof of non-opacity -- silently un-suppressing a
+        genuinely invisible layout change. Paired completeness must decline
+        instead, exactly as when one side resolves nothing at all.
+        """
+        ns1_id_old = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns1_id_new = entity_id_for_type((Record("ns1"),), "Handle")
+        assert ns1_id_old != ns1_id_new  # the two producers genuinely disagree
+        old = _snap([_opaque("Handle", ns1_id_old)])
+        new = _snap([_opaque("Handle", ns1_id_new)])
+        # A change about the SAME still-opaque declaration -- old-preferred
+        # entity_id, exactly as diff_types.py's real `t_old.entity_id or
+        # t_new.entity_id` always resolves it.
+        change = _size_change("Handle", ns1_id_old)
+        assert _survivors([change], old, new) == []
 
 
 class TestByValueExposureAcrossAQualificationMismatch:

@@ -42,8 +42,8 @@ measure but not movable without a separate migration of
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..diff_helpers import depth_aware_bare_name
@@ -104,38 +104,27 @@ class OpaqueTypeIndex:
 
     stable: frozenset[StableEntityId]
     local: frozenset[SnapshotLocalIdentity]
-    #: Whether *every* raw opaque declaration this index was built from
-    #: (before deduplication into :attr:`stable`/:attr:`local`) resolved a
-    #: cross-snapshot-stable ``EntityId``. ``True`` vacuously when there were
-    #: no opaque declarations at all.
-    #:
-    #: This is deliberately **not** ``len(stable) == len(local)`` -- that
-    #: comparison is satisfiable by the exact bug this field exists to help
-    #: close: two *different* opaque declarations sharing one bare leaf
-    #: spelling in different scopes collapse into a single ``local`` entry
-    #: (grouped by spelling) while still contributing two distinct ``stable``
-    #: entries (grouped by full scope+name), so a collision can make
-    #: ``len(stable) > len(local)`` even though every declaration resolved an
-    #: identity. Completeness is tracked directly during the same walk
-    #: :func:`find_opaque_types` already does, over the *raw*
-    #: (pre-deduplication) declaration list, which is the only shape that
-    #: cannot be fooled by a collision either collapsing or multiplying a
-    #: count.
-    #:
-    #: :meth:`intersect` ANDs the two sides' flags: narrowing (via
-    #: :meth:`contains`'s ``strict=True``) is safe for one comparison only
-    #: when *both* snapshots' opaque declarations resolved a stable identity
-    #: -- a single unresolved declaration on either side (a mixed producer
-    #: comparison, or a pre-``entity_id``-population schema loaded from an
-    #: archived baseline) would let a stable-tier miss silently mean "not
-    #: opaque" for a declaration that really is, dropping a real suppression
-    #: and reporting a purely private layout change as breaking. The caller
-    #: (``diff_filtering._downgrade_opaque_type_changes``) reads this flag
-    #: off the already-intersected index and passes it straight through as
-    #: ``contains(..., strict=opaque.complete)`` -- the identical
-    #: both-or-neither discipline ``compare/typedefs.py``'s and
-    #: ``compare/constants.py``'s own fidelity gates apply to their
-    #: ``SemanticIR``-vs-adapter selection.
+    #: For each bare spelling this index holds an opaque declaration under,
+    #: the stable ids resolved among just the declaration(s) sharing that
+    #: spelling -- the per-spelling breakdown :attr:`stable` itself discards
+    #: by flattening every declaration into one snapshot-wide set.
+    #: :meth:`intersect` uses this to verify *pairing*, not merely
+    #: *presence*, before it may set :attr:`complete`: see that method's own
+    #: docstring for the counter-example presence-only completeness misses
+    #: (Codex review on PR #1045 -- a first revision of this narrowing
+    #: checked only "did every raw declaration resolve *some* stable id",
+    #: which does not by itself prove the two sides' ids for the *same*
+    #: declaration actually agree). Not meaningful on an already-intersected
+    #: index (empty there); only :func:`find_opaque_types`'s own per-snapshot
+    #: output populates it.
+    stable_by_local: Mapping[SnapshotLocalIdentity, frozenset[StableEntityId]] = field(
+        default_factory=dict
+    )
+    #: Whether narrowing (:meth:`contains`'s ``strict=True``) is safe for
+    #: *this* (already-intersected) index. Set only by :meth:`intersect`;
+    #: defaults ``True`` on a freshly-built per-snapshot index, since
+    #: completeness is a comparison-level (paired) property that a lone
+    #: snapshot's own index cannot yet answer -- see :meth:`intersect`.
     complete: bool = True
 
     def intersect(self, other: OpaqueTypeIndex) -> OpaqueTypeIndex:
@@ -143,11 +132,39 @@ class OpaqueTypeIndex:
         sides to suppress. The tiers intersect independently: a type opaque
         on both sides but carrying a stable identity on only one still meets
         in the *local* tier, exactly as the pre-migration string set did.
-        ``complete`` is ANDed -- see that attribute's own docstring."""
+
+        **Completeness is computed here, from paired stable coverage --
+        never from bare presence.** For every spelling the two sides agree
+        is opaque (``self.local & other.local``), narrowing is safe for that
+        spelling only when the two sides' *own* stable-id sets for it
+        (``stable_by_local``) actually intersect -- proving the two sides
+        resolved the *same* declaration, not merely *a* declaration each.
+        The distinction is real: two producers can each individually resolve
+        a stable id for the *same* nominal declaration and still disagree on
+        what it is (e.g. whether an enclosing scope segment is a namespace
+        or a record), which a naive "did both sides resolve *something*"
+        check cannot see (Codex review on PR #1045 -- a first revision
+        ANDed each side's own whole-index "every declaration resolved
+        something" flag, which stayed ``True`` on both sides in exactly this
+        counter-example even though ``self.stable & other.stable`` held no
+        match for it; ``_downgrade_opaque_type_changes`` would then have
+        gone strict and wrongly un-suppressed a genuine still-opaque
+        declaration's own finding). ``all()`` over an empty spelling set is
+        vacuously ``True`` -- no shared spelling means nothing for narrowing
+        to get wrong.
+        """
+        local = self.local & other.local
+        paired = all(
+            bool(
+                self.stable_by_local.get(key, frozenset())
+                & other.stable_by_local.get(key, frozenset())
+            )
+            for key in local
+        )
         return OpaqueTypeIndex(
             stable=self.stable & other.stable,
-            local=self.local & other.local,
-            complete=self.complete and other.complete,
+            local=local,
+            complete=paired,
         )
 
     def __bool__(self) -> bool:
@@ -243,28 +260,26 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
             declarations.setdefault(t.name, []).append(t)
 
     if not opaque:
-        return OpaqueTypeIndex(stable=frozenset(), local=frozenset(), complete=True)
+        return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
 
     by_value_types = find_by_value_types(snap, opaque)
     surviving = opaque - by_value_types
 
     stable: set[StableEntityId] = set()
     local: set[SnapshotLocalIdentity] = set()
-    # Tracked over the *raw* per-declaration walk, not derived from the
-    # deduplicated `stable`/`local` set sizes afterward -- see
-    # `OpaqueTypeIndex.complete`'s own docstring for why a size comparison
-    # is fooled by exactly the collision this field exists to help close.
-    complete = True
+    stable_by_local: dict[SnapshotLocalIdentity, set[StableEntityId]] = {}
     for name in surviving:
         for t in declarations[name]:
-            local.add(snapshot_local_identity(name, t.entity_id))
+            key = snapshot_local_identity(name, t.entity_id)
+            local.add(key)
             resolved = stable_entity_id(t.entity_id)
             if resolved is not None:
                 stable.add(resolved)
-            else:
-                complete = False
+                stable_by_local.setdefault(key, set()).add(resolved)
     return OpaqueTypeIndex(
-        stable=frozenset(stable), local=frozenset(local), complete=complete
+        stable=frozenset(stable),
+        local=frozenset(local),
+        stable_by_local={k: frozenset(v) for k, v in stable_by_local.items()},
     )
 
 
