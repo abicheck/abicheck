@@ -23,16 +23,9 @@
 
 ## The problem
 
-You maintain a shared library (`.so`, `.dll`, `.dylib`). Other people's binaries were compiled against version 1. You are about to release version 2. Did you:
+You ship a shared library. Other people's programs were compiled against version 1, and you are about to release version 2. If an exported function vanished, a struct field moved, a vtable slot shifted, or an enum was renumbered, those programs **crash, corrupt data silently, or refuse to load**. No compiler warns you, and a test suite that rebuilds from source never sees it.
 
-- remove or rename an exported function,
-- insert a field in the middle of a public struct,
-- reorder a virtual method, renumber an enum, change a calling convention,
-- or change a default argument, a macro, or an inline body that never even reaches the binary?
-
-The first three kinds make existing programs **crash, corrupt data silently, or refuse to load** after an upgrade: a binary ABI break. The last kind is a source-level API break: already-compiled programs keep running with the old value baked in, but anything rebuilt against the new headers behaves differently. Compilers do not warn about either. Tests that rebuild everything from source do not catch the first. Users find out in production.
-
-**abicheck** compares two versions of a library, together with their public headers, debug info, build data, and optionally sources, and tells you exactly which existing consumers will break, why, and what version bump you owe.
+abicheck compares the two versions, with whatever headers, debug info, build data, and sources you have, and tells you what breaks, why, and which version bump you owe.
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=include/v2/
@@ -40,20 +33,19 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 
 ## Why abicheck
 
-- **It reads every source of evidence you have, not just one.** The compiled binary, its debug info (DWARF, PDB, BTF, CTF), the public header AST, the build-system flags, and the sources are five independent, additive layers. Each one finds breaks the others are blind to, and each one *removes* false positives the weaker ones would raise. [How it works](#how-it-works-five-layers-of-evidence).
-- **It tells you what it could not check.** Every report carries an Analysis Confidence section listing the detectors that were disabled and why, and a CLI comparison given header, build, or source evidence prints an evidence-coverage block up front naming which detector classes ran and which were off because the input lacked the evidence. A pass with missing evidence is labeled as such rather than looking like a clean one.
-- **Breadth of detection.** **397 ABI/API change types** across functions, variables, structs, classes, enums, unions, typedefs, templates, vtables, symbol versions, SONAMEs, dependencies, hardening flags, and platform metadata, each classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. [Change kind reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
-- **Separate verdicts for binary breaks and source breaks.** `BREAKING` means old binaries stop working. `API_BREAK` means consumers must recompile but their existing binaries still run. Other tools collapse the two; abicheck is the only one in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK`.
-- **Public-surface scoping.** With headers, findings are filtered to the library's public ABI, so churn in internal types does not fail your build. Opt-in [contract-aware mode](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/) goes further and gates only on the contract you declare: public headers, the export table, or everything.
-- **Zero false positives on the benchmark catalog** in both measured lanes, headers-only (L2) and full evidence (L3 to L5). Lower tiers do over-call internal churn; that is exactly what adding headers removes. Numbers below.
-- **Cross-platform, pure Python.** Linux ELF, Windows PE/COFF, macOS Mach-O. Python 3.10+, no compiler required for binary-only and debug-info modes.
-- **Built for CI.** Deterministic exit codes, SARIF, JSON, Markdown, HTML, and JUnit output, snapshot baselines, policy profiles, suppressions with expiry, a first-class [GitHub Action](#github-action), and a typed [Python API](#python-api) that resolves through the same request objects as the CLI.
-- **Beyond one library.** Compare a multi-library release as one bundle (cross-library dependency and provider findings are ELF/Linux-only; other platforms get per-library results), check whether a *specific application* still works (`--used-by`), verify a plugin still satisfies its host (`--required-symbol`), or validate a binary's whole dependency stack across two sysroots (`deps compare`).
-- **Drop-in for `abi-compliance-checker`.** `abicheck compat` mirrors ABICC's flags. [Migration guides](#migrating-from-another-tool) cover ABICC and libabigail.
+- **Five layers of evidence, not one.** Binary, debug info, headers, build flags, sources. Each layer finds breaks the others miss and removes false positives the weaker ones raise.
+- **It says what it could not check.** Missing evidence is reported, never silently passed.
+- **397 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). No other tool in the [benchmark](#how-it-compares-to-other-tools) makes that distinction.
+- **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
+- **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), a typed [Python API](#python-api), and a drop-in `compat` mode for `abi-compliance-checker`. Pure Python, Linux/Windows/macOS.
 
 ## What a report looks like
 
-The run below compares two builds where a struct gained a field in the middle, two enum values swapped, and a function disappeared. Markdown is the default; the same content is available as JSON, SARIF, HTML, and JUnit. Abridged from real output.
+The run below compares two builds where a struct gained a field in the middle, two enum values swapped, and a function disappeared. The HTML report, rendered from real output:
+
+<p align="center"><img src="docs/assets/readme/report-html.png" alt="abicheck HTML report: verdict BREAKING, analysis confidence table, change summary, removed and changed symbols" width="900"></p>
+
+The same content ships as Markdown (the default, and what the [GitHub Action](#github-action) posts as a PR comment), JSON, SARIF, and JUnit. Before the report, a CLI run prints which checks were on and which were off for the evidence you supplied:
 
 ```text
 $ abicheck compare v1/libfoo.so.1 v2/libfoo.so.2 --header old=v1/foo.h --header new=v2/foo.h
@@ -73,6 +65,9 @@ Checks enabled for this scan (and why others are not):
   [off] Macros, default args, inline/template/constexpr bodies — no source replay evidence
   [on]  Impact / call / reachability graph — from the source graph summary
 ```
+
+<details>
+<summary>Markdown output for the same run (abridged)</summary>
 
 ```markdown
 # ABI Report: libfoo.so.1
@@ -114,11 +109,31 @@ Checks enabled for this scan (and why others are not):
 > ℹ️ 1 redundant change(s) hidden (derived from root type changes).
 ```
 
+</details>
+
 Exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches. Findings derived from a root cause (here, the `point_scale` signature change that follows from the struct change) are folded into it and counted as hidden, so the report stays readable.
 
 ## How it works: five layers of evidence
 
 abicheck treats compatibility as a question of **evidence**. The more independent sources you give it, the more it can prove and the fewer false positives it raises. You provide up to five; each adds facts the previous one cannot see.
+
+```mermaid
+flowchart LR
+    subgraph give["What you give it"]
+        direction TB
+        L0["L0 · Binary<br/>.so · .dll · .dylib"]
+        L1["L1 · Debug info<br/>DWARF · PDB · BTF · CTF"]
+        L2["L2 · Public headers<br/>castxml / clang AST"]
+        L3["L3 · Build data<br/>compile DB · CMake · Bazel"]
+        L4["L4 · Sources<br/>per-TU source replay"]
+    end
+    L0 & L1 & L2 & L3 & L4 --> X["Overlay all evidence<br/>worst-wins verdict"]
+    X --> V["BREAKING · API_BREAK<br/>COMPATIBLE_WITH_RISK · COMPATIBLE"]
+    V --> O["Markdown · JSON · SARIF · HTML · JUnit<br/>exit code 0 · 2 · 4"]
+    style X fill:#fff3cd,stroke:#d4a017
+    style V fill:#f8d7da,stroke:#c0392b
+    style O fill:#d4edda,stroke:#2e8b57
+```
 
 | Layer | You provide | Read by | What it newly reveals |
 |:-----:|-------------|---------|-----------------------|
