@@ -124,7 +124,10 @@ RELATED_RULES: dict[str, list[str]] = {
         "public-typedef-removed",
         "tag-struct-renamed",
     ],
-    "case110_concurrent_unordered_map_api_drift": ["exported-function-removed"],
+    "case110_concurrent_unordered_map_api_drift": [
+        "compat-addition",
+        "exported-function-removed",
+    ],
     "case111_enumerable_thread_specific_lambda_ambiguity": [
         "constructor-overload-ambiguity"
     ],

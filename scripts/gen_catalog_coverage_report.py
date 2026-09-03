@@ -128,8 +128,8 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
         "demonstrates alone yet).",
         f"- **{len(variant_families)} of the rule-entity-backed rules** have "
         f"a demonstrated variant beyond their canonical case "
-        f"({len(variant_case_ids)} variant cases total, one per family "
-        "below) -- these are robustness demonstrations of an "
+        f"({len(variant_case_ids)} variant cases total -- see the per-family "
+        "breakdown below) -- these are robustness demonstrations of an "
         "already-counted rule, not additional rules.",
         f"- **{len(slug_cases) - len(variant_families)} rule-entity-backed "
         "rules** have exactly one demonstrated case so far, with no "

@@ -4273,6 +4273,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "compat-addition",
     "exported-function-removed"
    ],
    "rule_slug": null,
