@@ -56,12 +56,15 @@ from .canonical import (
 from .dto import (
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
+    TYPES_SECTION_KIND,
     SectionDTO,
     legacy_section_from_dto,
     legacy_section_to_dto,
     migrate_section_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
+    types_from_dto,
+    types_to_dto,
 )
 from .identity import (
     EntityId,
@@ -141,6 +144,7 @@ __all__ = [
     "SEMANTIC_IR_SECTION_KIND",
     "SectionDTO",
     "StorageVersions",
+    "TYPES_SECTION_KIND",
     "UNSTATED_VERSION",
     "VariantRef",
     "artifact_ref_relpath",
@@ -165,5 +169,7 @@ __all__ = [
     "split_legacy_document",
     "strip_capture_metadata",
     "to_sectioned_document",
+    "types_from_dto",
+    "types_to_dto",
     "variant_ref_relpath",
 ]

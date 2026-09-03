@@ -20,13 +20,17 @@ from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import (
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
+    TYPES_SECTION_KIND,
     SectionDTO,
     legacy_section_from_dto,
     legacy_section_to_dto,
     migrate_section_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
+    types_from_dto,
+    types_to_dto,
 )
+from abicheck.storage.types_section_codec import TypesSection
 
 
 class TestSectionDTO:
@@ -203,6 +207,27 @@ class TestMigrateSectionDTO:
         with pytest.raises(ValueError):
             migrate_section_dto(dto)
 
+    def test_a_registered_migration_step_actually_runs(self, monkeypatch) -> None:
+        """`_MIGRATIONS` is empty for every real section kind today (no
+        section has shipped a second version yet -- see this module's own
+        docstring), so the loop body that actually calls a registered step
+        and advances `version` is otherwise dead code in this build.
+        Registering a throwaway step here is the only way to exercise it."""
+        import abicheck.storage.dto as dto_module
+
+        monkeypatch.setitem(
+            dto_module._MIGRATIONS,
+            "graph",
+            {1: lambda payload: {**payload, "migrated": True}},
+        )
+        monkeypatch.setitem(dto_module.SECTION_SCHEMA_VERSIONS, "graph", 2)
+        dto = SectionDTO(
+            section_kind="graph", section_schema_version=1, payload={"a": 1}
+        )
+        migrated = migrate_section_dto(dto)
+        assert migrated.section_schema_version == 2
+        assert migrated.payload == {"a": 1, "migrated": True}
+
 
 def _entity(spelling: str) -> CanonicalEntity:
     return CanonicalEntity(canonical_spelling=Fact.present(spelling))
@@ -247,6 +272,16 @@ class TestLegacySectionDTO:
         with pytest.raises(ValueError, match="not a legacy section kind"):
             legacy_section_to_dto(SEMANTIC_IR_SECTION_KIND, {})
 
+    def test_encoding_an_unknown_section_kind_is_refused(self) -> None:
+        """The sibling of `test_decoding_an_unknown_section_kind_is_refused`
+        below, for the encode direction -- `not_a_real_kind` isn't in
+        `SECTION_SCHEMA_VERSIONS` at all, so this exercises the *first*
+        operand of the `or` short-circuiting True on its own, distinct from
+        every other test here (which all reach this check via the second
+        operand, a genuinely-known-but-specialized kind)."""
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto("not_a_real_kind", {})
+
     def test_decoding_a_semantic_ir_kind_dto_is_refused(self) -> None:
         dto = SectionDTO(
             section_kind=SEMANTIC_IR_SECTION_KIND,
@@ -257,7 +292,9 @@ class TestLegacySectionDTO:
             legacy_section_from_dto(dto)
 
     def test_decoding_an_unknown_section_kind_is_refused(self) -> None:
-        dto = SectionDTO(section_kind="not_a_real_kind", section_schema_version=1, payload={})
+        dto = SectionDTO(
+            section_kind="not_a_real_kind", section_schema_version=1, payload={}
+        )
         with pytest.raises(ValueError, match="not a legacy section kind"):
             legacy_section_from_dto(dto)
 
@@ -279,3 +316,91 @@ class TestLegacySectionDTO:
         assert canonical_json(dto_forward.to_dict()) == canonical_json(
             dto_backward.to_dict()
         )
+
+
+class TestTypesSectionDTO:
+    """ADR-063 Track 4 (8B): `TypesSection`, the `"types"` D8 legacy
+    section's own typed DTO."""
+
+    def test_round_trips_through_a_dict_document(self) -> None:
+        section = TypesSection(types=({"kind": "record", "name": "Foo"},))
+        dto = types_to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = types_from_dto(reloaded)
+        assert section2 == section
+
+    def test_from_document_refuses_a_non_mapping_payload(self) -> None:
+        with pytest.raises(ValueError, match="must be a mapping"):
+            TypesSection.from_document(["not", "a", "mapping"])  # type: ignore[arg-type]
+
+    def test_from_document_refuses_a_non_list_types_value(self) -> None:
+        with pytest.raises(ValueError, match="must carry a 'types' list"):
+            TypesSection.from_document({"types": "not-a-list"})
+
+    def test_from_document_refuses_a_missing_types_key(self) -> None:
+        with pytest.raises(ValueError, match="must carry a 'types' list"):
+            TypesSection.from_document({})
+
+    def test_from_document_refuses_extra_keys(self) -> None:
+        with pytest.raises(ValueError, match="may only carry 'types'"):
+            TypesSection.from_document({"types": [], "extra": 1})
+
+    def test_wrong_section_kind_is_refused(self) -> None:
+        dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
+        with pytest.raises(ValueError):
+            types_from_dto(dto)
+
+    def test_nested_lists_are_deep_unfrozen_not_left_as_tuples(self) -> None:
+        """Codex review, fresh evidence: `SectionDTO.payload` freezes every
+        nested mapping/list recursively (`_freeze`) — `types_from_dto` must
+        read back through `to_dict()`'s own deep `_unfreeze`, not the frozen
+        `payload` attribute directly, or a type entry's own nested list
+        (e.g. a `RecordType`'s `bases`) would round-trip as a `tuple` while
+        a freshly-dumped comparison side holds a plain `list`, producing a
+        spurious mismatch a downstream detector reads as a real change.
+        `TypesSection.types` is itself frozen internally (mirroring
+        `SectionDTO.payload`), so the ordinary-`dict`/`list` assertion below
+        goes through the public `to_document()` accessor, not `.types`
+        directly."""
+        section = TypesSection(types=({"name": "Foo", "bases": ["Base"]},))
+        dto = types_to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = types_from_dto(reloaded)
+        entry = section2.to_document()["types"][0]
+        assert isinstance(entry, dict)
+        assert isinstance(entry["bases"], list)
+        # json.dumps must accept the reconstructed document -- a leftover
+        # MappingProxyType/tuple would raise.
+        import json
+
+        json.dumps(section2.to_document())
+
+    def test_types_field_is_frozen_against_caller_mutation(self) -> None:
+        """Codex review, fresh evidence: a `frozen=True` dataclass whose one
+        field is a plain `tuple` of ordinary `dict`/`list` entries is not
+        actually immutable -- the caller's own entry objects (or a document
+        `to_document()` hands back) stay reachable and mutable, so mutating
+        either could silently change a `TypesSection`'s own content after
+        construction. `__post_init__` freezes every entry the same way
+        `SectionDTO.__post_init__` already freezes its own `payload`."""
+        original_entry = {"name": "Foo", "bases": ["Base"]}
+        section = TypesSection(types=(original_entry,))
+        original_entry["bases"].append("Mutated")
+        assert section.to_document()["types"][0]["bases"] == ["Base"]
+
+        document = section.to_document()
+        document["types"][0]["bases"].append("Mutated")
+        assert section.to_document()["types"][0]["bases"] == ["Base"]
+
+    def test_legacy_section_to_dto_refuses_the_types_kind(self) -> None:
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto(TYPES_SECTION_KIND, {"types": []})
+
+    def test_legacy_section_from_dto_refuses_a_types_kind_dto(self) -> None:
+        dto = SectionDTO(
+            section_kind=TYPES_SECTION_KIND,
+            section_schema_version=SECTION_SCHEMA_VERSIONS[TYPES_SECTION_KIND],
+            payload={"types": []},
+        )
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_from_dto(dto)

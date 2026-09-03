@@ -186,8 +186,8 @@ when a first PR lands against a sub-phase:
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
-| **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
-| **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+| **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
+| **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
 **5B's first PR landed (2026-09-03).** `abicheck.compare.fact_comparison.
 compare_facts` is the shared primitive (moved there from `model/fact.py`
@@ -345,6 +345,66 @@ bug it fixes without closing the class (an attacker would target
 `diff_bases`/`diff_va_list_params` instead). Recorded here per this
 repo's own "say so explicitly and record the gap" convention rather than
 left implicit or rushed.
+
+**7B's first PR landed (2026-09-03).** Scoped narrowly, after inspection
+showed most of `action/run.sh`'s raw-exit-code dispatch is not actually
+closable the way it first appears: the Click-usage-error-vs-real-verdict
+disambiguation (`_is_cli_error`'s stderr grep) has no `run_outcome` to read
+in the first place (a genuine CLI usage error produces no report at all),
+and `scan`'s dedicated evidence-contract/budget-overflow/not-comparable exit
+codes (7/5/6) are *deliberately* exit-code-only by ADR-037 D5's own design —
+three prior stderr/marker-file signals for that exact axis were each shown
+forgeable, which is why it has its own reserved exit code instead of a
+report-based signal at all. Neither is a gap this sub-phase can close by
+reading `run_outcome` harder. What *is* closable, and landed this PR:
+`_report_compat_verdict`/`_severity_gate_exit` — the two shared functions
+`compare` and `scan` alike consult to resolve the compatibility-axis verdict
+and the severity-policy gate tier — now read the report's own
+`run_outcome.compatibility`/`run_outcome.gate` (ADR-063 Phase 7 / D6) first,
+falling back to the pre-existing `verdict`/`severity.exit_code` field (and,
+for a non-JSON report, the rendered text) only when no `run_outcome` block
+is present. Behavior-preserving wherever both sources exist (`run_outcome
+.compatibility` is literally `result.verdict`, same as the legacy `verdict`
+field; `run_outcome.gate` is the identical fold `severity.exit_code`
+already encoded, just typed), so no existing `tests/test_action_run_sh_*.py`
+fixture needed updating — `tests/test_action_run_sh_run_outcome.py` adds the
+new coverage, giving each report a `run_outcome` value that deliberately
+disagrees with its paired legacy field to prove the script actually reads
+`run_outcome` rather than falling through to the unchanged path by
+coincidence. The release fan-out's own "independent pair-semantics
+reimplementation" half of this sub-phase's stated scope is untouched by
+this PR — real, separately-scoped follow-up work (`cli_compare_release.py`/
+`cli_compare_release_helpers.py`/`cli_compare_release_matrix.py` together
+are ~2800 lines with their own extensive review history; a shared
+pair-operation executor there needs its own dedicated slice, not a
+drive-by extension of this one).
+
+**8B's first PR landed (2026-09-03).** `storage.types_section_codec
+.TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
+through `storage.dto.types_to_dto`/`types_from_dto` in place of the generic
+`legacy_section_to_dto` pass-through envelope every other legacy section
+still uses. `"types"` was chosen as the first section to promote precisely
+*because* it is the simplest possible case: `storage.legacy_sections
+._SECTION_FIELDS["types"]` is exactly one field, and that field is required
+whenever the section is present at all (`_REQUIRED_SECTION_FIELDS["types"]`
+names it) — so there is no schema-version-dependent field-presence sparsity
+for a typed wrapper to get wrong, unlike the `provenance`/`debug`/`binary`
+sections a first investigation also considered, each of which carries a
+genuinely sparse, schema-version-dependent set of *optional* fields that a
+naive typed-dataclass-with-defaults conversion risks silently reconstructing
+incorrectly against `storage.import_v1.export_legacy_snapshot`'s
+byte-for-byte round-trip contract (verified against every real
+`tests/fixtures/schema/v*.json` fixture, `test_a_real_schema_fixture_round_
+trips`) — a real design problem those sections still need before they can
+follow, recorded here rather than attempted without it. The on-disk section
+payload shape is unchanged (`{"types": [...]}`, identical to what
+`legacy_section_to_dto` already stored); what changed is that the DTO layer
+no longer treats a `"types"` section as an arbitrary opaque blob
+indistinguishable from any other legacy section. The remaining seven legacy
+sections (`binary`/`declarations`/`layout`/`debug`/`build`/`graph`/
+`provenance`), multi-artifact `ProjectSnapshot` packages, and folding
+baseline-set/`BundleFacts` into sections all remain open, per this
+sub-phase's own stated scope.
 
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
