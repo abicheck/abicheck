@@ -19,6 +19,21 @@
   cached by an older abicheck build doesn't keep serving `semantic_ir=None`
   forever for an auto-detected BTF/CTF dump's identical cache-key inputs.
 
+### Fixed
+
+- **A `symbols_only`/`debug_presence_only` dump with an explicit BTF/CTF
+  `debug_format` no longer stamps a falsely-empty `SemanticIR`.** Both
+  modes resolve debug metadata through the cheap
+  `dwarf_presence.cheap_debug_presence_metadata` probe, which confirms
+  only that BTF/CTF debug info *exists* (`has_dwarf=True`) without ever
+  parsing its structs/enums. `_dump_elf` was passing the resolved format
+  straight through regardless, so `_build_symbol_only_snapshot`'s BTF/CTF
+  branch built `SemanticIR(occurrences={})` from a probe that never
+  looked — the same "confirmed empty" vs. "not evaluated" distinction
+  this codebase's own `Fact`/`FactStatus` discipline exists to preserve
+  elsewhere. `semantic_ir` is now left `None` on either presence-only path
+  (Codex review, fresh evidence).
+
 ### Testing
 
 - Added `tests/test_dumper_elf_fallback_coverage.py`, exercising
