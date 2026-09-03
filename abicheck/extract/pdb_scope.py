@@ -106,6 +106,33 @@ heuristic-history caution (AGENTS.md) says deserves real fixture
 verification first — matching the forward-declared-enclosing-class
 limitation immediately above.
 
+**Template-bearing names are split and keyed on their raw CodeView
+spelling, unnormalized (Codex review, PR #1025) — a documented,
+unverified-toolchain gap, not a silent one.** CodeView is reported to
+normalize away optional whitespace after a template argument's comma
+(e.g. spelling ``Box<Pair<int,long>,3>`` where castxml/clang would spell
+``Box<Pair<int, long>, 3>``), and this module passes each raw, unmodified
+``"::"``-segment straight into :func:`~abicheck.model.identity.
+entity_id_for_type`/``entity_id_for_enum`` as *leaf_name* — since neither
+constructor canonicalizes its argument, the same template specialization
+would resolve to two different ``EntityId``s (and, downstream, two
+different ``CanonicalEntity.canonical_spelling`` values once fed through
+``normalize_header_ast``) purely because one side's evidence came from
+PDB and the other from a header-AST/DWARF backend, breaking cross-backend
+reconciliation for every PDB-observed template specialization. Not fixed
+here: canonicalizing a template argument list's comma-spacing correctly
+needs a real parser, not a blind ``re.sub(",", ", ")`` — a `,` can appear
+inside a nested template's own argument list, a non-type template
+argument's string/char literal, or (rarer, but real) a function-pointer
+template argument's own parameter list, none of which this module can
+safely handle without a way to verify the transformation against real
+``clang-cl``/MSVC-produced PDB output, which this environment does not
+have (see the module docstring above). Documented rather than guess-fixed,
+the same call already made for the two limitations above; the same fix,
+whenever it lands with real fixture verification, would apply equally to
+any other PDB-sourced qualified name this module already builds an
+``EntityId`` from.
+
 Leaf module: depends on ``model`` (allowed: ``extract -> model``, ADR-061),
 ``model.qualified_name_split`` (the shared, dependency-free ``"::"``-
 splitting primitive; see that module's own docstring for why it lives in
