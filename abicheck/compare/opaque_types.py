@@ -263,14 +263,32 @@ def _unqualified_type_token_matches(
     return re.finditer(pattern, text)
 
 
+#: A C/C++ declarator-grouping paren whose own content opens with a
+#: pointer/reference sigil -- the parens exist purely to override normal
+#: declarator precedence (an array/function suffix binds tighter than a
+#: bare ``*`` would), so ``"Handle (*)[3]"`` (pointer to an array of
+#: ``Handle``) and ``"Handle (*)(int)"`` (pointer to a function returning
+#: ``Handle``) are both genuinely indirect even though the ``*``/``&``
+#: itself sits inside a paren rather than immediately after the type name
+#: (Codex review on PR #1041, follow-up round). An optional leading
+#: ``Class::``-qualified scope covers the pointer-to-member spelling too
+#: (``"Handle (Class::*)[3]"``).
+_DECLARATOR_GROUP_RE = re.compile(r"\(\s*(?:\w+(?:::\w+)*::\s*)?[*&]")
+
+
 def _sigil_follows(text: str, pos: int) -> bool:
-    """Whether *text* has a ``*``/``&`` at *pos*, after skipping whitespace
-    and a leading cv-qualifier keyword (:data:`_CV_OR_SPACE_RE`) -- so
-    ``"Handle *const"``/``"Handle const *"`` (either cv-qualifier order or
-    spacing) both still find the ``*``."""
+    """Whether *text* has a ``*``/``&`` at *pos* -- either directly, after
+    skipping whitespace and a leading cv-qualifier keyword
+    (:data:`_CV_OR_SPACE_RE`), so ``"Handle *const"``/``"Handle const *"``
+    (either cv-qualifier order or spacing) both still find the ``*`` -- or
+    wrapped in a declarator-grouping paren (:data:`_DECLARATOR_GROUP_RE`)
+    immediately following, so ``"Handle (*)[3]"``'s pointer-to-array
+    declarator is found too."""
     m = _CV_OR_SPACE_RE.match(text, pos)
     pos = m.end() if m else pos
-    return pos < len(text) and text[pos] in "*&"
+    if pos < len(text) and text[pos] in "*&":
+        return True
+    return _DECLARATOR_GROUP_RE.match(text, pos) is not None
 
 
 def _occurrence_is_indirect(text: str, end: int) -> bool:

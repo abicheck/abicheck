@@ -385,6 +385,27 @@ def test_occurrence_is_indirect_recognizes_a_pointer_nested_in_a_function_pointe
     assert _find_by_value_types(var_snap, opaque) == set()
 
 
+def test_occurrence_is_indirect_recognizes_a_declarator_group_pointer():
+    """Regression for the Codex review on PR #1041, follow-up round:
+    ``"Handle (*)[3]"`` (pointer to an array of ``Handle``) and
+    ``"Handle (*)(int)"`` (pointer to a function returning ``Handle``)
+    are both genuinely indirect, even though the ``*``/``&`` itself sits
+    inside a declarator-grouping paren rather than immediately after the
+    type name -- these parens exist purely to override normal declarator
+    precedence (an array/function suffix binds tighter than a bare ``*``
+    would), which C emits whenever a plain trailing ``*`` would otherwise
+    bind to the wrong part of the declarator. A pointer-to-member
+    spelling (``"Handle (Class::*)[3]"``) is covered too."""
+    opaque = {"Handle"}
+    for template in ("Handle (*)[3]", "Handle (*)(int)", "Handle (Class::*)[3]"):
+        var_snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0.0",
+            variables=[Variable(name="g", mangled="g", type=template)],
+        )
+        assert _find_by_value_types(var_snap, opaque) == set(), template
+
+
 def test_occurrence_is_indirect_handles_unbalanced_template_arguments():
     """Defensive-floor coverage for `skip_template_arguments`'s bracket
     stack: an unterminated `<...>` (malformed/adversarial rendered text)
