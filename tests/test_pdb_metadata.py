@@ -431,6 +431,27 @@ class TestIsUserVisible:
             _is_user_visible("std::__1::<unnamed-tag>", is_forward_ref=False) is False
         )
 
+    def test_abi_tag_spelled_leaf_declaration_still_rejected(self) -> None:
+        """Codex review, second round, fresh evidence: the ABI-tag exemption
+        applies only to a non-leaf (enclosing-scope) segment. A globally
+        named UDT whose own declaration leaf happens to be spelled
+        ``__1``/``__v2``/``__cxx11`` is not an inline namespace at all --
+        admitting it would add spurious layout facts, entity IDs, and
+        SemanticIR occurrences for what is, from CodeView's own name, a
+        compiler-reserved-looking declaration, not a real inline-namespace
+        member."""
+        assert _is_user_visible("__1", is_forward_ref=False) is False
+        assert _is_user_visible("__v2", is_forward_ref=False) is False
+        assert _is_user_visible("__cxx11", is_forward_ref=False) is False
+
+    def test_abi_tag_spelled_leaf_rejected_under_a_real_namespace_too(self) -> None:
+        """The same leaf-vs-non-leaf distinction holds when the ABI-tag-
+        spelled name is itself the declared type, nested under an ordinary
+        (non-ABI-tag) namespace -- only the ENCLOSING ``__1``/``__cxx11``
+        segment is ever transparent, never the leaf itself."""
+        assert _is_user_visible("NS::__1", is_forward_ref=False) is False
+        assert _is_user_visible("NS::__cxx11", is_forward_ref=False) is False
+
 
 # ---------------------------------------------------------------------------
 # Data model structural consistency

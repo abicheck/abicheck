@@ -99,7 +99,7 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     ``Anonymous`` identity another producer would give the same
     declaration.
 
-    A ``__``-prefixed segment is compiler-internal (e.g. MSVC's
+    A ``__``-prefixed NON-LEAF segment is compiler-internal (e.g. MSVC's
     ``__vc_attributes``) UNLESS it is a recognized ABI-tag inline namespace
     (libc++'s ``__1``, libstdc++'s ``__cxx11``) --
     :func:`~abicheck.model.qualified_name_split.is_inline_abi_namespace_segment`
@@ -112,17 +112,28 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     ``std::__1::vector<int>``, ``std::__cxx11::basic_string<char>``), losing
     its layout facts, entity ID, and SemanticIR occurrence rather than merely
     stripping the tag (Codex review, PR #1025).
+
+    The exemption applies ONLY to a non-leaf (enclosing-scope) segment,
+    never to the final, declaration-naming segment itself (Codex review,
+    second round, fresh evidence): a globally-named UDT literally called
+    ``__1``, ``__v2`` or ``__cxx11`` is not an inline namespace at all --
+    it is the declaration's own leaf name, which happens to collide with an
+    ABI-tag spelling -- and must still be rejected as compiler-internal the
+    same way any other ``__``-prefixed leaf (``__vc_attributes``) is.
     """
     if is_forward_ref:
         return False
     if not name:
         return False
-    if any(
-        segment.startswith("<")
-        or (segment.startswith("__") and not is_inline_abi_namespace_segment(segment))
-        for segment in split_top_level_scopes(name)
-    ):
-        return False
+    segments = split_top_level_scopes(name)
+    last_index = len(segments) - 1
+    for index, segment in enumerate(segments):
+        if segment.startswith("<"):
+            return False
+        if not segment.startswith("__"):
+            continue
+        if index == last_index or not is_inline_abi_namespace_segment(segment):
+            return False
     return True
 
 

@@ -44,7 +44,7 @@
   didn't distinguish a genuinely compiler-internal segment (MSVC's
   `__vc_attributes`) from a legitimate, user-visible ABI-tag namespace. Now
   exempted via the same `is_inline_abi_namespace_segment` recognizer
-  `diff_namespaces.py`/`diff_abi_tags.py` already treat as transparent.
+  `diff_namespaces.py`/`diff_abi_tags.py` already treat as transparent. The exemption applies only to a non-leaf (enclosing-scope) segment (Codex review, second round, fresh evidence): a globally named UDT whose own declaration leaf happens to be spelled `__1`/`__v2`/`__cxx11` is not an inline namespace at all, and must still be rejected as compiler-internal the same way `__vc_attributes` is.
 - **`extract/pdb_scope.py` documents a 4th accepted limitation**: it always
   emits an ordinary `Namespace` segment, never `InlineNamespace`, because
   CodeView's flat TPI qualified names carry no source-level `inline`
