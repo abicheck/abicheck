@@ -182,7 +182,8 @@ def test_internal_linkage_function_keeps_a_distinct_occurrence_per_tu(
     occurrences = merged.semantic_ir.occurrences_for(entity_id)
     assert len(occurrences) == 2
     disambiguators = {occ.disambiguator for occ in occurrences}
-    assert disambiguators == {"tu_a", "tu_b"}
+    assert len(disambiguators) == 2
+    assert all(d.startswith("tu_a:") or d.startswith("tu_b:") for d in disambiguators)
 
 
 def test_external_linkage_function_in_a_shared_header_still_collapses(
@@ -207,3 +208,70 @@ def test_external_linkage_function_in_a_shared_header_still_collapses(
     assert helper_fn.entity_id is not None
     occurrences = merged.semantic_ir.occurrences_for(helper_fn.entity_id)
     assert len(occurrences) == 1
+
+
+def test_mixed_linkage_collision_keeps_external_and_local_separate(
+    tmp_path: Path,
+) -> None:
+    """Codex review, third round, fresh evidence: a plain-C function's own
+    `EntityId` construction does not encode static-vs-external linkage at
+    all (confirmed empirically -- an externally-linked `int helper();` and
+    an unrelated file's `static int helper() { ... }` resolve to the
+    identical `extra=("extern_c",)` identity). Two TUs share the identical
+    external declaration; a third TU defines its own file-local `static`
+    version. Classifying locality globally by `EntityId` would wrongly
+    TU-qualify the two external observations too and yield three
+    occurrences instead of collapsing the external pair; this asserts
+    exactly one external plus one local occurrence."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("int helper();\n")
+    static_h = tmp_path / "static.h"
+    static_h.write_text("static int helper() { return 1; }\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h), _tu("tu_c", static_h)),
+        roots=[shared_h, static_h],
+    )
+
+    assert merged.semantic_ir is not None
+    helper_fns = [f for f in merged.functions if f.name == "helper"]
+    entity_ids = {fn.entity_id for fn in helper_fns}
+    assert None not in entity_ids
+    (entity_id,) = entity_ids  # the pre-existing identity collision itself
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 2
+    disambiguators = {occ.disambiguator for occ in occurrences}
+    local_disambiguators = {d for d in disambiguators if d.startswith("tu_c:")}
+    assert len(local_disambiguators) == 1
+    assert len(disambiguators - local_disambiguators) == 1
+
+
+def test_per_tu_local_declaration_pair_survives_across_tus(tmp_path: Path) -> None:
+    """Codex review, third round, fresh evidence: a TU-local function can
+    itself have more than one raw declaration within one fragment (its own
+    prototype and definition), and `tu_merge.py` does not collapse those
+    even within a single TU-scoped key. Two TUs each contributing their
+    own local prototype+definition pair for the same-named `static`
+    function must leave four distinct occurrences, not two -- replacing
+    (rather than combining with) the location-based disambiguator would
+    silently drop two of them."""
+    _requires_clang()
+    shared_h = tmp_path / "shared.h"
+    shared_h.write_text("static int helper();\nstatic int helper() { return 1; }\n")
+
+    merged = _run(
+        tmp_path,
+        (_tu("tu_a", shared_h), _tu("tu_b", shared_h)),
+        roots=[shared_h],
+    )
+
+    assert merged.semantic_ir is not None
+    helper_fns = [f for f in merged.functions if f.name == "helper"]
+    assert len(helper_fns) == 4, "tu_merge keeps each TU's own decl+def pair"
+    entity_ids = {fn.entity_id for fn in helper_fns}
+    assert None not in entity_ids
+    (entity_id,) = entity_ids
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 4
