@@ -64,12 +64,14 @@ Evidence coverage:
   L2 public header AST       present, high confidence: header-scoped
   L3 build context           not_collected
   L4 source ABI replay       not_collected
+  L5 source graph summary    present, reduced confidence
 Checks enabled for this scan (and why others are not):
   [on]  Symbol presence & linkage (added/removed/SONAME) — from the binary's dynamic symbol table
   [on]  Type layout, members, vtables, signatures — from DWARF/PDB debug info
   [on]  API decls absent from the symbol table; public-surface scoping — from the public header AST
   [off] Build-flag & toolchain drift (visibility, std, ABI flags) — no build data
   [off] Macros, default args, inline/template/constexpr bodies — no source replay evidence
+  [on]  Impact / call / reachability graph — from the source graph summary
 ```
 
 ```markdown
@@ -91,23 +93,28 @@ Checks enabled for this scan (and why others are not):
 
 ## ❌ Breaking Changes
 
-- **type_size_changed**: Size changed: point (64 → 96 bits) — `include/foo.h:2`
+- **type_size_changed**: Size changed: point (64 → 96 bits) (`64` → `96`) — `v1/foo.h:2`
   > Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.
+  > 1 derived change(s) collapsed
   > Affected symbols: `point_area`, `point_scale`
-- **type_field_offset_changed**: Field offset changed: point::y (32 → 64 bits) — `include/foo.h:2`
+- **type_field_offset_changed**: Field offset changed: point::y (32 → 64 bits) (`32` → `64`) — `v1/foo.h:2`
   > Old code reads/writes fields at stale offsets; silent data corruption.
-- **enum_member_value_changed**: Enum member value changed: color::GREEN (`1` → `2`)
+- **enum_member_value_changed**: Enum member value changed: color::GREEN (1 → 2) (`1` → `2`)
   > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
-- **enum_member_value_changed**: Enum member value changed: color::BLUE (`2` → `1`)
+- **enum_member_value_changed**: Enum member value changed: color::BLUE (2 → 1) (`2` → `1`)
   > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
-- **func_removed**: Public function removed: legacy_helper — `include/foo.h:6`
+- **func_removed**: Public function removed: legacy_helper (`legacy_helper`) — `v1/foo.h:6`
   > Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.
 
 ## ✅ Additions
-- **type_field_added_compatible**: Field added: point::z — `include/foo.h:2`
+
+- **type_field_added_compatible**: Field added: point::z — `v1/foo.h:2`
+  > Field appended without changing existing offsets; old code works but won't initialize the new field.
+
+> ℹ️ 1 redundant change(s) hidden (derived from root type changes).
 ```
 
-Exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches.
+Exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches. Findings derived from a root cause (here, the `point_scale` signature change that follows from the struct change) are folded into it and counted as hidden, so the report stays readable.
 
 ## How it works: five layers of evidence
 
@@ -121,7 +128,7 @@ abicheck treats compatibility as a question of **evidence**. The more independen
 | **L3** | + Build data (`--build-info build/`) | compile DB, CMake, Ninja, Bazel, Make | The flags the library was actually built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, export maps |
 | **L4** | + Sources | Per-translation-unit source replay | Facts that never reach the binary: macro and `constexpr` values, default-argument values, inline and template bodies |
 
-The layers are **additive, not a fallback chain**. abicheck overlays everything you give it and computes one worst-wins verdict under an *authority rule*: artifact evidence (L0 to L2) decides the shipped-ABI verdict, while build and source evidence (L3, L4) explains, localizes, scopes, or adds findings of its own, but never deletes an artifact-proven break. A derived source-reachability graph, `L5`, is computed from L3/L4 and used by `scan`; it is never an input.
+The layers are **additive, not a fallback chain**. abicheck overlays everything you give it and computes one worst-wins verdict under an *authority rule*: artifact evidence (L0 to L2) decides the shipped-ABI verdict, while build and source evidence (L3, L4) explains, localizes, scopes, or adds findings of its own, but never deletes an artifact-proven break. A derived source-reachability graph, `L5`, is computed from whatever evidence is present (reduced confidence from headers alone, full confidence with build and source data) and feeds the impact and reachability checks; it is never an input.
 
 With less input abicheck degrades gracefully instead of failing. `abicheck dump --dry-run` reports which layers it found. The best input is **old library + new library + matching headers + debug info + build data**. Read more in [Evidence & Detectability](https://abicheck.github.io/abicheck/learn/evidence-and-detectability/) and [Architecture](https://abicheck.github.io/abicheck/learn/architecture/).
 
