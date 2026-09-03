@@ -20,17 +20,29 @@ from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.canonical import canonical_form
 from abicheck.storage.dto import (
+    BINARY_SECTION_KIND,
+    BUILD_SECTION_KIND,
+    DEBUG_SECTION_KIND,
+    DECLARATIONS_SECTION_KIND,
     GRAPH_SECTION_KIND,
+    LAYOUT_SECTION_KIND,
+    PROVENANCE_SECTION_KIND,
     SEMANTIC_IR_SECTION_KIND,
     SectionDTO,
+    binary_from_dto,
+    build_from_dto,
+    debug_from_dto,
+    declarations_from_dto,
     graph_from_dto,
+    layout_from_dto,
+    provenance_from_dto,
     semantic_ir_from_dto,
 )
 from abicheck.storage.import_v1 import (
     export_legacy_snapshot,
     import_legacy_snapshot as _import_legacy_snapshot,
 )
-from abicheck.storage.legacy_sections import LEGACY_SECTION_KINDS
+from abicheck.storage.legacy_sections import _SECTION_FIELDS, LEGACY_SECTION_KINDS
 from abicheck.storage.package import InMemoryObjectStore
 
 
@@ -85,7 +97,13 @@ class TestImportLegacySnapshot:
         assert manifest.versions.source_schema_version == doc["schema_version"]
 
     def test_a_document_with_no_schema_version_defaults_to_one(self) -> None:
-        doc: dict[str, Any] = {"library": "libfoo.so.1"}
+        # `version` alongside `library`: a real `snapshot_to_dict()` document
+        # always carries both (`AbiSnapshot.version` has no default), and
+        # since ADR-063 Track 4 (8B)'s third slice `ProvenanceSection.
+        # from_document` now enforces that structurally at import time too
+        # (not just at export), matching `_REQUIRED_SECTION_FIELDS
+        # ["provenance"]`.
+        doc: dict[str, Any] = {"library": "libfoo.so.1", "version": "1.0.0"}
         store = InMemoryObjectStore()
         manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
         assert manifest.versions.source_schema_version == 1
@@ -123,6 +141,47 @@ class TestImportLegacySnapshot:
         assert dto.section_kind == GRAPH_SECTION_KIND
         section = graph_from_dto(dto)
         assert section.to_document() == {"surface_graph": doc["surface_graph"]}
+
+    @pytest.mark.parametrize(
+        "section_kind,from_dto_fn",
+        [
+            (BINARY_SECTION_KIND, binary_from_dto),
+            (DECLARATIONS_SECTION_KIND, declarations_from_dto),
+            (LAYOUT_SECTION_KIND, layout_from_dto),
+            (DEBUG_SECTION_KIND, debug_from_dto),
+            (BUILD_SECTION_KIND, build_from_dto),
+            (PROVENANCE_SECTION_KIND, provenance_from_dto),
+        ],
+    )
+    def test_each_remaining_sparse_section_round_trips_through_its_own_section(
+        self, section_kind: str, from_dto_fn: Any
+    ) -> None:
+        """ADR-063 Track 4 (8B), third slice: every remaining legacy section
+        is stored via its own dedicated `sparse_section_codec.py` DTO, not
+        the generic pass-through -- verified the same way `test_semantic_ir_
+        round_trips_through_its_own_section`/`test_graph_round_trips_
+        through_its_own_section` verify their own specialized sections.
+        `_snapshot_with_ir()` carries real, non-default values for every
+        field these six sections cover (library/version/functions/enums/...,
+        an `elf`/`dwarf` metadata object, and so on) via `snapshot_to_dict`,
+        so this exercises the real production shape, not a hand-built
+        minimal document."""
+        doc = snapshot_to_dict(_snapshot_with_ir())
+        store = InMemoryObjectStore()
+        manifest = import_legacy_snapshot(doc, store=store, artifact_id="libfoo")
+        sections = manifest.artifact_refs[0].sections
+        assert section_kind in sections
+        dto = SectionDTO.from_dict(store.get(sections[section_kind].digest))
+        assert dto.section_kind == section_kind
+        section = from_dto_fn(dto)
+        # Every key this section owns (per `legacy_sections._SECTION_FIELDS`)
+        # that the source document actually carries must survive the round
+        # trip unchanged -- `canonical_form` only normalizes tuple/list
+        # representation, never content.
+        expected = {
+            key: doc[key] for key in _SECTION_FIELDS[section_kind] if key in doc
+        }
+        assert canonical_form(section.to_document()) == canonical_form(expected)
 
     def test_the_legacy_sections_exclude_the_promoted_keys(self) -> None:
         doc = snapshot_to_dict(_snapshot_with_ir())

@@ -18,22 +18,48 @@ from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import (
+    BINARY_SECTION_KIND,
+    BUILD_SECTION_KIND,
+    DEBUG_SECTION_KIND,
+    DECLARATIONS_SECTION_KIND,
     GRAPH_SECTION_KIND,
+    LAYOUT_SECTION_KIND,
+    PROVENANCE_SECTION_KIND,
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
     TYPES_SECTION_KIND,
     SectionDTO,
+    binary_from_dto,
+    binary_to_dto,
+    build_from_dto,
+    build_to_dto,
+    debug_from_dto,
+    debug_to_dto,
+    declarations_from_dto,
+    declarations_to_dto,
     graph_from_dto,
     graph_to_dto,
+    layout_from_dto,
+    layout_to_dto,
     legacy_section_from_dto,
     legacy_section_to_dto,
     migrate_section_dto,
+    provenance_from_dto,
+    provenance_to_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
     types_from_dto,
     types_to_dto,
 )
 from abicheck.storage.graph_section_codec import GraphSection
+from abicheck.storage.sparse_section_codec import (
+    BinarySection,
+    BuildSection,
+    DebugSection,
+    DeclarationsSection,
+    LayoutSection,
+    ProvenanceSection,
+)
 from abicheck.storage.types_section_codec import TypesSection
 
 
@@ -268,12 +294,30 @@ class TestLegacySectionDTO:
     would silently bypass it (CodeRabbit review, symmetric with the
     `legacy_section_to_dto` refusal that already existed)."""
 
-    def test_round_trips(self) -> None:
-        # "layout" -- a still-generic legacy section kind. "graph" moved to
-        # its own dedicated `GraphSection` DTO this ADR-063 Track 4 (8B)
-        # slice, so it is no longer a valid stand-in here (see
-        # `TestGraphSectionDTO` below for its own dedicated coverage).
-        dto = legacy_section_to_dto("layout", {"a": 1})
+    def test_round_trips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # As of ADR-063 Track 4 (8B)'s third slice, every real
+        # `LEGACY_SECTION_KINDS` member has its own dedicated DTO -- there is
+        # no longer a live section kind this generic pass-through actually
+        # serves (see `TestGraphSectionDTO`/`TestSparseSectionDTOs` for their
+        # own dedicated coverage). It stays defined as the fallback a
+        # future, not-yet-specialized ninth section kind would use
+        # (`legacy_section_to_dto`'s own docstring), so this test proves
+        # that fallback path still works by registering one such synthetic
+        # kind rather than asserting the function is merely unreachable.
+        import abicheck.storage.dto as dto_module
+
+        monkeypatch.setitem(dto_module.SECTION_SCHEMA_VERSIONS, "future_section", 1)
+        # `legacy_section_from_dto`'s own guard is stricter than
+        # `legacy_section_to_dto`'s (it also requires D8 vocabulary
+        # membership, `LEGACY_SECTION_KINDS`, not just a registered DTO
+        # version) -- patch that too so the synthetic kind is a fully valid
+        # not-yet-specialized section for both halves of the round trip.
+        monkeypatch.setattr(
+            dto_module,
+            "LEGACY_SECTION_KINDS",
+            (*dto_module.LEGACY_SECTION_KINDS, "future_section"),
+        )
+        dto = legacy_section_to_dto("future_section", {"a": 1})
         assert legacy_section_from_dto(dto) == {"a": 1}
 
     def test_encoding_a_semantic_ir_kind_is_refused(self) -> None:
@@ -490,3 +534,273 @@ class TestGraphSectionDTO:
         )
         with pytest.raises(ValueError, match="not a legacy section kind"):
             legacy_section_from_dto(dto)
+
+
+#: ADR-063 Track 4 (8B), third slice: one entry per remaining sparse legacy
+#: section, `(cls, kind, to_dto, from_dto, required_kwargs, extra)` --
+#: `required_kwargs` is exactly what a real document always carries for that
+#: section (`_REQUIRED_SECTION_FIELDS`), `extra` is a representative
+#: optional-field payload including at least one nested list (to exercise
+#: the deep-freeze/unfreeze round trip the way `TestTypesSectionDTO`/
+#: `TestGraphSectionDTO` already do for their own single field).
+_SPARSE_SECTION_CASES = [
+    pytest.param(
+        BinarySection,
+        BINARY_SECTION_KIND,
+        binary_to_dto,
+        binary_from_dto,
+        {"elf": {"symbols": ["a"]}, "pe": None, "macho": None},
+        {"platform": "linux", "kabi": None},
+        id="binary",
+    ),
+    pytest.param(
+        DeclarationsSection,
+        DECLARATIONS_SECTION_KIND,
+        declarations_to_dto,
+        declarations_from_dto,
+        {
+            "functions": [{"name": "f"}],
+            "variables": [],
+            "enums": [],
+            "typedefs": [],
+            "sycl": None,
+        },
+        {"constants": [{"name": "C", "value": "1"}]},
+        id="declarations",
+    ),
+    pytest.param(
+        LayoutSection,
+        LAYOUT_SECTION_KIND,
+        layout_to_dto,
+        layout_from_dto,
+        {},
+        {"contract": {"scope": "public"}, "scope_fallback": ["a", "b"]},
+        id="layout",
+    ),
+    pytest.param(
+        DebugSection,
+        DEBUG_SECTION_KIND,
+        debug_to_dto,
+        debug_from_dto,
+        {"dwarf": {"present": True}, "dwarf_advanced": None},
+        {"ast_producer": "clang", "ast_compile_args": ["-std=c++17"]},
+        id="debug",
+    ),
+    pytest.param(
+        BuildSection,
+        BUILD_SECTION_KIND,
+        build_to_dto,
+        build_from_dto,
+        {},
+        {"build_source": {"kind": "cmake"}},
+        id="build",
+    ),
+    pytest.param(
+        ProvenanceSection,
+        PROVENANCE_SECTION_KIND,
+        provenance_to_dto,
+        provenance_from_dto,
+        {"library": "libfoo.so.1", "version": "1.0.0"},
+        {"git_commit": "abc123", "dependency_info": ["libbar.so.1"]},
+        id="provenance",
+    ),
+]
+
+
+class TestSparseSectionDTOs:
+    """ADR-063 Track 4 (8B), third slice: the six remaining legacy sections'
+    typed DTOs (`sparse_section_codec.py`) -- parametrized across all six
+    since the contract each must satisfy is identical (only the field names
+    and required/optional split differ)."""
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_round_trips_through_a_dict_document(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        section = cls(**required, extra=extra)
+        dto = to_dto(section)
+        assert dto.section_kind == kind
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = from_dto(reloaded)
+        assert section2 == section
+        # The document merges required fields + extra back into one flat
+        # mapping -- exactly `split_legacy_document`'s own section-payload
+        # shape, so a round trip through this wrapper changes nothing about
+        # the stored keys.
+        document = section2.to_document()
+        assert document == {**required, **extra}
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_from_document_refuses_a_non_mapping_payload(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        with pytest.raises(ValueError, match="must be a mapping"):
+            cls.from_document(["not", "a", "mapping"])
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_from_document_refuses_an_unknown_extra_key(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        payload = {**required, "totally_unknown_field": 1}
+        with pytest.raises(ValueError, match="may only carry"):
+            cls.from_document(payload)
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_wrong_section_kind_is_refused(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        other_kind = "types" if kind != "types" else "graph"
+        dto = SectionDTO(section_kind=other_kind, section_schema_version=1, payload={})
+        with pytest.raises(ValueError, match="expected section kind"):
+            from_dto(dto)
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_nested_lists_are_deep_unfrozen_not_left_as_tuples(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        section = cls(**required, extra=extra)
+        dto = to_dto(section)
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        section2 = from_dto(reloaded)
+        document = section2.to_document()
+        for value in document.values():
+            if isinstance(value, list):
+                assert not any(isinstance(v, tuple) for v in value)
+        # json.dumps must accept the reconstructed document -- a leftover
+        # MappingProxyType/tuple would raise.
+        import json
+
+        json.dumps(document)
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_legacy_section_to_dto_refuses_the_kind(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_to_dto(kind, {**required, **extra})
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_legacy_section_from_dto_refuses_the_kind(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        dto = SectionDTO(
+            section_kind=kind,
+            section_schema_version=SECTION_SCHEMA_VERSIONS[kind],
+            payload={**required, **extra},
+        )
+        with pytest.raises(ValueError, match="not a legacy section kind"):
+            legacy_section_from_dto(dto)
+
+    @pytest.mark.parametrize(
+        "cls,kind,to_dto,from_dto,required,extra", _SPARSE_SECTION_CASES
+    )
+    def test_extra_is_frozen_against_caller_mutation(
+        self,
+        cls: Any,
+        kind: str,
+        to_dto: Any,
+        from_dto: Any,
+        required: dict,
+        extra: dict,
+    ) -> None:
+        """Mirrors `TestTypesSectionDTO`/`TestGraphSectionDTO`'s identical
+        test: `__post_init__` freezes `extra` (and every required field) the
+        same way `SectionDTO.__post_init__`/`TypesSection.__post_init__`
+        already do, so a caller's own mutable object (or a later document
+        handed back by `to_document()`) cannot silently change this
+        section's content after construction."""
+        mutable_extra = dict(extra)
+        section = cls(**required, extra=mutable_extra)
+        mutable_extra["totally_new_key_after_construction"] = "x"
+        assert "totally_new_key_after_construction" not in section.to_document()
+
+        document = section.to_document()
+        document["totally_new_key_injected"] = "y"
+        assert "totally_new_key_injected" not in section.to_document()
+
+    def test_only_required_fields_are_omitted_when_missing_a_key(self) -> None:
+        """A section with *no* required fields (`layout`/`build`) accepts an
+        entirely empty payload -- the section is only ever created by
+        `split_legacy_document` when at least one field is present, but the
+        DTO layer itself has no reason to additionally forbid an empty one
+        (it is a legitimate, if degenerate, document)."""
+        assert LayoutSection.from_document({}) == LayoutSection(extra={})
+        assert BuildSection.from_document({}) == BuildSection(extra={})
+
+    @pytest.mark.parametrize(
+        "cls,kind,required_keys",
+        [
+            (BinarySection, BINARY_SECTION_KIND, ("elf", "pe", "macho")),
+            (
+                DeclarationsSection,
+                DECLARATIONS_SECTION_KIND,
+                ("functions", "variables", "enums", "typedefs", "sycl"),
+            ),
+            (DebugSection, DEBUG_SECTION_KIND, ("dwarf", "dwarf_advanced")),
+            (ProvenanceSection, PROVENANCE_SECTION_KIND, ("library", "version")),
+        ],
+    )
+    def test_from_document_refuses_each_missing_required_field_individually(
+        self, cls: Any, kind: str, required_keys: tuple[str, ...]
+    ) -> None:
+        full = {name: None for name in required_keys}
+        for missing_key in required_keys:
+            payload = {k: v for k, v in full.items() if k != missing_key}
+            with pytest.raises(ValueError, match="must carry"):
+                cls.from_document(payload)

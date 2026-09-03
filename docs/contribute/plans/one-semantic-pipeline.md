@@ -426,6 +426,45 @@ dependent optional-field profile the first PR's note above describes, and
 still need that design problem solved before they can follow the same
 pattern.
 
+**8B's third PR landed (2026-09-03), closing "typed DTOs for the remaining
+sections beyond `semantic_ir`" in full.** `storage.sparse_section_codec`
+solves the sparsity design problem the first two PRs left open: each of the
+six remaining sections' fields is split by what `storage.legacy_sections
+._REQUIRED_SECTION_FIELDS` already, independently proves about it (derived
+empirically from `tests/fixtures/schema/v1.json`, the format's own oldest
+fixture — any key that table lists is safe to require unconditionally in
+any document this build can still read). A field in that set becomes a
+real, always-present, named dataclass attribute (`BinarySection.elf`/`.pe`/
+`.macho`, `ProvenanceSection.library`/`.version`, `DebugSection.dwarf`/
+`.dwarf_advanced`, `DeclarationsSection.functions`/`.variables`/`.enums`/
+`.typedefs`/`.sycl`); every other field in the section's own
+`_SECTION_FIELDS` allowlist lives in `extra`, a validated (allowlist-
+checked, canonically-frozen), *never-defaulted* pass-through mapping, so a
+document missing an optional key entirely still round-trips with that key
+simply absent from `extra` — never fabricated, never dropped. `layout` and
+`build` have no field `_REQUIRED_SECTION_FIELDS` proves present since v1 at
+all (both sections postdate schema v1 in full), so their entire content
+stays in `extra`; still real, dedicated, versioned classes rather than the
+generic pass-through, per the module's own "typed only in the sense the
+required half of D8 actually supports today" scoping note. Wired through
+`storage.dto`'s six new `*_to_dto`/`*_from_dto` pairs and one new registry
+(`storage.import_v1._LEGACY_SECTION_CODECS`) that replaced the by-then
+three-branch `if`/`elif` chain in both `import_legacy_snapshot` and
+`export_legacy_snapshot` — a lookup table scales to a ninth section kind as
+a one-line addition instead of a second edit in two functions each time.
+Every one of D8's eight named legacy section kinds now has its own DTO;
+`legacy_section_to_dto`/`legacy_section_from_dto` remain defined as the
+generic fallback a future, not-yet-specialized ninth section kind would
+use, but are unreachable for any of today's eight. One real behavior
+change, deliberately: `import_legacy_snapshot` now enforces a section's own
+required fields structurally *at import time* too, not only at
+`export_legacy_snapshot`'s post-hoc `missing_required_section_fields`
+check — a hand-built document missing e.g. `provenance.version` entirely
+(never a real `snapshot_to_dict()` output, which always includes both
+`AbiSnapshot.library`/`.version` since neither has a dataclass default) now
+fails on import rather than passing silently through and only failing
+later, if ever, on export.
+
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
 gap 6B's own migration would otherwise trip on, and 6B is what actually

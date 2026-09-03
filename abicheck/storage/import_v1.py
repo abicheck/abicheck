@@ -86,19 +86,37 @@ adapter can close from a document alone.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .dto import (
+    BINARY_SECTION_KIND,
+    BUILD_SECTION_KIND,
+    DEBUG_SECTION_KIND,
+    DECLARATIONS_SECTION_KIND,
     GRAPH_SECTION_KIND,
+    LAYOUT_SECTION_KIND,
+    PROVENANCE_SECTION_KIND,
     SECTION_SCHEMA_VERSIONS,
     SEMANTIC_IR_SECTION_KIND,
     TYPES_SECTION_KIND,
     SectionDTO,
+    binary_from_dto,
+    binary_to_dto,
+    build_from_dto,
+    build_to_dto,
+    debug_from_dto,
+    debug_to_dto,
+    declarations_from_dto,
+    declarations_to_dto,
     graph_from_dto,
     graph_to_dto,
+    layout_from_dto,
+    layout_to_dto,
     legacy_section_from_dto,
     legacy_section_to_dto,
+    provenance_from_dto,
+    provenance_to_dto,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
     types_from_dto,
@@ -114,8 +132,64 @@ from .legacy_sections import (
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
+from .sparse_section_codec import (
+    BinarySection,
+    BuildSection,
+    DebugSection,
+    DeclarationsSection,
+    LayoutSection,
+    ProvenanceSection,
+)
 from .types_section_codec import TypesSection
 from .versioning import StorageVersions
+
+#: ADR-063 Track 4 (8B), third slice: one entry per `LEGACY_SECTION_KINDS`
+#: member that has its own dedicated DTO -- every one of them, as of this
+#: slice. Keyed by section kind, each value is `(to_dto, from_dto)`: `to_dto`
+#: takes a section's own already-split payload mapping and returns a
+#: `SectionDTO` (via that section's `from_document` + `*_to_dto`, mirroring
+#: `types_to_dto(TypesSection.from_document(payload))`'s own shape);
+#: `from_dto` is the matching `*_from_dto` function, taking a `SectionDTO`
+#: back to the typed domain object. A registry here (rather than a growing
+#: `if`/`elif` chain in both `import_legacy_snapshot` and
+#: `export_legacy_snapshot`) is what keeps adding a ninth section's own DTO
+#: a one-line addition instead of a second edit in two functions each time.
+_LEGACY_SECTION_CODECS: Mapping[
+    str, tuple[Callable[[Mapping[str, Any]], SectionDTO], Callable[[SectionDTO], Any]]
+] = {
+    TYPES_SECTION_KIND: (
+        lambda payload: types_to_dto(TypesSection.from_document(payload)),
+        types_from_dto,
+    ),
+    GRAPH_SECTION_KIND: (
+        lambda payload: graph_to_dto(GraphSection.from_document(payload)),
+        graph_from_dto,
+    ),
+    BINARY_SECTION_KIND: (
+        lambda payload: binary_to_dto(BinarySection.from_document(payload)),
+        binary_from_dto,
+    ),
+    DECLARATIONS_SECTION_KIND: (
+        lambda payload: declarations_to_dto(DeclarationsSection.from_document(payload)),
+        declarations_from_dto,
+    ),
+    LAYOUT_SECTION_KIND: (
+        lambda payload: layout_to_dto(LayoutSection.from_document(payload)),
+        layout_from_dto,
+    ),
+    DEBUG_SECTION_KIND: (
+        lambda payload: debug_to_dto(DebugSection.from_document(payload)),
+        debug_from_dto,
+    ),
+    BUILD_SECTION_KIND: (
+        lambda payload: build_to_dto(BuildSection.from_document(payload)),
+        build_from_dto,
+    ),
+    PROVENANCE_SECTION_KIND: (
+        lambda payload: provenance_to_dto(ProvenanceSection.from_document(payload)),
+        provenance_from_dto,
+    ),
+}
 
 __all__ = [
     "export_legacy_snapshot",
@@ -261,15 +335,14 @@ def import_legacy_snapshot(
     sections: dict[str, ObjectRef] = {}
     section_schema_versions: dict[str, int] = {}
     for section_kind, payload in legacy_sections.items():
-        # ADR-063 Track 4 (8B): `"types"`/`"graph"` each have their own
-        # dedicated DTO (`TypesSection`/`GraphSection`) instead of the
-        # generic pass-through every other legacy section still uses -- see
-        # `types_section_codec.py`/`graph_section_codec.py`'s own module
-        # docstrings for why these are the sections promoted so far.
-        if section_kind == TYPES_SECTION_KIND:
-            section_dto = types_to_dto(TypesSection.from_document(payload))
-        elif section_kind == GRAPH_SECTION_KIND:
-            section_dto = graph_to_dto(GraphSection.from_document(payload))
+        # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member now has
+        # its own dedicated DTO -- `_LEGACY_SECTION_CODECS` above -- instead
+        # of the generic pass-through; the `else` branch is the fallback a
+        # future, not-yet-specialized section kind would use.
+        codec = _LEGACY_SECTION_CODECS.get(section_kind)
+        if codec is not None:
+            to_dto_fn, _from_dto_fn = codec
+            section_dto = to_dto_fn(payload)
         else:
             section_dto = legacy_section_to_dto(section_kind, payload)
         sections[section_kind] = ObjectRef(
@@ -366,19 +439,18 @@ def export_legacy_snapshot(
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))
-        elif section_kind == TYPES_SECTION_KIND:
-            # `TypesSection.from_document`'s own validation already refuses
-            # a missing/malformed `types` list structurally -- the
-            # `missing_required_section_fields` check the generic branch
-            # below still needs is redundant here (the section's only field
-            # IS its one required field), so there is nothing further to
-            # check before merging it into the rebuilt document.
-            document.update(types_from_dto(dto).to_document())
-        elif section_kind == GRAPH_SECTION_KIND:
-            # Identical reasoning to the `TYPES_SECTION_KIND` branch above:
-            # `GraphSection.from_document`'s own validation already refuses
-            # a missing/malformed `surface_graph` mapping structurally.
-            document.update(graph_from_dto(dto).to_document())
+            continue
+        codec = _LEGACY_SECTION_CODECS.get(section_kind)
+        if codec is not None:
+            # Every dedicated section DTO's own `from_document` already
+            # refuses a missing required field (or a malformed payload)
+            # structurally -- `TypesSection`/`GraphSection`'s docstrings
+            # made this point first; it generalizes identically to the
+            # remaining six. The `missing_required_section_fields` check the
+            # generic branch below still needs is therefore redundant here,
+            # so there is nothing further to check before merging.
+            _to_dto_fn, from_dto_fn = codec
+            document.update(from_dto_fn(dto).to_document())
         else:
             payload = legacy_section_from_dto(dto)
             # A section whose *object* hashes and decodes fine can still
