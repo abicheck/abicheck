@@ -148,17 +148,17 @@ concepts:
   report_document:
     primitive: complete
     producers: complete
-    consumers: partial
-    authority: mixed
+    consumers: complete
+    authority: self
     removal_gate: >-
-      Markdown's leaf/root-cause render modes must still converge onto
-      ReportDocument -- not yet done, and tracked under ADR-061's own
-      item 1/Phase 2 accounting, not ADR-036 Increment 3 (the unrelated,
-      already-optional html_report.py/pr_comment.py-via-ReportModel
-      cleanup). Markdown's
-      full mode and review digest are already on it
-      (build_markdown_document/build_review_digest_document); not
-      currently assigned to a numbered ADR-063 phase.
+      None outstanding. Markdown's leaf/root-cause render modes have
+      since converged onto ReportDocument too
+      (report/render_markdown_alternate.py's build_leaf_document/
+      build_root_cause_document, reached from reporter_markdown.py's
+      _to_markdown_leaf/_to_markdown_root_cause) -- ADR-061's own item 1
+      is now closed for every renderer/format (JSON/SARIF/JUnit/--stat,
+      HTML, and every Markdown mode). Not currently assigned to a
+      numbered ADR-063 phase.
 
   l5_source_graph_identity:
     primitive: complete
