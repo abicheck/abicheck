@@ -123,7 +123,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_so),  # the .so FILE itself, not new_dir
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -133,7 +132,13 @@ class TestBundleFactsLibraryManifest:
 
         assert code == 0, out
 
-    def test_rejected_without_old_bundle_facts(self, tmp_path: Path) -> None:
+    def test_rejected_when_old_input_is_not_stored_bundle_facts(
+        self, tmp_path: Path
+    ) -> None:
+        # OLD_INPUT carries no artifact_type marker, so CLI cleanup phase
+        # two, PR I's automatic classification does not route this to
+        # compare_bundle_facts.dispatch() -- --bundle-facts-library-manifest
+        # is rejected the ordinary way instead.
         old = tmp_path / "old.json"
         old.write_text("{}")
         new = tmp_path / "new.json"
@@ -150,7 +155,8 @@ class TestBundleFactsLibraryManifest:
         )
 
         assert code == 64, out
-        assert "--old-bundle-facts" in out
+        assert "--bundle-facts-library-manifest" in out
+        assert "stored BundleFacts document" in out
 
     def test_unknown_library_name_is_rejected(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
@@ -170,7 +176,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -211,7 +216,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -252,7 +256,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -287,7 +290,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -315,7 +317,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -350,7 +351,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -409,7 +409,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -464,7 +463,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -557,7 +555,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--depth",
             "binary",
@@ -592,7 +589,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
@@ -651,7 +647,6 @@ class TestBundleFactsLibraryManifest:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),

@@ -5020,11 +5020,11 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
                                        syntax refinement (DONE) was the one
                                        piece independent of the semantics work
 PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
-      (prerequisite DONE; classifier/    explicit artifact_type discriminator
-       request/deletion not started)     on BundleFacts, operand classification
-                                       instead of a mode flag, and one
-                                       BundleCompareRequest over live/live +
-                                       stored/live + live/stored +
+      (prerequisite DONE; operand        explicit artifact_type discriminator
+       classification + flag deletion    on BundleFacts, operand classification
+       DONE 2026-09-03; full             instead of a mode flag, and one
+       BundleCompareRequest unification  BundleCompareRequest over live/live +
+       not started)                      stored/live + live/stored +
                                        stored/stored, with the full
                                        evaluation/gate/report/dry-run surface
                                        answered once. Shares PR G2's own
@@ -5048,13 +5048,46 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        "GateOptions" section, not yet the
                                        shared cross-front-end object this
                                        row's own BundleCompareRequest sketch
-                                       implies. The BundleCompareRequest
-                                       unification and the deletion below
-                                       are not started; whether they reuse
-                                       this GateOptions class as-is or need
-                                       a broader one is this row's own design
-                                       question to resolve, not decided here
-      └─ then DELETE compare --old-bundle-facts
+                                       implies.
+                                       **Operand classification + flag
+                                       deletion landed 2026-09-03**:
+                                       workflows/bundle_compare_operand.py's
+                                       BundleCompareRequest classifies
+                                       OLD_INPUT/NEW_INPUT (marker-only, a
+                                       bounded-prefix check -- deliberately
+                                       not the full looks_like_bundle_facts_
+                                       document() two-tier check, since this
+                                       classifier runs unconditionally on
+                                       every `compare` call, including the
+                                       overwhelming majority whose OLD_INPUT
+                                       is an ordinary AbiSnapshot about to be
+                                       parsed as one right after
+                                       classification says "not bundle
+                                       facts" -- see that module's own
+                                       docstring for the accepted, narrow
+                                       gap this leaves for a genuinely
+                                       marker-less legacy v1 document);
+                                       `compare_bundle_operand_dispatch.py`
+                                       is the frontends-boundary translation
+                                       (a stored NEW_INPUT is a
+                                       click.UsageError, live/stored and
+                                       stored/stored still having no
+                                       execution engine). `--old-bundle-facts`
+                                       and its former help text are gone, no
+                                       deprecation alias, per this plan's
+                                       standing stance. **Still not
+                                       started, and still this row's own
+                                       open design question:** the actual
+                                       BundleCompareRequest unification --
+                                       one evaluation/gate/report/dry-run
+                                       path across all four operand
+                                       combinations, live/stored and
+                                       stored/stored gaining a real engine
+                                       instead of a clean rejection, and
+                                       whether that unification reuses
+                                       GateOptions as-is or needs a broader
+                                       one.
+      └─ DELETE compare --old-bundle-facts — DONE 2026-09-03
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
       (NEW, not started)                --bundle-system-providers/--bundle-
                                        cohort and per-library header/compile

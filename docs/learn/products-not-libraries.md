@@ -125,8 +125,9 @@ against the stored document without reopening the old binaries:
 # release 1.0 -> 2.0, live on both sides, and persist 1.0's facts
 abicheck compare release-1.0/ release-2.0/ -H include/ --bundle-facts-out bundle-1.0.json
 
-# release 1.0 -> 3.0, without release-1.0/ on disk
-abicheck compare bundle-1.0.json release-3.0/ -H include/ --old-bundle-facts
+# release 1.0 -> 3.0, without release-1.0/ on disk (OLD_INPUT is detected
+# automatically as a stored BundleFacts document)
+abicheck compare bundle-1.0.json release-3.0/ -H include/
 ```
 
 A product whose members share one include tree but not one toolchain gives

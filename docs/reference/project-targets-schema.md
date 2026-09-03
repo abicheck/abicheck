@@ -460,8 +460,8 @@ declarative topology, confirm none of these apply to you:
   above for the one authoritative statement of that gap.
 - **Stored-facts bundle comparison (`BundleFacts`) has no run-plan /
   composite-Action / `check-project.yml` wiring** — it is reachable from
-  the Python API and from `compare --old-bundle-facts`, not from the
-  declarative CI surface.
+  the Python API and from `compare` (OLD_INPUT auto-detected as a stored
+  `BundleFacts` document), not from the declarative CI surface.
 - **`publish-baseline.yml` expects one `build-output.json` per contract
   profile** (G30 P1.1). A build system that doesn't emit a per-profile
   manifest in that shape needs to add one first — see the

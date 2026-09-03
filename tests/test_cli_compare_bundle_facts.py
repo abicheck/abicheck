@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for ``compare --old-bundle-facts`` (frontends/cli/commands/compare_bundle_facts.py).
+"""Tests for a stored-bundle-facts-OLD_INPUT ``compare`` (frontends/cli/commands/compare_bundle_facts.py).
 
 Exercises the real CLI entry point end to end -- unlike
 ``TestCompareReleaseAgainstBundleFacts`` in ``test_bundle_side_input.py``,
@@ -112,7 +112,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--format",
             "json",
@@ -142,7 +141,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--format",
             "json",
@@ -168,7 +166,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--format",
             "markdown",
@@ -207,7 +204,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--suppress",
             str(suppress_path),
@@ -237,7 +233,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--max-json-object-nodes",
             "1",
             "--format",
@@ -266,7 +261,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--format",
             "sarif",
         )
@@ -290,7 +284,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--fail-on-removed-library",
             "--format",
             "json",
@@ -299,7 +292,7 @@ class TestCompareOldBundleFacts:
         assert code == 64
         assert "--fail-on-removed-library" in out
 
-    def test_bundle_facts_out_together_with_old_bundle_facts_is_rejected(
+    def test_bundle_facts_out_together_with_stored_old_input_is_rejected(
         self, tmp_path: Path
     ) -> None:
         old_dir = tmp_path / "old"
@@ -317,7 +310,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--bundle-facts-out",
             str(tmp_path / "out.json"),
             "--format",
@@ -333,9 +325,9 @@ class TestCompareOldBundleFacts:
         # treated any non-directory path as a single library file --
         # a package archive silently produced zero matches instead of the
         # shared library inside it. Packs a real gcc-built .so into a
-        # .tar.gz and points --old-bundle-facts's NEW_INPUT at the archive
-        # itself, proving the breaking change is still detected once the
-        # archive is extracted first.
+        # .tar.gz and points a stored-bundle-facts-OLD_INPUT compare's
+        # NEW_INPUT at the archive itself, proving the breaking change is
+        # still detected once the archive is extracted first.
         import tarfile
 
         old_dir = tmp_path / "old"
@@ -359,7 +351,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(archive_path),
-            "--old-bundle-facts",
             "--include-system-declarations",
             "--format",
             "json",
@@ -392,7 +383,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--write",
             f"markdown={secondary_path}",
             "--format",
@@ -423,7 +413,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--format",
             "json",
         )
@@ -466,7 +455,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--output-dir",
             str(output_dir),
             "--format",
@@ -503,7 +491,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--output-dir",
             str(output_dir),
             "-o",
@@ -543,7 +530,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--output-dir",
             str(same_path),
             "-o",
@@ -585,7 +571,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--output-dir",
             str(preexisting_file),
             "--format",
@@ -624,7 +609,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--output-dir",
             str(output_dir),
             "--format",
@@ -665,7 +649,6 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "-o",
             str(summary_path),
             "--output-dir",
