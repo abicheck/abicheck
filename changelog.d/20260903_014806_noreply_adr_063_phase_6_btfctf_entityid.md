@@ -55,3 +55,19 @@
   check flagged on this PR (`dumper_elf_fallback.py` patch coverage;
   `extract/debug_layout_semantic_ir.py` was already fully covered by the
   existing test suite once run alongside `tests/test_dwarf_semantic_ir.py`).
+
+### Documentation
+
+- **`extract/debug_layout_semantic_ir.py` documents an inherited, accepted
+  limitation** (Codex review, fresh evidence): a same-named duplicate
+  struct/enum collapses to one `SemanticIR` occurrence, not two, because
+  `DwarfMetadata.structs`/`.enums` are already name-keyed, first-wins dicts
+  by the time this module receives them — the collapse happens in
+  `btf_metadata`'s/`ctf_metadata`'s own raw parse (`_extract_structs`/
+  `_extract_enums`), well before `to_dwarf_metadata()` runs, and every
+  pre-existing `_diff_dwarf`/`_diff_advanced_dwarf` detector already lives
+  with the identical collapse. A real fix needs both raw parsers to carry
+  multiple same-named records forward with a genuine per-record
+  discriminator — a materially larger, separately-scoped project touching
+  the shared `DwarfMetadata` contract every other BTF/CTF-backed consumer
+  depends on, not a heuristic this types-only slice can safely improvise.

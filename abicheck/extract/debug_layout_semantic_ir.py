@@ -71,6 +71,32 @@ carry no anonymous-vs-named distinction for a *nested member's own type* at
 all (only ``FieldInfo.type_name``, a plain string) — nothing here to key an
 ``Anonymous`` segment off regardless of scope.
 
+**A same-named duplicate struct/enum collapses to one occurrence, not two --
+an inherited limitation, not one this module introduces (Codex review,
+fresh evidence).** ``model/semantic_ir.py``'s own stated design goal is that
+an ODR-duplicate pair is never collapsed (``OccurrenceId``-keyed
+occurrences), but this module's only input, ``DwarfMetadata.structs``/
+``.enums``, is *already* a name-keyed, first-wins ``dict`` by the time it
+gets here -- ``btf_metadata._extract_structs``/``_extract_enums`` (and their
+CTF counterparts) collapse a same-named duplicate during BTF/CTF's own raw
+parse, well before ``to_dwarf_metadata()`` ever runs, confirmed directly
+(``if name not in structs: structs[name] = layout``) and pinned by the
+existing ``test_duplicate_*_first_wins`` tests -- so the second record's own
+fields/layout are already gone by the time :func:`semantic_ir_from_debug_metadata`
+receives *meta*, not merely uncollected. Every pre-existing ``_diff_dwarf``/
+``_diff_advanced_dwarf`` detector already lives with this same collapse for
+a BTF/CTF-sourced snapshot; this module inherits it rather than
+regressing it. A real fix needs BTF's/CTF's own raw parsers to carry
+multiple same-named records forward with a genuine per-record
+discriminator -- a materially larger, separately-scoped project touching
+the shared ``DwarfMetadata.structs``/``.enums`` contract every other
+BTF/CTF-backed consumer already depends on identically, not a heuristic
+this types-only slice can safely improvise. Note BTF's own format is
+documented as "compact, pre-deduplicated" (``btf_metadata.py``'s module
+docstring) precisely because the *encoder* is expected to fold identical
+type nodes before emission, which is exactly why this case is rare enough
+in real kernel builds to accept as a documented gap rather than block on.
+
 Leaf module: depends on ``model``/``model.dwarf_facts`` (allowed:
 ``extract -> model, storage``, ADR-061) and its sibling
 ``extract.semantic_normalizer`` — nothing above. Deliberately does not
@@ -175,6 +201,10 @@ def semantic_ir_from_debug_metadata(meta: DwarfMetadata, producer: str) -> Seman
     docstring), so there is no *matching* ``EntityId``-bearing evidence
     reaching this function to normalize in the first place — not a case
     this function silently drops, but evidence that never arrives here.
+
+    A same-named duplicate struct/enum collapses to one occurrence here too
+    — see this module's own docstring for why that loss happens upstream,
+    in BTF's/CTF's own raw parse, not in this function.
     """
     records = [
         _record_type_from_layout(name, layout) for name, layout in meta.structs.items()
