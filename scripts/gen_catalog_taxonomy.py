@@ -169,6 +169,7 @@ RELATED_RULES: dict[str, list[str]] = {
     "case191_header_only_graph_field_type": [
         "embedded-type-size-increased",
         "public-api-gains-internal-dependency",
+        "type-field-added-compatible",
     ],
     "case192_call_graph_break_survives_suppression": [
         "exported-function-removed",

@@ -5745,7 +5745,8 @@
    "validation_owner": "compiler-pair",
    "related_rules": [
     "embedded-type-size-increased",
-    "public-api-gains-internal-dependency"
+    "public-api-gains-internal-dependency",
+    "type-field-added-compatible"
    ],
    "rule_slug": null,
    "variant_of": null

@@ -30,9 +30,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 
 def _load_gen():
     path = REPO_DIR / "scripts" / "gen_catalog_coverage_report.py"
-    spec = importlib.util.spec_from_file_location(
-        "gen_catalog_coverage_report", path
-    )
+    spec = importlib.util.spec_from_file_location("gen_catalog_coverage_report", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     sys.path.insert(0, str(REPO_DIR / "scripts"))
@@ -67,9 +65,21 @@ def test_rule_count_matches_taxonomy_directly():
     slugs = {v["rule_slug"] for v in rules.values()}
     assert None not in slugs, "every rule-entity case must carry a rule_slug"
 
+    # A distinct rule also includes a scenario-only conceptual slug named in
+    # related_rules with no rule-entity case of its own (e.g.
+    # "overload-set-removed") -- counting only rule-entity slugs would
+    # undercount the catalog's real rule vocabulary.
+    scenario_only_slugs = {
+        slug
+        for entry in scenarios.values()
+        for slug in (entry.get("related_rules") or [])
+        if slug not in slugs
+    }
+    distinct_rule_count = len(slugs) + len(scenario_only_slugs)
+
     content = gen.OUT_PATH.read_text(encoding="utf-8")
     assert f"**{len(rules)} rule-entity cases**" in content
-    assert f"**{len(slugs)} distinct compatibility rules**" in content
+    assert f"**{distinct_rule_count} distinct compatibility rules**" in content
     assert f"**{len(scenarios)} scenario-entity cases**" in content
 
 

@@ -85,9 +85,24 @@ PHASE5_TARGET_WORKFLOWS: tuple[str, ...] = (
 
 def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     rules = {k: v for k, v in taxonomy.items() if v["entity"] == "rule"}
+    scenarios = {k: v for k, v in taxonomy.items() if v["entity"] == "scenario"}
     slug_cases: dict[str, list[str]] = {}
     for case_id, entry in rules.items():
         slug_cases.setdefault(entry["rule_slug"], []).append(case_id)  # type: ignore[arg-type]
+
+    # A distinct rule is any rule_slug a rule-entity case demonstrates,
+    # *plus* any conceptual slug a scenario names in its own related_rules
+    # with no rule-entity case of its own (e.g. "overload-set-removed" --
+    # the design doc's own worked examples deliberately name a generic
+    # mechanism no single-library case demonstrates alone yet). Counting
+    # only rule-entity slugs would undercount the catalog's real rule
+    # vocabulary by exactly that many.
+    scenario_only_slugs: set[str] = set()
+    for entry in scenarios.values():
+        for slug in entry.get("related_rules") or []:  # type: ignore[union-attr]
+            if slug not in slug_cases:
+                scenario_only_slugs.add(slug)
+    distinct_rule_count = len(slug_cases) + len(scenario_only_slugs)
 
     # A family's canonical case(s) are those with variant_of=None; everything
     # else in the family is a variant case. Reported separately -- a family
@@ -105,14 +120,20 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     lines = [
         "## Rule coverage",
         "",
-        f"- **{len(slug_cases)} distinct compatibility rules** demonstrated "
-        f"across **{len(rules)} rule-entity cases**.",
-        f"- **{len(variant_families)} of those rules** have a demonstrated "
-        f"variant beyond their canonical case ({len(variant_case_ids)} "
-        "variant cases total, one per family below) -- these are robustness "
-        "demonstrations of an already-counted rule, not additional rules.",
-        f"- **{len(slug_cases) - len(variant_families)} rules** have exactly "
-        "one demonstrated case so far, with no variant yet.",
+        f"- **{distinct_rule_count} distinct compatibility rules** in total "
+        f"-- **{len(slug_cases)}** demonstrated by at least one rule-entity "
+        f"case (across **{len(rules)} rule-entity cases**), plus "
+        f"**{len(scenario_only_slugs)}** named only in a scenario's own "
+        "`related_rules` (a generic mechanism no single-library case "
+        "demonstrates alone yet).",
+        f"- **{len(variant_families)} of the rule-entity-backed rules** have "
+        f"a demonstrated variant beyond their canonical case "
+        f"({len(variant_case_ids)} variant cases total, one per family "
+        "below) -- these are robustness demonstrations of an "
+        "already-counted rule, not additional rules.",
+        f"- **{len(slug_cases) - len(variant_families)} rule-entity-backed "
+        "rules** have exactly one demonstrated case so far, with no "
+        "variant yet.",
         "",
         "| Rule | Canonical case | Variant case(s) |",
         "|---|---|---|",
