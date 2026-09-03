@@ -546,7 +546,23 @@ STEPS: tuple[Step, ...] = (
     ),
     Step(
         "slow",
-        _py("pytest", "tests/", "-m", "slow", "--tb=short"),
+        # -n auto --dist worksteal, matching ci.yml's "Run slow tests" step:
+        # the `slow`-marked tests here are independent (Hypothesis/property-
+        # based suites plus the production-scale snapshot-compression round
+        # trips), so a serial run was pure wasted wall time on a multi-core
+        # runner/machine and left this local step unable to reproduce CI's
+        # actual timing behavior (Codex review, PR #1036).
+        _py(
+            "pytest",
+            "tests/",
+            "-m",
+            "slow",
+            "--tb=short",
+            "-n",
+            "auto",
+            "--dist",
+            "worksteal",
+        ),
         frozenset({FULL}),
         description="Hypothesis / perf-benchmark tests",
     ),
