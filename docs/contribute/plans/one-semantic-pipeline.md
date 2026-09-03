@@ -14038,17 +14038,21 @@ even carried across either format's own `to_dwarf_metadata()` conversion
 `EntityId`-bearing evidence reaching the normalizer for those kinds at
 all, not a case this slice silently drops.
 
-**Still not landed, and therefore this phase is not complete:**
 `service.py`'s own BTF/CTF dispatch (a third production assembler this
 phase's own "not the only production assembly call sites" note above
 names -- the separate call site around where it parses a raw BTF/CTF blob
 and constructs an `AbiSnapshot` directly from `btf.to_dwarf_metadata()`/
 `_typeinfo_functions(btf.func_protos)`/`dict(btf.typedefs)`, and the
 identical CTF branch beside it, NOT the `dumper_elf_fallback.py` path this
-slice wires) remains
-unwired for the same reason PDB's own `service.py`-adjacent dispatch was
-until this phase's seventh slice wired it (`service_dump_native_pe._dump_pe`'s
-existing header-scoping fallback branch, above); and the phase's own acceptance criteria (a
+slice wires) has since been wired too (Codex review, fresh evidence): that
+dispatch lives on today as `workflows/input_resolution.py::
+_resolve_raw_typeinfo` (ADR-061 Phase 4 relocated it out of `service.py`
+verbatim, before this slice's own review round), and now calls
+`semantic_ir_from_debug_metadata` for both its BTF and CTF branches, the
+same as `dumper_elf_fallback.py`'s own call site.
+
+**Still not landed, and therefore this phase is not complete:**
+the phase's own acceptance criteria (a
 closure-parameterized template fixture) remain only PARTIALLY met --
 castxml's own occurrence now really does decompose and canonicalize a
 closure-typed template argument end to end, but clang produces no
