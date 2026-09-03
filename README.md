@@ -187,7 +187,7 @@ Full-catalog benchmark from 2026-07-18, when the catalog held 193 cases, every t
 
 Run against abicheck 0.5.0, libabigail 2.4.0, and ABICC 2.3. The table is pinned to commit `ffa860c` and the 193-case catalog of that date; the exact reproduction procedure, ground-truth digest, per-case matrix, and the pinned cross-tool subset used for release-to-release tracking are in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases). `python scripts/benchmark_comparison.py --suite all` reruns the *current* catalog against the current checkout rather than reproducing that historical run.
 
-`abidiff` is still the right choice for a sub-second, symbols-only sanity check. For anything you gate a release on, the numbers above are the argument.
+`abidiff` is still the right choice for a sub-second sanity check, especially on a stripped binary where only the symbol table is available. For anything you gate a release on, the numbers above are the argument.
 
 ## Installation
 

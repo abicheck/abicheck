@@ -451,11 +451,10 @@ cross-library findings — removed dependencies, provider changes — are
 bundle analysis skipped). Before adopting the
 declarative topology, confirm none of these apply to you:
 
-- **`bundles:` checks only run at `depth: binary`** — `headers`/`build`/
-  `source` are rejected at `project validate`
-  (`BUNDLE_CHECK_DEPTHS` in `abicheck/buildsource/project_targets.py`). If
-  a bundle-level check needs header-scope evidence, it can't run through a
-  `bundles:` entry today.
+- **`bundles:` checks run at one depth only** — see the [`bundles:`
+  section](#bundles) above for the allowed depth and what `project
+  validate` rejects. If a bundle-level check needs header-scope evidence,
+  it can't run through a `bundles:` entry today.
 - **Per-target `public_headers:` is not honored for a `kind: bundle`
   member** — see the `public_headers` row of the `targets:` field table
   above for the one authoritative statement of that gap.
