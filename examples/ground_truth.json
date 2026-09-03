@@ -4216,6 +4216,7 @@
    "validation_owner": "compiler-pair",
    "related_rules": [
     "exported-function-removed",
+    "exported-type-removed",
     "virtual-dispatch-contract-removed"
    ],
    "rule_slug": null,
@@ -6875,6 +6876,7 @@
    "artifact_shape": "compiled-pair",
    "validation_owner": "compiler-pair",
    "related_rules": [
+    "exported-function-removed",
     "overload-set-removed"
    ],
    "rule_slug": null,

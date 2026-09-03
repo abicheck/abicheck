@@ -46,8 +46,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT_PATH = ROOT / "docs" / "contribute" / "catalog-coverage.md"
 
-# Phase 3 resolver (scripts/CLAUDE.md) -- this script's own directory is
-# already on sys.path when run directly (`python scripts/gen_catalog_coverage_report.py`).
+# Phase 3 resolver (scripts/CLAUDE.md). This script's own directory is
+# already on sys.path when run directly, but not when imported as
+# `scripts.gen_catalog_coverage_report` -- guard mirrors
+# fact_detector_misuse.py's identical sibling-import guard for the
+# identical reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
 GENERATED_NOTE = (
@@ -92,7 +97,8 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
 def _scenario_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     scenarios = {k: v for k, v in taxonomy.items() if v["entity"] == "scenario"}
     by_kind: Counter[str] = Counter(
-        entry["scenario_kind"] for entry in scenarios.values()  # type: ignore[misc]
+        entry["scenario_kind"]
+        for entry in scenarios.values()  # type: ignore[misc]
     )
     lines = [
         "## Scenario coverage",
@@ -113,7 +119,8 @@ def _scenario_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
 
 def _ecosystem_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     by_eco: Counter[str] = Counter(
-        entry["ecosystem"] for entry in taxonomy.values()  # type: ignore[misc]
+        entry["ecosystem"]
+        for entry in taxonomy.values()  # type: ignore[misc]
     )
     lines = [
         "## Ecosystem coverage",
@@ -158,16 +165,17 @@ def render() -> str:
         "",
         "# Catalog coverage by dimension",
         "",
-        "Phase 6 of the [examples/catalog split]"
-        "(plans/examples-catalog-split.md): the calibration "
-        "catalog under `examples/` is 197 `caseNN_*` fixtures, but not 197 "
-        "independent ABI/API concepts -- several are variants of the same "
-        "rule, or scenarios composing rules already counted elsewhere. This "
-        "page reports the catalog along five independent dimensions instead "
-        "of one flat case count, so \"three demonstrations of one rule\" "
-        "reads as \"1 rule, 3 variants\" rather than \"3 ABI concepts\". "
-        "Regenerate with `python scripts/gen_catalog_coverage_report.py` "
-        "after any `ground_truth.json` change.",
+        f"Phase 6 of the [examples/catalog split]"
+        f"(plans/examples-catalog-split.md): the calibration "
+        f"catalog under `examples/` is {len(taxonomy)} `caseNN_*` fixtures, "
+        f"but not {len(taxonomy)} independent ABI/API concepts -- several "
+        "are variants of the same rule, or scenarios composing rules "
+        "already counted elsewhere. This page reports the catalog along "
+        "five independent dimensions instead of one flat case count, so "
+        '"three demonstrations of one rule" reads as "1 rule, 3 variants" '
+        'rather than "3 ABI concepts". Regenerate with '
+        "`python scripts/gen_catalog_coverage_report.py` after any "
+        "`ground_truth.json` change.",
         "",
         _rule_coverage(taxonomy),
         _scenario_coverage(taxonomy),

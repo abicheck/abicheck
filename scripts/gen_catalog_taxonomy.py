@@ -61,8 +61,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Phase 3 resolver (scripts/CLAUDE.md) -- this script's own directory is
-# already on sys.path when run directly (`python scripts/gen_catalog_taxonomy.py`).
+# Phase 3 resolver (scripts/CLAUDE.md). This script's own directory is
+# already on sys.path when run directly, but not when imported as
+# `scripts.gen_catalog_taxonomy` -- guard mirrors fact_detector_misuse.py's
+# identical sibling-import guard for the identical reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
 EXAMPLES = example_catalog.EXAMPLES_DIR
@@ -109,6 +113,7 @@ RELATED_RULES: dict[str, list[str]] = {
     ],
     "case108_task_class_removed": [
         "exported-function-removed",
+        "exported-type-removed",
         "virtual-dispatch-contract-removed",
     ],
     "case109_flow_graph_policy_renames": [
@@ -118,7 +123,10 @@ RELATED_RULES: dict[str, list[str]] = {
     "case110_concurrent_unordered_map_api_drift": ["exported-function-removed"],
     "case111_enumerable_thread_specific_lambda_ambiguity": ["overload-added"],
     # -- SYCL case studies --
-    "case82_sycl_overload_set_removed": ["overload-set-removed"],
+    "case82_sycl_overload_set_removed": [
+        "exported-function-removed",
+        "overload-set-removed",
+    ],
     "case126_sycl_device_impl_ptr": ["public-class-representation-changed"],
     # -- oneMKL case study --
     "case112_lp64_ilp64": ["public-integer-model-width-changed"],

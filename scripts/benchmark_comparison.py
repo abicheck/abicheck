@@ -60,8 +60,13 @@ from typing import Any
 
 REPO_DIR = Path(__file__).parent.parent
 
-# Phase 3 resolver (scripts/CLAUDE.md) -- this script's own directory is
-# already on sys.path when run directly (`python scripts/benchmark_comparison.py`).
+# Phase 3 resolver (scripts/CLAUDE.md). This script's own directory is
+# already on sys.path when run directly, but not when imported as
+# `scripts.benchmark_comparison` (the documented programmatic surface,
+# `run_suite()`'s own docstring) -- guard mirrors fact_detector_misuse.py's
+# identical sibling-import guard for the identical reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
 EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
@@ -3409,7 +3414,7 @@ def _run_evidence_tiers(args: Any) -> None:
     REPORT_DIR.mkdir(exist_ok=True)
     BUILD_DIR.mkdir(exist_ok=True)
     all_cases = sorted(
-        d for d in EXAMPLES_DIR.iterdir() if d.is_dir() and d.name.startswith("case")
+        (path for _, path in example_catalog.iter_case_dirs()), key=lambda d: d.name
     )
     if args.suite == "pinned74":
         all_cases = [d for d in all_cases if PINNED_74_CASE_RE.match(d.name)]
@@ -3479,7 +3484,7 @@ def run_suite(args: argparse.Namespace) -> tuple[list[dict], list[Any], set[str]
     BUILD_DIR.mkdir(exist_ok=True)
 
     all_cases = sorted(
-        d for d in EXAMPLES_DIR.iterdir() if d.is_dir() and d.name.startswith("case")
+        (path for _, path in example_catalog.iter_case_dirs()), key=lambda d: d.name
     )
     if args.suite == "pinned74":
         all_cases = [d for d in all_cases if PINNED_74_CASE_RE.match(d.name)]
