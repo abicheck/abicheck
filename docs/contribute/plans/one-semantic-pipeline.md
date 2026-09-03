@@ -209,21 +209,40 @@ reporting a purely private layout change as breaking (a live false-positive
 risk against this repo's FP-rate gate).
 
 *The fix: gate narrowing on a completeness signal, not on producer
-identity.* `OpaqueTypeIndex.complete` tracks, during `find_opaque_types`'s
-own per-declaration walk, whether *every* opaque declaration resolved a
-stable identity — computed over the raw declaration list before
-deduplication, since the deduplicated `stable`/`local` set *sizes* can't
-answer this (a bare-name collision itself can make `len(stable) >
-len(local)`, so a size comparison would say "complete" exactly when a
-collision is present and say "incomplete" for unrelated reasons). `intersect()`
-ANDs the two sides' flags, and `_downgrade_opaque_type_changes` reads it
-straight off the already-intersected index: `opaque.contains(c, ...,
-strict=opaque.complete)`. `strict=True` only changes what happens on a
-stable-tier *miss* (never a hit, and never when the change carries no
-resolvable identity at all) — so this is additive, both-or-neither-gated
-capability layered on the existing permissive default, the identical
-discipline `compare/typedefs.py`'s and `compare/constants.py`'s own
-fidelity gates already established for the `SemanticIR` cutover.
+identity — three review rounds, each tightening the predicate a weaker
+one had gotten wrong.* The final shape: `OpaqueTypeIndex` carries
+`stable_by_local`, the stable ids resolved among just the declaration(s)
+sharing each bare spelling, and `intersect()`'s `complete` is true only
+when, for every spelling both sides agree is opaque, the two sides' own
+`stable_by_local` sets for it are **exactly equal and non-empty**.
+
+Two weaker predicates were tried and each fell to a real counter-example
+before landing on this one. First: "every raw declaration independently
+resolved *some* stable id" (per side, ANDed) — falsified by two producers
+resolving *different* ids for the *same* declaration (e.g. disagreeing on
+whether an enclosing scope segment is a namespace or a record), which
+this per-side-only check cannot see at all. Second, once fixed to compare
+the two sides' id sets per spelling: "the two sides' sets *intersect*" —
+falsified by a genuine collision itself, where *two distinct*
+declarations share one spelling and only *one* of them actually paired;
+a shared id from the paired declaration keeps the intersection non-empty
+while the other silently disagrees. Exact equality is what closes that
+gap: it requires *every* id either side resolved for a spelling to have a
+match on the other side, not merely that some id does. Equal-and-empty
+had to be excluded too (`frozenset() == frozenset()` is `True`, but two
+sides that both resolved *nothing* for a spelling are not in agreement —
+counting them as paired let `strict=True` reject a change on a
+contentless miss instead of falling through to the spelling tier, caught
+by an existing behavior-preservation test regressing).
+
+`_downgrade_opaque_type_changes` reads `complete` straight off the
+already-intersected index: `opaque.contains(c, ..., strict=opaque.complete)`.
+`strict=True` only changes what happens on a stable-tier *miss* (never a
+hit, and never when the change carries no resolvable identity at all) —
+so this is additive, both-or-neither-gated capability layered on the
+existing permissive default, the identical discipline
+`compare/typedefs.py`'s and `compare/constants.py`'s own fidelity gates
+already established for the `SemanticIR` cutover.
 
 *Investigation finding worth recording: the completeness precondition
 already holds far more often than the original "needs its own slice"

@@ -109,15 +109,28 @@ concepts:
       StableEntityId first and the RecordType.name spelling second) and
       type_reachability.py's closure-walk record-tracking keys (now
       SnapshotLocalIdentity rather than bare str). Bare-name-collision
-      narrowing landed 2026-09-03: OpaqueTypeIndex.complete tracks, per
-      comparison, whether every opaque declaration on BOTH sides resolved
-      a stable identity (computed over the raw per-declaration walk, not
-      derived from the deduplicated stable/local set sizes, since a
-      collision itself can make len(stable) > len(local)); only when that
-      holds does contains(..., strict=True) trust a stable-tier miss as
-      proof of non-opacity rather than falling back to the collision-prone
-      spelling tier. Investigation for this slice found the completeness
-      precondition already holds for every current producer's own output
+      narrowing landed 2026-09-03, through three review rounds that each
+      tightened the completeness predicate: OpaqueTypeIndex now carries
+      stable_by_local (the stable ids resolved per bare spelling), and
+      intersect() computes complete as -- for every spelling both sides
+      agree is opaque -- the two sides' own stable_by_local sets for it
+      being EXACTLY EQUAL AND NON-EMPTY, not merely "each side resolved
+      something" (that per-side-only condition passes even when the two
+      sides resolve DIFFERENT ids for the same declaration) and not merely
+      "the two sets intersect" (that passes even when only ONE of several
+      declarations colliding on one spelling actually paired, since a
+      shared id from one declaration keeps the intersection non-empty
+      while a different declaration under the same spelling silently
+      disagrees). Equal-and-empty is explicitly excluded too: two sides
+      that BOTH resolved nothing for a spelling are not in agreement, they
+      simply have no stable evidence for it, so counting that as paired
+      would let strict=True reject a change against a contentless miss
+      instead of falling through to the spelling tier. Only when this
+      three-part predicate holds does contains(..., strict=True) trust a
+      stable-tier miss as proof of non-opacity rather than falling back to
+      the collision-prone spelling tier. Investigation for this slice
+      found the completeness precondition already holds for every current
+      producer's own output
       (castxml/clang/DWARF/PDB all populate RecordType.entity_id
       unconditionally, BTF/CTF inherits it via the shared DWARF builder) --
       the realistic incompleteness case is producer-version/schema skew
