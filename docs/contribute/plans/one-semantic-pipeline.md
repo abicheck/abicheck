@@ -11076,6 +11076,59 @@ green; `ruff check`/`mypy abicheck/` clean; `check_architecture.py` 0
 errors; `check_ai_readiness.py` 0 errors; `check_docs_contract.py` 0
 errors.
 
+**The next two candidate cohorts (records, functions): investigated,
+declined for now (2026-09-03).** The original cohort-1 landing text named
+both as blocked -- records on "the IR does not yet model layout facts",
+functions on "cross-backend signature-spelling agreement" being an open
+question. Checked both claims against the codebase as it stands today,
+rather than carried them forward unexamined, and found neither still
+holds as a *blocker*; what's missing instead is a bug to justify the
+migration cost, the same bar typedefs/constants/opaque-narrowing above
+each cleared and this pair does not.
+
+*Records.* `RecordType`/`TypeMap` matching (`diff_helpers.py`, ADR-045,
+predating ADR-063 entirely) is already qualified-name-keyed with an
+ambiguity-safe bare-name alias for schema-evolution compatibility --
+structurally the same shape `render_display_name`-based matching would
+give a migrated reader, not the flat, unqualified alias map typedefs
+carried before their own migration. And the simplest candidate layout
+facts, `size_bits`/`alignment_bits`, are a direct, single-source
+pass-through of the identical `RecordType` field a normalizer would read
+to populate a `SemanticIR` fact for them -- there is no second value
+source for those two projections to ever disagree on, unlike a rendered
+*type spelling* (where two backends really can disagree). So "records
+carry layout facts the IR does not yet model" was true but was not
+itself the blocker: modeling them is straightforward (verified by design
+during this investigation, not implemented, since doing so would close
+nothing).
+
+*Functions.* `CanonicalEntity.canonical_spelling` already resolves the
+cross-backend signature-spelling agreement the original framing named as
+open -- Phase 2's third slice landed it (the canonical
+`"<return>(<param>, ...)"` spelling, built from the same
+`canonicalize_function_signature_param_type`/`canonicalize_type_name`
+primitives `entity_id_for_function` itself uses) after that framing was
+written, and this investigation is what caught the plan text not having
+caught up. But checked one level deeper, past the resolved-doc claim, for
+whether the underlying spelling problem was ever actually *reachable* by
+a real detector: it is not. `diff_symbols.py`'s own return-type/
+parameter-type comparisons already canonicalize via `canonicalize_type_name`
+directly, with no dependency on `SemanticIR` at all, and function/variable
+*matching* keys on the mangled name (`resolve_function_identity`'s
+CANONICAL tier) -- an unambiguous, already-qualified identity with no
+bare-name collision analogous to the opaque-type one to close.
+
+*Conclusion.* Declined on the identical basis 2B's `entity:` alias
+promotion was (see that section's own note, above): not blocked on
+missing infrastructure, but lacking a currently-identifiable finding to
+justify the migration cost. Revisit either family the moment a concrete
+cross-backend matching or spelling divergence surfaces that today's
+`TypeMap`/mangled-name/`canonicalize_type_name` mechanisms cannot already
+close -- at which point the infrastructure work this investigation
+scoped (a `size_bits`/`alignment_bits`-shaped `CanonicalEntity` addition
+for records; nothing further needed for functions, whose spelling is
+already modeled) is the concrete next step, not a redesign.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

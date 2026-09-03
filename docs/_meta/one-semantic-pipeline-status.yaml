@@ -193,10 +193,7 @@ concepts:
       First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
       through SemanticIRIndex (abicheck/compare/typedefs.py). Second
       cohort (2026-09-03): the CONSTANT family too
-      (abicheck/compare/constants.py), the next-simplest per this phase's
-      own reasoning -- records carry layout facts the IR does not yet
-      model, and functions need cross-backend signature-spelling
-      agreement worked out first. Both share one
+      (abicheck/compare/constants.py). Both share one
       legacy-flat-snapshot adapter
       (abicheck/model/semantic_ir_legacy_adapter.py) producing the same
       read shape for a snapshot carrying no SemanticIR, and both are
@@ -213,14 +210,50 @@ concepts:
       still reads the legacy collections directly -- deliberately, per
       this phase's own non-goal of not widening coverage until one full
       vertical slice is proven; each further cohort needs its own
-      MIGRATED_COHORTS entry. Not attempted by either cohort, and
-      explicitly flagged as needing separate sign-off/completeness work
-      first: narrowing a bare-name identity collision, and promoting the
-      entity: alias into a real match tier (see the identity concept's
-      own removal_gate). SemanticIRIndex.references() is still
+      MIGRATED_COHORTS entry, AND -- the finding this cohort's own
+      investigation (2026-09-03) adds -- a genuine bug the migration
+      would close, the same bar typedefs/constants themselves cleared
+      (their pre-existing matching mechanism was a flat, unqualified
+      alias map with no real identity story) and records/functions do
+      not: checked both candidate families rather than assumed, and found
+      neither is blocked the way the original cohort-1 framing described.
+      Records: RecordType/TypeMap matching (diff_helpers.py, ADR-045) is
+      already qualified-name-keyed with an ambiguity-safe bare-name
+      alias, so it does not share the flat-bare-map weakness typedefs had
+      before their own migration; and a record's simplest candidate
+      layout facts (size_bits/alignment_bits) are a direct, single-source
+      pass-through of the same RecordType field the SemanticIR normalizer
+      would read to populate them, so a migrated reader could never see a
+      value SemanticIR-vs-legacy comparison could actually disagree on --
+      "records carry layout facts the IR does not yet model" was true but
+      not itself the blocker once checked: modeling them is straightforward
+      (verified by design, not implemented, since there is nothing to
+      close by doing so). Functions: canonical_spelling (the
+      cross-backend-safe "<return>(<param>, ...)" signature spelling,
+      populated since Phase 2's third slice) already resolves the
+      cross-backend signature-spelling agreement the original cohort-1
+      framing named as the open blocker -- but separately, checked
+      whether that spelling problem was ever actually reachable in
+      today's detectors and found it is not: diff_symbols.py's own
+      return-type/parameter-type comparisons already canonicalize via
+      canonicalize_type_name directly, independent of SemanticIR, and
+      function/variable *matching* already keys on the mangled name
+      (resolve_function_identity's CANONICAL tier), an unambiguous,
+      already-qualified identity with no bare-name collision to close.
+      Declined for now on the same basis 2B's entity: alias promotion
+      was (see the identity concept's own removal_gate): not blocked, but
+      no currently-identifiable finding to justify the migration cost;
+      revisit either family if a concrete cross-backed matching or
+      spelling divergence surfaces that today's mechanisms cannot already
+      close. Bare-name-collision narrowing (opaque-type suppression) is
+      the one item from that original "not attempted" list that DID clear
+      this bar and landed this same day -- see the identity concept's own
+      removal_gate for the full account, including why entity: alias
+      promotion was declined on the identical "no bug to fix" basis.
+      SemanticIRIndex.references() is still
       unimplemented (it names a graph traversal belonging with the
       public-surface reference index, ADR-063 D5 / plan Phase 3), so
-      neither cohort uses it.
+      neither landed cohort uses it.
       Producers remain partial regardless (CanonicalEntity.template_arguments
       is populated for records but not for function templates, and clang
       produces no occurrence at all for a template specialization).
