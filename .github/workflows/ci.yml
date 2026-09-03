@@ -307,10 +307,24 @@ jobs:
         # few small test files' worth of informational coverage to
         # coverage-slow.xml, not gate anything (no --cov-fail-under in this
         # step).
+        #
+        # tests/test_header_scan_deadline_integration.py is carved out the
+        # same way, for the same reason (Codex review, PR #1036, a third
+        # independent trigger site): its lone `@pytest.mark.slow` test,
+        # test_pathological_header_natural_cost_is_tracked, measures real
+        # elapsed time against a 60s ceiling -- collected here (not by
+        # performance.yml's own dedicated job, which only runs
+        # test_performance.py/test_perf_binary_scan.py; this file is a gap
+        # in that job too, not fixed here) whenever clang/g++ are present,
+        # which they are on this canonical Ubuntu lane. Its sibling tests in
+        # the same file aren't `slow`-marked, so excluding the whole file
+        # from this `-m "slow"` selector (and re-including it in the serial
+        # invocation, where `-m "slow"` again narrows it to just this one
+        # test) has no effect on them either way.
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_perf_binary_scan.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
-          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m "slow"
+          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_perf_binary_scan.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/test_performance.py tests/test_perf_binary_scan.py tests/test_header_scan_deadline_integration.py -v --tb=short -m "slow"
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner
