@@ -362,6 +362,32 @@ class TestCompareRequestContractContextGateReceipt:
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.gate.exit_code_scheme == "severity"
 
+    def test_a_policy_file_overrides_an_unknown_policy_name(
+        self, tmp_path: Path
+    ) -> None:
+        """Round-10 review (Codex, fresh evidence): `load_suppression_and_
+        policy` accepts a request pairing an unknown `policy` name with a
+        valid `policy_file_path` -- the file wins, the name chose nothing.
+        The gate-receipt installer must not forward that ignored name to
+        `builtin_policy_identity`, which raises for anything outside
+        `VALID_BASE_POLICIES` -- that would turn an otherwise-completed
+        comparison into a receipt-install failure. Same fix already applied
+        on the scan side (`test_scan_compare_parity.py`'s identically-named
+        test)."""
+        old, new = _write(tmp_path, *_breaking_pair())
+        policy_file_path = tmp_path / "policy.yml"
+        policy_file_path.write_text(
+            "base_policy: sdk_vendor\n", encoding="utf-8"
+        )
+        result = self._run(
+            old,
+            new,
+            policy="not_a_real_policy",
+            policy_file_path=policy_file_path,
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.policy.base.id == "sdk_vendor"
+
 
 class TestScanRequestGateOptions:
     """`ScanRequest.severity_preset`/`exit_code_scheme` -> `run_scan`'s
