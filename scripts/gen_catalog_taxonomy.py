@@ -124,7 +124,7 @@ RELATED_RULES: dict[str, list[str]] = {
     # -- multi-library bundle project-topology scenarios --
     "case84_bundle_soname_skew": ["soname-inconsistent"],
     "case90_bundle_intra_dep_removed": ["exported-function-removed"],
-    "case91_bundle_intra_signature_drift": ["param-type-change"],
+    "case91_bundle_intra_signature_drift": ["param-type-change", "return-type"],
     "case92_bundle_provider_changed": ["symbol-source-owner-changed"],
     "case93_bundle_manifest_drift": ["missing-template-instantiation"],
     # -- G20 capability/audit scenarios --
@@ -143,7 +143,7 @@ RELATED_RULES: dict[str, list[str]] = {
     ],
     "case192_call_graph_break_survives_suppression": [
         "exported-function-removed",
-        "public-api-gains-internal-dependency",
+        "internal-symbol-required-by-public-api",
     ],
     "case193_ordinary_exported_fn_call_not_reachable": ["exported-function-removed"],
     "case194_header_graph_rename_reconciled": [

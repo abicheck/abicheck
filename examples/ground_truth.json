@@ -7035,7 +7035,8 @@
    "artifact_shape": "bundle",
    "validation_owner": "bundle-runner",
    "related_rules": [
-    "param-type-change"
+    "param-type-change",
+    "return-type"
    ],
    "rule_slug": null,
    "variant_of": null
@@ -7196,7 +7197,7 @@
    "validation_owner": "compare-cases",
    "related_rules": [
     "exported-function-removed",
-    "public-api-gains-internal-dependency"
+    "internal-symbol-required-by-public-api"
    ],
    "rule_slug": null,
    "variant_of": null
