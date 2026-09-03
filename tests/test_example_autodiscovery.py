@@ -40,8 +40,14 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
+REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 
 # ---------------------------------------------------------------------------
 # Platform helpers
@@ -738,7 +744,7 @@ def test_example_pipeline(
                 f"native toolchain does not support"
             )
 
-    case_dir = EXAMPLES_DIR / case_name
+    case_dir = example_catalog.case_dir(case_name)
     assert case_dir.is_dir(), f"Case directory not found: {case_dir}"
 
     v1_src, v2_src, v1_hdr, v2_hdr = _find_sources(case_dir)

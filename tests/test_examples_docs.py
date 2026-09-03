@@ -23,8 +23,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES_DIR = ROOT / "examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 GEN_SCRIPT = ROOT / "scripts" / "gen_examples_docs.py"
 
 
@@ -59,7 +65,7 @@ def test_ground_truth_matches_example_dirs() -> None:
 
 @pytest.mark.parametrize("case_name", _ground_truth_cases())
 def test_case_readme_has_required_structure(case_name: str) -> None:
-    readme = EXAMPLES_DIR / case_name / "README.md"
+    readme = example_catalog.case_dir(case_name) / "README.md"
     assert readme.exists(), f"missing README: {readme}"
     text = readme.read_text(encoding="utf-8")
 

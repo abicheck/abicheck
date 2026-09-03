@@ -16,7 +16,13 @@ from pathlib import Path
 
 import pytest
 
-EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 
 # (case_dir_name, expected_verdict, header_v1, header_v2)
 #
@@ -183,7 +189,7 @@ def _require_tool(name: str) -> None:
 
 
 # Load platform info from ground_truth.json
-_gt_path = EXAMPLES_DIR / "ground_truth.json"
+_gt_path = example_catalog.GROUND_TRUTH_PATH
 _gt_data = json.loads(_gt_path.read_text()) if _gt_path.exists() else {"verdicts": {}}
 _PLATFORMS: dict[str, list[str]] = {
     k: v.get("platforms", ["linux", "macos", "windows"])
@@ -404,7 +410,7 @@ def test_abi_example(case_name, expected_verdict, hdr_v1, hdr_v2, tmp_path):
     if current not in platforms:
         pytest.skip(f"{case_name} not supported on {current}")
 
-    case_dir = EXAMPLES_DIR / case_name
+    case_dir = example_catalog.case_dir(case_name)
     assert case_dir.is_dir(), f"Case directory not found: {case_dir}"
 
     build_dir = tmp_path / case_name
