@@ -66,8 +66,8 @@ per-invocation escape hatch to weigh against a whole-document parse on every
 ordinary ``compare`` call (CLAUDE.md's "no deprecation aliases" stance is the
 other half of why an escape hatch was not added back in a different shape).
 
-**Two review-caught refinements on top of the plain marker scan (Codex,
-PR #1042):**
+**Four review-caught refinements on top of the plain marker scan (Codex,
+PR #1042, three rounds):**
 
 1. **The G40 content-addressed zip archive format
    (``bundle_facts.write_bundle_facts_archive`` / ``save_bundle_facts(...,
@@ -99,22 +99,34 @@ PR #1042):**
    BundleFacts loader at all once ``--old-bundle-facts`` is gone. Point 3
    below closes the *actual* nested-member collision this was meant to
    prevent, without that side effect.
-3. **The marker match is anchored to the JSON document's own root object,
+3. **The marker must be a *direct member of the root object* (depth 1),
    not "anywhere in the decoded prefix" (Codex review, round 2, fresh
    evidence).** An unanchored search also matched a *nested* occurrence --
    not just a package member's embedded fixture (point 2's scenario,
-   independently closed by anchoring alone: a compressed archive's
-   decoded bytes never begin with ``{"artifact_type"`` at position 0, since
-   every supported format's own framing -- a tar header block, a zip/RPM/
-   deb magic -- always precedes any member content) but also an entirely
-   ordinary, single ``AbiSnapshot`` whose own ``constants`` mapping happens
-   to define a C constant literally named ``artifact_type`` with that exact
-   string value, which JSON-serializes as a nested object elsewhere in the
-   same document and does not make the document itself bundle facts.
-   Requiring the marker to be the root object's *own* first field (the
-   exact shape ``bundle_facts_to_dict`` always writes it in) rules out
-   both. This is what makes point 2's ``is_package`` pre-check
+   independently closed by depth-scoping alone: a compressed archive's
+   decoded bytes never place a string token at depth 1 immediately inside
+   a root ``{``, since every supported format's own framing -- a tar
+   header block, a zip/RPM/deb magic -- precedes any member content) but
+   also an entirely ordinary, single ``AbiSnapshot`` whose own
+   ``constants`` mapping happens to define a C constant literally named
+   ``artifact_type`` with that exact string value, which JSON-serializes
+   as a *nested* object and does not make the document itself bundle
+   facts. This is what makes point 2's ``is_package`` pre-check
    unnecessary, not merely one alternative fix for it.
+4. **The marker's *position* among the root object's members is not part
+   of the schema and must not be required (Codex review, round 3, fresh
+   evidence).** ``bundle_facts_to_dict`` always writes ``artifact_type``
+   first, but a document re-serialized by another conforming tool (a
+   pretty-printer, a key-sorting formatter) can freely reorder it --
+   ``bundle_facts_from_dict`` itself never requires a particular order,
+   so a routing check that does is stricter than the format it is meant
+   to recognize. A plain regex cannot express "this key, this depth,
+   anywhere among the siblings" (regex has no notion of nesting), so
+   points 3 and 4 together are answered by a small, bounded, depth-
+   tracking token scan (:func:`_root_level_artifact_type`) instead of a
+   single pattern -- still no full JSON parse, still bounded to the same
+   prefix ``bounded_decoded_prefix`` already reads, still no container-
+   node budget concern (the input size is already capped).
 """
 
 from __future__ import annotations
@@ -123,26 +135,91 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+#: Tokenizes a (possibly truncated) JSON byte prefix for
+#: :func:`_root_level_artifact_type`: a whole string literal (consumed as
+#: one token, escapes included, so a structural character inside a string
+#: value is never mistaken for real JSON structure -- the same "string
+#: alternative tried first" discipline ``storage.json_budget``'s own
+#: container-token regex already establishes), or one of the six
+#: structural characters that matter for depth/key-value tracking.
+#: Numbers/``true``/``false``/``null`` are deliberately not tokenized --
+#: this scan only ever needs to recognize string keys/values, and
+#: ``re.finditer`` simply skips over bytes no alternative matches, which is
+#: exactly "ignore" for a token kind this scan doesn't care about.
+_JSON_STRUCTURE_TOKEN_RE = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]', re.DOTALL)
 
-#: Matches ``{"artifact_type": "abicheck.bundle-facts"`` anchored to the very
-#: start of a decoded byte string (only whitespace may precede the ``{`` and
-#: separate each token -- matching how both ``json.dumps(..., indent=2)``
-#: -- the pretty-printed shape ``save_bundle_facts`` writes -- and a compact
-#: ``json.dumps(...)`` render it), never merely *containing* the marker
-#: text somewhere in a nested value (Codex review, round 2 -- see this
-#: module's own docstring, point 3, for the two false-positive shapes an
-#: unanchored search let through). Built once at import time from the real
-#: constant rather than hand-duplicated, so a future rename of the
-#: artifact-type value can't silently desync this pattern from what the
-#: writer actually emits.
-def _artifact_type_marker_pattern() -> re.Pattern[bytes]:
-    from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
 
-    return re.compile(
-        rb'\A\s*\{\s*"artifact_type"\s*:\s*"'
-        + re.escape(BUNDLE_FACTS_ARTIFACT_TYPE.encode("ascii"))
-        + rb'"'
-    )
+def _root_level_artifact_type(prefix: bytes) -> bytes | None:
+    """Scan a bounded, possibly-truncated JSON byte prefix for the root
+    object's own ``"artifact_type"`` member and return its raw (still
+    JSON-string-escaped) value, or ``None`` if no such *direct* member is
+    found before either the root container closes or the prefix runs out.
+
+    Depth-aware (a nested ``artifact_type`` at any deeper level is never
+    matched -- this module's own docstring, point 3) and order-independent
+    *within the root object* (the marker need not be the first member --
+    point 4), unlike a single regex, which can express neither. Still
+    anchored to *prefix* actually beginning with a JSON object (only
+    whitespace may precede the opening ``{``) -- without that check,
+    scanning for tokens anywhere in an unanchored byte string means the
+    *first* ``{`` this scan would ever see is whichever one appears
+    earliest, which for a real, non-JSON binary blob (a compressed
+    archive's own framing bytes, say) can easily be a nested member's own
+    object rather than a real document root at all (Codex review, fresh
+    evidence: an earlier draft without this check reintroduced point 2's
+    nested-package-member false positive by trading root-anchoring away
+    for order-independence, instead of keeping both). Bounded to *prefix*'s
+    own length -- a marker appearing only past the read window is a real,
+    accepted "cannot classify from this little" limitation of a
+    bounded-prefix design, the same shape as :func:`abicheck.snapshot_io.
+    bounded_decoded_prefix`'s own "corrupt or unrecognized -> None"
+    contract; never raises, never assumes truncation means absence
+    (returning ``None`` here means "not found in the visible window", the
+    caller does not distinguish that from a genuine absence -- both simply
+    fail to classify as stored bundle facts).
+    """
+    stripped = prefix.lstrip(b" \t\r\n")
+    if not stripped.startswith(b"{"):
+        return None
+    depth = 0
+    just_saw_colon = False
+    pending_key_is_marker = False
+    for m in _JSON_STRUCTURE_TOKEN_RE.finditer(stripped):
+        tok = m.group(0)
+        if tok in (b"{", b"["):
+            depth += 1
+            just_saw_colon = False
+            pending_key_is_marker = False
+            continue
+        if tok in (b"}", b"]"):
+            depth -= 1
+            just_saw_colon = False
+            pending_key_is_marker = False
+            if depth <= 0:
+                # The root container closed within the visible prefix --
+                # every direct member has already been seen.
+                break
+            continue
+        if tok == b":":
+            just_saw_colon = True
+            continue
+        if tok == b",":
+            just_saw_colon = False
+            pending_key_is_marker = False
+            continue
+        # A string literal -- a value if it immediately follows ':', a key
+        # otherwise (JSON's own key/value alternation, tracked explicitly
+        # rather than assumed from position, so "artifact_type" appearing
+        # as some *other* field's value is never mistaken for a key --
+        # Codex review, fresh evidence on an earlier draft of this scan).
+        if just_saw_colon:
+            if pending_key_is_marker:
+                return tok
+            just_saw_colon = False
+            pending_key_is_marker = False
+        else:
+            pending_key_is_marker = depth == 1 and tok == b'"artifact_type"'
+    return None
 
 
 def _looks_like_stored_bundle_facts_archive(path: Path) -> bool:
@@ -179,8 +256,8 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     ``False`` for anything that is not a regular file (a directory), or
     that this module's bounded prefix reader cannot decode at all (corrupt,
     or a format ``snapshot_io`` doesn't recognize). A real package archive
-    (wheel/deb/rpm/tar/conda) is not special-cased -- the root-anchored
-    marker match (this module's own docstring, point 3) already cannot
+    (wheel/deb/rpm/tar/conda) is not special-cased -- the depth-scoped
+    marker scan (this module's own docstring, points 3-4) already cannot
     match one, so excluding it separately would only reintroduce point 2's
     false-negative on a genuine stored-facts document with a package-like
     filename suffix. Never raises, never fully decompresses or JSON-parses
@@ -193,12 +270,26 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
         return False
     if _looks_like_stored_bundle_facts_archive(path):
         return True
+    from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
     from ..snapshot_io import bounded_decoded_prefix
 
     prefix = bounded_decoded_prefix(path)
     if prefix is None:
         return False
-    return _artifact_type_marker_pattern().match(prefix) is not None
+    value = _root_level_artifact_type(prefix)
+    if value is None:
+        return False
+    # *value* is still a raw JSON string token (quotes and any backslash
+    # escapes intact) -- decode it the same way json.loads() would rather
+    # than comparing escaped bytes to an unescaped constant, so a
+    # (technically valid, if unnecessary) escaped spelling still matches.
+    import json as _json
+
+    try:
+        decoded_value = _json.loads(value)
+    except ValueError:
+        return False
+    return bool(decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE)
 
 
 @dataclass(frozen=True)

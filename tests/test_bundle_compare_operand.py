@@ -54,6 +54,47 @@ class TestLooksLikeStoredBundleFacts:
         p.write_text(json.dumps(json.loads(_MARKER_JSON), indent=2))
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_reordered_root_keys_still_classify_as_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 3): bundle_facts_to_dict always
+        writes artifact_type first, but a document re-serialized by
+        another conforming tool (a pretty-printer, a key-sorting
+        formatter) can freely reorder root members -- bundle_facts_from_
+        dict itself never requires a particular order, so classification
+        must not either."""
+        p = tmp_path / "reordered.json"
+        # schema_version and per_library_snapshots both precede
+        # artifact_type here, unlike the writer's own real output.
+        p.write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "per_library_snapshots": {},
+                    "artifact_type": "abicheck.bundle-facts",
+                    "variant_fingerprint": "default",
+                }
+            )
+        )
+        assert looks_like_stored_bundle_facts(p) is True
+
+    def test_artifact_type_as_a_sibling_value_does_not_confuse_the_scan(
+        self, tmp_path: Path
+    ) -> None:
+        """The literal string "artifact_type" appearing as some other
+        field's *value* (not a key) at the root must not be mistaken for
+        the marker key itself."""
+        p = tmp_path / "confusing.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "some_field": "artifact_type",
+                    "another_field": "abicheck.bundle-facts",
+                }
+            )
+        )
+        assert looks_like_stored_bundle_facts(p) is False
+
     def test_ordinary_abisnapshot_json_is_not_stored(self, tmp_path: Path) -> None:
         p = tmp_path / "snap.json"
         p.write_text(json.dumps({"library": "libfoo.so", "functions": []}))
