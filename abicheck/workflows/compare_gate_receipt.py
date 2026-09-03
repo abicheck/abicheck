@@ -41,12 +41,16 @@ pipeline may not import (``engine-cli-boundary``) -- the same primitives
 (:mod:`abicheck.contract_context`) are used directly here instead of a
 second, diverging implementation.
 
-*policy_file* (Codex review, fresh evidence): the caller passes the
-``PolicyFile`` *as loaded*, before any ``--pack`` folding -- a pack-merged
-object cannot say which of its ``overrides`` came from the file and which
-from a pack, so folding it here would misattribute pack-contributed
-overrides as ``policy_file_path``-sourced. See ``service_compare_pipeline.
-classify_compare_pair``'s own ``receipt_pf`` comment for the full account.
+*policy_file* (Codex review, fresh evidence, twice over): the caller passes
+the same pack-folded ``PolicyFile`` it scores the comparison with.
+``pack_application.policy_file_with_packs`` clears the folded object's
+``source_path``/``source_sha256`` whenever it actually merges pack content
+in, so this no longer misattributes a pack's ``overrides`` as
+``policy_file_path``-sourced while still keeping them in the receipt (an
+earlier revision passed the *pre-fold* file instead, which fixed the
+misattribution but silently dropped the pack's contribution from the
+receipt entirely -- see that function's own docstring for the full account
+of why dropping the source there is safe for every other caller).
 """
 
 from __future__ import annotations

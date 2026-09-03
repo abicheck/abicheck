@@ -348,9 +348,29 @@ def policy_file_with_packs(
     the ``policy`` argument (``effective_policy``). Synthesizing one with the
     dataclass default would silently reset a ``--policy plugin_abi`` run to
     ``strict_abi``: a pack overriding one kind would change the base policy
-    for every other one. It carries no ``source_path``/``source_sha256``
-    because it came from no file; the packs' own identities and digests are
-    already in the receipt, which is where a replay reads them from.
+    for every other one.
+
+    The result never carries ``source_path``/``source_sha256`` once a pack
+    actually contributed something -- not only when synthesized from
+    scratch, but also when folded on top of a real, loaded file (Codex
+    review, fresh evidence): every *shipped* caller already resolves its own
+    receipt through a separate pack-manifest-identity path before calling
+    this (see ``cli_compare_receipt.record_resolved_config``'s own
+    docstring), using this function's return value purely to configure
+    ``checker.compare``'s raw scoring -- so clearing these two fields costs
+    them nothing. It matters for a caller with no such separate resolution
+    (``service_compare_pipeline.classify_compare_pair``'s typed-API receipt
+    installer, the one caller that folds an already-resolved
+    ``CompareRequest.pack_policy_overrides`` with no pack-manifest path to
+    resolve identity from at all): with the original file's digest left in
+    place, that receipt attributed the pack's own override to
+    ``policy_file_path``, and *omitting* the pack's contribution instead
+    (an earlier revision of that fix) let two requests differing only in
+    ``pack_policy_overrides`` render the identical ``effective_config_digest``
+    despite scoring to different verdicts. Clearing the source here keeps
+    the merged ``overrides``/``internal_namespaces`` content -- so the
+    digest still changes with it -- while stating honestly that the result
+    is no longer purely "the file as loaded."
     """
     if not application.policy_overrides and application.internal_namespaces is None:
         return policy_file
@@ -364,7 +384,9 @@ def policy_file_with_packs(
     # states, so this cannot overwrite one -- the ordering states the rule
     # rather than relying on it.
     overrides.update(application.policy_overrides)
-    updated = replace(policy_file, overrides=overrides)
+    updated = replace(
+        policy_file, overrides=overrides, source_path=None, source_sha256=None
+    )
     if application.internal_namespaces is not None:
         updated = replace(
             updated,

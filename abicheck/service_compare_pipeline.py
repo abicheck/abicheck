@@ -462,17 +462,14 @@ def classify_compare_pair(
     # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
     # policy/contract-surface contributions into the loaded PolicyFile, the
     # same way `pack_application.policy_file_with_packs` already does for the
-    # single-pair `compare` CLI. Every field is `None` for every pre-existing
-    # caller (the CLI's own single-pair path folds its packs before calling
-    # `compare_snapshots` directly and never sets these), so this is a no-op
-    # unless a caller -- today, the directory/package release fan-out --
-    # populated `CompareRequest.pack_policy_overrides`/
-    # `pack_internal_namespaces`. See `CompareRequest.pack_policy_overrides`'s
-    # own docstring for why this is the one chokepoint to apply it at.
-    # `receipt_pf`: the file as loaded, before pack folding -- a pack-merged
-    # `PolicyFile` can't say which `overrides` came from the file vs. a pack
-    # (Codex review); see `workflows.compare_gate_receipt`'s own docstring.
-    receipt_pf = pf
+    # single-pair `compare` CLI -- a no-op unless a caller (today, the
+    # release fan-out) populated `CompareRequest.pack_policy_overrides`/
+    # `pack_internal_namespaces`. `pf` is reused for the receipt below too
+    # (Codex review, fresh evidence): `policy_file_with_packs` clears
+    # `source_path`/`source_sha256` whenever it folds pack content in, so
+    # the merged object no longer falsely claims `policy_file_path`
+    # provenance while keeping the pack's own contribution in the receipt --
+    # see that function's own docstring for the full account.
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 
@@ -615,7 +612,7 @@ def classify_compare_pair(
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
     install_resolved_gate_receipt(
-        result, request, gate, receipt_pf, suppression, effective_scheme
+        result, request, gate, pf, suppression, effective_scheme
     )
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
