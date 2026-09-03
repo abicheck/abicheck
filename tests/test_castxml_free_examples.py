@@ -60,7 +60,6 @@ pytestmark = pytest.mark.skipif(
     "macOS (.dSYM) / Windows (PDB) are tracked separately under G1",
 )
 
-EXAMPLES = example_catalog.EXAMPLES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
 # Empirically verified to reach the ground-truth verdict from a
@@ -141,7 +140,7 @@ def _compile(src: Path, out: Path) -> None:
 def test_subset_entries_are_well_formed() -> None:
     """Every listed case must exist, carry a verdict, and need no castxml."""
     for name in CASTXML_FREE_CASES:
-        assert (EXAMPLES / name).is_dir(), f"missing example dir: {name}"
+        assert example_catalog.case_dir(name).is_dir(), f"missing example dir: {name}"
         entry = _GT.get(name)
         assert entry is not None, f"{name}: no ground_truth entry"
         assert entry.get("expected") is not None, f"{name}: null verdict"

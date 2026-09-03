@@ -42,7 +42,6 @@ from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
 from abicheck.serialization import snapshot_from_dict  # noqa: E402
 from abicheck.suppression import SuppressionList  # noqa: E402
 
-_EXAMPLES = example_catalog.EXAMPLES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
 
@@ -76,7 +75,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
         # scenario where the tag is actually read.
         old, new = snapshots
         suppression = SuppressionList.load(
-            _EXAMPLES / self.CASE / "suppress-refused.yaml"
+            example_catalog.case_dir(self.CASE) / "suppress-refused.yaml"
         )
         result = compare(old, new, suppression=suppression)
         removed = next(
@@ -91,7 +90,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
     def test_broad_suppression_refused_without_override(self, snapshots) -> None:
         old, new = snapshots
         suppression = SuppressionList.load(
-            _EXAMPLES / self.CASE / "suppress-refused.yaml"
+            example_catalog.case_dir(self.CASE) / "suppress-refused.yaml"
         )
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.BREAKING
@@ -108,7 +107,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
     ) -> None:
         old, new = snapshots
         suppression = SuppressionList.load(
-            _EXAMPLES / self.CASE / "suppress-acknowledged.yaml"
+            example_catalog.case_dir(self.CASE) / "suppress-acknowledged.yaml"
         )
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.NO_CHANGE
@@ -160,7 +159,7 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
 
     def test_broad_suppression_applies_cleanly_no_diagnostic(self, snapshots) -> None:
         old, new = snapshots
-        suppression = SuppressionList.load(_EXAMPLES / self.CASE / "suppress.yaml")
+        suppression = SuppressionList.load(example_catalog.case_dir(self.CASE) / "suppress.yaml")
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.NO_CHANGE
         assert result.changes == []

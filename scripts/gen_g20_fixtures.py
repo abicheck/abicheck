@@ -41,8 +41,6 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 import example_catalog  # noqa: E402
 from fixture_sync import sync_fixtures  # noqa: E402
 
-EXAMPLES = example_catalog.EXAMPLES_DIR
-
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption  # noqa: E402
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
 from abicheck.buildsource.source_abi import SourceAbiSurface  # noqa: E402
@@ -401,7 +399,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     # generators (see fixture_sync.py); this script owns only the fixtures.
     return sync_fixtures(
         FIXTURES,
-        examples_dir=EXAMPLES,
+        case_dir=example_catalog.case_dir,
         root=ROOT,
         to_dict=_to_dict_with_elf_facts,
         check=args.check,

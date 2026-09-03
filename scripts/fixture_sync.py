@@ -50,7 +50,7 @@ def render_fixture(builder: Fixture, to_dict: Callable[[Any], Any]) -> str:
 def sync_fixtures(
     fixtures: Mapping[str, Mapping[str, Fixture]],
     *,
-    examples_dir: Path,
+    case_dir: Callable[[str], Path],
     root: Path,
     to_dict: Callable[[Any], Any],
     check: bool,
@@ -60,17 +60,25 @@ def sync_fixtures(
     """Write every fixture, or (with *check*) report drift without writing.
 
     *fixtures* maps a case directory name to its ``{filename: fixture}`` set.
-    *label* names the family in the summary line ("G20 fixtures"), and
-    *regen_command* is what the drift message tells the reader to run. Returns
-    the process exit code: 1 when *check* found drift, 0 otherwise.
+    *case_dir* resolves a case name to its on-disk directory -- production
+    callers pass ``example_catalog.case_dir`` (Phase 3,
+    docs/contribute/plans/examples-catalog-split.md); a test injects its own
+    resolver (e.g. ``lambda name: tmp_path / "examples" / name``) rather than
+    pointing this driver at the real catalog. Keeping the join itself behind
+    a caller-supplied function -- not a flat directory this module joins by
+    hand -- is what lets Phase 4's directory split change only
+    ``example_catalog.case_dir`` and leave every one of this driver's callers
+    untouched. *label* names the family in the summary line ("G20 fixtures"),
+    and *regen_command* is what the drift message tells the reader to run.
+    Returns the process exit code: 1 when *check* found drift, 0 otherwise.
     """
     drift = False
     written = 0
     for case_name, files in fixtures.items():
-        case_dir = examples_dir / case_name
+        target_dir = case_dir(case_name)
         for filename, builder in files.items():
             content = render_fixture(builder, to_dict)
-            path = case_dir / filename
+            path = target_dir / filename
             if check:
                 # Absence is drift in its own right, checked before the content
                 # comparison: mapping a missing file to "" would let an empty
@@ -79,7 +87,7 @@ def sync_fixtures(
                     print(f"drift: {path.relative_to(root)}", file=sys.stderr)
                     drift = True
             else:
-                case_dir.mkdir(parents=True, exist_ok=True)
+                target_dir.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
                 written += 1
 

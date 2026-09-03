@@ -46,7 +46,6 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 
 # ---------------------------------------------------------------------------
 # Platform helpers
@@ -535,12 +534,17 @@ def test_subprocess_failure_detail_truncates_each_stream_independently() -> None
 # Auto-discovery: build test parameter list
 # ---------------------------------------------------------------------------
 def _collect_cases() -> list[tuple[str, str | None]]:
+    # ground_truth.json["verdicts"] (via example_catalog.iter_case_dirs), not a
+    # directory scan -- a case's identity is the ground-truth entry, and this
+    # survives Phase 4's planned catalog/{rules,patterns,...} directory split
+    # without this file needing to change (docs/contribute/plans/
+    # examples-catalog-split.md).
     cases = []
-    for d in sorted(EXAMPLES_DIR.iterdir()):
-        if not d.is_dir() or not d.name.startswith("case"):
+    for case_id, case_dir in sorted(example_catalog.iter_case_dirs()):
+        if not case_dir.is_dir():
             continue
-        expected = EXPECTED.get(d.name, "UNKNOWN")
-        cases.append((d.name, expected))
+        expected = EXPECTED.get(case_id, "UNKNOWN")
+        cases.append((case_id, expected))
     return cases
 
 
