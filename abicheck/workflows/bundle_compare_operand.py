@@ -65,6 +65,38 @@ produce already carries the marker, and there is no longer an explicit
 per-invocation escape hatch to weigh against a whole-document parse on every
 ordinary ``compare`` call (CLAUDE.md's "no deprecation aliases" stance is the
 other half of why an escape hatch was not added back in a different shape).
+
+**Two review-caught refinements on top of the plain marker scan (Codex,
+PR #1042):**
+
+1. **The G40 content-addressed zip archive format
+   (``bundle_facts.write_bundle_facts_archive`` / ``save_bundle_facts(...,
+   format="archive")``) is a real, supported ``BundleFacts`` encoding too --
+   it starts with a zip local-file-header magic, not JSON, so the plain
+   marker scan above never matches it.** Checked first, and just as cheaply:
+   ``storage.bundle_archive.sniff_bundle_archive_format`` peeks the same
+   handful of magic bytes ``bounded_decoded_prefix`` already sniffs, and
+   only a real ``"archive"`` verdict pays for opening the file with
+   ``BundleArchiveReader`` and reading its ``manifest.json`` member (bounded
+   by that reader's own existing safety caps -- size, container-node budget,
+   CRC-32 -- unconditionally, not new caps invented here) to check its own
+   ``artifact_type`` against ``BUNDLE_ARCHIVE_ARTIFACT_TYPE``. The execution
+   engine this classifier routes to already reads either encoding
+   transparently (``load_bundle_facts``'s own ``format="auto"`` default,
+   unchanged) -- only the *routing* decision was missing archive-shape
+   recognition.
+2. **A recognized package archive (wheel/deb/rpm/tar/conda) must never be
+   scanned for the marker at all.** A compressed release package can
+   legitimately carry a member whose own content happens to contain the
+   literal marker text near the start of the decompressed stream (an
+   embedded ``BundleFacts`` fixture in a test package, for instance) --
+   scanning ``bounded_decoded_prefix``'s decoded bytes without first ruling
+   out "this is a real package" risked exactly that false-positive
+   collision. ``abicheck.package.is_package`` (the same classifier
+   ``cli_resolve.classify_compare_operand`` already uses for this operand)
+   is checked before the marker scan, not after -- a package is definitively
+   not a lone stored-facts document, so there is nothing to gain from
+   scanning it and a real, if narrow, misclassification risk in doing so.
 """
 
 from __future__ import annotations
@@ -89,20 +121,54 @@ def _artifact_type_marker_pattern() -> re.Pattern[bytes]:
     )
 
 
-def looks_like_stored_bundle_facts(path: Path) -> bool:
-    """Cheap, safe, marker-only classification of *path* as a stored
-    :class:`~abicheck.bundle_facts.BundleFacts` document.
+def _looks_like_stored_bundle_facts_archive(path: Path) -> bool:
+    """``True`` when *path* is a G40 content-addressed zip archive whose own
+    ``manifest.json`` declares the archive artifact_type marker. Cheap on
+    the common (non-archive) case: bails out on the magic-byte sniff alone,
+    before ever opening *path* as a zip. See this module's own docstring
+    (point 1)."""
+    from ..errors import SnapshotError
+    from ..storage.bundle_archive import (
+        BundleArchiveReader,
+        sniff_bundle_archive_format,
+    )
+    from ..storage.bundle_facts_validation import BUNDLE_ARCHIVE_ARTIFACT_TYPE
 
-    ``False`` for anything that is not a regular file (a directory, a
-    package archive -- those already have their own ``compare`` operand
-    kinds) or that this module's bounded prefix reader cannot decode at all
-    (corrupt, or a format ``snapshot_io`` doesn't recognize). Never raises,
-    never fully decompresses or JSON-parses *path* -- see this module's own
-    docstring for why. A ``True`` answer still leaves full validation to
-    the ordinary bundle-facts read path (``load_bundle_facts`` /
-    ``bundle_facts_from_dict``); this only decides *routing*.
+    try:
+        if sniff_bundle_archive_format(path) != "archive":
+            return False
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+    except SnapshotError:
+        # Zip-shaped but not a well-formed BundleFacts archive (a real
+        # .whl/.conda package, a corrupted file, ...) -- not a classification
+        # failure, just "not this".
+        return False
+    return manifest.get("artifact_type") == BUNDLE_ARCHIVE_ARTIFACT_TYPE
+
+
+def looks_like_stored_bundle_facts(path: Path) -> bool:
+    """Cheap, safe classification of *path* as a stored
+    :class:`~abicheck.bundle_facts.BundleFacts` document -- either shape
+    (plain/compressed JSON, or the G40 zip archive).
+
+    ``False`` for anything that is not a regular file (a directory) or a
+    recognized package archive (wheel/deb/rpm/tar/conda -- see this
+    module's own docstring, point 2) -- those already have their own
+    ``compare`` operand kinds and are never scanned for the marker. Never
+    raises, never fully decompresses or JSON-parses a plain-JSON candidate
+    -- see this module's own docstring for why. A ``True`` answer still
+    leaves full validation to the ordinary bundle-facts read path
+    (``load_bundle_facts`` / ``bundle_facts_from_dict``); this only decides
+    *routing*.
     """
     if not path.is_file():
+        return False
+    if _looks_like_stored_bundle_facts_archive(path):
+        return True
+    from ..package import is_package
+
+    if is_package(path):
         return False
     from ..snapshot_io import bounded_decoded_prefix
 
