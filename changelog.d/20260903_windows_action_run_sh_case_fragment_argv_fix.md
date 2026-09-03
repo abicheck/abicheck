@@ -6,7 +6,7 @@
   reconstructs it via `list2cmdline` and Git Bash's own MSYS runtime then
   re-parses the result with its own, not-quite-identical rules — the two
   disagree on a large, quote-heavy argument and can corrupt it (observed as
-  `syntax error: unexpected end of file from `case' command`, on a script
+  ``syntax error: unexpected end of file from `case' command``, on a script
   that is valid bash and passes identically on every other platform).
   Migrated to the same file-based dispatch (`_run_bash_script`, writing the
   script to a temp file rather than passing it via `-c`) already used by this
