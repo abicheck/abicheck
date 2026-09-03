@@ -15,3 +15,6 @@
   question this slice does not attempt. Function/variable/typedef identity
   remains unimplemented (neither format's own richer parse carries that
   evidence across its own `to_dwarf_metadata()` conversion at all).
+  `snapshot_cache.py`'s `_SNAPSHOT_CACHE_VERSION` is bumped so a snapshot
+  cached by an older abicheck build doesn't keep serving `semantic_ir=None`
+  forever for an auto-detected BTF/CTF dump's identical cache-key inputs.
