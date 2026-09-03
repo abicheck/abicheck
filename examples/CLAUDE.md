@@ -16,6 +16,33 @@ For trusted repository fixtures, preserve CI's explicit
 Read `README.md` in this directory first — it indexes every case and
 explains the verdict taxonomy.
 
+## `workflows/` — curated user-facing examples (Phase 5, in progress)
+
+`examples/workflows/` is a **separate tree from the `caseNN_*` calibration
+catalog** below — Phase 5 of the [examples/catalog split]
+(../docs/contribute/plans/examples-catalog-split.md). Its entries are
+small, complete, task-oriented projects a new user runs end-to-end
+(`cd examples/workflows/<name>`, build, run one `abicheck` command, read
+the output) — not calibration fixtures a gate scores. Consequently:
+
+- **No `ground_truth.json` entry, no `caseNN` prefix, no taxonomy
+  classification** — the "examples-ground-truth" AI-readiness check and
+  every other gate that walks `case*` directories deliberately never sees
+  this tree (it filters on the `case` name prefix).
+- Verify every command and every excerpted output block against a real run
+  before writing it down — see `compare-release/README.md` for the
+  pattern (a real `gcc`+`abicheck compare` invocation, output excerpted,
+  not paraphrased).
+- Link out to the relevant `docs/use/*.md`/`docs/learn/*.md` page for
+  anything beyond that one task — a workflow example teaches "how do I run
+  this", not "how does this work" (that's the docs' job, see
+  `docs/AGENTS.md`'s ownership split).
+
+See the plan doc's Phase 5 row for the target set (compare one library
+[done], audit a release, multi-library project, evidence depth,
+build/source evidence, Python API, suppressions, GitHub Actions) and which
+of them remain.
+
 ## Per-case layout
 
 ```

@@ -379,6 +379,7 @@ python scripts/gen_platform_matrix.py     # docs/reference/platforms.md's "Quick
 python scripts/gen_learning_ladder.py     # docs/learn/abi-api-handling.md's numbered step list and role-path table (from docs/_meta/learning-ladder.yaml)
 python scripts/gen_backend_capability_matrix.py  # docs/reference/header-backend-capabilities.md's fact matrix
 python scripts/gen_fact_capability_matrix.py      # docs/reference/fact-registry.md
+python scripts/gen_catalog_coverage_report.py     # docs/contribute/catalog-coverage.md (rule/variant/scenario/ecosystem/workflow coverage)
 python scripts/gen_agent_skills.py        # .agents/skills/, .claude/skills/, .gemini/skills/ (from skills-src/)
 ```
 
