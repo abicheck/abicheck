@@ -125,14 +125,23 @@ def _builtins_module_aliases(tree: ast.AST) -> frozenset[str]:
     return frozenset(aliases)
 
 
-def _getattr_aliases(tree: ast.AST) -> frozenset[str]:
+def _getattr_aliases(tree: ast.AST, module_aliases: frozenset[str]) -> frozenset[str]:
     """Every local name bound to `getattr` in *tree*, plus `getattr` itself.
 
-    Covers `from builtins import getattr as g` and a plain module-level
-    `g = getattr`. A name rebound to something else entirely is not tracked
-    -- this resolves aliases *to* `getattr`, it does not prove a name is
-    still `getattr` at the call site, which is the same (deliberately
-    conservative, over-inclusive) posture the sibling scanners take.
+    Covers `from builtins import getattr as g`, a plain module-level
+    `g = getattr`, and `g = b.getattr` where `b` is a resolved *module* alias
+    from `_builtins_module_aliases` -- the assignment counterpart of the
+    `b.getattr(...)` call shape `_is_getattr_call` already resolves
+    (CodeRabbit review on PR #1041): without this, `import builtins as b;
+    g = b.getattr; g(snap, "typedefs")` reached neither branch, since the
+    call itself is a bare `Name` (`g(...)`) with no attribute for
+    `_is_getattr_call`'s own module-alias check to see, and the assignment
+    that produced `g` was an `ast.Attribute` value this function didn't
+    recognize as a `getattr` source. A name rebound to something else
+    entirely is not tracked -- this resolves aliases *to* `getattr`, it does
+    not prove a name is still `getattr` at the call site, which is the same
+    (deliberately conservative, over-inclusive) posture the sibling scanners
+    take.
     """
     aliases = set(_GETATTR_NAMES)
     for node in ast.walk(tree):
@@ -140,8 +149,17 @@ def _getattr_aliases(tree: ast.AST) -> frozenset[str]:
             for alias in node.names:
                 if alias.name == "getattr":
                     aliases.add(alias.asname or alias.name)
-        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
-            if node.value.id in aliases:
+        elif isinstance(node, ast.Assign):
+            value = node.value
+            resolves_getattr = (
+                isinstance(value, ast.Name) and value.id in aliases
+            ) or (
+                isinstance(value, ast.Attribute)
+                and value.attr == "getattr"
+                and isinstance(value.value, ast.Name)
+                and value.value.id in module_aliases
+            )
+            if resolves_getattr:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         aliases.add(target.id)
@@ -178,8 +196,8 @@ def legacy_collection_reads(
     variable that happens to share the field's name is not a read of the
     field.
     """
-    getattr_aliases = _getattr_aliases(tree)
     module_aliases = _builtins_module_aliases(tree)
+    getattr_aliases = _getattr_aliases(tree, module_aliases)
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in forbidden:

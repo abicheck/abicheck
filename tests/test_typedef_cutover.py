@@ -338,6 +338,13 @@ class TestSemanticIrCutoverGate:
             # (`b.getattr`), not an `ast.Name`, so it needs its own check.
             "import builtins as b\nx = b.getattr(snap, 'typedefs')",
             "import builtins\nx = builtins.getattr(snap, 'typedefs_qualified')",
+            # The evasion through an alias *assigned from* the module
+            # attribute, then called bare -- `g = b.getattr; g(snap, ...)`.
+            # The call itself is a bare `Name`, and the assignment's own
+            # value is an `ast.Attribute`, so neither the plain-alias nor
+            # the module-alias call check alone recognizes it (CodeRabbit
+            # review on PR #1041).
+            "import builtins as b\ng = b.getattr\nx = g(snap, 'typedefs')",
         ):
             found = legacy_collection_reads(ast.parse(source), forbidden)
             assert found, f"gate missed: {source!r}"
