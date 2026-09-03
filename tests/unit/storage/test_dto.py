@@ -572,7 +572,7 @@ _SPARSE_SECTION_CASES = [
             "functions": [{"name": "f"}],
             "variables": [],
             "enums": [],
-            "typedefs": [],
+            "typedefs": {"MyInt": "int"},
             "sycl": None,
         },
         {"constants": [{"name": "C", "value": "1"}]},
@@ -814,3 +814,60 @@ class TestSparseSectionDTOs:
             payload = {k: v for k, v in full.items() if k != missing_key}
             with pytest.raises(ValueError, match="must carry"):
                 cls.from_document(payload)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"elf": [], "pe": None, "macho": None},
+            {"elf": None, "pe": "not-a-mapping", "macho": None},
+            {"elf": None, "pe": None, "macho": 1},
+        ],
+    )
+    def test_binary_from_document_refuses_a_malformed_required_field(
+        self, payload: dict
+    ) -> None:
+        """Codex review, PR #1044: a required field's own top-level wire
+        shape is checked before freezing -- `elf: []` (a `list`, when
+        `AbiSnapshot.elf` is `ElfMetadata | None`, so `null` or a mapping)
+        must be rejected, not silently frozen and later read back by
+        `serialization.snapshot_from_dict` as a confirmed-absent `elf`,
+        turning corrupted evidence into missing evidence."""
+        with pytest.raises(ValueError, match="must be a mapping"):
+            BinarySection.from_document(payload)
+
+    def test_declarations_from_document_refuses_malformed_required_fields(
+        self,
+    ) -> None:
+        base = {
+            "functions": [],
+            "variables": [],
+            "enums": [],
+            "typedefs": {},
+            "sycl": None,
+        }
+        with pytest.raises(ValueError, match="must be a list"):
+            DeclarationsSection.from_document({**base, "functions": {}})
+        with pytest.raises(ValueError, match="must be a mapping"):
+            DeclarationsSection.from_document({**base, "typedefs": []})
+        with pytest.raises(ValueError, match="must be a mapping"):
+            DeclarationsSection.from_document({**base, "sycl": "nope"})
+
+    def test_debug_from_document_refuses_malformed_required_fields(self) -> None:
+        with pytest.raises(ValueError, match="must be a mapping"):
+            DebugSection.from_document({"dwarf": [], "dwarf_advanced": None})
+        with pytest.raises(ValueError, match="must be a mapping"):
+            DebugSection.from_document({"dwarf": None, "dwarf_advanced": 1})
+
+    def test_provenance_from_document_refuses_malformed_required_fields(self) -> None:
+        with pytest.raises(ValueError, match="must be a str"):
+            ProvenanceSection.from_document({"library": None, "version": "1.0.0"})
+        with pytest.raises(ValueError, match="must be a str"):
+            ProvenanceSection.from_document({"library": "libfoo.so.1", "version": 1})
+
+    def test_layout_and_build_have_no_shape_checked_required_fields(self) -> None:
+        """Neither section has any `REQUIRED_FIELDS` at all (both postdate
+        schema v1 entirely), so there is nothing for
+        `REQUIRED_FIELD_SHAPES` to name -- this pins that the shape-
+        validation machinery is inert for them, not merely untested."""
+        assert LayoutSection.REQUIRED_FIELD_SHAPES == {}
+        assert BuildSection.REQUIRED_FIELD_SHAPES == {}

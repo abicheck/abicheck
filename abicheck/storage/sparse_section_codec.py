@@ -57,6 +57,19 @@ own generic pass-through already did, while a document that *does* carry it
 keeps it, still exactly as given. Nothing here defaults, guesses, or
 reconstructs a field's value; the split is "typed" only in the sense the
 required half of D8 actually supports today.
+
+**Required-field shape validation** (Codex review, PR #1044): a required
+field's own top-level wire shape (mapping-or-null / mapping / list / str,
+matching the real `AbiSnapshot` field it round-trips) is checked before
+freezing -- `BinarySection.from_document({"elf": [], "pe": None, "macho":
+None})` is now rejected rather than silently accepted, frozen, and later
+read back by `serialization.snapshot_from_dict` as a *confirmed-absent*
+`elf` (turning corrupted evidence into missing evidence, never the other
+way, since a wrong-shaped value is always caught before storage). Shallow
+by design, matching `TypesSection`/`GraphSection`'s own precedent for their
+one field: only the field's own container type is checked, never what's
+inside it -- decoding a `RecordType`/`ElfMetadata` entry's internal
+structure remains real, separately-scoped future work.
 """
 
 from __future__ import annotations
@@ -99,6 +112,46 @@ def _unfreeze(value: Any) -> Any:
     return value
 
 
+#: The four top-level wire shapes a required field can be validated against
+#: (Codex review, PR #1044: `_freeze_required` previously accepted any value
+#: at all for a required field -- a malformed `elf: []` would freeze and
+#: round-trip unchanged, then `serialization.snapshot_from_dict` reads a
+#: non-mapping `elf` as absent, silently turning corrupted evidence into
+#: confirmed-missing evidence). Intentionally shallow -- only the field's
+#: own top-level container type, never its internal structure -- the same
+#: boundary `TypesSection`/`GraphSection` already draw for their own one
+#: field (validate that `types` is a `list`/`surface_graph` is a `Mapping`,
+#: never decode what's inside); deep-decoding a `RecordType`/`ElfMetadata`
+#: entry remains real, separately-scoped future work this module's own
+#: docstring already declines to attempt.
+_MAPPING_OR_NONE = "mapping_or_none"
+_MAPPING = "mapping"
+_LIST = "list"
+_STR = "str"
+
+
+def _check_required_field_shape(
+    section_kind: str, name: str, value: Any, shape: str
+) -> None:
+    if shape == _MAPPING_OR_NONE:
+        ok = value is None or isinstance(value, Mapping)
+    elif shape == _MAPPING:
+        ok = isinstance(value, Mapping)
+    elif shape == _LIST:
+        ok = isinstance(value, list)
+    elif shape == _STR:
+        ok = isinstance(value, str)
+    else:  # pragma: no cover - defensive: every REQUIRED_FIELD_SHAPES entry
+        # below is one of the four constants; a fifth value would be a typo
+        # in this module itself, not reachable from any document content.
+        raise AssertionError(f"unknown required-field shape {shape!r}")
+    if not ok:
+        raise ValueError(
+            f"a {section_kind!r} section payload's {name!r} must be a "
+            f"{shape.replace('_', ' ')}, not {type(value).__name__}"
+        )
+
+
 class _SparseSectionMixin:
     """Shared validation/freeze/document machinery for a sparse legacy
     section dataclass. Not itself a dataclass -- each concrete section below
@@ -121,6 +174,13 @@ class _SparseSectionMixin:
     #: allows -- genuinely optional, schema-version-dependent. Kept in
     #: `extra`, never defaulted.
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset()
+    #: Each `REQUIRED_FIELDS` entry's own top-level wire shape (one of
+    #: `_MAPPING_OR_NONE`/`_MAPPING`/`_LIST`/`_STR`), checked by
+    #: `_freeze_required` before freezing -- see that constant's own
+    #: docstring for why this stays shallow. A name absent here is not
+    #: shape-checked at all (no subclass currently needs that; every
+    #: `REQUIRED_FIELDS` entry today has a real, always-present type).
+    REQUIRED_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {}
 
     #: Declared by every concrete (`@dataclass`) subclass; only annotated
     #: here so mypy can see it through the mixin.
@@ -128,7 +188,11 @@ class _SparseSectionMixin:
 
     def _freeze_required(self) -> None:
         for name in self.REQUIRED_FIELDS:
-            object.__setattr__(self, name, _freeze(canonical_form(getattr(self, name))))
+            value = getattr(self, name)
+            shape = self.REQUIRED_FIELD_SHAPES.get(name)
+            if shape is not None:
+                _check_required_field_shape(self.SECTION_KIND, name, value, shape)
+            object.__setattr__(self, name, _freeze(canonical_form(value)))
 
     def _freeze_extra(self) -> None:
         extra = self.extra
@@ -198,6 +262,14 @@ class BinarySection(_SparseSectionMixin):
 
     SECTION_KIND: ClassVar[str] = "binary"
     REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("elf", "pe", "macho")
+    #: `model.snapshot.AbiSnapshot.elf`/`.pe`/`.macho` are each
+    #: `XxxMetadata | None` -- serialized as `null` or a nested mapping,
+    #: never a list/string/bool (Codex review, PR #1044).
+    REQUIRED_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "elf": _MAPPING_OR_NONE,
+        "pe": _MAPPING_OR_NONE,
+        "macho": _MAPPING_OR_NONE,
+    }
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "kabi",
@@ -243,6 +315,17 @@ class DeclarationsSection(_SparseSectionMixin):
         "typedefs",
         "sycl",
     )
+    #: `AbiSnapshot.functions`/`.variables`/`.enums` are plain `list[...]`
+    #: fields (never `None`); `.typedefs` is `dict[str, str]` (never a
+    #: bare list/string); `.sycl` is `SyclMetadata | None` (Codex review,
+    #: PR #1044).
+    REQUIRED_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "functions": _LIST,
+        "variables": _LIST,
+        "enums": _LIST,
+        "typedefs": _MAPPING,
+        "sycl": _MAPPING_OR_NONE,
+    }
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "typedefs_qualified",
@@ -316,6 +399,12 @@ class DebugSection(_SparseSectionMixin):
 
     SECTION_KIND: ClassVar[str] = "debug"
     REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("dwarf", "dwarf_advanced")
+    #: `AbiSnapshot.dwarf`/`.dwarf_advanced` are each `XxxMetadata | None`
+    #: (Codex review, PR #1044).
+    REQUIRED_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "dwarf": _MAPPING_OR_NONE,
+        "dwarf_advanced": _MAPPING_OR_NONE,
+    }
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "from_headers",
@@ -393,6 +482,12 @@ class ProvenanceSection(_SparseSectionMixin):
 
     SECTION_KIND: ClassVar[str] = "provenance"
     REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("library", "version")
+    #: `AbiSnapshot.library`/`.version` are plain `str` fields, no default,
+    #: never `None` (Codex review, PR #1044).
+    REQUIRED_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
+        "library": _STR,
+        "version": _STR,
+    }
     OPTIONAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "language_profile",
