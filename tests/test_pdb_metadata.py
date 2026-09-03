@@ -424,6 +424,18 @@ class TestIsUserVisible:
             is True
         )
 
+    def test_customized_libcxx_abi_namespace_preserved(self) -> None:
+        """Codex review, third round, fresh evidence: `_LIBCPP_ABI_NAMESPACE`
+        is a documented, build-configurable macro, so a vendor's own
+        customized spelling (e.g. `__vendor`) is a real, legitimate inline
+        namespace even though it matches no known-standard ABI-tag shape
+        (`__1`, `__cxx11`, ...). The non-leaf admit-by-default rule must
+        preserve it the same way a recognized tag is preserved -- rejecting
+        an unrecognized-but-real ABI-tag namespace would drop this
+        declaration's layout facts, entity ID, and SemanticIR occurrence
+        entirely."""
+        assert _is_user_visible("std::__vendor::Widget", is_forward_ref=False) is True
+
     def test_abi_inline_namespace_leaf_name_still_checked(self) -> None:
         """A recognized ABI-tag namespace segment does not exempt an
         otherwise-anonymous leaf nested inside it."""

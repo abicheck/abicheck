@@ -47,10 +47,7 @@ from .model.dwarf_facts import (
     StructLayout,
     ToolchainInfo,
 )
-from .model.qualified_name_split import (
-    is_inline_abi_namespace_segment,
-    split_top_level_scopes,
-)
+from .model.qualified_name_split import split_top_level_scopes
 from .pdb_parser import (
     CvEnumerator,
     CvMember,
@@ -85,6 +82,14 @@ def _machine_name(machine_code: int) -> str:
     return _FALLBACK.get(machine_code, f"0x{machine_code:04x}")
 
 
+#: MSVC/CodeView-synthesized namespace names positively known to be
+#: compiler-internal, never a real (possibly vendor-customized) ABI-tag
+#: inline namespace. See :func:`_is_user_visible`'s own docstring for why
+#: this is a small, explicit denylist rather than an allowlist of
+#: recognized ABI-tag shapes.
+_KNOWN_COMPILER_INTERNAL_NAMESPACES: frozenset[str] = frozenset({"__vc_attributes"})
+
+
 def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     """Return True if a PDB type should be included in metadata.
 
@@ -99,27 +104,41 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
     ``Anonymous`` identity another producer would give the same
     declaration.
 
-    A ``__``-prefixed NON-LEAF segment is compiler-internal (e.g. MSVC's
-    ``__vc_attributes``) UNLESS it is a recognized ABI-tag inline namespace
-    (libc++'s ``__1``, libstdc++'s ``__cxx11``) --
-    :func:`~abicheck.model.qualified_name_split.is_inline_abi_namespace_segment`
-    is the same recognizer ``diff_namespaces.py``/``diff_abi_tags.py`` treat
-    as a legitimate, transparent scope elsewhere in the pipeline (imported
-    from ``model``, not from the ``compare``-layer ``qualified_name_segments``
-    module this ``extract``-adjacent code may not depend on -- see that
-    ``model`` module's own docstring). Without this exemption, a per-segment
-    ``__`` check drops a real user-visible type entirely (e.g.
+    A ``__``-prefixed NON-LEAF segment is admitted by default, UNLESS it is
+    positively known to be compiler-synthesized
+    (:data:`_KNOWN_COMPILER_INTERNAL_NAMESPACES`, currently just MSVC's own
+    ``__vc_attributes``). This used to be the reverse -- an allowlist gated
+    on :func:`~abicheck.model.qualified_name_split.is_inline_abi_namespace_segment`
+    (the recognizer ``diff_namespaces.py``/``diff_abi_tags.py`` treat as a
+    legitimate, transparent scope elsewhere in the pipeline) -- but that
+    closed enumeration (version-numbered tags, ``__cxxN``, ``__ndkN``) can
+    never recognize a *customized* libc++ build: ``_LIBCPP_ABI_NAMESPACE``
+    is a documented, build-configurable macro, so a vendor's own spelling
+    (e.g. ``__vendor``) legitimately falls outside every known-standard tag
+    shape (Codex review, PR #1025, fresh evidence). Rejecting an
+    unrecognized-but-real ABI-tag namespace as "not on the allowlist" drops
+    a real, user-visible declaration's layout facts, entity ID, and
+    SemanticIR occurrence entirely -- the identical class of loss the
+    original ``std::__1::vector<int>``/``std::__cxx11::basic_string<char>``
+    fix (below) closed, just triggered by an unrecognized tag spelling
+    rather than a missing exemption altogether. Admitting an unrecognized
+    ``__``-prefixed non-leaf segment by default is the deliberately safer
+    failure direction: an extra namespace scope in the model is recoverable
+    noise, while silently dropping a real declaration is not. Without this
+    admit-by-default rule, a per-segment ``__`` check would still drop a
+    real user-visible type entirely (e.g.
     ``std::__1::vector<int>``, ``std::__cxx11::basic_string<char>``), losing
     its layout facts, entity ID, and SemanticIR occurrence rather than merely
     stripping the tag (Codex review, PR #1025).
 
-    The exemption applies ONLY to a non-leaf (enclosing-scope) segment,
-    never to the final, declaration-naming segment itself (Codex review,
-    second round, fresh evidence): a globally-named UDT literally called
-    ``__1``, ``__v2`` or ``__cxx11`` is not an inline namespace at all --
-    it is the declaration's own leaf name, which happens to collide with an
-    ABI-tag spelling -- and must still be rejected as compiler-internal the
-    same way any other ``__``-prefixed leaf (``__vc_attributes``) is.
+    The admit-by-default rule applies ONLY to a non-leaf (enclosing-scope)
+    segment, never to the final, declaration-naming segment itself (Codex
+    review, second round, fresh evidence): a globally-named UDT literally
+    called ``__1``, ``__v2`` or ``__cxx11`` is not an inline namespace at
+    all -- it is the declaration's own leaf name, which happens to collide
+    with an ABI-tag spelling -- and must still be rejected as
+    compiler-internal the same way any other ``__``-prefixed leaf
+    (``__vc_attributes``) is.
     """
     if is_forward_ref:
         return False
@@ -132,7 +151,7 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
             return False
         if not segment.startswith("__"):
             continue
-        if index == last_index or not is_inline_abi_namespace_segment(segment):
+        if index == last_index or segment in _KNOWN_COMPILER_INTERNAL_NAMESPACES:
             return False
     return True
 

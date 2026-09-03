@@ -60,3 +60,17 @@
   itself cacheable, so a snapshot cached by an older abicheck build for
   identical cache-key inputs would otherwise keep serving PDB model types
   with no `entity_id` and `semantic_ir=None` forever.
+- **`_is_user_visible`'s ABI-tag exemption is now admit-by-default for a
+  non-leaf `__`-prefixed segment, denylist-gated, instead of an
+  allowlist gated on a closed set of known-standard tag shapes** (Codex
+  review, third round, fresh evidence): `_LIBCPP_ABI_NAMESPACE` is a
+  documented, build-configurable macro, so a vendor's own customized
+  spelling (e.g. `__vendor`) can never match a closed enumeration of
+  known tag shapes (`__1`, `__cxxN`, `__ndkN`) and was being rejected as
+  compiler-internal, dropping a real, user-visible declaration's layout
+  facts, entity ID, and SemanticIR occurrence entirely. Any non-leaf
+  `__`-prefixed segment is now admitted UNLESS it is positively known to
+  be compiler-synthesized (`_KNOWN_COMPILER_INTERNAL_NAMESPACES`,
+  currently just MSVC's own `__vc_attributes`) -- the deliberately safer
+  failure direction, since an extra namespace scope is recoverable noise
+  while a silently-dropped declaration is not.
