@@ -108,13 +108,18 @@ class TestLooksLikeStoredBundleFacts:
     def test_package_archive_with_nested_marker_text_is_not_stored(
         self, tmp_path: Path
     ) -> None:
-        """Codex review, PR #1042: a compressed release package
-        (recognized by abicheck.package.is_package, e.g. a .tar.gz of
-        shared libraries) must never be scanned for the artifact_type
-        marker at all -- a nested member's own content coincidentally
-        containing the marker text (e.g. a BundleFacts fixture bundled
-        inside a test release archive) must not misclassify the whole
-        package as a stored-facts document."""
+        """Codex review, PR #1042 (round 1): a compressed release package
+        (e.g. a .tar.gz of shared libraries) whose *nested* member content
+        coincidentally contains the marker text (e.g. a BundleFacts fixture
+        bundled inside a test release archive) must not misclassify the
+        whole package as a stored-facts document. Closed by root-anchoring
+        the marker match (round 2), not by excluding recognized packages
+        outright (round 1's own fix, reverted -- see
+        test_bundle_facts_json_with_a_package_like_suffix_is_still_stored
+        for why): a tar/gzip stream's own framing (a 512-byte tar header
+        block before any member content) never decodes to bytes starting
+        with ``{"artifact_type"`` at position 0, root-anchoring rules this
+        out on its own."""
         tar_path = tmp_path / "release.tar.gz"
         with tarfile.open(tar_path, "w:gz") as tf:
             data = _MARKER_JSON.encode()
@@ -124,9 +129,9 @@ class TestLooksLikeStoredBundleFacts:
         assert looks_like_stored_bundle_facts(tar_path) is False
 
     def test_a_real_deb_package_is_not_stored(self, tmp_path: Path) -> None:
-        """.deb has its own magic-byte detection in is_package(); confirm
-        the package-exclusion check reaches it too, not just the
-        extension-based branch the .tar.gz/.whl cases above exercise."""
+        """.deb's own ar-archive magic bytes never decode to ``{...`` at
+        position 0 either -- root-anchoring rules it out the same way as
+        the .tar.gz/.whl cases above, with no is_package() call involved."""
         import shutil
         import subprocess
 
@@ -146,6 +151,56 @@ class TestLooksLikeStoredBundleFacts:
             capture_output=True,
         )
         assert looks_like_stored_bundle_facts(deb_path) is False
+
+    def test_bundle_facts_json_with_a_package_like_suffix_is_still_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 2): a genuine stored BundleFacts
+        JSON document named with a package-like suffix (a plausible
+        --bundle-facts-out output path from a templated CI naming
+        convention, e.g. baseline.tar.gz) must still classify as stored --
+        round 1's is_package() pre-check would have vetoed this purely by
+        filename suffix, with no remaining route back to the BundleFacts
+        loader post-flag-removal. Not an actual tar/gzip stream -- just a
+        plain JSON file wearing that extension, exactly what
+        --bundle-facts-out would write there."""
+        p = tmp_path / "baseline.tar.gz"
+        p.write_text(_MARKER_JSON)
+        assert looks_like_stored_bundle_facts(p) is True
+
+    def test_nested_artifact_type_in_an_ordinary_snapshot_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 2), fresh evidence: an ordinary
+        AbiSnapshot whose own `constants` mapping happens to define a C
+        constant literally named "artifact_type" with this exact string
+        value JSON-serializes as a *nested* object -- an unanchored search
+        matched it too, misrouting a real single-snapshot compare into the
+        BundleFacts loader. The root object's own first key is
+        "constants"' sibling top-level AbiSnapshot fields (library/version/
+        functions/...), never "artifact_type" -- root-anchoring rejects
+        this shape correctly."""
+        p = tmp_path / "snap.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "library": "libfoo.so",
+                    "version": "1.0",
+                    "functions": [],
+                    "variables": [],
+                    "types": [],
+                    "enums": [],
+                    "typedefs": [],
+                    "constants": [
+                        {
+                            "name": "artifact_type",
+                            "value": "abicheck.bundle-facts",
+                        }
+                    ],
+                }
+            )
+        )
+        assert looks_like_stored_bundle_facts(p) is False
 
 
 class TestClassifyBundleCompareOperands:
