@@ -433,6 +433,63 @@ def test_find_by_value_types_param_and_variable():
     assert result == {"Hidden"}
 
 
+def test_find_by_value_types_variable_only_exposure():
+    """A type exposed *only* through a public variable (no function
+    references it at all) -- the one case that reaches the variable loop's
+    own match-and-add, uncontaminated by an earlier function-side match
+    that would short-circuit it first."""
+    opaque = {"Handle"}
+    snap = _snap(variables=[Variable(name="g", mangled="g", type="Handle")])
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
+def test_find_by_value_types_short_circuits_a_later_return_type_check():
+    """Once a candidate type is confirmed by-value exposed by one function,
+    a *second* function's own return-type check for that same type
+    short-circuits (`if tname in by_value_types: continue`) instead of
+    re-running the token match against its own return type."""
+    opaque = {"Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "exposes",
+                "exposes",
+                return_type="void",
+                params=[Param(name="h", type="Handle", pointer_depth=0)],
+            ),
+            # This function's own return type never mentions "Handle" at
+            # all -- if the short-circuit at the top of the return-type
+            # loop did not fire, the match would simply not trigger either,
+            # so the two are indistinguishable by outcome alone. The
+            # coverage instrumentation is what actually proves the skip
+            # branch executes here, not this assertion by itself.
+            _fn("unrelated", "unrelated", return_type="void"),
+        ],
+    )
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
+def test_find_by_value_types_short_circuits_a_later_param_check():
+    """The param loop's own short-circuit: once the return-type check
+    already confirmed a type within the same function, that function's own
+    parameter loop skips re-checking the identical type rather than
+    re-running the token match against the parameter's type text."""
+    opaque = {"Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="Handle",
+                # Type text never mentions "Handle" -- proves the skip
+                # fired rather than an (impossible here) real match.
+                params=[Param(name="p", type="Other", pointer_depth=0)],
+            )
+        ],
+    )
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
 def test_find_by_value_types_pointer_only_returns_empty():
     snap = _snap(
         functions=[

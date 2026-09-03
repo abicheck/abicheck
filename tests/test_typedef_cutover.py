@@ -38,6 +38,7 @@ from abicheck.compare.typedefs import (
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
+    Anonymous,
     EntityKind,
     Namespace,
     entity_id_for_typedef,
@@ -362,3 +363,46 @@ class TestSemanticIrCutoverGate:
             'x = some_object.getattr(snap, "typedefs")',
         ):
             assert legacy_collection_reads(ast.parse(source), forbidden) == []
+
+
+class TestPrivateHelpers:
+    """Direct coverage for two internal helpers whose branches no
+    caller-level (``diff_typedefs``) test happens to exercise: real call
+    sites only ever reach ``_has_version_family_successor`` after the same
+    regex has already matched, and only ever reach ``_aliases`` with
+    identities that already render (the fidelity gate falls back before a
+    detector would iterate an unrenderable one) -- both defensive floors,
+    per each function's own docstring, not dead code."""
+
+    def test_has_version_family_successor_false_when_name_does_not_match(
+        self,
+    ) -> None:
+        from abicheck.compare.typedefs import _has_version_family_successor
+
+        assert not _has_version_family_successor("plain_alias", frozenset())
+
+    def test_has_version_family_successor_false_on_empty_prefix(self) -> None:
+        """A sentinel-shaped name with no family prefix (starts directly
+        with ``_version_``) must not match itself as its own family."""
+        from abicheck.compare.typedefs import _has_version_family_successor
+
+        assert not _has_version_family_successor(
+            "_version_1_0_0", frozenset({"_version_2_0_0"})
+        )
+
+    def test_aliases_skips_an_unrenderable_identity(self) -> None:
+        """The defensive floor itself: an ``Anonymous``-scoped typedef
+        identity contributes no entry, even directly against
+        ``SemanticIRIndex``, bypassing the fidelity gate that normally makes
+        this case unreachable from ``diff_typedefs``."""
+        from abicheck.compare.typedefs import _aliases
+
+        anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        ir = SemanticIR(
+            occurrences={
+                OccurrenceId(anon): CanonicalEntity(
+                    canonical_spelling=Fact.present("int")
+                )
+            }
+        )
+        assert _aliases(SemanticIRIndex(ir)) == {}
