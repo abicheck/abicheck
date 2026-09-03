@@ -42,7 +42,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 ## Why abicheck
 
 - **It reads every source of evidence you have, not just one.** The compiled binary, its debug info (DWARF, PDB, BTF, CTF), the public header AST, the build-system flags, and the sources are five independent, additive layers. Each one finds breaks the others are blind to, and each one *removes* false positives the weaker ones would raise. [How it works](#how-it-works-five-layers-of-evidence).
-- **It tells you what it could not check.** Every report starts with an evidence-coverage block naming which detector classes ran and which were off because the input lacked the evidence. A silent pass is never mistaken for a clean one.
+- **It tells you what it could not check.** Every report carries an Analysis Confidence section listing the detectors that were disabled and why, and a CLI comparison given header, build, or source evidence prints an evidence-coverage block up front naming which detector classes ran and which were off because the input lacked the evidence. A pass with missing evidence is labeled as such rather than looking like a clean one.
 - **Breadth of detection.** **397 ABI/API change types** across functions, variables, structs, classes, enums, unions, typedefs, templates, vtables, symbol versions, SONAMEs, dependencies, hardening flags, and platform metadata, each classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. [Change kind reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
 - **Separate verdicts for binary breaks and source breaks.** `BREAKING` means old binaries stop working. `API_BREAK` means consumers must recompile but their existing binaries still run. Other tools collapse the two; abicheck is the only one in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK`.
 - **Public-surface scoping.** With headers, findings are filtered to the library's public ABI, so churn in internal types does not fail your build. Opt-in [contract-aware mode](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/) goes further and gates only on the contract you declare: public headers, the export table, or everything.
@@ -97,7 +97,7 @@ Checks enabled for this scan (and why others are not):
 - **type_field_added_compatible**: Field added: point::z — `include/foo.h:2`
 ```
 
-Exit code `4`. Every finding names the change kind, the location, the consumer-visible consequence, and the symbols it reaches.
+Exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches.
 
 ## How it works: five layers of evidence
 
@@ -132,7 +132,7 @@ This is a discoverability floor, not an accuracy score; the [tool comparison pag
 
 ## How it compares to other tools
 
-`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs an ELF/PE/Mach-O pass, a header-AST pass, and a DWARF/PDB cross-check on every comparison, then layers build and source evidence on top, feeding **397 change types** of detection. That is where the gap comes from.
+`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **397 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
 
 | | abicheck | libabigail `abidiff` | ABICC |
 |---|:---:|:---:|:---:|
@@ -153,7 +153,7 @@ Full-catalog benchmark, 193 cases, every tool pointed at the whole catalog blind
 | ABICC (abi-dumper mode) | 44.6% | 8 | 99 |
 | ABICC (xml/legacy mode) | 40.4% | 7 | 108 |
 
-Run on 2026-07-18 against abicheck 0.5.0, castxml 0.6.3, libabigail 2.4.0, ABICC 2.3. Commands, per-case matrix, and the pinned cross-tool subset used for release-to-release tracking are in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases). Reproduce it with `python scripts/benchmark_comparison.py --suite all`.
+Run on 2026-07-18 against abicheck 0.5.0, castxml 0.6.3, libabigail 2.4.0, ABICC 2.3. The table is pinned to commit `ffa860c` and the 193-case catalog of that date; the exact reproduction procedure, ground-truth digest, per-case matrix, and the pinned cross-tool subset used for release-to-release tracking are in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases). `python scripts/benchmark_comparison.py --suite all` reruns the *current* catalog against the current checkout rather than reproducing that historical run.
 
 `abidiff` is still the right choice for a sub-second, symbols-only sanity check. For anything you gate a release on, the numbers above are the argument.
 
