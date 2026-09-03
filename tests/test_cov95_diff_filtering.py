@@ -529,6 +529,31 @@ def test_find_by_value_types_recognizes_a_cv_qualified_pointer_no_space():
         assert _find_by_value_types(snap, {"Handle"}) == set(), pointer_spelling
 
 
+def test_find_by_value_types_recognizes_a_reference_as_indirect():
+    """Regression for the third-round Codex review on PR #1041: a
+    reference declarator (``Handle&``, or the rvalue-reference
+    ``Handle&&``) is indirection too -- it never exposes the referent's own
+    layout by value -- but the original pointer check recognized only
+    ``*``. A genuinely opaque type referenced only by reference was
+    wrongly counted as by-value exposed, dropping it out of both identity
+    tiers and reporting its private layout change as breaking. Checked
+    across return type, parameter, and variable, and across both an
+    lvalue and an rvalue reference."""
+    for reference_spelling in ("Handle&", "Handle &", "Handle&&", "Handle &&"):
+        snap = _snap(
+            functions=[
+                _fn(
+                    "f",
+                    "f",
+                    return_type=reference_spelling,
+                    params=[Param(name="p", type=reference_spelling, pointer_depth=0)],
+                )
+            ],
+            variables=[Variable(name="g", mangled="g", type=reference_spelling)],
+        )
+        assert _find_by_value_types(snap, {"Handle"}) == set(), reference_spelling
+
+
 def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
     """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
     ``RecordType.name``, which may be qualified (``ns::Handle``), while a

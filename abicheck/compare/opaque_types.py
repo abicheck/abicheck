@@ -284,9 +284,9 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     return _references_unqualified_type_token(leaf, text)
 
 
-def _is_pointer_spelling(text: str) -> bool:
-    """Whether rendered type *text* declares a pointer (any indirection
-    level, any cv-qualifier spelling).
+def _is_indirect_spelling(text: str) -> bool:
+    """Whether rendered type *text* declares a pointer or reference (any
+    indirection level, any cv-qualifier spelling).
 
     The original check here (``text.endswith("*")`` or ``"* " in text``)
     only recognized a pointer whose ``*`` sits at the very end or is
@@ -298,8 +298,18 @@ def _is_pointer_spelling(text: str) -> bool:
     never as part of a bare type name -- so any ``*`` anywhere in the
     rendered text is sufficient evidence of at least one indirection level,
     with no false-positive risk from the type name itself (Codex review on
-    PR #1041)."""
-    return "*" in text
+    PR #1041).
+
+    A reference declarator (``Handle&``/``Handle&&``) is indirection too --
+    it never exposes the pointee's own layout by value -- but carries no
+    ``*`` at all, so it needs its own check: any ``&`` anywhere in the
+    rendered text (the C/C++ reference sigil is likewise never part of a
+    bare type name) is sufficient evidence, covering both an lvalue and an
+    rvalue reference alike (Codex review on PR #1041, follow-up round --
+    without this, a genuinely opaque type referenced only by ``Handle&``
+    was wrongly counted as by-value exposed and dropped out of both
+    identity tiers, reporting its private layout change as breaking)."""
+    return "*" in text or "&" in text
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
@@ -312,7 +322,9 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if _type_is_by_value_referenced(tname, rt) and not _is_pointer_spelling(rt):
+            if _type_is_by_value_referenced(tname, rt) and not _is_indirect_spelling(
+                rt
+            ):
                 by_value_types.add(tname)
         for param in func.params:
             pt = param.type.strip()
@@ -322,7 +334,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
                 if (
                     _type_is_by_value_referenced(tname, pt)
                     and param.pointer_depth == 0
-                    and not _is_pointer_spelling(pt)
+                    and not _is_indirect_spelling(pt)
                 ):
                     by_value_types.add(tname)
     # Also check variables — a public variable of this type means it's by-value
@@ -333,6 +345,8 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
         for tname in opaque:
             if tname in by_value_types:
                 continue
-            if _type_is_by_value_referenced(tname, vt) and not _is_pointer_spelling(vt):
+            if _type_is_by_value_referenced(tname, vt) and not _is_indirect_spelling(
+                vt
+            ):
                 by_value_types.add(tname)
     return by_value_types
