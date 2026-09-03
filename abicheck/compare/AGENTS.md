@@ -27,6 +27,13 @@ severity, or a CLI flag is in the wrong layer.
 - `dedup_key.py` — `hashable_value()`, the shared rule for turning an
   arbitrary finding value into something a `set` can hold. A leaf: it
   imports nothing, so any layer may depend on it.
+- `fact_comparison.py` — `compare_facts()`/`FactComparison`/
+  `FactComparability` (ADR-063 Phase 5B): decides whether an
+  `(old_fact, new_fact)` pair of `model.Fact[T]`s may be compared at all,
+  and what it means when it can't. Moved here from `model/fact.py` where
+  the primitive first landed (Codex review, PR #1033) — deciding "does this
+  differ" is exactly what `model/AGENTS.md`'s own scoped contract reserves
+  for this package, not `model/`.
 
 ## Conventions
 

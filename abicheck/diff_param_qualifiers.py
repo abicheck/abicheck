@@ -55,9 +55,10 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.fact_comparison import compare_facts
 from .diff_helpers import make_change
 from .finding_identity_ctor_dtor import iter_matched_function_pairs
-from .model import Function, compare_facts
+from .model import Function
 
 
 def param_restrict_changes(

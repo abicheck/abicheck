@@ -189,8 +189,11 @@ when a first PR lands against a sub-phase:
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
-**5B's first PR landed (2026-09-03).** `abicheck.model.fact.compare_facts`
-(re-exported as `abicheck.model.compare_facts`) is the shared primitive: it
+**5B's first PR landed (2026-09-03).** `abicheck.compare.fact_comparison.
+compare_facts` is the shared primitive (moved there from `model/fact.py`
+where it first landed — Codex review: deciding "does this differ" is a
+`compare/`-owned question per `model/AGENTS.md`'s own scoped contract, not
+`model/`'s). It
 classifies an `(old_fact, new_fact)` pair into `FactComparability.COMPARABLE`
 /`INCOMPLETE`/`UNSUPPORTED`/`NOT_APPLICABLE` per the review's proposed
 `FactStatus` → detector-meaning table, and returns the resolved

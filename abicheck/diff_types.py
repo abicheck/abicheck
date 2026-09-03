@@ -21,6 +21,7 @@ from collections.abc import Collection, Mapping
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.fact_comparison import compare_facts
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
@@ -90,7 +91,6 @@ from .model import (
     RecordType,
     TypeField,
     canonicalize_type_name,
-    compare_facts,
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
     is_non_abi_surface_type as _is_non_abi_surface_type,

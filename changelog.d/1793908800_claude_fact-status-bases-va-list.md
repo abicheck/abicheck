@@ -10,7 +10,7 @@
   extraction failure) silently read as "this side has no bases"/"not
   `va_list`" — fabricating a finding against real evidence on the other
   side purely from the capture gap. Both detectors now gate each comparison
-  through a new shared primitive, `abicheck.model.compare_facts`
+  through a new shared primitive, `abicheck.compare.fact_comparison.compare_facts`
   (ADR-063 Phase 5B's first `FactStatus`-aware detector cohort), and decline
   to compare when either side's evidence is incomplete instead. A
   fully-evidenced pair (`PRESENT`/`PARTIAL` on both sides, confirmed-empty

@@ -68,9 +68,6 @@ from .extraction_contract import (
 )
 from .fact import (
     Fact as Fact,
-    FactComparability as FactComparability,
-    FactComparison as FactComparison,
-    compare_facts as compare_facts,
     replace_with_fact_sync as replace_with_fact_sync,
     resolved_fact_value as resolved_fact_value,
 )
@@ -100,8 +97,6 @@ __all__ = [
     "ExtractionContract",
     "FACT_REGISTRY",
     "Fact",
-    "FactComparability",
-    "FactComparison",
     "FactDefinition",
     "FactLifecycle",
     "FactStatus",
@@ -115,7 +110,6 @@ __all__ = [
     "Variable",
     "Visibility",
     "canonicalize_type_name",
-    "compare_facts",
     "cv_qualifiers_only_differ",
     "func_signature_cv_only_differ",
     "is_abi_surface_type_name",
