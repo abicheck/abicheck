@@ -185,7 +185,7 @@ when a first PR lands against a sub-phase:
 | **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | not started | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test |
-| **6B — SemanticIR checker cutover** | not started | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
+| **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | not started | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | not started | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
@@ -12668,6 +12668,53 @@ review's "PR 2"-onward sequence describes (a semantic consumer cutover,
 `FactStatus`-aware detectors, and the rest) is still future work. This
 slice closes one real call site for `compare`, not consumer migration or
 full wiring.
+
+**"PR 2" (first slice) landed the query facade a consumer migration
+converges on, not the migration itself.** `model/semantic_ir_index.py`'s
+`SemanticIRIndex` wraps a `SemanticIR` and answers exactly the lookups the
+review's Phase 6B sketch names as prerequisite — `entity(EntityId)`,
+`occurrences_for(EntityId)`, `entities_of_kind(EntityKind)` (with
+`functions()`/`variables()`/`records()` convenience filters over it), and
+`fact(EntityId, fact_name)`. `references(entity)` — the review's sixth
+named query — is deliberately not implemented here: it names a
+graph-shaped traversal that belongs with the public-surface reference
+index this same plan's Phase 3/D5 amendment governs, and adding a second,
+ad hoc answer to "what does this reference" here would preempt that design
+rather than serve it. Same posture as `ResolvedExecutionContext`: pure
+composition over `SemanticIR.canonical_entities()`/`SemanticIR.
+occurrences_for()`, no re-derivation, its own primitive-level test suite
+(`tests/test_semantic_ir_index.py`), and **no live caller** — no detector
+in `diff_symbols.py`/`diff_types.py` reads through it yet. The actual
+consumer cutover (routing a detector family's matching through this index
+instead of the legacy `AbiSnapshot.functions`/`variables`/`types`
+projections, and proving the two agree via a parity test before any read
+path is removed) is still the next, larger, not-yet-attempted step this
+paragraph's own "still open" list already named.
+
+**Preparation step, same PR-2 umbrella: real-fixture parity between
+`SemanticIRIndex` and the legacy function-matching key.** Before any
+matcher rewrite, `tests/test_semantic_ir_index_function_parity.py` proves,
+on a real compiled fixture (two overloads plus one `extern "C"` function,
+both header-AST backends), the concrete fact a cutover of
+`diff_symbols._match_old_function`'s exact-key join would depend on:
+`SemanticIRIndex.functions()` sees *exactly* the same identity set as
+`AbiSnapshot.functions` (no function invisible to the index, no phantom
+entity absent from the legacy list), and two functions the legacy
+`Function.mangled`-keyed join keeps apart never collapse onto one
+`EntityId`. **Explicitly not claimed by this preparation step**: the
+extern "C" *alias-fallback* tier (`SymbolIdentityIndex.unique_alias_match`,
+`_match_old_function`'s `name:` join) is not shown to already agree with
+`EntityId` equality in general — that fallback joins on a bare, unscoped
+display name, while `entity_id_for_function`'s own `extern_c` tag is
+scope-qualified (see `model/identity.py`'s own docstring and
+`test_model_identity.py::test_extern_c_ignores_param_types`). A real
+fixture's extern "C" function sits at global scope on both sides, so this
+asymmetry does not surface in the case tested — it is recorded here as an
+open question the eventual matcher must resolve (either widen the
+extern-C `EntityId` tag to be scope-oblivious, matching production's
+unscoped alias join, or keep the alias-fallback tier as a distinct,
+non-`EntityId` join even after the exact-key tier cuts over), not silently
+assumed away by this step.
 
 ---
 
