@@ -414,6 +414,44 @@ class TestEvidenceView:
         assert evidence.effective_depth is None
         assert evidence.depth_satisfied is None
 
+    def test_available_depths_cannot_be_overridden_via_the_constructor(self):
+        """Codex review, PR #1027, fourth round: `available_depths` is a
+        read-only property, not a constructor parameter -- passing it is a
+        `TypeError`, not a silently-accepted competing value."""
+        with pytest.raises(TypeError):
+            EvidenceView(available_depths=("bogus",))  # type: ignore[call-arg]
+
+    def test_from_assurance_falls_back_to_the_given_requested_depth_when_assurances_own_is_none(
+        self,
+    ):
+        """Codex review, PR #1027, fourth round:
+        `analysis_assurance.compute_analysis_assurance()`'s own
+        `not_comparable` short-circuit returns a real `AnalysisAssurance`
+        whose `requested_depth` is `None` even when a depth was genuinely
+        requested -- the fallback must be used in exactly that case."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        not_comparable = AnalysisAssurance(status="not_comparable")
+        assert (
+            not_comparable.requested_depth is None
+        )  # sanity: reproduces the real shape
+
+        evidence = EvidenceView.from_assurance(
+            not_comparable, requested_depth="headers"
+        )
+        assert evidence.requested_depth == "headers"
+        assert evidence.effective_depth is None
+        assert evidence.depth_satisfied is None
+
+    def test_from_assurance_prefers_assurances_own_requested_depth_over_the_fallback(
+        self,
+    ):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        assurance = AnalysisAssurance(requested_depth="build", effective_depth="build")
+        evidence = EvidenceView.from_assurance(assurance, requested_depth="headers")
+        assert evidence.requested_depth == "build"
+
 
 class TestResolvedExecutionContextEvidenceIntegration:
     def test_requested_depth_property_reads_through_evidence(self):
@@ -478,3 +516,42 @@ class TestResolvedExecutionContextEvidenceIntegration:
         assert updated.operation == original.operation
         assert updated.evaluation_config is original.evaluation_config
         assert dict(updated.compile_contexts) == dict(original.compile_contexts)
+
+    def test_from_plan_with_a_not_comparable_assurance_preserves_the_requested_depth(
+        self,
+    ):
+        """Codex review, PR #1027, fourth round: the exact real-world shape
+        `compute_analysis_assurance()`'s own `not_comparable` short-circuit
+        produces (`requested_depth=None`) must not erase the plan's own
+        genuinely known requested depth."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        plan = _plan(requested_depth="headers")
+        not_comparable = AnalysisAssurance(status="not_comparable")
+        ctx = ResolvedExecutionContext.from_plan(plan, assurance=not_comparable)
+        assert ctx.evidence.requested_depth == "headers"
+        assert ctx.evidence.effective_depth is None
+
+    def test_with_assurance_with_a_not_comparable_assurance_preserves_the_requested_depth(
+        self,
+    ):
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        plan = _plan(requested_depth="build")
+        original = ResolvedExecutionContext.from_plan(plan)
+        not_comparable = AnalysisAssurance(status="not_comparable")
+        updated = original.with_assurance(not_comparable)
+        assert updated.evidence.requested_depth == "build"
+        assert updated.evidence.effective_depth is None
+
+    def test_resolution_digest_unaffected_by_a_not_comparable_assurance(self):
+        """The regression this whole fix guards against: attaching a
+        `not_comparable` assurance must not change the resolved-input
+        digest, since the requested depth it carries is unchanged."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        plan = _plan(requested_depth="headers")
+        cfg = _evaluation_config()
+        before = ResolvedExecutionContext.from_plan(plan, evaluation_config=cfg)
+        after = before.with_assurance(AnalysisAssurance(status="not_comparable"))
+        assert before.resolution_digest() == after.resolution_digest()

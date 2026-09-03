@@ -219,15 +219,26 @@ class EvidenceView:
     carries). *available_depths* is the static four-rung public ladder
     (:data:`abicheck.buildsource.scan_levels.USER_DEPTHS`) -- always
     populated, since it names what a request *could* have asked for, not
-    what this run resolved. *effective_depth*/*depth_satisfied* are
-    ``None`` until :meth:`from_assurance` copies them off a real
-    :class:`abicheck.analysis_assurance.AnalysisAssurance` -- this class
-    never computes them itself (see module docstring)."""
+    what this run resolved; a **read-only property**, not a constructor
+    parameter or dataclass field (Codex review, PR #1027, fourth round) --
+    a plain field would let a caller construct a value like
+    ``EvidenceView(available_depths=("bogus",))``, competing with the one
+    real ladder this class exists to state invariantly. *effective_depth*/
+    *depth_satisfied* are ``None`` until :meth:`from_assurance` copies them
+    off a real :class:`abicheck.analysis_assurance.AnalysisAssurance` --
+    this class never computes them itself (see module docstring)."""
 
     requested_depth: str | None = None
     effective_depth: str | None = None
     depth_satisfied: bool | None = None
-    available_depths: tuple[str, ...] = _AVAILABLE_DEPTHS
+
+    @property
+    def available_depths(self) -> tuple[str, ...]:
+        """The static four-rung public ``--depth`` ladder -- the same value
+        for every instance, so it is a computed property over the one
+        module-level constant rather than a per-instance field a caller
+        could override."""
+        return _AVAILABLE_DEPTHS
 
     @classmethod
     def for_request(cls, requested_depth: str | None) -> EvidenceView:
@@ -235,7 +246,9 @@ class EvidenceView:
         return cls(requested_depth=requested_depth)
 
     @classmethod
-    def from_assurance(cls, assurance: object) -> EvidenceView:
+    def from_assurance(
+        cls, assurance: object, *, requested_depth: str | None = None
+    ) -> EvidenceView:
         """The post-execution view, copied verbatim off *assurance* -- a
         real :class:`abicheck.analysis_assurance.AnalysisAssurance` in
         practice. Reads ``requested_depth``/``effective_depth``/
@@ -246,9 +259,27 @@ class EvidenceView:
         import `model`/`storage`/`extract`/`compare`/`policy`, never a
         checker-layer module), so a structural read is what lets this leaf
         module stay import-cycle-free while still accepting the real
-        object any caller already has in hand."""
+        object any caller already has in hand.
+
+        *requested_depth* is a fallback used only when *assurance* itself
+        carries none (Codex review, PR #1027, fourth round):
+        ``analysis_assurance.compute_analysis_assurance()``'s own
+        ``not_comparable`` short-circuit returns a real ``AnalysisAssurance``
+        whose ``requested_depth`` is ``None`` -- "every other assurance axis
+        is unreliable for this run" there means exactly that, not "no depth
+        was ever requested." Naively copying that ``None`` through would
+        silently discard a genuinely known pre-execution value (e.g. from
+        ``AnalysisPlan.requested_depth``) the moment a run turned out
+        not-comparable, changing this run's own :meth:`~ResolvedExecutionContext.
+        resolution_digest` for a reason that has nothing to do with what was
+        requested. *assurance*'s own value always wins when present."""
+        assurance_requested = getattr(assurance, "requested_depth", None)
         return cls(
-            requested_depth=getattr(assurance, "requested_depth", None),
+            requested_depth=(
+                assurance_requested
+                if assurance_requested is not None
+                else requested_depth
+            ),
             effective_depth=getattr(assurance, "effective_depth", None),
             depth_satisfied=getattr(assurance, "depth_satisfied", None),
         )
@@ -323,9 +354,14 @@ class ResolvedExecutionContext:
         full post-execution :class:`EvidenceView` via
         :meth:`EvidenceView.from_assurance` instead of the pre-execution,
         requested-only view -- for a caller resolving this context *after*
-        a run has already completed, rather than before."""
+        a run has already completed, rather than before. *plan.requested_depth*
+        is passed through as :meth:`EvidenceView.from_assurance`'s own
+        fallback, so a ``not_comparable`` assurance (whose own
+        ``requested_depth`` reads ``None``) doesn't discard the genuinely
+        known, already-resolved request (Codex review, PR #1027, fourth
+        round -- see that method's own docstring)."""
         evidence = (
-            EvidenceView.from_assurance(assurance)
+            EvidenceView.from_assurance(assurance, requested_depth=plan.requested_depth)
             if assurance is not None
             else EvidenceView.for_request(plan.requested_depth)
         )
@@ -344,9 +380,18 @@ class ResolvedExecutionContext:
         over unchanged -- this exists for a caller that built a
         pre-execution context (via :meth:`from_plan` with no *assurance*)
         and only later, once a run completes, has a real
-        :class:`abicheck.analysis_assurance.AnalysisAssurance` to attach."""
+        :class:`abicheck.analysis_assurance.AnalysisAssurance` to attach.
+        Passes this context's own already-known
+        ``self.evidence.requested_depth`` through as
+        :meth:`EvidenceView.from_assurance`'s fallback, for the identical
+        reason :meth:`from_plan` does (Codex review, PR #1027, fourth
+        round): a ``not_comparable`` *assurance* must not silently erase a
+        requested depth this context already had."""
         return dataclasses.replace(
-            self, evidence=EvidenceView.from_assurance(assurance)
+            self,
+            evidence=EvidenceView.from_assurance(
+                assurance, requested_depth=self.evidence.requested_depth
+            ),
         )
 
     def provenance_for(self, field_name: str) -> ValueProvenance | None:
