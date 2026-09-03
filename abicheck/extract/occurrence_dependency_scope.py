@@ -29,10 +29,24 @@ prefers the more-public provenance, the project-header declaration wins
 and the ``EntityId`` is kept -- but that check then wrongly kept BOTH
 occurrences too, leaking the excluded system-header declaration's own
 evidence into a default-scoped snapshot (confirmed empirically). This
-module's :func:`occurrence_survives_dependency_scope` (built on
-:func:`is_dependency_occurrence`) closes that by additionally checking
-each individual occurrence's OWN disambiguator-derived location, not
-just its shared identity's representative.
+module's :func:`scoped_occurrences_excluding_dependencies` closes that by
+additionally checking each individual occurrence's OWN
+disambiguator-derived location, not just its shared identity's
+representative -- but only ever removes a dependency occurrence when
+another, non-dependency occurrence of the SAME identity is also kept.
+
+That last qualifier matters: ``scope_snapshot_excluding_dependencies()``
+deliberately keeps a dependency-header type/function/variable whose flat
+representative is directly named by a kept public declaration (a
+``std::string`` parameter, say), even though every one of ITS OWN
+occurrences lives under a dependency header. A per-occurrence check with
+no such qualifier would drop all of that identity's occurrences purely
+because they are all dependency-header ones -- leaving the retained flat
+entity with zero surviving ``SemanticIR`` evidence, silently
+under-serving an IR-aware consumer relative to a flat-field one (Codex
+review, second round, fresh evidence). So an occurrence is only ever
+excluded here when a *different*, non-dependency occurrence of the same
+``EntityId`` survives to take its place as that identity's IR evidence.
 
 Leaf module: depends only on ``.provenance`` (the same header-origin
 classifier ``dumper_scoping.py``'s own flat-field filtering already
@@ -42,12 +56,13 @@ independently-drifting classifier).
 
 from __future__ import annotations
 
-from collections.abc import Sequence, Set as AbstractSet
+from collections.abc import Mapping, Sequence, Set as AbstractSet
 from pathlib import Path
 
-from .model.identity import EntityId, EntityKind
-from .model.occurrence import OccurrenceId
-from .provenance import header_from_location, is_dependency_header
+from ..model.identity import EntityId, EntityKind
+from ..model.occurrence import OccurrenceId
+from ..model.semantic_ir import CanonicalEntity
+from ..provenance import header_from_location, is_dependency_header
 
 _SCOPED_ENTITY_KINDS = (
     EntityKind.TYPE,
@@ -94,20 +109,55 @@ def is_dependency_occurrence(
     return is_dependency_header(header, header_roots)
 
 
-def occurrence_survives_dependency_scope(
-    occ_id: OccurrenceId,
+def scoped_occurrences_excluding_dependencies(
+    occurrences: Mapping[OccurrenceId, CanonicalEntity],
     kept_entity_ids: AbstractSet[EntityId],
     header_roots: Sequence[Path | str] | None,
-) -> bool:
-    """Whether *occ_id* survives ``dumper_scoping._scoped_semantic_ir``'s
-    combined whole-``EntityId`` and per-occurrence dependency scoping:
-    non-scoped kinds (typedefs, ...) always survive untouched; a scoped
-    kind survives only if its ``EntityId`` is in *kept_entity_ids* AND
-    this occurrence's own location is not itself a dependency header (see
-    :func:`is_dependency_occurrence` and this module's own docstring).
+) -> tuple[dict[OccurrenceId, CanonicalEntity], list[OccurrenceId]]:
+    """Apply ``dumper_scoping._scoped_semantic_ir``'s combined
+    whole-``EntityId`` and per-occurrence dependency scoping to
+    *occurrences*, returning ``(kept, excluded_ids)``.
+
+    A non-scoped kind (typedefs, ...) always survives untouched. A scoped
+    kind's occurrence survives if its ``EntityId`` is not in
+    *kept_entity_ids* -- excluded, matching the flat-field filter exactly
+    -- OR if this occurrence's own location is not itself a dependency
+    header (see :func:`is_dependency_occurrence`).
+
+    A *kept*-identity occurrence whose own location IS a dependency header
+    is excluded only when another, non-dependency occurrence of the SAME
+    ``EntityId`` also survives (this module's own docstring: dropping every
+    occurrence of a directly-referenced dependency identity would leave its
+    still-retained flat entity with zero ``SemanticIR`` evidence). This
+    requires a first pass over every occurrence to learn, per kept
+    ``EntityId``, whether it has any non-dependency occurrence at all --
+    a single per-occurrence predicate cannot answer that on its own.
     """
-    if occ_id.entity_id.kind not in _SCOPED_ENTITY_KINDS:
-        return True
-    return occ_id.entity_id in kept_entity_ids and not is_dependency_occurrence(
-        occ_id.disambiguator, header_roots
-    )
+    non_dependency_identities: set[EntityId] = set()
+    for occ_id in occurrences:
+        entity_id = occ_id.entity_id
+        if (
+            entity_id.kind in _SCOPED_ENTITY_KINDS
+            and entity_id in kept_entity_ids
+            and not is_dependency_occurrence(occ_id.disambiguator, header_roots)
+        ):
+            non_dependency_identities.add(entity_id)
+
+    kept: dict[OccurrenceId, CanonicalEntity] = {}
+    excluded: list[OccurrenceId] = []
+    for occ_id, entity in occurrences.items():
+        entity_id = occ_id.entity_id
+        if entity_id.kind not in _SCOPED_ENTITY_KINDS:
+            kept[occ_id] = entity
+            continue
+        if entity_id not in kept_entity_ids:
+            excluded.append(occ_id)
+            continue
+        if (
+            is_dependency_occurrence(occ_id.disambiguator, header_roots)
+            and entity_id in non_dependency_identities
+        ):
+            excluded.append(occ_id)
+        else:
+            kept[occ_id] = entity
+    return kept, excluded

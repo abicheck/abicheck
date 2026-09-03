@@ -61,3 +61,43 @@
   `occurrence_survives_dependency_scope`), split into its own leaf module
   to keep `dumper_scoping.py` under its `architecture/debt.yaml`
   no-growth baseline.
+
+  A second review round found three further gaps, all now closed: (1)
+  `_multi_location_non_ambiguous_entity_ids`'s location-set-size check
+  could not tell a single fragment's own prototype-then-definition pair
+  apart from the genuine cross-fragment case above -- both reduce to one
+  agreed-upon location set of size 2 -- so a `--dump-manifest` run over
+  exactly ONE translation unit kept two occurrences where the equivalent
+  non-manifest single-TU path collapses to one, forking persisted
+  occurrence IDs solely because a manifest was used; the fix adds a raw
+  per-entity fragment-count gate (computed in the same one-pass helper,
+  now `_per_entity_location_sets`'s second return value) so only a
+  genuinely multi-fragment agreement (>= 2 TUs) keeps its per-location
+  split, while a lone fragment's multi-location entity now falls through
+  to the ordinary blank-disambiguator collapse; (2) `Variable.is_static`
+  was appended as a plain positional field -- `Function.is_static`'s own
+  precedent -- but the model's own "append new fields at the end,
+  keyword-only where a default is needed" contract calls for keyword-only
+  on a new defaulted field, so it is now `field(default=False,
+  kw_only=True)` (every real call site already passes it by keyword, so
+  this is not a behavior change); (3) `occurrence_dependency_scope.py`
+  moved from the flat package root to `extract/`, its owning package
+  (ADR-061's task-routing table), and its per-occurrence dependency check
+  dropped every occurrence of a *kept* identity whenever all of that
+  identity's own occurrences happened to live under a dependency header --
+  exactly the case `scope_snapshot_excluding_dependencies` already
+  retains deliberately (a dependency type directly named by a kept public
+  declaration), leaving the retained flat entity with zero surviving
+  `SemanticIR` evidence; the new `scoped_occurrences_excluding_dependencies`
+  excludes a dependency occurrence only when a *different*, non-dependency
+  occurrence of the same identity also survives to stand in for it, via a
+  first pass that records which kept identities have at least one
+  non-dependency occurrence at all.
+
+  Added `tests/test_dumper_scoping_occurrence_dependency.py`, direct unit
+  tests for `scoped_occurrences_excluding_dependencies` covering all four
+  of its branches (non-scoped kind, excluded identity, kept identity with
+  only dependency occurrences, kept identity with a mix) -- closing a real
+  patch-coverage gap the review round's own fix left, split into its own
+  file since `test_dumper_scoping.py` has no `architecture/debt.yaml`
+  adoption-debt entry and is at the AI-readiness `new-test-size` cap.

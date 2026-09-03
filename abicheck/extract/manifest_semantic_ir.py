@@ -213,16 +213,22 @@ def _fragment_locations(fragment: TuFragment) -> dict[EntityId, set[str]]:
 
 def _per_entity_location_sets(
     fragments: Sequence[TuFragment],
-) -> dict[EntityId, set[frozenset[str]]]:
+) -> tuple[dict[EntityId, set[frozenset[str]]], dict[EntityId, int]]:
     """Every ``EntityId``'s own set of per-fragment *complete* location
-    sets, shared by both :func:`_ambiguous_by_source_location` and
-    :func:`_multi_location_non_ambiguous_entity_ids` -- one pass over the
-    fragments, read two different ways rather than recomputed twice."""
+    sets, AND the raw count of fragments that observed it at all -- shared
+    by :func:`_ambiguous_by_source_location` (needs only the former) and
+    :func:`_multi_location_non_ambiguous_entity_ids` (needs both -- see
+    that function's own docstring for why the raw fragment count, not the
+    deduped location-set count, is the gate it actually needs). One pass
+    over the fragments, read two different ways rather than recomputed
+    twice."""
     per_entity_fragment_sets: dict[EntityId, set[frozenset[str]]] = defaultdict(set)
+    per_entity_fragment_count: dict[EntityId, int] = defaultdict(int)
     for fragment in fragments:
         for entity_id, locs in _fragment_locations(fragment).items():
             per_entity_fragment_sets[entity_id].add(frozenset(locs))
-    return per_entity_fragment_sets
+            per_entity_fragment_count[entity_id] += 1
+    return per_entity_fragment_sets, per_entity_fragment_count
 
 
 def _ambiguous_by_source_location(
@@ -251,14 +257,16 @@ def _ambiguous_by_source_location(
 
 def _multi_location_non_ambiguous_entity_ids(
     per_entity_fragment_sets: dict[EntityId, set[frozenset[str]]],
+    per_entity_fragment_count: dict[EntityId, int],
 ) -> set[EntityId]:
     """Every ``EntityId`` that is NOT cross-fragment ambiguous (every
     fragment that observes it agrees on the identical, single location
-    set) but whose one agreed-upon location set itself has MORE THAN ONE
-    member -- e.g. an externally-linked prototype immediately followed by
-    its own definition, both declared together in one shared header that
-    every including TU sees identically (Codex review, PR #1024, fresh
-    evidence beyond the prior same-TU-only case: this also happens across
+    set), was observed by AT LEAST TWO fragments, and whose one
+    agreed-upon location set itself has MORE THAN ONE member -- e.g. an
+    externally-linked prototype immediately followed by its own
+    definition, both declared together in one shared header that every
+    including TU sees identically (Codex review, PR #1024, fresh evidence
+    beyond the prior same-TU-only case: this also happens across
     *multiple* fragments whose complete multi-location sets are equal to
     each other, not only within one fragment).
 
@@ -271,10 +279,27 @@ def _multi_location_non_ambiguous_entity_ids(
     a single declaration observed redundantly by every including TU) is
     correctly excluded here: blanking its disambiguator is what lets
     ``occurrences.setdefault`` fold every fragment's redundant observation
-    of that one real declaration down to the single occurrence it is."""
+    of that one real declaration down to the single occurrence it is.
+
+    The *fragment count* gate (Codex review, second round, fresh evidence)
+    is what keeps a genuinely single-fragment manifest run consistent with
+    the non-manifest single-TU path: a lone fragment's own
+    prototype-then-definition pair reduces to one ``frozenset`` of size 2
+    the identical way a real cross-fragment agreement does, so the
+    location-set-size check alone cannot tell them apart -- but only the
+    cross-fragment case has a non-manifest counterpart to stay consistent
+    with; a `--dump-manifest` run over exactly one TU must reproduce the
+    ordinary (non-manifest) `normalize_header_ast` call's own collapse of
+    every declaration onto its first-seen occurrence byte-for-byte, not
+    invent a persisted-occurrence-ID difference that exists solely because
+    a manifest was used. A single fragment's own multi-location entity
+    (count == 1) is therefore excluded here regardless of its location-set
+    size, leaving it to the ordinary blank-disambiguator branch below."""
     result: set[EntityId] = set()
     for entity_id, fragment_sets in per_entity_fragment_sets.items():
         if len(fragment_sets) != 1:
+            continue
+        if per_entity_fragment_count[entity_id] < 2:
             continue
         (only_location_set,) = fragment_sets
         if len(only_location_set) > 1:
@@ -284,10 +309,12 @@ def _multi_location_non_ambiguous_entity_ids(
 
 def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
     """See this module's own docstring."""
-    per_entity_fragment_sets = _per_entity_location_sets(fragments)
+    per_entity_fragment_sets, per_entity_fragment_count = _per_entity_location_sets(
+        fragments
+    )
     ambiguous_entity_ids = _ambiguous_by_source_location(per_entity_fragment_sets)
     multi_location_entity_ids = _multi_location_non_ambiguous_entity_ids(
-        per_entity_fragment_sets
+        per_entity_fragment_sets, per_entity_fragment_count
     )
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for fragment in sorted(fragments, key=lambda f: f.tu_name):

@@ -349,10 +349,13 @@ class Variable:
     # differ, since that axis is independent of linkage). Appended after
     # every pre-existing field (never inserted mid-list) so this additive
     # field cannot shift the positional slot of any field that came before
-    # it -- the same discipline `Function.hidden_friend_owner`'s own comment
-    # states, for the identical reason (`Variable` is a public,
-    # non-keyword-only dataclass too).
-    is_static: bool = False
+    # it. Unlike `Function.is_static`/`hidden_friend_owner` (older plain
+    # positional appends), this one is keyword-only (Codex review,
+    # `model/AGENTS.md`'s "Append new fields at the end, keyword-only where
+    # a default is needed") -- every real call site already passes it by
+    # keyword, so this closes off a new positional dependency without
+    # touching any of them.
+    is_static: bool = field(default=False, kw_only=True)
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from

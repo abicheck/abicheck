@@ -101,11 +101,12 @@ from pathlib import Path
 from typing import Any
 
 from .dumper_clang_streaming import suppress_streaming_prune
+from .extract.occurrence_dependency_scope import (
+    scoped_occurrences_excluding_dependencies,
+)
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
-from .model.occurrence import OccurrenceId
-from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
-from .occurrence_dependency_scope import occurrence_survives_dependency_scope
+from .model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 from .provenance import is_dependency_header
 from .type_reachability import (
     _NON_PUBLIC_ORIGINS,
@@ -1155,7 +1156,11 @@ def _scoped_semantic_ir(
     this function at all (the legacy ``typedefs``/``typedefs_qualified``
     fields stay unfiltered for the identical reason), so a typedef
     occurrence would be inconsistent with the *legacy* fields if dropped
-    here. Also see :mod:`~abicheck.occurrence_dependency_scope` for a second, per-occurrence check applied here (Codex review, PR #1024).
+    here. Also see :mod:`~abicheck.extract.occurrence_dependency_scope`
+    for a second, per-occurrence check applied here (Codex review, PR
+    #1024) -- it never drops every occurrence of a kept identity, only a
+    dependency one that a surviving non-dependency sibling occurrence can
+    stand in for.
 
     Every ``semantic_ir_conflicts`` entry belonging to an excluded
     occurrence is dropped too (Codex review, PR #1001, on an earlier
@@ -1181,13 +1186,12 @@ def _scoped_semantic_ir(
         | {f.entity_id for f in kept_functions if f.entity_id is not None}
         | {v.entity_id for v in kept_variables if v.entity_id is not None}
     )
-    kept_occurrences: dict[OccurrenceId, CanonicalEntity] = {}
-    excluded_occurrences: list[tuple[OccurrenceId, CanonicalEntity]] = []
-    for occ_id, entity in semantic_ir.occurrences.items():
-        if occurrence_survives_dependency_scope(occ_id, kept_entity_ids, header_roots):
-            kept_occurrences[occ_id] = entity
-        else:
-            excluded_occurrences.append((occ_id, entity))
+    kept_occurrences, excluded_ids = scoped_occurrences_excluding_dependencies(
+        semantic_ir.occurrences, kept_entity_ids, header_roots
+    )
+    excluded_occurrences = [
+        (occ_id, semantic_ir.occurrences[occ_id]) for occ_id in excluded_ids
+    ]
     if not excluded_occurrences:
         return semantic_ir, semantic_ir_conflicts
     scoped_ir = dataclasses.replace(semantic_ir, occurrences=kept_occurrences)

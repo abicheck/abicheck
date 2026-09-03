@@ -140,7 +140,6 @@
         "abicheck/header_utils.py",
         "abicheck/macho_metadata.py",
         "abicheck/numpy_capi.py",
-        "abicheck/occurrence_dependency_scope.py",
         "abicheck/package.py",
         "abicheck/parallel_probe.py",
         "abicheck/pdb_metadata.py",

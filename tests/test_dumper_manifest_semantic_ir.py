@@ -353,3 +353,39 @@ def test_externally_linked_proto_and_def_redundantly_seen_by_a_third_tu(
     assert len(occurrences) == 2
     disambiguators = {occ.disambiguator for occ in occurrences}
     assert len(disambiguators) == 2
+
+
+def test_single_tu_proto_and_def_collapses_like_the_non_manifest_path(
+    tmp_path: Path,
+) -> None:
+    """Codex review, second round, fresh evidence: a manifest with only ONE
+    TU containing both an externally-linked prototype and its own
+    definition must collapse to exactly one occurrence, the same way the
+    non-manifest single-TU path does (`normalize_header_ast` without
+    `disambiguate_by_source_location` folds every declaration of one
+    entity onto its first-seen occurrence). The location-set-size check
+    alone cannot distinguish this single-fragment pair from the genuine
+    cross-fragment case above
+    (`test_externally_linked_proto_and_def_shared_across_tus_stay_distinct`)
+    -- both reduce to one location set of size 2 -- so the fix gates on
+    the *fragment count* too: with only one TU there is no
+    manifest-vs-non-manifest inconsistency to introduce."""
+    _requires_clang()
+    header = tmp_path / "solo_proto_def.h"
+    header.write_text("int helper4();\nint helper4() { return 1; }\n")
+
+    merged = _run(tmp_path, (_tu("tu_solo", header),), roots=[header])
+
+    assert merged.semantic_ir is not None
+    helper_fns = [f for f in merged.functions if f.name == "helper4"]
+    assert len(helper_fns) == 2, "tu_merge keeps the decl+def pair even in one TU"
+    entity_ids = {fn.entity_id for fn in helper_fns}
+    assert None not in entity_ids
+    (entity_id,) = entity_ids
+    occurrences = merged.semantic_ir.occurrences_for(entity_id)
+    assert len(occurrences) == 1, (
+        "a single TU's own prototype+definition pair must collapse "
+        "exactly like the non-manifest single-TU path does"
+    )
+    (occ_id,) = occurrences
+    assert occ_id.disambiguator == ""
