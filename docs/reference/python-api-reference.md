@@ -497,6 +497,8 @@ Compare two ABI inputs and return the classified diff result.
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `compile_context` | `CompileContext \| None` | `None` |
 | `depth` | `str \| None` | `None` |
+| `severity_preset` | `str \| None` | `None` |
+| `exit_code_scheme` | `str \| None` | `None` |
 
 **Returns:** `CompareResult`
 
