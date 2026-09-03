@@ -328,6 +328,34 @@ class TestBareNameCollisionNarrowing:
         change = _size_change("Handle", ns1_id_old)
         assert _survivors([change], old, new) == []
 
+    def test_partial_pairing_among_colliding_declarations_does_not_go_strict(
+        self,
+    ) -> None:
+        """Regression for the Codex review on PR #1045, second round, fresh
+        evidence: the single-declaration case above is not the whole story.
+        Two *distinct* opaque declarations, ``ns1::Handle`` and
+        ``ns2::Handle``, genuinely collide on the bare spelling
+        ``"Handle"``. The two sides agree on ``ns1::Handle``'s id but --
+        the same producer-scoping disagreement as above -- disagree on
+        ``ns2::Handle``'s. An intersection-based pairing check (this
+        module's first fix) sees the *shared* ``ns1`` id, calls the whole
+        spelling "paired", and goes strict -- then wrongly trusts a
+        stable-tier miss on ``ns2::Handle``'s own still-opaque finding as
+        proof of non-opacity. Only exact set equality proves *every* id
+        either side resolved for a spelling has a match on the other side,
+        which correctly declines here instead.
+        """
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id_old = entity_id_for_type((Namespace("ns2"),), "Handle")
+        ns2_id_new = entity_id_for_type((Record("ns2"),), "Handle")
+        assert ns2_id_old != ns2_id_new  # the two producers genuinely disagree
+        old = _snap([_opaque("Handle", ns1_id), _opaque("Handle", ns2_id_old)])
+        new = _snap([_opaque("Handle", ns1_id), _opaque("Handle", ns2_id_new)])
+        # A change about ns2::Handle -- still genuinely opaque on both
+        # sides, just resolved under disagreeing ids.
+        change = _size_change("Handle", ns2_id_old)
+        assert _survivors([change], old, new) == []
+
 
 class TestByValueExposureAcrossAQualificationMismatch:
     """Regression for the Codex review on PR #1041, end to end through

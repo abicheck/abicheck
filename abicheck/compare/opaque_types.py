@@ -137,28 +137,57 @@ class OpaqueTypeIndex:
         never from bare presence.** For every spelling the two sides agree
         is opaque (``self.local & other.local``), narrowing is safe for that
         spelling only when the two sides' *own* stable-id sets for it
-        (``stable_by_local``) actually intersect -- proving the two sides
-        resolved the *same* declaration, not merely *a* declaration each.
-        The distinction is real: two producers can each individually resolve
-        a stable id for the *same* nominal declaration and still disagree on
-        what it is (e.g. whether an enclosing scope segment is a namespace
-        or a record), which a naive "did both sides resolve *something*"
-        check cannot see (Codex review on PR #1045 -- a first revision
-        ANDed each side's own whole-index "every declaration resolved
-        something" flag, which stayed ``True`` on both sides in exactly this
-        counter-example even though ``self.stable & other.stable`` held no
-        match for it; ``_downgrade_opaque_type_changes`` would then have
-        gone strict and wrongly un-suppressed a genuine still-opaque
-        declaration's own finding). ``all()`` over an empty spelling set is
-        vacuously ``True`` -- no shared spelling means nothing for narrowing
-        to get wrong.
+        (``stable_by_local``) are *exactly equal* -- proving the two sides
+        resolved the identical roster of declarations under that spelling,
+        not merely that *some* declaration each did.
+
+        Exact equality, not intersection-is-non-empty: a first revision of
+        this check required only that the two sides' stable-id sets for a
+        spelling *intersect*, which a real bare-name *collision* itself
+        falsifies as a sufficient condition (Codex review on PR #1045,
+        second round, fresh evidence). When two distinct declarations
+        genuinely share one spelling (``ns1::Handle``, ``ns2::Handle``, both
+        opaque, both bare-named ``"Handle"``), each side's set for that
+        spelling holds *two* ids -- and if the two sides agree on
+        ``ns1::Handle``'s id but disagree on ``ns2::Handle``'s (the same
+        producer-scoping disagreement the first round's counter-example
+        used, now on only one of the two colliding declarations), the sets
+        still *intersect* on the ``ns1`` id alone. An intersection-based
+        check would call the whole spelling "paired" and go strict, then
+        wrongly treat a stable-tier miss on ``ns2::Handle``'s own genuine,
+        still-opaque finding as proof of non-opacity. Only exact set
+        equality proves *every* id either side resolved for a spelling has
+        a match on the other side too -- which is what a stable-tier miss
+        anywhere in this index actually needs to mean "not one of the known
+        opaque declarations" to be trustworthy.
+
+        The first round's own counter-example (one declaration, disagreeing
+        ids) is the *single-element* case of this same check: ``{id_old} ==
+        {id_new}`` is ``False`` whenever the ids disagree, identically to
+        the earlier intersection-based answer for that narrower shape --
+        this revision only changes the *multi-declaration* case the first
+        one got wrong.
+
+        **Equal-and-empty does not count as paired.** ``frozenset() ==
+        frozenset()`` is ``True``, but "neither side resolved any stable id
+        for this spelling" is not evidence the two sides agree on
+        anything -- it means there is no stable-tier evidence for this
+        spelling *at all*, so a change belonging to it can only ever be
+        correctly matched through the spelling tier. Counting it as paired
+        would license a global ``strict=True`` that then rejects such a
+        change on the (contentless) miss instead of falling through, which
+        is exactly the ``test_a_change_carrying_a_stable_id_still_falls_
+        back_to_its_spelling`` regression a first version of this ``==``
+        revision introduced. Each key therefore also requires its shared
+        set to be non-empty. ``all()`` over an empty spelling set (``local``
+        itself empty) is still vacuously ``True`` -- no shared spelling
+        means nothing for narrowing to get wrong.
         """
         local = self.local & other.local
         paired = all(
-            bool(
-                self.stable_by_local.get(key, frozenset())
-                & other.stable_by_local.get(key, frozenset())
-            )
+            self.stable_by_local.get(key, frozenset())
+            == other.stable_by_local.get(key, frozenset())
+            != frozenset()
             for key in local
         )
         return OpaqueTypeIndex(
