@@ -236,3 +236,45 @@ class TestKnownGapStaysDocumented:
 
     def test_the_entity_kind_vocabulary_is_the_one_shared_enum(self) -> None:
         assert _STABLE_ID.kind is EntityKind.TYPE
+
+
+class TestByValueExposureAcrossAQualificationMismatch:
+    """Regression for the Codex review on PR #1041, end to end through
+    :func:`_find_opaque_types`: a public by-value parameter exposing a
+    ``RecordType`` must keep it out of ``opaque`` -- and therefore keep a
+    real finding about it unsuppressed -- even when the parameter's
+    rendered type text spells the record bare while ``RecordType.name``
+    is qualified. Before the by-value scan's own leaf-spelling widening,
+    this exposure went undetected, and once the stable tier could reliably
+    join the two sides despite the same qualification mismatch, that missed
+    exposure turned into a real, silent false-negative suppression.
+    """
+
+    def test_a_by_value_exposure_is_not_masked_by_the_qualification_mismatch(
+        self,
+    ) -> None:
+        from abicheck.model import Function, Param, Visibility
+
+        record = RecordType(
+            name="ns::Handle", kind="struct", is_opaque=True, entity_id=_STABLE_ID
+        )
+        func = Function(
+            name="use_handle",
+            mangled="use_handle",
+            return_type="void",
+            params=[Param(name="h", type="Handle", pointer_depth=0)],
+            visibility=Visibility.PUBLIC,
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0.0",
+            types=[record],
+            functions=[func],
+        )
+        # The type is by-value exposed, so it must never enter `opaque` --
+        # regardless of which identity tier a later join would use.
+        index = _find_opaque_types(snap)
+        assert not index
+
+        change = _size_change("ns::Handle", _STABLE_ID)
+        assert _survivors([change], snap, snap) == ["ns::Handle"]

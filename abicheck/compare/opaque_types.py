@@ -138,13 +138,16 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
        reveals the type is implementation-private.
 
     Returns a two-tier :class:`~abicheck.compare.opaque_types.
-    OpaqueTypeIndex`, not a ``set[str]``. The
-    *computation* is unchanged and still runs over ``RecordType.name``
-    spellings, because rule 2's by-value check
-    (:func:`find_by_value_types`) is a substring scan against rendered
-    signature text -- a spelling question, not an identity one, and
-    ``EntityId`` has nothing to contribute to it. Only the *result* is
-    re-expressed as identities.
+    OpaqueTypeIndex`, not a ``set[str]``. Rule 2's by-value check
+    (:func:`find_by_value_types`) still runs over ``RecordType.name``
+    spellings against rendered signature text -- a spelling question, not
+    an identity one, and ``EntityId`` has nothing to contribute to it --
+    but now also tries the name's unqualified leaf spelling alongside the
+    full one (see :func:`_by_value_scan_spellings`), since a qualification
+    mismatch there used to be silently absorbed by an equally spelling-based
+    join and no longer is once :class:`OpaqueTypeIndex`'s stable tier can
+    join across exactly that mismatch. Only the *result* is re-expressed
+    as identities.
     """
     opaque: set[str] = set()
     declarations: dict[str, list[RecordType]] = {}
@@ -174,6 +177,33 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
     return OpaqueTypeIndex(stable=frozenset(stable), local=frozenset(local))
 
 
+def _by_value_scan_spellings(tname: str) -> tuple[str, ...]:
+    """The spelling(s) of *tname* to search a rendered signature string for.
+
+    *tname* is ``RecordType.name`` -- which may be qualified
+    (``"ns::Handle"``) even when the signature text this function scans
+    renders the identical type unqualified (``"Handle"``, when the
+    reference sits inside the same namespace, or when the producer's own
+    signature renderer simply drops a redundant qualifier). A plain
+    ``tname in rendered_text`` substring test misses that case entirely --
+    a real gap this function has always had, made consequential rather than
+    cosmetic once :class:`~abicheck.compare.opaque_types.OpaqueTypeIndex`'s
+    stable tier can reliably join the two sides' declarations across
+    exactly that same qualification mismatch (Codex review on PR #1041):
+    a by-value exposure this scan fails to see leaves the type wrongly
+    ``opaque``, and the stable tier then suppresses the resulting finding
+    with no spelling mismatch left to (accidentally) save it.
+
+    Returns *tname* itself plus its unqualified leaf spelling (the segment
+    after the last ``"::"``) when the two differ -- never only the leaf, so
+    an already-bare name is unaffected and this stays a pure widening of
+    what the old single-spelling scan already caught."""
+    if "::" not in tname:
+        return (tname,)
+    leaf = tname.rsplit("::", 1)[-1]
+    return (tname, leaf) if leaf and leaf != tname else (tname,)
+
+
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
     """Return the subset of *opaque* types that any public function/variable uses by value."""
     by_value_types: set[str] = set()
@@ -182,12 +212,22 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
             continue
         rt = func.return_type.strip()
         for tname in opaque:
-            if tname in rt and not (rt.endswith("*") or "* " in rt):
+            if tname in by_value_types:
+                continue
+            if any(
+                spelling in rt for spelling in _by_value_scan_spellings(tname)
+            ) and not (rt.endswith("*") or "* " in rt):
                 by_value_types.add(tname)
         for param in func.params:
             pt = param.type.strip()
             for tname in opaque:
-                if tname in pt and param.pointer_depth == 0 and not pt.endswith("*"):
+                if tname in by_value_types:
+                    continue
+                if (
+                    any(spelling in pt for spelling in _by_value_scan_spellings(tname))
+                    and param.pointer_depth == 0
+                    and not pt.endswith("*")
+                ):
                     by_value_types.add(tname)
     # Also check variables — a public variable of this type means it's by-value
     for var in snap.variables:
@@ -195,6 +235,10 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
             continue
         vt = var.type.strip()
         for tname in opaque:
-            if tname in vt and not (vt.endswith("*") or "* " in vt):
+            if tname in by_value_types:
+                continue
+            if any(
+                spelling in vt for spelling in _by_value_scan_spellings(tname)
+            ) and not (vt.endswith("*") or "* " in vt):
                 by_value_types.add(tname)
     return by_value_types

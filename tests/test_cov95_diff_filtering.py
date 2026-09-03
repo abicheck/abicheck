@@ -448,6 +448,52 @@ def test_find_by_value_types_pointer_only_returns_empty():
     assert _find_by_value_types(snap, {"Hidden"}) == set()
 
 
+def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
+    """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
+    ``RecordType.name``, which may be qualified (``ns::Handle``), while a
+    signature's rendered type text can spell the identical type bare
+    (``Handle``) -- e.g. when the reference sits inside the same namespace.
+    A plain substring test against the full qualified name misses that
+    exposure entirely, which used to be silently compensated by an
+    equally spelling-based suppression join failing for the same reason;
+    since the join can now also succeed through a stable ``EntityId``
+    (immune to the same mismatch), a missed exposure here would wrongly
+    suppress a real finding. This must still detect the by-value use."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "byvalue",
+                "byvalue",
+                return_type="void",
+                params=[Param(name="h", type="Handle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
+
+
+def test_find_by_value_types_bare_spelling_check_does_not_apply_to_already_bare_names():
+    """The leaf-spelling widening only ever adds a second candidate for a
+    *qualified* name -- an already-bare opaque name's behavior (including
+    its false negatives on an unrelated substring) is completely
+    unaffected."""
+    opaque = {"Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="h", type="OtherHandle", pointer_depth=0)],
+            )
+        ]
+    )
+    # Substring matching still fires here (pre-existing, unrelated
+    # imprecision) -- this pins that the widening changed nothing about it.
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
 # ── _downgrade_opaque_type_changes (1047, 1049-1054) ─────────────────────────
 
 
