@@ -3923,6 +3923,35 @@ second top-level spelling of the same fact.
 > round:** the `--artifact-set` member-level signal — whether the
 > exit-code approach generalizes to it is its own, separate design
 > question, not attempted here — and the typed-API `gate.*` pack field.
+>
+> **Update (2026-09-03, Round 6): the `--artifact-set` member-level signal
+> is closed for `--format json`, still open for `--format text`.** PR
+> #1032's sixth Codex review round found that the marker-file/exit-code
+> rewrite above had silently deleted `action/run.sh`'s pre-existing
+> JSON-verdict check for this exact axis while replacing the single-binary
+> mechanism — regressing `--artifact-set` from "disambiguated via JSON" to
+> "always generic `ERROR`" with nothing catching it. The check (`_json_
+> report_src`/`_report_query` reading `compat_verdict ==
+> "EVIDENCE_CONTRACT_ERROR"`, ahead of `_is_cli_error`) is restored,
+> proven by a regression test that fails against the pre-fix state and
+> passes against the fix
+> (`test_exit_1_artifact_set_evidence_contract_error_from_json_report`).
+> The exit-code approach does **not** generalize here and was not
+> attempted: `service_scan._aggregate_scan_set_verdict` still floors the
+> *set's* own process exit at `1` (a single scan process spawning many
+> in-process member scans has no per-member OS exit code to report), so
+> this axis is disambiguated from the JSON report's `compat_verdict`, the
+> same way `--artifact-set` already disambiguates every other exit-1 cause.
+> **Genuinely still open:** a `format: text` `--artifact-set` step has no
+> such report to read — the Action never injects a `--write json=...`
+> secondary for `--artifact-set` (`run.sh`'s own comment: "`--artifact-set`
+> has no single-artifact JSON shape to render a second time"). Closing that
+> needs either a `--format text` artifact-set abort marker of its own (the
+> same forgeability concerns the single-binary marker hit would need
+> re-litigating for the multi-process/multi-member shape) or teaching the
+> Action to request a JSON secondary for `--artifact-set` runs
+> specifically — a separate, not-yet-scoped piece of work, unchanged by
+> this round.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4974,13 +5003,17 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        preset/exit_code_scheme fields, both
                                        resolved through the identical
                                        GateOptions object; see PR 4's own
-                                       section for the full account); still
-                                       open: a real --artifact-set
-                                       member-level evidence-contract signal
-                                       for the Action (the --format text
-                                       gap's remaining half -- a member's
-                                       abort never reaches the single-binary
-                                       catch site's own exit code at all)
+                                       section for the full account);
+                                       --artifact-set's own member-level
+                                       evidence-contract signal for the
+                                       Action closed for --format json
+                                       (2026-09-03, Round 6 -- the JSON-
+                                       verdict check a marker-file/exit-code
+                                       rewrite had silently regressed is
+                                       restored); still open: the same
+                                       signal for --format text, since the
+                                       Action never requests a JSON
+                                       secondary for --artifact-set runs
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;
