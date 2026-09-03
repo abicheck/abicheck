@@ -3859,7 +3859,32 @@ second top-level spelling of the same fact.
 > **not** added to either typed request, since neither `compare` nor `scan
 > --against` itself exposes them as CLI flags (only `.abicheck.yml` does,
 > which a typed caller has no equivalent of) — adding them would have been
-> new surface beyond CLI parity, not parity itself.
+> new surface beyond CLI parity, not parity itself. **A narrower gap found
+> while landing this and deliberately left open, not silently missed:**
+> `compatibility_evaluation_frontend.compare_request_inputs` — the ADR-049
+> D7 resolver behind `CompareRequest(..., contract_evaluation=True)`'s own
+> persisted receipt — still does not read `CompareRequest.severity_preset`/
+> `exit_code_scheme` into `ExplicitCompatibilityInputs` (its own docstring
+> still literally says "a `CompareRequest` carries no severity,
+> exit-code-scheme, or pack inputs", which this slice makes half-false).
+> Cosmetic only, not a functional bug the way the equivalent `scan` gap
+> was (`_scan_request_config`'s history, above): a typed `CompareRequest`
+> has no gate-pack field at all, so there is no pack whose D7 precedence
+> could be silently overridden the way `scan`'s real repro was — the real
+> exit-code decision (`CompareResult.exit_decision`) is unaffected, since it
+> reads the two fields directly, not through this resolver. What's stale is
+> only the `gate.exit_code_scheme`/`gate.severity.*` block inside the
+> `--contract` JSON report's `contract_context.evaluation_context.
+> resolved_config`, for the narrow combination of a typed caller setting
+> both `contract_evaluation=True` and `severity_preset`/`exit_code_scheme`.
+> Not fixed in this slice because `compatibility_evaluation_frontend.py`
+> sits at its own `architecture/debt.yaml` `no_growth` baseline (1996
+> lines, four lines under the file-size hard cap) — the fix needs a design
+> decision this plan's own governing principle asks not to make reactively
+> under a nearly-exhausted line budget (move responsibility to a new leaf
+> module vs. squeeze a few lines out of the existing one), not a
+> five-minute patch. Left for a future session alongside the two items
+> above.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
