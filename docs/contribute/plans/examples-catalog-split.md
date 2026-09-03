@@ -141,16 +141,20 @@ recorded the generic rule(s) it composes, reusing an existing rule case's
 `rule_slug` wherever the scenario's underlying mechanism is the same one a
 single-library rule case already demonstrates (e.g. `case90_bundle_intra_dep_removed`
 → `exported-function-removed`, `case92_bundle_provider_changed` →
-`symbol-source-owner-changed`, all seven header-graph-reconciliation
-capability cases → `public-api-gains-internal-dependency`, the internal
-dependency every one of them introduces), and otherwise a conceptual slug in
-the same ecosystem-neutral style the four original entries already used for
-a mechanism no rule case demonstrates alone yet (e.g. `case175_kabi_crc_changed`
-→ `symbol-type-signature-hash-changed`, `case148_xcheck_header_build_mismatch`
-→ `header-build-context-mismatch`). Three of those seven also name the
-specific graph-reconciliation outcome their own README's Category calls out
-as its actual point (`case194` → `internal-declaration-renamed-reconciled`,
-`case196` → `internal-declaration-moved-reconciled`, `case197` →
+`symbol-source-owner-changed`, five of the seven header-graph/call-graph
+capability cases (`case191`, `case194`-`case197`) → `public-api-gains-internal-dependency`,
+the internal dependency each of them introduces), and otherwise a conceptual
+slug in the same ecosystem-neutral style the four original entries already
+used for a mechanism no rule case demonstrates alone yet (e.g.
+`case175_kabi_crc_changed` → `symbol-type-signature-hash-changed`,
+`case148_xcheck_header_build_mismatch` → `header-build-context-mismatch`,
+`case192_call_graph_break_survives_suppression` →
+`internal-symbol-required-by-public-api`, distinct from case160's "public
+entry newly gains a dependency" rule since case192's call edge already
+exists in v1). Three of the five also name the specific graph-reconciliation
+outcome their own README's Category calls out as its actual point (`case194`
+→ `internal-declaration-renamed-reconciled`, `case196` →
+`internal-declaration-moved-reconciled`, `case197` →
 `internal-declaration-identity-reconciled`) — `case195` is the deliberate
 "reconciliation correctly declines to fire" counter-example, so it carries
 no reconciliation-outcome slug of its own.
