@@ -31,11 +31,19 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 REPO_DIR = Path(__file__).resolve().parents[2]
-EXAMPLES_DIR = REPO_DIR / "examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "special_cli_examples.v2"
 RUNNER = "validation/scripts/run_special_cli_examples.py"
-BASE_SNAPSHOT = EXAMPLES_DIR / "case170_env_runtime_floor_raised" / "old.abi.json"
+BASE_SNAPSHOT = (
+    example_catalog.case_dir("case170_env_runtime_floor_raised") / "old.abi.json"
+)
 
 
 class CompareSpec(NamedTuple):
@@ -277,7 +285,7 @@ def _validate_compare(
 def _run_compare_case(
     case_id: str, spec: CompareSpec, entry: dict[str, Any], timeout: int
 ) -> dict[str, Any]:
-    case_dir = EXAMPLES_DIR / case_id
+    case_dir = example_catalog.case_dir(case_id)
     old = case_dir / spec.old
     new = case_dir / spec.new
     command = [
@@ -301,7 +309,7 @@ def _run_compare_case(
 
 
 def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[str, Any]:
-    snapshot = EXAMPLES_DIR / case_id / "snapshot.abi.json"
+    snapshot = example_catalog.case_dir(case_id) / "snapshot.abi.json"
     command = [
         sys.executable,
         "-m",
@@ -360,7 +368,7 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
 def _make_pack(
     case_id: str, side: str, spec: EvidenceSpec, root: Path
 ) -> tuple[Path, Path]:
-    source = EXAMPLES_DIR / case_id / f"{side}.json"
+    source = example_catalog.case_dir(case_id) / f"{side}.json"
     pack = root / f"{case_id}-{side}"
     destination = pack / spec.payload_rel
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -410,7 +418,7 @@ def _run_evidence_case(
 def _run_python_case(
     entry: dict[str, Any], timeout: int, temp_root: Path
 ) -> dict[str, Any]:
-    case_dir = EXAMPLES_DIR / PYTHON_CASE
+    case_dir = example_catalog.case_dir(PYTHON_CASE)
     root = temp_root / PYTHON_CASE
     old_dir = root / "old"
     new_dir = root / "new"
