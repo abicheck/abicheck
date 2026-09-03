@@ -48,7 +48,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Zero false positives on the benchmark catalog** in both measured lanes, headers-only (L2) and full evidence (L3 to L5). Lower tiers do over-call internal churn; that is exactly what adding headers removes. Numbers below.
 - **Cross-platform, pure Python.** Linux ELF, Windows PE/COFF, macOS Mach-O. Python 3.10+, no compiler required for binary-only and debug-info modes.
 - **Built for CI.** Deterministic exit codes, SARIF, JSON, Markdown, HTML, and JUnit output, snapshot baselines, policy profiles, suppressions with expiry, a first-class [GitHub Action](#github-action), and a typed [Python API](#python-api) that resolves through the same request objects as the CLI.
-- **Beyond one library.** Compare a multi-library release as one bundle, check whether a *specific application* still works (`--used-by`), verify a plugin still satisfies its host (`--required-symbol`), or validate a binary's whole dependency stack across two sysroots (`deps compare`).
+- **Beyond one library.** Compare a multi-library release as one bundle (cross-library dependency and provider findings are ELF/Linux-only; other platforms get per-library results), check whether a *specific application* still works (`--used-by`), verify a plugin still satisfies its host (`--required-symbol`), or validate a binary's whole dependency stack across two sysroots (`deps compare`).
 - **Drop-in for `abi-compliance-checker`.** `abicheck compat` mirrors ABICC's flags. [Migration guides](#migrating-from-another-tool) cover ABICC and libabigail.
 
 ## What a report looks like
@@ -118,7 +118,7 @@ abicheck treats compatibility as a question of **evidence**. The more independen
 | **L0** | Just the binary, even stripped | ELF / PE / Mach-O parsers | Exported symbols, SONAME, symbol versions, visibility, dependencies |
 | **L1** | + Debug symbols (`-g` build or sidecar) | DWARF, PDB, BTF, CTF | Struct sizes and field offsets, enum values, vtable slots, calling conventions, packing |
 | **L2** | + Public headers (`-H include/`) | castxml or clang AST | Signatures, overloads, access levels, `noexcept`/`final`/`explicit`, templates, what is public vs internal |
-| **L3** | + Build data (`-p build/`) | compile DB, CMake, Ninja, Bazel, Make | The flags the library was actually built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, export maps |
+| **L3** | + Build data (`--build-info build/`) | compile DB, CMake, Ninja, Bazel, Make | The flags the library was actually built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, export maps |
 | **L4** | + Sources | Per-translation-unit source replay | Facts that never reach the binary: macro and `constexpr` values, default-argument values, inline and template bodies |
 
 The layers are **additive, not a fallback chain**. abicheck overlays everything you give it and computes one worst-wins verdict under an *authority rule*: artifact evidence (L0 to L2) decides the shipped-ABI verdict, while build and source evidence (L3, L4) explains, localizes, scopes, or adds findings of its own, but never deletes an artifact-proven break. A derived source-reachability graph, `L5`, is computed from L3/L4 and used by `scan`; it is never an input.
@@ -221,7 +221,7 @@ The whole CLI is seven root commands. Most single-library projects only ever nee
 | I want to… | Use |
 |------------|-----|
 | Check whether a library upgrade breaks existing consumers | [`abicheck compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
-| Compare a co-versioned **multi-library release** as one bundle | [`abicheck compare old-release/ new-release/`](https://abicheck.github.io/abicheck/use/multi-binary/) |
+| Compare a co-versioned **multi-library release** as one bundle (bundle-level analysis is [ELF/Linux-only](https://abicheck.github.io/abicheck/use/multi-binary/#platform-support)) | [`abicheck compare old-release/ new-release/`](https://abicheck.github.io/abicheck/use/multi-binary/) |
 | Check whether **my application** survives a library upgrade | [`abicheck compare --used-by ./myapp`](https://abicheck.github.io/abicheck/use/appcompat/) |
 | Check whether a **plugin** still satisfies its host's entrypoints | [`abicheck compare --required-symbol SYM`](https://abicheck.github.io/abicheck/use/plugin-systems/) |
 | Scan a PR with source and build context, against a baseline | [`abicheck scan ARTIFACT --against baseline.json`](https://abicheck.github.io/abicheck/use/scan-levels/) |
@@ -247,7 +247,7 @@ The whole CLI is seven root commands. Most single-library projects only ever nee
     upload-sarif: true
 ```
 
-The action installs Python, castxml, and abicheck, runs the comparison, sets the exit code, and can post a PR comment or upload SARIF to the Security tab. Outputs: `verdict`, `exit-code`, `report-path`. Matrix builds, cross-compilation, and gating flags: [GitHub Action](https://abicheck.github.io/abicheck/use/github-action/).
+The action installs Python, castxml, and abicheck, runs the comparison, sets the exit code, and can post a PR comment or upload SARIF to the Security tab. Outputs: `verdict`, `exit-code`, `report-path`. The default compare path needs only checkout access; grant `pull-requests: write` for PR comments and `security-events: write` for SARIF upload. Matrix builds, cross-compilation, and gating flags: [GitHub Action](https://abicheck.github.io/abicheck/use/github-action/).
 
 ### Exit codes
 
@@ -256,10 +256,10 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 | `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | Safe. No binary ABI break |
 | `2` | `API_BREAK` | Source-level break. Consumers must recompile; existing binaries still run |
 | `4` | `BREAKING` | Binary ABI break. Existing binaries will crash or misbehave |
-| `8` | any | A library vanished from a multi-library release and `--fail-on-removed-library` is set |
+| `8` | any | A library vanished from a multi-library release and `--fail-on-removed-library` is set; under the default scheme, only when no `2`/`4` already applies |
 | `64` | usage error | Bad flags or inputs |
 
-A `--severity-*` flag or a `severity:` config block switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `scan`, `deps compare`, and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
+`--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `scan`, `deps compare`, and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
 
 ### Policies and suppressions
 
@@ -288,7 +288,7 @@ print(result.diff.verdict)       # e.g. Verdict.BREAKING
 print(len(result.diff.changes))  # number of detected changes
 ```
 
-`run_compare` returns a `CompareResult` with `diff`, `old_snapshot`, `new_snapshot`, and the resolved suppressions. The CLI and the API resolve through the same typed request objects and compatibility semantics, so a script or an AI agent gets the same answer a human gets at the terminal. There is no separate protocol server; agents use the CLI's JSON/SARIF output or this API directly. A portable [Agent Skill](https://abicheck.github.io/abicheck/use/agent-skills/) is generated from [`skills-src/`](skills-src/check-abi-compatibility/) so a coding agent can answer "will this break existing consumers?" on its own.
+`run_compare` returns a `CompareResult` with `diff`, `old_snapshot`, `new_snapshot`, and the resolved suppressions. The CLI and the API resolve through the same typed request objects and compatibility semantics, so a script or an AI agent gets the same answer a human gets at the terminal. There is no separate protocol server; agents use the CLI's JSON/SARIF output or this API directly. A portable [Agent Skill](https://abicheck.github.io/abicheck/use/agent-skills/) (an internal candidate, not yet externally published) is generated from [`skills-src/`](skills-src/check-abi-compatibility/) with `python scripts/install_dev_skill.py`, so a coding agent can answer "will this break existing consumers?" on its own.
 
 Snapshots, custom policies, rendering, and the CLI/API parity table: [Python API guide](https://abicheck.github.io/abicheck/use/python-api/).
 
@@ -311,7 +311,7 @@ Details, including which toolchains each lane exercises: [Platform Support](http
 
 The [`examples/`](examples/README.md) directory contains **197 real-world ABI/API scenarios** with ground-truth verdicts: 192 single-library cases (most are `v1`/`v2` pairs with a consumer app; the rest are single-snapshot audits and hand-built L3 to L5 evidence-model fixtures for breaks no artifact layer can see) plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
 
-CI validates the full **197-case catalog** on every push to `main` and every pull request that touches the engine, the tests, or the examples; `python scripts/benchmark_comparison.py --suite all` runs the same sweep locally. Each GitHub Release additionally runs and attaches the pinned 74-case cross-tool subset for apples-to-apples comparison with libabigail and ABICC. The [validation runbook](docs/contribute/examples-validation-runbook.md) describes the full proof matrix.
+CI validates the full **197-case catalog** on every push to `main` and every pull request that touches the engine, the tests, or the examples; `python scripts/benchmark_comparison.py --suite all` runs the same sweep locally. Each GitHub Release additionally runs and attaches the pinned 74-case cross-tool subset (`case01` to `case73` plus `case26b`; `python scripts/benchmark_comparison.py --suite pinned74`) for apples-to-apples comparison with libabigail and ABICC. The [validation runbook](docs/contribute/examples-validation-runbook.md) describes the full proof matrix.
 
 ## Documentation
 
