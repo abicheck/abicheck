@@ -775,14 +775,9 @@ class InMemoryObjectStore:
             if digest not in self._objects:
                 self._objects[digest] = payload
             return digest
-        # Normalize once, then hash and store from that same snapshot -- a
-        # second independent traversal of a stateful `Mapping` could digest
-        # different content than what gets stored (Codex review). `stripped`
-        # is already `canonical_form`'s output, so hashing goes straight
-        # through `semantic_digest_of_canonical_form` rather than
-        # `semantic_digest`, which would otherwise re-run `canonical_form`
-        # over content that is already canonical -- a second full traversal
-        # of every section on every `put()` call that bought nothing.
+        # Normalize once, then hash and store from that same snapshot -- a second independent traversal of a
+        # stateful `Mapping` could digest different content than what gets stored (Codex review). Hashed via
+        # `semantic_digest_of_canonical_form`, not `semantic_digest`, since `stripped` is already canonical.
         stripped = strip_capture_metadata(content)
         digest = semantic_digest_of_canonical_form(stripped, algorithm=algorithm)
         if digest not in self._objects:
@@ -797,12 +792,8 @@ class InMemoryObjectStore:
             raise KeyError(f"no object stored under digest {digest!r}") from None
         if isinstance(stored, bytes):
             return stored  # immutable already -- no copy needed
-        # An isolated copy, not the store's own object -- else a caller
-        # could mutate it in place, uncorrectably (Codex review). `stored`
-        # is already `canonical_form`'s own output (that's exactly what
-        # `put()` stored), so `copy_of_canonical_form` gives the same
-        # isolation without `canonical_form`'s redundant re-sort/re-validate
-        # pass over content that is already known canonical.
+        # An isolated copy, not the store's own object -- else a caller could mutate it in place, uncorrectably
+        # (Codex review). `stored` is already canonical, so `copy_of_canonical_form`'s plain copy suffices.
         return copy_of_canonical_form(stored)
 
     def has(self, digest: str) -> bool:

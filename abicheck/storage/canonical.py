@@ -57,10 +57,8 @@ __all__ = [
     "CAPTURE_METADATA_KEY",
     "canonical_form",
     "canonical_json",
-    "copy_of_canonical_form",
     "raw_digest",
     "semantic_digest",
-    "semantic_digest_of_canonical_form",
     "strip_capture_metadata",
 ]
 
