@@ -38,10 +38,9 @@ safe.
 from __future__ import annotations
 
 import functools
-import json
 
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
-from abicheck.serialization import snapshot_to_dict
+from abicheck.serialization import snapshot_to_json
 from abicheck.snapshot_io import (
     ZSTD_LEVEL_BASELINE,
     SnapshotCompression,
@@ -104,14 +103,28 @@ def graph_heavy_snapshot_at_scale() -> AbiSnapshot:
 @functools.lru_cache(maxsize=1)
 def graph_heavy_snapshot_at_scale_json_bytes() -> bytes:
     """The serialized JSON bytes of :func:`graph_heavy_snapshot_at_scale`,
-    cached the same way and for the same reason -- ``snapshot_to_dict`` +
-    ``json.dumps`` over an 8600-entry graph is itself real, measurable work
-    (not just the compression downstream of it), and every caller that needs
-    these bytes needs the *identical* bytes, so computing them once and
-    sharing is lossless. Asserts the >8 MiB "past zstd's single-segment
-    window collapse" premise here, once, rather than in every caller that
-    used to re-derive these bytes just to check it."""
-    encoded = json.dumps(snapshot_to_dict(graph_heavy_snapshot_at_scale())).encode()
+    cached the same way and for the same reason -- ``snapshot_to_json()``
+    over an 8600-entry graph is itself real, measurable work (not just the
+    compression downstream of it), and every caller that needs these bytes
+    needs the *identical* bytes, so computing them once and sharing is
+    lossless. Asserts the >8 MiB "past zstd's single-segment window
+    collapse" premise here, once, rather than in every caller that used to
+    re-derive these bytes just to check it.
+
+    Uses ``snapshot_to_json()`` (the real ``save_snapshot``/``write_snapshot``
+    envelope -- the sectioned-document shape ``to_sectioned_document()``
+    produces, ADR-062/063 Phase 8), not a hand-rolled ``json.dumps(
+    snapshot_to_dict(...))`` of the legacy flat shape (Codex review, fresh
+    evidence): the whole point of :func:`graph_heavy_snapshot_at_scale_
+    compressed_bytes` below is that its output is byte-identical to what a
+    real ``save_snapshot()`` call would write, and a caller shortcutting a
+    write through it (``test_service_resolve_input_round_trips_a_
+    compressed_snapshot_at_production_scale``, the compare-CLI test's
+    ``old_p``) is asserting it reads a file in the *current* production
+    format at scale -- a flat-shape file would still round-trip
+    (``snapshot_from_dict`` reads both transparently) but would silently
+    stop being the regression coverage those tests claim to provide."""
+    encoded = snapshot_to_json(graph_heavy_snapshot_at_scale()).encode()
     assert len(encoded) > 8 * 1024 * 1024  # past the single-segment collapse point
     return encoded
 

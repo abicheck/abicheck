@@ -278,21 +278,22 @@ jobs:
         # integration combines per-worker coverage automatically, so
         # --cov-append here still lands in one coverage-slow.xml.
         #
-        # tests/test_performance.py is carved out and run separately,
-        # serially, unchanged (Codex review, PR #1036): its whole-file
-        # `pytestmark = pytest.mark.slow` also selects wall-clock-budget
-        # (2s/5s/30s ceilings) and scaling-exponent-fit tests, which measure
-        # real elapsed time -- running them concurrently with the CPU-heavy
-        # tests above makes xdist scheduler contention part of the
-        # measurement, so this required job could fail (or a scaling fit
-        # could distort) with no actual product regression.
-        # .github/workflows/performance.yml's own dedicated job already
-        # runs this same file the identical serial way on its own schedule;
-        # this invocation is this job's copy, for every PR.
+        # tests/test_performance.py AND tests/test_perf_binary_scan.py are
+        # carved out and run separately, serially, unchanged (Codex review,
+        # PR #1036 -- the second file caught in a follow-up round: same
+        # whole-file `pytestmark = pytest.mark.slow`, same wall-clock
+        # ceilings, 3s/5s and 30s/45s here). Both measure real elapsed time,
+        # so running them concurrently with the CPU-heavy tests above makes
+        # xdist scheduler contention part of the measurement, and this
+        # required job could fail (or a scaling fit could distort) with no
+        # actual product regression. .github/workflows/performance.yml's own
+        # dedicated job already runs both files together the identical
+        # serial way on its own schedule; this invocation is this job's
+        # copy, for every PR.
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
-          pytest tests/test_performance.py -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_perf_binary_scan.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner
