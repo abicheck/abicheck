@@ -46,6 +46,12 @@ from typing import Any, Protocol
 
 from .severity import PRESET_DEFAULT, SeverityConfig, resolve_severity_config
 
+#: The three spellings `--exit-code-scheme`/`.abicheck.yml`'s `exit_code_
+#: scheme` accept (`cli_scan.py`'s own `click.Choice`, mirrored by
+#: `compare`'s equivalent option) -- `None` (not stated) is separately
+#: valid at every call site below, so it isn't included here.
+_VALID_EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
+
 
 class _GatePackApplication(Protocol):
     """The structural shape of
@@ -257,6 +263,27 @@ def resolve_release_gate_options(
         severity_quality_issues=severity_quality_issues,
         severity_addition=severity_addition,
     )
+    if (
+        release_exit_code_scheme is not None
+        and release_exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES
+    ):
+        # Every caller here is past its own front-end's usage-error
+        # handling (Click's `--exit-code-scheme` is a `click.Choice`; a
+        # pack's `gate.exit_code_scheme` is validated at load time) --
+        # except a typed `CompareRequest`/`ScanRequest` caller, which has
+        # none: an unchecked, misspelled scheme (e.g. "legacy " with
+        # trailing whitespace) would otherwise silently fail neither the
+        # `== "severity"`/`== "legacy"` branch below, so a caller that also
+        # set a severity_preset would get the severity algorithm merely
+        # because `severity_config` came back non-None -- a breaking
+        # change could then exit 0 instead of the misspelling being
+        # rejected (Codex review, PR #1032). `ValueError`, matching
+        # `resolve_severity_config`'s own contract for an invalid
+        # `severity_preset` just below.
+        raise ValueError(
+            f"invalid exit_code_scheme {release_exit_code_scheme!r}; "
+            f"must be one of {_VALID_EXIT_CODE_SCHEMES} or None"
+        )
     severity_config = _resolve_release_severity_config(
         severity_preset,
         severity_abi_breaking,

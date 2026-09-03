@@ -290,3 +290,96 @@ class TestScanRequestGateOptions:
         )
         omitted = run_scan(ScanRequest(binaries=[new], baseline=old))
         assert explicit_none.exit_code == omitted.exit_code == 4
+
+
+class TestInvalidExitCodeScheme:
+    """`exit_code_scheme` reaches `resolve_release_gate_options` unchecked
+    from a typed `CompareRequest`/`ScanRequest` -- unlike the CLI's own
+    `--exit-code-scheme` (`click.Choice`) or a pack's `gate.exit_code_scheme`
+    (validated at load time), a typed caller has no front-end validation of
+    its own (Codex review, PR #1032). Regression for the bug class, not just
+    the one reported spelling: a misspelled/mistyped scheme must be rejected
+    outright rather than silently falling through the `"severity"`/
+    `"legacy"` `==` checks -- which, combined with a `severity_preset` also
+    being set, would otherwise silently select the severity algorithm for a
+    scheme that was never actually `"severity"` (the exact failure mode
+    Codex's finding describes: a breaking change exiting 0 instead of the
+    typo being caught)."""
+
+    @pytest.mark.parametrize(
+        "bad_scheme",
+        [
+            "legacy ",  # trailing whitespace -- Codex's own repro
+            "Legacy",  # wrong case
+            "lgeacy",  # misspelling
+            "strict",  # a real severity *preset* name, not a scheme
+            "",  # empty string
+        ],
+    )
+    def test_resolve_release_gate_options_rejects_unknown_schemes(
+        self, bad_scheme: str
+    ) -> None:
+        from abicheck.policy.release_gate_options import resolve_release_gate_options
+
+        with pytest.raises(ValueError, match="exit_code_scheme"):
+            resolve_release_gate_options(
+                None,
+                release_exit_code_scheme=bad_scheme,
+                severity_preset="info-only",
+                severity_abi_breaking=None,
+                severity_potential_breaking=None,
+                severity_quality_issues=None,
+                severity_addition=None,
+            )
+
+    @pytest.mark.parametrize("scheme", ["auto", "legacy", "severity", None])
+    def test_resolve_release_gate_options_accepts_every_valid_scheme(
+        self, scheme: str | None
+    ) -> None:
+        from abicheck.policy.release_gate_options import resolve_release_gate_options
+
+        # Must not raise.
+        gate = resolve_release_gate_options(
+            None,
+            release_exit_code_scheme=scheme,
+            severity_preset=None,
+            severity_abi_breaking=None,
+            severity_potential_breaking=None,
+            severity_quality_issues=None,
+            severity_addition=None,
+        )
+        assert gate.exit_code_scheme == scheme
+
+    def test_scan_request_with_a_misspelled_scheme_fails_fast_not_silently(
+        self, tmp_path: Path
+    ) -> None:
+        """The end-to-end regression this fix closes: before it, a typed
+        `ScanRequest(exit_code_scheme="legacy ", severity_preset=...)`
+        would silently resolve `GateOptions.severity` to a real config
+        (neither `==` branch in `resolve_release_gate_options` matched the
+        trailing-whitespace string), so `run_scan_core` would select the
+        severity algorithm for a scheme that was never actually
+        `"severity"` -- exactly the misclassification risk Codex's finding
+        named. It must now raise instead."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old = AbiSnapshot(
+            version="1.0",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            elf=_elf("_Z5pub_av"),
+            **common,
+        )
+        new = AbiSnapshot(version="2.0", functions=[], elf=_elf(), **common)
+        old_p, new_p = _write(tmp_path, old, new)
+
+        with pytest.raises(ValueError, match="exit_code_scheme"):
+            run_scan(
+                ScanRequest(
+                    binaries=[new_p],
+                    baseline=old_p,
+                    severity_preset="info-only",
+                    exit_code_scheme="legacy ",
+                )
+            )
