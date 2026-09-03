@@ -439,6 +439,47 @@ override: `project plan`'s former `--gate-missing-required`/
 deprecation window" stance as the rest of this cleanup) — set the policy
 here instead.
 
+## Known limitations of the declarative topology
+
+The declarative `targets:`/`bundles:`/`profiles:`/`baseline:` path is not
+yet a drop-in replacement for every project. `abicheck compare` on
+directory/package inputs, driven directly from your own workflow, remains
+the path every project can use today (see
+[Multi-Binary Releases](../use/multi-binary.md)). Before adopting the
+declarative topology, confirm none of these apply to you:
+
+- **`bundles:` checks only run at `depth: binary`** — `headers`/`build`/
+  `source` are rejected at `project validate`
+  (`BUNDLE_CHECK_DEPTHS` in `abicheck/buildsource/project_targets.py`). If
+  a bundle-level check needs header-scope evidence, it can't run through a
+  `bundles:` entry today.
+- **Per-target `public_headers:` is not honored for a `kind: bundle`
+  member** — it is projected into a standalone target's own run-plan cell
+  (see the `targets:` field table above), but no per-bundle-member header
+  staging exists.
+- **Stored-facts bundle comparison (`BundleFacts`) has no run-plan /
+  composite-Action / `check-project.yml` wiring** — it is reachable from
+  the Python API and from `compare --old-bundle-facts`, not from the
+  declarative CI surface.
+- **`publish-baseline.yml` expects one `build-output.json` per contract
+  profile** (G30 P1.1). A build system that doesn't emit a per-profile
+  manifest in that shape needs to add one first — see the
+  [`build-output.json` reference](build-output-schema.md).
+- **`profiles:` describes a build *lane* (compiler/flags), not a library** —
+  one profile's `targets[]` can list several libraries built under it, but
+  a project needs one profile *per distinct build configuration*: e.g. a
+  release with a SYCL-built subset needs one profile for that subset and
+  another for the rest, not one profile per library.
+
+None of these block `compare`-based CI — they are gaps in the declarative
+topology specifically. The design history for the bundle-depth restriction
+and the `build-output.json` contract lives in the
+[G30 GitHub Actions integration plan](../contribute/plans/g30-github-actions-integration-model.md),
+and for stored-facts bundle comparison in the
+[G38 bundle-facts plan](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md).
+Neither lists these as scheduled work, so check the code itself before
+relying on a gap having closed.
+
 ## Validation
 
 `abicheck project validate [CONFIG]` (`CONFIG` defaults to
