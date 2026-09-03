@@ -13,9 +13,13 @@
   `_evidence_contract_gated()` now checks that marker file when there is no
   JSON report to read, so a `format: text` step (the Action's documented
   default) publishes `EVIDENCE_CONTRACT_ERROR` instead of the generic
-  `ERROR` bucket a bad flag or crash gets. (An earlier iteration of this fix
-  signaled over a stderr marker line; two review rounds found that channel
-  forgeable — a crafted `INPUT_NEW_LIBRARY` path echoed into an unrelated
-  error message could spoof it, even with a whole-line match, since a legal
-  Unix filename may itself contain embedded newlines — so the signal was
-  moved off stderr entirely.)
+  `ERROR` bucket a bad flag or crash gets. (Two earlier iterations of this
+  fix were still forgeable: signaling over a stderr marker line let a
+  crafted `INPUT_NEW_LIBRARY` path — echoed into an unrelated error message,
+  even via an embedded newline — spoof the classification regardless of
+  anchoring, so the signal moved to a marker file; that file's path was
+  then found to leak as an inherited environment variable to every
+  subprocess `abicheck` itself spawns during evidence collection, letting a
+  PR-controlled build script forge the marker directly, so the variable is
+  now popped out of this process's own environment at import time, before
+  any subprocess of its own can inherit it.)

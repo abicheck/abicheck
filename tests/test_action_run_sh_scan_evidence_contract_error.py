@@ -574,3 +574,39 @@ def test_evidence_contract_gated_marker_file_matches_a_real_cli_run(tmp_path):
     result = _run_marker_file_pipeline(marker_path)
     assert result.returncode == 0, result.stderr
     assert "GATED=1" in result.stdout
+
+
+def test_evidence_contract_marker_env_var_does_not_leak_to_child_processes():
+    """Regression for the class Codex found on PR #1032 (third review
+    round): ``ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE`` used to be read live
+    from ``os.environ`` at exception time, which meant it stayed visible
+    (inherited) to every subprocess ``abicheck`` itself spawns during
+    evidence collection (build-tool queries over the *analyzed* checkout,
+    via ``deadline.run_bounded``'s ``Popen`` calls, none of which restrict
+    ``env=``) -- a PR-controlled build script could read the path and write
+    the marker itself, forging ``EVIDENCE_CONTRACT_ERROR`` for an unrelated
+    failure later in the same run.
+
+    Proves the actual mechanism, not just the symptom: spawn a fresh
+    interpreter with the env var set, trigger the same import
+    ``abicheck.cli``'s unconditional command-registration block performs
+    for every real invocation (``cli_scan_helpers``, which pops the
+    variable at import time), and assert it is gone from ``os.environ``
+    afterward -- meaning no subprocess this process goes on to spawn could
+    ever inherit it."""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os\n"
+            "os.environ['ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE'] = '/tmp/should-not-leak'\n"
+            "import abicheck.cli_scan_helpers  # noqa: F401\n"
+            "print('LEAKED' if 'ABICHECK_EVIDENCE_CONTRACT_MARKER_FILE' in os.environ else 'STRIPPED')\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "STRIPPED" in proc.stdout, proc.stdout
+    assert "LEAKED" not in proc.stdout, proc.stdout
