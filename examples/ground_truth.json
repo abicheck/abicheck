@@ -7230,6 +7230,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [
+    "internal-declaration-renamed-reconciled",
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,
@@ -7264,6 +7265,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [
+    "internal-declaration-moved-reconciled",
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,
@@ -7281,6 +7283,7 @@
    "artifact_shape": "fixture-pair",
    "validation_owner": "evidence-cases",
    "related_rules": [
+    "internal-declaration-identity-reconciled",
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,

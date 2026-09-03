@@ -62,7 +62,7 @@ unaffected. Each of the 197 entries carries:
 | `scope` | `single-library` or `multi-library` (the five bundle cases) |
 | `artifact_shape` | `compiled-pair`, `snapshot-pair`, `snapshot-audit`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:`/`mode:` fields when a case declares them (authoritative over any file-scan heuristic; `snapshot-audit` is a single-release G20 scan, `snapshot-pair` an old/new comparison), else from what the case directory actually ships |
 | `validation_owner` | which runner family exercises the case (mirrors `examples/CLAUDE.md`'s "owner families" list) |
-| `related_rules` | rule slugs a scenario composes — populated only for the scenarios the design discussion named explicitly (see the module docstring's "Known gaps") |
+| `related_rules` | rule slugs a scenario composes — populated for every scenario case (see "What Phase 2 implements" below for how each was derived) |
 | `rule_slug` / `variant_of` | every `rule`-entity case's canonical family name and, for a confirmed duplicate, the case it's a variant of — see "What Phase 2 implements" below |
 
 Entity/scenario_kind/ecosystem classification for the scenario families
@@ -141,12 +141,19 @@ recorded the generic rule(s) it composes, reusing an existing rule case's
 `rule_slug` wherever the scenario's underlying mechanism is the same one a
 single-library rule case already demonstrates (e.g. `case90_bundle_intra_dep_removed`
 → `exported-function-removed`, `case92_bundle_provider_changed` →
-`symbol-source-owner-changed`, five of the seven header-graph-reconciliation
-capability cases → `public-api-gains-internal-dependency`), and otherwise a
-conceptual slug in the same ecosystem-neutral style the four original
-entries already used for a mechanism no rule case demonstrates alone yet
-(e.g. `case175_kabi_crc_changed` → `symbol-type-signature-hash-changed`,
-`case148_xcheck_header_build_mismatch` → `header-build-context-mismatch`).
+`symbol-source-owner-changed`, all seven header-graph-reconciliation
+capability cases → `public-api-gains-internal-dependency`, the internal
+dependency every one of them introduces), and otherwise a conceptual slug in
+the same ecosystem-neutral style the four original entries already used for
+a mechanism no rule case demonstrates alone yet (e.g. `case175_kabi_crc_changed`
+→ `symbol-type-signature-hash-changed`, `case148_xcheck_header_build_mismatch`
+→ `header-build-context-mismatch`). Three of those seven also name the
+specific graph-reconciliation outcome their own README's Category calls out
+as its actual point (`case194` → `internal-declaration-renamed-reconciled`,
+`case196` → `internal-declaration-moved-reconciled`, `case197` →
+`internal-declaration-identity-reconciled`) — `case195` is the deliberate
+"reconciliation correctly declines to fire" counter-example, so it carries
+no reconciliation-outcome slug of its own.
 `related_rules` is deliberately not validated against the live `rule_slug`
 set for this reason — see `tests/test_catalog_taxonomy.py`'s
 `test_related_rules_are_non_empty_strings` and `gen_catalog_taxonomy.py`'s

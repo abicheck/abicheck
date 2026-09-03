@@ -1,7 +1,7 @@
 {
   "frozen_at": "2026-07-18T07:10:59Z",
   "git_commit": "ffa860cfc5e4c080905ee6a5eeb1947534e010be",
-  "ground_truth_sha256": "c77481cda6999792076291b30829f79eaab8368c6b6f475c92ce9e2e2b363113",
+  "ground_truth_sha256": "92a6a7475aa893c58202ca542805dfcd3db03f586103ac741fe5dd39e35f96b6",
   "results_by_case": {
     "case01_symbol_removal": {
       "abicc_dumper": "BREAKING",

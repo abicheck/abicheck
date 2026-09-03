@@ -147,14 +147,19 @@ RELATED_RULES: dict[str, list[str]] = {
     ],
     "case193_ordinary_exported_fn_call_not_reachable": ["exported-function-removed"],
     "case194_header_graph_rename_reconciled": [
-        "public-api-gains-internal-dependency"
+        "internal-declaration-renamed-reconciled",
+        "public-api-gains-internal-dependency",
     ],
     "case195_header_graph_ambiguous_rename_not_reconciled": [
         "public-api-gains-internal-dependency"
     ],
-    "case196_header_graph_move_reconciled": ["public-api-gains-internal-dependency"],
+    "case196_header_graph_move_reconciled": [
+        "internal-declaration-moved-reconciled",
+        "public-api-gains-internal-dependency",
+    ],
     "case197_header_graph_identity_reconciled": [
-        "public-api-gains-internal-dependency"
+        "internal-declaration-identity-reconciled",
+        "public-api-gains-internal-dependency",
     ],
 }
 
