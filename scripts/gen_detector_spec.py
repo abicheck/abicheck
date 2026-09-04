@@ -30,9 +30,18 @@ import sys
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+# This script's own directory is already on sys.path when run directly, but not
+# when loaded via importlib (tests/test_detector_spec.py) -- guard mirrors
+# gen_examples_docs.py's identical sibling-import guard for the identical reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import example_catalog  # noqa: E402
+
 MD_PATH = REPO_DIR / "docs" / "reference" / "detector-spec.md"
 JSON_PATH = REPO_DIR / "docs" / "reference" / "detector-spec.json"
-GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 EXAMPLES_DOC_DIR = REPO_DIR / "docs" / "reference" / "examples"
 
 # Cap the number of example links rendered per kind so common kinds don't blow

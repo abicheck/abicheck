@@ -22,7 +22,6 @@ Marked `@pytest.mark.integration` — requires a C/C++ compiler + castxml in PAT
 """
 from __future__ import annotations
 
-import json
 import os
 import platform
 import shutil
@@ -40,8 +39,13 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
+REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Platform helpers
@@ -84,8 +88,8 @@ SHARED_LIB_SUFFIX = _shared_lib_suffix()
 # Single source of truth: add cases / known_gap fields there, not here.
 # To skip a case, set its "expected" value to null in ground_truth.json.
 # ---------------------------------------------------------------------------
-_GT_PATH = REPO_DIR / "examples" / "ground_truth.json"
-_gt_data = json.loads(_GT_PATH.read_text())
+_GT_PATH = example_catalog.GROUND_TRUTH_PATH
+_gt_data = example_catalog.load_ground_truth()
 EXPECTED: dict[str, str | None] = {
     k: v.get("expected") for k, v in _gt_data["verdicts"].items()
 }
@@ -530,12 +534,17 @@ def test_subprocess_failure_detail_truncates_each_stream_independently() -> None
 # Auto-discovery: build test parameter list
 # ---------------------------------------------------------------------------
 def _collect_cases() -> list[tuple[str, str | None]]:
+    # ground_truth.json["verdicts"] (via example_catalog.iter_case_dirs), not a
+    # directory scan -- a case's identity is the ground-truth entry, and this
+    # survives Phase 4's planned catalog/{rules,patterns,...} directory split
+    # without this file needing to change (docs/contribute/plans/
+    # examples-catalog-split.md).
     cases = []
-    for d in sorted(EXAMPLES_DIR.iterdir()):
-        if not d.is_dir() or not d.name.startswith("case"):
+    for case_id, case_dir in sorted(example_catalog.iter_case_dirs()):
+        if not case_dir.is_dir():
             continue
-        expected = EXPECTED.get(d.name, "UNKNOWN")
-        cases.append((d.name, expected))
+        expected = EXPECTED.get(case_id, "UNKNOWN")
+        cases.append((case_id, expected))
     return cases
 
 
@@ -738,7 +747,7 @@ def test_example_pipeline(
                 f"native toolchain does not support"
             )
 
-    case_dir = EXAMPLES_DIR / case_name
+    case_dir = example_catalog.case_dir(case_name)
     assert case_dir.is_dir(), f"Case directory not found: {case_dir}"
 
     v1_src, v2_src, v1_hdr, v2_hdr = _find_sources(case_dir)

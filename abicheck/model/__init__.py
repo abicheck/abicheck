@@ -68,6 +68,7 @@ from .extraction_contract import (
 )
 from .fact import (
     Fact as Fact,
+    fact_confirmed_true as fact_confirmed_true,
     replace_with_fact_sync as replace_with_fact_sync,
     resolved_fact_value as resolved_fact_value,
 )
@@ -111,6 +112,7 @@ __all__ = [
     "Visibility",
     "canonicalize_type_name",
     "cv_qualifiers_only_differ",
+    "fact_confirmed_true",
     "func_signature_cv_only_differ",
     "is_abi_surface_type_name",
     "is_compiler_internal_type",

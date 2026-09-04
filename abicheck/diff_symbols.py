@@ -23,6 +23,7 @@ from typing import Any
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.constants import constant_index_pair, diff_constants
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -942,6 +943,13 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
     }
     old_virtual_sigs = old_virtual_signatures(old.function_map.values())
+    # Mirrors diff_types.py's own identical computation for the same pair of
+    # snapshots -- see virtual_method_addition's own docstring for why it
+    # needs this to decide whether TYPE_VTABLE_CHANGED would decline for a
+    # reason unrelated to evidence (a legacy pre-v21 direct-clang snapshot).
+    vtable_facts_reliable = (
+        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    )
 
     # Build a lookup of ALL functions in new snapshot (including hidden).
     new_all = new.function_map
@@ -976,7 +984,14 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         if mangled not in old_map and f_new.name not in matched_by_name:
             virtual_break = virtual_method_addition(
-                f_new, old_owner_classes, old_types, new_types, old_virtual_sigs
+                f_new,
+                old_owner_classes,
+                old_types,
+                new_types,
+                old_virtual_sigs,
+                old.function_map,
+                new_all,
+                vtable_facts_reliable=vtable_facts_reliable,
             )
             changes.append(
                 virtual_break
@@ -1819,21 +1834,29 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("constants")
 def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect preprocessor / const-constant changes (ABICC: Changed/Added/Removed_Constant).
+    """The constant family, migrated onto the ``SemanticIR`` read index
+    (ADR-063 Phase 6B's second checker cutover -- see ``compare/
+    constants.py``'s own docstring for why constants went second).
 
-    Header-tier only: ``AbiSnapshot.constants`` is populated from header
-    parsing (castxml, and the direct-clang backend's own
-    ``parse_constants()``). If either side was NOT (confirmed) parsed from
-    headers (DWARF/symbols mode, a snapshot taken before constant extraction,
-    or a legacy/inferred headerless snapshot), its ``constants`` map is empty
-    only because the data is *unavailable* — comparing would report every
-    constant as removed (or added, depending on direction). Skip unless both
-    sides are header-aware.
+    What stays here is only the *comparison-level* half: the header-tier
+    gate (``AbiSnapshot.constants`` is empty, not merely absent, whenever
+    either side wasn't parsed from headers -- comparing would report every
+    constant as removed/added), which raw map the pair trusts (there is
+    only one legacy collection here, unlike typedefs' alias-map choice), and
+    the fingerprint-comparison-reliability predicate
+    (``constant_value_fingerprint_comparison_unreliable``, closed over both
+    snapshots -- see that function's own docstring for why a pre-
+    stabilization direct-clang fingerprint can't be trusted against a fresh
+    one). Detection itself moved to ``compare.constants.diff_constants``,
+    which reads only through :class:`~abicheck.model.semantic_ir_index.
+    SemanticIRIndex` and is forbidden by ``scripts/semantic_ir_cutover.py``
+    from touching a legacy constant collection at all.
 
-    ``constant_value_fingerprint_comparison_unreliable`` declines a CHANGED
-    verdict when either side's value is a pre-stabilization direct-clang
-    fingerprint that can't be trusted against a fresh one — see that
-    function's own docstring (``diff_default_value_reliability.py``) for why.
+    ``constant_index_pair`` hands back the ``SemanticIR``-backed index when
+    its own rendered names/values/identities exactly reproduce
+    ``old.constants``/``new.constants`` on both sides, and the legacy
+    adapter otherwise -- so this is a real read of the IR wherever the IR is
+    faithful, and bit-for-bit the previous behavior everywhere else.
 
     Known limitation, not attempted here: a versioned inline namespace can
     make the same constant reachable under two qualified spellings
@@ -1846,53 +1869,18 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     if not _both_header_aware(old, new):
         return []
-    changes: list[Change] = []
-    old_consts = old.constants
-    new_consts = new.constants
-
-    for name, old_val in old_consts.items():
-        new_val = new_consts.get(name)
-        if new_val is None:
-            changes.append(
-                make_change(
-                    ChangeKind.CONSTANT_REMOVED,
-                    symbol=name,
-                    name=name,
-                    old_value=old_val,
-                    entity_id=old.constant_entity_ids.get(name),
-                )
+    old_index, new_index = constant_index_pair(
+        old, new, old_constants=old.constants, new_constants=new.constants
+    )
+    return diff_constants(
+        old_index,
+        new_index,
+        is_fingerprint_comparison_unreliable=(
+            lambda old_value, new_value: constant_value_fingerprint_comparison_unreliable(
+                old, new, old_value, new_value
             )
-        elif new_val != old_val:
-            if constant_value_fingerprint_comparison_unreliable(
-                old, new, old_val, new_val
-            ):
-                continue
-            changes.append(
-                make_change(
-                    ChangeKind.CONSTANT_CHANGED,
-                    symbol=name,
-                    name=name,
-                    old=repr(old_val),
-                    new=repr(new_val),
-                    old_value=old_val,
-                    new_value=new_val,
-                    entity_id=old.constant_entity_ids.get(name)
-                    or new.constant_entity_ids.get(name),
-                )
-            )
-
-    for name, new_val in new_consts.items():
-        if name not in old_consts:
-            changes.append(
-                make_change(
-                    ChangeKind.CONSTANT_ADDED,
-                    symbol=name,
-                    name=name,
-                    new_value=new_val,
-                    entity_id=new.constant_entity_ids.get(name),
-                )
-            )
-    return changes
+        ),
+    )
 
 
 @registry.detector("var_access")

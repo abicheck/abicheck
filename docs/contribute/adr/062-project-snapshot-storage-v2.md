@@ -45,12 +45,25 @@ readable. The directory writer/reader
 `read_legacy_snapshot_document`) remain available as typed-API primitives —
 `compare`/`scan --against` still accept a directory package as an input
 path — but no `dump` CLI flag produces one today.
-Folding baseline sets/`BundleFacts` into sections, multi-artifact packages,
-variant capture, and the `.tar.zst` transport form (A1.4-A1.8) remain not
-implemented — note this is the **remainder of Phase 1**, not Phase 2 (Phase
-2 is the separate scale/performance work: lazy loading, streaming encode,
-cache migration, indexes). A full per-item design for A1.1's `.tar.zst`
-remainder and A1.4-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
+**A1.4/A1.5's first slice is now implemented** (ADR-063 Track B "8B"):
+`PackageManifest.project_sections` (`abicheck/storage/package.py`) is the
+cross-artifact-evidence slot D7 describes, and `abicheck/bundle_facts_store
+.py`'s `write_bundle_facts_package`/`read_bundle_facts_package` are the
+first real producer/reader of a multi-`ArtifactRef` `PackageManifest` — one
+`BundleFacts` becomes N `ArtifactRef`s under one shared `VariantRef`, with
+`BundleFacts.manifest` (an `InstantiationManifest`) as the first
+`project_sections` entry, reusing `import_legacy_snapshot`'s per-artifact
+section split so byte-identical section content across libraries is stored
+once. `abicheck/project_snapshot_store.py`'s `write_project_manifest`/
+`read_project_manifest` publish and read `project_sections` back through
+the real D6 directory layout. What remains open: `BuildSourcePack`/project
+source-graph dedup (the ~57-59 MB-per-artifact finding this ADR's Context
+names), `bundle_variants:` capture wiring, stored/live release-comparison
+CLI reachability, non-ELF artifact membership, and the `.tar.zst` transport
+form (the remainder of A1.1/A1.4-A1.8) — note this is the **remainder of
+Phase 1**, not Phase 2 (Phase 2 is the separate scale/performance work:
+lazy loading, streaming encode, cache migration, indexes). A full per-item
+design for A1.1's `.tar.zst` remainder and A1.4-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
 now exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
 "Phase 1" section — design only, not implemented by that addition; the
 object model these items build on (`PackageManifest.artifact_refs`/

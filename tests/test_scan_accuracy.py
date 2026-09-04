@@ -9,12 +9,20 @@ These tests systematically verify that:
 from __future__ import annotations
 
 import copy
+import sys
+from pathlib import Path
 
 import pytest
 
-from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.checker_policy import Confidence
-from abicheck.model import (
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
+from abicheck.checker_policy import Confidence  # noqa: E402
+from abicheck.model import (  # noqa: E402
     AbiSnapshot,
     EnumMember,
     EnumType,
@@ -294,14 +302,11 @@ class TestGroundTruthExpectedKinds:
     """Validate that ground_truth.json expected_kinds field is parseable."""
 
     def test_ground_truth_expected_kinds_are_valid(self):
-        import json
-        from pathlib import Path
-
-        gt_path = Path(__file__).parent.parent / "examples" / "ground_truth.json"
+        gt_path = example_catalog.GROUND_TRUTH_PATH
         if not gt_path.exists():
             pytest.skip("ground_truth.json not found")
 
-        gt = json.loads(gt_path.read_text())
+        gt = example_catalog.load_ground_truth()
         valid_kinds = {ck.value for ck in ChangeKind}
 
         for case_name, case_data in gt["verdicts"].items():

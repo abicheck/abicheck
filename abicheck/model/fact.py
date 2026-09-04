@@ -324,3 +324,18 @@ class Fact(Generic[T]):
         return cls(
             status=FactStatus.NOT_APPLICABLE, value=None, diagnostics=diagnostics
         )
+
+
+def fact_confirmed_true(fact: Fact[bool | None] | None) -> bool:
+    """Whether *fact* is a confirmed-complete, positively-``True`` reading.
+
+    Shared by "alternate conclusive trait" fallbacks (e.g. a confirmed
+    ``is_standard_layout``/``is_trivially_copyable`` as independent proof a
+    record owns no vtable — see ``diff_layout._check_vptr_introduced`` /
+    ``diff_vtable_layout._is_polymorphic``). Only a ``PRESENT`` status with
+    value ``True`` is trusted; anything else (``None``, not collected,
+    partial, or a confirmed ``False``/``None`` value) is not — a confirmed
+    ``False`` says nothing either way about the question these callers ask,
+    so it must not be conflated with "no evidence".
+    """
+    return fact is not None and fact.status is FactStatus.PRESENT and fact.value is True

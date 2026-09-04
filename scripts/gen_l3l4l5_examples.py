@@ -44,6 +44,14 @@ from typing import Any
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO))
 
+# Phase 3 resolver (scripts/CLAUDE.md). This script's own directory is
+# already on sys.path when run directly, but not when imported as
+# `scripts.gen_l3l4l5_examples` -- guard mirrors gen_examples_docs.py's
+# identical sibling-import guard for the identical reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import example_catalog  # noqa: E402
+
 from abicheck.buildsource.adapters.base import derive_build_options  # noqa: E402
 from abicheck.buildsource.build_evidence import (  # noqa: E402
     BuildEvidence,
@@ -64,7 +72,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     mark_source_edges_extractor_coverage,
 )
 
-EXAMPLES = _REPO / "examples"
+EXAMPLES = example_catalog.EXAMPLES_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -721,7 +729,7 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
 def _write_or_check(
     case_name: str, side: str, data: dict[str, Any], *, check: bool
 ) -> bool:
-    path = EXAMPLES / case_name / f"{side}.json"
+    path = example_catalog.case_dir(case_name) / f"{side}.json"
     rendered = json.dumps(data, indent=2, sort_keys=True) + "\n"
     if check:
         if not path.is_file():

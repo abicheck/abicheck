@@ -286,12 +286,17 @@ conflict resolution (see AGENTS.md's own extensive documentation of D7/D8
 in the module map). But the resolved answer still gets translated into
 several different runtime shapes: single-pair `compare` uses a typed
 resolved configuration; `scan` has its own receipt/configuration flow;
-policy packs fold into `PolicyFile`; gate packs fold into `SeverityConfig`
-and raw scheme strings; and the release fan-out has no equivalent typed
-object at all — `apply_release_gate_pack()`'s own documentation states it
-manually mirrors pack-application logic against six raw gate/severity
-strings because release has no `ResolvedCompareConfig`-shaped object to
-read from.
+policy packs fold into `PolicyFile`; and the release fan-out now has its
+own resolved gate object (`policy.release_gate_options.GateOptions`/
+`resolve_release_gate_options`, ADR-064, landed 2026-09-02) rather than
+raw scheme strings — closing this section's original "no equivalent typed
+object at all" premise (Codex review, PR #1050, fresh evidence). What
+remains: `GateOptions` is not itself `EffectiveGate`/
+`EffectiveEvaluationConfig`-shaped, and `apply_release_gate_pack()`'s own
+documentation still states it manually mirrors, rather than calls,
+`pack_application.apply_to_compare_config`'s identical fold logic,
+because the release fan-out has no `ResolvedCompareConfig`-shaped object
+of its own to fold packs onto.
 
 **Target:** one runtime object,
 

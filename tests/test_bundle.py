@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle import (
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.bundle import (  # noqa: E402
     BundleSnapshot,
     ConsumerEntry,
     InstantiationManifest,
@@ -23,9 +29,9 @@ from abicheck.bundle import (
     compare_bundle,
     load_manifest,
 )
-from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
-from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.checker_policy import ChangeKind, Verdict  # noqa: E402
+from abicheck.checker_types import Change, DiffResult  # noqa: E402
+from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -3790,9 +3796,7 @@ class TestCompareReleaseBundleE2E:
 
         from abicheck.cli import main
 
-        case_dir = (
-            Path(__file__).parent.parent / "examples" / "case84_bundle_soname_skew"
-        )
+        case_dir = example_catalog.case_dir("case84_bundle_soname_skew")
         old = tmp_path / "v1"
         new = tmp_path / "v2"
         old.mkdir()
@@ -3846,9 +3850,7 @@ class TestCompareReleaseBundleE2E:
 
         from abicheck.cli import main
 
-        case_dir = (
-            Path(__file__).parent.parent / "examples" / "case84_bundle_soname_skew"
-        )
+        case_dir = example_catalog.case_dir("case84_bundle_soname_skew")
         old = tmp_path / "v1"
         new = tmp_path / "v2"
         old.mkdir()
@@ -3888,9 +3890,7 @@ class TestCompareReleaseBundleE2E:
 
         from abicheck.cli import main
 
-        case_dir = (
-            Path(__file__).parent.parent / "examples" / "case84_bundle_soname_skew"
-        )
+        case_dir = example_catalog.case_dir("case84_bundle_soname_skew")
         old = tmp_path / "v1"
         new = tmp_path / "v2"
         old.mkdir()

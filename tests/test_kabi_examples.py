@@ -9,16 +9,22 @@ castxml), so this corpus is validated compiler-free, mirroring
 
 from __future__ import annotations
 
-import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.service import compare_snapshots, resolve_input
-
 _REPO = Path(__file__).resolve().parent.parent
-_EXAMPLES = _REPO / "examples"
-_GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.service import compare_snapshots, resolve_input  # noqa: E402
+
+_EXAMPLES = example_catalog.EXAMPLES_DIR
+_GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: kABI cases: those shipping a v1.symvers/v2.symvers fixture pair. Order- and
 #: duplicate-insensitive so this predicate can't drift from
@@ -37,7 +43,7 @@ def test_kabi_corpus_is_non_empty() -> None:
 @pytest.mark.parametrize("case_name", _KABI_CASES)
 def test_case_matches_ground_truth(case_name: str) -> None:
     info = _GT[case_name]
-    case_dir = _EXAMPLES / case_name
+    case_dir = example_catalog.case_dir(case_name)
     old = resolve_input(case_dir / "v1.symvers", is_elf=False)
     new = resolve_input(case_dir / "v2.symvers", is_elf=False)
     assert old.kabi is not None and new.kabi is not None, (

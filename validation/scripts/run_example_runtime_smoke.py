@@ -22,8 +22,14 @@ import time
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parents[2]
-EXAMPLES_DIR = REPO_DIR / "examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "example_runtime_smoke.v1"
 
 
@@ -231,7 +237,7 @@ def _skip_reason(case_name: str, entry: dict[str, object]) -> str | None:
     platforms = entry.get("platforms", ["linux", "macos", "windows"])
     if _platform() not in platforms:
         return f"not supported on {_platform()} (requires {platforms})"
-    if not (EXAMPLES_DIR / case_name / "CMakeLists.txt").exists():
+    if not (example_catalog.case_dir(case_name) / "CMakeLists.txt").exists():
         return "no CMakeLists.txt"
     if entry.get("requires_feature") == "_BitInt":
         return "compiler lacks required feature '_BitInt'"

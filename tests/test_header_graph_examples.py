@@ -50,8 +50,14 @@ from pathlib import Path
 
 import pytest
 
-REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
+REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
 
 #: (case dir, expected verdict, expected changed kinds beyond the L5 risk
 #: finding all four share). An entry may itself be a ``frozenset`` of
@@ -139,7 +145,7 @@ def test_header_graph_reproduces_documented_finding(
     expected_extra_kinds: set[str],
     tmp_path: Path,
 ) -> None:
-    case_dir = EXAMPLES_DIR / case_name
+    case_dir = example_catalog.case_dir(case_name)
     cxx = _find_cxx_compiler()
     assert cxx is not None
 

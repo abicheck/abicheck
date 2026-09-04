@@ -43,7 +43,6 @@ from pathlib import Path
 from typing import Any
 
 REPO_DIR = Path(__file__).resolve().parents[2]
-GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 DEFAULT_RESULTS_DIR = REPO_DIR / "results"
 
 # Run directly from a source checkout (no `pip install -e .` yet, no external
@@ -53,6 +52,12 @@ DEFAULT_RESULTS_DIR = REPO_DIR / "results"
 sys.path.insert(0, str(REPO_DIR))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect_full_example_matrix as _matrix  # noqa: E402
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 sys.path.insert(0, str(REPO_DIR / "tests"))
 import validate_examples as _ve  # noqa: E402

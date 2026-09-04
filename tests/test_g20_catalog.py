@@ -16,7 +16,7 @@ committed fixtures in sync with their generator.
 
 from __future__ import annotations
 
-import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,8 +24,14 @@ import pytest
 from tests._scan_fixtures import crosscheck_surface, load_case_snapshot
 
 _REPO = Path(__file__).resolve().parent.parent
-_EXAMPLES = _REPO / "examples"
-_GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO / "scripts"))
+import example_catalog  # noqa: E402
+
+_EXAMPLES = example_catalog.EXAMPLES_DIR
+_GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: G20 cases: those declaring a cross-check expectation (the v4 audit corpus).
 _G20_CASES = sorted(
@@ -52,7 +58,7 @@ def test_g20_corpus_is_non_empty() -> None:
 @pytest.mark.parametrize("case_name", _G20_CASES)
 def test_case_emits_canonical_expected_kinds(case_name: str) -> None:
     info = _GT[case_name]
-    snap_path = _EXAMPLES / case_name / "snapshot.abi.json"
+    snap_path = example_catalog.case_dir(case_name) / "snapshot.abi.json"
     assert snap_path.is_file(), (
         f"{case_name}: missing committed fixture {snap_path.name}"
     )

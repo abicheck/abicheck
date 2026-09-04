@@ -4318,6 +4318,23 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > outstanding PR B work. See the "Ordering" table at the bottom, which now
 > marks PR B **(DONE)** on this basis.
 
+**Update (2026-09-02, corrects the note above): `GateOptions` landed** —
+not as part of PR G2, and not via the internal-representation rewrite this
+note anticipated. ADR-064's own dedicated slice
+(`abicheck/policy/release_gate_options.py`'s `GateOptions`/
+`resolve_release_gate_options`) resolved the release fan-out's severity/
+exit-code-scheme config into one typed object additively, without the
+raw-string call sites needing to change shape first — see that ADR's own
+"Landed" note. What genuinely remains, narrower than this note's framing:
+`apply_release_gate_pack` still mirrors, rather than calls,
+`pack_application.apply_to_compare_config`'s identical fold logic,
+deferred to the duplication-and-convergence-assessment plan's own P0
+`EffectiveGate`/`EffectiveEvaluationConfig` target — not PR G2, a
+different, narrower `ExitDecision`-precedence unification unrelated to
+this fold. Full current status: ADR-063 Track 4's 7B ledger entry,
+`docs/_meta/one-semantic-pipeline-status.yaml` (Codex review, PR #1050,
+fresh evidence).
+
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.
 

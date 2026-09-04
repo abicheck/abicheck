@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -43,6 +44,8 @@ from abicheck.source_smoke import SourceSmokeSpec, run_source_smoke
 REPO_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = REPO_DIR / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
 
 ARTIFACT_VARIANTS = (
     "debug-headers",
@@ -1153,22 +1156,19 @@ def _check_case_preconditions(
 
 
 def _resolve_case_sources(
-    name: str,
-    expected_raw: str | None,
+    name: str, expected_raw: str | None, *, case_dir: Callable[[str], Path] = example_catalog.case_dir,
 ) -> tuple[Path, tuple[Path, Path, Path | None, Path | None]] | CaseResult:
-    """Resolve the case directory and source files.
-
-    Returns (case_dir, sources_tuple) on success, or a CaseResult on error.
-    """
-    case_dir = EXAMPLES_DIR / name
-    if not case_dir.is_dir():
+    """Resolve the case directory and source files. Returns (case_dir,
+    sources_tuple) on success, or a CaseResult on error."""
+    resolved = case_dir(name)
+    if not resolved.is_dir():
         return CaseResult(name, "ERROR", expected_raw, None, "directory not found")
 
-    sources = _find_sources(case_dir)
+    sources = _find_sources(resolved)
     if sources is None:
         return CaseResult(name, "ERROR", expected_raw, None,
                           "no recognised source layout (harness error — fix example or mark skip in ground_truth.json)")
-    return case_dir, sources
+    return resolved, sources
 
 
 def _handle_build_error(

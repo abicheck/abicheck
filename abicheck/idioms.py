@@ -283,6 +283,18 @@ def _recognise_handle(graph: SurfaceGraph) -> dict[str, IdiomTag]:
 
 
 def _recognise_factory(graph: SurfaceGraph) -> dict[str, IdiomTag]:
+    """Tag a public function returning a pointer to a polymorphic type as a
+    factory idiom (ADR-027 anti-pattern context, not a finding on its own).
+
+    ADR-063 Phase 5B audit: single-snapshot, no old/new pair to gate --
+    an uncollected ``vtable_fact`` on ``rec`` only makes ``rec_vtable`` read
+    empty, which can only *withhold* a factory tag (under-detection), never
+    fabricate one. Left on the collapsed ``resolved_fact_value`` read
+    rather than converted to a direct ``FactStatus`` branch, matching the
+    five single-snapshot aids the second 5B PR already closed this same way
+    (``diff_stdlib_impl``/``diff_time64``/``idioms._collect_base_targets``/
+    ``buildsource/header_graph``/``compare.surface_graph``).
+    """
     out: dict[str, IdiomTag] = {}
     for fn in graph.snapshot.functions:
         if fn.visibility != Visibility.PUBLIC:
@@ -430,6 +442,14 @@ def _has_virtual_destructor(rec: RecordType) -> bool:
     mangled attribute. A polymorphic type whose vtable has no destructor
     slot has a non-virtual destructor — deleting through a base pointer
     is UB.
+
+    ADR-063 Phase 5B audit: single-snapshot, called only from
+    ``_detect_non_virtual_dtor`` below, itself already gated on a non-empty
+    ``vtable`` before calling here (so this function only ever runs on a
+    record whose vtable evidence already read as populated). An uncollected
+    ``vtable_fact`` here can only read as "no destructor slot found," which
+    that caller already treats as *possible* absence of a virtual
+    destructor, not confirmed — see its own note.
     """
     vtable = resolved_fact_value(rec.vtable_fact, [])
     for entry in vtable:
@@ -661,7 +681,17 @@ def _detect_non_virtual_dtor(
     base_targets: set[str],
     factory_targets: set[str],
 ) -> list[AntiPattern]:
-    """Collect POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR findings."""
+    """Collect POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR findings.
+
+    ADR-063 Phase 5B audit: single-snapshot (an ADR-027 anti-pattern scan
+    over one already-produced snapshot, not an old/new pair), so an
+    uncollected ``vtable_fact`` on ``rec`` can only shrink ``vtable`` to
+    ``[]`` and skip this record entirely -- a *missed*
+    ``POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR``, never a fabricated one. Same
+    under-detection-only shape the second 5B PR already closed for
+    ``idioms._collect_base_targets``, left on the collapsed
+    ``resolved_fact_value`` read for the same reason.
+    """
     found: list[AntiPattern] = []
     for rec in graph.snapshot.types:
         vtable = resolved_fact_value(rec.vtable_fact, [])

@@ -38,9 +38,15 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of merge commit fd197d59 (PR #1025, the PDB EntityId/SemanticIR
-# slice), which itself carries forward b2d8eaaf (PR #1024, the multi-TU
-# manifest occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
+# as of base commit bfb40222 (Track 4's 7B ledger/plan-table drift fix --
+# updating the run_outcome concept's removal_gate to describe the landed
+# release-fan-out investigation and its parity test -- was built on and
+# merges this content forward), which itself carries forward 2a88a5bd (the
+# constant family's SemanticIR cutover -- Phase 6B's second detector
+# cohort), 62679b1 (PR #1041, the typedef family's SemanticIR cutover --
+# Phase 6B's first detector cohort), fd197d59 (PR #1025, the PDB
+# EntityId/SemanticIR slice), b2d8eaaf (PR #1024, the multi-TU manifest
+# occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
 # status-sync fixes. Update this file in the same PR that changes a
 # concept's landed status.
 #
@@ -53,7 +59,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: fd197d59
+as_of_commit: bfb40222
 as_of_date: "2026-09-03"
 
 concepts:
@@ -105,23 +111,71 @@ concepts:
       (now compare/opaque_types.OpaqueTypeIndex, matching on
       StableEntityId first and the RecordType.name spelling second) and
       type_reachability.py's closure-walk record-tracking keys (now
-      SnapshotLocalIdentity rather than bare str). Still open: the
-      opaque-type index does not yet NARROW -- the bare-RecordType.name
-      collision remains reachable through its spelling tier, because
-      making the stable tier authoritative would drop a real suppression
-      whenever two sides' producers disagree about whether an identity
-      was resolved; that needs stable-tier completeness on both sides
-      first. type_reachability.py's own spelling-matching machinery
+      SnapshotLocalIdentity rather than bare str). Bare-name-collision
+      narrowing landed 2026-09-03, through three review rounds that each
+      tightened the completeness predicate: OpaqueTypeIndex now carries
+      stable_by_local (the stable ids resolved per bare spelling), and
+      intersect() computes complete as -- for every spelling both sides
+      agree is opaque -- the two sides' own stable_by_local sets for it
+      being EXACTLY EQUAL AND NON-EMPTY, not merely "each side resolved
+      something" (that per-side-only condition passes even when the two
+      sides resolve DIFFERENT ids for the same declaration) and not merely
+      "the two sets intersect" (that passes even when only ONE of several
+      declarations colliding on one spelling actually paired, since a
+      shared id from one declaration keeps the intersection non-empty
+      while a different declaration under the same spelling silently
+      disagrees). Equal-and-empty is explicitly excluded too: two sides
+      that BOTH resolved nothing for a spelling are not in agreement, they
+      simply have no stable evidence for it, so counting that as paired
+      would let strict=True reject a change against a contentless miss
+      instead of falling through to the spelling tier. Only when this
+      three-part predicate holds does contains(..., strict=True) trust a
+      stable-tier miss as proof of non-opacity rather than falling back to
+      the collision-prone spelling tier. Investigation for this slice
+      found the completeness precondition already holds for every current
+      producer's own output
+      (castxml/clang/DWARF/PDB all populate RecordType.entity_id
+      unconditionally, BTF/CTF inherits it via the shared DWARF builder) --
+      the realistic incompleteness case is producer-version/schema skew
+      (an archived pre-entity_id baseline, or a genuinely mixed
+      header-AST/DWARF comparison), which the completeness gate degrades
+      safely for. Still open: a change carrying no resolvable entity_id at
+      all still falls through to the spelling tier unconditionally (no
+      identity for strict to narrow). type_reachability.py's own
+      spelling-matching machinery
       (_spelling_index/_stripped_signature_spelling/
       _non_stdlib_signature_spellings and _record_identity's three call
       sites) is deliberately NOT migrated: those strings are spellings
       that must appear inside a rendered Function.return_type/Param.type,
       not opaque identities -- the same conclusion Phase 2's ninth slice
-      reached and recorded. And the entity: alias is still not promoted
-      into a real match tier: StableEntityId makes the gate
-      un-forgettable but does not by itself establish that changing what
-      report_canonical_finding_id hashes is safe for already-stored
-      suppression rules, which needs explicit maintainer sign-off.
+      reached and recorded. The entity: alias is still not promoted into a
+      real match tier -- investigated in depth 2026-09-03 rather than left
+      unexamined: StableEntityId/entity_id_is_cross_snapshot_stable (the
+      designated "entity: promotion gate", already built and tested) make
+      the stability precondition un-forgettable, but investigating what
+      concrete bug promotion would actually close today found none.
+      resolve_change_identity's existing NORMALIZED tier for typedefs/
+      constants already keys on their own alias/qualified-name spelling,
+      which both header-AST backends already agree on (the remaining
+      cross-backend risk in that data -- a VALUE spelling difference, e.g.
+      "char const*" vs "char const *" -- is what canonicalize_values=True
+      already normalizes, independently of entity_id); functions/variables
+      already get the CANONICAL (mangled-name) tier, which is strictly more
+      precise than an entity-derived one. So unlike the opaque-type
+      bare-name collision (a demonstrated, testable false suppression this
+      same investigation closed), there is no currently-identifiable
+      finding that promotion would fix -- only the same production
+      compatibility risk already named (changing what
+      report_canonical_finding_id hashes for already-stored suppression
+      rules). Wiring it in anyway would be exactly the "heuristic in search
+      of a bug, not a fix for one" pattern AGENTS.md's own decision-making
+      principles warn against elsewhere (see the constants normalizer's
+      identical reasoning for declining a value-spelling canonicalizer with
+      no observed divergence). Declined for now on that basis, not merely
+      deferred for lack of sign-off; revisit only if a concrete
+      cross-backend or cross-detector collision surfaces that only an
+      entity-tier promotion can close, with the compatibility trade-off
+      made explicitly to a maintainer at that point.
       Separately, producers remain partial: both
       PDB and BTF/CTF now populate entity_id for struct/enum types only
       (types only, 2026-09-03) -- PDB via extract/pdb_scope.py (an
@@ -151,26 +205,71 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Phase 6B (semantic-ir-checker-cutover), first cohort landed
-      2026-09-03: the TYPEDEF family now reads SemanticIR through
-      SemanticIRIndex (abicheck/compare/typedefs.py), with a
+      Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
+      First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
+      through SemanticIRIndex (abicheck/compare/typedefs.py). Second
+      cohort (2026-09-03): the CONSTANT family too
+      (abicheck/compare/constants.py). Both share one
       legacy-flat-snapshot adapter
       (abicheck/model/semantic_ir_legacy_adapter.py) producing the same
-      read shape for a snapshot carrying no SemanticIR, and a new
-      semantic-ir-cutover AI-readiness check (scripts/semantic_ir_cutover.py,
-      a real AST scan, no allowlist) forbidding that module from reading
-      AbiSnapshot.typedefs/typedefs_qualified/typedef_entity_ids. Which
-      backing is used is decided by a fidelity gate requiring the IR's own
-      rendered display names to reproduce the comparison's alias maps
-      exactly on BOTH sides, so the cutover is behavior-preserving by
+      read shape for a snapshot carrying no SemanticIR, and both are
+      forbidden -- by MIGRATED_COHORTS entries in the same
+      semantic-ir-cutover AI-readiness check
+      (scripts/semantic_ir_cutover.py, a real AST scan, no allowlist) --
+      from reading AbiSnapshot.typedefs/typedefs_qualified/
+      typedef_entity_ids and AbiSnapshot.constants/constant_entity_ids
+      respectively. Which backing is used is decided per cohort by a
+      fidelity gate requiring the IR's own rendered display
+      names/values/identities to reproduce the comparison's legacy maps
+      exactly on BOTH sides, so each cutover is behavior-preserving by
       construction. EVERY OTHER detector family remains unmigrated and
       still reads the legacy collections directly -- deliberately, per
       this phase's own non-goal of not widening coverage until one full
       vertical slice is proven; each further cohort needs its own
-      MIGRATED_COHORTS entry. SemanticIRIndex.references() is still
+      MIGRATED_COHORTS entry, AND -- the finding this cohort's own
+      investigation (2026-09-03) adds -- a genuine bug the migration
+      would close, the same bar typedefs/constants themselves cleared
+      (their pre-existing matching mechanism was a flat, unqualified
+      alias map with no real identity story) and records/functions do
+      not: checked both candidate families rather than assumed, and found
+      neither is blocked the way the original cohort-1 framing described.
+      Records: RecordType/TypeMap matching (diff_helpers.py, ADR-045) is
+      already qualified-name-keyed with an ambiguity-safe bare-name
+      alias, so it does not share the flat-bare-map weakness typedefs had
+      before their own migration; and a record's simplest candidate
+      layout facts (size_bits/alignment_bits) are a direct, single-source
+      pass-through of the same RecordType field the SemanticIR normalizer
+      would read to populate them, so a migrated reader could never see a
+      value SemanticIR-vs-legacy comparison could actually disagree on --
+      "records carry layout facts the IR does not yet model" was true but
+      not itself the blocker once checked: modeling them is straightforward
+      (verified by design, not implemented, since there is nothing to
+      close by doing so). Functions: canonical_spelling (the
+      cross-backend-safe "<return>(<param>, ...)" signature spelling,
+      populated since Phase 2's third slice) already resolves the
+      cross-backend signature-spelling agreement the original cohort-1
+      framing named as the open blocker -- but separately, checked
+      whether that spelling problem was ever actually reachable in
+      today's detectors and found it is not: diff_symbols.py's own
+      return-type/parameter-type comparisons already canonicalize via
+      canonicalize_type_name directly, independent of SemanticIR, and
+      function/variable *matching* already keys on the mangled name
+      (resolve_function_identity's CANONICAL tier), an unambiguous,
+      already-qualified identity with no bare-name collision to close.
+      Declined for now on the same basis 2B's entity: alias promotion
+      was (see the identity concept's own removal_gate): not blocked, but
+      no currently-identifiable finding to justify the migration cost;
+      revisit either family if a concrete cross-backed matching or
+      spelling divergence surfaces that today's mechanisms cannot already
+      close. Bare-name-collision narrowing (opaque-type suppression) is
+      the one item from that original "not attempted" list that DID clear
+      this bar and landed this same day -- see the identity concept's own
+      removal_gate for the full account, including why entity: alias
+      promotion was declined on the identical "no bug to fix" basis.
+      SemanticIRIndex.references() is still
       unimplemented (it names a graph traversal belonging with the
-      public-surface reference index, ADR-063 D5 / plan Phase 3), so the
-      typedef cohort does not use it.
+      public-surface reference index, ADR-063 D5 / plan Phase 3), so
+      neither landed cohort uses it.
       Producers remain partial regardless (CanonicalEntity.template_arguments
       is populated for records but not for function templates, and clang
       produces no occurrence at all for a template specialization).
@@ -227,8 +326,35 @@ concepts:
     authority: mixed
     removal_gate: >-
       Phase 7B (boundary-consumer-migration): action/run.sh reads
-      run_outcome/exit from the machine report instead of decoding the
-      raw process exit code and stderr text itself.
+      run_outcome/exit from the machine report instead of decoding the raw
+      process exit code and stderr text itself; the release fan-out's own
+      "independent pair-semantics reimplementation" half of this
+      sub-phase's scope closes when its remaining gaps below land.
+      action/run.sh's first PR landed 2026-09-03, scoped narrowly (most of
+      its raw-exit-code dispatch was found not closable this way):
+      _report_compat_verdict/_severity_gate_exit now read
+      run_outcome.compatibility/run_outcome.gate first, falling back to
+      the pre-existing verdict/severity.exit_code field only when no
+      run_outcome block is present. The release fan-out's own half was
+      investigated 2026-09-03 and found substantially already unified
+      (depth, suppression, pack policy/namespace overrides, compile
+      context, and --contract mode/domain all already route through one
+      service.run_compare chokepoint per pair), with two concrete,
+      still-open gaps: policy.release_gate_options.apply_release_gate_pack
+      mirrors, rather than calls, pack_application.apply_to_compare_config
+      (deferred to the duplication-and-convergence-assessment plan's own
+      P0 EffectiveGate/EffectiveEvaluationConfig target, guarded meanwhile
+      by tests/test_release_gate_pack_fold_parity.py's parity property);
+      and cli_compare_receipt.resolve_release_pack_application
+      unconditionally rejects a --pack asserting contract.unresolved for a
+      release comparison, with no landed fix yet. Full investigation,
+      evidence, and this content's own review history (Codex, PR #1050,
+      several rounds correcting this same account) live in
+      docs/contribute/plans/one-semantic-pipeline.md's "7B's
+      release-fan-out investigation landed" section -- the narrative owner
+      for this concept per docs/AGENTS.md's fact-owner/narrative-owner
+      split; not reproduced here in full, to avoid the exact
+      ledger-vs-plan drift this same PR exists to fix.
 
   sectioned_storage:
     primitive: complete
@@ -238,7 +364,18 @@ concepts:
     removal_gate: >-
       Phase 8B (multi-artifact-canonical-storage): typed DTOs for every
       section beyond semantic_ir, multi-artifact ProjectSnapshot
-      packages, and baseline-set/BundleFacts folded into sections.
+      packages, and baseline-set/BundleFacts folded into sections. First
+      PR landed 2026-09-03: storage.types_section_codec.TypesSection is
+      the "types" legacy section's own typed DTO (wired through
+      storage.dto.types_to_dto/types_from_dto in place of the generic
+      legacy_section_to_dto pass-through envelope), chosen first because
+      it is the simplest case -- exactly one field, always required when
+      the section is present, with none of the schema-version-dependent
+      optional-field sparsity that made provenance/debug/binary
+      considered-and-deferred. On-disk payload shape is unchanged. The
+      remaining seven legacy sections (binary/declarations/layout/debug/
+      build/graph/provenance), multi-artifact ProjectSnapshot packages,
+      and folding baseline-set/BundleFacts into sections all remain open.
 
   report_document:
     primitive: complete

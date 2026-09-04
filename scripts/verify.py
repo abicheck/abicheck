@@ -28,8 +28,8 @@ Profiles:
            The everyday inner-loop command.
     pr     The exact always-required CI-equivalent checks: everything `fast`
            runs, plus golden tests, coverage floor, and the ai-readiness /
-           FP-rate / tier-accuracy / doc-sync / schema/FAIR-metadata gates
-           the `ai-readiness` and `fair-metadata` CI jobs run on every PR.
+           architecture / FP-rate / tier-accuracy / doc-sync /
+           schema/FAIR-metadata gates that required workflows run on every PR.
     full   Everything in `pr`, plus external-tool, parity, performance,
            packaging, and changelog-fragment lanes — each skipped (not
            failed) when the environment lacks the tool it needs (or, for

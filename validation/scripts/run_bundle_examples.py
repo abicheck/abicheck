@@ -25,8 +25,14 @@ import time
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parents[2]
-EXAMPLES_DIR = REPO_DIR / "examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "bundle_examples.v1"
 
 
@@ -101,7 +107,7 @@ def _build_case(build_dir: Path, case_name: str, entry: dict) -> str | None:
     if not libs:
         libs = sorted(
             p.stem
-            for p in (EXAMPLES_DIR / case_name / "old").glob("lib*.c*")
+            for p in (example_catalog.case_dir(case_name) / "old").glob("lib*.c*")
             if p.is_file()
         )
     if not libs:
@@ -122,7 +128,7 @@ def _build_case84(build_dir: Path) -> str | None:
     gcc = shutil.which("gcc")
     if gcc is None:
         return "gcc not found"
-    case_dir = EXAMPLES_DIR / "case84_bundle_soname_skew"
+    case_dir = example_catalog.case_dir("case84_bundle_soname_skew")
     old_dir = build_dir / "case84_bundle_soname_skew" / "old"
     new_dir = build_dir / "case84_bundle_soname_skew" / "new"
     old_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +180,9 @@ def _compare_release(build_dir: Path, case_name: str, entry: dict) -> tuple[dict
     ]
     manifest_file = entry.get("manifest_file")
     if manifest_file:
-        cmd.extend(["--manifest", str(EXAMPLES_DIR / case_name / str(manifest_file))])
+        cmd.extend(
+            ["--manifest", str(example_catalog.case_dir(case_name) / str(manifest_file))]
+        )
     bundle_cohort = entry.get("bundle_cohort")
     if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_kinds") or []):
         bundle_cohort = "libonedal_"

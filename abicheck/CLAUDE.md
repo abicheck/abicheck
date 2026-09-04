@@ -1,8 +1,13 @@
 # CLAUDE.md — `abicheck/` package
 
-This is the main Python package. See `/CLAUDE.md` at the repo root for the
-authoritative module map, key types, conventions, and quick-reference
-commands; that file already documents this directory in depth.
+This is the main Python package. See the repository-root [`CLAUDE.md`](../CLAUDE.md)/[`AGENTS.md`](../AGENTS.md)
+for the authoritative module map, key types, conventions, quick-reference
+commands, and the canonical ADR-061 task-routing table/dependency-direction
+rule. This directory's own [`AGENTS.md`](AGENTS.md) adds task recipes and
+migration bookkeeping specific to `abicheck/` without repeating that table —
+this file is scoped, per-area context for Claude Code sessions rooted here,
+not an adapter that just points elsewhere (root `CLAUDE.md`'s "Claude
+Code-specific notes" section).
 
 ## Quick orientation
 
@@ -11,7 +16,7 @@ Pipeline order (data flow):
 1. **Parse** binary → platform-specific metadata (`elf_metadata.py`,
    `pe_metadata.py`, `macho_metadata.py`, `dwarf_*.py`, `pdb_*.py`,
    `btf_metadata.py`, `ctf_metadata.py`, `sycl_metadata.py`).
-2. **Snapshot** → `dumper.py` builds `AbiSnapshot` (model in `model.py`),
+2. **Snapshot** → `dumper.py` builds `AbiSnapshot` (model in `model/`),
    optionally cached via `snapshot_cache.py`.
 3. **Diff** snapshots (`diff_symbols.py`, `diff_types.py`,
    `diff_platform.py`, `diff_filtering.py`, `diff_versioning.py`,
@@ -25,19 +30,32 @@ Pipeline order (data flow):
 
 ## When adding code here
 
-- Read the matching section of `/CLAUDE.md` before touching `cli.py`,
+- Read the matching section of the root `CLAUDE.md` before touching `cli.py`,
   `diff_platform.py`, `dumper.py`, or `compat/cli.py` — they are large
-  and intentionally so.
-- New `ChangeKind` values: follow the four-step procedure in
-  `/CLAUDE.md` ("Adding a new ChangeKind").
+  legacy files, not a design precedent (see this directory's `AGENTS.md`
+  "Working with legacy large modules": a file already above its recorded
+  adoption baseline may not exceed that baseline, but may regrow up to it
+  after shrinking — not an absolute never-grow rule).
+- **New code goes to its ADR-061 target owner, not the flat legacy
+  namespace.** Check the root `AGENTS.md`'s "Task routing and dependency
+  direction" table before adding a new top-level `cli_*`, `service_*`,
+  `dumper_*`, `diff_*`, `reporter_*`, `bundle_*`, or `contract_*` sibling —
+  the migration targets are `model/`, `storage/`, `extract/`, `compare/`,
+  `policy/`, `workflows/`, `report/`, `frontends/`, and
+  `scripts/check_architecture.py` gates new/growing files and cross-layer
+  imports against `architecture/modules.yaml`/`debt.yaml`.
+- New `ChangeKind` values: follow the five-step procedure in the root
+  `AGENTS.md` ("Adding a new ChangeKind").
 - Every module must start with `from __future__ import annotations`
   (except `__init__.py` / `__main__.py`).
-- Public types live in `model.py`, `checker_types.py`,
-  `checker_policy.py`. Changing their public surface is a breaking
-  change to the Python API — coordinate it.
+- Public types live in `model/`, `checker_types.py`, `checker_policy.py`.
+  Changing their public surface is a breaking change to the Python API —
+  coordinate it.
 
 ## Tests
 
-Unit tests sit in `/tests/`. The default fast run command (see
-`/CLAUDE.md`) excludes integration, libabigail, abicc, slow, and golden
-markers — use it.
+Unit tests sit in `/tests/`. The default fast run command (see the root
+`CLAUDE.md`/`AGENTS.md`) excludes integration, libabigail, abicc, slow, and
+golden markers — use it. `python scripts/verify.py --profile pr --only
+architecture` reproduces the bounded-module gate (ADR-061) locally before it
+runs in CI.

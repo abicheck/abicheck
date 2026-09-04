@@ -34,29 +34,35 @@ from __future__ import annotations
 
 import json
 import struct
+import sys
 from pathlib import Path
 
-from abicheck.btf_metadata import (
+_REPO = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.btf_metadata import (  # noqa: E402
     BTF_KIND_INT,
     BTF_KIND_STRUCT,
     BTF_MAGIC,
     BTF_VERSION,
     parse_btf_from_bytes,
 )
-from abicheck.checker import compare
-from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.ctf_metadata import (
+from abicheck.checker import compare  # noqa: E402
+from abicheck.checker_policy import ChangeKind, Verdict  # noqa: E402
+from abicheck.ctf_metadata import (  # noqa: E402
     CTF_K_INTEGER,
     CTF_K_STRUCT,
     CTF_MAGIC,
     CTF_VERSION_3,
     parse_ctf_from_bytes,
 )
-from abicheck.model import AbiSnapshot
-from abicheck.reporter import to_json, to_markdown
-from abicheck.sycl_metadata import SyclMetadata, SyclPluginInfo
-
-_REPO = Path(__file__).parent.parent
+from abicheck.model import AbiSnapshot  # noqa: E402
+from abicheck.reporter import to_json, to_markdown  # noqa: E402
+from abicheck.sycl_metadata import SyclMetadata, SyclPluginInfo  # noqa: E402
 
 # ── BTF blob builder (minimal, self-contained) ───────────────────────────────
 
@@ -276,8 +282,8 @@ def test_ctf_struct_gains_field_is_breaking_through_compare() -> None:
 def test_committed_btf_example_matches_ground_truth() -> None:
     """The committed examples/case121 BTF blobs reproduce the ground-truth verdict
     through the real parse_btf_from_bytes → compare path (no kernel toolchain)."""
-    case = _REPO / "examples" / "case121_kernel_btf_struct_field_added"
-    gt = json.loads((_REPO / "examples" / "ground_truth.json").read_text())
+    case = example_catalog.case_dir("case121_kernel_btf_struct_field_added")
+    gt = example_catalog.load_ground_truth()
     entry = gt["verdicts"]["case121_kernel_btf_struct_field_added"]
 
     def _snap(blob: str) -> AbiSnapshot:
@@ -294,7 +300,7 @@ def test_committed_btf_example_matches_ground_truth() -> None:
 def test_resolve_input_ingests_raw_btf_blob() -> None:
     """resolve_input() detects a bare BTF blob by magic and parses it (no ELF)."""
     from abicheck.service import resolve_input
-    case = _REPO / "examples" / "case121_kernel_btf_struct_field_added"
+    case = example_catalog.case_dir("case121_kernel_btf_struct_field_added")
     snap = resolve_input(case / "v1.btf")
     assert snap.dwarf is not None and snap.dwarf.has_dwarf
     assert "task_state" in (snap.dwarf.structs or {})
@@ -323,7 +329,7 @@ def test_resolve_input_raw_btf_blob_populates_semantic_ir() -> None:
     from abicheck.model.identity import entity_id_for_type
     from abicheck.service import resolve_input
 
-    case = _REPO / "examples" / "case121_kernel_btf_struct_field_added"
+    case = example_catalog.case_dir("case121_kernel_btf_struct_field_added")
     snap = resolve_input(case / "v1.btf")
     assert snap.semantic_ir is not None
     entity_id = entity_id_for_type((), "task_state")

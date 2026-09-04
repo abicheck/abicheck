@@ -8,6 +8,7 @@ These tests run without compilation — they validate metadata integrity only.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,15 @@ from abicheck.checker_policy import (
     ChangeKind,
 )
 
-REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
-GT_PATH = EXAMPLES_DIR / "ground_truth.json"
+REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+GT_PATH = example_catalog.GROUND_TRUTH_PATH
 
 
 @pytest.fixture(scope="module")
@@ -146,7 +153,7 @@ class TestDirectorySync:
         """Every ground_truth entry must have a matching examples/ directory."""
         missing = []
         for case_name in verdicts:
-            case_dir = EXAMPLES_DIR / case_name
+            case_dir = example_catalog.case_dir(case_name)
             if not case_dir.is_dir():
                 missing.append(case_name)
         assert not missing, f"Ground truth entries without directories: {missing}"

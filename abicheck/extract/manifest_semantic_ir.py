@@ -85,7 +85,7 @@ never simply "on" for the whole manifest.** Two independent axes:
    _function_key`` itself already keys by ``tu_name`` for exactly this
    reason -- see that function's own docstring). Locality is checked
    against *each fragment's own* declaration
-   (:func:`_locally_linked_entity_ids_in_fragment`), never a single global
+   (:func:`_locally_linked_declaration_locations_in_fragment`), never a single global
    set built once across every fragment: a plain-C function's own
    ``EntityId`` construction does not encode static-vs-external linkage at
    all (confirmed empirically -- an externally-linked `int helper();` and
@@ -147,7 +147,12 @@ __all__ = ["manifest_semantic_ir"]
 def _has_local_linkage_mangling(mangled: str) -> bool:
     """See ``tu_merge._has_local_linkage_mangling``'s own docstring --
     reused verbatim rather than re-derived, since ``extract/`` may not
-    import that root-level module."""
+    import that root-level module. Includes that function's Darwin
+    leading-underscore normalization (a genuinely Itanium-mangled Darwin
+    symbol carries one extra leading underscore, e.g. ``"__ZL6helperi"``
+    -- see that docstring for the full account)."""
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 
@@ -159,18 +164,33 @@ def _entity_id_is_extern_c(entity_id: EntityId | None) -> bool:
     return entity_id is not None and entity_id.extra == ("extern_c",)
 
 
+def _looks_itanium_mangled(mangled: str) -> bool:
+    """See ``tu_merge._looks_itanium_mangled``'s own docstring -- reused,
+    not reinvented, for the identical ``extract/`` may-not-import-
+    ``tu_merge`` reason the rest of this module's small helpers already
+    give."""
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
+    return mangled.startswith("_Z")
+
+
 def _is_locally_linked_function(fn: Function) -> bool:
     """See ``tu_merge._function_key``'s own docstring for the full
     reasoning behind each branch -- reused, not reinvented, including the
     ``entity_is_record_member`` gate closing that function's static-
     member-function sub-case (its sibling non-static-method collision
-    remains a separately-documented, still-open limitation) and the
+    remains a separately-documented, still-open limitation), the
     Darwin-leading-underscore fix (macOS CI, fresh evidence): ``fn.mangled
     == fn.name`` is not proof of "no C++ mangling" on a Darwin target, so
     ``fn.is_extern_c`` -- each header-AST backend's own Darwin-aware
-    determination -- is read directly instead, exactly mirroring
-    ``tu_merge._function_key``'s identical fix."""
-    if fn.mangled == fn.name or fn.is_extern_c:
+    determination -- is read directly instead, and the
+    :func:`_looks_itanium_mangled` guard closing the follow-up gap where a
+    static member nested inside an ``extern "C"`` block wrongly inherits
+    ``is_extern_c=True`` despite being genuinely Itanium-mangled -- all
+    exactly mirroring ``tu_merge._function_key``'s identical fixes."""
+    if fn.mangled == fn.name or (
+        fn.is_extern_c and not _looks_itanium_mangled(fn.mangled)
+    ):
         return fn.is_static and not entity_is_record_member(fn.entity_id)
     return _has_local_linkage_mangling(fn.mangled)
 
@@ -180,39 +200,101 @@ def _is_locally_linked_variable(var: Variable) -> bool:
     plain-C ``var.mangled == var.name`` fallback branch, closed by
     ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review), the
     ``entity_is_record_member`` gate closing that same function's
-    uninstantiated-template-static-data-member gap, and the Darwin-
+    uninstantiated-template-static-data-member gap, the Darwin-
     leading-underscore fix (macOS CI, fresh evidence) mirroring
     ``tu_merge._variable_key``'s identical fix: :class:`Variable` carries
     no ``is_extern_c`` field of its own, so :func:`_entity_id_is_extern_c`
-    reads the same Darwin-aware signal back off ``var.entity_id`` instead."""
-    if var.mangled == var.name or _entity_id_is_extern_c(var.entity_id):
+    reads the same Darwin-aware signal back off ``var.entity_id`` instead,
+    and the :func:`_looks_itanium_mangled` guard closing the follow-up
+    static-member-inside-``extern "C"`` gap, exactly mirroring
+    ``tu_merge._variable_key``'s identical fix."""
+    if var.mangled == var.name or (
+        _entity_id_is_extern_c(var.entity_id)
+        and not _looks_itanium_mangled(var.mangled)
+    ):
         return var.is_static and not entity_is_record_member(var.entity_id)
     return _has_local_linkage_mangling(var.mangled)
 
 
-def _locally_linked_entity_ids_in_fragment(fragment: TuFragment) -> set[EntityId]:
-    """Every ``EntityId`` belonging to a TU-local function/variable in
-    *this fragment alone* -- never aggregated globally across fragments
-    (Codex review, third round, fresh evidence): a plain-C function's own
-    ``EntityId`` construction does not encode static-vs-external linkage
-    (confirmed empirically -- an externally-linked and an unrelated
-    internally-linked same-named plain-C function resolve to the
-    *identical* ``extra=("extern_c",)`` identity), so a global set would
-    wrongly promote every occurrence sharing that collided identity to be
+def _locally_linked_declaration_locations_in_fragment(
+    fragment: TuFragment,
+) -> dict[EntityId, set[str]]:
+    """Every locally-linked function/variable declaration in *this
+    fragment alone*, keyed by ``EntityId`` -> the set of its own raw
+    ``source_location``\\ s (``""`` for one with none, matching
+    ``semantic_normalizer._location_disambiguator``'s identical fallback)
+    -- never aggregated globally across fragments (Codex review, third
+    round, fresh evidence): a plain-C function's own ``EntityId``
+    construction does not encode static-vs-external linkage (confirmed
+    empirically -- an externally-linked and an unrelated internally-linked
+    same-named plain-C function resolve to the *identical*
+    ``extra=("extern_c",)`` identity), so a global set would wrongly
+    promote every occurrence sharing that collided identity to be
     TU-scoped, including genuinely external ones from other fragments that
-    must still collapse together."""
-    local_ids: set[EntityId] = set()
-    local_ids.update(
-        fn.entity_id
-        for fn in fragment.functions
-        if fn.entity_id is not None and _is_locally_linked_function(fn)
-    )
-    local_ids.update(
-        var.entity_id
-        for var in fragment.variables
-        if var.entity_id is not None and _is_locally_linked_variable(var)
-    )
-    return local_ids
+    must still collapse together.
+
+    **Per-location, not a flat ``set[EntityId]`` (Codex review, sixth
+    round, fresh evidence, real clang confirmed):** two *different*
+    declarations *within the same fragment* can share the identical
+    colliding ``EntityId`` while having different localities -- a file-
+    scope ``static`` function and an unrelated class's static member
+    function, both named identically, both nested inside one
+    ``extern "C" { ... }`` block (real clang, verified directly:
+    ``extern "C" { static int make(); struct Widget { static int
+    make(); }; }`` mangles the free function to ``_ZL4makev`` -- a real
+    Itanium *local*-linkage marker, extern "C" notwithstanding, since a
+    C-linkage specification only suppresses mangling for a declaration
+    with genuine *external* linkage -- and the member to the ordinary,
+    marker-free ``_ZN6Widget4makeEv``; both nonetheless got
+    ``is_extern_c=True`` inherited by the parser's ``_walk``, so
+    ``entity_id_for_function``'s ``is_extern_c`` branch erased both their
+    scopes onto the identical bare ``EntityId``). A flat
+    ``set[EntityId]`` cannot represent "this one declaration sharing the
+    entity id is local, that other one is not" -- membership is a single
+    yes/no per entity id, so the free function's own correct `True`
+    (from :func:`_is_locally_linked_function`'s own :func:`_looks_
+    itanium_mangled` guard) wrongly promoted the *member*'s occurrence
+    into being TU-qualified too, splitting what should be one shared
+    occurrence into two. Keying by each declaration's own source location
+    within the entity id's bucket is what lets the caller check "is THIS
+    occurrence's own declaration local", not "is any declaration sharing
+    this entity id local anywhere in the fragment".
+
+    **Known, accepted limitation** (Codex review, fresh evidence, seventh
+    round): this per-location keying still cannot distinguish two
+    colliding-``EntityId`` declarations that *also* share the identical
+    ``source_location`` string -- both landing on the same source line, or
+    (``extract/headers/clang/context.py``'s own ``source_location``
+    behavior) a nested declaration clang omits line info for, which falls
+    back to the bare filename and can coincide with another declaration's
+    own bare-filename fallback. Deeper still: :func:`~abicheck.extract.
+    semantic_normalizer.normalize_header_ast` (called by this module's
+    :func:`manifest_semantic_ir`) already keys its own raw occurrence dict
+    by ``OccurrenceId`` (``entity_id`` + that same location string)
+    *before* this function's classification ever runs, so a genuine
+    same-location collision may have already collapsed the two raw
+    declarations into one entry there -- data this function's own
+    per-location set can no longer recover regardless of how it keys.
+    Closing this needs declaration-level identity carried into
+    ``normalize_header_ast``'s own occurrence construction (an index or
+    similarly disambiguator-independent key, not a location string that
+    can coincide), which reaches a shared, foundational function well
+    beyond this module's own scope and every one of its other callers,
+    not something to change speculatively without a real toolchain to
+    verify the combined result against. Left as a tracked residual --
+    see ``tests/regressions/manifest.py``'s ``identity.platform_decorated_
+    mangled_name`` entry -- given how many independent coincidences must
+    align to reach it (a same-fragment ``EntityId`` collision between a
+    genuinely local and a genuinely external declaration, *and* those two
+    declarations additionally sharing one exact source location)."""
+    local: dict[EntityId, set[str]] = defaultdict(set)
+    for fn in fragment.functions:
+        if fn.entity_id is not None and _is_locally_linked_function(fn):
+            local[fn.entity_id].add(fn.source_location or "")
+    for var in fragment.variables:
+        if var.entity_id is not None and _is_locally_linked_variable(var):
+            local[var.entity_id].add(var.source_location or "")
+    return local
 
 
 def _fragment_locations(fragment: TuFragment) -> dict[EntityId, set[str]]:
@@ -341,7 +423,9 @@ def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
     )
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for fragment in sorted(fragments, key=lambda f: f.tu_name):
-        local_entity_ids = _locally_linked_entity_ids_in_fragment(fragment)
+        local_declaration_locations = _locally_linked_declaration_locations_in_fragment(
+            fragment
+        )
         fragment_ir = normalize_header_ast(
             types=fragment.types,
             enums=fragment.enums,
@@ -355,7 +439,9 @@ def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
             disambiguate_by_source_location=True,
         )
         for occ_id, entity in fragment_ir.occurrences.items():
-            if occ_id.entity_id in local_entity_ids:
+            if occ_id.disambiguator in local_declaration_locations.get(
+                occ_id.entity_id, ()
+            ):
                 # Combine, never replace: this fragment's own declaration
                 # may itself carry more than one raw location (its own
                 # prototype and definition), and each must stay distinct.

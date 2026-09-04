@@ -25,8 +25,14 @@ from pathlib import Path
 from typing import Any
 
 REPO_DIR = Path(__file__).resolve().parents[2]
-EXAMPLES_DIR = REPO_DIR / "examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "full_example_matrix.v2"
 
 ARTIFACT_CONTRACTS = {

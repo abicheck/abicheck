@@ -50,7 +50,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper import _CastxmlParser
-from abicheck.model import AbiSnapshot, AccessLevel, Variable
+from abicheck.model import AbiSnapshot, AccessLevel, Fact, Variable
 
 
 def _make_root_with_static_members_and_free_var() -> Element:
@@ -610,3 +610,40 @@ class TestLegacyCastxmlVarAccessBaselineSuppression:
         )
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(compare(old, new))
         assert ChangeKind.VAR_ACCESS_WIDENED not in _kinds(compare(old, new))
+
+
+class TestVarAccessFactStatusGating:
+    """ADR-063 Phase 5B: ``var_access_changes`` reads ``access_fact.status``
+    directly, per variable, additive to the whole-snapshot
+    ``castxml_var_access_facts_reliable`` gate above (mirrors
+    ``compare.va_list_diff.diff_va_list_params``'s identical treatment of
+    ``Param.is_va_list``)."""
+
+    def test_uncollected_old_side_declines(self) -> None:
+        old = _snap(
+            ast_producer="castxml",
+            castxml_var_access_facts_reliable=True,
+            variables=[
+                Variable(
+                    name="data",
+                    mangled="_data",
+                    type="int",
+                    access_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap(
+            ast_producer="castxml",
+            castxml_var_access_facts_reliable=True,
+            variables=[_var(AccessLevel.PRIVATE)],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(result)
+        assert ChangeKind.VAR_ACCESS_WIDENED not in _kinds(result)
+
+    def test_confirmed_present_still_fires(self) -> None:
+        # Unaffected: an ordinary construction backfills to Fact.present(...)
+        # and behaves exactly as before.
+        old = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PUBLIC)])
+        new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
+        assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(compare(old, new))

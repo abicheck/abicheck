@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import BREAKING_KINDS, RISK_KINDS, ChangeKind
-from abicheck.model import AbiSnapshot, RecordType, TypeField
+from abicheck.model import AbiSnapshot, Fact, RecordType, TypeField
 
 
 def _snap(version: str, *, types: list[RecordType]) -> AbiSnapshot:
@@ -90,6 +90,214 @@ class TestLayoutDescriptorDiff:
         # vptr_offset_bits=0 must NOT report VPTR_INTRODUCED — the old vtable is
         # proof the type was already polymorphic.
         old = _snap("1", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=None)])
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_old_sides_vtable_fact_uncollected(self) -> None:
+        """ADR-063 Phase 5B (vtable/vptr_offset_bits slice): a direct
+        ``FactStatus`` read, additive to the pre-existing
+        ``vtable_facts_reliable`` snapshot-wide flag. The old side's own
+        ``vtable``/``vptr_offset_bits`` read empty/None -- same *value* as a
+        genuinely non-polymorphic class (``test_vptr_introduced`` above) --
+        but the fact backing that reading was never actually collected, so
+        it must not be trusted as confirmed non-polymorphic.
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_old_sides_vptr_offset_bits_fact_uncollected(
+        self,
+    ) -> None:
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_still_flagged_when_old_side_confirmed_non_polymorphic(self) -> None:
+        # Unaffected: an explicit Fact.present(...) confirming genuine
+        # absence still fires, exactly like the pre-existing
+        # test_vptr_introduced case above (this pins the same behavior when
+        # the fact is stated explicitly rather than left to backfill).
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.present([]),
+                    vptr_offset_bits_fact=Fact.present(None),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_old_sides_vtable_fact_partial_empty(self) -> None:
+        """Codex review, this slice: a ``PARTIAL`` empty ``vtable_fact`` --
+        only the observed portion confirmed empty, not the whole list --
+        must not be trusted as confirmed non-polymorphic either, unlike a
+        genuine ``Fact.present([])`` (see the still-flagged case above).
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.partial([]),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_still_flagged_when_old_sides_vptr_offset_bits_fact_partial(
+        self,
+    ) -> None:
+        # Unlike vtable_fact above, vptr_offset_bits_fact is a scalar heuristic
+        # derivation (the direct-clang header-AST backend's own
+        # Fact.partial(0 if vtable else None)) -- PARTIAL there is a real
+        # signal, not an evidence gap, so it must not block this detector.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.present([]),
+                    vptr_offset_bits_fact=Fact.partial(None),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
+    def test_vptr_flagged_via_confirmed_standard_layout_despite_uncollected_vtable(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a confirmed ``is_standard_layout=True``
+        is independent affirmative evidence the old side owned no vtable
+        anywhere in its hierarchy (the standard-layout requirement excludes
+        virtual functions/bases transitively), so it can substitute for an
+        uncollected ``vtable_fact``/``vptr_offset_bits_fact`` pair rather than
+        this detector declining outright.
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_standard_layout=True,
+                    is_standard_layout_fact=Fact.present(True),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_standard_layout_fact_uncollected_too(self) -> None:
+        # The fallback only applies when is_standard_layout is *itself*
+        # confirmed -- an uncollected is_standard_layout_fact provides no
+        # evidence at all, so the detector still declines.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_standard_layout_confirmed_false(self) -> None:
+        # A confirmed is_standard_layout=False says nothing about
+        # polymorphism either way (plenty of non-standard-layout classes are
+        # still non-polymorphic, e.g. mixed access control) -- must not be
+        # treated as the fallback signal, so the primary pair's own
+        # uncollected status still governs.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_standard_layout=False,
+                    is_standard_layout_fact=Fact.present(False),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_vptr_flagged_via_confirmed_trivially_copyable_despite_uncollected_vtable(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence, second round: a confirmed
+        ``is_trivially_copyable=True`` is equally conclusive as
+        ``is_standard_layout=True`` -- trivial copyability requires every
+        special member function to be trivial, which itself requires no
+        virtual functions/virtual base classes.
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_trivially_copyable=True,
+                    is_trivially_copyable_fact=Fact.present(True),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_trivially_copyable_confirmed_false(self) -> None:
+        # A confirmed is_trivially_copyable=False says nothing about
+        # polymorphism either way -- must not be treated as the fallback
+        # signal.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_trivially_copyable=False,
+                    is_trivially_copyable_fact=Fact.present(False),
+                )
+            ],
+        )
         new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
         assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
 
@@ -176,11 +384,25 @@ class TestLayoutDescriptorDiff:
         must not fire a phantom LAYOUT_UNVERIFIABLE."""
         old = _snap(
             "1",
-            types=[_rec(name="A", size_bits=None, is_standard_layout=None, is_trivially_copyable=None)],
+            types=[
+                _rec(
+                    name="A",
+                    size_bits=None,
+                    is_standard_layout=None,
+                    is_trivially_copyable=None,
+                )
+            ],
         )
         new = _snap(
             "2",
-            types=[_rec(name="A", size_bits=None, is_standard_layout=True, is_trivially_copyable=True)],
+            types=[
+                _rec(
+                    name="A",
+                    size_bits=None,
+                    is_standard_layout=True,
+                    is_trivially_copyable=True,
+                )
+            ],
         )
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in _kinds(old, new)
 

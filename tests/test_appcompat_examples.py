@@ -32,15 +32,21 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.appcompat import check_appcompat
-from abicheck.checker_policy import Verdict
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.appcompat import check_appcompat  # noqa: E402
+from abicheck.checker_policy import Verdict  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux",
     reason="appcompat fixtures use GNU ld -Wl,-soname (Linux only)",
 )
 
-EXAMPLES = Path(__file__).parent.parent / "examples"
+EXAMPLES = example_catalog.EXAMPLES_DIR
 
 
 def _cc() -> str:
@@ -60,7 +66,7 @@ def _build_case(
     not touch the changed symbol).
     """
     cc = _cc()
-    case_dir = EXAMPLES / case
+    case_dir = example_catalog.case_dir(case)
     lib_v1 = tmp_path / "libcase.so.1"
     lib_v2 = tmp_path / "libcase.so.2"
     # Most cases use the flat v1.c/v2.c convention; some use the old/+new/

@@ -42,8 +42,8 @@ measure but not movable without a separate migration of
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..diff_helpers import depth_aware_bare_name
@@ -95,40 +95,144 @@ class OpaqueTypeIndex:
     Every opaque declaration contributes to *local*; one additionally
     contributes to *stable* when it has a stable identity. Keeping both is
     what makes :meth:`intersect` and :meth:`contains` a strict *superset* of
-    the pre-migration behavior rather than a narrowing one.
+    the pre-migration behavior rather than a narrowing one -- **except**
+    when :attr:`complete` licenses :meth:`contains`'s ``strict=True`` path
+    (ADR-063 Phase 2's bare-name-collision narrowing); see that attribute's
+    own docstring for the one case this index does narrow the pre-migration
+    behavior in, and why it is provably safe when it does.
     """
 
     stable: frozenset[StableEntityId]
     local: frozenset[SnapshotLocalIdentity]
+    #: For each bare spelling this index holds an opaque declaration under,
+    #: the stable ids resolved among just the declaration(s) sharing that
+    #: spelling -- the per-spelling breakdown :attr:`stable` itself discards
+    #: by flattening every declaration into one snapshot-wide set.
+    #: :meth:`intersect` uses this to verify *pairing*, not merely
+    #: *presence*, before it may set :attr:`complete`: see that method's own
+    #: docstring for the counter-example presence-only completeness misses
+    #: (Codex review on PR #1045 -- a first revision of this narrowing
+    #: checked only "did every raw declaration resolve *some* stable id",
+    #: which does not by itself prove the two sides' ids for the *same*
+    #: declaration actually agree). Not meaningful on an already-intersected
+    #: index (empty there); only :func:`find_opaque_types`'s own per-snapshot
+    #: output populates it.
+    stable_by_local: Mapping[SnapshotLocalIdentity, frozenset[StableEntityId]] = field(
+        default_factory=dict
+    )
+    #: Whether narrowing (:meth:`contains`'s ``strict=True``) is safe for
+    #: *this* (already-intersected) index. Set only by :meth:`intersect`;
+    #: defaults ``True`` on a freshly-built per-snapshot index, since
+    #: completeness is a comparison-level (paired) property that a lone
+    #: snapshot's own index cannot yet answer -- see :meth:`intersect`.
+    complete: bool = True
 
     def intersect(self, other: OpaqueTypeIndex) -> OpaqueTypeIndex:
         """Per-tier intersection -- a declaration must be opaque on *both*
         sides to suppress. The tiers intersect independently: a type opaque
         on both sides but carrying a stable identity on only one still meets
-        in the *local* tier, exactly as the pre-migration string set did."""
+        in the *local* tier, exactly as the pre-migration string set did.
+
+        **Completeness is computed here, from paired stable coverage --
+        never from bare presence.** For every spelling the two sides agree
+        is opaque (``self.local & other.local``), narrowing is safe for that
+        spelling only when the two sides' *own* stable-id sets for it
+        (``stable_by_local``) are *exactly equal* -- proving the two sides
+        resolved the identical roster of declarations under that spelling,
+        not merely that *some* declaration each did.
+
+        Exact equality, not intersection-is-non-empty: a first revision of
+        this check required only that the two sides' stable-id sets for a
+        spelling *intersect*, which a real bare-name *collision* itself
+        falsifies as a sufficient condition (Codex review on PR #1045,
+        second round, fresh evidence). When two distinct declarations
+        genuinely share one spelling (``ns1::Handle``, ``ns2::Handle``, both
+        opaque, both bare-named ``"Handle"``), each side's set for that
+        spelling holds *two* ids -- and if the two sides agree on
+        ``ns1::Handle``'s id but disagree on ``ns2::Handle``'s (the same
+        producer-scoping disagreement the first round's counter-example
+        used, now on only one of the two colliding declarations), the sets
+        still *intersect* on the ``ns1`` id alone. An intersection-based
+        check would call the whole spelling "paired" and go strict, then
+        wrongly treat a stable-tier miss on ``ns2::Handle``'s own genuine,
+        still-opaque finding as proof of non-opacity. Only exact set
+        equality proves *every* id either side resolved for a spelling has
+        a match on the other side too -- which is what a stable-tier miss
+        anywhere in this index actually needs to mean "not one of the known
+        opaque declarations" to be trustworthy.
+
+        The first round's own counter-example (one declaration, disagreeing
+        ids) is the *single-element* case of this same check: ``{id_old} ==
+        {id_new}`` is ``False`` whenever the ids disagree, identically to
+        the earlier intersection-based answer for that narrower shape --
+        this revision only changes the *multi-declaration* case the first
+        one got wrong.
+
+        **Equal-and-empty does not count as paired.** ``frozenset() ==
+        frozenset()`` is ``True``, but "neither side resolved any stable id
+        for this spelling" is not evidence the two sides agree on
+        anything -- it means there is no stable-tier evidence for this
+        spelling *at all*, so a change belonging to it can only ever be
+        correctly matched through the spelling tier. Counting it as paired
+        would license a global ``strict=True`` that then rejects such a
+        change on the (contentless) miss instead of falling through, which
+        is exactly the ``test_a_change_carrying_a_stable_id_still_falls_
+        back_to_its_spelling`` regression a first version of this ``==``
+        revision introduced. Each key therefore also requires its shared
+        set to be non-empty. ``all()`` over an empty spelling set (``local``
+        itself empty) is still vacuously ``True`` -- no shared spelling
+        means nothing for narrowing to get wrong.
+        """
+        local = self.local & other.local
+        paired = all(
+            self.stable_by_local.get(key, frozenset())
+            == other.stable_by_local.get(key, frozenset())
+            != frozenset()
+            for key in local
+        )
         return OpaqueTypeIndex(
-            stable=self.stable & other.stable, local=self.local & other.local
+            stable=self.stable & other.stable,
+            local=local,
+            complete=paired,
         )
 
     def __bool__(self) -> bool:
         return bool(self.stable or self.local)
 
-    def contains(self, change: Change, spelling: str) -> bool:
+    def contains(self, change: Change, spelling: str, *, strict: bool = False) -> bool:
         """Whether *change* names an opaque declaration.
 
         Stable tier first: when the change carries a cross-snapshot-stable
         ``EntityId`` this index holds, the declaration is *proven* to be the
         opaque one, regardless of how either side rendered its display
         spelling (a qualified ``Change.symbol`` against a bare
-        ``RecordType.name`` misses under a string compare). Falling back to
-        the spelling tier on a stable *miss* -- rather than treating the
-        stable tier as authoritative and stopping -- is deliberate; see
-        ``diff_filtering._downgrade_opaque_type_changes`` for what that
-        would cost and what it would buy.
+        ``RecordType.name`` misses under a string compare).
+
+        *strict* (default ``False``, the pre-existing, always-safe
+        behavior): whether a stable-tier *miss* -- the change carries a
+        resolvable stable identity, but it is not one of this index's known
+        opaque declarations -- may stop here rather than falling back to the
+        spelling tier. A caller may only pass ``strict=True`` when it has
+        independently established :attr:`complete` for the very index being
+        queried (``diff_filtering._downgrade_opaque_type_changes`` is the
+        one caller that does); passing it unconditionally would treat a
+        merely-incomplete index as if a miss were proof of non-opacity,
+        silently dropping a real suppression whenever the two sides'
+        producers disagree about whether an identity was resolved at all.
+
+        When the change carries no resolvable stable identity at all
+        (``stable_entity_id(change.entity_id) is None``), *strict* has no
+        effect -- there is no miss to be strict about, so this always falls
+        through to the spelling tier, which is the one shape of the bare-
+        name collision this index still cannot close (see
+        ``diff_filtering._downgrade_opaque_type_changes``'s own docstring).
         """
         stable = stable_entity_id(change.entity_id)
-        if stable is not None and stable in self.stable:
-            return True
+        if stable is not None:
+            if stable in self.stable:
+                return True
+            if strict:
+                return False
         return snapshot_local_identity(spelling) in self.local
 
 
@@ -192,13 +296,20 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
 
     stable: set[StableEntityId] = set()
     local: set[SnapshotLocalIdentity] = set()
+    stable_by_local: dict[SnapshotLocalIdentity, set[StableEntityId]] = {}
     for name in surviving:
         for t in declarations[name]:
-            local.add(snapshot_local_identity(name, t.entity_id))
+            key = snapshot_local_identity(name, t.entity_id)
+            local.add(key)
             resolved = stable_entity_id(t.entity_id)
             if resolved is not None:
                 stable.add(resolved)
-    return OpaqueTypeIndex(stable=frozenset(stable), local=frozenset(local))
+                stable_by_local.setdefault(key, set()).add(resolved)
+    return OpaqueTypeIndex(
+        stable=frozenset(stable),
+        local=frozenset(local),
+        stable_by_local={k: frozenset(v) for k, v in stable_by_local.items()},
+    )
 
 
 #: Matches whitespace or a leading cv-qualifier keyword, repeated -- the

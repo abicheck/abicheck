@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.vtable_evidence import vtable_transition_is_evidenced
 from .diff_helpers import make_change
 from .model import Fact, Function, RecordType
 from .model.availability import FactStatus
@@ -45,6 +46,15 @@ from .model.mangled_name import (
     itanium_scope_components_with_template_positions as itanium_scope_components_with_template_positions,
     msvc_scope_components as msvc_scope_components,
 )
+
+# `model/namespace_spelling.py`'s real home is documented on that module
+# itself (ADR-063 Track 2, 5B closure): pure string matching over an
+# already-spelled identity, needed here (`virtual_method_addition`'s own
+# call into `compare.vtable_evidence.vtable_transition_is_evidenced`) and by
+# `type_reachability_spelling.py`, which re-exports it by value for
+# back-compat and cannot be imported from here at all (it already imports
+# this module at its own top level).
+from .model.namespace_spelling import _namespace_suffix_spellings
 
 
 def itanium_qualified_name(mangled: str) -> str | None:
@@ -1116,16 +1126,20 @@ def virtual_method_addition(
     old_types: Mapping[str, RecordType],
     new_types: Mapping[str, RecordType],
     old_virtual_sigs: dict[str, set[str]],
+    old_funcs: Mapping[str, Function],
+    new_funcs: Mapping[str, Function],
+    *,
+    vtable_facts_reliable: bool = True,
 ) -> Change | None:
     """A new *virtual* method on a class that already exists across versions.
 
     Returns a ``VIRTUAL_METHOD_ADDED`` change, or ``None`` if this added symbol
     is not a virtual added to a pre-existing type. Scoped to the genuine blind
-    spot: when the owner's ``vtable`` array is identical on both sides (e.g.
-    DWARF/symbol-only snapshots that carry no vtable layout), the per-type
-    ``TYPE_VTABLE_CHANGED`` detector cannot see the growth, so this is the only
-    signal. When the vtable array *does* differ, ``TYPE_VTABLE_CHANGED`` already
-    reports it and we defer to avoid a duplicate finding.
+    spot: when ``diff_types_vtable``'s own ``TYPE_VTABLE_CHANGED`` detector
+    would not fire for this owner (its raw ``vtable`` array is identical on
+    both sides, or the difference has no positive evidence behind it), this is
+    the only signal. When ``TYPE_VTABLE_CHANGED`` genuinely would fire, defer
+    to it to avoid a duplicate finding.
 
     The owner's record must be present on both sides (the DWARF blind spot this
     targets). ``old_owner_classes`` — the set of *scope-qualified* owners of the
@@ -1141,8 +1155,73 @@ def virtual_method_addition(
     rather than adding one — those are ABI-compatible, not breaks. Matching is by
     full signature, so a same-named virtual with *different* parameters (a new
     slot, e.g. ``Derived::paint(double)`` over ``Base::paint(int)``) still fires.
+
+    ``old_funcs``/``new_funcs`` are each snapshot's full function map
+    (``AbiSnapshot.function_map``, mangled name -> ``Function``, including
+    non-public/hidden entries) — used both for the already-existed guard
+    just below and to consult the shared vtable-evidence predicate further
+    down. ``vtable_facts_reliable`` mirrors ``diff_types.py``'s own
+    ``old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable``
+    computation for the identical pair of snapshots; a caller that does not
+    have both snapshots at hand (unusual — every real caller does) may leave
+    it at its conservative default (never declines to defer on account of
+    reliability alone).
+
+    ADR-063 Track 2, 5B closure. Previously this function's ``old_vtable !=
+    new_vtable`` branch deferred to ``TYPE_VTABLE_CHANGED`` unconditionally,
+    on nothing but a docstring's word that the sibling detector's own
+    ``_vtable_transition_is_evidenced`` heuristic "still finds real evidence"
+    in the one shape this blind spot actually needs covered (one side's
+    ``vtable_fact`` uncollected, the other genuinely populated) — the two
+    detectors were coupled only by prose, in two separate files, with no
+    executable link between them.
+
+    Fixed by making the coupling a real function call: both detectors now
+    share one predicate, ``compare.vtable_evidence.vtable_transition_is_
+    evidenced`` — a leaf module below both of them (it depends on ``model``
+    only, taking ``owner_class_of``/the namespace-suffix matcher as injected
+    callables rather than importing either), closing exactly the "needs an
+    import this leaf module's own no-cycle constraint does not allow without
+    further restructuring" gap this docstring and ``diff_types_vtable.py``'s
+    own module docstring used to record. When the predicate says the
+    difference is genuinely evidenced, this function defers to avoid a
+    duplicate finding, same as before.
+
+    When it is *not* evidenced (or ``vtable_facts_reliable`` is ``False``, in
+    which case ``diff_types_vtable`` declines before ever reaching the
+    predicate — see ``_diff_type_vtable``), this function falls through to
+    its own signature-based override check below instead of silently
+    dropping the finding. For a genuinely *new* mangled symbol this branch
+    is reached only when ``vtable_facts_reliable`` is ``False`` — the shared
+    predicate's own "class's own virtual functions" evidence branch always
+    sees a real difference for a brand-new symbol (it is present in
+    ``new_funcs``'s owned set and, by construction, absent from
+    ``old_funcs``'s), so it is always evidenced when reliable. The one way a
+    *reliable* comparison reaches "not evidenced" at all is the shape the
+    already-existed guard above now intercepts explicitly — this function no
+    longer relies on that being merely implied by the evidence predicate's
+    absence of a positive signal (Codex review, fresh evidence: an earlier
+    revision let exactly that shape fall through here uncaught, fabricating
+    a BREAKING ``VIRTUAL_METHOD_ADDED`` for a compatible hidden-to-public
+    visibility promotion).
     """
     if not f_new.is_virtual:
+        return None
+    old_self = old_funcs.get(f_new.mangled)
+    if old_self is not None and old_self.is_virtual:
+        # Already existed in the old ABI under this exact mangled name --
+        # just not public (hidden/internal linkage becoming exported, the
+        # shape a header/export-scoping change or a build-mode switch
+        # produces). No new vtable slot was added: the slot was already
+        # accounted for whenever this method was first declared, and
+        # nothing about becoming public changes that. A compatible
+        # visibility promotion (tracked separately as FUNC_ADDED for the
+        # newly-public symbol), never VIRTUAL_METHOD_ADDED. (Codex review,
+        # fresh evidence: without this guard, the fallthrough below — added
+        # for the ADR-063 5B closure — reached exactly this shape, since a
+        # promoted method's own owned-virtual-function set reads identical
+        # on both sides and so never evidences a real vtable transition,
+        # fabricating a BREAKING finding for a compatible export change.)
         return None
     owner = owner_class_of(f_new)
     if owner is None:
@@ -1153,8 +1232,22 @@ def virtual_method_addition(
         return None  # no pre-existing record on both sides → compatible / out of scope
     old_vtable = _fact_str_list(t_old.vtable_fact)
     new_vtable = _fact_str_list(t_new.vtable_fact)
-    if old_vtable != new_vtable:
-        return None  # TYPE_VTABLE_CHANGED covers this case
+    if old_vtable != new_vtable and vtable_facts_reliable:
+        if vtable_transition_is_evidenced(
+            owner,
+            t_old,
+            t_new,
+            old_funcs,
+            new_funcs,
+            owner_class_of=owner_class_of,
+            namespace_suffix_spellings=_namespace_suffix_spellings,
+        ):
+            return None  # TYPE_VTABLE_CHANGED covers this case -- verified, not assumed
+        # No evidence behind the raw array difference (or `TYPE_VTABLE_
+        # CHANGED` would decline for the identical reason `diff_types_vtable`
+        # already checks) -- the sibling detector will stay silent, so this
+        # function is the only remaining signal for this owner. Fall through
+        # to the same override check used when the arrays are equal outright.
     # An override of an inherited virtual reuses that base's slot — no new slot,
     # no relayout. If any transitive base already declared a virtual with the
     # *same signature* (not just the same name), treat the addition as an

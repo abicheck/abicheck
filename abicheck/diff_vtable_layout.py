@@ -48,13 +48,18 @@ than fabricating a break.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
+from .diff_types_vtable import _virtual_signatures_by_owner
 from .model import (
     AbiSnapshot,
+    FactStatus,
     RecordType,
+    fact_confirmed_true,
     is_non_abi_surface_type,
     resolved_fact_value,
     stdlib_namespaces_excluded,
@@ -69,12 +74,146 @@ def _is_polymorphic(
     name: str,
     types: dict[str, RecordType],
     memo: dict[str, bool | None],
+    *,
+    vtable_facts_reliable: bool = True,
+    virtual_owner_index: Mapping[str, set[str]] | None = None,
 ) -> bool | None:
     """Whether class *name* is polymorphic (owns/inherits a vtable).
 
     Returns ``None`` when it cannot be determined — the named type is absent
     from *types* (unknown), so its polymorphism (and thus the derived class's
     group structure) is indeterminate and callers must skip the finding.
+
+    An empty own ``vtable``/``virtual_bases`` also reads as indeterminate
+    (not confidently ``False``) when *this record's own* ``vtable_fact``
+    wasn't actually confirmed complete (ADR-063 Phase 5B — direct
+    ``FactStatus`` read, replacing an implicit reliance on the value
+    alone). This closes a real, previously-unguarded gap: a persisted,
+    pre-v21 direct-clang snapshot's ``vtable`` is unconditionally ``[]``
+    for *every* record regardless of real polymorphism (``AbiSnapshot.
+    clang_vtable_facts_reliable``'s own docstring; ``diff_types_vtable``/
+    ``diff_layout`` already gate their own vtable reads on that flag, but
+    this module never did) — without this check, a genuinely-polymorphic
+    base read from such a snapshot silently contributed no secondary
+    vtable group here, with nothing to catch it. ``virtual_bases_fact``
+    carries no equivalent known-unreliable-producer history (unlike
+    ``vtable_fact``, no producer has ever been shown to emit a placeholder
+    value for it), so only ``vtable_fact`` needs this direct check — a
+    real positive read from either field (or from the transitive base walk
+    below) still settles the question regardless of this record's own
+    ``vtable_fact`` status, since that positive evidence doesn't depend on
+    the record's own vtable being trustworthy at all.
+
+    Only a ``PRESENT`` status earns the empty reading trust — ``PARTIAL``
+    does not (Codex review, this slice): an empty *partial* vtable list
+    means only the observed portion is empty, not that the class owns no
+    virtuals at all, the same discipline ``diff_cxx_rules.
+    _fact_str_list_confirmed`` already applies to ``bases``/
+    ``virtual_bases`` for the identical reason (a list-typed fact's
+    uncovered remainder could hold the very entry that would answer the
+    question). No real producer emits ``Fact.partial(...)`` for
+    ``vtable_fact`` today (only ``vptr_offset_bits_fact`` — a scalar, not a
+    list, so its own ``PARTIAL`` reading carries no "uncovered remainder"
+    risk — is ever partial), but this function does not assume that stays
+    true.
+
+    *vtable_facts_reliable* (Codex review, this slice) is the same
+    whole-snapshot flag (``AbiSnapshot.clang_vtable_facts_reliable``)
+    ``diff_layout``/``diff_types_vtable`` already thread through their own
+    vtable reads — layered *alongside* the per-record ``FactStatus`` check
+    above, not instead of it. In every real pipeline the two agree (a
+    legacy pre-v21 clang-producer load's ``storage.fact_backfill`` always
+    corrects every affected record's ``vtable_fact`` to ``NOT_COLLECTED``
+    in the same pass that sets this flag ``False``, and no other code path
+    sets it ``False`` at all), so this is defense in depth for a
+    hand-constructed or future snapshot that could set the two out of
+    sync, not a fix for an observed gap.
+
+    A confirmed ``is_standard_layout=True`` -- or, equally conclusively
+    (Codex review, fresh evidence, second round), a confirmed
+    ``is_trivially_copyable=True`` -- is a third, independent way to trust
+    the empty reading (mirrors ``diff_layout._check_vptr_introduced``'s
+    identical fallback): the C++ standard-layout requirement excludes
+    virtual functions and virtual base classes transitively, and trivial
+    copyability requires every special member function to be trivial,
+    which itself requires no virtual functions/virtual base classes -- so
+    either trait alone conclusively proves *this record's own* vtable is
+    empty even when ``vtable_fact`` itself wasn't collected. Either only
+    substitutes for the ``vtable_fact`` check above, not for the
+    transitive base walk below — a base whose *own* evidence is missing
+    still degrades that base to indeterminate on its own terms.
+
+    A confirmed, *non-``None``* ``vptr_offset_bits`` is a fourth,
+    unconditionally-safe positive-evidence path (Codex review, fresh
+    evidence, third round) — the mirror image of the already-rejected
+    "confirmed ``None`` proves absence" findings on this same guard's
+    sibling in ``diff_layout.py``: a *real* recorded vptr offset can only
+    exist if the class genuinely owns a vptr somewhere in its hierarchy, so
+    it settles the question the same unconditional way ``vtable``/
+    ``virtual_bases`` reading non-empty already does, regardless of this
+    record's own ``vtable_fact`` status. Unlike a confirmed ``None`` (which
+    stays ambiguous per the tri-state reasoning above), there is no
+    corresponding ambiguity in the positive direction. ``PARTIAL`` earns
+    the same trust as ``PRESENT`` here, matching ``diff_layout.
+    _check_vptr_introduced``'s own permissive treatment of this field: it
+    is a scalar, not a list, so its own ``PARTIAL`` reading carries no
+    "uncovered remainder" risk, and the direct-clang header-AST backend
+    never emits anything but ``PARTIAL`` for it.
+
+    A confirmed ``is_abstract=True`` is a fifth, equally unconditional
+    positive-evidence path (Codex review, fresh evidence, fourth round): a
+    C++ abstract class has at least one pure virtual function (its own, or
+    an unoverridden one inherited from a base), and a pure virtual function
+    is still a *virtual* function -- so abstractness alone proves
+    polymorphism regardless of ``vtable_fact``'s status. Unlike
+    ``vptr_offset_bits_fact``, ``is_abstract_fact`` carries no known
+    unreliable-producer history tied to ``vtable_facts_reliable`` (no
+    ``storage.fact_backfill`` rule exists for it at all), so this check is
+    not gated on that flag -- the same treatment ``virtual_bases_fact``
+    already gets above, for the identical reason.
+
+    *virtual_owner_index* -- an optional ``diff_types_vtable._virtual_
+    signatures_by_owner(snapshot.function_map)`` (Codex review, fresh
+    evidence, fifth round) -- supplies a sixth positive-evidence path:
+    ``snapshot.functions`` is a separate evidence stream from the class
+    DIE's virtual-method children (``RecordType.vtable``), the same
+    "different projection of the same debug info" independence
+    ``diff_types_vtable._vtable_transition_is_evidenced`` already relies on
+    for its own second branch -- so a retained ``Function`` with
+    ``is_virtual=True`` owned by this class proves polymorphism even when
+    ``vtable_fact`` itself is uncollected. Matches by *exact* qualified
+    identity (``rec.qualified_name or rec.name``, the same pattern
+    ``diff_layout._index`` uses), not the eager namespace-suffix matching
+    ``_vtable_transition_is_evidenced`` gets away with for its own
+    suppression-oriented purpose -- unlike that caller, a match here
+    becomes an unconditional affirmative ``True``, so two unrelated classes
+    sharing only a leaf name (``ns1::Foo``/``ns2::Foo``) could otherwise
+    fabricate polymorphism (Codex review, fresh evidence, sixth round).
+    Pre-indexed by owner once per snapshot (rather than each query
+    rescanning the whole function map) since a large hierarchy can query
+    many distinct owners against the same mapping (Codex review, fresh
+    evidence, seventh round).
+
+    Gated on ``not vtable_facts_reliable`` (Codex review, fresh evidence,
+    eighth round) -- narrower than every other positive-evidence path
+    above, deliberately: unlike ``vtable``/``vptr_offset_bits``/
+    ``is_abstract``, a retained ``Function.is_virtual`` can itself be
+    DWARF-sourced, and DWARF's own per-translation-unit coverage loss is
+    exactly the same false-positive class ``diff_types_vtable.py``'s own
+    module docstring extensively documents and explicitly accepts as
+    unfixed for its "class's own virtual functions" branch. There, a
+    spurious mismatch only ever widens "keep this finding" (never fabricate
+    one) -- the safe direction for a suppression check. Here a spurious
+    match directly settles this record's own polymorphism, which can
+    fabricate a `SECONDARY_VTABLE_GROUP_CHANGED` the derived class never
+    actually had, if the *other* side happens to have an independent
+    per-TU capture gap of its own. Restricting to `vtable_facts_reliable
+    =False` scopes this path to its actual motivating case -- a legacy
+    pre-v21 *direct-clang* (header-AST) snapshot, whose ``Function``
+    entries are parsed from the whole header in one pass and so never
+    suffer DWARF's incremental per-TU coverage problem at all. Outside that
+    scope this path declines (returns to indeterminate/other checks),
+    which is always the safe direction.
     """
     if name in memo:
         return memo[name]
@@ -84,21 +223,58 @@ def _is_polymorphic(
         return None
     vtable = resolved_fact_value(rec.vtable_fact, [])
     virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
-    if vtable or virtual_bases:
+    vptr_fact = rec.vptr_offset_bits_fact
+    own_vptr_confirmed_present = (
+        vtable_facts_reliable
+        and vptr_fact is not None
+        and vptr_fact.is_present
+        and vptr_fact.value is not None
+    )
+    own_confirmed_abstract = fact_confirmed_true(rec.is_abstract_fact)
+    own_has_retained_virtual_function = (
+        not vtable_facts_reliable
+        and virtual_owner_index is not None
+        and bool(virtual_owner_index.get(rec.qualified_name or rec.name))
+    )
+    if (
+        vtable
+        or virtual_bases
+        or own_vptr_confirmed_present
+        or own_confirmed_abstract
+        or own_has_retained_virtual_function
+    ):
         memo[name] = True
         return True
+    vtable_fact = rec.vtable_fact
+    own_confirmed_non_polymorphic_by_other_trait = fact_confirmed_true(
+        rec.is_standard_layout_fact
+    ) or fact_confirmed_true(rec.is_trivially_copyable_fact)
+    own_vtable_confirmed_empty = (
+        own_confirmed_non_polymorphic_by_other_trait
+        or vtable_facts_reliable
+        and (vtable_fact is None or vtable_fact.status is FactStatus.PRESENT)
+    )
     # Guard against inheritance cycles (malformed input): assume non-polymorphic
     # while resolving, overwrite below.
     memo[name] = False
     bases = resolved_fact_value(rec.bases_fact, [])
     for base in bases:
-        sub = _is_polymorphic(base, types, memo)
+        sub = _is_polymorphic(
+            base,
+            types,
+            memo,
+            vtable_facts_reliable=vtable_facts_reliable,
+            virtual_owner_index=virtual_owner_index,
+        )
         if sub is None:
             memo[name] = None
             return None
         if sub:
             memo[name] = True
             return True
+    if not own_vtable_confirmed_empty:
+        memo[name] = None
+        return None
     return False
 
 
@@ -106,6 +282,9 @@ def _secondary_groups(
     rec: RecordType,
     types: dict[str, RecordType],
     memo: dict[str, bool | None],
+    *,
+    vtable_facts_reliable: bool = True,
+    virtual_owner_index: Mapping[str, set[str]] | None = None,
 ) -> list[str] | None:
     """Ordered list of base names that own a *secondary* vtable group.
 
@@ -114,13 +293,22 @@ def _secondary_groups(
     polymorphic direct non-virtual base, then every polymorphic virtual base,
     contributes a secondary group in that order. Returns ``None`` if any base's
     polymorphism is indeterminate.
+
+    *vtable_facts_reliable*/*virtual_owner_index* are threaded straight into
+    ``_is_polymorphic`` — see that function's own docstring.
     """
     primary_taken = False
     groups: list[str] = []
     bases = resolved_fact_value(rec.bases_fact, [])
     virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
     for base in bases:  # direct, non-virtual, in declaration order
-        poly = _is_polymorphic(base, types, memo)
+        poly = _is_polymorphic(
+            base,
+            types,
+            memo,
+            vtable_facts_reliable=vtable_facts_reliable,
+            virtual_owner_index=virtual_owner_index,
+        )
         if poly is None:
             return None
         if not poly:
@@ -130,7 +318,13 @@ def _secondary_groups(
             continue
         groups.append(base)
     for vbase in virtual_bases:
-        poly = _is_polymorphic(vbase, types, memo)
+        poly = _is_polymorphic(
+            vbase,
+            types,
+            memo,
+            vtable_facts_reliable=vtable_facts_reliable,
+            virtual_owner_index=virtual_owner_index,
+        )
         if poly is None:
             return None
         if poly:
@@ -158,6 +352,20 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # debug-only std:: record would surface as a BREAKING finding for a library
     # that does not own it (mirrors _is_abi_surface_type in diff_types.py).
     exclude_stdlib = stdlib_namespaces_excluded(old, new)
+    # Only ever consulted by _is_polymorphic when vtable_facts_reliable is
+    # False for that side (see its own docstring) -- skip the one-time
+    # O(functions) index build entirely for the overwhelmingly common
+    # reliable-producer case.
+    old_virtual_owner_index = (
+        _virtual_signatures_by_owner(old.function_map)
+        if not old.clang_vtable_facts_reliable
+        else None
+    )
+    new_virtual_owner_index = (
+        _virtual_signatures_by_owner(new.function_map)
+        if not new.clang_vtable_facts_reliable
+        else None
+    )
 
     for name in sorted(old_types.keys() & new_types.keys()):
         if is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib):
@@ -203,8 +411,20 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # tracking to resolve, and the *real* change (if any) is independently
         # reported on the base type itself.
         if o_bases == n_bases and o_virtual_bases == n_virtual_bases:
-            og = _secondary_groups(o, old_types, old_memo)
-            ng = _secondary_groups(n, new_types, new_memo)
+            og = _secondary_groups(
+                o,
+                old_types,
+                old_memo,
+                vtable_facts_reliable=old.clang_vtable_facts_reliable,
+                virtual_owner_index=old_virtual_owner_index,
+            )
+            ng = _secondary_groups(
+                n,
+                new_types,
+                new_memo,
+                vtable_facts_reliable=new.clang_vtable_facts_reliable,
+                virtual_owner_index=new_virtual_owner_index,
+            )
             if og is not None and ng is not None and og != ng:
                 changes.append(
                     make_change(
