@@ -505,3 +505,146 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         merged_config = diff.contract_context.evaluation_context.resolved_config
         assert merged_config.suppressions is observed_suppressions
         assert merged_config.provenance["suppressions"] is observed_suppression_provenance
+
+
+def _release_pack(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+class TestReleaseFanOutAcceptsContractUnresolvedPack:
+    """Track 2 -- 7B residual, closed: ``cli_compare_receipt.resolve_
+    release_pack_application`` used to reject a ``--pack`` asserting
+    ``contract.unresolved`` unconditionally, even with ``--contract`` given.
+    Re-reading that rejection's own reasoning against the plumbing
+    ``TestReleaseFanOutMergesContractContext`` above already exercises (a
+    per-library ``PersistedContractContext``, merged with the pack's
+    resolved config) found no hazard left to guard against: the field never
+    touches evidence, labels, or ``GateDecision`` for any library (ADR-049
+    Section 6.2), only the orthogonal contract-coverage exit floor, so it
+    applies release-wide the same way ``policy.overrides``/``surface.
+    internal_namespaces`` already do. See ``resolve_release_pack_
+    application``'s own docstring for the full account.
+
+    Real, end-to-end ``CliRunner`` cases -- not mocked -- so the fix is
+    proven through the actual CLI path, not just against the resolver in
+    isolation.
+    """
+
+    def test_rejected_without_contract(self, tmp_path: Path) -> None:
+        """No ``--contract`` on this release: still rejected as decorative,
+        the same ``CONTRACT_EVALUATION_ONLY_FIELDS`` check the single-pair
+        path applies -- nothing would read the field."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        pack = _release_pack(
+            tmp_path,
+            "unresolved.yml",
+            "id: unresolved\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.unresolved: warn\n",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        result = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--pack", str(pack)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "contract.unresolved" in result.output
+        assert "needs --contract" in result.output
+
+    def test_now_applies_with_contract(self, tmp_path: Path) -> None:
+        """With ``--contract``: now resolves instead of raising
+        ``PackManifestError``. These hand-built snapshots carry no real
+        header-AST evidence, so ``--contract public`` alone already produces
+        a real coverage-incomplete exit contribution -- proving the pack's
+        value reached the per-library context, not merely that no exception
+        was raised."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        def _fn(name: str, mangled: str) -> Function:
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        pack = _release_pack(
+            tmp_path,
+            "unresolved.yml",
+            "id: unresolved\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.unresolved: warn\n",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[_fn("api_a", "_Z5api_av")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+            from_headers=True,
+        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        runner = CliRunner()
+        without_pack = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--contract",
+                "public",
+                "--format",
+                "json",
+            ],
+        )
+        # Compatible addition-only change, but `public` cannot prove its own
+        # coverage complete for these snapshots -- exit 1 from the
+        # orthogonal coverage floor alone, not from any ABI break.
+        assert without_pack.exit_code == 1, without_pack.output
+        without_lib = json.loads(without_pack.output)["libraries"][0]
+        assert without_lib["contract_coverage_exit_contribution"] == 1
+
+        with_pack = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--contract",
+                "public",
+                "--format",
+                "json",
+                "--pack",
+                str(pack),
+            ],
+        )
+        assert with_pack.exit_code == 0, with_pack.output
+        lib = json.loads(with_pack.output)["libraries"][0]
+        # Zeroed by `contract.unresolved: warn` -- the failures themselves
+        # stay in the ledger, unsuppressed (ADR-049 Section 6.2).
+        assert lib["contract_coverage_exit_contribution"] == 0
+        assert (
+            lib["contract_coverage_failure_count"]
+            == without_lib["contract_coverage_failure_count"]
+        )

@@ -345,17 +345,24 @@ concepts:
       the duplication-and-convergence-assessment plan's own P0
       EffectiveGate/EffectiveEvaluationConfig target); and
       cli_compare_receipt.resolve_release_pack_application unconditionally
-      rejects a --pack asserting contract.unresolved for a release
-      comparison, with no landed fix yet. The first gap's exit-code-scheme
-      half closed 2026-09-04: policy.release_gate_options.
-      resolve_gate_pack_exit_code_scheme is now the one function both
-      callers use for that piece, guarded by tests/
+      rejected a --pack asserting contract.unresolved for a release
+      comparison. The first gap's exit-code-scheme half closed 2026-09-04:
+      policy.release_gate_options.resolve_gate_pack_exit_code_scheme is now
+      the one function both callers use for that piece, guarded by tests/
       test_release_gate_pack_fold_parity.py's parity property; the
       *severity-level* application itself (a dataclasses.replace on an
       already-resolved SeverityConfig vs. six raw-string overrides) remains
       expressed twice against its two different pre-resolution shapes,
       still the P0 EffectiveGate/EffectiveEvaluationConfig target's job to
-      collapse for real. Full investigation, evidence, and this content's
+      collapse for real. The second gap (the contract.unresolved rejection)
+      closed 2026-09-04 too (Track 2): re-reading the rejection's own
+      reasoning against the already-confirmed plumbing found no hazard it
+      didn't already cover, so the unconditional rejection was replaced with
+      the same contract_evaluation-gated check the single-pair path already
+      applies -- tests/test_pack_application.py's
+      test_contract_unresolved_pack_now_applies_to_a_release_comparison
+      proves a release comparison now resolves the field rather than raising
+      PackManifestError. Full investigation, evidence, and this content's
       own review history (Codex, PR #1050, several rounds correcting this
       same account) live in docs/contribute/plans/one-semantic-pipeline.md's
       "7B's release-fan-out investigation landed" section -- the narrative
