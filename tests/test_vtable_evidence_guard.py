@@ -21,7 +21,7 @@ from abicheck.diff_types_vtable import (
     _owned_virtual_signatures,
     _vtable_transition_is_evidenced,
 )
-from abicheck.model import Function, RecordType, Visibility
+from abicheck.model import Fact, FactStatus, Function, RecordType, Visibility
 
 NAME = "Abstract"
 
@@ -227,6 +227,97 @@ class TestPreExistingSignalsStillHold:
         assert not _vtable_transition_is_evidenced(
             NAME, _cls([]), _cls([f"{NAME}::f()"]), {}, {}
         )
+
+
+class TestExplicitFactStatusWouldNotSafelyGateThisGuard:
+    """ADR-063 Track 4, 5B final closure: an early decline keyed off
+    ``vtable_fact.status`` (``NOT_COLLECTED``/``FAILED``) was investigated and
+    rejected for this guard specifically — these tests are the executable
+    half of that finding, not just the docstring's prose.
+
+    ``_vtable_transition_is_evidenced`` already treats a ``NOT_COLLECTED``/
+    ``FAILED`` ``vtable_fact`` identically to a confirmed-empty one via
+    ``resolved_fact_value``'s default collapse — the "both sides captured
+    something" branch already can't fire when either side's own list reads
+    empty for *any* of those three reasons, so a direct status read would be
+    redundant there. What it would NOT be redundant for is short-circuiting
+    the two independent fallback evidence streams below (the class's own
+    virtual functions from ``snapshot.functions``, and ``size_bits``/
+    ``virtual_bases_fact``) before they run — and both of those streams read
+    facts that have nothing to do with ``vtable_fact``'s own status, so an
+    explicit ``NOT_COLLECTED``/``FAILED`` tag on ``vtable_fact`` corroborates
+    nothing about whether *they* still hold real evidence. Gating on it
+    would trade this guard's fabrication guard for exactly the
+    under-detection lever the plan's own 5B "Known gap surfaced by review"
+    note already names for this sub-phase.
+    """
+
+    def test_not_collected_vtable_fact_does_not_silence_the_own_functions_signal(
+        self,
+    ) -> None:
+        old = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        new = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        assert old.vtable_fact is not None
+        assert old.vtable_fact.status is FactStatus.NOT_COLLECTED
+        # A real signal from an entirely different evidence stream (the
+        # class's own retained virtual methods) must still be honored --
+        # an early decline on vtable_fact's own status would have thrown
+        # this away before this check even ran.
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, _virtual())
+
+    def test_failed_vtable_fact_does_not_silence_the_size_delta_signal(self) -> None:
+        old = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.failed("simulated producer error"),
+        )
+        new = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=128,
+            vtable_fact=Fact.failed("simulated producer error"),
+        )
+        assert old.vtable_fact is not None
+        assert old.vtable_fact.status is FactStatus.FAILED
+        # Same principle for the size-delta stream: a producer failure on
+        # vtable_fact specifically says nothing about size_bits, which is
+        # read straight off the record independent of any Fact wrapper.
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+    def test_the_both_sides_populated_branch_is_already_unreachable_when_uncollected(
+        self,
+    ) -> None:
+        """The one branch a direct status check *could* have replaced is
+        already unreachable via ``resolved_fact_value``'s existing collapse
+        -- confirming the status read really would be redundant there, not
+        just declined for style. A populated old side plus an uncollected
+        new side falls through to the fallback streams exactly as a
+        confirmed-empty new side would, and (with no other evidence
+        differing) is correctly suppressed either way."""
+        old = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable=["A::f()"],
+        )
+        new = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        assert not _vtable_transition_is_evidenced(NAME, old, new, {}, {})
 
 
 class TestOwnedVirtualSignaturesBackCompatWrapper:

@@ -100,6 +100,66 @@ unevidenced difference (same owned-virtual-function set, same size, same
 virtual-base list on both sides) no longer leaves *both* detectors silently
 declining -- ``virtual_method_addition`` now falls through to its own
 signature-based override check instead.
+
+**ADR-063 Track 4, 5B final closure (this revision): re-examined and
+declined, not merely re-stated.** The consolidation above removed the
+*import-cycle* constraint that previously blocked ``virtual_method_
+addition`` from consulting this cluster's real verdict -- and that
+constraint, now resolved, was never what stood between this cluster and a
+direct ``FactStatus`` pre-check in the first place. Re-checked from
+scratch rather than assumed: the consolidation changes nothing about what
+DWARF's own per-TU extraction can observe, so the false positive this
+guard exists to suppress -- ``Fact.present([])``, genuinely ``PRESENT``,
+for a class whose virtual methods live in a translation unit only the
+*other* side's debug info covers -- is exactly as unable to be
+distinguished from a genuinely non-polymorphic class via ``vtable_fact.
+status`` alone as it was before this module existed. Nothing about moving
+the predicate's location changes what evidence its own inputs carry.
+
+The narrower case the previous revision of this docstring left open --
+gating specifically on ``vtable_fact.status`` being ``NOT_COLLECTED``/
+``FAILED`` (as opposed to conflating it with a confirmed-``PRESENT([])``
+empty read) -- was investigated on its own merits and is also declined,
+for a different reason than the disjoint-case argument above:
+
+* The one branch such a check *could* replace -- ``vtable_transition_
+  is_evidenced``'s own "both sides captured something" affirmative --
+  already can't fire when either side is ``NOT_COLLECTED``/``FAILED``:
+  ``resolved_fact_value`` collapses both statuses to the same falsy
+  default a confirmed-empty ``PRESENT([])`` reads as, so the truthiness
+  check already excludes them. A direct status read there would be
+  redundant, not a new capability.
+* Where it would NOT be redundant is short-circuiting *before* the two
+  fallback evidence streams run -- the class's own retained virtual
+  functions (``snapshot.functions``) and the ``size_bits``/
+  ``virtual_bases_fact`` layout check. Both are independent projections of
+  the debug info that carry no relationship to ``vtable_fact``'s own
+  status: a producer failure recorded against ``vtable_fact``
+  specifically says nothing about whether ``size_bits`` was captured, or
+  whether the class's own virtual methods still resolve. Using
+  ``vtable_fact.status`` to skip those checks would silence a real,
+  independently-evidenced finding purely because an unrelated field on the
+  same record carries a decline-worthy status -- trading this guard's
+  fabrication guard for exactly the under-detection lever the plan's own
+  5B "Known gap surfaced by review" note already names for this
+  sub-phase (a decline-rather-than-fabricate gate silencing the *sole*
+  signal for its break class). ``tests/test_vtable_evidence_guard.py``'s
+  ``TestExplicitFactStatusWouldNotSafelyGateThisGuard`` is the executable
+  form of this argument: an explicit ``NOT_COLLECTED``/``FAILED``
+  ``vtable_fact`` still lets the owned-virtual-function and size-delta
+  streams fire, and demonstrates the "both sides populated" branch is
+  already unreachable for either status, matching the redundancy claim
+  above rather than merely asserting it.
+
+This closes ADR-063 Phase 5B's own removal gate for the ``vtable`` field
+family as a formal, investigated decline -- the same disposition 2B's
+`entity:` alias promotion and 6B's own undone cohort items received, per
+``docs/contribute/plans/one-semantic-pipeline.md``'s 5B section and
+``docs/_meta/one-semantic-pipeline-status.yaml``'s ``facts`` concept.
+Reopening this needs evidence this predicate's inputs do not carry today
+(a per-finding provider record naming which translation unit each side's
+debug info actually covered, or a polymorphism walk over both base
+chains) -- not a different way of reading the fields already here.
 """
 
 from __future__ import annotations
