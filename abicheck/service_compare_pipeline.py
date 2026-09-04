@@ -420,15 +420,25 @@ def resolve_compare_request(
     # One Semantic Pipeline plan, sub-phase 4B: thread each side's resolved
     # `CompileContext` into the context too (mirrors `execute_dump_request`'s
     # identical fold on the dump path) -- `side_effective_compile_context`
-    # is the one place that decides whether recording it here is safe.
+    # is the one place that decides whether recording it here is safe,
+    # including its own format detection (never the un-followed `old_fmt`/
+    # `new_fmt` above, which reads `None` for a linker-script operand even
+    # when the resolved target it follows really did drive a header-AST
+    # parse -- Codex review, PR #1047).
     compile_contexts: dict[str, CompileContext] = {}
     old_ctx = side_effective_compile_context(
-        old_res, old, old_fmt, dump_manifest=request.old.dump_manifest
+        old_res,
+        old,
+        required_path(request.old, "old"),
+        dump_manifest=request.old.dump_manifest,
     )
     if old_ctx is not None:
         compile_contexts["old"] = old_ctx
     new_ctx = side_effective_compile_context(
-        new_res, new, new_fmt, dump_manifest=request.new.dump_manifest
+        new_res,
+        new,
+        required_path(request.new, "new"),
+        dump_manifest=request.new.dump_manifest,
     )
     if new_ctx is not None:
         compile_contexts["new"] = new_ctx

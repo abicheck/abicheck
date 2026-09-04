@@ -612,7 +612,6 @@ def execute_dump_request(
             :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
-    from . import service
     from .dependency_info import populate_side_dependency_info
     from .evidence_depth import depth_rank, gated_source_label
 
@@ -724,30 +723,13 @@ def execute_dump_request(
             )
         )
         # `with_assurance()` alone leaves `compile_contexts` empty --
-        # `side_effective_compile_context` (shared with the compare path,
-        # see its own docstring) answers whether `resolution.
-        # effective_compile_context` is safe to record. "Did a header-AST
-        # parse run" is answered by detecting the format of the
-        # *actually-resolved* target, mirroring `resolve_input`'s own
-        # dispatch order rather than any single proxy (`resolved.fmt`/
-        # `snap.from_headers`/`snap.platform` each disagree with reality for
-        # some input shape): `sniff_text_format` first rules out the two
-        # verbatim-load formats, then `resolve_linker_script_chain` follows
-        # any GNU ld linker script to its real target for detection.
-        # `side.path` is guaranteed non-None here -- the `is None` branch
-        # above already raised before this point.
-        parsed_fmt = service.detect_binary_format(side.path)
-        if parsed_fmt is None and service.sniff_text_format(side.path) not in (
-            "json",
-            "perl",
-        ):
-            from .binary_utils import resolve_linker_script_chain
-
-            parsed_fmt = service.detect_binary_format(
-                resolve_linker_script_chain(side.path)
-            )
+        # `side_effective_compile_context` (shared with the compare path)
+        # answers whether `resolution.effective_compile_context` is safe to
+        # record, including its own format detection (following a GNU ld
+        # linker script to its real target). `side.path` is guaranteed
+        # non-None here -- the `is None` branch above already raised.
         side_ctx = side_effective_compile_context(
-            resolution, snap, parsed_fmt, dump_manifest=side.dump_manifest
+            resolution, snap, side.path, dump_manifest=side.dump_manifest
         )
         if side_ctx is not None:
             resolved_execution_context = dataclasses.replace(

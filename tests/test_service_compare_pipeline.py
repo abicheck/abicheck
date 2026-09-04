@@ -289,3 +289,53 @@ class TestResolvedExecutionContextWiring:
         assert pair.new.library == "libtest"
         assert pair.old.version == "old"
         assert pair.new.version == "new"
+
+    def test_compile_context_included_for_a_followed_linker_script(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, PR #1047, fresh evidence: a GNU ld linker script
+        side resolves ``old_fmt``/``new_fmt`` to ``None`` on its own text-file
+        path (not ELF/PE/Mach-O magic bytes), but the real header-AST parse
+        runs against the real target the script resolves to underneath --
+        the un-followed raw format alone wrongly excluded a genuinely-
+        participating compile context. ``side_effective_compile_context``
+        now detects the format of the *followed* target itself (mirrors the
+        identical dump-path regression,
+        ``test_dump_resolved_execution_context.py::
+        test_compile_context_included_for_a_followed_linker_script``)."""
+        from abicheck import service_compare_pipeline
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        target = tmp_path / "libfoo.so.1"
+        target.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        old_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+
+        def _fake_impl(side, evidence, **kwargs):
+            return SideResolution(
+                snapshot=AbiSnapshot(
+                    library="libtest", version=side.version, from_headers=True
+                ),
+                effective_includes=(),
+                effective_compile_context=old_ctx,
+            )
+
+        monkeypatch.setattr(
+            service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
+        )
+        request = CompareRequest(
+            old=InputSpec(path=old_p, version="old"),
+            new=InputSpec(path=new_p, version="new"),
+        )
+        pair = service_compare_pipeline.resolve_compare_request(request)
+
+        assert pair.old_fmt is None  # the raw linker-script path itself
+        assert dict(pair.resolved_execution_context.compile_contexts) == {
+            "old": old_ctx,
+            "new": old_ctx,
+        }
