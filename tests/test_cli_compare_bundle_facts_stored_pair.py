@@ -578,3 +578,67 @@ class TestStoredPairEndToEnd:
 
         assert code == 16
         assert "not comparable" in out
+
+    def test_incomparable_dependency_scope_emits_json_when_requested(
+        self, tmp_path: Path
+    ) -> None:
+        """The JSON half of the same refusal (Codex review, PR #1060, round
+        14): ``exit_bundle_facts_not_comparable`` previously wrote only the
+        stderr message and exited, even under ``--format json`` -- unlike
+        native ``compare``'s own ``_report_not_comparable``, which still
+        emits the requested JSON envelope. A stored-pair refusal must do the
+        same instead of silently dropping the requested report format."""
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=ElfMetadata(
+                soname="libcore.so",
+                symbols=[ElfSymbol(name="core_fn", visibility="default")],
+            ),
+            functions=[
+                Function(
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            from_headers=True,
+            dependency_scope="filtered",
+        )
+        new_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="new",
+            elf=ElfMetadata(
+                soname="libcore.so",
+                symbols=[ElfSymbol(name="core_fn", visibility="default")],
+            ),
+            functions=[
+                Function(
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            from_headers=True,
+            dependency_scope="full",
+        )
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
+        save_bundle_facts(capture_bundle_facts({"libcore.so": new_snapshot}), new_path)
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--format", "json"
+        )
+
+        assert code == 16
+        assert "not comparable" in out
+        start = out.index("{")
+        document = json.loads(out[start:])
+        assert document["mode"] == "bundle_facts"
+        assert document["verdict"] is None
+        assert document["not_comparable"] is True
+        assert document["reason"]["kind"] == "scope_mismatch"
+        assert "message" in document["reason"]

@@ -346,8 +346,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         # comments explain each of these four exception types).
         except (SnapshotError, TypeError, ValueError, OSError) as exc:
             raise click.ClickException(str(exc)) from exc
-        except (ProfileMismatchError, ScopeMismatchError) as exc:
-            exit_bundle_facts_not_comparable(exc)  # not caught above (round 12)
+        except (ProfileMismatchError, ScopeMismatchError) as exc:  # round 12/14
+            exit_bundle_facts_not_comparable(exc, fmt=fmt, output=kwargs.get("output"))
     else:
         # Codex review: NEW_INPUT is documented ("a live release directory/
         # package") to accept a package archive (wheel/deb/rpm/tar), but
@@ -512,8 +512,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 # click.Path(exists=True) argument, not dir_okay=False -- turns out
                 # to be a directory or otherwise unreadable file.
                 raise click.ClickException(str(exc)) from exc
-            except (ProfileMismatchError, ScopeMismatchError) as exc:
-                exit_bundle_facts_not_comparable(exc)  # round 12, see above
+            except (ProfileMismatchError, ScopeMismatchError) as exc:  # round 12/14
+                exit_bundle_facts_not_comparable(exc, fmt=fmt, output=kwargs.get("output"))
         finally:
             # Mirrors the live release fan-out's own --keep-extracted handling
             # (_cleanup_temp_dirs): remove the package-extraction tempdir unless

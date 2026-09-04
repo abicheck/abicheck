@@ -734,7 +734,9 @@ def reject_ast_override_flags_for_stored_pair(ctx: click.Context) -> None:
             )
 
 
-def exit_bundle_facts_not_comparable(exc: Exception) -> None:
+def exit_bundle_facts_not_comparable(
+    exc: Exception, *, fmt: str = "markdown", output: Path | None = None
+) -> None:
     """Translate a ``ProfileMismatchError``/``ScopeMismatchError`` raised
     from inside a per-library ``compare_snapshots()`` call into a clean CLI
     failure, exit 16 -- the same code native ``compare``'s own ADR-050 D2
@@ -747,14 +749,28 @@ def exit_bundle_facts_not_comparable(exc: Exception) -> None:
     reached neither clause and surfaced as a raw traceback instead. Shared
     by both the stored/stored and stored/live dispatch branches, which both
     diff each matched library through the identical ``compare_snapshots()``
-    chokepoint. Deliberately narrower than native compare's own
-    ``_report_not_comparable`` (no SARIF/JUnit rendering, no schema-
-    conformant JSON envelope): this dispatcher's own JSON output is the
-    simpler ``mode: "bundle_facts"`` shape, which has no not-comparable
-    document convention of its own to fabricate one for -- a clear stderr
-    message is what every non-JSON native-compare format already gets too."""
+    chokepoint.
+
+    *fmt*/*output* (Codex review, PR #1060, round 14), when ``fmt ==
+    "json"``, get a machine-readable refusal document written the same way
+    an ordinary successful comparison's JSON would be (``-o`` or stdout) --
+    a stored-pair refusal must be consumable by the same scripts/report
+    aggregator native compare's own ``_report_not_comparable`` JSON output
+    already is; silently leaving the requested report file unwritten (the
+    prior stderr-only behavior) was itself a gap this round found. The
+    envelope mirrors this dispatcher's own ordinary ``mode: "bundle_facts"``
+    shape rather than native compare's schema-versioned ``compare_report.
+    schema.json`` document -- the two were never the same schema even for a
+    successful comparison here, so inventing schema conformance only for
+    the refusal case would be a new, undocumented contract, not a fix.
+    Every other format (``markdown``/``html``/``review``, and the default)
+    gets only the stderr message, matching native compare's own identical
+    "no equivalent document convention" choice for those formats."""
     import sys
 
+    from ....errors import ProfileMismatchError
+
+    kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
     click.echo(
         f"Error: not comparable: {exc}\n"
         "Two matched libraries were not extracted under a comparable "
@@ -762,4 +778,16 @@ def exit_bundle_facts_not_comparable(exc: Exception) -> None:
         "produced for this bundle.",
         err=True,
     )
+    if fmt == "json":
+        import json as _json
+
+        from ....frontends.cli.runtime import _write_or_echo
+
+        document = {
+            "mode": "bundle_facts",
+            "verdict": None,
+            "not_comparable": True,
+            "reason": {"kind": kind, "message": str(exc)},
+        }
+        _write_or_echo(output, _json.dumps(document, indent=2))
     sys.exit(16)
