@@ -1545,10 +1545,19 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         # existed, now scoped to just the ABIs it's actually unsound for
         # (see _FUNCTION_DESCRIPTOR_ARCHES's own docstring for why this
         # moved from an allowlist to a denylist).
+        # P2 review, fresh evidence, round two (Codex): computed unconditionally
+        # (unlike uncovered_funcs below, which is deliberately zeroed on a
+        # function-descriptor architecture) so the "no CFI sections at all"
+        # branch below can tell "no exported function exists to cover" apart
+        # from "coverage can't be checked on this architecture" -- the latter
+        # must stay incomplete when unwind data is totally absent, since real
+        # exported functions do exist there; only the former is legitimately
+        # nothing-to-be-incomplete-about.
+        exported_func_addrs = _build_exported_func_addrs(elf, arch_key)
         uncovered_funcs = (
             set()
             if arch_key in _FUNCTION_DESCRIPTOR_ARCHES
-            else _build_exported_func_addrs(elf, arch_key)
+            else set(exported_func_addrs)
         )
         source_failed: list[bool] = []
         # P2 review, fresh evidence (Codex): consult every CFI section that
@@ -1564,18 +1573,27 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                 # A present CFI section whose entries failed to decode --
                 # genuinely incomplete evidence.
                 return False
+            if not exported_func_addrs:
+                # P2 review, fresh evidence, round three (Codex): a DSO with
+                # real DWARF that exports only variables (or no symbols at
+                # all) has no ABI function for this pass to analyze -- a
+                # total absence of unwind sections is not evidence of
+                # missing coverage when there is nothing this pass is
+                # accountable for covering in the first place.
+                return True
             # P2 review, fresh evidence (Codex): neither .eh_frame nor
-            # .debug_frame is present at all. Both call sites gate this
-            # function on cu_total > 0 (real DWARF DIEs exist), so this
-            # shape is a binary whose unwind sections were stripped
-            # independently of its debug info -- frame_registers/
-            # callee_saved_regs then stay empty for every function, which
-            # previously read as a clean "complete" pass (a self-comparison
-            # of such a binary reported analysis_assurance.status="complete"
-            # and exited 0 under --require-complete-analysis). Fail closed:
-            # a total absence of unwind data is incomplete evidence for the
-            # calling-convention-drift analysis this pass exists to run,
-            # not "nothing to be incomplete about".
+            # .debug_frame is present at all, and at least one exported
+            # function does exist. Both call sites gate this function on
+            # cu_total > 0 (real DWARF DIEs exist), so this shape is a
+            # binary whose unwind sections were stripped independently of
+            # its debug info -- frame_registers/callee_saved_regs then stay
+            # empty for every function, which previously read as a clean
+            # "complete" pass (a self-comparison of such a binary reported
+            # analysis_assurance.status="complete" and exited 0 under
+            # --require-complete-analysis). Fail closed: a total absence of
+            # unwind data is incomplete evidence for the calling-
+            # convention-drift analysis this pass exists to run, not
+            # "nothing to be incomplete about".
             return False
 
         complete = True

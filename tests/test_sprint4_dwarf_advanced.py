@@ -106,7 +106,12 @@ class TestParseAdvancedDwarfEvidenceState:
         function with no completeness signal. Exercised through the real
         public entry point (parse_advanced_dwarf), letting the actual
         _parse_frame_registers/_get_cfi_source pipeline run rather than
-        patching it out."""
+        patching it out. At least one exported function symbol must exist
+        for this to apply -- P2 review, round three (Codex): a DSO with no
+        exported functions at all has nothing for this pass to cover, so
+        a total absence of unwind data is not evidence of missing
+        coverage in that case (see the sibling
+        test_no_exported_functions_at_all_stays_parsed below)."""
         good_cu = MagicMock()
         good_cu.get_top_DIE.return_value = MagicMock(attributes={})
 
@@ -120,11 +125,48 @@ class TestParseAdvancedDwarfEvidenceState:
             patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
             patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
             patch("abicheck.dwarf_advanced._build_addr_to_syms", return_value={}),
+            patch(
+                "abicheck.dwarf_advanced._build_exported_func_addrs",
+                return_value={0x1000},
+            ),
         ):
             meta = parse_advanced_dwarf(Path(__file__))
 
         assert meta.cu_failed == 0
         assert meta.evidence_state == "partial"
+        assert meta.frame_registers == {}
+
+    def test_no_exported_functions_at_all_stays_parsed(self) -> None:
+        """P2 review, fresh evidence, round three (Codex): a DSO with real
+        DWARF that exports only variables (or no symbols at all) has no
+        ABI function for frame-register/callee-saved analysis to cover --
+        a total absence of unwind sections must not downgrade this to
+        "partial" when there is nothing this pass is accountable for
+        covering in the first place. This is the sibling positive control
+        to test_no_unwind_sections_at_all_downgrades_a_clean_parse_to_
+        partial above, which supplies at least one exported function."""
+        good_cu = MagicMock()
+        good_cu.get_top_DIE.return_value = MagicMock(attributes={})
+
+        mock_elf = self._mock_session([good_cu])
+        mock_dwarf = mock_elf.get_dwarf_info.return_value
+        mock_dwarf.has_EH_CFI.return_value = False
+        mock_dwarf.has_CFI.return_value = False
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
+            patch("abicheck.dwarf_advanced._build_addr_to_syms", return_value={}),
+            patch(
+                "abicheck.dwarf_advanced._build_exported_func_addrs",
+                return_value=set(),
+            ),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "parsed"
         assert meta.frame_registers == {}
 
     def test_incomplete_cfi_downgrades_a_clean_parse_to_partial(self) -> None:

@@ -67,9 +67,12 @@ def selected_modules(
     """Return a safe PR mutation subset, or ``None`` for the full scope.
 
     A changed detector module selects itself.  A conventional detector-test
-    path selects its paired module.  Infrastructure-only and unclassified-test
-    changes keep the full scope; when a detector module is also changed, its
-    diff-scoped measurement remains the only bounded PR gate.
+    path selects its paired module.  Infrastructure-only changes keep the
+    full scope; when a detector module is also changed, its diff-scoped
+    measurement remains the only bounded PR gate.  An *unclassified* test
+    change (one that pairs with no ``only_mutate`` module) always keeps the
+    full scope too, regardless of whether a source module was also
+    selected -- see this function's own docstring correction below.
     """
     selected = {path for path in changed_paths if path in only_mutate}
     known_test_paths = set()
@@ -84,12 +87,23 @@ def selected_modules(
         for path in changed_paths
         if path.startswith("tests/") and path.endswith(".py")
     }
-    # When the PR changes a detector module, `--diff-scoped` can only gate
-    # that module's changed functions.  An unrelated test edit cannot enlarge
-    # that function set, so retain the source-derived subset.  With no source
-    # module selected, an unclassified test could weaken any module and needs
-    # the full drift measurement.
-    if changed_tests - known_test_paths and not selected:
+    # P1 review, fresh evidence (Codex): the prior condition
+    # (`if changed_tests - known_test_paths and not selected`) only widened
+    # to full scope when NO source module was also selected -- so a PR
+    # changing one detector module (e.g. diff_types.py) plus one unclassified
+    # test (e.g. tests/test_integration_helpers.py, matching no module's
+    # tests/test_<stem>*.py glob) narrowed to just {diff_types.py}. If that
+    # test weakens coverage for an unchanged function anywhere -- in
+    # diff_types.py itself or in any OTHER mutated module -- neither the
+    # diff-scoped run (which only gates functions this diff actually changed
+    # in a selected module) nor require_baseline_for_pr() (which also finds
+    # no module pairing for that test) can catch it. AGENTS.md's own
+    # "time estimates are not a factor in technical decisions" rule means the
+    # CI-job-budget rationale that justified the old, narrower condition
+    # cannot stand in for correctness here: an unclassified test change
+    # always keeps the full configured scope, full stop, whether or not a
+    # source module was also touched.
+    if changed_tests - known_test_paths:
         return None
     # A full configured run exceeds the CI job budget for mixed
     # infrastructure+detector changes.  The detector subset still measures
@@ -175,14 +189,33 @@ def require_baseline_for_pr(
     diff -- it is documented as the complete check, and a label-forced run
     on a diff this function would otherwise clear must not silently report
     "gated nothing" and exit 0.
+
+    P1 review, fresh evidence (finding 5, Codex): an *unclassified* test
+    change (one whose path pairs with no ``only_mutate`` module at all,
+    e.g. ``tests/test_integration_helpers.py``) previously required
+    baseline drift only when it happened to share the diff with a
+    conventional, module-paired test -- ``_module_for_test_path`` maps such
+    a path to ``None``, which the trailing ``discard(None)`` silently drops
+    from ``touched_modules``, so a PR touching only an unclassified test
+    (alone, or alongside an unrelated changed source module -- see
+    ``selected_modules``'s own matching fix) could see ``touched_modules``
+    end up empty and skip baseline drift entirely, even though that test
+    could weaken coverage for ANY mutated module and ``--diff-scoped``
+    cannot see it (its own scope is limited to the modules
+    ``selected_modules`` selects, and to the functions the diff literally
+    changed within them). Fixed the same way ``selected_modules`` was:
+    an unclassified test change unconditionally requires baseline drift,
+    checked before -- not folded into -- the per-module ``touched_modules``
+    computation below.
     """
     if labelled:
         return True
-    touched_modules = {
-        _module_for_test_path(p, only_mutate)
-        for p in changed_paths
-        if p.startswith("tests/") and p.endswith(".py")
+    changed_tests = {
+        p for p in changed_paths if p.startswith("tests/") and p.endswith(".py")
     }
+    if any(_module_for_test_path(p, only_mutate) is None for p in changed_tests):
+        return True
+    touched_modules = {_module_for_test_path(p, only_mutate) for p in changed_tests}
     touched_modules.discard(None)
     return bool(touched_modules)
 

@@ -543,6 +543,45 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
         assert result.evidence_state == "parsed"
         assert result.structs["HasVoidPtr"].fields[0].type_name == "void *"
 
+    def test_enumerator_missing_const_value_marks_partial(self) -> None:
+        """P2 review, fresh evidence (Codex): a named DW_TAG_enumerator
+        with no DW_AT_const_value at all -- truncated/malformed debug
+        info, not a legitimate zero-valued case, since a real enumerator
+        always carries its own constant value. _attr_int()'s own
+        "attribute absent -> 0" default previously fabricated a real-
+        looking value here (indistinguishable from a genuine 0) with no
+        completeness signal, since the incomplete accumulator was never
+        threaded into _process_enum/_process_enum_named at all."""
+        enumerator = _Die("DW_TAG_enumerator", {"DW_AT_name": "A"})
+        enum_die = _Die(
+            "DW_TAG_enumeration_type",
+            {"DW_AT_name": "E", "DW_AT_byte_size": 4},
+            children=[enumerator],
+        )
+
+        result = _run_parse([enum_die])
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        # Best-effort output still emitted (the fabricated 0 value).
+        assert result.enums["E"].members["A"] == 0
+
+    def test_enumerator_with_const_value_stays_parsed(self) -> None:
+        """Positive control: a real, explicit const value (including a
+        genuine 0) must not be flagged."""
+        enumerator = _Die(
+            "DW_TAG_enumerator", {"DW_AT_name": "A", "DW_AT_const_value": 0}
+        )
+        enum_die = _Die(
+            "DW_TAG_enumeration_type",
+            {"DW_AT_name": "E", "DW_AT_byte_size": 4},
+            children=[enumerator],
+        )
+
+        result = _run_parse([enum_die])
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+        assert result.enums["E"].members["A"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Unified single-pass entry point (dumper.py's real ELF-dump path)

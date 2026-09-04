@@ -41,10 +41,23 @@ def test_mutation_infrastructure_only_keeps_full_scope() -> None:
     assert scope.selected_modules({"scripts/mutation_scope.py"}, MODULES) is None
 
 
-def test_source_subset_survives_an_unclassified_test_change() -> None:
-    assert scope.selected_modules(
-        {"abicheck/diff_types.py", "tests/test_integration_helpers.py"}, MODULES
-    ) == ["abicheck/diff_types.py"]
+def test_unclassified_test_change_keeps_full_scope_even_with_a_source_module() -> None:
+    """P1 review, fresh evidence (Codex): a changed detector module (e.g.
+    diff_types.py) plus an unclassified test (matching no module's
+    tests/test_<stem>*.py glob, e.g. test_integration_helpers.py)
+    previously narrowed to just {diff_types.py} -- if that unclassified
+    test weakens coverage for an unchanged function anywhere (in
+    diff_types.py itself or any OTHER mutated module), neither the
+    function-scoped diff-scoped run nor require_baseline_for_pr() (which
+    also finds no module pairing for that test) can catch it. Renamed
+    from test_source_subset_survives_an_unclassified_test_change, whose
+    name and assertion described the prior (now-corrected) behavior."""
+    assert (
+        scope.selected_modules(
+            {"abicheck/diff_types.py", "tests/test_integration_helpers.py"}, MODULES
+        )
+        is None
+    )
 
 
 def test_malicious_changed_filename_is_data_not_a_selected_module() -> None:
@@ -97,6 +110,26 @@ def test_different_module_changed_still_needs_baseline_for_the_untouched_one() -
     module's own test -- the aggregate MATCHED boolean going true for
     diff_types.py must not paper over serialization.py's own gap."""
     changed = {"abicheck/diff_types.py", "tests/test_serialization_roundtrip.py"}
+    assert scope.require_baseline_for_pr(changed, MODULES, labelled=False) is True
+
+
+def test_unclassified_test_alone_needs_baseline() -> None:
+    """P1 review, fresh evidence (finding 5, Codex): an unclassified test
+    (pairs with no only_mutate module) previously fell out of
+    touched_modules entirely (mapped to None, then discarded), so a PR
+    touching only such a test skipped baseline drift -- even though that
+    test could weaken coverage for any mutated module with nothing to
+    catch it."""
+    changed = {"tests/test_integration_helpers.py"}
+    assert scope.require_baseline_for_pr(changed, MODULES, labelled=False) is True
+
+
+def test_unclassified_test_plus_a_source_module_still_needs_baseline() -> None:
+    """Sibling to selected_modules's own matching fix: a changed detector
+    module (diff_types.py) alongside an unclassified test must still
+    require baseline drift for the unclassified test's own unmonitored
+    risk, not just diff-scoped's function-level coverage of diff_types.py."""
+    changed = {"abicheck/diff_types.py", "tests/test_integration_helpers.py"}
     assert scope.require_baseline_for_pr(changed, MODULES, labelled=False) is True
 
 

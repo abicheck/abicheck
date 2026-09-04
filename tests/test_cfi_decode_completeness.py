@@ -172,21 +172,53 @@ class TestCfiSourceDecodeFailurePropagates:
     def test_total_absence_of_cfi_sections_is_incomplete(self) -> None:
         """P2 review, fresh evidence (Codex, PR #784): a genuine total
         absence of unwind sections (neither .eh_frame nor .debug_frame) is
-        now reported incomplete (False), not complete -- both call sites
-        of _parse_frame_registers only invoke it once real DWARF DIEs
-        exist, so this shape means the unwind sections were stripped
+        now reported incomplete (False), not complete, when at least one
+        exported function exists to be covered -- both call sites of
+        _parse_frame_registers only invoke it once real DWARF DIEs exist,
+        so this shape means the unwind sections were stripped
         independently of debug info, not that there was nothing to
         extract. Renamed from test_legitimately_absent_source_is_still_
         reported_complete, whose docstring and assertion described the
-        prior (now-corrected) behavior."""
+        prior (now-corrected) behavior. P2 review, round three (Codex):
+        must supply a real exported function -- see the sibling positive
+        control test_total_absence_of_cfi_with_no_exported_functions_
+        stays_complete below for the "nothing to cover" case."""
         mock_elf = MagicMock()
         mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        dyn.iter_symbols.return_value = [_sym("some_fn", 0x1000)]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
         mock_dwarf = MagicMock()
         mock_dwarf.has_EH_CFI.return_value = False
         mock_dwarf.has_CFI.return_value = False
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+    def test_total_absence_of_cfi_with_no_exported_functions_stays_complete(
+        self,
+    ) -> None:
+        """P2 review, fresh evidence, round three (Codex): a DSO with real
+        DWARF that exports only variables (or no symbols at all) has no
+        ABI function for frame-register/callee-saved analysis to cover --
+        a total absence of unwind sections must not be reported incomplete
+        when there is nothing this pass is accountable for covering."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        dyn.iter_symbols.return_value = [_sym("exported_var", 0x3000, is_func=False)]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+        mock_dwarf = MagicMock()
+        mock_dwarf.has_EH_CFI.return_value = False
+        mock_dwarf.has_CFI.return_value = False
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert meta.frame_registers == {}
 
     def test_eh_frame_decode_failure_with_real_fde_free_debug_frame_fallback(
         self,

@@ -263,7 +263,7 @@ def _walk_die_iter(
             if die_name:
                 next_scope = qualified  # nested types use this as their scope
         elif tag == "DW_TAG_enumeration_type":
-            _process_enum(die, meta, CU, scope_prefix=scope)
+            _process_enum(die, meta, CU, scope_prefix=scope, incomplete=incomplete)
         elif tag == "DW_TAG_typedef":
             _process_typedef(die, meta, CU, type_cache, incomplete=incomplete)
         elif tag == "DW_TAG_base_type" and die_name:
@@ -317,7 +317,9 @@ def _process_typedef(
             )
     elif tag == "DW_TAG_enumeration_type":
         if not target_name and typedef_name not in meta.enums:
-            _process_enum_named(target, meta, CU, override_name=typedef_name)
+            _process_enum_named(
+                target, meta, CU, override_name=typedef_name, incomplete=incomplete
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -535,12 +537,14 @@ def _process_enum(
     meta: DwarfMetadata,
     CU: Any,
     scope_prefix: str = "",
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     name = _attr_str(die, "DW_AT_name")
     if not name:
         return  # anonymous — handled via typedef in _process_typedef
     qualified = f"{scope_prefix}::{name}" if scope_prefix else name
-    _process_enum_named(die, meta, CU, override_name=qualified)
+    _process_enum_named(die, meta, CU, override_name=qualified, incomplete=incomplete)
 
 
 def _process_enum_named(
@@ -548,6 +552,8 @@ def _process_enum_named(
     meta: DwarfMetadata,
     CU: Any,
     override_name: str | None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     name = override_name or _attr_str(die, "DW_AT_name")
     if not name:
@@ -562,6 +568,16 @@ def _process_enum_named(
     for child in die.iter_children():
         if child.tag == "DW_TAG_enumerator":
             member_name = _attr_str(child, "DW_AT_name")
+            if member_name and "DW_AT_const_value" not in child.attributes:
+                # P2 review, fresh evidence (Codex): a named DW_TAG_enumerator
+                # with no DW_AT_const_value at all -- truncated/malformed
+                # debug info, not a legitimate zero-valued case, since a real
+                # enumerator always carries its own constant value.
+                # _attr_int()'s own "attribute absent -> 0" default silently
+                # fabricated a real-looking value here, indistinguishable
+                # from a genuine 0, with no completeness signal.
+                if incomplete is not None:
+                    incomplete.append(True)
             # DW_AT_const_value may be signed (DW_FORM_sdata → negative values)
             member_val = _attr_int(child, "DW_AT_const_value")
             if member_name:
