@@ -338,10 +338,11 @@ is one more source for that same gate.
 A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
 `surface.internal_namespaces`/`gate.*`, similarly, all apply uniformly to
 every library on a directory/package (release) `compare` — the gate half
-folds into the release fan-out's own raw severity/exit-code-scheme inputs,
-since it has no resolved `GateOptions` object of its own yet.
-`contract.unresolved` is still rejected on a release comparison, since the
-per-library fan-out has no per-comparison contract context to fold it into.
+folds into the release fan-out's own resolved `GateOptions` object
+(ADR-064, landed 2026-09-02). `contract.unresolved` is still rejected on a
+release comparison, pending verification that lifting it is safe (see
+ADR-063 Track 4's 7B ledger entry,
+`docs/_meta/one-semantic-pipeline-status.yaml`).
 `scan --pack` also requires `--against`, since a pack's only application
 there is the baseline comparison. Each rejection above is a usage error
 rather than a silently ignored flag.

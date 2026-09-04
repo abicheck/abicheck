@@ -262,12 +262,11 @@ comparison's policy). On a directory/package (release) `compare`, a `kind:
 policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
 internal_namespaces`/`gate.exit_code_scheme`/`gate.severity.<category>` all
 apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1
-and 2) — the gate half is folded into the release's own raw severity/
-exit-code-scheme inputs rather than a resolved `GateOptions` object, which
-doesn't exist for the release fan-out yet. `contract.unresolved` is still
-rejected there, with or without `--contract`: its consumer needs a
-per-comparison contract context the release fan-out never builds per
-library.
+and 2) — the gate half is folded into the release fan-out's own resolved
+`GateOptions` object (ADR-064, landed 2026-09-02). `contract.unresolved` is
+still rejected there, with or without `--contract` (pending verification
+that lifting it is safe — see ADR-063 Track 4's 7B ledger entry,
+`docs/_meta/one-semantic-pipeline-status.yaml`).
 
 ## The resolution receipt
 
