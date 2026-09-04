@@ -325,6 +325,30 @@ def _run_bundle_analysis(
             raise click.ClickException(
                 f"Failed to load manifest {manifest_path}: {exc}",
             ) from exc
+    else:
+        # ADR-062 A1.7: fall back to a stored side's own embedded
+        # InstantiationManifest (`materialize_release_variant_artifacts`
+        # already preserves `write_bundle_facts_package`'s project_sections
+        # section on disk) rather than silently skipping the manifest-drift
+        # contract entirely for a stored comparison with no explicit
+        # --manifest (Codex review, fresh evidence). old_map is checked
+        # first (the side a manifest more naturally describes as a
+        # baseline); new_map only if old carries none. Best-effort: a
+        # package written by `storage.import_bundle_facts` stores its own
+        # captured manifest in a different shape this reader does not
+        # translate (see `read_embedded_instantiation_manifest`'s own
+        # docstring) and simply yields None, same as no manifest at all.
+        from .bundle_facts_store import read_embedded_instantiation_manifest
+
+        for candidate_map in (old_map, new_map):
+            for candidate_path in candidate_map.values():
+                if not candidate_path.is_dir():
+                    continue
+                manifest = read_embedded_instantiation_manifest(candidate_path)
+                if manifest is not None:
+                    break
+            if manifest is not None:
+                break
 
     system_extra: list[str] = [
         s.strip() for s in bundle_system_providers.split(",") if s.strip()

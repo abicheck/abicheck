@@ -257,3 +257,47 @@ def _display_dirname(key: str, artifact_id: str) -> str:
     if not sanitized or sanitized in (".", ".."):
         return artifact_id
     return f"{sanitized}-{artifact_id}"
+
+
+def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
+    """*pkg_map* (a `resolve_release_package_map` result), restricted to
+    members whose materialized `ArtifactRef.kind` is `"elf"` --
+    `--dso-only`'s stored-side counterpart to `is_elf_shared_object`
+    filtering a live directory's discovered files (Codex review, fresh
+    evidence: `--dso-only` was only ever applied to the live-discovery
+    branch, so a stored non-ELF snapshot -- header-only, Python-visible,
+    ... -- or a stored executable artifact still reached the comparison
+    even when explicitly excluded).
+
+    Best-effort per member: a sub-package whose own kind cannot be
+    determined (a read failure this function itself does not expect, since
+    every member here was already successfully materialized) is *excluded*,
+    not included -- `--dso-only`'s whole contract is "only compare what is
+    confirmed to be a DSO", so uncertainty must not silently widen it.
+    """
+    from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
+
+    filtered: dict[str, Path] = {}
+    for key, sub_dir in pkg_map.items():
+        try:
+            summary = read_manifest_summary(sub_dir)
+            (artifact_id,) = summary.artifact_ids
+            kind = read_artifact_ref(sub_dir, artifact_id).kind
+        except Exception:
+            continue
+        if kind == "elf":
+            filtered[key] = sub_dir
+    return filtered
+
+
+def dso_only_filter_pair(
+    old_pkg_map: dict[str, Path] | None, new_pkg_map: dict[str, Path] | None
+) -> tuple[dict[str, Path] | None, dict[str, Path] | None]:
+    """`dso_only_package_map` applied to whichever of *old_pkg_map*/
+    *new_pkg_map* is not `None` -- the pair shape
+    `cli_compare_release_matrix._prepare_compare_release_inputs` needs for
+    its own two stored-side maps in one call."""
+    return (
+        dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
+        dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
+    )

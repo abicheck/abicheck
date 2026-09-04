@@ -177,8 +177,13 @@ def capture_bundle_facts(
     time) they are guaranteed to, and to record each library's real
     on-disk *filename* (``BundleFacts.library_filenames``) for the
     SONAME-skew fallback. A name absent from *library_paths* simply gets
-    no recorded aliases/filename, same as when it's omitted entirely.
+    no recorded aliases/filename, same as when it's omitted entirely. A
+    *directory* entry (a materialized stored-release sub-package, ADR-062
+    A1.7) isn't a real ELF file, so it's resolved via
+    `bundle._stored_library_identity` instead (Codex review: identity was
+    lost, replaced by the sub-package's own dirname).
     """
+    from .bundle import _stored_library_identity
     from .bundle_soname import filesystem_alias_basenames, resolved_basename
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
@@ -187,9 +192,15 @@ def capture_bundle_facts(
         for name, path in library_paths.items():
             if name not in per_library_snapshots:
                 continue
-            # The resolved target's basename, not path.name -- library_paths
-            # commonly names a dev symlink, and path.name would capture the
-            # unversioned name, not the real one SONAME-skew needs (Codex).
+            if path.is_dir():
+                stored_name, stored_aliases = _stored_library_identity(path)
+                if stored_name is not None:
+                    library_filenames[name] = stored_name.name
+                if stored_aliases:
+                    filesystem_aliases[name] = stored_aliases
+                continue
+            # Resolved target's basename, not path.name (a dev symlink's
+            # unversioned name) -- SONAME-skew needs the real one (Codex).
             library_filenames[name] = resolved_basename(path)
             aliases = filesystem_alias_basenames(path)
             if aliases:

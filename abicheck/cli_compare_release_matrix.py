@@ -616,18 +616,11 @@ def _resolve_release_package_side(
             side_dir, variant_id=variant_id, dest_root=dest_root
         )
     except (ValueError, OSError, SnapshotError) as exc:
-        # Ambiguous-variant selection and a same-key artifact collision
-        # (ValueError), a missing/unreadable ref or object file (OSError),
-        # and a corrupt/incompatible stored document (SnapshotError) are all
-        # usage errors (a malformed *input*, not an abicheck bug) -- a
-        # package that already passed `is_project_snapshot_package_dir`'s
-        # own manifest read can still fail deeper (a missing artifact ref,
-        # a dangling object digest) once materialization actually walks its
-        # full ref/object graph. Translated the same way `_build_match_map`'s
-        # own `AmbiguousLibraryMatchError` -> `click.ClickException` already
-        # is, rather than propagating as an unhandled exception (which Click
-        # would surface as a generic exit-1 traceback instead of a normal
-        # exit-64 usage error) (Codex review).
+        # Ambiguous variant, a same-key collision (ValueError), a missing/
+        # unreadable ref or object (OSError), or a corrupt document
+        # (SnapshotError) are all usage errors, not an abicheck bug --
+        # translated the same way `_build_match_map`'s own
+        # `AmbiguousLibraryMatchError` already is (Codex review).
         raise click.UsageError(str(exc)) from exc
 
 
@@ -695,6 +688,14 @@ def _prepare_compare_release_inputs(
         if make_temp_dir is not None
         else None
     )
+    if dso_only:
+        # --dso-only's stored-side counterpart to is_elf_shared_object
+        # filtering a live directory's files below (Codex review: previously
+        # only applied there, so a stored non-ELF/executable artifact stayed
+        # in scope). No-op on either map that's already None.
+        from .workflows.release_package import dso_only_filter_pair
+
+        old_pkg_map, new_pkg_map = dso_only_filter_pair(old_pkg_map, new_pkg_map)
 
     old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
         old_dir,

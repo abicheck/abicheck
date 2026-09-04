@@ -90,6 +90,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .bundle_facts import (
@@ -124,6 +125,7 @@ if TYPE_CHECKING:
 __all__ = [
     "INSTANTIATION_MANIFEST_SECTION_KIND",
     "read_bundle_facts_package",
+    "read_embedded_instantiation_manifest",
     "write_bundle_facts_package",
 ]
 
@@ -700,3 +702,43 @@ def read_bundle_facts_package(
         filesystem_aliases=filesystem_aliases,
         library_filenames=library_filenames,
     )
+
+
+def read_embedded_instantiation_manifest(
+    root: str | Path,
+) -> InstantiationManifest | None:
+    """Best-effort read of a `ProjectSnapshot` package (or a single-artifact
+    sub-package materialized from one)'s own embedded `InstantiationManifest`
+    -- `PackageManifest.project_sections[INSTANTIATION_MANIFEST_SECTION_KIND]`,
+    the exact shape `write_bundle_facts_package` stores it under, decoded the
+    same way `read_bundle_facts_package` decodes it for its own
+    reconstruction (Codex review: ADR-062 A1.4/A1.5's own project-level
+    manifest evidence otherwise went completely unconsulted during ordinary
+    `compare-release` bundle analysis of a stored side that carries it --
+    `materialize_release_variant_artifacts` already preserves the section on
+    disk, but nothing read it back).
+
+    Returns `None` -- never raises -- for anything that isn't a readable
+    package carrying this section: no `manifest.json`, a corrupted/
+    hand-edited `project_sections` entry, or a package that simply never had
+    an instantiation manifest to begin with (e.g. one written by
+    `storage.import_bundle_facts`, whose own captured manifest -- if any --
+    lives inside its `BUNDLE_COMPOSITION_SECTION_KIND` composition payload
+    instead, a different shape this function does not attempt to translate;
+    a real gap, not silently claimed to be covered).
+    """
+    from .project_snapshot_store import DirectoryObjectStore, read_project_manifest
+
+    root_path = Path(root)
+    try:
+        manifest = read_project_manifest(root_path)
+    except Exception:
+        return None
+    manifest_ref = manifest.project_sections.get(INSTANTIATION_MANIFEST_SECTION_KIND)
+    if manifest_ref is None or manifest_ref.kind != INSTANTIATION_MANIFEST_SECTION_KIND:
+        return None
+    try:
+        raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
+        return manifest_from_dict(_manifest_document_from_storage(raw))
+    except Exception:
+        return None

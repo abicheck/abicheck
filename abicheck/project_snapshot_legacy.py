@@ -29,7 +29,7 @@ out, don't trim the file to fit.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -47,6 +47,7 @@ from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .storage.package import (
     ArtifactRef,
     InMemoryObjectStore,
+    ObjectRef,
     PackageManifest,
     VariantRef,
 )
@@ -58,12 +59,6 @@ __all__ = [
     "read_legacy_snapshot_document",
     "write_legacy_snapshot_package",
 ]
-
-#: D6's fixed, package-relative object-store directory name
-#: (`objects/sha256/<aa>/<digest>.json[.zst]`, `storage/package.py`'s
-#: `object_relpath`) -- not exported as a public constant there, but a
-#: stable part of the documented D6 layout every writer agrees on.
-_OBJECTS_DIRNAME = "objects"
 
 
 def is_project_snapshot_package_dir(path: str | Path) -> bool:
@@ -300,25 +295,46 @@ def read_legacy_snapshot_document(
     )
 
 
-def _populate_objects_dir(sub_dir: Path, objects_source: Path) -> None:
-    """Make *objects_source* (*root*'s own `objects/` directory) reachable
-    from *sub_dir* -- preferring a symlink (cheap: D7 content addressing
-    means every object a sub-package's own `write_project_manifest`
-    validation reads through it resolves to the identical bytes *root*
-    already stores, so copying would only duplicate potentially large
-    section content for no benefit), but falling back to a real recursive
-    copy when the host/filesystem cannot create one -- a Windows host
-    without Developer Mode/elevated symlink privileges, or a filesystem
-    without directory-symlink support, must still be able to materialize a
-    stored-release comparison (Codex review).
-    """
-    import shutil
+def _materialize_referenced_objects(
+    dest_dir: Path,
+    source_store: DirectoryObjectStore,
+    refs: Iterable[ObjectRef],
+) -> None:
+    """Copy exactly the objects *refs* names -- not *root*'s entire
+    `objects/` tree -- into a fresh `DirectoryObjectStore` rooted at
+    *dest_dir*, via the content layer (`ObjectStore.get`/`.put`), never a
+    raw filesystem copy or symlink of the source tree.
 
-    dest = sub_dir / _OBJECTS_DIRNAME
-    try:
-        dest.symlink_to(objects_source, target_is_directory=True)
-    except OSError:
-        shutil.copytree(objects_source, dest)
+    Replaces an earlier symlink-the-whole-directory (falling back to
+    `shutil.copytree` on a host without symlink privileges) strategy that
+    had two real problems (Codex review, fresh evidence): a package with N
+    large objects unrelated to the one artifact/variant/project sections
+    actually referenced here paid an N-fold disk cost on every
+    materialized sub-package under the `copytree` fallback, and
+    `copytree`'s default `symlinks=False` follows source symlinks --
+    letting a crafted package plant one inside its own `objects/` tree at
+    exactly the path a real object would occupy, pointing outside the
+    package entirely, and have comparison silently read and copy that
+    external file's content in. Going through `get()`/`put()` instead
+    means every byte materialized here is read back out under the
+    identical digest scheme `ObjectStore.get()` already verifies (a
+    tampered or substituted object fails there, not silently), and no
+    directory-level symlink -- the one thing a malicious package's own
+    `objects/` layout could otherwise influence -- is ever created.
+    """
+    dest_store = DirectoryObjectStore(dest_dir)
+    for ref in refs:
+        materialized_digest = dest_store.put(source_store.get(ref.digest))
+        if materialized_digest != ref.digest:
+            # Can only happen if the source store's own content no longer
+            # hashes to the digest its own ref names -- a corrupted or
+            # hand-edited package, not something a correct writer produces.
+            raise SnapshotError(
+                f"object {ref.digest!r} re-hashed to {materialized_digest!r} "
+                "after being read back from the source package -- the "
+                "source package's object store is corrupted or was "
+                "hand-edited"
+            )
 
 
 def materialize_release_variant_artifacts(
@@ -413,7 +429,7 @@ def materialize_release_variant_artifacts(
 
     dest_root_path = Path(dest_root)
     dest_root_path.mkdir(parents=True, exist_ok=True)
-    objects_source = (root_path / _OBJECTS_DIRNAME).resolve()
+    source_store = DirectoryObjectStore(root_path)
 
     result: dict[str, tuple[Path, ArtifactRef]] = {}
     for artifact_id in variant.artifact_ids:
@@ -423,8 +439,6 @@ def materialize_release_variant_artifacts(
 
         sub_dir = dest_root_path / artifact_id
         sub_dir.mkdir(parents=True, exist_ok=True)
-        if objects_source.is_dir():
-            _populate_objects_dir(sub_dir, objects_source)
         # Every section kind this sub-package's manifest ends up
         # referencing needs a matching `section_schema_versions` entry
         # (`write_project_manifest`'s own validation) -- not just the
@@ -459,13 +473,21 @@ def materialize_release_variant_artifacts(
         # one sub-package it happens to read first, since nothing else
         # would carry it once the original multi-artifact package's own
         # `refs/variants/<id>.json` is gone. Every `ObjectRef` referenced
-        # stays resolvable: `_populate_objects_dir` links/copies the
-        # *entire* `objects/` store above, not just this artifact's own
-        # digests.
+        # here is what `_materialize_referenced_objects` below actually
+        # copies -- not the whole source `objects/` store.
         trimmed_variant = VariantRef(
             variant_id=variant_id,
             artifact_ids=(artifact_id,),
             sections=full_variant.sections,
+        )
+        _materialize_referenced_objects(
+            sub_dir,
+            source_store,
+            [
+                *artifact.sections.values(),
+                *full_variant.sections.values(),
+                *summary.project_sections.values(),
+            ],
         )
         sub_manifest = PackageManifest(
             versions=trimmed_versions,

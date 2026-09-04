@@ -352,6 +352,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/bundle_facts.py",
+      "baseline_lines": 811,
+      "target": "workflows (already home)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: ADR-062 A1.7's capture_bundle_facts() gained a directory-entry branch so a stored, materialized ProjectSnapshot sub-package's real library_filenames/filesystem_aliases (read via bundle._stored_library_identity) are preserved in a --bundle-facts-out capture instead of being silently replaced with the sub-package's own synthetic dirname (Codex review, fresh evidence). Comments already trimmed to keep growth past the 800-line adoption baseline minimal.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/checker.py",
       "baseline_lines": 1286,
       "target": "compare",
