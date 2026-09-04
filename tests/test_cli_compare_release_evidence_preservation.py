@@ -778,3 +778,97 @@ class TestMalformedEmbeddedManifestRaises:
 
         with pytest.raises(Exception):  # noqa: B017 -- any decode failure, by design
             read_embedded_instantiation_manifest(pkg)
+
+
+class TestBothSidesEmptyVariantsStillEnforceManifests:
+    """Codex review, fresh evidence: `_run_bundle_analysis` returned `None`
+    immediately whenever *both* `old_map`/`new_map` were empty, before ever
+    resolving a manifest -- two valid empty `BundleFacts` packages (both
+    selected variants carry zero artifacts) could each declare a
+    required-symbol manifest and still compare as `NO_CHANGE`/exit 0."""
+
+    def test_manifest_drift_is_reported_even_when_both_sides_are_empty(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle_facts import BundleFacts
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
+        facts = BundleFacts(
+            variant_fingerprint="gcc13-avx2",
+            per_library_snapshots={},
+            manifest=manifest,
+            filesystem_aliases={},
+            library_filenames={},
+        )
+        old_pkg = tmp_path / "old_pkg"
+        store = DirectoryObjectStore(old_pkg)
+        pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(old_pkg, pkg_manifest)
+
+        empty_facts = BundleFacts(
+            variant_fingerprint="gcc13-avx2",
+            per_library_snapshots={},
+            manifest=None,
+            filesystem_aliases={},
+            library_filenames={},
+        )
+        new_pkg = tmp_path / "new_pkg"
+        new_store = DirectoryObjectStore(new_pkg)
+        new_manifest = write_bundle_facts_package(
+            empty_facts, store=new_store, variant_id="v1"
+        )
+        write_project_manifest(new_pkg, new_manifest)
+
+        ec, out = _invoke(
+            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+        )
+        doc = json.loads(out)
+        bundle_findings = doc.get("bundle_findings") or []
+        matching = [
+            f
+            for f in bundle_findings
+            if f.get("kind") == "bundle_manifest_instantiation_removed"
+            and f.get("symbol") == "core_mul"
+        ]
+        assert matching, (
+            "expected the core_mul manifest-drift finding even though both "
+            f"selected variants have zero artifacts, got: {out}"
+        )
+
+
+class TestMismatchedManifestRefKindRaises:
+    """Codex review, fresh evidence: `project_sections[...]`'s own
+    `ObjectRef.kind` is a caller-controlled label, not verified by
+    `PackageManifest` construction -- a corrupted/hand-edited package could
+    name an `ObjectRef` of a *different* kind under the instantiation-
+    manifest key. The reader previously just made `project_level` false and
+    fell through to `None`/an unrelated fallback instead of raising,
+    letting a corrupted package silently disable its required-symbol
+    check."""
+
+    def test_mismatched_kind_raises_not_none(self, tmp_path: Path) -> None:
+        from abicheck.bundle_facts import BundleFacts
+        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
+        facts = BundleFacts(
+            variant_fingerprint="gcc13-avx2",
+            per_library_snapshots={},
+            manifest=manifest,
+            filesystem_aliases={},
+            library_filenames={},
+        )
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(pkg, pkg_manifest)
+
+        manifest_json = pkg / "manifest.json"
+        doc = json.loads(manifest_json.read_text())
+        doc["project_sections"]["instantiation_manifest"]["kind"] = "something_else"
+        manifest_json.write_text(json.dumps(doc))
+
+        with pytest.raises(ValueError, match="kind"):
+            read_embedded_instantiation_manifest(pkg)

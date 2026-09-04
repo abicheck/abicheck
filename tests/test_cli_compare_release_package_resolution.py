@@ -508,3 +508,52 @@ class TestBundleFactsOutNeverAttributesNewsManifestToOld:
             "NEW's own embedded manifest was attributed to the captured "
             f"OLD baseline: {captured.manifest}"
         )
+
+
+class TestReleaseMatchKeyLooksUpEmptyLibraryName:
+    """Codex review: `import_bundle_facts` explicitly accepts and
+    round-trips an empty-string `per_library_snapshots` key, but
+    `_release_match_key`'s own `library_name and library_filenames` guard
+    used truthiness -- an empty-string `library_name` failed that check, so
+    `library_filenames[""]`'s real filename was never looked up and the
+    artifact was keyed by its opaque artifact_id instead."""
+
+    def test_empty_bundle_key_still_resolves_its_real_filename(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.import_bundle_facts import (
+            BUNDLE_FACTS_ARTIFACT_TYPE,
+            import_bundle_facts,
+        )
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        bundle_key = ""
+        real_filename = "libfoo.so.1"
+        doc = {
+            "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+            "schema_version": 2,
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {
+                bundle_key: snapshot_to_dict(
+                    _snap(bundle_key, "1.0", [_fn("foo", "_Z3foov")])
+                ),
+            },
+            "filesystem_aliases": {},
+            "library_filenames": {bundle_key: real_filename},
+            "manifest": None,
+        }
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = import_bundle_facts(
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
+        )
+        write_project_manifest(pkg, manifest)
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert set(resolved) == {"libfoo.so"}, (
+            f"expected key from {real_filename!r} for the empty bundle key, "
+            f"not the opaque artifact_id: got {sorted(resolved)}"
+        )

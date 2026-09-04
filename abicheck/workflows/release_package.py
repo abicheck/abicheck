@@ -160,7 +160,14 @@ def _release_match_key(
 
     name = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
     library_name = artifact.native_identity.get(_NATIVE_IDENTITY_LIBRARY_NAME_KEY)
-    if not name and library_name and library_filenames:
+    # `library_name is not None`, not truthiness: `import_bundle_facts`
+    # itself can legitimately round-trip an empty-string library key (its
+    # own docstring notes this), so `library_name == ""` must still probe
+    # `library_filenames[""]` rather than being treated the same as "no
+    # library_name was ever recorded" (Codex review, fresh evidence) --
+    # otherwise such an artifact is keyed by its opaque artifact_id and
+    # never matches the equivalent live library.
+    if not name and library_name is not None and library_filenames:
         name = library_filenames.get(library_name)
     if not name:
         name = library_name

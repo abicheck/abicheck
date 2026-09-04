@@ -379,7 +379,17 @@ def _run_bundle_analysis(
     from .bundle import build_bundle_snapshot_mixed
     from .bundle_analysis import analyze_bundle
 
-    if not old_map and not new_map:
+    # Resolved before the empty-maps check: an empty BundleFacts package can still declare a required-symbol manifest (Codex review).
+    manifest = _resolve_bundle_manifest(
+        manifest_path,
+        old_root,
+        new_root,
+        old_map,
+        new_map,
+        old_variant=old_variant,
+        new_variant=new_variant,
+    )
+    if not old_map and not new_map and manifest is None:
         return None
     try:
         # ADR-062 A1.7: old_map/new_map may hold a stored ProjectSnapshot
@@ -387,7 +397,7 @@ def _run_bundle_analysis(
         # binary paths -- build_bundle_snapshot_mixed resolves either kind,
         # rather than build_bundle_snapshot's live-only ELF parse, which
         # would otherwise silently drop every stored-side library from
-        # bundle-level analysis (Codex review, security finding).
+        # bundle-level analysis (Codex review, security finding); an empty map still builds a valid, empty BundleSnapshot.
         old_snap = build_bundle_snapshot_mixed(dict(old_map))
         new_snap = build_bundle_snapshot_mixed(dict(new_map))
     except Exception as exc:
@@ -398,16 +408,6 @@ def _run_bundle_analysis(
         # pipelines that previously didn't see bundle analysis at all.
         click.echo(f"Warning: bundle analysis skipped: {exc}", err=True)
         return None
-
-    manifest = _resolve_bundle_manifest(
-        manifest_path,
-        old_root,
-        new_root,
-        old_map,
-        new_map,
-        old_variant=old_variant,
-        new_variant=new_variant,
-    )
 
     system_extra: list[str] = [
         s.strip() for s in bundle_system_providers.split(",") if s.strip()

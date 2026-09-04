@@ -759,12 +759,25 @@ def read_embedded_instantiation_manifest(
     except Exception:
         return None
     manifest_ref = manifest.project_sections.get(INSTANTIATION_MANIFEST_SECTION_KIND)
-    project_level = (
-        manifest_ref is not None
-        and manifest_ref.kind == INSTANTIATION_MANIFEST_SECTION_KIND
-    )
-    if project_level:
-        assert manifest_ref is not None
+    if manifest_ref is not None:
+        # `manifest_ref.kind` is a caller-controlled label, not verified by
+        # `PackageManifest`/`ObjectRef` construction -- a corrupted or
+        # hand-assembled package could map this key to an `ObjectRef` whose
+        # own `kind` names something else entirely. Raising here (matching
+        # `read_bundle_facts_package`'s identical per-artifact-section
+        # guard) rather than falling through to `project_level = False`
+        # (which read the same as "no manifest declared" and could silently
+        # fall back to unrelated variant-composition evidence, or simply
+        # return `None`) is what keeps a corrupted section from disabling
+        # the required-symbol check it was meant to enforce (Codex review,
+        # fresh evidence).
+        if manifest_ref.kind != INSTANTIATION_MANIFEST_SECTION_KIND:
+            raise ValueError(
+                f"{root_path}: project_sections[{INSTANTIATION_MANIFEST_SECTION_KIND!r}] "
+                f"names an ObjectRef of kind {manifest_ref.kind!r}, not "
+                f"{INSTANTIATION_MANIFEST_SECTION_KIND!r} -- the package is "
+                "corrupted or was hand-edited"
+            )
         raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
         return manifest_from_dict(_manifest_document_from_storage(raw))
     if variant_id is not None:
