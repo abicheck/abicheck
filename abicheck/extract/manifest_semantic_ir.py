@@ -85,7 +85,7 @@ never simply "on" for the whole manifest.** Two independent axes:
    _function_key`` itself already keys by ``tu_name`` for exactly this
    reason -- see that function's own docstring). Locality is checked
    against *each fragment's own* declaration
-   (:func:`_locally_linked_entity_ids_in_fragment`), never a single global
+   (:func:`_locally_linked_declaration_locations_in_fragment`), never a single global
    set built once across every fragment: a plain-C function's own
    ``EntityId`` construction does not encode static-vs-external linkage at
    all (confirmed empirically -- an externally-linked `int helper();` and
@@ -216,29 +216,57 @@ def _is_locally_linked_variable(var: Variable) -> bool:
     return _has_local_linkage_mangling(var.mangled)
 
 
-def _locally_linked_entity_ids_in_fragment(fragment: TuFragment) -> set[EntityId]:
-    """Every ``EntityId`` belonging to a TU-local function/variable in
-    *this fragment alone* -- never aggregated globally across fragments
-    (Codex review, third round, fresh evidence): a plain-C function's own
-    ``EntityId`` construction does not encode static-vs-external linkage
-    (confirmed empirically -- an externally-linked and an unrelated
-    internally-linked same-named plain-C function resolve to the
-    *identical* ``extra=("extern_c",)`` identity), so a global set would
-    wrongly promote every occurrence sharing that collided identity to be
+def _locally_linked_declaration_locations_in_fragment(
+    fragment: TuFragment,
+) -> dict[EntityId, set[str]]:
+    """Every locally-linked function/variable declaration in *this
+    fragment alone*, keyed by ``EntityId`` -> the set of its own raw
+    ``source_location``\\ s (``""`` for one with none, matching
+    ``semantic_normalizer._location_disambiguator``'s identical fallback)
+    -- never aggregated globally across fragments (Codex review, third
+    round, fresh evidence): a plain-C function's own ``EntityId``
+    construction does not encode static-vs-external linkage (confirmed
+    empirically -- an externally-linked and an unrelated internally-linked
+    same-named plain-C function resolve to the *identical*
+    ``extra=("extern_c",)`` identity), so a global set would wrongly
+    promote every occurrence sharing that collided identity to be
     TU-scoped, including genuinely external ones from other fragments that
-    must still collapse together."""
-    local_ids: set[EntityId] = set()
-    local_ids.update(
-        fn.entity_id
-        for fn in fragment.functions
-        if fn.entity_id is not None and _is_locally_linked_function(fn)
-    )
-    local_ids.update(
-        var.entity_id
-        for var in fragment.variables
-        if var.entity_id is not None and _is_locally_linked_variable(var)
-    )
-    return local_ids
+    must still collapse together.
+
+    **Per-location, not a flat ``set[EntityId]`` (Codex review, sixth
+    round, fresh evidence, real clang confirmed):** two *different*
+    declarations *within the same fragment* can share the identical
+    colliding ``EntityId`` while having different localities -- a file-
+    scope ``static`` function and an unrelated class's static member
+    function, both named identically, both nested inside one
+    ``extern "C" { ... }`` block (real clang, verified directly:
+    ``extern "C" { static int make(); struct Widget { static int
+    make(); }; }`` mangles the free function to ``_ZL4makev`` -- a real
+    Itanium *local*-linkage marker, extern "C" notwithstanding, since a
+    C-linkage specification only suppresses mangling for a declaration
+    with genuine *external* linkage -- and the member to the ordinary,
+    marker-free ``_ZN6Widget4makeEv``; both nonetheless got
+    ``is_extern_c=True`` inherited by the parser's ``_walk``, so
+    ``entity_id_for_function``'s ``is_extern_c`` branch erased both their
+    scopes onto the identical bare ``EntityId``). A flat
+    ``set[EntityId]`` cannot represent "this one declaration sharing the
+    entity id is local, that other one is not" -- membership is a single
+    yes/no per entity id, so the free function's own correct `True`
+    (from :func:`_is_locally_linked_function`'s own :func:`_looks_
+    itanium_mangled` guard) wrongly promoted the *member*'s occurrence
+    into being TU-qualified too, splitting what should be one shared
+    occurrence into two. Keying by each declaration's own source location
+    within the entity id's bucket is what lets the caller check "is THIS
+    occurrence's own declaration local", not "is any declaration sharing
+    this entity id local anywhere in the fragment"."""
+    local: dict[EntityId, set[str]] = defaultdict(set)
+    for fn in fragment.functions:
+        if fn.entity_id is not None and _is_locally_linked_function(fn):
+            local[fn.entity_id].add(fn.source_location or "")
+    for var in fragment.variables:
+        if var.entity_id is not None and _is_locally_linked_variable(var):
+            local[var.entity_id].add(var.source_location or "")
+    return local
 
 
 def _fragment_locations(fragment: TuFragment) -> dict[EntityId, set[str]]:
@@ -367,7 +395,9 @@ def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
     )
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for fragment in sorted(fragments, key=lambda f: f.tu_name):
-        local_entity_ids = _locally_linked_entity_ids_in_fragment(fragment)
+        local_declaration_locations = _locally_linked_declaration_locations_in_fragment(
+            fragment
+        )
         fragment_ir = normalize_header_ast(
             types=fragment.types,
             enums=fragment.enums,
@@ -381,7 +411,9 @@ def manifest_semantic_ir(fragments: Sequence[TuFragment]) -> SemanticIR:
             disambiguate_by_source_location=True,
         )
         for occ_id, entity in fragment_ir.occurrences.items():
-            if occ_id.entity_id in local_entity_ids:
+            if occ_id.disambiguator in local_declaration_locations.get(
+                occ_id.entity_id, ()
+            ):
                 # Combine, never replace: this fragment's own declaration
                 # may itself carry more than one raw location (its own
                 # prototype and definition), and each must stay distinct.

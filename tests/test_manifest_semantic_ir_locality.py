@@ -302,3 +302,45 @@ def test_static_member_function_wrongly_tagged_extern_c_collapses_to_one_occurre
     ir = manifest_semantic_ir([a, b])
     occurrences = ir.occurrences_for(member_id)
     assert len(occurrences) == 1
+
+
+def test_colliding_entity_id_same_fragment_classifies_locality_per_declaration():
+    # Fourth Darwin quirk instance (Codex review, sixth round, real clang
+    # verified): a file-scope static function and an unrelated class's
+    # static member function, both named identically, both nested inside
+    # one extern "C" { ... } block, share the identical EntityId (both get
+    # is_extern_c=True inherited by the parser, which erases both their
+    # scopes onto the same bare EntityId) -- but the free function is
+    # genuinely local (mangled '__ZL4makev', real Itanium local marker)
+    # while the member is genuinely external (mangled '__ZN6Widget4makeEv',
+    # no local marker). Both declarations appear in the SAME fragment. A
+    # flat per-fragment set[EntityId] cannot represent "this declaration
+    # sharing the entity id is local, that other one is not" -- it wrongly
+    # promoted the member's occurrence into being TU-qualified too,
+    # splitting one shared occurrence into two. Expect exactly 3
+    # occurrences: 2 local (one per TU) for the free function, 1 shared
+    # for the member.
+    shared_id = entity_id_for_function((), "make", is_extern_c=True)
+    free_fn_a = _fn(
+        "make",
+        "__ZL4makev",
+        is_static=True,
+        is_extern_c=True,
+        entity_id=shared_id,
+        source_location="w.h:1",
+    )
+    member_fn = _fn(
+        "make",
+        "__ZN6Widget4makeEv",
+        is_static=True,
+        is_extern_c=True,
+        entity_id=shared_id,
+        source_location="w.h:2",
+    )
+    a = TuFragment(tu_name="a", functions=(free_fn_a, member_fn))
+    b = TuFragment(tu_name="b", functions=(free_fn_a, member_fn))
+    ir = manifest_semantic_ir([a, b])
+    occurrences = ir.occurrences_for(shared_id)
+    assert len(occurrences) == 3
+    disambiguators = {occ.disambiguator for occ in occurrences}
+    assert disambiguators == {"a:w.h:1", "b:w.h:1", "w.h:2"}
