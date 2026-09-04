@@ -42,7 +42,9 @@ class FuncProto:
     linkage: int | None = None
 
 
-def read_null_terminated_string(data: bytes, offset: int) -> tuple[str, bool]:
+def read_null_terminated_string(
+    data: bytes, offset: int, *, invalid: list[bool] | None = None
+) -> str:
     """Read a null-terminated UTF-8 string from a binary section.
 
     Shared by BTF and CTF parsers for reading their string tables -- both
@@ -50,21 +52,27 @@ def read_null_terminated_string(data: bytes, offset: int) -> tuple[str, bool]:
     missing terminator is itself a corruption/truncation signal, not a
     legitimate shape.
 
-    Returns ``(string, valid)`` (P2 review, two rounds): ``valid`` is False
-    when *offset* itself is out of ``data``'s bounds (a corrupt/out-of-range
-    name offset), OR when no NUL terminator is found before the end of the
-    buffer (an in-bounds but truncated string table, e.g. a section cut off
-    mid-entry). Both shapes previously returned indistinguishable results
-    from a legitimate zero-length or trailing name -- the first round only
-    caught the out-of-bounds-offset shape and left the missing-terminator
-    one still reading `valid=True`.
+    P1 review: keeps its original ``-> str`` return contract (an existing
+    caller using the result as a plain string, including a bare truthiness
+    check, must not silently start seeing a two-element tuple instead).
+    *invalid*, when given, has ``True`` appended (append-only, mirrors this
+    module's other opt-in out-params -- e.g. ``truncated``/``decode_failed``
+    elsewhere in the codebase) whenever *offset* itself is out of ``data``'s
+    bounds (a corrupt/out-of-range name offset), OR no NUL terminator is
+    found before the end of the buffer (an in-bounds but truncated string
+    table, e.g. a section cut off mid-entry) -- both shapes are otherwise
+    indistinguishable from a legitimate zero-length or trailing name.
     """
     if offset < 0 or offset >= len(data):
-        return "", False
+        if invalid is not None:
+            invalid.append(True)
+        return ""
     end = data.find(b"\x00", offset)
     if end < 0:
-        return data[offset:].decode("utf-8", errors="replace"), False
-    return data[offset:end].decode("utf-8", errors="replace"), True
+        if invalid is not None:
+            invalid.append(True)
+        return data[offset:].decode("utf-8", errors="replace")
+    return data[offset:end].decode("utf-8", errors="replace")
 
 
 @runtime_checkable

@@ -88,9 +88,13 @@ def _read_string(str_data: bytes, offset: int) -> tuple[str, bool]:
     """Read a null-terminated string from the CTF string table.
 
     Returns ``(name, valid)`` -- see ``read_null_terminated_string``'s own
-    docstring for what ``valid=False`` means.
+    docstring for what ``valid=False`` means. This module-private wrapper
+    is what carries the tuple shape; the shared helper itself keeps its
+    original ``-> str`` contract (P1 review).
     """
-    return read_null_terminated_string(str_data, offset)
+    invalid: list[bool] = []
+    name = read_null_terminated_string(str_data, offset, invalid=invalid)
+    return name, not invalid
 
 
 class _TypeResolver:
