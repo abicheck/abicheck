@@ -1170,6 +1170,20 @@ class TypeDatabase:
         """Get the parsed fieldlist members for type index *ti*."""
         return self._fieldlists.get(ti, [])
 
+    def has_fieldlist(self, ti: int) -> bool:
+        """Return True if *ti* names an actually-parsed LF_FIELDLIST record.
+
+        P2 review, fresh evidence: a fully-framed LF_STRUCTURE/LF_UNION/
+        LF_ENUM can declare a non-zero ``field_list_ti`` that names an index
+        the TPI stream never defined at all, or that resolves to some other
+        (non-fieldlist) record kind -- both collapse to the same empty
+        ``get_fieldlist()`` result as a struct/enum that legitimately has no
+        members, with no way for a caller to tell "zero members" apart from
+        "member list unresolvable". Callers use this to distinguish the two
+        before trusting an empty ``get_fieldlist()`` result.
+        """
+        return ti in self._fieldlists
+
     def get_procedure(self, ti: int) -> CvProcedure | None:
         return self._procedures.get(ti)
 

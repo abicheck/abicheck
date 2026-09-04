@@ -364,6 +364,95 @@ class TestPdbToDwarfMetadata:
         meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
         assert meta.evidence_state == "parsed"
 
+    def test_struct_with_missing_fieldlist_marks_partial_and_is_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        """P2 review, fresh evidence (Codex): a fully-framed LF_STRUCTURE
+        whose field_list_ti names a type index the TPI stream never
+        defined previously fell through TypeDatabase.get_fieldlist()'s
+        empty-list default -- indistinguishable from a struct that
+        legitimately has zero fields -- and _extract_struct_layouts()
+        recorded it with a fabricated empty layout while evidence_state
+        stayed "parsed". The struct must now be dropped (same per-record
+        skip-and-continue as any other malformed-field extraction failure)
+        and the channel marked partial, exercised through the public
+        parser rather than only at the TypeDatabase/helper level."""
+        records = [
+            (LF_STRUCTURE, _make_lf_structure(2, 0, 0x9999, 8, "Bad")),  # 0x1000
+        ]
+        pdb_bytes = _build_minimal_pdb(tpi_records=records)
+        pdb_file = tmp_path / "missing_fieldlist.pdb"
+        pdb_file.write_bytes(pdb_bytes)
+
+        meta, adv = parse_pdb_debug_info(pdb_file)
+
+        assert meta.evidence_state == "partial"
+        assert adv.evidence_state == "partial"
+        assert "Bad" not in meta.structs
+
+    def test_struct_with_wrong_kind_fieldlist_marks_partial_and_is_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        """Sibling shape: field_list_ti resolves to a real record, but one
+        that isn't LF_FIELDLIST at all (here, another struct) -- same
+        get_fieldlist() empty-list collapse, same required outcome."""
+        records = [
+            (LF_STRUCTURE, _make_lf_structure(0, 0, 0, 4, "Other")),  # 0x1000
+            (
+                LF_STRUCTURE,
+                _make_lf_structure(2, 0, 0x1000, 8, "Bad"),
+            ),  # 0x1001, field_ti points at 0x1000 (a struct, not a fieldlist)
+        ]
+        pdb_bytes = _build_minimal_pdb(tpi_records=records)
+        pdb_file = tmp_path / "wrong_kind_fieldlist.pdb"
+        pdb_file.write_bytes(pdb_bytes)
+
+        meta, adv = parse_pdb_debug_info(pdb_file)
+
+        assert meta.evidence_state == "partial"
+        assert "Bad" not in meta.structs
+        # The unaffected struct is unaffected by its sibling's bad reference.
+        assert "Other" in meta.structs
+
+    def test_enum_with_missing_fieldlist_marks_partial_but_keeps_definition(
+        self, tmp_path: Path
+    ) -> None:
+        """Enum sibling of the struct case: the enum's own name/underlying
+        size is still recorded (mirrors the struct-level per-record skip
+        principle of not discarding good structural evidence alongside
+        bad), but its member list must not be silently reported empty."""
+        records = [
+            (LF_ENUM, _make_lf_enum(3, 0, 0x74, 0x9999, "BadEnum")),  # 0x1000
+        ]
+        pdb_bytes = _build_minimal_pdb(tpi_records=records)
+        pdb_file = tmp_path / "missing_enum_fieldlist.pdb"
+        pdb_file.write_bytes(pdb_bytes)
+
+        meta, adv = parse_pdb_debug_info(pdb_file)
+
+        assert meta.evidence_state == "partial"
+        assert "BadEnum" in meta.enums
+        assert meta.enums["BadEnum"].members == {}
+
+    def test_zero_field_list_ti_is_not_flagged_partial(self, tmp_path: Path) -> None:
+        """Positive control: field_list_ti == 0 means "no fields" by
+        CodeView convention (an opaque/forward-declared-with-no-body
+        struct, or a valueless enum) -- this is not the same shape as an
+        unresolvable reference and must not be flagged."""
+        records = [
+            (LF_STRUCTURE, _make_lf_structure(0, 0, 0, 0, "Empty")),  # 0x1000
+            (LF_ENUM, _make_lf_enum(0, 0, 0x74, 0, "EmptyEnum")),  # 0x1001
+        ]
+        pdb_bytes = _build_minimal_pdb(tpi_records=records)
+        pdb_file = tmp_path / "zero_fieldlist.pdb"
+        pdb_file.write_bytes(pdb_bytes)
+
+        meta, adv = parse_pdb_debug_info(pdb_file)
+
+        assert meta.evidence_state == "parsed"
+        assert meta.structs["Empty"].fields == []
+        assert meta.enums["EmptyEnum"].members == {}
+
 
 # ---------------------------------------------------------------------------
 # Data model consistency: AdvancedDwarfMetadata from PDB

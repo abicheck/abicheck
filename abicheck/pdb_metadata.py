@@ -240,7 +240,9 @@ def parse_pdb_debug_info(
         log.warning("parse_pdb_debug_info: struct extraction failed: %s", exc)
 
     try:
-        _extract_enums(pdb.types, meta, src_files)
+        enums_skipped = _extract_enums(pdb.types, meta, src_files)
+        if enums_skipped:
+            meta.evidence_state = "partial"
     except Exception as exc:  # noqa: BLE001
         meta.evidence_state = "partial"
         log.warning("parse_pdb_debug_info: enum extraction failed: %s", exc)
@@ -342,6 +344,22 @@ def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]
     if cv_struct.field_list_ti == 0:
         return []
 
+    if not types.has_fieldlist(cv_struct.field_list_ti):
+        # P2 review, fresh evidence: a fully-framed struct whose
+        # field_list_ti names a missing or non-LF_FIELDLIST record
+        # previously fell through to get_fieldlist()'s empty-list default,
+        # indistinguishable from a struct that legitimately has zero
+        # fields -- silently emitting an empty layout with no completeness
+        # signal. Raising here routes through _extract_struct_layouts'
+        # existing per-struct except-and-skip handling (same as any other
+        # malformed-field extraction failure), so the struct is left out of
+        # meta.structs entirely rather than recorded with a fabricated
+        # empty layout, and evidence_state is marked partial.
+        raise ValueError(
+            f"unresolved field_list_ti {cv_struct.field_list_ti:#x} for "
+            f"struct {cv_struct.name!r}"
+        )
+
     members = types.get_fieldlist(cv_struct.field_list_ti)
     fields: list[FieldInfo] = []
 
@@ -388,8 +406,16 @@ def _extract_enums(
     types: TypeDatabase,
     meta: DwarfMetadata,
     src_files: dict[str, str] | None = None,
-) -> None:
-    """Extract enum types from TPI into DwarfMetadata.enums."""
+) -> bool:
+    """Extract enum types from TPI into DwarfMetadata.enums.
+
+    Returns True if any enum's ``field_list_ti`` named a missing or
+    non-LF_FIELDLIST record -- the enum's own definition (name, underlying
+    size) is still recorded, but with its member list skipped rather than
+    silently reported as empty (same distinction ``_extract_fields`` makes
+    for structs; P2 review, fresh evidence).
+    """
+    skipped = False
     for _ti, cv_enum in types.all_enums().items():
         if not _is_user_visible(cv_enum.name, cv_enum.is_forward_ref):
             continue
@@ -397,10 +423,19 @@ def _extract_enums(
         underlying_size = types.type_size(cv_enum.underlying_type_ti)
 
         members: dict[str, int] = {}
-        field_members = types.get_fieldlist(cv_enum.field_list_ti)
-        for m in field_members:
-            if isinstance(m, CvEnumerator) and m.name:
-                members[m.name] = m.value
+        if cv_enum.field_list_ti != 0:
+            if not types.has_fieldlist(cv_enum.field_list_ti):
+                log.debug(
+                    "_extract_enums: unresolved field_list_ti %#x for enum %s",
+                    cv_enum.field_list_ti,
+                    cv_enum.name,
+                )
+                skipped = True
+            else:
+                field_members = types.get_fieldlist(cv_enum.field_list_ti)
+                for m in field_members:
+                    if isinstance(m, CvEnumerator) and m.name:
+                        members[m.name] = m.value
 
         enum_info = EnumInfo(
             name=cv_enum.name,
@@ -411,6 +446,8 @@ def _extract_enums(
 
         if cv_enum.name not in meta.enums:
             meta.enums[cv_enum.name] = enum_info
+
+    return skipped
 
 
 # ---------------------------------------------------------------------------
