@@ -182,8 +182,37 @@ def write_bundle_facts_package(
             "package read_bundle_facts_package would itself then refuse to "
             "reconstruct"
         )
-    document = bundle_facts_to_dict(facts)
-    _charge_document_bytes(document, context="facts' encoded document")
+    # Charged incrementally, one library at a time, via `bundle_facts_to_dict`'s
+    # own `on_snapshot` hook -- a plain post-hoc `_charge_document_bytes(document,
+    # ...)` would first require converting and retaining every library's
+    # snapshot into one combined document before the budget is ever
+    # consulted, temporarily duplicating an arbitrarily large `facts` in
+    # memory before this guard has any chance to reject it (Codex review).
+    decoded_bytes_so_far = 0
+
+    def _charge_snapshot(library_name: str, snapshot_document: Any) -> None:
+        nonlocal decoded_bytes_so_far
+        decoded_bytes_so_far = _charge_running_bytes(
+            snapshot_document,
+            decoded_bytes_so_far,
+            context=(
+                "facts.per_library_snapshots' encoded documents "
+                f"(reached while encoding {library_name!r})"
+            ),
+        )
+
+    document = bundle_facts_to_dict(facts, on_snapshot=_charge_snapshot)
+    # The remaining, composition-only content (`per_library_snapshots`
+    # already charged above) -- variant_fingerprint/manifest/
+    # filesystem_aliases/library_filenames are typically small relative to
+    # snapshot content, so one combined charge for them is not the same
+    # unbounded-duplication risk the per-library loop above guards against.
+    composition_only = {
+        key: value for key, value in document.items() if key != "per_library_snapshots"
+    }
+    _charge_running_bytes(
+        composition_only, decoded_bytes_so_far, context="facts' encoded document"
+    )
     return import_bundle_facts(
         document,
         store=store,

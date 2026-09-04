@@ -406,8 +406,10 @@ class TestWriteBundleFactsPackageSchemaVersionConsistency:
 
         real_bundle_facts_to_dict = module.bundle_facts_to_dict
 
-        def fake_bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
-            document = real_bundle_facts_to_dict(facts)
+        def fake_bundle_facts_to_dict(
+            facts: BundleFacts, **kwargs: Any
+        ) -> dict[str, Any]:
+            document = real_bundle_facts_to_dict(facts, **kwargs)
             # Force the second library to claim a different, still-valid
             # legacy schema_version than the first, simulating two
             # snapshots captured under different abicheck producer epochs.
@@ -473,6 +475,64 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
 
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             write_bundle_facts_package(facts, store=store)
+
+    def test_charges_each_converted_snapshot_incrementally_on_write(
+        self, monkeypatch: Any
+    ) -> None:
+        """The decoded-byte budget must be checked *as* each library's
+        snapshot is converted, not only after every member of `facts` has
+        already been converted and retained in one combined document. Three
+        libraries, a budget that admits roughly two snapshots' worth of
+        bytes: the third must never even be *converted* -- proving the
+        check runs incrementally, not as one charge over an already-fully-
+        materialized document (Codex review). A plain assert-raises test
+        alone cannot distinguish the two: both eventually raise the same
+        error for a budget this tight; only the conversion *call count* can
+        show the difference."""
+        import json
+
+        import abicheck.bundle_facts_store as module
+        import abicheck.serialization as serialization_module
+
+        facts = capture_bundle_facts(
+            {
+                "liba.so": _snapshot("liba.so"),
+                "libb.so": _snapshot("libb.so"),
+                "libc.so": _snapshot("libc.so"),
+            }
+        )
+        store = InMemoryObjectStore()
+
+        one_snapshot_bytes = len(
+            json.dumps(
+                serialization_module.snapshot_to_dict(_snapshot("liba.so"))
+            ).encode("utf-8")
+        )
+        # Room for roughly two snapshots, not three.
+        monkeypatch.setattr(
+            module,
+            "DEFAULT_MAX_BUNDLE_DECODED_BYTES",
+            2 * one_snapshot_bytes + 64,
+        )
+
+        real_snapshot_to_dict = serialization_module.snapshot_to_dict
+        converted: list[str] = []
+
+        def counting_snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
+            converted.append(snap.library)
+            return real_snapshot_to_dict(snap)
+
+        monkeypatch.setattr(
+            serialization_module, "snapshot_to_dict", counting_snapshot_to_dict
+        )
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            write_bundle_facts_package(facts, store=store)
+
+        assert len(converted) < 3, (
+            "all three snapshots were converted before the budget was ever "
+            "checked -- the check is not incremental"
+        )
 
     def test_refuses_to_write_past_the_alias_node_budget(
         self, monkeypatch: Any

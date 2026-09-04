@@ -564,6 +564,31 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match=BUNDLE_COMPOSITION_SECTION_KIND):
             export_bundle_facts(single, store=store)
 
+    def test_export_rejects_a_composition_ref_whose_kind_does_not_match(self) -> None:
+        """`variant.sections`' own key and the `ObjectRef.kind` it maps to
+        are two independent fields -- a hand-assembled package could map
+        `BUNDLE_COMPOSITION_SECTION_KIND` to an `ObjectRef` declaring a
+        different `kind` while still pointing at a real, validly-encoded
+        digest, defeating the ref's own purpose of identifying its content
+        before it is fetched (Codex review)."""
+        import dataclasses
+
+        doc = _bundle_document()
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        real_ref = manifest.variant_refs[0].sections[BUNDLE_COMPOSITION_SECTION_KIND]
+        doctored_variant = dataclasses.replace(
+            manifest.variant_refs[0],
+            sections={
+                BUNDLE_COMPOSITION_SECTION_KIND: dataclasses.replace(
+                    real_ref, kind="not_bundle_composition"
+                )
+            },
+        )
+        doctored = dataclasses.replace(manifest, variant_refs=(doctored_variant,))
+        with pytest.raises(ValueError, match="not_bundle_composition"):
+            export_bundle_facts(doctored, store=store)
+
     def _doctored_composition_manifest(
         self, payload: dict[str, Any]
     ) -> tuple[PackageManifest, InMemoryObjectStore]:

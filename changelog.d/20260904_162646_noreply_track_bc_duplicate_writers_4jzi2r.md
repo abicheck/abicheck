@@ -37,4 +37,12 @@
   of `[key, value]` pairs), instead of silently accepting it via a plain
   `dict(entry)` conversion, and a stored `manifest` that is not itself a
   mapping with a list-valued `provides` key (previously an unhandled
-  `TypeError`/`KeyError` instead of the documented `ValueError`).
+  `TypeError`/`KeyError` instead of the documented `ValueError`). It also
+  now checks the composition `ObjectRef.kind` against
+  `BUNDLE_COMPOSITION_SECTION_KIND` before fetching it, not only via the
+  fetched content's own internal kind afterward. `bundle_facts_serialization
+  .bundle_facts_to_dict` gained a matching optional `on_snapshot` hook, used
+  by `write_bundle_facts_package` to charge each library's encoded size as
+  it is converted, rather than only after every member of a possibly-large
+  `BundleFacts` has already been converted and retained in one combined
+  document.

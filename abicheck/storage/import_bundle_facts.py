@@ -613,26 +613,22 @@ def export_bundle_facts(
     aggregate decoded size *as* each piece is reconstructed, rather than
     only after every member of a possibly-untrusted `manifest` has already
     been retained in memory, raises from this callback to abort before the
-    next piece is fetched. For the bundle-composition section, the callback
-    receives that section's own decoded payload. For an artifact, it
-    receives `{"library_name": <the recovered library name>,
-    "snapshot": <the exported snapshot document>}` rather than the bare
-    snapshot document -- the recovered library name becomes a
-    `per_library_snapshots` key in the document this function returns, so a
-    caller charging only the bare snapshot would never account for an
-    arbitrarily large library name (Codex review).
+    next piece is fetched. For an artifact, the callback receives
+    `{"library_name": ..., "snapshot": ...}` rather than the bare snapshot
+    document, so a caller charging its bytes also charges the recovered
+    library name -- itself a `per_library_snapshots` key in the returned
+    document (Codex review).
 
-    Raises `ValueError` if *variant_id* names no variant in *manifest*, if
-    that variant carries no `BUNDLE_COMPOSITION_SECTION_KIND` section (never
-    produced by anything but `import_bundle_facts` itself, so this means the
-    manifest was not built by it, or was hand-edited), if that section (or
-    any artifact's own section) is not advertised in this package's
-    `section_schema_versions`, if the stored composition's
-    `variant_fingerprint` is not a string, if the stored `manifest` is not
-    a mapping with a list-valued `provides` key, if a stored manifest
-    `provides` entry is not itself a mapping, or if a stored template
-    instantiation names the same parameter more than once -- or whatever
-    *on_document* itself raises.
+    Raises `ValueError` for a manifest not produced by `import_bundle_facts`
+    (no variant matching *variant_id*, no `BUNDLE_COMPOSITION_SECTION_KIND`
+    section, that section's `ObjectRef.kind` disagreeing with its own key,
+    or a section -- the composition one or any artifact's -- absent from
+    `section_schema_versions`), or for untrusted stored content that fails
+    validation this reader applies symmetrically with its own import-side
+    counterpart (a non-string `variant_fingerprint`, a `manifest` that
+    isn't a mapping with a list-valued `provides`, a `provides` entry that
+    isn't a mapping, or a template instantiation naming one parameter
+    twice) -- or whatever *on_document* itself raises.
     """
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
@@ -645,21 +641,26 @@ def export_bundle_facts(
             f"variant {variant_id!r} has no {BUNDLE_COMPOSITION_SECTION_KIND!r} "
             "section -- this manifest was not produced by import_bundle_facts"
         )
+    # `variant.sections`' own key and the `ObjectRef.kind` it maps to are
+    # two independent fields -- checked before `store.get()` ever runs, not
+    # only via the fetched `SectionDTO`'s own internal `section_kind`
+    # afterward (Codex review).
+    if composition_ref.kind != BUNDLE_COMPOSITION_SECTION_KIND:
+        raise ValueError(
+            f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} "
+            f"section names an ObjectRef of kind {composition_ref.kind!r}, not "
+            f"{BUNDLE_COMPOSITION_SECTION_KIND!r} -- the package is corrupted "
+            "or was hand-edited"
+        )
     # A package this module writes advertises the *union* of every library's
     # own section kinds, plus `BUNDLE_COMPOSITION_SECTION_KIND`, in
-    # `manifest.versions.section_schema_versions` (a header-only library
-    # legitimately has no "binary" section, one dumped at a shallower depth
-    # legitimately has no "debug" section) -- so one artifact carrying
-    # *fewer* kinds than the union is expected, not corruption. A kind the
-    # union never advertises at all is unambiguous, though: no legitimate
-    # write could have produced it, and `check_reader_compatibility` alone
-    # does not catch a hand-edited package that keeps a recognized section
-    # (on an artifact, or -- the identical risk one level up -- the
-    # variant's own `bundle_composition` section) while dropping it from
-    # the package-wide version map (Codex review, both directions). Checked
-    # before this section is ever decoded, not after: unversioned contract
-    # evidence (the variant fingerprint, the instantiation manifest) must
-    # never reach a comparison even transiently.
+    # `manifest.versions.section_schema_versions` -- one artifact carrying
+    # *fewer* kinds than the union is expected (a header-only library has
+    # no "binary" section), but a kind the union never advertises at all is
+    # unambiguous corruption, on an artifact or the variant's own
+    # `bundle_composition` section alike (Codex review, both directions).
+    # Checked before this section is ever decoded: unversioned contract
+    # evidence must never reach a comparison even transiently.
     advertised_sections = set(manifest.versions.section_schema_versions)
     if BUNDLE_COMPOSITION_SECTION_KIND not in advertised_sections:
         raise ValueError(
@@ -741,11 +742,8 @@ def export_bundle_facts(
     if raw_manifest is None:
         exported_manifest = None
     else:
-        # Mirrors `_validated_manifest`'s own import-side shape check,
-        # applied symmetrically here: `composition` is untrusted stored
-        # content (the identical reasoning the `variant_fingerprint`/
-        # `provides`-entry checks above already give), so a stored
-        # `manifest` that is not a mapping, or has no list-valued
+        # Mirrors `_validated_manifest`'s own import-side shape check: a
+        # stored `manifest` that is not a mapping, or has no list-valued
         # `provides` key, must raise the documented `ValueError` rather
         # than an unhandled `TypeError`/`KeyError` from the dict-spread/
         # subscript below (Codex review).
@@ -764,16 +762,13 @@ def export_bundle_facts(
             ],
         }
 
-    # `import_bundle_facts` itself rejects a non-string `variant_fingerprint`
-    # outright (mirrored above), but that check runs only for a document
-    # that actually went through `import_bundle_facts` -- a `VariantRef
-    # .sections[BUNDLE_COMPOSITION_SECTION_KIND]` object built or stored some
-    # other way is untrusted content this reader must not silently trust
-    # either. `bundle_facts_serialization.bundle_facts_from_dict()`
-    # unconditionally coerces this field via `str(...)`, so a stored
-    # non-string value (e.g. the JSON number `1`) would otherwise silently
-    # become the string `"1"` here -- possibly colliding with a genuinely
-    # distinct, already-string `"1"` fingerprint from another variant and
+    # `import_bundle_facts` rejects a non-string `variant_fingerprint` on
+    # the way in, but that check never runs for a `VariantRef.sections
+    # [BUNDLE_COMPOSITION_SECTION_KIND]` object built or stored some other
+    # way. `bundle_facts_from_dict()` unconditionally coerces this field
+    # via `str(...)`, so a stored non-string (e.g. the JSON number `1`)
+    # would otherwise silently become `"1"` -- possibly colliding with a
+    # genuinely distinct, already-string `"1"` fingerprint elsewhere and
     # letting `pair_variants()` compare the wrong variants (Codex review).
     raw_variant_fingerprint = composition.get(
         "variant_fingerprint", _DEFAULT_VARIANT_FINGERPRINT
