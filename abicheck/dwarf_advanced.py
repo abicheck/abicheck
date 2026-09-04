@@ -857,15 +857,25 @@ def _build_addr_to_sym(elf: Any) -> dict[int, str]:
 
 
 def _get_cfi_source(dwarf: Any) -> Any:
-    """Return CFI entry iterator, preferring .eh_frame over .debug_frame."""
+    """Return CFI entry iterator, preferring .eh_frame over .debug_frame.
+
+    P1 review, fresh evidence: pyelftools' real ``DWARFInfo`` API is
+    ``EH_CFI_entries()``/``CFI_entries()`` -- there is no ``get_``-prefixed
+    spelling. The previous ``get_EH_CFI_entries()``/``get_CFI_entries()``
+    calls always raised ``AttributeError``, silently caught below, so this
+    function unconditionally returned ``None`` and every FDE-backed
+    detector family (frame-register convention, callee-saved fingerprint)
+    was never evaluated against any real binary despite the advanced
+    channel reporting ``parsed``.
+    """
     try:
-        src = dwarf.get_EH_CFI_entries()
+        src = dwarf.EH_CFI_entries()
         if src is not None:
             return src
     except (AttributeError, ELFError):
         pass
     try:
-        return dwarf.get_CFI_entries()
+        return dwarf.CFI_entries()
     except (AttributeError, ELFError):
         return None
 

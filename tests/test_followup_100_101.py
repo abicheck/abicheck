@@ -125,23 +125,38 @@ class TestBuildAddrToSym:
 
 
 class TestGetCfiSource:
+    """P1 review, fresh evidence: pyelftools' real ``DWARFInfo`` API is
+    ``EH_CFI_entries()``/``CFI_entries()`` (no ``get_`` prefix) --
+    ``_get_cfi_source`` previously called nonexistent ``get_``-prefixed
+    names, silently caught by its own ``except AttributeError``, so CFI
+    extraction never actually ran against any real binary. These tests
+    use ``spec=DWARFInfo`` (rather than a bare ``MagicMock()``, which
+    auto-creates *any* attribute and so could not have caught this
+    mismatch) precisely so a future rename of either side reintroduces a
+    hard test failure instead of a silently-always-empty extraction.
+    """
+
     def test_prefers_eh_frame(self) -> None:
-        dwarf = MagicMock()
+        from elftools.dwarf.dwarfinfo import DWARFInfo
+
+        dwarf = MagicMock(spec=DWARFInfo)
         eh_entries = [object()]
-        dwarf.get_EH_CFI_entries.return_value = eh_entries
+        dwarf.EH_CFI_entries.return_value = eh_entries
         assert _get_cfi_source(dwarf) is eh_entries
 
     def test_fallbacks_to_debug_frame(self) -> None:
-        dwarf = MagicMock()
+        from elftools.dwarf.dwarfinfo import DWARFInfo
+
+        dwarf = MagicMock(spec=DWARFInfo)
         dbg_entries = [object(), object()]
-        dwarf.get_EH_CFI_entries.return_value = None
-        dwarf.get_CFI_entries.return_value = dbg_entries
+        dwarf.EH_CFI_entries.return_value = None
+        dwarf.CFI_entries.return_value = dbg_entries
         assert _get_cfi_source(dwarf) is dbg_entries
 
     def test_returns_none_on_missing_both(self) -> None:
         dwarf = MagicMock()
-        dwarf.get_EH_CFI_entries.side_effect = AttributeError("no eh")
-        dwarf.get_CFI_entries.side_effect = AttributeError("no dbg")
+        dwarf.EH_CFI_entries.side_effect = AttributeError("no eh")
+        dwarf.CFI_entries.side_effect = AttributeError("no dbg")
         assert _get_cfi_source(dwarf) is None
 
 

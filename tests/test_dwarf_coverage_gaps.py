@@ -1130,8 +1130,8 @@ class TestParseFrameRegisters:
         mock_elf.get_section_by_name.return_value = None
 
         mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = None
-        mock_dwarf.get_CFI_entries.return_value = None
+        mock_dwarf.EH_CFI_entries.return_value = None
+        mock_dwarf.CFI_entries.return_value = None
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
@@ -1154,7 +1154,7 @@ class TestParseFrameRegisters:
         fde.__getitem__ = MagicMock(return_value=0x1000)
 
         mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = [fde]
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
@@ -1193,7 +1193,7 @@ class TestParseFrameRegisters:
         fde.__getitem__ = MagicMock(side_effect=KeyError("no initial_location"))
 
         mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = [fde]
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False

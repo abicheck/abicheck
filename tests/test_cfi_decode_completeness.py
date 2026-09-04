@@ -57,7 +57,7 @@ def _fde_with_symbol(mock_dwarf, mock_elf, decode_error) -> None:
     fde.__class__.__name__ = "FDE"
     fde.__getitem__ = MagicMock(return_value=0x1000)
     fde.get_decoded.side_effect = decode_error
-    mock_dwarf.get_EH_CFI_entries.return_value = [fde]
+    mock_dwarf.EH_CFI_entries.return_value = [fde]
 
 
 class TestHelperLevelDecodeFailurePropagates:
@@ -113,7 +113,7 @@ class TestHelperLevelDecodeFailurePropagates:
         fde.__getitem__ = MagicMock(return_value=0x1000)
         fde.get_decoded.return_value = decoded
         mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = [fde]
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
