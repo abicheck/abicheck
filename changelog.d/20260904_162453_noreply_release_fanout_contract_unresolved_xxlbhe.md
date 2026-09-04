@@ -8,10 +8,10 @@ it should read in CHANGELOG.md. Delete the other sections.
 
 ### Fixed
 
-- **`compare-release`/`scan --against` on a directory or package can now use
-  a `--pack` asserting `contract.unresolved`.** The release fan-out
-  previously rejected any pack that assigned `contract.unresolved` with a
-  hard `PackManifestError`, even when `--contract` was given. The per-library
+- **`compare` on a directory or package (the release fan-out) can now use a
+  `--pack` asserting `contract.unresolved`.** The release fan-out previously
+  rejected any pack that assigned `contract.unresolved` with a hard
+  `PackManifestError`, even when `--contract` was given. The per-library
   plumbing that field needs (a persisted contract context, merged with the
   pack's resolved config) already existed, so the rejection is gone: a pack
   asserting `contract.unresolved: warn` now applies uniformly to every
