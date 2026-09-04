@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Scenario — Capability / evidence demonstration · audit |
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `header_build_context_mismatch` |
 | **Source files** | `examples/case148_xcheck_header_build_mismatch/` |
+| **Related rules** | [`header-build-context-mismatch`](by-rule/header-build-context-mismatch.md) |
 
 **Category:** API Break (Audit) | **Verdict:** 🟠 API_BREAK
 

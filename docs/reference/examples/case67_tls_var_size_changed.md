@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `tls_var_size_changed` |
 | **Source files** | `examples/case67_tls_var_size_changed/` |
+| **Rule family** | [`tls-var-size-changed`](by-rule/tls-var-size-changed.md) |
 
 **Category:** Variable ABI | **Verdict:** 🔴 BREAKING
 
@@ -134,4 +136,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Tls var size changed](by-rule/tls-var-size-changed.md)._

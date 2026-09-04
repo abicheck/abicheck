@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `integer_model_changed` |
 | **Source files** | `examples/case112_lp64_ilp64/` |
+| **Ecosystem** | [oneMKL](by-ecosystem/onemkl.md) |
+| **Related rules** | [`public-integer-model-width-changed`](by-rule/public-integer-model-width-changed.md), [`typedef-underlying-changed`](by-rule/typedef-underlying-changed.md) |
 
 **Category:** Numerical-Library ABI Hazard | **Verdict:** 🔴 BREAKING
 
@@ -148,4 +151,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneMKL](by-ecosystem/onemkl.md)._

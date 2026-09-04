@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `char8t_migration` |
 | **Source files** | `examples/case114_char8t_migration/` |
+| **Rule family** | [`char8t-migration`](by-rule/char8t-migration.md) |
 
 **Category:** Binary ABI break / C++20 | **Verdict:** 🔴 BREAKING
 
@@ -136,4 +138,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Char8t migration](by-rule/char8t-migration.md)._

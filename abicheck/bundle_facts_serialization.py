@@ -49,6 +49,7 @@ every existing ``from abicheck.serialization import bundle_facts_to_dict``
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -133,7 +134,11 @@ def looks_like_bundle_facts_document(data: Any) -> bool:
     return isinstance(data.get("per_library_snapshots"), dict)
 
 
-def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
+def bundle_facts_to_dict(
+    facts: BundleFacts,
+    *,
+    on_snapshot: Callable[[str, dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
     JSON-able dict (G38 Phase 2).
 
@@ -153,19 +158,32 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     round-tripped v1 document must not still declare ``schema_version: 1``
     while carrying a v2 field -- that combination is exactly the malformed,
     self-contradictory document schema_version 2's own introduction was
-    meant to make impossible (Codex review, fresh evidence)."""
+    meant to make impossible (Codex review, fresh evidence).
+
+    ``on_snapshot``, when given, is called once per library immediately
+    after its own ``snapshot_to_dict()`` conversion, with that library's
+    name and encoded document. A caller enforcing an aggregate size budget
+    (e.g. ``bundle_facts_store.write_bundle_facts_package``) charges each
+    snapshot as it is produced this way, rather than only after every
+    member of a possibly-large ``BundleFacts`` has already been converted
+    and retained in one combined document (Codex review) -- raise from the
+    callback to abort before the next snapshot is converted."""
     from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, BUNDLE_FACTS_SCHEMA_VERSION
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
+
+    per_library_snapshots: dict[str, Any] = {}
+    for name, snap in facts.per_library_snapshots.items():
+        document = snapshot_to_dict(snap)
+        if on_snapshot is not None:
+            on_snapshot(name, document)
+        per_library_snapshots[name] = document
 
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
         "schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
         "variant_fingerprint": facts.variant_fingerprint,
-        "per_library_snapshots": {
-            name: snapshot_to_dict(snap)
-            for name, snap in facts.per_library_snapshots.items()
-        },
+        "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": {
             name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
         },

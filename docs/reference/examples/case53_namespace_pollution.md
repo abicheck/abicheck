@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break, Bad practice |
 | **Detected `ChangeKind`s** | `func_removed`, `func_added` |
 | **Source files** | `examples/case53_namespace_pollution/` |
+| **Rule family** | [`namespace-pollution`](by-rule/namespace-pollution.md) |
 
 **Category:** API Design | **Verdict:** 🔴 BREAKING (bad practice)
 
@@ -154,4 +156,4 @@ nm -D libfoo_v2.so | grep ' T '
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Namespace pollution](by-rule/namespace-pollution.md)._

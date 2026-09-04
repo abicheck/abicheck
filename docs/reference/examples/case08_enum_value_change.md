@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
 | **Source files** | `examples/case08_enum_value_change/` |
+| **Rule family** | [`enum-member-value-changed`](by-rule/enum-member-value-changed.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -130,4 +132,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enum member value changed](by-rule/enum-member-value-changed.md)._

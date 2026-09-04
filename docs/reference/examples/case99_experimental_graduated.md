@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `experimental_graduated`, `func_added` |
 | **Source files** | `examples/case99_experimental_graduated/` |
+| **Rule family** | [`experimental-graduated`](by-rule/experimental-graduated.md) |
 
 **Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
@@ -121,4 +123,4 @@ for years after standardization.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Experimental graduated](by-rule/experimental-graduated.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `template_body_changed` |
 | **Source files** | `examples/case122_template_signature_uninstantiated/` |
+| **Rule family** | [`template-signature-uninstantiated`](by-rule/template-signature-uninstantiated.md) |
 
 **Category:** Modern C/C++ Contract | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -198,4 +200,4 @@ here without a source-AST-replay capability equivalent to abicheck's own L4.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Template signature uninstantiated](by-rule/template-signature-uninstantiated.md)._

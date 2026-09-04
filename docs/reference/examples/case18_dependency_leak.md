@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case18_dependency_leak/` |
+| **Rule family** | [`dependency-leak`](by-rule/dependency-leak.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -170,4 +172,4 @@ naive symbol-only or header-blind comparison (plain `nm`/`readelf` diff, or
 - `thirdparty_v1.h`
 - `thirdparty_v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Dependency leak](by-rule/dependency-leak.md)._

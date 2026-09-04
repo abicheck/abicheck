@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `exceptions_mode_changed` |
 | **Source files** | `examples/case130_exceptions_mode_flip/` |
+| **Rule family** | [`exceptions-mode-flip`](by-rule/exceptions-mode-flip.md) |
 
 **Category:** Build Mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -128,4 +130,4 @@ build-context layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Exceptions mode flip](by-rule/exceptions-mode-flip.md)._

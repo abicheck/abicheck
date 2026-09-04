@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `threadsafe_statics_mode_changed` |
 | **Source files** | `examples/case132_threadsafe_statics_flip/` |
+| **Rule family** | [`threadsafe-statics-flip`](by-rule/threadsafe-statics-flip.md) |
 
 **Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -113,4 +115,4 @@ layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Threadsafe statics flip](by-rule/threadsafe-statics-flip.md)._

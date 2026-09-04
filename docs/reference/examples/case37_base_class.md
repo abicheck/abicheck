@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_base_changed` |
 | **Source files** | `examples/case37_base_class/` |
+| **Rule family** | [`base-class`](by-rule/base-class.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -165,4 +167,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class](by-rule/base-class.md)._

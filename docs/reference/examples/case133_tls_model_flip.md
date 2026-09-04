@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `tls_model_changed` |
 | **Source files** | `examples/case133_tls_model_flip/` |
+| **Rule family** | [`tls-model-flip`](by-rule/tls-model-flip.md) |
 
 **Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -110,4 +112,4 @@ layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Tls model flip](by-rule/tls-model-flip.md)._

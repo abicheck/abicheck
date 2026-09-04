@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `base_class_offset_changed`, `type_size_changed`, `type_field_offset_changed` |
 | **Source files** | `examples/case140_empty_base_optimization_lost/` |
+| **Rule family** | [`empty-base-optimization-lost`](by-rule/empty-base-optimization-lost.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -160,4 +162,4 @@ immediately named than abicheck's `base_class_offset_changed`.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Empty base optimization lost](by-rule/empty-base-optimization-lost.md)._

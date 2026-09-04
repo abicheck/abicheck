@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `executable_stack_removed` |
 | **Source files** | `examples/case136_executable_stack_removed/` |
+| **Rule family** | [`executable-stack-flag-changed`](by-rule/executable-stack-flag-changed.md) — Duplicate of [case49_executable_stack](case49_executable_stack.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -107,4 +109,4 @@ unmarked object file.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Executable stack flag changed](by-rule/executable-stack-flag-changed.md)._

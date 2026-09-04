@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case07_struct_layout/` |
+| **Rule family** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -125,4 +127,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Embedded type size increased](by-rule/embedded-type-size-increased.md)._

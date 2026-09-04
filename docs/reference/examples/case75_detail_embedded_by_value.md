@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `examples/case75_detail_embedded_by_value/` |
+| **Rule family** | [`detail-embedded-by-value`](by-rule/detail-embedded-by-value.md) |
 
 **Category:** Internal Leak | **Verdict:** 🔴 BREAKING
 
@@ -143,4 +145,4 @@ without moving the public type's ABI.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Detail embedded by value](by-rule/detail-embedded-by-value.md)._

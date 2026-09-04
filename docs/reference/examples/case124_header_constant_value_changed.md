@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `constant_changed` |
 | **Source files** | `examples/case124_header_constant_value_changed/` |
+| **Rule family** | [`header-constant-value-changed`](by-rule/header-constant-value-changed.md) |
 
 **Category:** API Break | **Verdict:** 🟠 API_BREAK
 
@@ -127,4 +129,4 @@ change at all.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Header constant value changed](by-rule/header-constant-value-changed.md)._

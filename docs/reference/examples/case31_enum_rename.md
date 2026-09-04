@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `enum_member_renamed` |
 | **Source files** | `examples/case31_enum_rename/` |
+| **Rule family** | [`enum-rename`](by-rule/enum-rename.md) |
 
 **Category:** Enum API | **Verdict:** 🟠 API_BREAK (binary compatible)
 
@@ -148,4 +150,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Enum rename](by-rule/enum-rename.md)._
