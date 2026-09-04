@@ -353,8 +353,14 @@ concepts:
       apply_release_gate_pack mirrors, rather than calls,
       pack_application.apply_to_compare_config, because the release
       fan-out has no ResolvedCompareConfig-shaped object of its own to fold
-      packs onto -- remains open as ADR-064's own named, deferred "PR G2"
-      prerequisite work; guarded meanwhile against silent drift by
+      packs onto -- is distinct from ADR-064's own GateOptions rewrite
+      (already landed 2026-09-02, per that ADR's own "Landed" note, and
+      what replaced the release fan-out's three independent severity/
+      exit-code-scheme re-derivations with one resolution). The fold
+      duplication itself remains open as the duplication-and-convergence-
+      assessment plan's own P0 EffectiveGate/EffectiveEvaluationConfig
+      target (docs/contribute/plans/duplication-and-convergence-
+      assessment.md), guarded meanwhile against silent drift by
       tests/test_release_gate_pack_fold_parity.py's Hypothesis property
       test pinning both fold implementations to agree on outcome.
 
