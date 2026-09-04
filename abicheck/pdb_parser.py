@@ -754,44 +754,51 @@ class TypeDatabase:
         ti = rec.type_index
         leaf = rec.leaf
 
+        # P2 review: every _parse_* below returns True/False (complete or a
+        # non-exception early exit) instead of the previous silent no-op;
+        # False counts toward failed_record_count like a caught exception.
+        complete = True
         if leaf in (LF_STRUCTURE, LF_CLASS):
-            self._parse_struct(ti, d, is_union=False)
+            complete = self._parse_struct(ti, d, is_union=False)
         elif leaf == LF_UNION:
-            self._parse_struct(ti, d, is_union=True)
+            complete = self._parse_struct(ti, d, is_union=True)
         elif leaf == LF_ENUM:
-            self._parse_enum(ti, d)
+            complete = self._parse_enum(ti, d)
         elif leaf == LF_FIELDLIST:
-            self._parse_fieldlist(ti, d)
+            complete = self._parse_fieldlist(ti, d)
         elif leaf == LF_PROCEDURE:
-            self._parse_procedure(ti, d)
+            complete = self._parse_procedure(ti, d)
         elif leaf == LF_MFUNCTION:
-            self._parse_mfunction(ti, d)
+            complete = self._parse_mfunction(ti, d)
         elif leaf == LF_POINTER:
-            self._parse_pointer(ti, d)
+            complete = self._parse_pointer(ti, d)
         elif leaf == LF_ARRAY:
-            self._parse_array(ti, d)
+            complete = self._parse_array(ti, d)
         elif leaf == LF_MODIFIER:
-            self._parse_modifier(ti, d)
+            complete = self._parse_modifier(ti, d)
         elif leaf == LF_BITFIELD:
-            self._parse_bitfield(ti, d)
+            complete = self._parse_bitfield(ti, d)
         elif leaf == LF_ARGLIST:
-            self._parse_arglist(ti, d)
+            complete = self._parse_arglist(ti, d)
+        if not complete:
+            self.failed_record_count += 1
 
-    def _parse_struct(self, ti: int, d: bytes, *, is_union: bool) -> None:
+    def _parse_struct(self, ti: int, d: bytes, *, is_union: bool) -> bool:
         """Parse LF_STRUCTURE, LF_CLASS, or LF_UNION into a CvStruct.
 
         LF_STRUCTURE/LF_CLASS have a 16-byte header (count, prop, field_ti,
         derived_ti, vshape_ti); LF_UNION has an 8-byte header (count, prop,
         field_ti).  The ``is_union`` flag selects the appropriate layout.
+        Returns False (payload too short for the header) rather than raising.
         """
         if is_union:
             if len(d) < 8:
-                return
+                return False
             (count, prop, field_ti) = struct.unpack_from("<HHI", d, 0)
             pos = 8
         else:
             if len(d) < 16:
-                return
+                return False
             (count, prop, field_ti, _derived_ti, _vshape_ti) = struct.unpack_from(
                 "<HHIII", d, 0)
             pos = 16
@@ -807,10 +814,11 @@ class TypeDatabase:
             is_union=is_union,
             count=count,
         )
+        return True
 
-    def _parse_enum(self, ti: int, d: bytes) -> None:
+    def _parse_enum(self, ti: int, d: bytes) -> bool:
         if len(d) < 12:
-            return
+            return False
         (count, prop, utype_ti, field_ti) = struct.unpack_from("<HHII", d, 0)
         name, _ = _read_cstring(d, 12)
         self._enums[ti] = CvEnum(
@@ -821,20 +829,25 @@ class TypeDatabase:
             is_forward_ref=bool(prop & _PROP_FORWARD_REF),
             count=count,
         )
+        return True
 
     def _parse_fieldlist(
         self, ti: int, d: bytes,
         _visited: set[int] | None = None,
-    ) -> None:
+    ) -> bool:
+        """P2 review: False whenever a sub-record was cut short (or an
+        unrecognized sub-leaf/circular LF_INDEX forced an early stop) --
+        the fieldlist stored on this ti is real but incomplete."""
         if _visited is None:
             _visited = set()
         if ti in _visited:
             log.warning("Circular LF_INDEX reference at ti=0x%x, skipping", ti)
-            return
+            return False
         _visited.add(ti)
 
         members: list[Any] = []
         pos = 0
+        complete = True
         while pos + 2 <= len(d):
             # Detect single-byte padding (LF_PAD1..LF_PADn = 0xF1..0xFF) before
             # consuming the 2-byte sub_leaf: a byte >= 0xF0 at pos is a pad byte,
@@ -862,14 +875,17 @@ class TypeDatabase:
             else:
                 # Unknown sub-record — can't safely continue
                 log.debug("Unknown fieldlist sub-leaf 0x%04x at pos %d", sub_leaf, pos)
+                complete = False
                 break
 
             if new_pos is None:  # truncated sub-record
+                complete = False
                 break
             # 4-byte alignment within fieldlist
             pos = (new_pos + 3) & ~3
 
         self._fieldlists[ti] = members
+        return complete
 
     def _parse_lf_member(
         self, d: bytes, pos: int, members: list[Any],
@@ -913,9 +929,11 @@ class TypeDatabase:
         # Resolve continuation
         cont_rec = self._tpi.get(cont_ti)
         if cont_rec and cont_rec.leaf == LF_FIELDLIST:
-            self._parse_fieldlist(cont_ti, cont_rec.data, _visited)
+            cont_complete = self._parse_fieldlist(cont_ti, cont_rec.data, _visited)
             cont_members = self._fieldlists.get(cont_ti, [])
             members.extend(cont_members)
+            if not cont_complete:  # propagate via the same None convention
+                return None
         return pos
 
     def _parse_lf_onemethod(
@@ -937,15 +955,17 @@ class TypeDatabase:
             members.append(CvOneMethod(name=m_name, type_ti=m_type_ti))
         return pos
 
-    def _skip_subrecord(self, sub_leaf: int, d: bytes, pos: int) -> int:
+    def _skip_subrecord(self, sub_leaf: int, d: bytes, pos: int) -> int | None:
         """Skip known sub-record types we don't parse.
 
-        Returns the new position past the sub-record data.
+        Returns the new position, or None if truncated (P2 review: used to
+        return len(d) here, which the caller's own None check never saw --
+        LF_VFUNCTAB in particular had no bounds check at all).
         """
         if sub_leaf == LF_STMEMBER:
             # attr(2) + type_ti(4) + name(variable)
             if pos + 6 > len(d):
-                return len(d)
+                return None
             pos += 6
             _, pos = _read_cstring(d, pos)
             return pos
@@ -953,7 +973,7 @@ class TypeDatabase:
         if sub_leaf == LF_NESTTYPE:
             # padding(2) + type_ti(4) + name(variable)
             if pos + 6 > len(d):
-                return len(d)
+                return None
             pos += 6
             _, pos = _read_cstring(d, pos)
             return pos
@@ -964,19 +984,21 @@ class TypeDatabase:
         if sub_leaf == LF_METHOD:
             # count(2) + mlist_ti(4) + name(variable)
             if pos + 6 > len(d):
-                return len(d)
+                return None
             pos += 6
             _, pos = _read_cstring(d, pos)
             return pos
 
         if sub_leaf == LF_VFUNCTAB:
             # padding(2) + type_ti(4)
+            if pos + 6 > len(d):
+                return None
             return pos + 6
 
         if sub_leaf == LF_BCLASS:
             # attr(2) + type_ti(4) + offset(numeric leaf)
             if pos + 6 > len(d):
-                return len(d)
+                return None
             pos += 6
             _, pos = _read_numeric_leaf(d, pos)
             return pos
@@ -984,17 +1006,17 @@ class TypeDatabase:
         if sub_leaf in (LF_VBCLASS, LF_IVBCLASS):
             # attr(2) + direct_ti(4) + vbptr_ti(4) + vbpoff(numeric) + vbtableoff(numeric)
             if pos + 10 > len(d):
-                return len(d)
+                return None
             pos += 10
             _, pos = _read_numeric_leaf(d, pos)
             _, pos = _read_numeric_leaf(d, pos)
             return pos
 
-        return len(d)  # bail out — can't continue
+        return None  # unreachable: caller pre-filters to the leaves above
 
-    def _parse_procedure(self, ti: int, d: bytes) -> None:
+    def _parse_procedure(self, ti: int, d: bytes) -> bool:
         if len(d) < 12:
-            return
+            return False
         (rvtype, calltype, _funcattr, parmcount, arglist) = struct.unpack_from(
             "<IBBHI", d, 0)
         self._procedures[ti] = CvProcedure(
@@ -1004,10 +1026,11 @@ class TypeDatabase:
             param_count=parmcount,
             arglist_ti=arglist,
         )
+        return True
 
-    def _parse_mfunction(self, ti: int, d: bytes) -> None:
+    def _parse_mfunction(self, ti: int, d: bytes) -> bool:
         if len(d) < 24:
-            return
+            return False
         (rvtype, classtype, thistype, calltype, _funcattr,
          parmcount, arglist, thisadjust) = struct.unpack_from(
             "<IIIBBHIi", d, 0)
@@ -1021,10 +1044,11 @@ class TypeDatabase:
             arglist_ti=arglist,
             this_adjust=thisadjust,
         )
+        return True
 
-    def _parse_pointer(self, ti: int, d: bytes) -> None:
+    def _parse_pointer(self, ti: int, d: bytes) -> bool:
         if len(d) < 8:
-            return
+            return False
         (referent, attrs) = struct.unpack_from("<II", d, 0)
         size = (attrs >> 13) & 0x3F
         self._pointers[ti] = CvPointer(
@@ -1033,10 +1057,11 @@ class TypeDatabase:
             attrs=attrs,
             byte_size=size if size else 8,  # default to 8 for 64-bit
         )
+        return True
 
-    def _parse_array(self, ti: int, d: bytes) -> None:
+    def _parse_array(self, ti: int, d: bytes) -> bool:
         if len(d) < 8:
-            return
+            return False
         (elem_ti, idx_ti) = struct.unpack_from("<II", d, 0)
         pos = 8
         byte_size, pos = _read_numeric_leaf(d, pos)
@@ -1048,10 +1073,11 @@ class TypeDatabase:
             byte_size=byte_size,
             name=name,
         )
+        return True
 
-    def _parse_modifier(self, ti: int, d: bytes) -> None:
+    def _parse_modifier(self, ti: int, d: bytes) -> bool:
         if len(d) < 6:
-            return
+            return False
         (mod_ti, attr) = struct.unpack_from("<IH", d, 0)
         self._modifiers[ti] = CvModifier(
             type_index=ti,
@@ -1060,10 +1086,11 @@ class TypeDatabase:
             is_volatile=bool(attr & 0x02),
             is_unaligned=bool(attr & 0x04),
         )
+        return True
 
-    def _parse_bitfield(self, ti: int, d: bytes) -> None:
+    def _parse_bitfield(self, ti: int, d: bytes) -> bool:
         if len(d) < 6:
-            return
+            return False
         (underlying, length, position) = struct.unpack_from("<IBB", d, 0)
         self._bitfields[ti] = CvBitfield(
             type_index=ti,
@@ -1071,20 +1098,24 @@ class TypeDatabase:
             length=length,
             position=position,
         )
+        return True
 
-    def _parse_arglist(self, ti: int, d: bytes) -> None:
+    def _parse_arglist(self, ti: int, d: bytes) -> bool:
         if len(d) < 4:
-            return
+            return False
         (count,) = struct.unpack_from("<I", d, 0)
         args = []
         pos = 4
+        complete = True
         for _ in range(count):
             if pos + 4 > len(d):
+                complete = False
                 break
             (arg_ti,) = struct.unpack_from("<I", d, pos)
             pos += 4
             args.append(arg_ti)
         self._arglists[ti] = args
+        return complete
 
     # --- Public query API ---
 

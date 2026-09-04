@@ -44,7 +44,10 @@ import pytest
 from abicheck.pdb_parser import (
     LF_ENUM,
     LF_FIELDLIST,
+    LF_STMEMBER,
     LF_STRUCTURE,
+    LF_UNION,
+    LF_VFUNCTAB,
     TypeDatabase,
     parse_tpi_stream,
 )
@@ -197,3 +200,70 @@ class TestTypeDatabaseFailedRecordCount:
         assert db.failed_record_count == 1
         db.parse_all()  # second call, should be a no-op
         assert db.failed_record_count == 1
+
+
+class TestFailedRecordCountNonExceptionTruncation:
+    """P2 review, fresh evidence beyond the resolved TPI-truncation thread:
+    a record with valid *outer* framing (a real ``TpiRecord`` the stream
+    parsed fine) but a truncated *recognized* payload was still invisible
+    to ``failed_record_count`` -- every individual ``_parse_*`` method
+    returns early (``return``, ``break``) on a too-short payload without
+    raising, so ``parse_all()``'s own ``except`` never fires for this
+    shape either. Each ``_parse_*``/``_skip_subrecord`` now returns
+    True/False instead of silently no-oping, propagated through
+    ``_parse_record`` into the same ``failed_record_count``."""
+
+    def _db(self, records: list[tuple[int, bytes]]) -> TypeDatabase:
+        tpi = parse_tpi_stream(_build_tpi_stream(records))
+        db = TypeDatabase(tpi)
+        db.parse_all()
+        return db
+
+    def test_lf_structure_shorter_than_its_fixed_header(self) -> None:
+        """The reviewer's own example: LF_STRUCTURE payload < 16 bytes."""
+        db = self._db([(LF_STRUCTURE, b"\x00" * 4)])
+        assert db.failed_record_count == 1
+        assert len(db.all_structs()) == 0
+
+    def test_lf_union_shorter_than_its_fixed_header(self) -> None:
+        """LF_UNION shares _parse_struct's dispatch but its own, shorter
+        (8-byte) header -- give it fewer than that."""
+        db = self._db([(LF_UNION, b"\x00" * 4)])
+        assert db.failed_record_count == 1
+
+    def test_lf_enum_shorter_than_its_fixed_header(self) -> None:
+        db = self._db([(LF_ENUM, b"\x00" * 4)])
+        assert db.failed_record_count == 1
+        assert len(db.all_enums()) == 0
+
+    def test_fieldlist_with_truncated_sub_record(self) -> None:
+        """The reviewer's other named example: ``_parse_fieldlist()``
+        breaks normally on a truncated sub-record (LF_STMEMBER here, needs
+        6 bytes, given only 2)."""
+        data = struct.pack("<H", LF_STMEMBER) + b"\x00" * 2
+        db = self._db([(LF_FIELDLIST, data)])
+        assert db.failed_record_count == 1
+        assert db.get_fieldlist(0x1000) == []
+
+    def test_fieldlist_with_complete_data_is_not_counted(self) -> None:
+        """Positive control: a fully consumed fieldlist (no sub-records at
+        all -- 0 bytes is legitimately "empty," not truncated) must not be
+        flagged."""
+        db = self._db([(LF_FIELDLIST, b"")])
+        assert db.failed_record_count == 0
+
+    def test_lf_vfunctab_shorter_than_its_fixed_header(self) -> None:
+        """Latent bug this same fix closed: LF_VFUNCTAB previously had no
+        bounds check in ``_skip_subrecord`` at all -- it returned
+        ``pos + 6`` unconditionally, which could exceed the fieldlist's own
+        length and simply end the parse loop on the next iteration's
+        ``while`` condition, silently truncating with no signal
+        whatsoever (not even a False return, since the caller's ``new_pos
+        is None`` check never saw a value past the fieldlist's bounds)."""
+        # sub_leaf(2) consumed by the fieldlist loop before dispatch, then
+        # _skip_subrecord needs 6 more bytes for LF_VFUNCTAB's own
+        # padding(2)+type_ti(4) -- give it only 2.
+        data = struct.pack("<H", LF_VFUNCTAB) + b"\x00" * 2
+        db = self._db([(LF_FIELDLIST, data)])
+        assert db.failed_record_count == 1
+        assert db.get_fieldlist(0x1000) == []
