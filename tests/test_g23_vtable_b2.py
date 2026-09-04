@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.diff_types_vtable import _virtual_signatures_by_owner
 from abicheck.diff_vtable_layout import _is_polymorphic, _secondary_groups
 from abicheck.model import AbiSnapshot, Fact, Function, RecordType
 
@@ -140,7 +141,11 @@ class TestSecondaryVtableGroup:
         # direct-clang shape), but a retained Function with is_virtual=True
         # still proves B was polymorphic -- so losing that virtual (and the
         # function) on the new side is a real SECONDARY_VTABLE_GROUP_CHANGED,
-        # not a silently-dropped indeterminate base.
+        # not a silently-dropped indeterminate base. clang_vtable_facts_
+        # reliable=False on the old side (Codex review, eighth round) is
+        # this path's actual scope -- the legacy pre-v21 direct-clang shape
+        # its own docstring names, where a retained Function is guaranteed
+        # header-AST-sourced rather than DWARF-sourced.
         a = _poly("A", vtable=["_ZN1A1fEv"])
         b_old = RecordType(
             name="B", kind="class", size_bits=64, vtable_fact=Fact.not_collected()
@@ -156,6 +161,7 @@ class TestSecondaryVtableGroup:
         old = AbiSnapshot(
             library="lib.so", version="1", types=[a, b_old, d], functions=[b_method]
         )
+        old.clang_vtable_facts_reliable = False
         new = AbiSnapshot(library="lib.so", version="2", types=[a, b_new, d])
         assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED in _kinds(compare(old, new))
 
@@ -571,7 +577,11 @@ class TestReconstructionFactStatus:
         # "class's own virtual functions" branch already relies on. This
         # matters most for a legacy direct-clang snapshot that predates
         # vtable reconstruction: function-level is_virtual metadata
-        # survives even though vtable/vtable_fact do not.
+        # survives even though vtable/vtable_fact do not. Gated on
+        # vtable_facts_reliable=False -- its actual motivating scope (Codex
+        # review, eighth round) -- since that's the one case a retained
+        # Function is guaranteed header-AST-sourced, not DWARF-sourced (and
+        # so immune to DWARF's own per-TU capture-gap false positive).
         rec = RecordType(
             name="P",
             kind="class",
@@ -585,8 +595,42 @@ class TestReconstructionFactStatus:
             return_type="void",
             is_virtual=True,
         )
-        funcs = {method.mangled: method}
-        assert _is_polymorphic("P", types, {}, funcs=funcs) is True
+        index = _virtual_signatures_by_owner({method.mangled: method})
+        assert (
+            _is_polymorphic(
+                "P", types, {}, vtable_facts_reliable=False, virtual_owner_index=index
+            )
+            is True
+        )
+
+    def test_retained_virtual_function_ignored_when_vtable_facts_reliable(self):
+        # Codex review, fresh evidence, eighth round: outside the
+        # vtable_facts_reliable=False scope, a retained Function could
+        # itself be DWARF-sourced and vulnerable to the exact per-TU
+        # capture-gap false positive diff_types_vtable.py's own module
+        # docstring documents and accepts for its own "class's own virtual
+        # functions" branch -- so this path must decline (stay
+        # indeterminate) rather than fabricate True.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        types = {"P": rec}
+        method = Function(
+            name="P::method",
+            mangled="_ZN1P6methodEv",
+            return_type="void",
+            is_virtual=True,
+        )
+        index = _virtual_signatures_by_owner({method.mangled: method})
+        assert (
+            _is_polymorphic(
+                "P", types, {}, vtable_facts_reliable=True, virtual_owner_index=index
+            )
+            is None
+        )
 
     def test_retained_non_virtual_function_does_not_prove_polymorphic(self):
         rec = RecordType(
@@ -602,12 +646,18 @@ class TestReconstructionFactStatus:
             return_type="void",
             is_virtual=False,
         )
-        funcs = {method.mangled: method}
-        assert _is_polymorphic("P", types, {}, funcs=funcs) is None
+        index = _virtual_signatures_by_owner({method.mangled: method})
+        assert (
+            _is_polymorphic(
+                "P", types, {}, vtable_facts_reliable=False, virtual_owner_index=index
+            )
+            is None
+        )
 
-    def test_funcs_defaults_to_none_and_preserves_prior_behavior(self):
-        # Omitting funcs entirely (every pre-existing caller) must keep
-        # today's behavior unchanged -- no positive evidence to consult.
+    def test_virtual_owner_index_defaults_to_none_and_preserves_prior_behavior(self):
+        # Omitting virtual_owner_index entirely (every pre-existing caller)
+        # must keep today's behavior unchanged -- no positive evidence to
+        # consult.
         rec = RecordType(
             name="P",
             kind="class",
@@ -615,7 +665,7 @@ class TestReconstructionFactStatus:
             vtable_fact=Fact.not_collected(),
         )
         types = {"P": rec}
-        assert _is_polymorphic("P", types, {}) is None
+        assert _is_polymorphic("P", types, {}, vtable_facts_reliable=False) is None
 
     def test_same_leaf_name_different_namespace_does_not_fabricate_polymorphic(
         self,
@@ -642,5 +692,16 @@ class TestReconstructionFactStatus:
             return_type="void",
             is_virtual=True,
         )
-        funcs = {unrelated_method.mangled: unrelated_method}
-        assert _is_polymorphic("ns1::Foo", types, {}, funcs=funcs) is None
+        index = _virtual_signatures_by_owner(
+            {unrelated_method.mangled: unrelated_method}
+        )
+        assert (
+            _is_polymorphic(
+                "ns1::Foo",
+                types,
+                {},
+                vtable_facts_reliable=False,
+                virtual_owner_index=index,
+            )
+            is None
+        )

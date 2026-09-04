@@ -25,21 +25,27 @@ only symbol this module exports). ``_vtable_transition_is_evidenced``/
 ``_vtable_transition_rests_on_unresolved_evidence``/
 ``_layout_evidence_is_unverifiable``/``_owned_virtual_signatures`` are
 private to this cluster and only ever called from within it.
-``_owned_virtual_signatures_for_record`` is the one exception (Codex
-review, fresh evidence): ``diff_vtable_layout._is_polymorphic`` also
-imports it directly as a sixth positive-evidence path (a retained
-``Function.is_virtual`` proves polymorphism independent of
-``RecordType.vtable``, the same "different projection of the same debug
-info" reasoning this cluster already relies on) rather than reimplementing
-its own copy of the owner-matching logic. Deliberately the *exact*-match
-sibling, not ``_owned_virtual_signatures``'s eager namespace-suffix
-matching -- that new caller uses a match as an unconditional affirmative
-``True``, the opposite safety direction from this cluster's own
-suppression-oriented use, where over-inclusion only ever widens "keep the
-finding," never fabricates one (Codex review, second round, caught the
-first attempt reusing the eager variant here). This does not reintroduce
-the import-cycle constraint above: ``diff_vtable_layout.py`` imports
-nothing from ``diff_types`` itself, only from this leaf module.
+``_virtual_signatures_by_owner`` is the one exception (Codex review, fresh
+evidence): ``diff_vtable_layout._is_polymorphic`` also imports it directly
+as a sixth positive-evidence path (a retained ``Function.is_virtual``
+proves polymorphism independent of ``RecordType.vtable``, the same
+"different projection of the same debug info" reasoning this cluster
+already relies on) rather than reimplementing its own copy of the
+owner-matching logic -- built on the same *exact*-match identity
+``_owned_virtual_signatures_for_record`` uses (a single-owner query, still
+private to this cluster, that ``_virtual_signatures_by_owner`` now shares
+its ``owner_class_of`` matching with), not ``_owned_virtual_signatures``'s
+eager namespace-suffix matching: that new caller uses a match as an
+unconditional affirmative ``True``, the opposite safety direction from
+this cluster's own suppression-oriented use, where over-inclusion only
+ever widens "keep the finding," never fabricates one (Codex review, second
+round, caught the first attempt reusing the eager variant here). Grouped
+by owner once instead of scanning the whole function map per query (Codex
+review, third round -- that new caller can query many distinct owners
+against the same mapping while walking an inheritance graph). This does
+not reintroduce the import-cycle constraint above: ``diff_vtable_layout.
+py`` imports nothing from ``diff_types`` itself, only from this leaf
+module.
 
 **ADR-063 Phase 5B (vtable/vptr_offset_bits slice) re-audit, landed.** The
 plan's own "Deliberately not attempted" note (5B's first PR) flagged this
@@ -444,6 +450,35 @@ def _owned_virtual_signatures_for_record(
         for mangled, fn in funcs.items()
         if getattr(fn, "is_virtual", False) and owner_class_of(fn) == qualified
     }
+
+
+def _virtual_signatures_by_owner(
+    funcs: Mapping[str, Function],
+) -> dict[str, set[str]]:
+    """Every virtual member function in *funcs*, grouped by exact owning-
+    class identity (same ``owner_class_of`` exact match
+    ``_owned_virtual_signatures_for_record`` uses) -- computed once instead
+    of that function's own per-query full scan.
+
+    Built for ``diff_vtable_layout._is_polymorphic``'s retained-virtual-
+    ``Function`` evidence path (Codex review, fresh evidence): a caller
+    that queries *many* distinct owners against the same ``funcs`` mapping
+    (walking a whole inheritance graph) turns an O(records) scan into
+    O(records × functions) if it calls ``_owned_virtual_signatures_for_
+    record`` fresh each time. One pass here, then each caller query is a
+    plain dict lookup.
+    """
+    from .diff_cxx_rules import owner_class_of
+
+    index: dict[str, set[str]] = {}
+    for mangled, fn in funcs.items():
+        if not getattr(fn, "is_virtual", False):
+            continue
+        owner = owner_class_of(fn)
+        if owner is None:
+            continue
+        index.setdefault(owner, set()).add(mangled)
+    return index
 
 
 def _diff_type_vtable(

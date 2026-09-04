@@ -54,11 +54,10 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .diff_types_vtable import _owned_virtual_signatures_for_record
+from .diff_types_vtable import _virtual_signatures_by_owner
 from .model import (
     AbiSnapshot,
     FactStatus,
-    Function,
     RecordType,
     fact_confirmed_true,
     is_non_abi_surface_type,
@@ -77,7 +76,7 @@ def _is_polymorphic(
     memo: dict[str, bool | None],
     *,
     vtable_facts_reliable: bool = True,
-    funcs: Mapping[str, Function] | None = None,
+    virtual_owner_index: Mapping[str, set[str]] | None = None,
 ) -> bool | None:
     """Whether class *name* is polymorphic (owns/inherits a vtable).
 
@@ -173,37 +172,48 @@ def _is_polymorphic(
     not gated on that flag -- the same treatment ``virtual_bases_fact``
     already gets above, for the identical reason.
 
-    *funcs* -- an optional ``snapshot.function_map`` (Codex review, fresh
-    evidence, fifth round) -- supplies a sixth, unconditional
-    positive-evidence path: ``snapshot.functions`` is a separate evidence
-    stream from the class DIE's virtual-method children
-    (``RecordType.vtable``), the same "different projection of the same
-    debug info" independence ``diff_types_vtable._vtable_transition_is_
-    evidenced`` already relies on for its own second branch -- so a
-    retained ``Function`` with ``is_virtual=True`` owned by this class
-    proves polymorphism even when ``vtable_fact`` itself is uncollected.
-    This matters most for a legacy direct-clang snapshot that predates
-    vtable reconstruction: its function-level ``is_virtual`` metadata
-    survives even though ``vtable``/``vtable_fact`` do not.
+    *virtual_owner_index* -- an optional ``diff_types_vtable._virtual_
+    signatures_by_owner(snapshot.function_map)`` (Codex review, fresh
+    evidence, fifth round) -- supplies a sixth positive-evidence path:
+    ``snapshot.functions`` is a separate evidence stream from the class
+    DIE's virtual-method children (``RecordType.vtable``), the same
+    "different projection of the same debug info" independence
+    ``diff_types_vtable._vtable_transition_is_evidenced`` already relies on
+    for its own second branch -- so a retained ``Function`` with
+    ``is_virtual=True`` owned by this class proves polymorphism even when
+    ``vtable_fact`` itself is uncollected. Matches by *exact* qualified
+    identity (``rec.qualified_name or rec.name``, the same pattern
+    ``diff_layout._index`` uses), not the eager namespace-suffix matching
+    ``_vtable_transition_is_evidenced`` gets away with for its own
+    suppression-oriented purpose -- unlike that caller, a match here
+    becomes an unconditional affirmative ``True``, so two unrelated classes
+    sharing only a leaf name (``ns1::Foo``/``ns2::Foo``) could otherwise
+    fabricate polymorphism (Codex review, fresh evidence, sixth round).
+    Pre-indexed by owner once per snapshot (rather than each query
+    rescanning the whole function map) since a large hierarchy can query
+    many distinct owners against the same mapping (Codex review, fresh
+    evidence, seventh round).
 
-    Uses ``diff_types_vtable._owned_virtual_signatures_for_record`` --
-    *exact* qualified-identity matching -- not its sibling
-    ``_owned_virtual_signatures``'s eager namespace-suffix matching (Codex
-    review, fresh evidence, sixth round): that eager matching is safe only
-    for a *suppression*-oriented caller (over-inclusion just means "sets
-    differ more often," which keeps a finding rather than fabricating one
-    -- the safe direction for `_vtable_transition_is_evidenced`). Here the
-    match result directly becomes an affirmative ``True`` verdict, the
-    opposite safety direction: two unrelated classes sharing only a leaf
-    name (``ns1::Foo``/``ns2::Foo``) would let an unrelated namespace's
-    virtual method fabricate ``ns1::Foo``'s own polymorphism. The exact
-    variant needs a fully qualified identity, not the bare ``name`` this
-    function receives as its map key (which can itself be an unqualified
-    leaf on castxml) -- so it's computed the same way `diff_layout._index`
-    already does: ``rec.qualified_name or rec.name``.
-    *funcs* is optional (defaults to ``None``, meaning "no function-level
-    evidence available") so every pre-existing caller that doesn't have a
-    ``function_map`` handy keeps today's behavior unchanged.
+    Gated on ``not vtable_facts_reliable`` (Codex review, fresh evidence,
+    eighth round) -- narrower than every other positive-evidence path
+    above, deliberately: unlike ``vtable``/``vptr_offset_bits``/
+    ``is_abstract``, a retained ``Function.is_virtual`` can itself be
+    DWARF-sourced, and DWARF's own per-translation-unit coverage loss is
+    exactly the same false-positive class ``diff_types_vtable.py``'s own
+    module docstring extensively documents and explicitly accepts as
+    unfixed for its "class's own virtual functions" branch. There, a
+    spurious mismatch only ever widens "keep this finding" (never fabricate
+    one) -- the safe direction for a suppression check. Here a spurious
+    match directly settles this record's own polymorphism, which can
+    fabricate a `SECONDARY_VTABLE_GROUP_CHANGED` the derived class never
+    actually had, if the *other* side happens to have an independent
+    per-TU capture gap of its own. Restricting to `vtable_facts_reliable
+    =False` scopes this path to its actual motivating case -- a legacy
+    pre-v21 *direct-clang* (header-AST) snapshot, whose ``Function``
+    entries are parsed from the whole header in one pass and so never
+    suffer DWARF's incremental per-TU coverage problem at all. Outside that
+    scope this path declines (returns to indeterminate/other checks),
+    which is always the safe direction.
     """
     if name in memo:
         return memo[name]
@@ -221,8 +231,10 @@ def _is_polymorphic(
         and vptr_fact.value is not None
     )
     own_confirmed_abstract = fact_confirmed_true(rec.is_abstract_fact)
-    own_has_retained_virtual_function = funcs is not None and bool(
-        _owned_virtual_signatures_for_record(rec.qualified_name or rec.name, funcs)
+    own_has_retained_virtual_function = (
+        not vtable_facts_reliable
+        and virtual_owner_index is not None
+        and bool(virtual_owner_index.get(rec.qualified_name or rec.name))
     )
     if (
         vtable
@@ -252,7 +264,7 @@ def _is_polymorphic(
             types,
             memo,
             vtable_facts_reliable=vtable_facts_reliable,
-            funcs=funcs,
+            virtual_owner_index=virtual_owner_index,
         )
         if sub is None:
             memo[name] = None
@@ -272,7 +284,7 @@ def _secondary_groups(
     memo: dict[str, bool | None],
     *,
     vtable_facts_reliable: bool = True,
-    funcs: Mapping[str, Function] | None = None,
+    virtual_owner_index: Mapping[str, set[str]] | None = None,
 ) -> list[str] | None:
     """Ordered list of base names that own a *secondary* vtable group.
 
@@ -282,7 +294,7 @@ def _secondary_groups(
     contributes a secondary group in that order. Returns ``None`` if any base's
     polymorphism is indeterminate.
 
-    *vtable_facts_reliable*/*funcs* are threaded straight into
+    *vtable_facts_reliable*/*virtual_owner_index* are threaded straight into
     ``_is_polymorphic`` — see that function's own docstring.
     """
     primary_taken = False
@@ -295,7 +307,7 @@ def _secondary_groups(
             types,
             memo,
             vtable_facts_reliable=vtable_facts_reliable,
-            funcs=funcs,
+            virtual_owner_index=virtual_owner_index,
         )
         if poly is None:
             return None
@@ -311,7 +323,7 @@ def _secondary_groups(
             types,
             memo,
             vtable_facts_reliable=vtable_facts_reliable,
-            funcs=funcs,
+            virtual_owner_index=virtual_owner_index,
         )
         if poly is None:
             return None
@@ -340,6 +352,20 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # debug-only std:: record would surface as a BREAKING finding for a library
     # that does not own it (mirrors _is_abi_surface_type in diff_types.py).
     exclude_stdlib = stdlib_namespaces_excluded(old, new)
+    # Only ever consulted by _is_polymorphic when vtable_facts_reliable is
+    # False for that side (see its own docstring) -- skip the one-time
+    # O(functions) index build entirely for the overwhelmingly common
+    # reliable-producer case.
+    old_virtual_owner_index = (
+        _virtual_signatures_by_owner(old.function_map)
+        if not old.clang_vtable_facts_reliable
+        else None
+    )
+    new_virtual_owner_index = (
+        _virtual_signatures_by_owner(new.function_map)
+        if not new.clang_vtable_facts_reliable
+        else None
+    )
 
     for name in sorted(old_types.keys() & new_types.keys()):
         if is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib):
@@ -390,14 +416,14 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 old_types,
                 old_memo,
                 vtable_facts_reliable=old.clang_vtable_facts_reliable,
-                funcs=old.function_map,
+                virtual_owner_index=old_virtual_owner_index,
             )
             ng = _secondary_groups(
                 n,
                 new_types,
                 new_memo,
                 vtable_facts_reliable=new.clang_vtable_facts_reliable,
-                funcs=new.function_map,
+                virtual_owner_index=new_virtual_owner_index,
             )
             if og is not None and ng is not None and og != ng:
                 changes.append(
