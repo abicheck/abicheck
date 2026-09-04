@@ -161,8 +161,115 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     the nested-namespace case; a plain ``startswith("_ZL")`` check only ever
     matches when the local entity is the *first* component, i.e. at global
     scope.
+
+    **Darwin leading-underscore quirk, second instance (macOS CI, fresh
+    evidence):** the same platform linker convention behind
+    :func:`_function_key`/:func:`_variable_key`'s own ``is_extern_c`` fix
+    also decorates a *genuinely* Itanium-mangled Darwin symbol with one
+    extra leading underscore (``"__ZL6helperi"``, not the plain Itanium
+    ``"_ZL6helperi"`` -- confirmed via ``model/mangled_name.py``'s own
+    ``_itanium_strip_prefix`` docstring, which fixed the identical quirk
+    for ``diff_cxx_rules.py``'s callers). ``_mangled_name_is_local_
+    linkage``'s own ``mangled.startswith("_Z")`` gate rejects every such
+    symbol outright, so a Darwin C++ ``static`` declaration whose mangled
+    name genuinely carries the ``_ZL``/nested-``L`` marker (as opposed to
+    the plain-C/``extern "C"`` case the ``is_extern_c`` branch above
+    already covers) still fell through to "not local" here, unfixed by
+    that first round. Normalized the same way
+    ``_itanium_strip_prefix`` already does for this exact quirk: one
+    leading underscore is stripped before the check, unconditionally
+    rather than gated on the target actually being Darwin.
+
+    **Known, accepted limitation** (Codex review, fresh evidence, fifth
+    round): the unconditional strip is not perfectly safe -- an explicit
+    ``asm("__ZL3foo")`` label on a *non*-Darwin target is a real, distinct
+    mangled identity a programmer chose to write (exactly the same
+    "asm label, not linker decoration" shape ``extract/headers/clang/
+    functions.py``'s own ``is_extern_c`` determination already documents
+    and gates on ``is_darwin_target`` for), not a decoration artifact --
+    stripping its leading underscore here would misread it as local
+    linkage. Gating this strip on the actual target the same way that
+    call site does would need a target triple threaded through every
+    :class:`~abicheck.tu_fragment.TuFragment`/``Function``/``Variable``
+    reaching this module, which none of them carry today, and even a
+    target gate is not fully sufficient on its own (that call site's own
+    docstring: a real ``asm("_foo")`` label is just as possible ON Darwin
+    as off it). Left undone rather than guess-fixed with an unverified
+    partial gate: a real, explicit asm-label mangled name that happens to
+    collide with this exact quirk's decorated-Itanium shape (``__Z...``
+    on a non-Darwin symbol) is vanishingly rare in practice compared to
+    the Darwin quirk this closes on every real Darwin CI run, and no
+    toolchain matrix was available to verify a target-gated version
+    against. See ``tests/regressions/manifest.py``'s
+    ``identity.platform_decorated_mangled_name`` entry for the tracked
+    residual.
     """
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
+
+
+def _looks_itanium_mangled(mangled: str) -> bool:
+    """Whether *mangled* carries the Itanium ``_Z`` magic-prefix marker at
+    all (Darwin's extra leading underscore stripped first, mirroring
+    :func:`_has_local_linkage_mangling`'s own normalization) -- i.e.
+    *some* genuine C++ name mangling was applied, independent of whether
+    that mangling denotes local linkage.
+
+    This is the guard :func:`_function_key`/:func:`_variable_key` need
+    before trusting ``is_extern_c`` as proof "no C++ mangling happened"
+    (Codex review, fresh evidence, fourth round): a class nested inside an
+    ``extern "C" { ... }`` block has its ``is_extern_c``/``entity_id``
+    ``extern_c`` tag wrongly inherited all the way down to its own
+    genuinely-C++-mangled static members by ``dumper_clang.py``'s
+    ``_walk`` (``child_extern_c = ... extern_c`` for every node kind other
+    than the ``LinkageSpecDecl`` itself -- there is no re-check when
+    descending into a nested ``CXXRecordDecl``), even though a static
+    member function/variable of an ordinarily-visible class still mangles
+    to an ordinary marker-free Itanium symbol (e.g. ``__ZN6Widget4makeEi``
+    on Darwin) with the class's own genuine external linkage, nothing to
+    do with C linkage at all. Without this guard, that inherited
+    ``is_extern_c=True`` routed such a member through the ``is_static``
+    fallback branch below with ``entity_id.scope`` already erased by
+    ``entity_id_for_function``'s own ``is_extern_c`` branch (which drops
+    every scope component unconditionally) -- so
+    ``entity_is_record_member`` could no longer see it *was* a record
+    member, and the member was wrongly TU-scoped as if it were a private,
+    file-local declaration; two TUs' identical externally-linked static
+    member then wrongly stayed split into two entities instead of merging
+    into one.
+
+    A mangled name that genuinely starts with the Itanium ``_Z`` prefix is
+    always more specific, trustworthy evidence than the (potentially
+    mis-inherited) ``is_extern_c`` flag -- real C linkage produces no such
+    prefix at all -- so when this returns ``True``, the caller should
+    prefer :func:`_has_local_linkage_mangling`'s own direct read of the
+    mangled name over the ``is_extern_c`` fallback, exactly as it already
+    does for the plain ``fn.mangled != fn.name`` case.
+
+    **Known, accepted limitation** (PR #1048, eighth round): a genuine
+    ``extern "C"`` free declaration literally named e.g. ``_ZL3foo`` collides byte-for-byte with this grammar -- see ``identity.platform_decorated_mangled_name`` in ``tests/regressions/manifest.py``.
+    """
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
+    return mangled.startswith("_Z")
+
+
+def _entity_id_is_extern_c(entity_id: EntityId | None) -> bool:
+    """Whether *entity_id* was built via the ``is_extern_c`` branch of
+    :func:`~abicheck.model.identity.entity_id_for_function`/
+    :func:`~abicheck.model.identity.entity_id_for_variable` (``extra ==
+    ("extern_c",)``).
+
+    :class:`Variable` carries no ``is_extern_c`` field of its own the way
+    :class:`Function` does, so this is the one Darwin-safe signal
+    :func:`_variable_key` has available -- both header-AST backends already
+    route their Darwin-aware ``is_extern_c`` determination (leading-
+    underscore-tolerant, unlike a raw ``mangled == name`` comparison)
+    through this same constructor argument when building a variable's
+    entity id, so reading it back here costs no new computation.
+    """
+    return entity_id is not None and entity_id.extra == ("extern_c",)
 
 
 def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
@@ -261,8 +368,41 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     ``is_static`` is not.
     :func:`~abicheck.extract.headers.scope_segments.entity_is_record_member`
     withholds trust in the ``is_static`` fallback for exactly this case.
+
+    **Third known, accepted limitation, closed (macOS CI, fresh evidence):**
+    ``fn.mangled == fn.name`` is not proof of "no C++ mangling" on a Darwin
+    target -- the platform's linker convention prepends a leading
+    underscore to *every* global symbol clang emits, C or C++, mangled or
+    not (see ``dumper_clang.py``'s own ``parse_variables`` docstring and
+    ``known-gaps.md``'s Mach-O-leading-underscore entries for the same
+    quirk hitting other call sites). A real ``static`` C function parsed in
+    C mode therefore reports ``mangled="_helper"`` against ``name="helper"``
+    on macOS -- never equal -- so this branch's ``mangled == name`` test
+    silently missed every plain-C/`extern "C"` declaration on that
+    platform, falling through to :func:`_has_local_linkage_mangling`, which
+    finds no Itanium marker in a bare Darwin-decorated name and wrongly
+    reports non-local linkage. Each header-AST backend's own
+    ``parse_functions()`` already computes ``is_extern_c`` the Darwin-aware
+    way (gated ``symbol_candidates`` de-prefixing, not a raw equality), so
+    reading that field here instead of re-deriving the same signal from a
+    platform-fragile string comparison closes the gap for every backend at
+    once.
+
+    **Fourth known, accepted limitation, closed (macOS CI, fresh
+    evidence):** ``fn.is_extern_c`` is not always trustworthy either -- see
+    :func:`_looks_itanium_mangled`'s own docstring for the full account of
+    how a static member function nested inside an ``extern "C" { ... }``
+    block wrongly inherits ``is_extern_c=True`` from clang's AST walk
+    despite genuinely being Itanium-mangled with ordinary external
+    linkage. Gated on :func:`_looks_itanium_mangled` returning ``False``:
+    a mangled name that itself carries the Itanium ``_Z`` marker is always
+    more specific evidence than the (possibly mis-inherited) flag, so it
+    routes to :func:`_has_local_linkage_mangling`'s own direct read
+    instead of trusting ``is_extern_c``.
     """
-    if fn.mangled == fn.name:
+    if fn.mangled == fn.name or (
+        fn.is_extern_c and not _looks_itanium_mangled(fn.mangled)
+    ):
         is_local = fn.is_static and not entity_is_record_member(fn.entity_id)
     else:
         is_local = _has_local_linkage_mangling(fn.mangled)
@@ -315,8 +455,36 @@ def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
     checks whether ``var.entity_id.scope`` ends in a
     :class:`~abicheck.model.identity.Record` segment, which is populated
     from the real scope walk regardless of mangling success.
+
+    **Third known, accepted limitation, closed (macOS CI, fresh evidence):**
+    the identical Darwin gap :func:`_function_key`'s own docstring now
+    documents applies here too -- ``var.mangled == var.name`` is not proof
+    of "no C++ mangling" on a Darwin target, since its linker convention
+    prepends a leading underscore to every global symbol, mangled or not.
+    A plain-C (or `extern "C"`) file-scope variable therefore never
+    satisfies this branch's raw equality check on macOS, falling through
+    to :func:`_has_local_linkage_mangling` and wrongly reporting non-local
+    linkage. Unlike :class:`Function`, :class:`Variable` carries no
+    ``is_extern_c`` field to read directly, but ``var.entity_id`` was built
+    from the identical Darwin-aware determination each backend's own
+    ``parse_variables()`` already makes -- :func:`_entity_id_is_extern_c`
+    reads that back instead of re-deriving the same signal from a
+    platform-fragile string comparison.
+
+    **Fourth known, accepted limitation, closed (macOS CI, fresh
+    evidence):** the identical gap :func:`_function_key`'s own docstring
+    now documents applies here too -- a static *member variable* nested
+    inside an ``extern "C" { ... }`` block wrongly inherits the
+    ``extern_c``-tagged ``entity_id`` from clang's AST walk despite being
+    genuinely Itanium-mangled with ordinary external linkage. Gated the
+    same way: :func:`_looks_itanium_mangled` returning ``True`` routes to
+    :func:`_has_local_linkage_mangling`'s own direct read instead of
+    trusting :func:`_entity_id_is_extern_c`.
     """
-    if var.mangled == var.name:
+    if var.mangled == var.name or (
+        _entity_id_is_extern_c(var.entity_id)
+        and not _looks_itanium_mangled(var.mangled)
+    ):
         is_local = var.is_static and not entity_is_record_member(var.entity_id)
     else:
         is_local = _has_local_linkage_mangling(var.mangled)

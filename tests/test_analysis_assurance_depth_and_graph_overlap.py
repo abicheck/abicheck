@@ -343,6 +343,124 @@ class TestRequestedDepthPropagationSharedPipeline:
         assert aa.depth_satisfied is False, aa
         assert aa.status != "complete", aa
 
+    def test_classify_compare_pair_no_context_and_no_depth_leaves_it_none(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion to the two tests above: covers the one remaining branch
+        of ``classify_compare_pair``'s depth-stamping guard (ADR-063
+        Track 3) -- a hand-built ``ResolvedComparePair`` with no context
+        *and* a request with no ``depth`` at all, so neither the
+        context-agrees branch nor the ``request.depth``-fallback branch
+        fires and ``requested_depth`` stays at its default ``None``."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.service_compare_pipeline import (
+            ResolvedComparePair,
+            classify_compare_pair,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+        pair = ResolvedComparePair(
+            old=old,
+            new=new,
+            old_fmt=None,
+            new_fmt=None,
+            old_evidence=evidence,
+            new_evidence=evidence,
+        )
+        result = classify_compare_pair(request, pair).diff
+
+        assert result.requested_depth is None, result
+
+    def _pair_with_context(
+        self,
+        old: AbiSnapshot,
+        new: AbiSnapshot,
+        context: object,
+    ) -> object:
+        from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.service_compare_pipeline import ResolvedComparePair
+
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+        return ResolvedComparePair(
+            old=old,
+            new=new,
+            old_fmt=None,
+            new_fmt=None,
+            old_evidence=evidence,
+            new_evidence=evidence,
+            resolved_execution_context=context,
+        )
+
+    def test_classify_compare_pair_reads_requested_depth_from_resolved_execution_context(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-063 Track 3 (One Semantic Pipeline plan, sub-phase 4B's first
+        real consumer): ``classify_compare_pair`` stamps ``DiffResult.
+        requested_depth`` off ``pair.resolved_execution_context.
+        requested_depth`` when one is attached and agrees with
+        ``request.depth`` -- the ordinary case, since both are seeded from
+        the same request in every real invocation."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.resolved_execution_context import (
+            EvidenceView,
+            ResolvedExecutionContext,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="headers"
+        )
+        context = ResolvedExecutionContext(
+            operation="compare", evidence=EvidenceView.for_request("headers")
+        )
+        pair = self._pair_with_context(old, new, context)
+        result = classify_compare_pair(request, pair).diff
+
+        assert result.requested_depth == "headers", result
+
+    def test_classify_compare_pair_prefers_request_depth_over_a_stale_context(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review (PR #1047): a caller may pass a *different*
+        ``request`` than the one that built ``pair`` (``classify_compare_
+        pair``'s own docstring names this split as the whole reason ADR-055
+        D1 exists). ``old``/``new`` are projected to *this* request's depth
+        (``project_pair_to_depth``), so a context whose own ``requested_
+        depth`` disagrees must not win -- reporting it would claim a depth
+        this classification never actually saw. Must defer to
+        ``request.depth`` instead."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.resolved_execution_context import (
+            EvidenceView,
+            ResolvedExecutionContext,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        # The context was resolved for "source"; this call classifies at
+        # "headers" instead.
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="headers"
+        )
+        context = ResolvedExecutionContext(
+            operation="compare", evidence=EvidenceView.for_request("source")
+        )
+        pair = self._pair_with_context(old, new, context)
+        result = classify_compare_pair(request, pair).diff
+
+        assert result.requested_depth == "headers", result
+
 
 class TestGraphCompletenessPartialFamilyOverlap:
     """Round-9 review, Finding 2: the round-8 fix only flagged a fully
@@ -594,7 +712,8 @@ class TestExportAccountingDedupsLegacyPersistedOverlap:
         )
         for snap in (old, new):
             snap.build_source = BuildSourcePack(
-                root=tmp_path / "legacy-overlapping-pack", source_abi=surface,
+                root=tmp_path / "legacy-overlapping-pack",
+                source_abi=surface,
             )
 
         result = checker.compare(old, new)
@@ -607,6 +726,8 @@ class TestExportAccountingDedupsLegacyPersistedOverlap:
         assert aa.export_accounting.internal == 2
         assert aa.export_accounting.unaccounted == 0
         assert aa.export_accounting.source_linked == 2
+
+
 class TestGraphCompletenessConditionallyApplicableFamily:
     """PR #767 follow-up (P2 review): the round-9 ``!=`` fix above (Finding 2
     in that round) is too aggressive for a *conditionally applicable* pass

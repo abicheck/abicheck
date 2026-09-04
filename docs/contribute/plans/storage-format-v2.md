@@ -109,14 +109,23 @@ and `BundleFacts` document is bit-for-bit unchanged.
 ### Phase 1 — unified project and multibuild storage
 
 **Status: A1.1/A1.2/A1.3/A1.4 implemented** — the object model
-(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`), a
-real directory-backed store (`abicheck/project_snapshot_store.py`'s
-`DirectoryObjectStore` plus its manifest/ref writer/reader — everything but
-the `.tar.zst` transport form), the v1-v25 import adapter
+(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`,
+`PackageManifest.project_sections`), a real directory-backed store
+(`abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` plus its
+manifest/ref writer/reader, also publishing/reading `project_sections` —
+everything but the `.tar.zst` transport form), the v1-v25 import adapter
 (`storage/import_v1.py`), a single-library snapshot round-tripping through
-the store as a one-artifact project, and (ADR-063 Track C 8B) folding
-`BundleFacts`/baseline sets onto that same sectioned representation are all
-landed. A1.5-A1.8 remain open. See "Landed in Phase 1" below.
+the store as a one-artifact project, and A1.4 (folding `BundleFacts`/
+baseline sets onto that same sectioned representation) are all landed —
+**the last of these twice over**, by two independently-landed slices with
+non-interoperable physical layouts: `storage/import_bundle_facts.py`/
+`import_baseline_set.py` (ADR-063 Track C 8B, taking an already-persisted
+document and attaching composition facts to `VariantRef.sections`) and
+`abicheck/bundle_facts_store.py` (ADR-063 Track B "8B", taking a live
+`BundleFacts` object and attaching them to `PackageManifest.project_sections`/
+`ArtifactRef.native_identity` instead) — see A1.4's own entry below for the
+reconciliation this still needs. A1.5-A1.8 remain open. See "Landed in Phase
+1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
   directory abstraction, with a deterministic `.tar.zst` transport form.
@@ -134,8 +143,19 @@ landed. A1.5-A1.8 remain open. See "Landed in Phase 1" below.
   level. **Implemented** — see `tests/test_project_snapshot_store.py`'s full
   package round trip.
 - **A1.4** Baseline sets and `BundleFacts` are expressed as sections of one
-  package rather than parallel top-level formats. **Implemented** (ADR-063
-  Track C 8B) — `storage.import_bundle_facts`/`storage.import_baseline_set`.
+  package rather than parallel top-level formats. **Implemented twice, not
+  yet reconciled**: `storage.import_bundle_facts`/`storage.import_baseline_set`
+  (ADR-063 Track C 8B) fold an already-persisted document onto
+  `VariantRef.sections`; `abicheck/bundle_facts_store.py` (ADR-063 Track B
+  "8B") independently folds a *live* `BundleFacts` object onto
+  `PackageManifest.project_sections`/`ArtifactRef.native_identity` instead.
+  The two landed in parallel with no shared physical layout — a package
+  written by one cannot be read by the other. Follow-up: rebuild
+  `bundle_facts_store.py`'s writer/reader as a thin wrapper over
+  `bundle_facts_serialization.bundle_facts_to_dict`/`bundle_facts_from_dict`
+  plus `storage.import_bundle_facts`, retiring the separate
+  `project_sections`/`native_identity` layout in favor of the document-level
+  contract `import_v1.py` already established.
 - **A1.5** `BuildSourcePack`, project source graphs, and toolchain profiles
   are stored once per project/variant and referenced by digest.
 - **A1.6** `bundle_variants:` is wired into `.abicheck.yml` discovery, the
@@ -184,11 +204,23 @@ nothing in the existing pipeline changes behavior.
    — `project_snapshot_store.py`/`project_snapshot_legacy.py`; see
    `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 8 note for the
    single-file-by-default CLI wiring this actually shipped as.
-4. **Open, designed below**: the `.tar.zst` transport form (the remainder of
-   A1.1), folding baseline sets and `BundleFacts` into sections plus
-   digest-deduplicated shared evidence (A1.4/A1.5), `bundle_variants:` CLI
-   wiring (A1.6), stored/live release-comparison reachability (A1.7), and
-   non-ELF artifact membership (A1.8).
+4. Express a `BundleFacts` (N libraries plus an instantiation manifest) and
+   an `actions/baseline` set as a multi-artifact project (A1.4). **Landed
+   twice, not yet reconciled** — `storage/import_bundle_facts.py`/
+   `import_baseline_set.py` (ADR-063 Track C 8B) fold an already-persisted
+   document onto `VariantRef.sections`; `bundle_facts_store.py`'s
+   `write_bundle_facts_package`/`read_bundle_facts_package` (ADR-063 Track B
+   "8B") independently fold a *live* `BundleFacts` object onto
+   `PackageManifest.project_sections` (`storage/package.py`)/
+   `ArtifactRef.native_identity` instead. Both are published/read through
+   `project_snapshot_store.py`'s `write_project_manifest`/
+   `read_project_manifest`, but the two slices do not share a physical
+   layout — see A1.4's own entry above for the follow-up.
+5. **Open, designed below**: the `.tar.zst` transport form (the remainder of
+   A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
+   (the remainder of A1.4/A1.5), `bundle_variants:` CLI wiring (A1.6),
+   stored/live release-comparison reachability (A1.7), and non-ELF artifact
+   membership (A1.8).
 
 `AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
 re-sort the whole mapping per call, so building a ledger of *n* overrides
@@ -270,33 +302,75 @@ is transparently decompressed today).
 
 #### A1.4 — folding baseline sets/`BundleFacts` into sections
 
-**Status: implemented** (ADR-063 Track C 8B). G38 Phase 2's own persisted
+**Status: implemented twice, in parallel, not yet reconciled** (ADR-063
+Track C 8B and, independently, Track B "8B"). G38 Phase 2's own persisted
 `BundleFacts` shape landed first (see "Relationship to G38" above), so this
 item's actual target — per that section's own contingency — became
 `BundleFacts` document fields (and an `actions/baseline`-produced baseline
-set's `manifest.json`) becoming sections, not a fresh container design.
+set's `manifest.json`) becoming sections, not a fresh container design. Two
+independent slices then built two different, non-interoperable adapters for
+that same target before either was aware of the other; both are described
+below rather than picking a winner silently.
 
-**What landed, vs. what this section originally sketched.** The original
-draft below this note (kept for its still-relevant reasoning about *why*
-cross-library facts need a home distinct from any one `ArtifactRef`)
-proposed a new `PackageManifest.project_sections: Mapping[str, ObjectRef]`
-field. The landed design instead reuses `VariantRef` — a `BundleFacts`
-document's `per_library_snapshots` share exactly one matched build (G38 has
-no notion of one bundle spanning several variants), so its own composition
-facts (`variant_fingerprint`, `manifest`, `filesystem_aliases`,
-`library_filenames`) are exactly the kind of "this shared build's own
-facts, not any one artifact's" content `VariantRef.declared`/`.captured`
-already existed for one axis of (coordinate matching); this item generalizes
-that to arbitrary content via a new `VariantRef.sections:
-Mapping[str, ObjectRef]` field, symmetric with `ArtifactRef.sections`
-one level up. A baseline set's own `manifest.json` metadata
-(`manifest_version`, `project_ref`, `profile`, `snapshot_schema`,
+**Track C 8B — what landed, vs. what this section originally sketched.**
+The original draft below this note (kept for its still-relevant reasoning
+about *why* cross-library facts need a home distinct from any one
+`ArtifactRef`) proposed a new `PackageManifest.project_sections:
+Mapping[str, ObjectRef]` field. This slice instead reuses `VariantRef` — a
+`BundleFacts` document's `per_library_snapshots` share exactly one matched
+build (G38 has no notion of one bundle spanning several variants), so its
+own composition facts (`variant_fingerprint`, `manifest`,
+`filesystem_aliases`, `library_filenames`) are exactly the kind of "this
+shared build's own facts, not any one artifact's" content
+`VariantRef.declared`/`.captured` already existed for one axis of
+(coordinate matching); this item generalizes that to arbitrary content via
+a new `VariantRef.sections: Mapping[str, ObjectRef]` field, symmetric with
+`ArtifactRef.sections` one level up. A baseline set's own `manifest.json`
+metadata (`manifest_version`, `project_ref`, `profile`, `snapshot_schema`,
 `fact_set`, `baseline_generation`, `generator`) gets the identical
-treatment via its own section kind. Should a future package genuinely need
-to express facts shared *across* variants (not yet a real requirement — no
-producer needs it), the original `PackageManifest.project_sections` sketch
-remains the right shape for that separate case; it was not built here
-because nothing yet needs it.
+treatment via its own section kind. This slice's own adapters
+(`storage/import_bundle_facts.py`/`import_baseline_set.py`) take an
+already-persisted document, matching the "storage takes an
+already-serialized document" contract `import_v1.py` established.
+
+**Track B "8B" — what landed independently.**
+`abicheck/bundle_facts_store.py`'s `write_bundle_facts_package`/
+`read_bundle_facts_package` take a *live* `BundleFacts` object instead (one
+`ArtifactRef` per library under a shared `VariantRef`, via
+`import_legacy_snapshot` against one shared `store`), and use the original
+`PackageManifest.project_sections: Mapping[str, ObjectRef]` sketch this
+section originally proposed: `BundleFacts.manifest` is the first real
+`project_sections` entry, and `filesystem_aliases`/`library_filenames`/the
+real library name move onto each library's own `ArtifactRef.native_identity`
+instead. **Not** landed by this slice: a shared `BuildSourcePack`/project
+source graph as a `project_sections` entry — closing finding #6's "~57-59 MB
+graph repeated per artifact" needs that half specifically (A1.5 below).
+
+**The reconciliation this still needs.** The two slices do not share a
+physical layout — a package written by one's writer cannot be read by the
+other's reader — because each was built without visibility into the other
+landing the identical plan item at the same time. Since Track C 8B's
+adapters already establish "storage takes an already-serialized document"
+as this area's contract, the natural follow-up is to rebuild
+`bundle_facts_store.py`'s writer/reader as a thin wrapper — `bundle_facts_to_dict`/
+`bundle_facts_from_dict` (already the canonical live-object ↔ document
+bridge) composed with `storage.import_bundle_facts.import_bundle_facts`/
+`export_bundle_facts` — retiring the separate `project_sections`/
+`native_identity` layout. Not attempted as part of landing either slice:
+it needs `bundle_facts_store.py`'s own ~30-test suite (much of it pinned to
+the internal layout being retired) rewritten with the same adversarial-review
+rigor the original had, which is real, separately-scoped follow-up work, not
+a side effect of noticing the collision.
+
+**Goal (both slices).** A release directory (today: N per-library
+`.abi.json[.zst]` files, sometimes a `manifest.json`, sometimes a
+`BundleFacts` document embedding all N snapshots again) is representable as
+one `ProjectSnapshot` package: one `PackageManifest` naming N `ArtifactRef`s
+under a shared `VariantRef`, with cross-library evidence (`BuildSourcePack`,
+the project source graph, the instantiation manifest) stored **once** and
+referenced by digest from every artifact that needs it — closing finding #6
+("~57-59 MB graph repeated per artifact") directly, since today's
+per-snapshot embedding is exactly what A1.5 replaces.
 
 One further deviation, noted rather than silently absorbed:
 `filesystem_aliases`/`library_filenames` stayed as their original

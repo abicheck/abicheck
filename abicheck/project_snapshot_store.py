@@ -62,6 +62,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from .errors import SnapshotError
@@ -80,6 +81,7 @@ from .storage.canonical import (
 from .storage.package import (
     MANIFEST_RELPATH,
     ArtifactRef,
+    ObjectRef,
     PackageManifest,
     VariantRef,
     artifact_ref_relpath,
@@ -433,6 +435,16 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
                     f"variant {variant.variant_id!r} section "
                     f"{section_kind!r} -> {ref.digest!r} ({exc})"
                 )
+    # `project_sections` (ADR-062 A1.4/A1.5) is embedded in manifest.json
+    # itself (see the summary dict below), but checked for durability first
+    # for the same reason `artifact.sections` is above.
+    for section_kind, ref in manifest.project_sections.items():
+        try:
+            store.get(ref.digest)
+        except (KeyError, ValueError, SnapshotError) as exc:
+            invalid.append(
+                f"project_sections[{section_kind!r}] -> {ref.digest!r} ({exc})"
+            )
     if invalid:
         raise ValueError(
             "refusing to publish manifest.json referencing object(s) not "
@@ -440,11 +452,19 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             f"{sorted(invalid)} -- populate objects/ (e.g. via "
             "DirectoryObjectStore.put) before calling write_project_manifest"
         )
-    summary = {
+    summary: dict[str, Any] = {
         "versions": manifest.versions.to_dict(),
         "variant_ids": [variant.variant_id for variant in manifest.variant_refs],
         "artifact_ids": [artifact.artifact_id for artifact in manifest.artifact_refs],
     }
+    # Omitted when empty, matching `_optional_project_sections`'s own
+    # "absent means no cross-artifact evidence, not a truncated document"
+    # reading -- also keeps a one-artifact package's manifest.json free of
+    # a field it never had before A1.4/A1.5 introduced it.
+    if manifest.project_sections:
+        summary["project_sections"] = {
+            key: ref.to_dict() for key, ref in manifest.project_sections.items()
+        }
     manifest_path = root_path / MANIFEST_RELPATH
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     _write_canonical_json_text(
@@ -455,20 +475,23 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
 
 
 class ManifestSummary:
-    """`manifest.json`'s own small, always-loaded content — `versions` plus
-    which variant/artifact ids exist, without either's full record."""
+    """`manifest.json`'s own small, always-loaded content — `versions`,
+    which variant/artifact ids exist (without either's full record), and
+    `project_sections` (ADR-062 A1.4/A1.5's cross-artifact evidence refs)."""
 
-    __slots__ = ("versions", "variant_ids", "artifact_ids")
+    __slots__ = ("versions", "variant_ids", "artifact_ids", "project_sections")
 
     def __init__(
         self,
         versions: StorageVersions,
         variant_ids: tuple[str, ...],
         artifact_ids: tuple[str, ...],
+        project_sections: Mapping[str, ObjectRef] = MappingProxyType({}),
     ) -> None:
         self.versions = versions
         self.variant_ids = variant_ids
         self.artifact_ids = artifact_ids
+        self.project_sections = project_sections
 
 
 def _required_string_id_list(
@@ -561,6 +584,26 @@ def _required_string_id_list(
     return tuple(raw)
 
 
+def _optional_project_sections(
+    data: Mapping[str, Any], record: str
+) -> Mapping[str, ObjectRef]:
+    """`data["project_sections"]`, or `{}` if absent -- unlike
+    `variant_ids`/`artifact_ids`, this is an *additive* field (ADR-062
+    A1.4/A1.5): a package written before it existed has no cross-artifact
+    evidence to name, a valid state, not a truncated document. A *present
+    but malformed* value is still refused (not a JSON object, or a
+    malformed object reference), since that means hand-edited/corrupted.
+    """
+    if "project_sections" not in data:
+        return MappingProxyType({})
+    raw = data["project_sections"]
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{record} project_sections must be a JSON object, not {type(raw).__name__}"
+        )
+    return {key: ObjectRef.from_dict(value) for key, value in raw.items()}
+
+
 def read_manifest_summary(root: str | Path) -> ManifestSummary:
     """Load only `manifest.json` — the one document D8 requires be small
     enough to load unconditionally.
@@ -589,6 +632,7 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
         versions=versions,
         variant_ids=_required_string_id_list(data, "variant_ids", record),
         artifact_ids=_required_string_id_list(data, "artifact_ids", record),
+        project_sections=_optional_project_sections(data, record),
     )
 
 
@@ -783,5 +827,8 @@ def read_project_manifest(root: str | Path) -> PackageManifest:
         for artifact_id in summary.artifact_ids
     )
     return PackageManifest(
-        versions=summary.versions, variant_refs=variants, artifact_refs=artifacts
+        versions=summary.versions,
+        variant_refs=variants,
+        artifact_refs=artifacts,
+        project_sections=summary.project_sections,
     )
