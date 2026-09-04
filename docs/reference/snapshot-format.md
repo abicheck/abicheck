@@ -189,7 +189,19 @@ itself reads the envelope transparently regardless of version, per
 static-vs-external variable identity collision `tu_merge._variable_key`'s own
 docstring long documented as a known, accepted limitation; missing on a pre-v43
 snapshot loads as `False`, matching every prior reader's implicit assumption
-since the field did not exist.
+since the field did not exist. Finally (v44) each DWARF/advanced-DWARF
+channel (`DwarfMetadata`/`AdvancedDwarfMetadata`) persists its own evidence
+source, parse state (`parsed`/`partial`/`presence_only`/`failed`/
+`not_supported`/`not_available`), and compilation-unit accounting
+(`cu_total`/`cu_failed`), so `analysis_assurance`'s completeness gate can
+distinguish a real parsed fact from binary-depth's cheap section-presence
+probe or a partial/failed extraction, instead of collapsing all three into
+the same `has_dwarf: true`. Missing on a pre-v44 snapshot loads
+fail-closed rather than as a false claim of completeness: `evidence_state`
+defaults to `presence_only` when the block's `has_dwarf` is true (there is
+DWARF-shaped data, just no provenance about whether it was fully parsed)
+and to `not_available` when it is false (no DWARF at all); `cu_total`/
+`cu_failed` default to `0`/`0`.
 
 ### Forward / backward compatibility
 
