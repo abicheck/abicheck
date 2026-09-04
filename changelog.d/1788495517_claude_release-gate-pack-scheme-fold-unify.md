@@ -11,5 +11,7 @@
   for either command -- purely an internal deduplication of logic that
   previously had a real regression history (Codex review, PR #1032). The
   two fold functions' *severity-level* application remains separately
-  expressed against their different pre-resolution shapes, deferred to
-  ADR-064's own named "PR G2" prerequisite work.
+  expressed against their different pre-resolution shapes, deferred to the
+  duplication-and-convergence-assessment plan's own P0
+  `EffectiveGate`/`EffectiveEvaluationConfig` target (distinct from
+  ADR-064's `GateOptions` rewrite, which already landed).

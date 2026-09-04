@@ -943,6 +943,13 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
     }
     old_virtual_sigs = old_virtual_signatures(old.function_map.values())
+    # Mirrors diff_types.py's own identical computation for the same pair of
+    # snapshots -- see virtual_method_addition's own docstring for why it
+    # needs this to decide whether TYPE_VTABLE_CHANGED would decline for a
+    # reason unrelated to evidence (a legacy pre-v21 direct-clang snapshot).
+    vtable_facts_reliable = (
+        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    )
 
     # Build a lookup of ALL functions in new snapshot (including hidden).
     new_all = new.function_map
@@ -977,7 +984,14 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         if mangled not in old_map and f_new.name not in matched_by_name:
             virtual_break = virtual_method_addition(
-                f_new, old_owner_classes, old_types, new_types, old_virtual_sigs
+                f_new,
+                old_owner_classes,
+                old_types,
+                new_types,
+                old_virtual_sigs,
+                old.function_map,
+                new_all,
+                vtable_facts_reliable=vtable_facts_reliable,
             )
             changes.append(
                 virtual_break

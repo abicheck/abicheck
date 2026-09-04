@@ -183,10 +183,10 @@ when a first PR lands against a sub-phase:
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
 | **2B — Identity consumer migration** | in progress | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted). The `StableEntityId`/`SnapshotLocalIdentity` split landed (`abicheck/model/identity_tiers.py`), and two post-parse consumers migrated onto it — `diff_filtering.py`'s opaque-type suppression (`compare/opaque_types.OpaqueTypeIndex`, matching on `StableEntityId` first and the `RecordType.name` spelling second) and `type_reachability.py`'s closure-walk record-tracking keys (`SnapshotLocalIdentity` rather than bare `str`). Bare-name-collision narrowing landed (2026-09-03, see the note below the table): `OpaqueTypeIndex.complete` gates `contains(..., strict=...)` on both sides' stable tier being provably complete for the comparison at hand, closing the collision exactly when doing so cannot drop a real suppression. The `entity:` alias promotion in `finding_identity.resolve_change_identity`/`report_canonical_finding_id` was investigated (2026-09-03) and declined rather than deferred: no currently-identifiable finding needs it (typedefs/constants already get a fine NORMALIZED tier off their own spelling, functions/variables already get the stronger CANONICAL mangled tier), so wiring it in would trade real suppression-file compatibility for a benefit that cannot be demonstrated today — see the ledger's `identity` concept for the full reasoning |
-| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
+| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. A fourth slice (2026-09-04, "Track 3") closed the "unread" half of that gap for one concrete site: `classify_compare_pair`'s own `DiffResult.requested_depth` stamp — previously a second, independent `request.depth.lower()` normalization living a few lines away from the identical one `ResolvedExecutionContext.from_plan` already performs — now reads `pair.resolved_execution_context.requested_depth` instead, when it agrees with the call's own `request.depth` (Codex review, PR #1047: this function's own two-phase split lets a caller pass a *different* `request` than built `pair`, and `old`/`new` are always projected to *this* call's `request.depth`, so a disagreement defers to it rather than reporting a depth the classification never actually saw), falling back to the direct computation for a caller that attaches no context at all (a hand-built `ResolvedComparePair`, as some unit tests still do). `classify_compare_pair` is the typed Python API's `run_compare_request` path specifically -- the native `compare` CLI calls `compare_snapshots()` directly and does not go through it. **Correction to this row's own prior text:** `resolve_dump_request`/`execute_dump_request` are *not* "fully unwired" -- `execute_dump_request` already calls `with_assurance()` (landed 2026-09-03, commit `280b6c614`, the same day as the third slice above), the real post-execution caller this row previously said didn't exist yet; `DumpResult.resolved_execution_context` is fully built, assurance-enriched, and even carries a per-side `compile_contexts` entry when a header-AST parse ran -- but nothing downstream of `execute_dump_request` (no CLI, nothing outside the function itself) reads it back, so it remains a genuinely *unread*, not unbuilt, object. A fifth slice (2026-09-04) closed one more concrete site on the `compare` path: `resolve_compare_request` was carrying no `compile_contexts` at all (`evaluation_config`/`compile_contexts` were both named as deferred in the third slice's own note) even though each side's resolved `CompileContext` was reachable a few lines away -- switching `_resolve_side`/`_resolve_old_side`/`_resolve_new_side` from `resolve_side_snapshot` to `_resolve_side_snapshot_impl` recovers `SideResolution.effective_compile_context` per side, threaded through the identical safety gate the dump path already applied (lifted out of `execute_dump_request`'s own inline conditional into one shared predicate so the two paths share one decision instead of two hand-copies -- Codex review, PR #1037, six rounds, the dump-path original). A sixth slice (2026-09-04, Codex review, fresh evidence on the same PR) relocated that shared predicate a second time, to `workflows.artifact.compile_context_gate.side_effective_compile_context` (a new leaf module, not `workflows.artifact.execute` as first landed): the initial placement grew `service_compare_pipeline.py`/`workflows/artifact/execute.py` past the 800-line production cap, and a bare `SideResolution` type import would have pulled the helper into the large, already-allowlisted `workflows.artifact.execute -> service -> ...` import cycle as a genuinely new member -- so the function now takes the bare `CompileContext | None` it actually reads off `SideResolution.effective_compile_context` instead of the whole object, needing no import from `execute.py` at all. `evaluation_config` remains unresolved on both paths (still `None` on every real `ResolvedComparePair`/`ResolvedDumpRequest`), and every *other* independently-re-derived value this sub-phase names (policy/pack resolution) is still read the old way — this slice closes two concrete sites (compile-context threading, plus the dedup itself), not the sub-phase |
 | **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed. Third PR landed (see the note below the table): the dedicated `vtable`/`vptr_offset_bits` slice — `diff_vtable_layout._is_polymorphic`/`diff_layout._check_vptr_introduced` now read `FactStatus` directly (additive, per-record); the `TYPE_VTABLE_CHANGED` cluster (`diff_types_vtable.py`) itself was re-audited and found unsafe to convert without a `diff_cxx_rules.virtual_method_addition`-side fix blocked by an import-cycle constraint, so the removal gate remains open for that one cluster specifically. Fourth through seventh PRs landed (see the note below the table): closed the case-(a) field inventory's audit status entirely -- `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/`access` gated directly; `default` and the five `deprecated`/`is_scoped` surfaces investigated, found not safely convertible without a legacy-hybrid load-path fix (a real end-to-end test regression, not a hypothetical), and left on their existing `fact_provenance` mechanism with the specific finding recorded. Eighth PR landed (see the note below the table): audited the entire remaining case-(b) field inventory (nineteen per-declaration fields plus six detector-unconsumed snapshot-level ones) and found it already safe -- zero findings, no code changes -- closing this sub-phase's audit scope for every model field carrying a `Fact[T]` sibling as of this session; the sub-phase's own remaining work is the `vtable`/`TYPE_VTABLE_CHANGED` cluster (`vptr_offset_bits` is fully gated — see the corrected note further down), not a further audit sweep |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
-| **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
+| **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary); the release fan-out's gate-pack-fold duplication (a distinct residual, not ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02); the release fan-out's explicit rejection of a `--pack`-asserted `contract.unresolved` | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; a real per-pair executor for depth/suppression/policy/compile-context/`--contract` mode-and-domain already exists (`service.run_compare`) and ADR-064's `GateOptions` already resolves the release fan-out's severity/exit-code-scheme gate config exactly once (confirmed by the 2026-09-03 investigation below) — what remains is narrower: `apply_release_gate_pack` mirrors, rather than calls, `pack_application.apply_to_compare_config` (deferred to the duplication-and-convergence-assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target, guarded meanwhile by `tests/test_release_gate_pack_fold_parity.py`'s parity property), and `resolve_release_pack_application` unconditionally rejects `contract.unresolved` for a release comparison — not for lack of a per-library `PersistedContractContext` (`service.run_compare` already creates one, `record_release_resolved_config` already merges into it after every pair), but as the rejection's own deliberate choice, unverified whether still necessary — no landed fix or confirmed-necessary rationale yet |
 | **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
 **2B's bare-name-collision narrowing landed (2026-09-03).** The gap
@@ -791,7 +791,31 @@ sub-phase:
   single Tier-2 chokepoint... this is what keeps `compare-release` and
   `compare` on one classification path"), which folds all five identically
   for a release pair and a single-pair `compare` invocation of the same
-  library. Nothing to unify here — it already is.
+  library. Nothing to unify here — it already is, **with one qualification
+  found on review, itself corrected on a second review pass** (Codex, this
+  PR, two rounds): `cli_compare_receipt.resolve_release_pack_application`
+  unconditionally rejects a `--pack` assigning `contract.unresolved` for a
+  release comparison (a hard `PackManifestError`, not a silent no-op) — but
+  *not* because the release fan-out lacks a per-library
+  `PersistedContractContext` for that field's consumer
+  (`contract_coverage_exit._accepts_unresolved`) to read, the first-round
+  finding's premise. It does build and merge one: `_run_compare_pair` calls
+  `record_release_resolved_config` after every pair
+  (`cli_compare_release_pairwise.py`), which folds the pack's resolved
+  config into `result.contract_context` via `contract_context.
+  with_resolved_config` whenever `--contract` produced one — and
+  `_compare_one_library` reads `coverage_exit_floor(result)` off exactly
+  that context afterward. So the context-plumbing this field's consumer
+  needs already exists; the rejection itself is the *only* blocker, not
+  missing infrastructure. Whether that rejection remains necessary now that
+  the plumbing exists, or is a stale defensive guard a future slice could
+  safely lift, is unverified — not attempted here, and not to be assumed
+  either way without re-reading `resolve_release_pack_application`'s own
+  reasoning against this evidence. So a release comparison cannot use
+  `contract.unresolved` today, where a single-pair `compare` can — a real,
+  live boundary-consumer gap (the explicit rejection), not merely a
+  duplication risk like the gate-pack fold below, and not a missing-context
+  gap either.
 - **Severity/exit-code-scheme gate resolution** — ADR-064's own
   `GateOptions`/`resolve_release_gate_options`
   (`abicheck/policy/release_gate_options.py`) already resolves this exactly
@@ -803,8 +827,13 @@ sub-phase:
   `apply_release_gate_pack` "mirrors [`pack_application.
   apply_to_compare_config`'s] *logic*... instead" of calling it, because the
   release fan-out has no `ResolvedCompareConfig`-shaped object of its own to
-  fold packs onto — a full unification is ADR-064's own named, deferred
-  "PR G2" prerequisite work, not this sub-phase's to redo reactively.
+  fold packs onto — distinct from ADR-064's own `GateOptions` rewrite
+  (already landed 2026-09-02, per that ADR's own "Landed" note, and what
+  closed the three-independent-re-derivations drift risk above): a full
+  fold unification is the duplication-and-convergence-assessment plan's own
+  P0 `EffectiveGate`/`EffectiveEvaluationConfig` target
+  (`docs/contribute/plans/duplication-and-convergence-assessment.md`), not
+  this sub-phase's to redo reactively.
   `tests/test_release_gate_pack_fold_parity.py` (this PR) closes the actual
   residual risk instead: a Hypothesis property test pinning the two
   independently-reasoned fold implementations to agree on outcome for every
@@ -840,13 +869,26 @@ sub-phase:
 **Net effect**: the "shared pair-operation executor" the plan text's one-line
 goal names is, on inspection, substantially already real — just distributed
 across several independently-landed mechanisms rather than one function —
-with exactly one concrete gap identified (the `apply_to_compare_config`/
-`apply_release_gate_pack` duplication), guarded by a parity test rather than
-left to silent drift in the meantime. Recorded here per this repo's own "say
-so explicitly and record the gap" convention rather than closing 7B's own
-status row on an incomplete account, or forcing a premature rewrite of
-carefully-built, recently-landed code (`GateOptions`) to manufacture a
-bigger diff.
+with two concrete, still-open gaps, not one (a second found on review,
+Codex, this PR — see the amended first bullet above): the
+`apply_to_compare_config`/`apply_release_gate_pack` duplication, which has
+its own named, deferred follow-up (the duplication-and-convergence-assessment
+plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target — not
+ADR-064's `GateOptions` rewrite, which already landed 2026-09-02) and is now
+guarded by a parity test rather than left to silent drift; and the release
+fan-out's explicit rejection of a `--pack`-asserted `contract.unresolved`
+(`resolve_release_pack_application` rejects it outright — not for a missing
+`PersistedContractContext`, which `service.run_compare` already creates
+per library and `record_release_resolved_config` already merges into, per
+a second review round's own correction to the first round's premise
+above, but as the rejection's own deliberate choice), which has no landed
+fix or confirmed-necessary rationale
+yet and remains a live boundary-consumer gap for a future slice to
+investigate and close. Recorded here per this
+repo's own "say so explicitly and record the gap" convention rather than
+closing 7B's own status row on an incomplete account, or forcing a premature
+rewrite of carefully-built, recently-landed code (`GateOptions`) to
+manufacture a bigger diff.
 
 **The exit-code-scheme half of that one gap landed (2026-09-04).** Reading
 both fold functions side by side found their *scheme* resolution --
@@ -878,8 +920,10 @@ six independent raw-string overrides on the other -- is the same update
 expressed against two different pre-resolution data shapes, not duplicated
 logic in the way the scheme resolution was. Collapsing that difference for
 real needs the release fan-out to hold a `ResolvedCompareConfig`-shaped
-object of its own to fold onto, which is still ADR-064's own named, deferred
-"PR G2" prerequisite work, not attempted here.
+object of its own to fold onto -- the duplication-and-convergence-assessment
+plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target (not
+ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02 and is
+what this fold already builds on), not attempted here.
 
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
@@ -13820,20 +13864,23 @@ outside its own tests constructs" gap for the `compare` path specifically:
 every real `compare` now builds one from real production inputs, not only
 from a hand-built `AnalysisPlan` inside a test.
 
-**Still open, and not attempted here:** the context built at this seam
-carries no `evaluation_config`/`compile_contexts` (this resolution runs
-before ADR-049 D7's evaluation config exists for the native CLI, and before
-any per-side `CompileContext` is captured back out of
+**Still open at the time this section was first written:** the context built
+at this seam carried no `evaluation_config`/`compile_contexts` (this
+resolution runs before ADR-049 D7's evaluation config exists for the native
+CLI, and before any per-side `CompileContext` is captured back out of
 `resolve_side_snapshot`'s own internals — see the field's own docstring on
-`ResolvedComparePair`); nothing calls `with_assurance()` once a real
-`AnalysisAssurance` exists; `resolve_dump_request` remains fully unwired
-(its own `ResolvedDumpRequest` object has its own deliberately-scoped
-exclusions documented in its docstring, so folding this in needs the same
-kind of considered pass, not a copy-paste of this slice); and everything the
-review's "PR 2"-onward sequence describes (a semantic consumer cutover,
-`FactStatus`-aware detectors, and the rest) is still future work. This
-slice closes one real call site for `compare`, not consumer migration or
-full wiring.
+`ResolvedComparePair`), and nothing called `with_assurance()`. **Both since
+closed, on the `dump` side first and later on `compare`** — see the
+"Adjacent, additive infrastructure" ledger row (4B) above for the up-to-date
+account: `execute_dump_request` now calls `with_assurance()` for real
+(2026-09-03) and threads a per-side `compile_contexts` entry
+(`resolution.effective_compile_context`, gated by
+`side_effective_compile_context`); `resolve_compare_request` gained the
+identical `compile_contexts` threading on 2026-09-04 (ADR-063 Track 3),
+reusing that same shared predicate. `evaluation_config` remains unresolved
+on both paths — that is genuinely still open. Everything the review's
+"PR 2"-onward sequence describes (a semantic consumer cutover,
+`FactStatus`-aware detectors, and the rest) is still future work.
 
 **"PR 2" (first slice) landed the query facade a consumer migration
 converges on, not the migration itself.** `model/semantic_ir_index.py`'s

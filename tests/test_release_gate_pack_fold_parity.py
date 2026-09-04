@@ -25,14 +25,19 @@ One real, self-documented duplication remained at investigation time:
 `release_gate_options.py`'s own module docstring stated plainly that
 `apply_release_gate_pack` "mirrors [`apply_to_compare_config`'s] *logic*...
 instead" of sharing it, because the release fan-out has no
-`ResolvedCompareConfig`-shaped object of its own to fold packs onto (a full
-unification of the two *severity-level* applications is still ADR-064's own
-named, deferred "PR G2" prerequisite work -- see below). Two
-independently-reasoned implementations of one algorithm is exactly this
-repo's own AGENTS.md "Primitive-level property tests" case -- so rather than
-a risky, out-of-scope rewrite, this test was written to pin the two
-implementations to agree on outcome, so a change to one that silently drifts
-from the other fails here first.
+`ResolvedCompareConfig`-shaped object of its own to fold packs onto -- this
+is distinct from ADR-064's own `GateOptions` rewrite (already landed
+2026-09-02, and what `resolve_release_gate_options`/`apply_release_gate_pack`
+themselves are part of), not that rewrite's still-open "PR G2" work; a full
+fold unification is the duplication-and-convergence-assessment plan's own
+P0 `EffectiveGate`/`EffectiveEvaluationConfig` target instead (not attempted
+here -- see ADR-063 Track 4's 7B ledger entry,
+`docs/_meta/one-semantic-pipeline-status.yaml`, for the full account, itself
+corrected on review after this test first landed). Two independently-reasoned implementations of one
+algorithm is exactly this repo's own AGENTS.md "Primitive-level property
+tests" case -- so rather than a risky, out-of-scope rewrite, this test pins
+the two implementations to agree on outcome, so a change to one that
+silently drifts from the other fails here first.
 
 **The exit-code-scheme half of that duplication has since been closed**
 (ADR-063 Track A, 7B, follow-up PR): `policy.release_gate_options
@@ -44,12 +49,12 @@ remains genuinely separate is the *severity-level* application itself
 (`dataclasses.replace` on an already-resolved `SeverityConfig` for
 `apply_to_compare_config`, six independent raw-string overrides for
 `apply_release_gate_pack`) -- not duplicated logic so much as the same
-update expressed against two different pre-resolution data shapes, which is
-exactly the "no `ResolvedCompareConfig`-shaped object to fold onto" gap PR G2
-is scoped to close for real. This test is kept, unchanged in what it
-asserts, as the black-box parity guard over the whole fold (both the now-
-shared piece and the still-separate one) rather than being narrowed now that
-part of what it guards is implemented once instead of twice.
+update expressed against two different pre-resolution data shapes, still
+the P0 `EffectiveGate`/`EffectiveEvaluationConfig` target's job to close
+for real. This test is kept, unchanged in what it asserts, as the black-box
+parity guard over the whole fold (both the now-shared piece and the
+still-separate one) rather than being narrowed now that part of what it
+guards is implemented once instead of twice.
 
 **Scope, precisely.** Both sides are driven from the identical "pre-pack"
 severity/scheme state -- a real `ResolvedCompareConfig` built by

@@ -421,14 +421,22 @@ Core pipeline (in order of data flow):
      severity/exit-code-scheme config since the fix that closed the "scan
      never consults severity" gap below. The directory/package
      release fan-out (`cli_compare_release.py`) takes all three kinds too,
-     since CLI cleanup phase two's "PR B" slice 2 — it has no `GateOptions`-
-     shaped object of its own, so a `kind: gate` pack's `gate.exit_code_
-     scheme`/`gate.severity.*` are folded into the fan-out's own raw
-     severity/exit-code-scheme strings by `cli_compare_release_helpers.
-     apply_release_gate_pack`, called once before every downstream consumer
-     of those strings reads them (see that plan section for what's still
-     open — the full `GateOptions` unification, reassigned to PR G2's own
-     prerequisite work rather than attempted reactively inside PR B; PR B's
+     since CLI cleanup phase two's "PR B" slice 2 — a `kind: gate` pack's
+     `gate.exit_code_scheme`/`gate.severity.*` fold into the fan-out's own
+     resolved `GateOptions` (`policy.release_gate_options.
+     resolve_release_gate_options`, which ADR-064 landed 2026-09-02 —
+     closing the "no `GateOptions`-shaped object of its own" gap this note
+     used to describe) via `apply_release_gate_pack`, called once before
+     every downstream consumer reads the result. What remains open (see
+     that plan section for the exact scope): `apply_release_gate_pack`
+     itself mirrors, rather than calls, `pack_application.
+     apply_to_compare_config`'s identical fold logic, since the release
+     fan-out still has no `ResolvedCompareConfig`-shaped object of its own
+     to fold packs onto — deferred to the duplication-and-convergence-
+     assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig`
+     target, not ADR-064's own `GateOptions` rewrite (already landed) or
+     its PR G2 (a different, unrelated deferred item — ADR-063 Track 4's
+     7B ledger entry has the full account). PR B's
      other stated goal, the effective-config digest, has already landed for
      the native compare/release JSON path, the `--stat` JSON summary, and
      `scan --against` JSON -- non-JSON renderers (Markdown, review, SARIF,

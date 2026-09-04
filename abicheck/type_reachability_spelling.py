@@ -36,6 +36,16 @@ from typing import TYPE_CHECKING
 
 from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from .model import ScopeOrigin, Visibility
+from .model.namespace_spelling import (
+    # Re-exported (`as`-aliased) by value -- moved to `model/` (ADR-063
+    # Track 2, 5B closure) so `compare/vtable_evidence.py` can depend on it
+    # without importing this module (which imports `diff_cxx_rules` at
+    # module scope, so the reverse import would be a cycle). Every existing
+    # `from .type_reachability_spelling import _namespace_suffix_spellings`
+    # call site keeps resolving. See `model/namespace_spelling.py`'s own
+    # module docstring for the full accounting.
+    _namespace_suffix_spellings as _namespace_suffix_spellings,
+)
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -170,53 +180,6 @@ def _stripped_signature_spelling(identity: str) -> str | None:
                     break
             return rest
     return None
-
-
-def _namespace_suffix_spellings(identity: str) -> list[str]:
-    """Every suffix spelling of *identity* obtainable by dropping some
-    prefix of its namespace/class-scope chain, at each ``"::"`` boundary
-    that occurs at template-argument bracket depth zero — from the full
-    identity itself (dropping nothing) down to the fully bare leaf.
-
-    A real backend does not always spell a nested type as either the
-    fully-qualified identity or the fully-bare leaf (Codex review, fresh
-    evidence, confirmed empirically via ``clang -ast-dump`` on
-    ``namespace api { struct Outer { struct Inner {}; }; Outer::Inner
-    g(); }``): direct-clang prints that function's return type as exactly
-    ``"Outer::Inner"`` — dropping the *enclosing namespace* (``api::``,
-    implied by lookup context inside that namespace) while keeping the
-    *class-nesting* qualifier (``Outer::``, a distinct scope that is never
-    elided) — a partial qualification distinct from both the full identity
-    ``"api::Outer::Inner"`` and the fully-bare leaf ``"Inner"``. Generating
-    every such suffix (not just the two extremes) is what lets a signature
-    spelled this way still resolve to the right record.
-
-    A plain ``identity.rsplit("::", 1)`` would additionally split *inside*
-    a template argument's own qualified name: for
-    ``"api::Wrapper<dep::Tag>"``, the lexically last ``"::"`` belongs to
-    the template argument ``dep::Tag``, not an outer namespace boundary.
-    Tracking ``<``/``>`` nesting depth and only considering a ``"::"`` at
-    depth zero as a namespace separator avoids that.
-
-    Returns ``[identity]`` (a single-element list) when *identity* carries
-    no depth-zero ``"::"`` at all (already bare, or only qualified inside
-    template arguments).
-    """
-    depth = 0
-    splits = [0]
-    i = 0
-    n = len(identity)
-    while i < n:
-        ch = identity[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth -= 1
-        elif ch == ":" and depth == 0 and i + 1 < n and identity[i + 1] == ":":
-            splits.append(i + 2)
-            i += 1
-        i += 1
-    return [identity[s:] for s in splits]
 
 
 def _bare_type_name(identity: str) -> str:

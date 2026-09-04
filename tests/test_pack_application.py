@@ -1229,16 +1229,14 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_contract_unresolved_pack_still_rejected_on_a_release_comparison(
         self, tmp_path: Path, with_contract: bool
     ) -> None:
-        """Codex review, fresh evidence: `contract.unresolved`'s consumer
-        (`contract_coverage_exit._accepts_unresolved`) reads a per-comparison
-        `PersistedContractContext` only `checker.compare`'s own
-        `record_resolved_config` installs -- which the release fan-out never
-        builds per library. Accepting the pack here would score nothing: an
-        incomplete coverage floor would still contribute 1 to every
-        library's exit code regardless of `contract.unresolved=warn`, the
-        exact decorative-``--pack`` failure this module exists to prevent.
-        Rejected unconditionally -- with or without --contract, since even
-        --contract does not make the release fan-out apply this field."""
+        """`resolve_release_pack_application` rejects `contract.unresolved`
+        unconditionally, with or without --contract -- not because the
+        release fan-out lacks a per-library `PersistedContractContext` for
+        it (it doesn't lack one; that was an earlier review round's wrong
+        premise), but because whether lifting the rejection is safe remains
+        unverified. See that function's own docstring and ADR-063 Track 4's
+        7B ledger entry (`docs/_meta/one-semantic-pipeline-status.yaml`) for
+        the full trace and review history."""
         pack = _pack(
             tmp_path,
             "unresolved.yml",

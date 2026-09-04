@@ -38,14 +38,17 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of base commit 2a88a5bd (the constant family's SemanticIR cutover --
-# Phase 6B's second detector cohort -- was built on and merges this
-# content forward), which itself carries forward 62679b1 (PR #1041, the
-# typedef family's SemanticIR cutover -- Phase 6B's first detector
-# cohort), fd197d59 (PR #1025, the PDB EntityId/SemanticIR slice),
-# b2d8eaaf (PR #1024, the multi-TU manifest occurrence-detail fix),
-# bb14e8e (PR #1021), and PR #1019's own status-sync fixes. Update this
-# file in the same PR that changes a concept's landed status.
+# as of base commit bfb40222 (Track 4's 7B ledger/plan-table drift fix --
+# updating the run_outcome concept's removal_gate to describe the landed
+# release-fan-out investigation and its parity test -- was built on and
+# merges this content forward), which itself carries forward 2a88a5bd (the
+# constant family's SemanticIR cutover -- Phase 6B's second detector
+# cohort), 62679b1 (PR #1041, the typedef family's SemanticIR cutover --
+# Phase 6B's first detector cohort), fd197d59 (PR #1025, the PDB
+# EntityId/SemanticIR slice), b2d8eaaf (PR #1024, the multi-TU manifest
+# occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
+# status-sync fixes. Update this file in the same PR that changes a
+# concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -56,7 +59,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: 2a88a5bd
+as_of_commit: bfb40222
 as_of_date: "2026-09-03"
 
 concepts:
@@ -323,45 +326,42 @@ concepts:
     authority: mixed
     removal_gate: >-
       Phase 7B (boundary-consumer-migration): action/run.sh reads
-      run_outcome/exit from the machine report instead of decoding the
-      raw process exit code and stderr text itself. First PR landed
-      2026-09-03, scoped narrowly after inspection showed most of
-      run.sh's raw-exit-code dispatch is not actually closable this way
-      (the Click-usage-error-vs-real-verdict disambiguation has no
-      run_outcome to read at all, and scan's evidence-contract/budget-
-      overflow/not-comparable exit codes are deliberately exit-code-only
-      by ADR-037 D5's own design): _report_compat_verdict/
-      _severity_gate_exit -- the two shared functions compare and scan
-      alike consult -- now read run_outcome.compatibility/run_outcome.gate
-      first, falling back to the pre-existing verdict/severity.exit_code
-      field only when no run_outcome block is present. The release
-      fan-out's own "independent pair-semantics reimplementation" half of
-      this sub-phase's scope got its dedicated investigation 2026-09-03:
-      reading cli_compare_release.py/cli_compare_release_helpers.py/
-      cli_compare_release_matrix.py/cli_compare_release_pairwise.py closely
-      found most duplication axes (depth, suppression, pack policy/
-      namespace overrides, compile context, contract evaluation; severity/
-      exit-code-scheme gate resolution via ADR-064's GateOptions; report
-      composition; the build-config matrix pseudo-pair) already unified or
-      structurally justified, leaving exactly one real gap: pack_
-      application.apply_to_compare_config (single-pair compare) and
-      policy.release_gate_options.apply_release_gate_pack (the release
-      fan-out) independently re-deriving the same exit-code-scheme fold
-      logic, since the release fan-out has no ResolvedCompareConfig-shaped
-      object of its own to fold onto. The exit-code-scheme half of that gap
-      closed 2026-09-04: policy.release_gate_options.
+      run_outcome/exit from the machine report instead of decoding the raw
+      process exit code and stderr text itself; the release fan-out's own
+      "independent pair-semantics reimplementation" half of this
+      sub-phase's scope closes when its remaining gaps below land.
+      action/run.sh's first PR landed 2026-09-03, scoped narrowly (most of
+      its raw-exit-code dispatch was found not closable this way):
+      _report_compat_verdict/_severity_gate_exit now read
+      run_outcome.compatibility/run_outcome.gate first, falling back to
+      the pre-existing verdict/severity.exit_code field only when no
+      run_outcome block is present. The release fan-out's own half was
+      investigated 2026-09-03 and found substantially already unified
+      (depth, suppression, pack policy/namespace overrides, compile
+      context, and --contract mode/domain all already route through one
+      service.run_compare chokepoint per pair), with two concrete gaps:
+      policy.release_gate_options.apply_release_gate_pack mirrored, rather
+      than called, pack_application.apply_to_compare_config (deferred to
+      the duplication-and-convergence-assessment plan's own P0
+      EffectiveGate/EffectiveEvaluationConfig target); and
+      cli_compare_receipt.resolve_release_pack_application unconditionally
+      rejects a --pack asserting contract.unresolved for a release
+      comparison, with no landed fix yet. The first gap's exit-code-scheme
+      half closed 2026-09-04: policy.release_gate_options.
       resolve_gate_pack_exit_code_scheme is now the one function both
-      callers use for that piece (pack_application.py, a legacy_root_
-      module, imports it -- the direction the architecture gate allows;
-      the reverse import is what its own docstring already explains is
-      forbidden), guarded by tests/test_release_gate_pack_fold_parity.py.
-      What remains open is narrower: the *severity-level* application
-      itself is still expressed twice against two different pre-resolution
-      shapes (a dataclasses.replace on an already-resolved SeverityConfig
-      vs. six raw-string overrides) -- collapsing that for real needs the
-      release fan-out to hold a ResolvedCompareConfig-shaped object of its
-      own, which is still ADR-064's own named, deferred "PR G2"
-      prerequisite work.
+      callers use for that piece, guarded by tests/
+      test_release_gate_pack_fold_parity.py's parity property; the
+      *severity-level* application itself (a dataclasses.replace on an
+      already-resolved SeverityConfig vs. six raw-string overrides) remains
+      expressed twice against its two different pre-resolution shapes,
+      still the P0 EffectiveGate/EffectiveEvaluationConfig target's job to
+      collapse for real. Full investigation, evidence, and this content's
+      own review history (Codex, PR #1050, several rounds correcting this
+      same account) live in docs/contribute/plans/one-semantic-pipeline.md's
+      "7B's release-fan-out investigation landed" section -- the narrative
+      owner for this concept per docs/AGENTS.md's fact-owner/narrative-owner
+      split; not reproduced here in full, to avoid the exact
+      ledger-vs-plan drift this same PR exists to fix.
 
   sectioned_storage:
     primitive: complete
