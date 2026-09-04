@@ -227,6 +227,12 @@ class TestBuildConfigBundleBlock:
         )
         assert cfg.bundle_system_providers == ["libvendor.so.1"]
 
+    def test_cohorts_whitespace_only_entries_are_dropped(self) -> None:
+        # Symmetric with the system_providers case above -- cohorts goes
+        # through the identical strip-and-filter comprehension.
+        cfg = BuildConfig.from_dict({"bundle": {"cohorts": ["libfoo_", "   "]}})
+        assert cfg.bundle_cohorts == ["libfoo_"]
+
 
 # ── end-to-end: a bad .abicheck.yml exits 64 through a real command ─────────
 

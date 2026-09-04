@@ -432,3 +432,32 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 1, out
         assert captured["system_providers"] == ["libvendor.so.1"]
         assert captured["cohorts"] == ["libfoo_"]
+
+    def test_malformed_auto_discovered_config_exits_64_before_dispatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A malformed config -- auto-discovered or explicit -- is caught by
+        # compare.py's own resolve_compile_context call site (a UsageError,
+        # exit 64) before dispatch() ever runs: that call site always
+        # forwards the resolved path as an *explicit* build_config, so
+        # merge_compile_config's auto-discovered-is-best-effort exception
+        # never applies here. Proves dispatch()'s own bundle: read has
+        # nothing left to validate.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        (tmp_path / ".abicheck.yml").write_text(
+            "bundle:\n  system_providers: 123\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out

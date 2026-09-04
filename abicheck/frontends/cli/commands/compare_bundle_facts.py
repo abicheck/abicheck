@@ -250,19 +250,18 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     # under `extract` (architecture/modules.yaml).
     from ....workflows.extraction import load_build_config_with_digest
 
+    # Not re-validated here: compare.py's own dispatch call site always
+    # resolves this same path (explicit or auto-discovered) and forwards it
+    # to resolve_compile_context as an *explicit* build_config, which
+    # already raises a UsageError for a malformed file before dispatch()
+    # ever runs -- there is no real path that reaches this second read with
+    # an unparseable config.
     _bundle_cfg_path = kwargs.get("config")
-    _bundle_cfg = None
-    if _bundle_cfg_path is not None:
-        # Already validated once by compare.py's own resolve_compile_context
-        # call ahead of dispatch() -- this ValueError guard is only for a
-        # caller that invokes dispatch() directly (tests) without that
-        # earlier pass.
-        try:
-            _bundle_cfg = load_build_config_with_digest(_bundle_cfg_path)[0]
-        except ValueError as exc:
-            raise click.ClickException(
-                f"Failed to load config {_bundle_cfg_path}: {exc}",
-            ) from exc
+    _bundle_cfg = (
+        load_build_config_with_digest(_bundle_cfg_path)[0]
+        if _bundle_cfg_path is not None
+        else None
+    )
     bundle_system_providers = (
         list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
     )
