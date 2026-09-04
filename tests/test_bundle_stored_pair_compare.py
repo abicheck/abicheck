@@ -233,6 +233,38 @@ class TestCompareStoredBundleFactsPair:
         with pytest.raises(ValueError, match="empty variant_fingerprint"):
             compare_stored_bundle_facts_pair(old_path, new_path)
 
+    def test_non_string_variant_fingerprint_is_refused(self, tmp_path: Path) -> None:
+        """A malformed ``variant_fingerprint: 1`` must not silently load as
+        the string ``"1"`` and then compare equal to a genuine
+        ``variant_fingerprint: "1"`` on the other side -- prior to this fix
+        the loader (``bundle_facts_serialization.bundle_facts_from_dict``)
+        applied a blind ``str(...)`` coercion, so the two were
+        indistinguishable by the time they reached this function's own
+        mismatch/empty checks (Codex review, PR #1060, round 8)."""
+        import json
+
+        old_path = tmp_path / "old.bundlefacts.json"
+        old_path.write_text(
+            json.dumps(
+                {
+                    "artifact_type": "abicheck.bundle-facts",
+                    "schema_version": 2,
+                    "per_library_snapshots": {},
+                    "variant_fingerprint": 1,
+                }
+            )
+        )
+        new_path = self._facts_path(
+            tmp_path,
+            "new.bundlefacts.json",
+            "new",
+            Visibility.PUBLIC,
+            variant_fingerprint="1",
+        )
+
+        with pytest.raises(ValueError, match="variant_fingerprint"):
+            compare_stored_bundle_facts_pair(old_path, new_path)
+
     def test_new_only_manifest_is_not_silently_discarded(self, tmp_path: Path) -> None:
         """When no explicit --manifest is given and only the NEW document
         captured one, it must still be consulted -- compare_bundle_from_

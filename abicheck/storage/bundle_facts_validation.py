@@ -239,6 +239,32 @@ def validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
     return aliases
 
 
+def validated_variant_fingerprint(raw: object, *, default: str) -> str:
+    """Validate a persisted top-level ``variant_fingerprint`` field.
+
+    Rejects a non-string value (Codex review, PR #1060, round 8) instead of
+    silently coercing it with ``str(...)`` -- the prior behavior meant a
+    malformed ``variant_fingerprint: 1`` and a genuine ``variant_fingerprint:
+    "1"`` both loaded as the identical string ``"1"``, so
+    ``compare_stored_bundle_facts_pair()``'s own mismatch/empty-fingerprint
+    checks (which compare this field for identity) could not tell a real
+    match from a coincidental one. *raw* is ``None`` when the key was absent
+    from the document entirely (``dict.get`` with no default, as every other
+    caller here passes it) -- that case returns *default* unchanged, exactly
+    :data:`~abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`'s prior
+    fallback; a present-but-wrong-typed value is rejected outright rather
+    than coerced. *default* is a parameter, not imported, so this leaf
+    module's own "no ``bundle_facts.py`` import" contract (this module's own
+    docstring) stays intact."""
+    if raw is None:
+        return default
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"bundle facts: 'variant_fingerprint' must be a string, got {raw!r}"
+        )
+    return raw
+
+
 def validated_filename_map(raw: object) -> dict[str, str]:
     """Validate and convert a persisted ``library_filenames`` mapping --
     rejects a non-string value instead of silently coercing it
