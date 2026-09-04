@@ -137,6 +137,47 @@ class TestImportBundleFacts:
         roundtrip = export_bundle_facts(manifest, store=store)
         assert roundtrip["variant_fingerprint"] == ""
 
+    def test_a_missing_filesystem_aliases_defaults_to_empty(self) -> None:
+        doc = _bundle_document()
+        del doc["filesystem_aliases"]
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["filesystem_aliases"] == {}
+
+    @pytest.mark.parametrize("bad_value", [[], "", 0])
+    def test_rejects_a_non_mapping_filesystem_aliases(self, bad_value: Any) -> None:
+        """A falsey-but-present non-mapping is malformed input, not an
+        empty collection -- `or {}` would otherwise make it
+        indistinguishable from a producer that genuinely captured no
+        aliases (Codex review)."""
+        doc = _bundle_document(filesystem_aliases=bad_value)
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_rejects_a_filesystem_aliases_value_that_is_not_a_string_list(
+        self,
+    ) -> None:
+        doc = _bundle_document(filesystem_aliases={"liba.so": "not-a-list"})
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_rejects_a_filesystem_aliases_list_with_a_non_string_entry(self) -> None:
+        doc = _bundle_document(filesystem_aliases={"liba.so": ["ok", 1]})
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    @pytest.mark.parametrize("bad_value", [[], "", 0])
+    def test_rejects_a_non_mapping_library_filenames(self, bad_value: Any) -> None:
+        doc = _bundle_document(library_filenames=bad_value)
+        with pytest.raises(ValueError, match="library_filenames"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_rejects_a_non_string_library_filenames_value(self) -> None:
+        doc = _bundle_document(library_filenames={"liba.so": 123})
+        with pytest.raises(ValueError, match="library_filenames"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
     def test_export_is_the_exact_inverse(self) -> None:
         doc = _bundle_document()
         store = InMemoryObjectStore()

@@ -117,6 +117,63 @@ _BUNDLE_FACTS_SCHEMA_VERSION = 2
 _DEFAULT_VARIANT_FINGERPRINT = "default"
 
 
+def _validated_filesystem_aliases(raw: Any) -> dict[str, list[str]]:
+    """`bundle_facts_serialization.bundle_facts_to_dict()`'s own
+    `filesystem_aliases` shape (`{library: [alias, ...]}`), validated rather
+    than defaulted through: `None`/absent means "no aliases captured" (a
+    real, common case — `capture_bundle_facts` only populates this when
+    given real on-disk paths), but any other falsey-but-present non-mapping
+    (`[]`, `""`, `0`) is malformed input, not an empty collection, and must
+    not be silently normalized to one via `... or {}` (Codex review) --
+    that would make a producer's genuine "no aliases" indistinguishable
+    from a corrupted document."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            f"bundle_facts_document['filesystem_aliases'] must be a mapping, "
+            f"not {type(raw).__name__} ({raw!r})"
+        )
+    validated: dict[str, list[str]] = {}
+    for library, aliases in raw.items():
+        if not isinstance(library, str):
+            raise ValueError(
+                "bundle_facts_document['filesystem_aliases'] has a non-string "
+                f"key: {library!r}"
+            )
+        if not isinstance(aliases, list) or not all(
+            isinstance(alias, str) for alias in aliases
+        ):
+            raise ValueError(
+                f"bundle_facts_document['filesystem_aliases'][{library!r}] "
+                f"must be a list of strings, not {aliases!r}"
+            )
+        validated[library] = list(aliases)
+    return validated
+
+
+def _validated_library_filenames(raw: Any) -> dict[str, str]:
+    """`bundle_facts_to_dict()`'s own `library_filenames` shape
+    (`{library: filename}`), validated the same way
+    `_validated_filesystem_aliases` is, for the identical reason."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            f"bundle_facts_document['library_filenames'] must be a mapping, "
+            f"not {type(raw).__name__} ({raw!r})"
+        )
+    validated: dict[str, str] = {}
+    for library, filename in raw.items():
+        if not isinstance(library, str) or not isinstance(filename, str):
+            raise ValueError(
+                "bundle_facts_document['library_filenames'] must map strings "
+                f"to strings, got {library!r}: {filename!r}"
+            )
+        validated[library] = filename
+    return validated
+
+
 def import_bundle_facts(
     bundle_facts_document: Mapping[str, Any],
     *,
@@ -251,10 +308,12 @@ def import_bundle_facts(
     composition_payload = {
         "variant_fingerprint": variant_fingerprint,
         "manifest": bundle_facts_document.get("manifest"),
-        "filesystem_aliases": dict(
-            bundle_facts_document.get("filesystem_aliases") or {}
+        "filesystem_aliases": _validated_filesystem_aliases(
+            bundle_facts_document.get("filesystem_aliases")
         ),
-        "library_filenames": dict(bundle_facts_document.get("library_filenames") or {}),
+        "library_filenames": _validated_library_filenames(
+            bundle_facts_document.get("library_filenames")
+        ),
     }
     composition_dto = bundle_composition_to_dto(composition_payload)
     composition_ref = ObjectRef(

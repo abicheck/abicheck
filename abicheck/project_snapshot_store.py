@@ -349,11 +349,11 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     refs that were never written, which every subsequent reader would
     treat as a corrupted package.
 
-    Raises `ValueError` if any `ArtifactRef.sections` entry names a digest
-    this function cannot read back via `DirectoryObjectStore.get()` --
-    absent, or present but not matching its own digest -- checked, and
-    this function's own writes abandoned, before `manifest.json` is
-    touched.
+    Raises `ValueError` if any `ArtifactRef.sections` or `VariantRef.sections`
+    entry names a digest this function cannot read back via
+    `DirectoryObjectStore.get()` -- absent, or present but not matching its
+    own digest -- checked, and this function's own writes abandoned, before
+    `manifest.json` is touched.
 
     **A known, deliberately deferred gap** (flagged in the same review
     round as a distinct, further finding once the ordering above was
@@ -415,6 +415,22 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
             except (KeyError, ValueError, SnapshotError) as exc:
                 invalid.append(
                     f"artifact {artifact.artifact_id!r} section "
+                    f"{section_kind!r} -> {ref.digest!r} ({exc})"
+                )
+    # `VariantRef.sections` (ADR-063 Track C 8B) names objects exactly the
+    # same way `ArtifactRef.sections` does -- a `BundleFacts`/baseline-set
+    # composition object absent or corrupted here must fail this same
+    # pre-publication check, not surface only once a later
+    # `export_bundle_facts`/`export_baseline_set` calls `store.get()`
+    # against a package this function already reported as published
+    # (Codex review).
+    for variant in manifest.variant_refs:
+        for section_kind, ref in variant.sections.items():
+            try:
+                store.get(ref.digest)
+            except (KeyError, ValueError, SnapshotError) as exc:
+                invalid.append(
+                    f"variant {variant.variant_id!r} section "
                     f"{section_kind!r} -> {ref.digest!r} ({exc})"
                 )
     if invalid:
