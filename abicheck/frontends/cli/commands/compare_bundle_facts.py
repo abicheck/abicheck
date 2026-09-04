@@ -101,13 +101,10 @@ def _resolve_new_side_headers_includes(
     return headers, includes
 
 
-def resolve_dispatch_compile_context(
-    ctx: click.Context, kwargs: dict[str, Any], *, new_is_stored: bool
-) -> Any:
+def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any], *, new_is_stored: bool) -> Any:
     """Resolve ``dispatch()``'s ``compile_context`` argument, mutating
-    *kwargs* the same way ``compare_cmd`` itself used to before delegating
-    here -- split out purely to keep ``compare.py`` under its own
-    architecture cap, not for any independent reason.
+    *kwargs* the same way ``compare_cmd`` used to before delegating here --
+    split out purely to keep ``compare.py`` under its architecture cap.
 
     When *new_is_stored* (CLI cleanup phase two, PR I's stored/stored
     shape), this skips ``resolve_compile_context`` entirely and returns
@@ -120,19 +117,26 @@ def resolve_dispatch_compile_context(
     run from an ordinary project directory that happens to declare a
     compile: block (Codex review, PR #1060). ``kwargs["config"]`` is still
     resolved either way, since the config-block rejection checks in that
-    same module (severity:/scope:/suppression:/... ) still apply to a
-    stored/stored comparison.
+    same module still apply to a stored/stored comparison. An *explicit*
+    ``--config`` whose own ``compile:`` block declares real settings is
+    rejected too, via ``compare_bundle_facts_rejections.
+    reject_explicit_compile_config_for_stored_pair`` (Codex review, PR
+    #1060, fresh evidence) -- unlike an auto-discovered ambient one.
     """
     from ....cli_helpers_compare import discover_project_config
 
-    # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
-    # (_resolve_compare_config) -- resolve_compile_context alone never
-    # auto-discovers without a --sources tree. Overwriting kwargs["config"]
-    # means dispatch()'s own config check (cli_options is kept out of that
-    # sibling module's own imports -- see its docstring) covers an
-    # auto-discovered .abicheck.yml too.
+    # Codex review: mirror run_compare's own cwd-upward cfg_path fallback --
+    # resolve_compile_context alone never auto-discovers without a
+    # --sources tree.
+    _config_explicit = ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
     kwargs["config"] = kwargs.get("config") or discover_project_config()
     if new_is_stored:
+        if _config_explicit and kwargs["config"] is not None:
+            from .compare_bundle_facts_rejections import (
+                reject_explicit_compile_config_for_stored_pair,
+            )
+
+            reject_explicit_compile_config_for_stored_pair(kwargs["config"])
         return None
 
     from ....cli_options import resolve_compile_context
@@ -152,12 +156,9 @@ def resolve_dispatch_compile_context(
         compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
     )
     # Forward the *merged* include list (Codex review), not the raw kwargs
-    # resolve_compile_context was given -- when .abicheck.yml supplies
-    # compile.include_dirs, merged_includes is _includes extended with
-    # those config-derived roots, and the side-scoped new_includes_only
-    # override (already folded into _includes above) would otherwise make
-    # dispatch()'s own independent re-derivation from raw kwargs silently
-    # drop them.
+    # resolve_compile_context was given -- .abicheck.yml's compile.
+    # include_dirs would otherwise be dropped by dispatch()'s own
+    # independent re-derivation from raw kwargs.
     kwargs["includes"] = tuple(merged_includes)
     kwargs["new_includes_only"] = ()
     return compile_context

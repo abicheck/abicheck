@@ -234,6 +234,16 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--version" in out
 
+    def test_explicit_old_version_is_rejected(self, tmp_path: Path) -> None:
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--version", "old=1.0"
+        )
+
+        assert code == 64
+        assert "--version" in out
+
     def test_include_system_declarations_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
 
@@ -301,6 +311,39 @@ class TestStoredPairEarlyRejections:
         monkeypatch.chdir(tmp_path)
 
         code, out = _invoke("compare", str(old_path), str(new_path))
+
+        assert code != 64
+        assert "nothing was compared" in out
+
+    def test_explicit_config_with_compile_block_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Unlike an ambient, auto-discovered config (silently unused,
+        above), an *explicitly* given ``--config`` whose compile: block
+        would have no effect on a stored/stored comparison must be
+        rejected, not silently ignored -- the user asked for it by name
+        (Codex review, PR #1060, fresh evidence)."""
+        old_path, new_path = self._both_stored(tmp_path)
+        config_path = tmp_path / "custom.yml"
+        config_path.write_text("compile:\n  include_dirs: [include]\n")
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--config", str(config_path)
+        )
+
+        assert code == 64
+        assert "compile:" in out
+
+    def test_explicit_config_with_no_compile_block_is_not_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        old_path, new_path = self._both_stored(tmp_path)
+        config_path = tmp_path / "custom.yml"
+        config_path.write_text("{}\n")
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--config", str(config_path)
+        )
 
         assert code != 64
         assert "nothing was compared" in out

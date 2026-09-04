@@ -493,6 +493,20 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "a stored-bundle-facts OLD_INPUT: OLD_FACTS is already a resolved, stored "
             "snapshot with no header re-extraction available."
         )
+    if kwargs.get("old_version") not in (None, "", "old"):
+        # Codex review, fresh evidence: neither compare_release_against_
+        # bundle_facts() nor compare_stored_bundle_facts_pair() has an
+        # old_version parameter at all -- OLD_INPUT is always a stored,
+        # already-resolved document in this dispatcher (regardless of
+        # whether NEW_INPUT is too), and its per-library snapshots already
+        # carry whatever version they were captured with, so a requested
+        # --version old=... was silently discarded rather than applied or
+        # rejected, on either side of this shape.
+        raise click.UsageError(
+            "--version old=... is not supported together with "
+            "a stored-bundle-facts OLD_INPUT: OLD_FACTS's own per-library "
+            "snapshots already carry whatever version they were captured with."
+        )
     if kwargs.get("demangle") is not None:
         # Codex review, fresh evidence: --demangle/--no-demangle is
         # documented to apply to markdown output, but this dispatcher's
@@ -634,4 +648,42 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
             "stored BundleFacts documents: neither side's language is "
             "re-detected or re-parsed from headers, so there is nothing "
             "left for it to select."
+        )
+
+
+def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
+    """Raise ``click.UsageError`` when *config_path* -- an *explicitly*
+    given ``--config`` (Click parameter-source COMMANDLINE, checked by the
+    caller, ``compare_bundle_facts.resolve_dispatch_compile_context``)
+    -- declares real ``compile:`` settings that a stored/stored comparison
+    has no channel to honor (Codex review, PR #1060). An *ambient*,
+    auto-discovered ``.abicheck.yml`` is deliberately not checked this way
+    at all -- see that function's own docstring for why the two cases
+    differ: an explicit ``--config`` is a request the user expects
+    honored, while an ambient one silently applying nothing is exactly the
+    point of not letting an unrelated project default break a stored/
+    stored comparison. Lives here rather than in ``compare_bundle_facts.py``
+    purely to keep that file under its own architecture line cap -- this
+    module already owns every other stored/stored-specific rejection."""
+    from ....workflows.extraction import load_build_config
+
+    try:
+        bc = load_build_config(Path(config_path))
+    except ValueError as exc:
+        raise click.UsageError(f"cannot parse build config {config_path}: {exc}") from exc
+    if (
+        bc.compile_frontend is not None
+        or bc.compile_std is not None
+        or bc.compile_include_dirs
+        or bc.compile_defines
+        or bc.compile_sysroot is not None
+        or bc.compile_nostdinc is not None
+    ):
+        raise click.UsageError(
+            f"{config_path} declares compile: settings, which are not "
+            "supported when both OLD_INPUT and NEW_INPUT are stored "
+            "BundleFacts documents: neither side runs any header-frontend "
+            "extraction for them to configure. Omit --config to let an "
+            "ambient project config, if any, stay harmlessly unused here "
+            "instead, or use a --config that declares no compile: block."
         )
