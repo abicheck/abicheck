@@ -381,7 +381,30 @@ class TestVariantRef:
         assert variant.declared == {}
         assert variant.captured == {}
         assert variant.artifact_ids == ()
+        assert variant.sections == {}
         assert variant.to_dict() == {"variant_id": "v"}
+
+    def test_sections_round_trips(self) -> None:
+        """ADR-063 Track C 8B: `VariantRef.sections` mirrors
+        `ArtifactRef.sections` -- content that belongs to the whole
+        variant (a `BundleFacts`/baseline-set's own composition facts),
+        not to any one artifact."""
+        obj = ObjectRef(kind="bundle_composition", digest="sha256:" + "22" * 32)
+        variant = VariantRef(
+            variant_id="v", artifact_ids=("liba",), sections={"bundle_composition": obj}
+        )
+        assert VariantRef.from_dict(variant.to_dict()) == variant
+        assert variant.sections["bundle_composition"] == obj
+
+    def test_sections_is_read_only(self) -> None:
+        obj = ObjectRef(kind="bundle_composition", digest="sha256:" + "22" * 32)
+        variant = VariantRef(variant_id="v", sections={"bundle_composition": obj})
+        with pytest.raises(TypeError):
+            variant.sections["other"] = obj  # type: ignore[index]
+
+    def test_a_malformed_sections_value_is_refused(self) -> None:
+        with pytest.raises(TypeError):
+            VariantRef(variant_id="v", sections={"bundle_composition": "not-a-ref"})
 
 
 class TestArtifactRef:

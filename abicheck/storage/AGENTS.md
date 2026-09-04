@@ -64,9 +64,10 @@ Seven primitives (four Phase 0, three Phase 1), plus the internal `guards.py`; e
 | `identity.py` | `EntityId`/`OccurrenceId`/`OccurrenceSet`/`IdentityConflict` — logical vs. observed identity, multiplicity preserved (D4) |
 | `canonical.py` | `canonical_form`/`canonical_json`/`semantic_digest` — the one canonical logical encoding (D5) |
 | `versioning.py` | `StorageVersions`/`ProducerIdentity`/`check_reader_compatibility` — the separated version axes (D2) |
-| `package.py` | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`/`InMemoryObjectStore` — D6/D7's package object model and path layout (plan A1.1). The directory-backed `ObjectStore` implementation lives outside this package — `abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` — since this package may import only `model` |
+| `package.py` (+ `ref_ids.py`, internal) | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`/`InMemoryObjectStore` — D6/D7's package object model and path layout (plan A1.1); `ref_ids.py` is its split-out cross-platform ref-id safety leaf. The directory-backed `ObjectStore` lives outside this package — `abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` — since this package may import only `model` |
 | `dto.py` | `SectionDTO`/`migrate_section_dto`/`semantic_ir_to_dto`/`semantic_ir_from_dto` — A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint (a distinct, versioned, explicitly-encoded class per section, never `asdict`; `scripts/check_ai_readiness.py`'s `project-snapshot-dto-no-asdict` check enforces it mechanically) |
-| `import_v1.py` | `import_legacy_snapshot` — the v1-v25 import adapter (A1.2/A1.3): one already-serialized legacy document, reshaped into a one-artifact `PackageManifest` |
+| `import_v1.py` | `import_legacy_snapshot`/`export_legacy_snapshot` — the v1-v25 import adapter (A1.2/A1.3): one already-serialized legacy document, reshaped into a one-artifact `PackageManifest`, and its exact inverse |
+| `import_bundle_facts.py`, `import_baseline_set.py` | A1.4 (ADR-063 Track C 8B): fold a G38 `BundleFacts` document (resp. a baseline set's `manifest.json` + snapshots) onto `VariantRef.sections`, calling `import_v1` once per library |
 | `guards.py` | the value guards all seven apply at their doors — internal, not re-exported (invariant 6) |
 
 ## Invariants this package must not break
@@ -106,9 +107,8 @@ Seven primitives (four Phase 0, three Phase 1), plus the internal `guards.py`; e
    **The guards live in `guards.py`** — `identity_text`, `decision_key`,
    `provenance_text`, `diagnostics_from`, `mapping`. They were one copy per
    module until review found *seven* separate sites missing a check its
-   siblings already had, one at a time. The module is internal (not
-   re-exported) but its surface is pinned by the same landed-surface table
-   as the four public ones. Add a new guard there, not at a call site.
+   siblings already had, one at a time. Add a new guard there, not at a
+   call site.
 
    `canonical_form` keeps its own mapping-key rejection: it is the *format*
    refusing to encode a key it cannot round-trip, decided by the value's

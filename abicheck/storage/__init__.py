@@ -24,7 +24,13 @@ primitives, plus Phase 1's ``package``/``dto``/``legacy_sections``/
 ``import_v1`` modules (the storage-format-v2 plan's A1.1-A1.3: the
 ``ProjectSnapshot`` manifest/ref/object-store model, its per-section DTO
 envelope, the full D8 legacy-document section split, and the v1-v25 import
-adapter/its exact inverse). ``sectioned_document`` (ADR-063 Phase 8,
+adapter/its exact inverse). ``import_bundle_facts``/``import_baseline_set``
+(ADR-063 Track C 8B) are the same import/export pair for a persisted G38
+``BundleFacts`` document and an ``actions/baseline``-produced baseline set
+respectively — each folds its per-library content through ``import_v1``
+unchanged and its own container-level facts onto ``VariantRef.sections``,
+the new field this pair added to ``package.VariantRef`` for exactly that
+purpose. ``sectioned_document`` (ADR-063 Phase 8,
 redesigned) packages that same D8 split as one JSON document instead of a
 directory -- the shape every real ``dump``/``compare``/``scan`` invocation
 now reads and writes by default, via ``serialization.snapshot_to_json``/
@@ -54,8 +60,10 @@ from .canonical import (
     strip_capture_metadata,
 )
 from .dto import (
+    BASELINE_SET_SECTION_KIND,
     BINARY_SECTION_KIND,
     BUILD_SECTION_KIND,
+    BUNDLE_COMPOSITION_SECTION_KIND,
     DEBUG_SECTION_KIND,
     DECLARATIONS_SECTION_KIND,
     GRAPH_SECTION_KIND,
@@ -65,10 +73,14 @@ from .dto import (
     SEMANTIC_IR_SECTION_KIND,
     TYPES_SECTION_KIND,
     SectionDTO,
+    baseline_set_metadata_from_dto,
+    baseline_set_metadata_to_dto,
     binary_from_dto,
     binary_to_dto,
     build_from_dto,
     build_to_dto,
+    bundle_composition_from_dto,
+    bundle_composition_to_dto,
     debug_from_dto,
     debug_to_dto,
     declarations_from_dto,
@@ -95,6 +107,12 @@ from .identity import (
     OccurrenceId,
     OccurrenceSet,
     elf_symbol_occurrence,
+)
+from .import_baseline_set import export_baseline_set, import_baseline_set
+from .import_bundle_facts import (
+    BUNDLE_FACTS_ARTIFACT_TYPE,
+    export_bundle_facts,
+    import_bundle_facts,
 )
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .legacy_sections import (
@@ -137,8 +155,11 @@ from .versioning import (
 __all__ = [
     "ArtifactRef",
     "AvailabilityLedger",
+    "BASELINE_SET_SECTION_KIND",
     "BINARY_SECTION_KIND",
     "BUILD_SECTION_KIND",
+    "BUNDLE_COMPOSITION_SECTION_KIND",
+    "BUNDLE_FACTS_ARTIFACT_TYPE",
     "CAPTURE_METADATA_KEY",
     "COMPARISON_CONTRACT_VERSION",
     "Confidence",
@@ -176,10 +197,14 @@ __all__ = [
     "UNSTATED_VERSION",
     "VariantRef",
     "artifact_ref_relpath",
+    "baseline_set_metadata_from_dto",
+    "baseline_set_metadata_to_dto",
     "binary_from_dto",
     "binary_to_dto",
     "build_from_dto",
     "build_to_dto",
+    "bundle_composition_from_dto",
+    "bundle_composition_to_dto",
     "canonical_form",
     "canonical_json",
     "check_reader_compatibility",
@@ -188,10 +213,14 @@ __all__ = [
     "declarations_from_dto",
     "declarations_to_dto",
     "elf_symbol_occurrence",
+    "export_baseline_set",
+    "export_bundle_facts",
     "export_legacy_snapshot",
     "from_sectioned_document",
     "graph_from_dto",
     "graph_to_dto",
+    "import_baseline_set",
+    "import_bundle_facts",
     "import_legacy_snapshot",
     "is_sectioned_document",
     "join_legacy_document",

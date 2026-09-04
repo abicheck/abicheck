@@ -18,8 +18,10 @@ from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import (
+    BASELINE_SET_SECTION_KIND,
     BINARY_SECTION_KIND,
     BUILD_SECTION_KIND,
+    BUNDLE_COMPOSITION_SECTION_KIND,
     DEBUG_SECTION_KIND,
     DECLARATIONS_SECTION_KIND,
     GRAPH_SECTION_KIND,
@@ -29,10 +31,14 @@ from abicheck.storage.dto import (
     SEMANTIC_IR_SECTION_KIND,
     TYPES_SECTION_KIND,
     SectionDTO,
+    baseline_set_metadata_from_dto,
+    baseline_set_metadata_to_dto,
     binary_from_dto,
     binary_to_dto,
     build_from_dto,
     build_to_dto,
+    bundle_composition_from_dto,
+    bundle_composition_to_dto,
     debug_from_dto,
     debug_to_dto,
     declarations_from_dto,
@@ -284,6 +290,68 @@ class TestSemanticIRDTO:
         dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
         with pytest.raises(ValueError):
             semantic_ir_from_dto(dto)
+
+
+class TestBundleCompositionDTO:
+    """ADR-063 Track C 8B: `bundle_composition_to_dto`/`_from_dto`, the
+    variant-level counterpart of `legacy_section_to_dto` for a `BundleFacts`
+    document's own composition facts."""
+
+    def test_round_trips_through_a_dict_document(self) -> None:
+        payload = {
+            "variant_fingerprint": "default",
+            "manifest": {"libraries": ["liba.so"]},
+            "filesystem_aliases": {"liba.so": ["liba.so.1"]},
+            "library_filenames": {"liba.so": "liba.so.1.2.3"},
+        }
+        dto = bundle_composition_to_dto(payload)
+        assert dto.section_kind == BUNDLE_COMPOSITION_SECTION_KIND
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        assert bundle_composition_from_dto(reloaded) == payload
+
+    def test_wrong_section_kind_is_refused(self) -> None:
+        dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
+        with pytest.raises(ValueError):
+            bundle_composition_from_dto(dto)
+
+    def test_is_a_specialized_section_kind_not_a_legacy_one(self) -> None:
+        with pytest.raises(ValueError):
+            legacy_section_to_dto(BUNDLE_COMPOSITION_SECTION_KIND, {})
+        dto = bundle_composition_to_dto({})
+        with pytest.raises(ValueError):
+            legacy_section_from_dto(dto)
+
+
+class TestBaselineSetMetadataDTO:
+    """ADR-063 Track C 8B: `baseline_set_metadata_to_dto`/`_from_dto`, the
+    baseline-set counterpart of `bundle_composition_to_dto`."""
+
+    def test_round_trips_through_a_dict_document(self) -> None:
+        payload = {
+            "manifest_version": 1,
+            "project_ref": "refs/heads/main",
+            "profile": "default",
+            "snapshot_schema": 43,
+            "fact_set": {"depth": "s4"},
+            "baseline_generation": 3,
+            "generator": {"tool": "actions/baseline"},
+        }
+        dto = baseline_set_metadata_to_dto(payload)
+        assert dto.section_kind == BASELINE_SET_SECTION_KIND
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        assert baseline_set_metadata_from_dto(reloaded) == payload
+
+    def test_wrong_section_kind_is_refused(self) -> None:
+        dto = SectionDTO(section_kind="graph", section_schema_version=1, payload={})
+        with pytest.raises(ValueError):
+            baseline_set_metadata_from_dto(dto)
+
+    def test_is_a_specialized_section_kind_not_a_legacy_one(self) -> None:
+        with pytest.raises(ValueError):
+            legacy_section_to_dto(BASELINE_SET_SECTION_KIND, {})
+        dto = baseline_set_metadata_to_dto({})
+        with pytest.raises(ValueError):
+            legacy_section_from_dto(dto)
 
 
 class TestLegacySectionDTO:

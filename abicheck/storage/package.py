@@ -58,7 +58,6 @@ so a future filesystem-backed implementation can't invent a second layout.
 from __future__ import annotations
 
 import hashlib
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -79,6 +78,11 @@ from .guards import (
     provenance_text as _provenance_text,
     required_field as _required_field,
     row_sequence as _row_sequence,
+)
+from .ref_ids import (
+    REF_SUFFIX as _REF_SUFFIX,
+    reject_filesystem_collisions as _reject_filesystem_collisions,
+    safe_ref_id as _safe_ref_id,
 )
 from .versioning import StorageVersions
 
@@ -120,129 +124,6 @@ SECTION_KINDS = (
     "diagnostics",
     "raw_refs",
 )
-
-
-#: Windows' reserved device names -- forbidden as a path component's stem
-#: regardless of case or of what follows (`CON`, `con.json`, and `Con` are
-#: all refused the same way a real Windows filesystem refuses them), so a
-#: writer fanning this manifest out to `refs/variants/<id>.json` never hits
-#: a name the target filesystem cannot create.
-#: Superscript digits 0-9, index-aligned (`_SUPERSCRIPT_DIGITS[1]` is `"¹"`).
-#: Windows treats `COM¹`/`LPT¹` and friends as reserved device names too --
-#: a real, documented bypass of the plain-ASCII-digit restriction that a
-#: Windows filesystem update closed by rejecting these spellings as well.
-_SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
-
-_WINDOWS_RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
-    | {f"COM{i}" for i in range(1, 10)}
-    | {f"LPT{i}" for i in range(1, 10)}
-    | {f"COM{_SUPERSCRIPT_DIGITS[i]}" for i in range(1, 4)}
-    | {f"LPT{_SUPERSCRIPT_DIGITS[i]}" for i in range(1, 4)}
-)
-
-#: Characters no Windows filesystem accepts in a path component, beyond the
-#: separators `_safe_ref_id` already rejects on every platform.
-_WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"|?*')
-
-#: The literal suffix `variant_ref_relpath`/`artifact_ref_relpath` append to
-#: a ref id to form its ref document's filename.
-_REF_SUFFIX = ".json"
-
-#: The common filesystem path-component limit (ext4, NTFS, APFS, ...) an id
-#: plus `_REF_SUFFIX` must fit under. Measured in encoded bytes, not
-#: characters: POSIX filesystems count bytes, and the UTF-8 encoding of a
-#: non-ASCII id can be several bytes per character, so a character count
-#: alone would accept an id whose actual on-disk name is longer than this
-#: limit.
-_MAX_REF_COMPONENT_BYTES = 255
-
-
-def _safe_ref_id(value: str, field_name: str) -> str:
-    """A ref id, made safe to use as a bare, cross-platform filename component.
-
-    A variant or artifact id becomes a literal path segment
-    (`refs/variants/<variant-id>.json`), so a value containing a path
-    separator or a `..` component could let a written package escape its own
-    directory. Checked once here so every current and future path helper
-    inherits the rule rather than each re-deriving it.
-
-    The check is Windows-shaped, not just POSIX-shaped, even though nothing
-    here runs on Windows yet: a package is meant to be written on one
-    platform and read on another, so an id only POSIX would accept (a
-    Windows reserved device name, a trailing dot or space, `:`/`*`/`?`/...)
-    would make a manifest that validates here fail once a real writer tries
-    to place it on a different filesystem. Refusing it at the one place
-    every id passes through means a future writer never has to guess which
-    ids are actually portable.
-    """
-    _identity_text(value, field_name)
-    if (
-        not value
-        or "/" in value
-        or "\\" in value
-        or value in (".", "..")
-        or any(ord(char) < 0x20 for char in value)
-        or any(char in _WINDOWS_FORBIDDEN_CHARS for char in value)
-        or value[-1] in (".", " ")
-        or value.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES
-        # The id never appears on disk alone -- it is always rendered as
-        # `<id>.json` -- so what must fit under the filesystem's component
-        # limit is the id *plus* that suffix, not the id by itself. Checked
-        # against the UTF-8 encoding, since that is what actually reaches
-        # the filesystem's own byte-counted limit.
-        or len(value.encode("utf-8")) + len(_REF_SUFFIX) > _MAX_REF_COMPONENT_BYTES
-    ):
-        raise ValueError(
-            f"{field_name} must be a non-empty, cross-platform-path-safe "
-            f"identifier no more than "
-            f"{_MAX_REF_COMPONENT_BYTES - len(_REF_SUFFIX)} UTF-8 bytes long, "
-            f"got {value!r}"
-        )
-    return value
-
-
-def _reject_filesystem_collisions(ids: list[str], record_kind: str) -> None:
-    """Two ids a real filesystem would treat as the same path, refused early.
-
-    Two ways two *distinct* Python strings still name one file:
-
-    * **Case** -- `Foo`/`foo` are distinct strings but one file on a
-      case-insensitive filesystem (the default on Windows and on macOS's
-      usual volume format), so `variant_ref_relpath`/`artifact_ref_relpath`
-      would write both as the same path, the second silently overwriting
-      the first.
-    * **Unicode normalization** -- `"é"` (`é`, one code point) and
-      `"é"` (`e` + a combining acute accent) render identically and
-      are canonically equivalent text, but compare unequal, and unequal
-      under `casefold()` alone too. A normalization-insensitive filesystem
-      (macOS's default APFS/HFS+ configuration) treats them as the same
-      path component for exactly the reason a case-insensitive one treats
-      `Foo`/`foo` as the same one.
-
-    Folded via Unicode's own canonical-caseless-matching construction
-    (`NFD(casefold(NFD(x)))`, Unicode Standard D145/D146) rather than a single
-    normalize-then-casefold pass: `casefold()` is not guaranteed to preserve
-    normalization, so two ids that are themselves already NFC/NFD and
-    genuinely distinct can still fold to differently-normalized strings that
-    a normalization-insensitive filesystem would treat as one path
-    component. Renormalizing after casefolding is what closes that gap --
-    either kind of collision (case, or Unicode normalization, or both at
-    once) is caught here, at the one place every id is collected, rather
-    than only once a real writer target reproduces it.
-    """
-    seen: dict[str, str] = {}
-    for ref_id in ids:
-        folded = unicodedata.normalize(
-            "NFD", unicodedata.normalize("NFD", ref_id).casefold()
-        )
-        collision = seen.get(folded)
-        if collision is not None and collision != ref_id:
-            raise ValueError(
-                f"{record_kind} {ref_id!r} and {collision!r} would collide on "
-                "a case-insensitive or normalization-insensitive filesystem"
-            )
-        seen[folded] = ref_id
 
 
 def variant_ref_relpath(variant_id: str) -> str:
@@ -327,6 +208,19 @@ def object_relpath(digest: str) -> str:
             f"hex digest, not {digest!r}"
         )
     return f"{_OBJECT_DIR}/{algorithm}/{hexdigest[:2]}/{hexdigest}.json"
+
+
+def _validated_sections(raw: Any, field_name: str) -> Mapping[str, ObjectRef]:
+    """A `str -> ObjectRef` sections mapping, guarded and key-sorted --
+    shared by `VariantRef.sections` and `ArtifactRef.sections` (D6/D8), the
+    same content shape at two different scopes."""
+    _mapping(raw, field_name)
+    sections: dict[str, ObjectRef] = {}
+    for key, value in raw.items():
+        sections[_decision_key(key, f"{field_name} key")] = _instance_of(
+            value, ObjectRef, f"{field_name}[{key!r}]"
+        )
+    return MappingProxyType(dict(sorted(sections.items())))
 
 
 def _normalized_text_mapping(raw: Any, field_name: str) -> Mapping[str, str]:
@@ -439,12 +333,19 @@ class VariantRef:
     set, because — unlike `declared`/`captured`, whose *keys* are what a
     decision compares — this field is itself the payload D5 says an
     unordered collection needs an explicit sort key for.
+
+    `sections` mirrors `ArtifactRef.sections` one level up, for content that
+    describes the *variant's whole membership* rather than any one artifact
+    — a persisted `BundleFacts`/baseline-set's own container-level facts
+    (ADR-063 Track C 8B: `storage.import_bundle_facts`/
+    `storage.import_baseline_set`), which name no single artifact.
     """
 
     variant_id: str
     declared: Mapping[str, str] = field(default_factory=dict)
     captured: Mapping[str, str] = field(default_factory=dict)
     artifact_ids: tuple[str, ...] = ()
+    sections: Mapping[str, ObjectRef] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # `_safe_ref_id`, not `_identity_text`: this id becomes the literal
@@ -474,6 +375,9 @@ class VariantRef:
         # collect it in (D5's array-with-a-stable-sort-key rule, applied to a
         # plain identifier list rather than a JSON document).
         object.__setattr__(self, "artifact_ids", tuple(sorted(set(checked_ids))))
+        object.__setattr__(
+            self, "sections", _validated_sections(self.sections, "sections")
+        )
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"variant_id": self.variant_id}
@@ -483,16 +387,24 @@ class VariantRef:
             out["captured"] = dict(self.captured)
         if self.artifact_ids:
             out["artifact_ids"] = list(self.artifact_ids)
+        if self.sections:
+            out["sections"] = {k: v.to_dict() for k, v in self.sections.items()}
         return out
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> VariantRef:
         _mapping(data, "a variant reference")
+        sections_raw = data.get("sections", {})
+        _mapping(sections_raw, "sections")
+        sections = {
+            key: ObjectRef.from_dict(value) for key, value in sections_raw.items()
+        }
         return cls(
             variant_id=_required_field(data, "variant_id", "a variant reference"),
             declared=data.get("declared", {}),
             captured=data.get("captured", {}),
             artifact_ids=data.get("artifact_ids", ()),
+            sections=sections,
         )
 
 
@@ -547,15 +459,8 @@ class ArtifactRef:
             "native_identity",
             _normalized_text_mapping(self.native_identity, "native_identity"),
         )
-        sections_raw = self.sections
-        _mapping(sections_raw, "sections")
-        sections: dict[str, ObjectRef] = {}
-        for key, value in sections_raw.items():
-            sections[_decision_key(key, "sections key")] = _instance_of(
-                value, ObjectRef, f"sections[{key!r}]"
-            )
         object.__setattr__(
-            self, "sections", MappingProxyType(dict(sorted(sections.items())))
+            self, "sections", _validated_sections(self.sections, "sections")
         )
 
     def to_dict(self) -> dict[str, Any]:

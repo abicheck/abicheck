@@ -82,11 +82,13 @@ from .storage.package import (
     ArtifactRef,
     PackageManifest,
     VariantRef,
-    _reject_filesystem_collisions,
-    _safe_ref_id,
     artifact_ref_relpath,
     object_relpath,
     variant_ref_relpath,
+)
+from .storage.ref_ids import (
+    reject_filesystem_collisions as _reject_filesystem_collisions,
+    safe_ref_id as _safe_ref_id,
 )
 from .storage.versioning import StorageVersions, check_reader_compatibility
 

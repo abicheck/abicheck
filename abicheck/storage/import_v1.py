@@ -43,8 +43,33 @@ not attempt is decoding those sections' *internal* shape into typed domain
 objects the way `semantic_ir` is — `elf`/`dwarf`/`build_source`/... stay
 exactly the JSON `serialization.snapshot_to_dict()` already produced inside
 their own section; only the *partition* is new here. That deeper split
-(A1.4's own "fold baseline sets and `BundleFacts` into sections...
-coordinating with G38 Phase 2") remains real, separately-scoped future work.
+remains real, separately-scoped future work, the same way
+`storage.legacy_sections`'s own module docstring names splitting `dwarf`'s
+internal shape further.
+
+**A1.4's "fold baseline sets and `BundleFacts` into sections" is done**
+(ADR-063 Track C 8B) — `storage.import_bundle_facts`/
+`storage.import_baseline_set` are the sibling import/export pairs for a
+persisted G38 `BundleFacts` document and an `actions/baseline`-produced
+baseline set respectively. Both are built *on* this module, not alongside
+it: each per-library snapshot inside either container still travels through
+`import_legacy_snapshot`/`export_legacy_snapshot` completely unchanged, one
+call per library, exactly the way this docstring's own next paragraph
+already anticipated ("a caller importing several libraries into one
+project calls this once per library... and merges the resulting manifests'
+`variant_refs`/`artifact_refs`"). What's new in that pair is only what a
+single-library import never needed: folding each *container's own*
+composition-level facts (a `BundleFacts`'s `manifest`/`filesystem_aliases`/
+`library_filenames`/`variant_fingerprint`; a baseline set's own
+`manifest.json` metadata) onto the new `VariantRef.sections` field
+(`storage.package`) that pair added, via two more independent section
+kinds (`dto.BUNDLE_COMPOSITION_SECTION_KIND`/`dto.BASELINE_SET_SECTION_KIND`)
+— see either module's own docstring for why that content belongs on the
+variant rather than any one artifact, and for what a baseline set's own
+`artifacts[].snapshot`/`.binary` relative paths deliberately are *not*
+carried into the package (no physical writer exists yet to make those
+paths meaningful).
+
 **No existing baseline is rewritten by this module** — it only ever reads a
 document and builds new, additional structures from it, per ADR-062 D13.
 
