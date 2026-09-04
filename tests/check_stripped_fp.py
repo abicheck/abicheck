@@ -31,6 +31,14 @@ from typing import Any
 REPO_DIR = Path(__file__).parent.parent
 GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 
+# evidence_tiers.py is the single, exhaustive, KeyError-if-unmapped source of
+# truth for which ChangeKind sits at which evidence tier -- reused below
+# instead of re-deriving "is this kind DWARF-independent" from a second,
+# necessarily-incomplete name/prefix list.
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import evidence_tiers  # noqa: E402
+
 # Verdicts the ground truth may declare as "not a real ABI break".
 # COMPATIBLE_WITH_RISK is included: the runtime-model-flip cases (case130–133)
 # are risk-only, so a reduced-evidence run that reports BREAKING for one of them
@@ -159,7 +167,11 @@ def _dwarf_evidence_loss_allows_downgrade(
     The catalog's ``min_evidence`` says which capability establishes the
     canonical finding; the receipt says which capability this run actually
     lost.  Both are required.  This deliberately excludes L0 kinds even when
-    they co-occur with a higher-level detector in a case.
+    they co-occur with a higher-level detector in a case -- but only when
+    that co-occurring L0 kind's own default verdict is itself BREAKING
+    (``_is_l0_finding``'s hardcoded set): such a kind should keep firing
+    without DWARF, so any downgrade for that case is suspicious, not
+    expected evidence loss.
     """
     if not isinstance(assurance, dict):
         return False
@@ -172,10 +184,29 @@ def _dwarf_evidence_loss_allows_downgrade(
     kinds = entry.get("expected_kinds")
     if not isinstance(kinds, list) or not kinds:
         return False
-    channels = {
-        _DEBUG_CHANNEL_BY_KIND.get(kind) for kind in kinds if isinstance(kind, str)
-    }
-    if None in channels or not channels:
+    # A kind whose own evidence tier is L0 (per evidence_tiers.py's
+    # exhaustive registry) never depends on DWARF at all -- it is not part
+    # of "the DWARF capability that was lost" and must not be required to
+    # name a debug channel below. Without this filter, a case mixing an L0
+    # kind (still detectable without DWARF, but not BREAKING-tier on its
+    # own -- e.g. runtime_floor_raised, RISK-tier) with a DWARF-dependent
+    # kind (the one actually lost) trips the "None in channels" guard and
+    # wrongly rejects a genuine downgrade as an unproven regression
+    # (case15_noexcept_change: found when frame_register_changed's first
+    # real use in this catalog co-occurred with the pre-existing L0
+    # runtime_floor_raised kind). An unmapped kind is conservatively *not*
+    # treated as L0 here, preserving this module's existing "default
+    # unknown kinds to no waiver" contract.
+    dwarf_dependent_kinds = [
+        kind
+        for kind in kinds
+        if isinstance(kind, str)
+        and evidence_tiers.EVIDENCE_TIER_BY_KIND.get(kind) != "L0"
+    ]
+    if not dwarf_dependent_kinds:
+        return False
+    channels = {_DEBUG_CHANNEL_BY_KIND.get(kind) for kind in dwarf_dependent_kinds}
+    if None in channels:
         return False
 
     # The receipt, not aggregate dwarf_context_status, proves loss for each

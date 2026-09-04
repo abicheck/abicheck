@@ -107,6 +107,28 @@ def test_btf_basic_evidence_is_not_advanced_capability() -> None:
     assert aa.status == "partial"
 
 
+def test_not_supported_advanced_state_does_not_add_a_false_parse_failure_note() -> None:
+    """P2 review, fresh evidence (Codex): ``not_supported`` (a BTF/CTF-
+    sourced side's advanced channel -- neither format carries calling-
+    convention/value-ABI/frame-register facts at all) was previously
+    missing from ``known_states``, so the ``"not in known_states"``
+    fallback misclassified it as an unrecognized/failed state and added
+    the false "debug evidence was only presence-probed or failed to parse"
+    note even though the basic channel parsed cleanly. ``status`` stays
+    "partial" regardless (via ``advanced_unavailable``'s own, accurate
+    reason) -- this test is about the note text, not the status."""
+    old = _debug_snapshot("1.0", BtfMetadata(has_btf=True).to_dwarf_metadata())
+    new = _debug_snapshot("2.0", BtfMetadata(has_btf=True).to_dwarf_metadata())
+
+    aa = checker.compare(old, new, scope_to_public_surface=False).analysis_assurance
+
+    assert isinstance(aa, AnalysisAssurance)
+    assert aa.status == "partial"
+    assert not any(
+        "only presence-probed or failed to parse" in note for note in aa.notes
+    )
+
+
 def test_presence_only_receipt_does_not_claim_parsed_facts() -> None:
     old_basic, old_advanced = _section_presence_metadata(True, "btf")
     new_basic, new_advanced = _section_presence_metadata(True, "btf")

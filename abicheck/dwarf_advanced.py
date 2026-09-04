@@ -948,6 +948,18 @@ def _normalize_arch(elf: Any) -> str:
     }.get(arch, arch)
 
 
+#: Architectures where an exported function symbol's ``st_value`` names its
+#: real code-entry address (matching what an FDE's own ``initial_location``
+#: names), so the two can be compared directly. Deliberately the same set
+#: ``_reg_name`` has register-name tables for -- every other ELF ABI this
+#: module processes falls back to a generic ``"regN"`` label, so it has no
+#: verified per-arch knowledge to justify assuming this equality holds
+#: there too (see ``_parse_frame_registers``'s own PPC64/ELFv1 note, where
+#: it provably does not: an exported symbol's ``st_value`` names its
+#: ``.opd`` function descriptor, not its code entry).
+_CODE_ENTRY_SYMBOL_ARCHES = frozenset({"x64", "x86", "aarch64"})
+
+
 def _build_addr_to_sym(elf: Any) -> dict[int, str]:
     """Build address → symbol name map from .dynsym (preferred) and .symtab.
 
@@ -1008,8 +1020,64 @@ def _has_fde(entries: Any) -> bool:
     return any(e.__class__.__name__ == "FDE" for e in entries)
 
 
+def _get_all_cfi_sources(
+    dwarf: Any, *, source_failed: list[bool] | None = None
+) -> list[Any]:
+    """Return every CFI entry list this binary carries with a real FDE.
+
+    Order is ``.eh_frame``-then-``.debug_frame`` (the same preference
+    ``_get_cfi_source`` applies), but unlike that function -- which returns
+    only the first section carrying a real FDE, since most callers want one
+    canonical source -- this collects *both* when both are present and each
+    carries real data. P2 review, fresh evidence (Codex): a valid binary can
+    link object files built with different unwind-table settings (e.g. some
+    translation units compiled with ``-fno-asynchronous-unwind-tables``), so
+    ``.eh_frame`` can carry FDEs for only some exported functions while
+    ``.debug_frame`` carries the rest -- ``_get_cfi_source``'s early return
+    on the first section with *any* real FDE meant the other section, and
+    whatever functions only it named, was never inspected at all.
+    ``source_failed`` accumulates the same way for either section: ``True``
+    is appended only when a section that genuinely exists fails to decode,
+    never for a section that was never present.
+    """
+    sources: list[Any] = []
+    try:
+        has_eh = dwarf.has_EH_CFI()
+    except (AttributeError, ELFError):
+        has_eh = False
+    if has_eh:
+        try:
+            entries = dwarf.EH_CFI_entries()
+            if _has_fde(entries):
+                sources.append(entries)
+        except (AttributeError, AssertionError, ELFError):
+            if source_failed is not None:
+                source_failed.append(True)
+    try:
+        has_dbg = dwarf.has_CFI()
+    except (AttributeError, ELFError):
+        has_dbg = False
+    if has_dbg:
+        try:
+            entries = dwarf.CFI_entries()
+            if _has_fde(entries):
+                sources.append(entries)
+        except (AttributeError, AssertionError, ELFError):
+            if source_failed is not None:
+                source_failed.append(True)
+    return sources
+
+
 def _get_cfi_source(dwarf: Any, *, source_failed: list[bool] | None = None) -> Any:
     """Return CFI entry iterator, preferring .eh_frame over .debug_frame.
+
+    Short-circuits on the first section carrying a real FDE -- unlike its
+    sibling ``_get_all_cfi_sources`` (above), which collects every section
+    that carries one. Kept as its own independent implementation (some
+    duplication with ``_get_all_cfi_sources`` accepted) rather than a thin
+    wrapper around it, so a caller that only wants one canonical source
+    never pays for probing ``.debug_frame`` when ``.eh_frame`` alone
+    already answered the question.
 
     P1 review, four rounds of fresh evidence against this same function:
 
@@ -1181,11 +1249,39 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         # P2 review, fresh evidence (Codex): the coverage set this pass is
         # actually accountable for -- exported *functions* specifically
         # (addr_to_sym also matches exported data symbols, which never
-        # have an FDE and aren't this analysis' concern).
-        uncovered_funcs = _build_exported_func_addrs(elf)
+        # have an FDE and aren't this analysis' concern). Restricted to
+        # architectures this module actually has register-name support for
+        # (_reg_name's own x64/x86/aarch64 set): on those, a function
+        # symbol's st_value IS its code-entry address, so comparing it
+        # against an FDE's own initial_location is sound. That equality
+        # does NOT hold on every ELF ABI -- P1 review, fresh evidence,
+        # Codex: on big-endian PPC64 ELFv1, an exported STT_FUNC symbol's
+        # st_value points to its .opd function descriptor, while the FDE's
+        # initial_location names the real code entry, so this comparison
+        # would never match and every exported function would read
+        # "uncovered" on an otherwise fully-instrumented binary. This
+        # module has no verified PPC64 .opd-descriptor resolution (no
+        # register-name table, no PPC64 fixture to validate one against),
+        # so rather than ship unverified descriptor-following logic for an
+        # architecture this analysis doesn't otherwise support at all, the
+        # coverage set stays empty there -- the same "never flagged
+        # uncovered by this specific check" behavior every architecture
+        # had before this check existed.
+        uncovered_funcs = (
+            _build_exported_func_addrs(elf)
+            if arch_key in _CODE_ENTRY_SYMBOL_ARCHES
+            else set()
+        )
         source_failed: list[bool] = []
-        cfi_src = _get_cfi_source(dwarf, source_failed=source_failed)
-        if cfi_src is None:
+        # P2 review, fresh evidence (Codex): consult every CFI section that
+        # carries real FDE data, not just the single preferred one --
+        # .eh_frame and .debug_frame can each cover a disjoint subset of
+        # exported functions (see _get_all_cfi_sources's own docstring), so
+        # stopping at the first source with any real FDE previously left a
+        # function named only by the *other* section wrongly counted as
+        # uncovered.
+        cfi_sources = _get_all_cfi_sources(dwarf, source_failed=source_failed)
+        if not cfi_sources:
             if source_failed:
                 # A present CFI section whose entries failed to decode --
                 # genuinely incomplete evidence.
@@ -1205,38 +1301,48 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
             return False
 
         complete = True
-        for entry in cfi_src:
-            try:
-                if entry.__class__.__name__ != "FDE":
-                    continue
-                pc_begin: int = entry["initial_location"]
-                uncovered_funcs.discard(pc_begin)
-                sym_name = addr_to_sym.get(pc_begin, "")
-                if not sym_name:
-                    continue
-                decode_failed: list[bool] = []
-                reg = _extract_cfa_reg_from_fde(
-                    entry, arch_key, decode_failed=decode_failed
-                )
-                if reg is not None:
-                    meta.frame_registers[sym_name] = reg
-                # Extract callee-saved register fingerprint from prologue
-                saved = _extract_callee_saved_regs(
-                    entry, arch_key, decode_failed=decode_failed
-                )
-                if saved is not None:
-                    meta.callee_saved_regs[sym_name] = saved
-                if decode_failed:
-                    # P1 review, fresh evidence: both helpers above catch and
-                    # swallow their own decode errors (so callers of them
-                    # standalone keep getting a plain None), which otherwise
-                    # left this loop's own except below unreachable for that
-                    # failure shape -- this FDE's facts were genuinely
-                    # skipped, so the pass is not complete.
+        # A function named by more than one source (the ordinary case --
+        # both sections usually cover the same functions) keeps only the
+        # first (preferred) source's facts; a later source's entry for an
+        # already-seen function is skipped rather than silently
+        # overwriting it.
+        seen_funcs: set[int] = set()
+        for cfi_src in cfi_sources:
+            for entry in cfi_src:
+                try:
+                    if entry.__class__.__name__ != "FDE":
+                        continue
+                    pc_begin: int = entry["initial_location"]
+                    uncovered_funcs.discard(pc_begin)
+                    if pc_begin in seen_funcs:
+                        continue
+                    sym_name = addr_to_sym.get(pc_begin, "")
+                    if not sym_name:
+                        continue
+                    decode_failed: list[bool] = []
+                    reg = _extract_cfa_reg_from_fde(
+                        entry, arch_key, decode_failed=decode_failed
+                    )
+                    if reg is not None:
+                        meta.frame_registers[sym_name] = reg
+                    # Extract callee-saved register fingerprint from prologue
+                    saved = _extract_callee_saved_regs(
+                        entry, arch_key, decode_failed=decode_failed
+                    )
+                    if saved is not None:
+                        meta.callee_saved_regs[sym_name] = saved
+                    if decode_failed:
+                        # P1 review, fresh evidence: both helpers above catch and
+                        # swallow their own decode errors (so callers of them
+                        # standalone keep getting a plain None), which otherwise
+                        # left this loop's own except below unreachable for that
+                        # failure shape -- this FDE's facts were genuinely
+                        # skipped, so the pass is not complete.
+                        complete = False
+                    seen_funcs.add(pc_begin)
+                except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
+                    log.debug("_parse_frame_registers: skipping FDE: %s", exc)
                     complete = False
-            except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
-                log.debug("_parse_frame_registers: skipping FDE: %s", exc)
-                complete = False
 
         if uncovered_funcs:
             # At least one exported function symbol's address was never

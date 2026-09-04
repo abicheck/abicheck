@@ -1249,6 +1249,15 @@ class TypeDatabase:
     def type_name(self, ti: int, depth: int = 0) -> str:
         """Resolve a type index to a human-readable name."""
         if depth > 10:
+            # P2 review, fresh evidence (Codex): a cyclic or genuinely
+            # more-than-ten-level pointer/modifier/array chain hits this
+            # guard and substitutes a placeholder the same way an
+            # unresolved type index does below -- but previously did so
+            # without recording it in unresolved_type_ref_count(), so a
+            # struct/enum whose member type only degrades via depth
+            # exhaustion (never a missing TPI entry) could leave the basic
+            # channel reading "parsed" despite an actually-degraded field.
+            self._unresolved_type_refs.add(ti)
             return "..."
         if ti in self._name_cache:
             return self._name_cache[ti]
@@ -1260,6 +1269,8 @@ class TypeDatabase:
     def type_size(self, ti: int, depth: int = 0) -> int:
         """Resolve a type index to its byte size."""
         if depth > 10:
+            # See the identical depth-exhaustion note in type_name() above.
+            self._unresolved_type_refs.add(ti)
             return 0
         if ti in self._size_cache:
             return self._size_cache[ti]

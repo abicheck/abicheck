@@ -52,6 +52,7 @@ from abicheck.pdb_parser import (
     LF_STRUCTURE,
     LF_UNION,
     LF_VFUNCTAB,
+    CvModifier,
     TypeDatabase,
     parse_tpi_stream,
 )
@@ -515,3 +516,76 @@ class TestUnsupportedNumericLeafMarksFailed:
         db = self._db([(LF_STRUCTURE, _make_lf_structure(0, 0, 0, 4, "S"))])
         assert db.failed_record_count == 0
         assert db.get_fieldlist(0x1001) == []
+
+
+class TestDepthExhaustionCountsAsUnresolved:
+    """P2 review, fresh evidence (Codex): ``type_name()``/``type_size()``'s
+    own ``depth > 10`` guard substitutes a placeholder (``"..."``/``0``) the
+    same way an unresolved type index does -- but previously did so without
+    adding to ``_unresolved_type_refs``, so a cyclic (or genuinely deep)
+    pointer/modifier/array chain left ``unresolved_type_ref_count()`` at 0
+    despite emitting degraded member facts."""
+
+    def _db(self) -> TypeDatabase:
+        tpi = parse_tpi_stream(_build_tpi_stream([]))
+        return TypeDatabase(tpi)
+
+    def test_cyclic_modifier_chain_marks_unresolved(self) -> None:
+        """The reviewer's exact repro: a two-CvModifier cycle. Neither
+        modifier carries a qualifier, so ``type_name`` is a pure passthrough
+        of whatever the depth-exhausted placeholder resolves to -- keeps
+        the assertion about the guard firing, not about quals stacking up
+        across ten recursive hops."""
+        db = self._db()
+        db._modifiers[0x1000] = CvModifier(
+            type_index=0x1000,
+            modified_ti=0x1001,
+            is_const=False,
+            is_volatile=False,
+            is_unaligned=False,
+        )
+        db._modifiers[0x1001] = CvModifier(
+            type_index=0x1001,
+            modified_ti=0x1000,
+            is_const=False,
+            is_volatile=False,
+            is_unaligned=False,
+        )
+        assert db.type_name(0x1000) == "..."
+        assert db.unresolved_type_ref_count > 0
+
+    def test_cyclic_modifier_chain_size_also_marks_unresolved(self) -> None:
+        """type_size() has its own identical guard/cache pair -- covered
+        separately since a fix to type_name() alone would leave this half
+        of the bug still open."""
+        db = self._db()
+        db._modifiers[0x1000] = CvModifier(
+            type_index=0x1000,
+            modified_ti=0x1001,
+            is_const=False,
+            is_volatile=False,
+            is_unaligned=False,
+        )
+        db._modifiers[0x1001] = CvModifier(
+            type_index=0x1001,
+            modified_ti=0x1000,
+            is_const=False,
+            is_volatile=False,
+            is_unaligned=False,
+        )
+        assert db.type_size(0x1000) == 0
+        assert db.unresolved_type_ref_count > 0
+
+    def test_acyclic_shallow_chain_is_not_flagged(self) -> None:
+        """Positive control: a short, non-cyclic modifier chain resolving
+        well within the depth cap must not be flagged."""
+        db = self._db()
+        db._modifiers[0x1000] = CvModifier(
+            type_index=0x1000,
+            modified_ti=0x03,  # a simple built-in type (void), depth 1
+            is_const=True,
+            is_volatile=False,
+            is_unaligned=False,
+        )
+        assert db.type_name(0x1000) == "const void"
+        assert db.unresolved_type_ref_count == 0

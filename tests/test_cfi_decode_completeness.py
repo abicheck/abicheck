@@ -280,3 +280,149 @@ class TestUnmatchedExportedFunctionMarksIncomplete:
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+
+
+def _fde_for(addr: int, *, cfa_reg: int | None = None) -> MagicMock:
+    """Build a mock FDE at *addr*. When *cfa_reg* is given, its decoded
+    table carries one real CFA row (register number *cfa_reg*) so
+    ``_extract_cfa_reg_from_fde`` resolves an actual register name instead
+    of the "no CFA data" ``None`` an empty table always produces."""
+    fde = MagicMock()
+    fde.__class__ = type("FDE", (), {})
+    fde.__class__.__name__ = "FDE"
+    fde.__getitem__ = MagicMock(return_value=addr)
+    decoded = MagicMock()
+    if cfa_reg is None:
+        decoded.table = []
+    else:
+        cfa = MagicMock()
+        cfa.reg = cfa_reg
+        decoded.table = [{"pc": addr, "cfa": cfa}]
+    fde.get_decoded.return_value = decoded
+    return fde
+
+
+class TestMultiSourceCfiCoverage:
+    """P2 review, fresh evidence (Codex): a valid binary can link object
+    files built with different unwind-table settings, so ``.eh_frame``
+    carries FDEs for only some exported functions while ``.debug_frame``
+    carries the rest -- ``_get_cfi_source``'s early return on the first
+    section with *any* real FDE meant the other section (and whatever
+    functions only it named) was never inspected, wrongly counting those
+    functions as uncovered. Fixed by ``_get_all_cfi_sources`` collecting
+    every section with real FDE data."""
+
+    def test_function_covered_only_by_debug_frame_is_not_flagged(self) -> None:
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        eh_only = _sym("eh_only_fn", 0x1000)
+        dbg_only = _sym("dbg_only_fn", 0x2000)
+        dyn.iter_symbols.return_value = [eh_only, dbg_only]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x1000, cfa_reg=7)]
+        mock_dwarf.CFI_entries.return_value = [_fde_for(0x2000, cfa_reg=6)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert set(meta.frame_registers) == {"eh_only_fn", "dbg_only_fn"}
+
+    def test_function_in_neither_source_still_flagged(self) -> None:
+        """Negative control: a function genuinely absent from both sources
+        must still be reported incomplete -- the multi-source fix must not
+        over-correct into never flagging anything."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        eh_only = _sym("eh_only_fn", 0x1000)
+        missing = _sym("missing_fn", 0x3000)
+        dyn.iter_symbols.return_value = [eh_only, missing]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x1000)]
+        mock_dwarf.CFI_entries.return_value = [_fde_for(0x2000)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+    def test_function_in_both_sources_keeps_eh_frame_facts(self) -> None:
+        """A function named by both sources must not have its .eh_frame
+        (preferred) facts overwritten by .debug_frame's own entry for the
+        same address."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        sym = _sym("both_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        eh_fde = _fde_for(0x1000, cfa_reg=7)
+        dbg_fde = _fde_for(0x1000)
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [eh_fde]
+        mock_dwarf.CFI_entries.return_value = [dbg_fde]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert set(meta.frame_registers) == {"both_fn"}
+        # The .debug_frame duplicate's own FDE must never have been decoded
+        # for facts -- only consulted for coverage (its initial_location).
+        dbg_fde.get_decoded.assert_not_called()
+        eh_fde.get_decoded.assert_called()
+
+
+class TestNonCodeEntrySymbolArchExcludedFromCoverage:
+    """P1 review, fresh evidence (Codex): on big-endian PPC64 ELFv1, an
+    exported STT_FUNC symbol's ``st_value`` points to its ``.opd`` function
+    descriptor, not its code entry, so it can never equal any FDE's own
+    ``initial_location`` -- every exported function on such a binary would
+    wrongly read "uncovered" under the naive address-equality check. Fixed
+    by restricting the coverage set to architectures this module has
+    verified register-name support for (``_CODE_ENTRY_SYMBOL_ARCHES``)."""
+
+    def test_unmapped_arch_with_no_matching_fde_is_not_flagged(self) -> None:
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "PPC64"
+        dyn = MagicMock()
+        # st_value (0x1000) deliberately never matches the FDE's own
+        # initial_location (0x2000) -- the exact PPC64 .opd-descriptor
+        # mismatch shape, without needing real .opd-resolution logic.
+        sym = _sym("ppc64_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x2000)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+
+    def test_known_arch_with_same_mismatch_is_still_flagged(self) -> None:
+        """Positive control: the identical address mismatch on a
+        known/verified architecture (x64) must still be flagged -- the
+        arch restriction must not blanket-disable this check."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        sym = _sym("x64_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x2000)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False

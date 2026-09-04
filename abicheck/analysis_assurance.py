@@ -1168,8 +1168,25 @@ def compute_analysis_assurance(
     # treat as parsed: it may come from a hand-edited/third-party snapshot and
     # cannot prove the corresponding detector facts were evaluated. A wholly
     # unavailable channel is handled separately by ``dwarf_evidence_missing``;
-    # it is not a parse failure for header-only analysis.
-    known_states = {"parsed", "not_available", "presence_only", "partial", "failed"}
+    # it is not a parse failure for header-only analysis. ``not_supported``
+    # (P2 review, fresh evidence, Codex) is a real, documented state
+    # ``_debug_evidence_receipt`` emits for a BTF/CTF-sourced side's advanced
+    # channel -- neither format carries calling-convention/value-ABI/frame-
+    # register facts at all, so it is a structural fact about the format,
+    # not a parse failure. Omitting it here fell through to the "not in
+    # known_states" branch below, so the every-BTF/CTF-comparison-parses-
+    # basic-cleanly case still added the false "debug evidence was only
+    # presence-probed or failed to parse" note (``advanced_unavailable``
+    # correctly keeps the overall status "partial" for its own, accurate
+    # reason regardless).
+    known_states = {
+        "parsed",
+        "not_available",
+        "presence_only",
+        "partial",
+        "failed",
+        "not_supported",
+    }
     debug_parse_incomplete = any(
         receipt["basic"] in {"presence_only", "partial", "failed"}
         or receipt["advanced"] in {"presence_only", "partial", "failed"}
