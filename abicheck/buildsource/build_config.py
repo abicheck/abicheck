@@ -468,8 +468,20 @@ class BuildConfig:
             debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
             debug_debuginfod=_opt_bool(debug, "debuginfod"),
             debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
-            bundle_system_providers=_strs(bundle, "system_providers"),
-            bundle_cohorts=_strs(bundle, "cohorts"),
+            # Stripped here, once, at the single choke point every consumer
+            # (compare's fan-out, scan --artifact-set, stored-BundleFacts
+            # compare) reads through -- compare's own fan-out incidentally
+            # stripped via a comma-join/split round trip through a legacy
+            # string parameter, but the other two forwarded the raw tuple
+            # unchanged, so a quoted entry with stray whitespace matched one
+            # consumer's SONAME comparison and silently missed another's
+            # (Codex review, fresh evidence).
+            bundle_system_providers=[
+                s.strip() for s in _strs(bundle, "system_providers") if s.strip()
+            ],
+            bundle_cohorts=[
+                s.strip() for s in _strs(bundle, "cohorts") if s.strip()
+            ],
             exit_code_scheme=_one_of(
                 _str(top, "exit_code_scheme", "auto") or "auto",
                 _EXIT_CODE_SCHEMES,

@@ -362,12 +362,15 @@ inputs:
       does not auto-run it. Used by scan and dump modes, and by compare
       mode (--config). Also the only way to configure the cross-library
       bundle-analysis layer's system-provider allow-list extension and
-      co-versioned cohort declarations for compare mode (directory/package
-      operands) and scan mode (--artifact-set): .abicheck.yml's `bundle:`
-      block (`system_providers:`/`cohorts:`, CLI cleanup phase two, PR J —
-      there is no longer a per-invocation Action input for either, matching
-      the native CLI's own removal of --bundle-system-providers/
-      --bundle-cohort).
+      co-versioned cohort declarations: .abicheck.yml's `bundle:` block
+      (`system_providers:`/`cohorts:`, CLI cleanup phase two, PR J — there
+      is no longer a per-invocation Action input for either, matching the
+      native CLI's own removal of --bundle-system-providers/
+      --bundle-cohort). `system_providers:` applies to compare mode
+      (directory/package operands) and scan mode (--artifact-set) alike;
+      `cohorts:` (the SONAME-skew check) applies to compare only — an
+      --artifact-set audit has no old/new release pair to detect a skew
+      between, so the setting has no effect there.
     required: false
   allow-build-query:
     description: >
