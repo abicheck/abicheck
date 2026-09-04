@@ -131,7 +131,10 @@ class DwarfSession:
 
 
 def open_dwarf_session(
-    so_path: Path, *, cfi_source_path: Path | None = None
+    so_path: Path,
+    *,
+    cfi_source_path: Path | None = None,
+    open_failed: list[bool] | None = None,
 ) -> DwarfSession | None:
     """Open *so_path* and return a :class:`DwarfSession`, or ``None``.
 
@@ -149,6 +152,18 @@ def open_dwarf_session(
     ``cfi_elf``/``cfi_dwarf`` unset (falling back to the sidecar's own
     ``elf``/``dwarf``, the pre-existing behaviour) rather than failing the
     whole DWARF session over an enhancement.
+
+    ``open_failed`` (P2 review, fresh evidence, Codex): opt-in out-param
+    (mirrors this codebase's established ``incomplete``/``truncated``
+    convention), appended ``True`` only when the file was readable and
+    genuinely carried DWARF-shaped content this function *tried* to parse
+    but ``ELFFile``/``get_dwarf_info()`` raised on -- a real parse failure,
+    distinct from a legitimately absent-DWARF binary (``has_real_dwarf_info``
+    returning ``False`` cleanly) or a path that couldn't even be opened as
+    a file. Lets ``parse_dwarf`` map this ``None`` to
+    ``evidence_state="failed"`` rather than the default ``"not_available"``,
+    the same distinction ``BtfMetadata``/``CtfMetadata.extraction_failed``
+    already draw for their own formats.
     """
     try:
         f = open(so_path, "rb")
@@ -186,6 +201,8 @@ def open_dwarf_session(
         # ``with open()`` block that closed on *any* exception; match that here
         # so the "never raises" contract holds and no descriptor leaks.
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
+        if open_failed is not None:
+            open_failed.append(True)
         f.close()
         return None
 
@@ -424,8 +441,23 @@ def parse_dwarf(
     real (not ``SHT_NOBITS``) ``.eh_frame``/``.debug_frame`` data. See
     ``DwarfSession.cfi_elf``'s own docstring.
     """
-    session = open_dwarf_session(so_path, cfi_source_path=cfi_source_path)
+    open_failed: list[bool] = []
+    session = open_dwarf_session(
+        so_path, cfi_source_path=cfi_source_path, open_failed=open_failed
+    )
     if session is None:
+        # P2 review, fresh evidence (Codex): distinguish a genuine
+        # ELFFile/get_dwarf_info() parse failure (open_failed) from a
+        # legitimately absent-DWARF binary or an unopenable path -- an
+        # explicitly requested malformed DWARF input was previously
+        # reported identically to a legitimately stripped one, despite
+        # the receipt promising to distinguish extraction failure from
+        # absence.
+        if open_failed:
+            return (
+                DwarfMetadata(evidence_state="failed"),
+                AdvancedDwarfMetadata(evidence_state="failed"),
+            )
         return DwarfMetadata(), AdvancedDwarfMetadata()
 
     try:

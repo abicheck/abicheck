@@ -121,8 +121,15 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
                 return DwarfMetadata()
             return _parse(f, so_path)
     except (ELFError, OSError, ValueError) as exc:
+        # P2 review, fresh evidence (Codex): _parse's own ELFFile(f) call is
+        # unguarded, so reaching here (rather than has_real_dwarf_info()'s
+        # own clean, exception-free return inside _parse) means either the
+        # file couldn't be opened at all or it genuinely failed to parse as
+        # ELF/DWARF -- an explicitly requested malformed input, not a
+        # legitimately absent-DWARF binary. Mirrors dwarf_unified.
+        # open_dwarf_session's identical open_failed distinction.
         log.warning("parse_dwarf_metadata: failed to open/parse %s: %s", so_path, exc)
-        return DwarfMetadata()
+        return DwarfMetadata(evidence_state="failed")
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +420,16 @@ def _expand_anonymous_member(
     layout changes inside anonymous structs/unions are still detected.
     """
     if "DW_AT_type" not in die.attributes:
+        # P2 review, fresh evidence (Codex): an anonymous DW_TAG_member
+        # with no DW_AT_type at all is truncated/malformed debug info,
+        # the identical shape _process_member's own equivalent gap was
+        # already fixed for on the named-member path -- not a legitimate
+        # type-less case, since an anonymous aggregate member always
+        # names its own struct/union type. Previously returned [] here
+        # with no completeness signal, silently dropping this member's
+        # nested layout while the basic channel still reported "parsed".
+        if incomplete is not None:
+            incomplete.append(True)
         return []
     try:
         target = _resolve_ref(die, "DW_AT_type", CU)

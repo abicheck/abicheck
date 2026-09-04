@@ -63,6 +63,21 @@ def _struct_with_member_missing_type() -> _Die:
     )
 
 
+def _struct_with_anonymous_member_missing_type() -> _Die:
+    """An anonymous DW_TAG_member with no DW_AT_type at all -- reaches
+    _expand_anonymous_member's own `"DW_AT_type" not in die.attributes`
+    branch, which has no reference to resolve (unlike the malformed-
+    reference repro below) and so never reaches its except-branch
+    accounting -- the anonymous-member sibling of
+    _struct_with_member_missing_type above."""
+    anon_member = _Die("DW_TAG_member", {})
+    return _Die(
+        "DW_TAG_structure_type",
+        {"DW_AT_name": "OuterNoType", "DW_AT_byte_size": 8},
+        children=[anon_member],
+    )
+
+
 def _typedef_with_bad_target() -> _Die:
     """A typedef whose DW_AT_type references an unresolved offset -- reaches
     _process_typedef's own except Exception: incomplete.append(True); return."""
@@ -170,6 +185,18 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
         assert result.cu_failed == 0
         assert result.evidence_state == "partial"
         assert result.structs["NoType"].fields[0].type_name == "unknown"
+
+    def test_anonymous_member_missing_type_marks_partial(self) -> None:
+        """P2 review, fresh evidence (Codex): the anonymous-member sibling
+        of test_member_missing_type_marks_partial above --
+        _expand_anonymous_member's own no-DW_AT_type branch had the
+        identical gap, silently dropping the anonymous member's nested
+        layout with no completeness signal."""
+        result = _run_parse([_struct_with_anonymous_member_missing_type()])
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        # The anonymous member contributed no fields (silently dropped).
+        assert result.structs["OuterNoType"].fields == []
 
     def test_malformed_typedef_target_marks_partial(self) -> None:
         # Real pyelftools raises (DWARFError) for an unresolvable ref rather

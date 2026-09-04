@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from elftools.common.exceptions import ELFError
 
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata  # noqa: E402
 from abicheck.dwarf_metadata import DwarfMetadata  # noqa: E402
@@ -412,6 +413,71 @@ class TestDwarfSession:
         for _ in range(30):
             assert du.open_dwarf_session(so) is None  # must not raise
         assert nfds() - base <= 1, "open_dwarf_session leaked a file descriptor"
+
+    def test_open_dwarf_session_reports_open_failed_for_genuine_parse_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P2 review, fresh evidence (Codex): open_dwarf_session's own
+        open_failed out-param must distinguish a genuine ELFFile()/
+        get_dwarf_info() parse failure from a legitimately absent-DWARF
+        binary or an unopenable path -- both previously returned an
+        indistinguishable None."""
+        from abicheck import dwarf_unified as du
+
+        so = tmp_path / "corrupt.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 128)
+        monkeypatch.setattr(
+            du, "ELFFile", lambda *_a, **_k: (_ for _ in ()).throw(ELFError("bad"))
+        )
+
+        open_failed: list[bool] = []
+        assert du.open_dwarf_session(so, open_failed=open_failed) is None
+        assert open_failed == [True]
+
+    def test_open_dwarf_session_none_cases_do_not_report_open_failed(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control: a directory, a nonexistent path, and a non-
+        regular file all return None without ELFFile ever being reached --
+        open_failed must stay empty for all three, unlike the genuine
+        parse-failure case above."""
+        for path in (
+            tmp_path,  # directory
+            tmp_path / "missing.so",  # nonexistent
+        ):
+            open_failed: list[bool] = []
+            assert open_dwarf_session(path, open_failed=open_failed) is None
+            assert open_failed == []
+
+    def test_parse_dwarf_reports_failed_evidence_state_on_open_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The end-to-end contract: parse_dwarf() maps open_dwarf_session's
+        genuine parse failure to evidence_state="failed" on both returned
+        metadata objects, not the default "not_available"."""
+        from abicheck import dwarf_unified as du
+
+        so = tmp_path / "corrupt.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 128)
+        monkeypatch.setattr(
+            du, "ELFFile", lambda *_a, **_k: (_ for _ in ()).throw(ELFError("bad"))
+        )
+
+        meta, adv = parse_dwarf(so)
+        assert isinstance(meta, DwarfMetadata)
+        assert isinstance(adv, AdvancedDwarfMetadata)
+        assert meta.evidence_state == "failed"
+        assert adv.evidence_state == "failed"
+
+    def test_parse_dwarf_stays_not_available_on_missing_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control: a genuinely nonexistent path (never reaches
+        ELFFile at all) keeps the default "not_available" state, unlike
+        the genuine parse-failure case above."""
+        meta, adv = parse_dwarf(tmp_path / "missing.so")
+        assert meta.evidence_state == "not_available"
+        assert adv.evidence_state == "not_available"
 
     def test_parse_dwarf_survives_cu_iteration_failure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

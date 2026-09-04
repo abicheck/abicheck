@@ -219,8 +219,16 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                 meta.evidence_state = "partial"
             return meta
     except (ELFError, OSError, ValueError) as exc:
+        # P2 review, fresh evidence (Codex): this standalone entry point's
+        # own ELFFile(f)/get_dwarf_info() call is unguarded inside the try
+        # above, so reaching here (rather than the has_real_dwarf_info()
+        # branch's own clean, exception-free return) means either the file
+        # couldn't be opened at all or it genuinely failed to parse as
+        # ELF/DWARF -- an explicitly requested malformed input, not a
+        # legitimately absent-DWARF binary. Mirrors dwarf_unified.
+        # open_dwarf_session's identical open_failed distinction.
         log.warning("parse_advanced_dwarf: failed %s: %s", so_path, exc)
-        return AdvancedDwarfMetadata()
+        return AdvancedDwarfMetadata(evidence_state="failed")
 
 
 # ---------------------------------------------------------------------------

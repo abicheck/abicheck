@@ -96,6 +96,18 @@ class TestParseDwarfMetadata:
         result = parse_dwarf_metadata(f)
         assert result.has_dwarf is False
 
+    def test_elf_error_marks_evidence_state_failed(self, tmp_path) -> None:
+        """P2 review, fresh evidence (Codex): an explicitly requested but
+        genuinely malformed ELF/DWARF input previously read back
+        identically to a legitimately stripped binary -- both defaulting
+        to the DwarfMetadata dataclass's own "not_available" evidence_state.
+        Mirrors dwarf_unified.open_dwarf_session's identical
+        open_failed distinction."""
+        f = tmp_path / "bad.so"
+        f.write_bytes(b"not elf at all")
+        result = parse_dwarf_metadata(f)
+        assert result.evidence_state == "failed"
+
 
 # ── _parse with no DWARF ─────────────────────────────────────────────
 

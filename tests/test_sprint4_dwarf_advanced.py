@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from elftools.common.exceptions import ELFError
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.compare.dwarf_advanced_diff import diff_advanced_dwarf
@@ -162,6 +163,24 @@ class TestParseAdvancedDwarfEvidenceState:
         ):
             meta = parse_advanced_dwarf(Path(__file__))
 
+        assert meta.evidence_state == "failed"
+
+    def test_elffile_construction_failure_reports_failed_not_not_available(
+        self,
+    ) -> None:
+        """P2 review, fresh evidence (Codex): reaching this entry point's
+        outer except (ELFFile()/get_dwarf_info() raising, as opposed to
+        has_real_dwarf_info() cleanly returning False) means an explicitly
+        requested but genuinely malformed DWARF input -- previously
+        indistinguishable from a legitimately stripped binary, both
+        defaulting to the AdvancedDwarfMetadata dataclass's own
+        "not_available" evidence_state."""
+        with patch(
+            "abicheck.dwarf_advanced.ELFFile", side_effect=ELFError("bad magic")
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.has_dwarf is False
         assert meta.evidence_state == "failed"
 
 
