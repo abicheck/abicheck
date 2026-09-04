@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Scenario — Capability / evidence demonstration · audit |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `exported_not_public`, `public_not_exported` |
 | **Source files** | `examples/case150_xcheck_export_public_pair/` |
+| **Related rules** | [`audit-accidental-export`](by-rule/audit-accidental-export.md), [`audit-public-not-exported`](by-rule/audit-public-not-exported.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 

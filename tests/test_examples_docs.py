@@ -110,6 +110,119 @@ def test_generator_rewrites_source_links_without_mkdocs_broken_links() -> None:
     assert "../../examples/" not in rewritten
 
 
+def _make_case(mod, **overrides):
+    defaults = dict(
+        name="case900_demo",
+        title="Case 900: Demo",
+        verdict="BREAKING",
+        category="breaking",
+        platforms=["linux"],
+        abi_break=True,
+        api_break=False,
+        bad_practice=False,
+        expected_kinds=[],
+        body="",
+    )
+    defaults.update(overrides)
+    return mod.Case(**defaults)
+
+
+def test_meta_table_shows_rule_family_relation() -> None:
+    """A case page's meta table surfaces the taxonomy's rule_slug/
+    relation_type/relation_axis -- the review finding this generator now
+    addresses: the taxonomy was invisible on the public docs site even
+    though ground_truth.json already carried it."""
+    mod = _load_generator_module()
+    case = _make_case(
+        mod,
+        rule_slug="exported-function-removed",
+        variant_of="case01_symbol_removal",
+        relation_type="duplicate",
+    )
+    table = mod._meta_table(case)
+    assert (
+        "[`exported-function-removed`](by-rule/exported-function-removed.md)" in table
+    )
+    assert "Duplicate of [case01_symbol_removal](case01_symbol_removal.md)" in table
+
+    variant_case = _make_case(
+        mod,
+        rule_slug="enum-member-value-changed",
+        variant_of="case08_enum_value_change",
+        relation_type="variant",
+        relation_axis="public-surface",
+    )
+    variant_table = mod._meta_table(variant_case)
+    assert "Variant (public-surface) of [case08_enum_value_change]" in variant_table
+
+
+def test_meta_table_shows_scenario_classification_and_ecosystem() -> None:
+    mod = _load_generator_module()
+    case = _make_case(
+        mod,
+        entity="scenario",
+        scenario_kind="case-study",
+        ecosystem="onetbb",
+        related_rules=["exported-function-removed"],
+    )
+    table = mod._meta_table(case)
+    assert "Scenario — Ecosystem case study" in table
+    assert "[oneTBB](by-ecosystem/onetbb.md)" in table
+    assert (
+        "[`exported-function-removed`](by-rule/exported-function-removed.md)" in table
+    )
+
+
+def test_build_rule_families_groups_canonical_duplicate_variant_and_scenarios() -> None:
+    mod = _load_generator_module()
+    canonical = _make_case(
+        mod, name="case01_symbol_removal", rule_slug="exported-function-removed"
+    )
+    duplicate = _make_case(
+        mod,
+        name="case12_function_removed",
+        rule_slug="exported-function-removed",
+        variant_of="case01_symbol_removal",
+        relation_type="duplicate",
+    )
+    scenario = _make_case(
+        mod,
+        name="case108_task_class_removed",
+        entity="scenario",
+        scenario_kind="case-study",
+        related_rules=["exported-function-removed"],
+    )
+    families = mod._build_rule_families([canonical, duplicate, scenario])
+    fam = families["exported-function-removed"]
+    assert fam.canonical is canonical
+    assert fam.duplicates == [duplicate]
+    assert fam.variants == []
+    assert fam.scenarios == [scenario]
+
+
+def test_by_rule_index_lists_every_family_including_scenario_only_slugs() -> None:
+    """A rule_slug named only in a scenario's related_rules (no rule-entity
+    case demonstrates it alone yet) still gets a family entry, so every
+    linked rule page actually exists -- a dangling by-rule link would fail
+    mkdocs --strict."""
+    mod = _load_generator_module()
+    scenario = _make_case(
+        mod,
+        name="case192_demo",
+        entity="scenario",
+        related_rules=["scenario-only-rule"],
+    )
+    families = mod._build_rule_families([scenario])
+    assert "scenario-only-rule" in families
+    fam = families["scenario-only-rule"]
+    assert fam.canonical is None
+    assert fam.scenarios == [scenario]
+    index = mod._render_by_rule_index(families)
+    assert "[`scenario-only-rule`](scenario-only-rule.md)" in index
+    page = mod._render_rule_family_page(fam)
+    assert "No single-library case demonstrates this rule alone yet" in page
+
+
 def test_generator_source_section_uses_code_literals() -> None:
     mod = _load_generator_module()
     case = mod.Case(

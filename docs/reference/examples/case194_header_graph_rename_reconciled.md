@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Scenario — Capability / evidence demonstration |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `declaration_renamed`, `public_api_internal_dependency_added` |
 | **Source files** | `examples/case194_header_graph_rename_reconciled/` |
+| **Related rules** | [`internal-declaration-renamed-reconciled`](by-rule/internal-declaration-renamed-reconciled.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
 
 **Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 

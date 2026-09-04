@@ -313,6 +313,59 @@ files: examples/<case>/` / `Source: examples/<case>/README.md` path
 templates need to resolve through the catalog manifest/resolver instead of
 a literal prefix.
 
+## Taxonomy visibility on the public docs site
+
+The same external review that prompted the Phase 4 redesign above also
+found the taxonomy invisible outside `ground_truth.json`: "internally the
+repository understands that the cases are different. Externally, users
+still see a flat '192/197 examples' catalog organized primarily by verdict
+and an almost-identical 'category' dimension." Its recommended order put
+this before the physical move (its own "PR 2" — make the taxonomy visible
+without moving any file), since it delivers real user-facing value without
+Phase 4's directory-churn risk.
+
+`scripts/gen_examples_docs.py` now consumes `ground_truth.json["taxonomy"]`
+directly, no directory move required:
+
+- Every case page's meta table gains a **Classification** row (`Rule`, or
+  `Scenario — <scenario_kind>`, with `· audit` appended when `operation`
+  is `"audit"`), and an **Ecosystem** row when the case models a real
+  project (linked to a generated `by-ecosystem/<eco>.md` page) rather than
+  the language-neutral default.
+- A `rule`-entity case gains a **Rule family** row: its `rule_slug`
+  (linked to a generated `by-rule/<slug>.md` page), and — when it's a
+  confirmed duplicate or variant — which relation and (for a variant)
+  which axis, linked back to its canonical case.
+- A `scenario`-entity case gains a **Related rules** row listing every
+  rule slug it composes, each linked to that rule's family page.
+- A new `by-rule/<slug>.md` page per rule family groups its complete
+  membership — canonical demonstration, duplicate fixtures, variants (with
+  axis), and every scenario that composes it via `related_rules` — exactly
+  the "canonical rule page should group its complete family" shape the
+  review asked for. A slug named only in a scenario's `related_rules`
+  (a generic mechanism no single-library case demonstrates alone yet, e.g.
+  `overload-set-removed`) still gets a family page, so every by-rule link
+  the generator emits resolves under `mkdocs build --strict`.
+- `by-rule/index.md` and the five `by-ecosystem/<eco>.md` pages are wired
+  into `mkdocs.yml`'s nav under **Examples** (`By Rule`, `By Ecosystem`),
+  alongside the existing `By Verdict`/`By Category`. Individual rule pages
+  stay link-only (linked from the by-rule index and from case pages), the
+  same convention per-case pages already use — ~160 rule slugs is too many
+  for a flat nav list, matching the existing By Verdict/By Category
+  pattern's own small-enumeration-only rule.
+
+**Deliberately still out of scope** (the review's remaining PR 2 items,
+not attempted here): the five bundle cases remain excluded from this
+generator's per-case pages (they use a different ground-truth shape --
+`library_assertions`, not a single `expected` verdict -- and rendering
+them needs its own page shape, a larger change than reusing the taxonomy
+this pass adds); the catalog's own top-level framing ("Examples & Case
+Encyclopedia") is unchanged, not yet renamed to "Compatibility Catalog";
+and `docs/start/first-check.md`/`examples/README.md` still lead with the
+calibration catalog rather than the Phase 5 `compare-release` workflow as
+the primary onboarding path. Each is real, separately-scoped follow-up
+work, not a Phase 3/4 dependency.
+
 ## Files & surfaces
 
 - `scripts/gen_catalog_taxonomy.py` (new) — the taxonomy generator.

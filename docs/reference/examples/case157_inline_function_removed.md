@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `inline_function_removed` |
 | **Source files** | `examples/case157_inline_function_removed/` |
+| **Rule family** | [`inline-function-removed`](by-rule/inline-function-removed.md) |
 
 **Category:** Build/Source Evidence (L4) | **Verdict:** 🟠 API_BREAK
 
@@ -133,4 +135,4 @@ to hand either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Inline function removed](by-rule/inline-function-removed.md)._

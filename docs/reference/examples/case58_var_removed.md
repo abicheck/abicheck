@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_removed` |
 | **Source files** | `examples/case58_var_removed/` |
+| **Rule family** | [`var-removed`](by-rule/var-removed.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -121,4 +123,4 @@ abidiff v1.xml v2.xml
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Var removed](by-rule/var-removed.md)._

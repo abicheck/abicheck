@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break, Bad practice |
 | **Detected `ChangeKind`s** | `type_base_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `examples/case188_public_class_private_base_class/` |
+| **Rule family** | [`public-class-private-base-class`](by-rule/public-class-private-base-class.md) |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Category:** Class Layout | **Verdict:** 🔴 BREAKING
@@ -139,4 +141,4 @@ inheritance for internal implementation details.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public class private base class](by-rule/public-class-private-base-class.md)._

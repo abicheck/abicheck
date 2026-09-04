@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `inline_namespace_moved` |
 | **Source files** | `examples/case71_inline_namespace_moved/` |
+| **Rule family** | [`inline-namespace-moved`](by-rule/inline-namespace-moved.md) |
 
 **Category:** Symbol ABI | **Verdict:** 🔴 BREAKING
 
@@ -161,4 +163,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace moved](by-rule/inline-namespace-moved.md)._

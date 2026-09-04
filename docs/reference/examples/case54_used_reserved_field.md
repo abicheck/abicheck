@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `used_reserved_field` |
 | **Source files** | `examples/case54_used_reserved_field/` |
+| **Rule family** | [`used-reserved-field`](by-rule/used-reserved-field.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -115,4 +117,4 @@ reserves space for future extensions; Wayland protocol structs use
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Used reserved field](by-rule/used-reserved-field.md)._

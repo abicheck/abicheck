@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `vtable_thunk_offset_changed` |
 | **Source files** | `examples/case172_vtable_thunk_offset_changed/` |
+| **Rule family** | [`vtable-thunk-offset-changed`](by-rule/vtable-thunk-offset-changed.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -136,4 +138,4 @@ function's name or signature.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable thunk offset changed](by-rule/vtable-thunk-offset-changed.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `param_default_value_changed`, `param_default_value_removed` |
 | **Source files** | `examples/case32_param_defaults/` |
+| **Rule family** | [`param-defaults`](by-rule/param-defaults.md) |
 
 **Category:** C++ Defaults | **Verdict:** 🟠 API_BREAK (binary compatible)
 
@@ -162,4 +164,4 @@ echo "exit: $?"   # → 0 (no binary ABI change; abidiff doesn't read header
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Param defaults](by-rule/param-defaults.md)._

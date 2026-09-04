@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | ✅ **NO_CHANGE** |
 | **Category** | No Change |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case04_no_change/` |
+| **Rule family** | [`no-change`](by-rule/no-change.md) |
 
 **Category:** Symbol API | **Verdict:** ✅ NO_CHANGE
 
@@ -106,4 +108,4 @@ echo "exit: $?"   # → 0
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: No change](by-rule/no-change.md)._

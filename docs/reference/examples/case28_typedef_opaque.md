@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_became_opaque` |
 | **Source files** | `examples/case28_typedef_opaque/` |
+| **Rule family** | [`typedef-opaque`](by-rule/typedef-opaque.md) |
 
 **Category:** Type System | **Verdict:** 🔴 BREAKING
 
@@ -164,4 +166,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Typedef opaque](by-rule/typedef-opaque.md)._

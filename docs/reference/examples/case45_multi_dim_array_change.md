@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_field_type_changed`, `type_size_changed` |
 | **Source files** | `examples/case45_multi_dim_array_change/` |
+| **Rule family** | [`multi-dim-array-change`](by-rule/multi-dim-array-change.md) |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
@@ -124,4 +126,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Multi dim array change](by-rule/multi-dim-array-change.md)._

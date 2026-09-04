@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `examples/case38_virtual_methods/` |
+| **Rule family** | [`virtual-methods`](by-rule/virtual-methods.md) |
 
 **Category:** C++ Virtual / Deleted | **Verdict:** 🔴 BREAKING
 
@@ -168,4 +170,4 @@ echo "exit: $?"   # → 12 (ABI change + breaking)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual methods](by-rule/virtual-methods.md)._

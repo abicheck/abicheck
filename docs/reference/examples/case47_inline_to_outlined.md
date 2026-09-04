@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case47_inline_to_outlined/` |
+| **Rule family** | [`inline-function-outlined`](by-rule/inline-function-outlined.md) — Duplicate of [case16_inline_to_non_inline](case16_inline_to_non_inline.md) |
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE
 
@@ -133,4 +135,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inline function outlined](by-rule/inline-function-outlined.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `examples/case09_cpp_vtable/` |
+| **Rule family** | [`cpp-vtable`](by-rule/cpp-vtable.md) |
 
 **Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
@@ -131,4 +133,4 @@ echo "exit: $?"   # → 4
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Cpp vtable](by-rule/cpp-vtable.md)._

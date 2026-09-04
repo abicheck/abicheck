@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `lto_mode_changed` |
 | **Source files** | `examples/case154_lto_mode_flip/` |
+| **Rule family** | [`lto-mode-flip`](by-rule/lto-mode-flip.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -124,4 +126,4 @@ localizes the cause to the LTO flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Lto mode flip](by-rule/lto-mode-flip.md)._

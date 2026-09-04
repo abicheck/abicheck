@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_params_changed`, `func_return_changed` |
 | **Source files** | `examples/case46_pointer_chain_type_change/` |
+| **Rule family** | [`pointer-chain-type-change`](by-rule/pointer-chain-type-change.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -123,4 +125,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer chain type change](by-rule/pointer-chain-type-change.md)._

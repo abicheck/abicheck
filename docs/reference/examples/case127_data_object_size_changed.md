@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `symbol_size_changed` |
 | **Source files** | `examples/case127_data_object_size_changed/` |
+| **Rule family** | [`data-object-size-changed`](by-rule/data-object-size-changed.md) |
 
 **Category:** Symbol / Data Layout | **Verdict:** 🔴 BREAKING
 
@@ -128,4 +130,4 @@ distinguishes them.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Data object size changed](by-rule/data-object-size-changed.md)._

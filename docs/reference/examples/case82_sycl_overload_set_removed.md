@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `sycl_overload_set_removed` |
 | **Source files** | `examples/case82_sycl_overload_set_removed/` |
+| **Ecosystem** | [SYCL](by-ecosystem/sycl.md) |
+| **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md), [`exported-type-removed`](by-rule/exported-type-removed.md), [`overload-set-removed`](by-rule/overload-set-removed.md) |
 
 **Category:** Overload-Family ABI | **Verdict:** 🔴 BREAKING
 
@@ -137,4 +140,4 @@ typically 30-80 symbols.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md)._

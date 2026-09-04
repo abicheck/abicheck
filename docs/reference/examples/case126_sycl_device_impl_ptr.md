@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `struct_size_changed` |
 | **Source files** | `examples/case126_sycl_device_impl_ptr/` |
+| **Ecosystem** | [SYCL](by-ecosystem/sycl.md) |
+| **Related rules** | [`public-class-representation-changed`](by-rule/public-class-representation-changed.md), [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +145,4 @@ trace at all, which `abidiff` cannot see regardless of flags.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `public_api_internal_dependency_added` |
 | **Source files** | `examples/case190_public_inline_function_references_internal_constant/` |
+| **Rule family** | [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) — Variant (specialization) of [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) |
 
 **Category:** Risk (Source Graph) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -135,4 +137,4 @@ abicheck's build-source evidence layers (ADR-028 through ADR-033).
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Public api gains internal dependency](by-rule/public-api-gains-internal-dependency.md)._

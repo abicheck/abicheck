@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `hidden_friend_removed` |
 | **Source files** | `examples/case96_hidden_friend_removed/` |
+| **Rule family** | [`hidden-friend-removed`](by-rule/hidden-friend-removed.md) |
 
 **Category:** Source API contract | **Verdict:** 🟠 API_BREAK
 
@@ -136,4 +138,4 @@ This case is a pure header/API-contract break, which only an L2
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Hidden friend removed](by-rule/hidden-friend-removed.md)._

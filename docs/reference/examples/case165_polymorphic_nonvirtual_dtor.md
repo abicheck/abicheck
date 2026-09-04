@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `polymorphic_type_non_virtual_dtor` |
 | **Source files** | `examples/case165_polymorphic_nonvirtual_dtor/` |
+| **Rule family** | [`polymorphic-nonvirtual-dtor`](by-rule/polymorphic-nonvirtual-dtor.md) |
 
 **Category:** API Design / Latent UB | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -140,4 +142,4 @@ header.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Polymorphic nonvirtual dtor](by-rule/polymorphic-nonvirtual-dtor.md)._

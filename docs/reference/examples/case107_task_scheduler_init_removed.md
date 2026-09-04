@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed`, `type_removed` |
 | **Source files** | `examples/case107_task_scheduler_init_removed/` |
+| **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
+| **Related rules** | [`compat-addition`](by-rule/compat-addition.md), [`exported-function-removed`](by-rule/exported-function-removed.md), [`exported-type-removed`](by-rule/exported-type-removed.md) |
 
 **Category:** Class Removal | **Verdict:** 🔴 BREAKING
 
@@ -131,4 +134,4 @@ to either pin to classic TBB or rewrite its initialization path.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._

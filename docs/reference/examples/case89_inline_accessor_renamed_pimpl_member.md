@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `inline_body_references_renamed_member` |
 | **Source files** | `examples/case89_inline_accessor_renamed_pimpl_member/` |
+| **Rule family** | [`inline-accessor-renamed-pimpl-member`](by-rule/inline-accessor-renamed-pimpl-member.md) |
 
 **Category:** Pimpl ABI | **Verdict:** 🔴 BREAKING
 
@@ -158,4 +160,4 @@ exit-code comparison on a related layout-change finding.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline accessor renamed pimpl member](by-rule/inline-accessor-renamed-pimpl-member.md)._

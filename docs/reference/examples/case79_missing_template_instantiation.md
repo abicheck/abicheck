@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `instantiation_missing_from_binary` |
 | **Source files** | `examples/case79_missing_template_instantiation/` |
+| **Rule family** | [`missing-template-instantiation`](by-rule/missing-template-instantiation.md) |
 
 **Category:** Header-vs-Binary Parity | **Verdict:** 🔴 BREAKING
 
@@ -138,4 +140,4 @@ reproduces with a minimal two-instantiation example.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Missing template instantiation](by-rule/missing-template-instantiation.md)._

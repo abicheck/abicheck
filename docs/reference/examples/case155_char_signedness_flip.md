@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `char_signedness_changed` |
 | **Source files** | `examples/case155_char_signedness_flip/` |
+| **Rule family** | [`char-signedness-flip`](by-rule/char-signedness-flip.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -127,4 +129,4 @@ directly localizes the cause to the signedness flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Char signedness flip](by-rule/char-signedness-flip.md)._

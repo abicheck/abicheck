@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `type_field_type_changed` |
 | **Source files** | `examples/case30_field_qualifiers/` |
+| **Rule family** | [`field-qualifiers`](by-rule/field-qualifiers.md) |
 | **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy-escalated API break)
@@ -161,4 +163,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field qualifiers](by-rule/field-qualifiers.md)._

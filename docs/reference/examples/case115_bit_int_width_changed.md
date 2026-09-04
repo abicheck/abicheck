@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `bit_int_width_changed` |
 | **Source files** | `examples/case115_bit_int_width_changed/` |
+| **Rule family** | [`bit-int-width-changed`](by-rule/bit-int-width-changed.md) |
 
 **Category:** Modern C/C++ Contract | **Verdict:** 🔴 BREAKING
 
@@ -166,4 +168,4 @@ an abicheck-specific `ChangeKind`.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Bit int width changed](by-rule/bit-int-width-changed.md)._
