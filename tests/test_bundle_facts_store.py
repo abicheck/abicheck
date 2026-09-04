@@ -550,6 +550,39 @@ class TestManifestDecodeRejectsCorruption:
         with pytest.raises(ValueError, match="more than once"):
             _manifest_document_from_storage(corrupted)
 
+    def test_rejects_an_oversized_alias_array_by_node_count(self) -> None:
+        """A JSON array of millions of short strings can stay well under
+        the aggregate byte budget while still costing `json.loads()` one
+        allocation per element -- a node-count amplification a byte-size
+        charge alone cannot see (Codex review)."""
+        from abicheck.bundle_facts_store import _decode_aliases
+        from abicheck.storage.json_budget import JsonContainerBudgetExceeded
+
+        huge_alias_array = json.dumps(["a"] * 2_000_000)
+
+        with pytest.raises(JsonContainerBudgetExceeded):
+            _decode_aliases(huge_alias_array)
+
+
+class TestWriteBundleFactsPackageValidatesManifestStructure:
+    def test_refuses_a_template_entry_with_no_instantiations(self) -> None:
+        """`ManifestEntry`'s own dataclass construction doesn't enforce
+        `manifest_from_dict`'s "a template entry needs a non-empty
+        instantiations list" constraint -- a directly-constructed
+        `InstantiationManifest` violating it must be refused here, not
+        written successfully and only fail `read_bundle_facts_package`'s
+        own decode later (Codex review)."""
+        invalid_manifest = InstantiationManifest(
+            entries=(ManifestEntry(template="acme::train_ops", instantiations=()),)
+        )
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so")}, manifest=invalid_manifest
+        )
+        store = InMemoryObjectStore()
+
+        with pytest.raises(ValueError, match="instantiations"):
+            write_bundle_facts_package(facts, store=store)
+
 
 class TestReadBundleFactsPackageSectionCrossCheck:
     def test_refuses_an_artifact_carrying_an_unadvertised_section(self) -> None:

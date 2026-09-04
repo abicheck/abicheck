@@ -96,6 +96,10 @@ from .bundle_manifest import InstantiationManifest, manifest_from_dict, manifest
 from .serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 from .storage.bundle_archive_json_guard import bounded_encode_utf8
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
+from .storage.json_budget import (
+    DEFAULT_MAX_JSON_CONTAINER_NODES,
+    check_json_container_budget,
+)
 from .storage.package import (
     ArtifactRef,
     ObjectRef,
@@ -146,7 +150,20 @@ def _encode_aliases(aliases: tuple[str, ...]) -> str:
 
 
 def _decode_aliases(encoded: str) -> tuple[str, ...]:
-    """The exact inverse of `_encode_aliases`."""
+    """The exact inverse of `_encode_aliases`.
+
+    `check_json_container_budget` runs first: `encoded`'s own byte length
+    is already charged against `DEFAULT_MAX_BUNDLE_DECODED_BYTES` by the
+    caller, but an untrusted array of millions of short strings can stay
+    well under that byte budget while still costing `json.loads()` (and
+    the `tuple(decoded)` copy below) one Python-object allocation per
+    element -- a node-count amplification a byte-size charge alone cannot
+    see (Codex review). The same pre-scan `bundle_facts.py`'s own G40
+    archive uses for the identical reason, applied here before decoding.
+    """
+    check_json_container_budget(
+        encoded.encode("utf-8"), DEFAULT_MAX_JSON_CONTAINER_NODES
+    )
     decoded = json.loads(encoded)
     if not isinstance(decoded, list) or not all(
         isinstance(item, str) for item in decoded
@@ -405,6 +422,18 @@ def write_bundle_facts_package(
 
     project_sections: dict[str, ObjectRef] = {}
     if facts.manifest is not None:
+        # Round-trip-validate the manifest structurally before ever storing
+        # it: `manifest_from_dict` enforces constraints (e.g. a template
+        # entry needs a non-empty `instantiations` list) that `ManifestEntry`
+        # 's own dataclass construction does not, so a directly-constructed
+        # `InstantiationManifest` violating one could otherwise write
+        # successfully here and only fail `read_bundle_facts_package`'s own
+        # `manifest_from_dict` call later (Codex review). Reusing
+        # `manifest_to_dict`/`manifest_from_dict` -- the same pair the
+        # reader's own decode ultimately goes through, on the plain (not
+        # storage-transformed) shape -- rather than re-deriving their
+        # constraints here.
+        manifest_from_dict(manifest_to_dict(facts.manifest))
         manifest_document = _manifest_document_for_storage(facts.manifest)
         decoded_bytes_so_far = _charge_document_bytes(
             manifest_document,
