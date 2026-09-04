@@ -278,6 +278,57 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="manifest"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 
+    def test_a_float_manifest_entry_symbol_is_coerced_to_a_string(self) -> None:
+        """`_parse_manifest_entry` unconditionally coerces `symbol` via
+        `str(...)` -- a raw non-string value (e.g. the float `1.0`) must be
+        stored as that exact coerced string, not passed through
+        unvalidated: `SectionDTO` canonicalization would otherwise silently
+        rewrite `1.0` to the int `1`, so a later `str(1)` reads `"1"` where
+        the canonical parser itself would have read `"1.0"` (Codex review,
+        fresh evidence)."""
+        doc = _bundle_document(manifest={"provides": [{"symbol": 1.0}]})
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["manifest"]["provides"] == [{"symbol": "1.0"}]
+
+    def test_a_falsey_manifest_entry_library_is_dropped(self) -> None:
+        """`_parse_manifest_entry`'s own
+        `str(raw["library"]) if raw.get("library") else None` -- a falsey
+        `library` (e.g. `0`) means "no library" to the canonical parser,
+        never an explicit `"0"`."""
+        doc = _bundle_document(manifest={"provides": [{"symbol": "a", "library": 0}]})
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert "library" not in roundtrip["manifest"]["provides"][0]
+
+    def test_a_truthy_non_string_manifest_entry_library_is_coerced(self) -> None:
+        doc = _bundle_document(manifest={"provides": [{"symbol": "a", "library": 7}]})
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["manifest"]["provides"][0]["library"] == "7"
+
+    def test_a_float_template_instantiation_value_is_coerced_to_a_string(
+        self,
+    ) -> None:
+        """`_parse_template_instantiations` unconditionally coerces every
+        instantiation key/value via `str(...)` -- the identical
+        canonicalization risk as a bare `symbol`/`pattern`/`template`
+        (Codex review, fresh evidence)."""
+        doc = _bundle_document(
+            manifest={
+                "provides": [{"template": "t", "instantiations": [{"Float": 1.0}]}]
+            }
+        )
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["manifest"]["provides"][0]["instantiations"] == [
+            {"Float": "1.0"}
+        ]
+
     def test_export_is_the_exact_inverse(self) -> None:
         doc = _bundle_document()
         store = InMemoryObjectStore()

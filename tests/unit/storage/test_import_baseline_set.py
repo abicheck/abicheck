@@ -263,6 +263,28 @@ class TestImportBaselineSet:
         metadata, _snapshots = export_baseline_set(manifest, store=store)
         assert metadata[key] == ""
 
+    def test_a_float_fact_set_producer_is_coerced_like_the_canonical_reader(
+        self,
+    ) -> None:
+        """`_evidence_incompatibility` (`buildsource.baseline_set`) reads
+        `fact_set['producer']` and coerces it via `str(value or "")` --
+        the identical nested-identity canonicalization risk
+        `project_ref`/`profile` already guard against, one level deeper
+        (Codex review, fresh evidence)."""
+        doc = _manifest_document(fact_set={"producer": 1.0, "depth": "s4"})
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert metadata["fact_set"]["producer"] == "1.0"
+        assert metadata["fact_set"]["depth"] == "s4"
+
+    def test_a_non_mapping_fact_set_round_trips_unchanged(self) -> None:
+        doc = _manifest_document(fact_set="not-a-mapping")
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert metadata["fact_set"] == "not-a-mapping"
+
     def test_export_rejects_an_unknown_variant_id(self) -> None:
         doc = _manifest_document()
         store = InMemoryObjectStore()

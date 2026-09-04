@@ -135,6 +135,41 @@ _STRICT_INT_METADATA_KEYS = frozenset({"snapshot_schema", "baseline_generation"}
 #: evidence beyond the two `_STRICT_INT_METADATA_KEYS` fields.
 _STRING_METADATA_KEYS = frozenset({"project_ref", "profile"})
 
+#: `fact_set`'s own nested `"producer"` key -- unlike every other
+#: `fact_set` key (opaque, never consulted by any resolve/freshness
+#: decision), `_evidence_incompatibility`
+#: (`buildsource.baseline_set`) reads exactly this one key and coerces it
+#: the identical `str(value or "")` way `project_ref`/`profile` are
+#: coerced. A non-string `producer` (e.g. a JSON float) must be normalized
+#: the same way before `fact_set` is stored as a whole, for the identical
+#: "storage canonicalization must not change what string the canonical
+#: reader would have produced" reason `_STRING_METADATA_KEYS` exists
+#: (Codex review, fresh evidence: a nested decision-bearing identity the
+#: earlier top-level-only fix did not reach).
+_FACT_SET_STRING_KEYS = frozenset({"producer"})
+
+
+def _coerced_fact_set(value: Any) -> Any:
+    """*value* (the raw `fact_set` mapping), with `_FACT_SET_STRING_KEYS`
+    coerced to `str` in place -- see that constant's own docstring. Not a
+    mapping at all (a shape `load_baseline_manifest` itself treats as
+    "unstated", `fact_set if isinstance(fact_set, dict) else None`) is
+    returned unchanged; this adapter's own `_STRICT_INT_METADATA_KEYS`
+    handling already establishes dropping (not raising on) a value the
+    canonical reader treats as unstated, but `fact_set` itself is not one
+    of those keys -- an entirely malformed `fact_set` still round-trips
+    unchanged, the same "not decoded, only partitioned" contract this
+    package's other sections follow, since nothing here reads it except
+    the one nested key that actually feeds a decision."""
+    if not isinstance(value, Mapping):
+        return value
+    coerced = dict(value)
+    for key in _FACT_SET_STRING_KEYS:
+        if key in coerced and not isinstance(coerced[key], str):
+            coerced[key] = str(coerced[key]) if coerced[key] else ""
+    return coerced
+
+
 #: `abicheck.buildsource.baseline_set.SUPPORTED_MANIFEST_VERSIONS`, duplicated
 #: for the identical layering reason `import_bundle_facts.py`'s own
 #: duplicated constants give: `storage/` may not import `buildsource/` (a
@@ -329,6 +364,8 @@ def import_baseline_set(
             # canonicalization change what string the canonical reader
             # would have produced.
             value = str(value) if value else ""
+        elif key == "fact_set":
+            value = _coerced_fact_set(value)
         metadata_payload[key] = value
     metadata_dto = baseline_set_metadata_to_dto(metadata_payload)
     metadata_ref = ObjectRef(

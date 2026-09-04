@@ -197,19 +197,26 @@ def _validated_library_filenames(raw: Any) -> dict[str, str]:
     return validated
 
 
-def _validated_manifest_entry(raw: Any) -> None:
+def _validated_manifest_entry(raw: Any) -> dict[str, Any]:
     """One `bundle_facts_document['manifest']['provides']` entry, checked
     against the same structural rules `bundle_manifest
     ._validate_manifest_entry_shape`/`_parse_manifest_entry`/
     `_parse_template_instantiations` enforce -- duplicated here for the
     identical layering reason `_validated_manifest`'s own docstring gives
-    (`bundle_manifest.py` is a flat-root module `storage/` may not import).
-    Unlike that owner's functions, this only *validates* the raw shape; it
-    never decodes to a `ManifestEntry` -- the same "not decoded, only
-    partitioned" contract every other section here follows (Codex review:
-    an earlier version of this module validated only the outer `manifest`
-    container and let a malformed `provides` entry, e.g. `null` or `{}`,
-    round-trip unchecked)."""
+    (`bundle_manifest.py` is a flat-root module `storage/` may not import)
+    -- and returns a normalized copy with every decision-bearing identity
+    value (`symbol`/`pattern`/`template`, `library`, and each template
+    instantiation's own key/value) coerced to `str` the identical way
+    `_parse_manifest_entry`/`_parse_template_instantiations` themselves
+    unconditionally coerce them. A raw non-string value here (e.g. the
+    JSON float `1.0`) must be stored as that exact coerced string, not
+    passed through unvalidated: `SectionDTO` canonicalization could
+    otherwise silently rewrite it in a way that changes what string the
+    canonical reader would have produced (`1.0` -> int `1` -> `str(1)` ==
+    `"1"`, vs. the canonical parser's own unconditional `str(1.0)` ==
+    `"1.0"`) -- Codex review, fresh evidence beyond the entry-shape-only
+    finding this same function already fixed (an earlier version validated
+    the shape but stored every value verbatim)."""
     if not isinstance(raw, Mapping):
         raise ValueError(
             "bundle_facts_document['manifest']['provides'] entry must be a "
@@ -227,7 +234,19 @@ def _validated_manifest_entry(raw: Any) -> None:
             "'optional_provider' must be a boolean, not "
             f"{raw['optional_provider']!r}"
         )
-    if shape_keys[0] == "template":
+    shape = shape_keys[0]
+    normalized = dict(raw)
+    normalized[shape] = str(raw[shape])
+    # `library = str(raw["library"]) if raw.get("library") else None` --
+    # `_parse_manifest_entry`'s own coercion: a truthy value is stringified,
+    # a falsey one (including an absent key) means "no library", dropped
+    # here rather than stored as an explicit `null`/`""` the canonical
+    # parser itself never produces.
+    if raw.get("library"):
+        normalized["library"] = str(raw["library"])
+    else:
+        normalized.pop("library", None)
+    if shape == "template":
         instantiations = raw.get("instantiations", [])
         if not isinstance(instantiations, list) or not instantiations:
             raise ValueError(
@@ -240,23 +259,27 @@ def _validated_manifest_entry(raw: Any) -> None:
                 f"entry's 'instantiations' must be a list of mappings: "
                 f"{raw!r}"
             )
+        normalized["instantiations"] = [
+            {str(k): str(v) for k, v in inst.items()} for inst in instantiations
+        ]
+    return normalized
 
 
 def _validated_manifest(raw: Any) -> Any:
     """*raw*, checked against the shape
     `bundle_manifest.manifest_from_dict` requires -- a mapping with a
-    list-valued `"provides"` key, each entry itself validated via
-    `_validated_manifest_entry` -- `None`/absent means "no instantiation
-    manifest was captured", tolerated the same way that function tolerates
-    it.
+    list-valued `"provides"` key, each entry itself validated and
+    normalized via `_validated_manifest_entry` -- `None`/absent means "no
+    instantiation manifest was captured", tolerated the same way that
+    function tolerates it.
 
     A `manifest` that passes this check but still fails
-    `manifest_from_dict`'s own decode (e.g. a `library` field of a type
-    that function's own `str(...)` coercion happens to tolerate anyway)
-    still round-trips through this adapter unchanged -- the same "not
-    decoded, only partitioned" contract `legacy_section_to_dto`'s own
-    docstring states for every other section here; only structural
-    rejections `manifest_from_dict` actually raises on are replicated.
+    `manifest_from_dict`'s own decode still round-trips through this
+    adapter unchanged -- the same "not decoded, only partitioned" contract
+    `legacy_section_to_dto`'s own docstring states for every other section
+    here; only structural rejections `manifest_from_dict` actually raises
+    on are replicated, and only the specific decision-bearing values that
+    function unconditionally coerces are normalized.
     """
     if raw is None:
         return None
@@ -265,9 +288,10 @@ def _validated_manifest(raw: Any) -> Any:
             "bundle_facts_document['manifest'] must be a mapping with a "
             f"list-valued 'provides' key, not {raw!r}"
         )
-    for entry in raw["provides"]:
-        _validated_manifest_entry(entry)
-    return raw
+    normalized_provides = [
+        _validated_manifest_entry(entry) for entry in raw["provides"]
+    ]
+    return {**raw, "provides": normalized_provides}
 
 
 def import_bundle_facts(
