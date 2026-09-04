@@ -70,7 +70,6 @@ from ....cli_options import (
     set_input_options,
     severity_options,
     two_sided_input_options,
-    variant_kwargs_from_context,
     variant_options,
     verbose_option,
 )
@@ -187,7 +186,6 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         )
     from ....cli_compare_release import compare_release_cmd
 
-    kwargs.update(variant_kwargs_from_context(ctx))  # A1.7
     assert compare_release_cmd.callback is not None
     try:
         compare_release_cmd.callback(**kwargs)

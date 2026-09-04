@@ -370,6 +370,33 @@ def materialize_release_variant_artifacts(
             f"{sorted(summary.variant_ids)})"
         )
     variant = read_variant_ref(root_path, variant_id)
+    # `read_variant_artifact_pair`'s own docstring names this exact gap as
+    # deliberately deferred: it validates the "declared" direction (every id
+    # `variant.artifact_ids` names is itself published and self-consistent)
+    # but not "owned" (a *different* published artifact whose own
+    # `variant_id` also names this variant, yet `variant.artifact_ids`
+    # simply omits it). Left unchecked, a stale or hand-edited package could
+    # omit exactly the one artifact carrying a real ABI break from
+    # `variant.artifact_ids`, and this function would silently compare
+    # every *other* artifact clean -- excluding the break from the release
+    # gate entirely rather than raising (Codex review, security finding).
+    # This is the real caller `read_variant_artifact_pair`'s docstring
+    # names as the reason to eventually close that gap: reading every
+    # artifact ref in the package to check the reverse direction.
+    owned_elsewhere = sorted(
+        artifact_id
+        for artifact_id in summary.artifact_ids
+        if artifact_id not in variant.artifact_ids
+        and read_artifact_ref(root_path, artifact_id).variant_id == variant_id
+    )
+    if owned_elsewhere:
+        raise ValueError(
+            f"{root_path} variant {variant_id!r} omits artifact_id(s) "
+            f"{owned_elsewhere} from its own artifact_ids even though each "
+            f"names {variant_id!r} as its own variant_id -- the package's "
+            "membership graph is self-contradictory (refusing to silently "
+            "exclude a real library from the comparison)"
+        )
 
     dest_root_path = Path(dest_root)
     dest_root_path.mkdir(parents=True, exist_ok=True)

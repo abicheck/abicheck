@@ -438,6 +438,24 @@ def compare_release_cmd(
         resolve_package_debug_info as resolve_debug_info,
     )
 
+    # ADR-062 A1.7: --old-variant/--new-variant are declared on `compare`
+    # itself (`cli_options.variant_options`, `expose_value=False` + a
+    # `ctx.meta` stash) rather than on this unregistered internal command,
+    # so a caller reaching this function via `.callback(**kwargs)` -- every
+    # real caller -- never has them in `kwargs` at all; recovered here from
+    # the still-current Click context instead, so `frontends/cli/commands/
+    # compare.py`'s own already-capped `_dispatch_release_compare` doesn't
+    # have to grow to inject them (Codex review: keep the variant-plumbing
+    # responsibility off that file's own line budget).
+    if old_variant is None and new_variant is None:
+        from .cli_options import variant_kwargs_from_context
+
+        ctx = click.get_current_context(silent=True)
+        if ctx is not None:
+            variant_kwargs = variant_kwargs_from_context(ctx)
+            old_variant = variant_kwargs["old_variant"]
+            new_variant = variant_kwargs["new_variant"]
+
     _setup_verbosity(verbose)
 
     # CLI cleanup phase two, PR E: shared with `compare` so it can't drift.

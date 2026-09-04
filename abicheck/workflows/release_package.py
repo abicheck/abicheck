@@ -39,6 +39,7 @@ classified module -- `frontends.may_import` lists `workflows`, not
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -155,5 +156,37 @@ def resolve_release_package_map(
                 "be distinguishable for compare-release's matching logic "
                 "to tell them apart"
             )
+        # `_compare_one_library`'s own `entry["library"] = old_path.name`
+        # publishes this directory's basename as the release report's
+        # display name for this library (JSON/Markdown/JUnit, per-library
+        # filenames, removal warnings) -- renamed here from the artifact_id
+        # `materialize_release_variant_artifacts` names it for collision
+        # safety (an opaque hash) to something a reader can actually
+        # attribute a finding to, once `key`'s own uniqueness is already
+        # settled above. Still suffixed with a short `artifact_id` prefix,
+        # so a `key` that only differs from another by a character
+        # `_DISPLAY_DIRNAME_UNSAFE` collapses (e.g. a `/` vs `:`) still
+        # cannot collide on disk (Codex review).
+        display_dir = sub_dir.with_name(_display_dirname(key, artifact_id))
+        if display_dir != sub_dir:
+            sub_dir.rename(display_dir)
+            sub_dir = display_dir
         result[key] = sub_dir
     return result
+
+
+#: Characters refused as-is in a materialized sub-package's display
+#: directory name -- deliberately looser than `storage.ref_ids.safe_ref_id`
+#: (which `artifact_id`/`variant_id` must satisfy): this name is never
+#: itself an on-disk identity anything reads back, only a release report's
+#: display string riding along on a path component, so it only needs to
+#: avoid a path separator or traversal segment, not full Windows-reserved-
+#: name portability.
+_DISPLAY_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def _display_dirname(key: str, artifact_id: str) -> str:
+    sanitized = _DISPLAY_DIRNAME_UNSAFE.sub("_", key).strip(". ")[:80]
+    if not sanitized or sanitized in (".", ".."):
+        sanitized = "lib"
+    return f"{sanitized}-{artifact_id[:12]}"

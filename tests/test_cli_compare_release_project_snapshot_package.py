@@ -133,10 +133,11 @@ def _library_outcomes(release_json: str) -> dict[str, _Outcome]:
     by the discovered filename (a live directory's own literal
     `old_path.name`, e.g. ``liba.so.json``). Only meaningful for a *live*
     directory operand -- a stored-package operand's own materialized
-    sub-package directory is named by the artifact's opaque `artifact_id`
-    (`project_snapshot_legacy.materialize_release_variant_artifacts`'s own
-    docstring: collision-safety, not a display name), so use
-    `_sorted_outcomes` instead to compare a stored side against anything."""
+    sub-package directory basename (`workflows.release_package.
+    resolve_release_package_map`) is a sanitized display form of the
+    canonical match key plus a short `artifact_id` suffix for guaranteed
+    uniqueness, not the bare canonical key itself, so use `_sorted_outcomes`
+    instead to compare a stored side against anything."""
     doc = json.loads(release_json)
     return {
         str(entry["library"]).removesuffix(".json"): _outcome_tuple(entry)
@@ -294,7 +295,9 @@ class TestStoredBundleAnalysisSeesElfMetadata:
         from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 
         def elf_snap(name: str, meta: ElfMetadata) -> AbiSnapshot:
-            return AbiSnapshot(library=name, version="1.0", elf=meta, from_headers=False)
+            return AbiSnapshot(
+                library=name, version="1.0", elf=meta, from_headers=False
+            )
 
         old_libs = {
             "libcore.so": elf_snap(
@@ -319,7 +322,9 @@ class TestStoredBundleAnalysisSeesElfMetadata:
         new_libs = {
             "libcore.so": elf_snap(
                 "libcore.so",
-                ElfMetadata(soname="libcore.so.1", symbols=[ElfSymbol(name="core_add")]),
+                ElfMetadata(
+                    soname="libcore.so.1", symbols=[ElfSymbol(name="core_add")]
+                ),
             ),
             "libalgo.so": old_libs["libalgo.so"],  # unchanged
         }
@@ -350,10 +355,111 @@ class TestStoredBundleAnalysisSeesElfMetadata:
         kinds = {f.kind for f in result.bundle_findings}
         assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
         finding = next(
-            f for f in result.bundle_findings if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
         )
         assert finding.symbol == "core_mul"
         assert finding.consumer_library == "libalgo.so"
+
+
+class TestReverseMembershipValidation:
+    """Codex review, fresh evidence after the collision/symlink/architecture
+    fixes: `read_variant_artifact_pair` only validates the "declared"
+    membership direction (every id `variant.artifact_ids` names is itself
+    published and self-consistent), never the reverse "owned" direction --
+    a *different* published artifact whose own `variant_id` also names this
+    variant, yet `variant.artifact_ids` simply omits it. A stale/hand-edited
+    package could silently exclude exactly the one library carrying a real
+    ABI break from the comparison. `PackageManifest.__post_init__` already
+    rejects this shape when a manifest is *constructed* in-memory (it's the
+    only way a real writer could produce one), so this fixture writes a
+    valid package first and then hand-edits its published
+    `refs/variants/<id>.json` on disk -- simulating a stale/corrupted
+    package the same way a real one could arise (a partial write, a
+    hand-edited file), not something `write_project_manifest` itself would
+    ever emit."""
+
+    def test_omitted_artifact_with_matching_variant_id_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        import json
+
+        from abicheck.model import Function, Visibility
+        from abicheck.project_snapshot_legacy import (
+            materialize_release_variant_artifacts,
+        )
+        from abicheck.project_snapshot_store import (
+            DirectoryObjectStore,
+            write_project_manifest,
+        )
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.canonical import canonical_json
+        from abicheck.storage.import_v1 import import_legacy_snapshot
+        from abicheck.storage.package import PackageManifest, VariantRef
+
+        root = tmp_path / "pkg"
+        store = DirectoryObjectStore(root)
+        liba = AbiSnapshot(
+            library="liba.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        libb = AbiSnapshot(library="libb.so", version="1.0")
+        from abicheck.serialization import snapshot_to_dict
+
+        m_a = import_legacy_snapshot(
+            snapshot_to_dict(liba),
+            store=store,
+            artifact_id="a1",
+            max_known_schema_version=SCHEMA_VERSION,
+            variant_id="v1",
+        )
+        m_b = import_legacy_snapshot(
+            snapshot_to_dict(libb),
+            store=store,
+            artifact_id="a2",
+            max_known_schema_version=SCHEMA_VERSION,
+            variant_id="v1",
+        )
+        (art_a,) = m_a.artifact_refs
+        (art_b,) = m_b.artifact_refs
+        # First write a genuinely valid package (both artifacts declared).
+        good_variant = VariantRef(variant_id="v1", artifact_ids=("a1", "a2"))
+        write_project_manifest(
+            root,
+            PackageManifest(
+                versions=m_a.versions,
+                variant_refs=(good_variant,),
+                artifact_refs=(art_a, art_b),
+            ),
+        )
+        # Then hand-corrupt the published variant ref to omit "a2" -- which
+        # still names "v1" as its own variant_id (its refs/artifacts/a2.json
+        # is untouched) -- simulating a stale/partial write.
+        variant_ref_path = root / "refs" / "variants" / "v1.json"
+        data = json.loads(variant_ref_path.read_text())
+        data["artifact_ids"] = ["a1"]
+        variant_ref_path.write_text(canonical_json(data, indent=2))
+
+        try:
+            materialize_release_variant_artifacts(
+                root, variant_id="v1", dest_root=tmp_path / "resolved"
+            )
+        except ValueError as exc:
+            assert "a2" in str(exc)
+        else:
+            raise AssertionError(
+                "materialize_release_variant_artifacts silently excluded "
+                "artifact 'a2' instead of raising"
+            )
 
 
 class TestVariantSelection:
