@@ -2103,12 +2103,12 @@
     },
     {
       "path": "tests/test_scan_artifact_set.py",
-      "baseline_lines": 1407,
+      "baseline_lines": 1428,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +5 lines (CLI cleanup phase two, PR J): the test asserting --bundle-system-providers required --artifact-set was rewritten to assert the flag itself is gone (No such option), since there is no longer a per-run 'supplied without --artifact-set' state to reject. +34 lines (2026-09-04, Codex review): added test_cwd_abicheck_yml_bundle_block_reaches_scan_request, proving --artifact-set now discovers .abicheck.yml's bundle: block cwd-upward (not just from --build-config/--sources) after a review round found the config was silently never read in that case.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +5 lines (CLI cleanup phase two, PR J): the test asserting --bundle-system-providers required --artifact-set was rewritten to assert the flag itself is gone (No such option), since there is no longer a per-run 'supplied without --artifact-set' state to reject. +34 lines (2026-09-04, Codex review): added test_cwd_abicheck_yml_bundle_block_reaches_scan_request, proving --artifact-set now discovers .abicheck.yml's bundle: block cwd-upward (not just from --build-config/--sources) after a review round found the config was silently never read in that case. +21 lines (2026-09-04, second Codex review round): added test_malformed_cwd_bundle_block_is_rejected_not_silently_dropped, pinning _discover_scan_project_config's new require_parseable=True behavior -- a malformed ambient bundle: block now fails loud (usage error) instead of silently degrading to 'no providers declared', since PR J removed --bundle-system-providers' CLI-flag fallback entirely.",
       "review_by": "2026-11-30"
     },
     {

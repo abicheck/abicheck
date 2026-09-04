@@ -339,6 +339,27 @@ class TestArtifactSetCompileContextForwarding:
         assert result.exit_code == 0, result.output
         assert captured["req"].bundle_system_providers == ("libvendor.so.1",)
 
+    def test_malformed_cwd_bundle_block_is_rejected_not_silently_dropped(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: bundle: has no CLI-flag fallback any more (PR J
+        # removed --bundle-system-providers), so a malformed ambient config
+        # must fail loud, not silently read as "no providers declared".
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        (tmp_path / ".abicheck.yml").write_text(
+            "bundle:\n  system_providers: 123\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "cannot parse build config" in result.output
+
 
 class TestArtifactSetSourceMethodSelection:
     """P2 regression (Codex review): omitting --depth must opt an

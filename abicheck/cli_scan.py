@@ -838,7 +838,7 @@ def _run_artifact_set(
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
     # PR J: --bundle-system-providers -> .abicheck.yml bundle: (Codex review).
-    _, _bundle_cfg, _ = _discover_scan_project_config(build_config, sources, None, allow_cwd_discovery=True)
+    _, _bundle_cfg, _ = _discover_scan_project_config(build_config, sources, None, allow_cwd_discovery=True, require_parseable=True)
     bsp = tuple(_bundle_cfg.bundle_system_providers) if _bundle_cfg else ()
 
     req = ScanRequest(
@@ -1050,18 +1050,19 @@ def _resolve_scan_evaluation_config(
 
 def _discover_scan_project_config(
     build_config: Path | None, sources: Path | None, against: Path | None,
-    *, allow_cwd_discovery: bool = False
+    *, allow_cwd_discovery: bool = False, require_parseable: bool = False
 ) -> tuple[Path | None, Any, str | None]:
     """Resolve the project config for this scan, with the digest that parsed it.
 
     Returns ``(cfg_path, project_cfg, sha256)``. An explicitly-bound
     ``--build-config`` that cannot be parsed is a usage error; an
     auto-discovered one is best-effort and degrades to a warning with
-    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention.
-    The cwd-upward fallback runs only when *against* is given (a plain
-    audit never needs severity/scope/suppression) or *allow_cwd_discovery*
-    opts in -- the artifact-set audit path does this for ``bundle:`` alone
-    (PR J, Codex review), with no other audit-mode consumer to widen.
+    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention
+    -- unless *require_parseable* (Codex review: ``bundle:`` has no CLI-flag
+    fallback any more, so a malformed ambient config must fail loud too).
+    The cwd-upward fallback runs only when *against* is given (a plain audit
+    never needs severity/scope/suppression) or *allow_cwd_discovery* opts in
+    -- the artifact-set audit path does this for ``bundle:`` alone, no other consumer widening it.
     """
     from .workflows.extraction import discover_build_config
 
@@ -1083,7 +1084,7 @@ def _discover_scan_project_config(
 
             project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
-            if explicit_config:
+            if explicit_config or require_parseable:
                 raise click.UsageError(
                     f"cannot parse build config {cfg_path}: {exc}"
                 ) from exc
