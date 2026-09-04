@@ -3,7 +3,7 @@
 
 Cases modeling the Generic (language/platform-level, no specific project) ecosystem.
 
-_179 case(s)._ [← back to all examples](../index.md)
+_184 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -186,3 +186,8 @@ _179 case(s)._ [← back to all examples](../index.md)
 | [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) | Declaration Reconciled as Moved Across a Compound Edit | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| `case84_bundle_soname_skew` (bundle) | Multi-Library Bundle SONAME Skew | — | — |
+| `case90_bundle_intra_dep_removed` (bundle) | Bundle — Intra-Bundle Removed Symbol | — | — |
+| `case91_bundle_intra_signature_drift` (bundle) | Bundle — Intra-Bundle extern-C Signature Drift | — | — |
+| `case92_bundle_provider_changed` (bundle) | Bundle — Symbol Provider Migration | — | — |
+| `case93_bundle_manifest_drift` (bundle) | Bundle — Instantiation Manifest Drift | — | — |

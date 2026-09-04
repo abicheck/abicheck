@@ -55,7 +55,7 @@ Several cases demonstrate the same atomic compatibility rule under a different c
 
 | Ecosystem | Cases |
 |-----------|-------|
-| [Generic (language/platform-level, no specific project)](by-ecosystem/generic.md) | 179 |
+| [Generic (language/platform-level, no specific project)](by-ecosystem/generic.md) | 184 |
 | [oneTBB](by-ecosystem/onetbb.md) | 7 |
 | [SYCL](by-ecosystem/sycl.md) | 2 |
 | [oneMKL](by-ecosystem/onemkl.md) | 1 |

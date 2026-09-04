@@ -325,6 +325,23 @@ equivalent yet, so this whole class is genuinely Phase 4's to introduce
 (a probes-directory resolver plus updating each consumer above), not
 fixable ahead of the move.
 
+A seventh Codex review round pointed out that `gen_examples_docs.py`'s
+listed fix above (its case-page `Source files:`/`Source:` templates) is
+only half the generator's own README output: `_render_examples_readme()`
+still writes the generated headline/verdict-distribution/case-index
+regions into `examples/README.md`, with every case-index row linking
+`<case>/README.md` relative to the pre-move root — and the target diagram
+above also introduces a `catalog/README.md` this generator does nothing
+to populate. Following the checklist as written would leave the
+GitHub-facing catalog index full of broken links and the new catalog
+README empty. This is real, additional Phase 4 scope, not fixable now (no
+`catalog/` tree exists yet to retarget the templates at): retarget
+`_render_examples_readme()`'s three generated regions at
+`catalog/README.md`, and separately rebuild `examples/README.md` around
+the curated Phase 5 workflows (per this plan's own "Taxonomy visibility on
+the public docs site" section's "still out of scope" list, which already
+named the catalog-vs-workflows README split as open).
+
 ## Taxonomy visibility on the public docs site
 
 The same external review that prompted the Phase 4 redesign above also

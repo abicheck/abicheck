@@ -533,10 +533,11 @@ def _render_index(cases: list[Case]) -> str:
     by_eco: dict[str, list[Case]] = defaultdict(list)
     for c in cases:
         by_eco[c.ecosystem].append(c)
+    bundle_by_eco = _bundle_cases_by_ecosystem()
     lines.append("| Ecosystem | Cases |\n")
     lines.append("|-----------|-------|\n")
     for eco in ECOSYSTEM_ORDER:
-        n = len(by_eco.get(eco, []))
+        n = len(by_eco.get(eco, [])) + len(bundle_by_eco.get(eco, []))
         lines.append(f"| [{ECOSYSTEM_LABEL[eco]}](by-ecosystem/{eco}.md) | {n} |\n")
     lines.append("\n## All cases\n\n")
     lines.append(
@@ -559,14 +560,24 @@ def _render_group_index(
     cases: list[Case],
     *,
     backlink: str = "../index.md",
+    extra_unlinked: list[tuple[str, str]] = (),
 ) -> str:
+    """`extra_unlinked` is for multi-library bundle cases (ADR-023) that
+    belong in this group's taxonomy but have no generated `../<name>.md`
+    page of their own (`_load_cases()` excludes them, different
+    ground-truth shape, no single verdict/category) -- rendered as
+    unlinked, verdict/category-less rows rather than silently omitted
+    (a Codex review found the ecosystem view disagreeing with
+    ground_truth.json/catalog-coverage.md the same way the by-rule view
+    did before RuleFamily.bundle_scenarios)."""
+    total = len(cases) + len(extra_unlinked)
     lines = [
         WARNING,
         f"# {title}\n\n",
         blurb + "\n\n",
-        f"_{len(cases)} case(s)._ [← back to all examples]({backlink})\n\n",
+        f"_{total} case(s)._ [← back to all examples]({backlink})\n\n",
     ]
-    if not cases:
+    if not cases and not extra_unlinked:
         lines.append("_No cases in this group._\n")
         return "".join(lines)
     lines.append("| Case | Title | Verdict | Category |\n")
@@ -579,6 +590,8 @@ def _render_group_index(
             f"| {vinfo['icon']} {vinfo['label']} "
             f"| {CATEGORY_META[c.category]['label']} |\n"
         )
+    for name, title_ in sorted(extra_unlinked):
+        lines.append(f"| `{name}` (bundle) | {title_} | — | — |\n")
     return "".join(lines)
 
 
@@ -610,21 +623,42 @@ class RuleFamily:
     bundle_scenarios: list[tuple[str, str]]
 
 
-def _bundle_scenario_related_rules() -> dict[str, list[tuple[str, str]]]:
-    """rule_slug -> [(bundle_case_name, short_title), ...] for every
-    multi-library bundle case's own `related_rules` -- read directly from
-    the taxonomy block, since `_load_cases()` deliberately excludes bundle
-    cases (see its own docstring) before any Case-based grouping runs."""
+def _bundle_case_entries() -> list[tuple[str, dict]]:
+    """(case_name, taxonomy_entry) for every multi-library bundle case --
+    the one taxonomy scan `_bundle_scenario_related_rules`/
+    `_bundle_cases_by_ecosystem` both build on, since `_load_cases()`
+    deliberately excludes bundle cases (see its own docstring) before any
+    Case-based grouping runs."""
     data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
     verdicts: dict[str, dict] = data["verdicts"]
     taxonomy: dict[str, dict] = data.get("taxonomy") or {}
+    return [
+        (name, taxonomy.get(name) or {})
+        for name, meta in verdicts.items()
+        if meta.get("category") == "bundle" or meta.get("bundle") is True
+    ]
+
+
+def _bundle_scenario_related_rules() -> dict[str, list[tuple[str, str]]]:
+    """rule_slug -> [(bundle_case_name, short_title), ...] for every
+    multi-library bundle case's own `related_rules`."""
     out: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for name, meta in verdicts.items():
-        if not (meta.get("category") == "bundle" or meta.get("bundle") is True):
-            continue
-        entry = taxonomy.get(name) or {}
+    for name, entry in _bundle_case_entries():
         for slug in entry.get("related_rules") or []:
             out[slug].append((name, _case_title(name)))
+    return out
+
+
+def _bundle_cases_by_ecosystem() -> dict[str, list[tuple[str, str]]]:
+    """ecosystem -> [(bundle_case_name, short_title), ...] for every
+    multi-library bundle case -- the ecosystem-view counterpart of
+    `_bundle_scenario_related_rules` (a Codex review found the ecosystem
+    pages/index undercounting the same way the by-rule pages did before
+    that fix)."""
+    out: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for name, entry in _bundle_case_entries():
+        eco = entry.get("ecosystem", "generic")
+        out[eco].append((name, _case_title(name)))
     return out
 
 
@@ -977,6 +1011,7 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
             ),
         )
 
+    bundle_by_ecosystem = _bundle_cases_by_ecosystem()
     for eco in ECOSYSTEM_ORDER:
         info_label = ECOSYSTEM_LABEL[eco]
         _write(
@@ -985,6 +1020,7 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
                 title=f"{info_label} cases",
                 blurb=f"Cases modeling the {info_label} ecosystem.",
                 cases=by_ecosystem.get(eco, []),
+                extra_unlinked=bundle_by_ecosystem.get(eco, []),
             ),
         )
 

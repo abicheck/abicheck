@@ -222,6 +222,34 @@ def test_build_rule_families_includes_bundle_scenarios() -> None:
     assert "`case90_bundle_intra_dep_removed`" in page
 
 
+def test_ecosystem_view_includes_bundle_cases() -> None:
+    """The ecosystem index/pages must count multi-library bundle cases too
+    (all five are ecosystem: generic in the real taxonomy), even though
+    `_load_cases()` excludes them entirely -- a Codex review found the
+    'generic' ecosystem page reporting 179 cases while
+    catalog-coverage.md (which reads the taxonomy directly) reports 184,
+    the same class of bug the by-rule bundle-scenario fix above closed."""
+    mod = _load_generator_module()
+    bundle_by_eco = mod._bundle_cases_by_ecosystem()
+    generic_bundles = {name for name, _title in bundle_by_eco["generic"]}
+    assert generic_bundles == {
+        "case84_bundle_soname_skew",
+        "case90_bundle_intra_dep_removed",
+        "case91_bundle_intra_signature_drift",
+        "case92_bundle_provider_changed",
+        "case93_bundle_manifest_drift",
+    }
+    rendered = mod._render_group_index(
+        title="Generic cases",
+        blurb="Cases modeling the Generic ecosystem.",
+        cases=[],
+        extra_unlinked=bundle_by_eco["generic"],
+    )
+    assert "_5 case(s)._" in rendered
+    assert "](../case84_bundle_soname_skew.md)" not in rendered
+    assert "`case84_bundle_soname_skew` (bundle)" in rendered
+
+
 def test_by_rule_index_lists_every_family_including_scenario_only_slugs() -> None:
     """A rule_slug named only in a scenario's related_rules (no rule-entity
     case demonstrates it alone yet) still gets a family entry, so every
