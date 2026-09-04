@@ -698,3 +698,37 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
             "ambient project config, if any, stay harmlessly unused here "
             "instead, or use a --config that declares no compile: block."
         )
+
+
+#: (Click parameter dest, CLI flag) pairs for the expose_value=False
+#: AST-override flags reject_ast_override_flags_for_stored_pair() checks --
+#: shared so the two never drift, since neither name is derivable from the
+#: other mechanically (Click's default dest derivation is one-way).
+_AST_OVERRIDE_FLAGS: tuple[tuple[str, str], ...] = (
+    ("allow_ast_frontend_fallback", "--allow-ast-frontend-fallback"),
+    ("allow_unsupported_castxml", "--allow-unsupported-castxml"),
+)
+
+
+def reject_ast_override_flags_for_stored_pair(ctx: click.Context) -> None:
+    """Raise ``click.UsageError`` for an explicitly-given
+    ``--allow-ast-frontend-fallback``/``--allow-unsupported-castxml`` on a
+    stored/stored comparison (Codex review, PR #1060, round 11).
+
+    Both flags are ``expose_value=False`` (``cli_options.
+    _scoped_env_flag_callback`` sets a scoped env var as a side effect and
+    never adds a ``kwargs`` entry at all), so ``reject_unsupported_
+    options()`` -- which reads only ``kwargs`` -- can never see either flag
+    to reject it: neither side of a stored/stored comparison runs any
+    header-frontend AST extraction for either flag to affect, so both were
+    silently accepted and had no effect. ``ctx.get_parameter_source()``
+    still answers ``COMMANDLINE`` for an ``expose_value=False`` option --
+    Click records the source at parse time regardless of exposure -- so
+    this checks the one place that survives instead of ``kwargs``."""
+    for dest, flag in _AST_OVERRIDE_FLAGS:
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError(
+                f"{flag} is not supported when both OLD_INPUT and NEW_INPUT "
+                "are stored BundleFacts documents: neither side runs any "
+                "header-frontend AST extraction for it to affect."
+            )

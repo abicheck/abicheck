@@ -116,13 +116,16 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     invocation run from a project directory with a compile: block (Codex
     review, PR #1060). ``kwargs["config"]`` is still resolved either way,
     since the config-block rejection checks in that same module still
-    apply. An *explicit* ``--config`` whose own ``compile:`` block declares
-    real settings is
-    rejected too, via ``compare_bundle_facts_rejections.
-    reject_explicit_compile_config_for_stored_pair`` (Codex review, PR
-    #1060, fresh evidence) -- unlike an auto-discovered ambient one.
-    """
+    apply. An *explicit* ``--config`` with a real ``compile:`` block, and
+    the expose_value=False ``--allow-ast-frontend-fallback``/
+    ``--allow-unsupported-castxml`` flags, are rejected too (that module's
+    ``reject_explicit_compile_config_for_stored_pair``/
+    ``reject_ast_override_flags_for_stored_pair``)."""
     from ....cli_helpers_compare import discover_project_config
+    from .compare_bundle_facts_rejections import (
+        reject_ast_override_flags_for_stored_pair,
+        reject_explicit_compile_config_for_stored_pair,
+    )
 
     # Codex review: mirror run_compare's own cwd-upward cfg_path fallback --
     # resolve_compile_context alone never auto-discovers without a
@@ -131,11 +134,8 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     kwargs["config"] = kwargs.get("config") or discover_project_config()
     if new_is_stored:
         if _config_explicit and kwargs["config"] is not None:
-            from .compare_bundle_facts_rejections import (
-                reject_explicit_compile_config_for_stored_pair,
-            )
-
             reject_explicit_compile_config_for_stored_pair(kwargs["config"])
+        reject_ast_override_flags_for_stored_pair(ctx)
         return None
 
     from ....cli_options import resolve_compile_context

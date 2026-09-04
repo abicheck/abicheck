@@ -21,7 +21,7 @@ budget check, and ``load_bundle_facts``'s full dispatch body, split out of
 `storage/`'s own ADR-061 D1 remit ("serialize snapshots/baselines, own
 their schemas") and its `model`-only dependency rule: every function here
 depends on nothing first-party but ``errors`` (a `public_root_surfaces`
-exemption) and `storage.json_budget` (same package) --
+exemption) and `storage.json_budget`/`storage.guards` (same package) --
 ``load_bundle_facts_dispatch`` takes its `bundle_facts.py`/`snapshot_io.py`/
 `serialization.py` collaborators as injected callables instead of importing
 them, since `storage`'s own `may_import: [model]` forbids importing any of
@@ -264,12 +264,22 @@ def validated_variant_fingerprint(raw: object) -> str:
     valid string -- before this function ever sees it, while an explicit
     ``null`` reaches this function as ``None`` and is rejected by the
     ``isinstance`` check like any other wrong-typed value, never silently
-    defaulted."""
-    if not isinstance(raw, str):
-        raise ValueError(
-            f"bundle facts: 'variant_fingerprint' must be a string, got {raw!r}"
-        )
-    return raw
+    defaulted.
+
+    Delegates to ``guards.identity_text()`` (Codex review, PR #1060, round
+    11) rather than repeating its own ``isinstance`` check -- this module's
+    own docstring and ``storage/AGENTS.md``'s "Never coerce a value a
+    decision reads" section both name ``guards.py`` as the one place this
+    check lives, precisely because a duplicated copy is how a future
+    validation improvement (or a bug fix to the check itself) drifts
+    between sites; an earlier version of this function kept its own
+    independent copy instead. Raises ``TypeError`` (``identity_text``'s own
+    contract), not this module's usual ``ValueError`` -- already covered by
+    every caller's ``except (SnapshotError, TypeError, ValueError,
+    OSError)`` boundary."""
+    from .guards import identity_text
+
+    return identity_text(raw, "variant_fingerprint")
 
 
 def validated_filename_map(raw: object) -> dict[str, str]:

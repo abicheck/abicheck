@@ -308,6 +308,33 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--lang" in out
 
+    def test_allow_ast_frontend_fallback_is_rejected(self, tmp_path: Path) -> None:
+        """--allow-ast-frontend-fallback is expose_value=False (Codex
+        review, PR #1060, round 11) -- it never reaches kwargs at all, so
+        reject_unsupported_options() (kwargs-only) can never see it. Must
+        still be rejected via ctx.get_parameter_source(), not silently
+        accepted with no effect."""
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--allow-ast-frontend-fallback"
+        )
+
+        assert code == 64
+        assert "--allow-ast-frontend-fallback" in out
+
+    def test_allow_unsupported_castxml_is_rejected(self, tmp_path: Path) -> None:
+        """The expose_value=False sibling of the above (Codex review, PR
+        #1060, round 11)."""
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--allow-unsupported-castxml"
+        )
+
+        assert code == 64
+        assert "--allow-unsupported-castxml" in out
+
     def test_default_invocation_is_not_rejected_by_any_new_side_check(
         self, tmp_path: Path
     ) -> None:

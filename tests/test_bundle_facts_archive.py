@@ -870,7 +870,9 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
         plain-JSON loader uses, not a bare ``str(...)`` coercion -- a
         malformed ``variant_fingerprint: 1`` and a genuine
         ``variant_fingerprint: "1"`` must not both load as the identical
-        string ``"1"`` (Codex review, PR #1060, round 10)."""
+        string ``"1"`` (Codex review, PR #1060, round 10). The check now
+        delegates to ``storage.guards.identity_text()`` (round 11), which
+        raises ``TypeError`` rather than a bare ``ValueError``."""
         from abicheck.bundle_facts import BUNDLE_FACTS_SCHEMA_VERSION
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
@@ -886,5 +888,5 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
                 }
             )
 
-        with pytest.raises(ValueError, match="variant_fingerprint"):
+        with pytest.raises(TypeError, match="variant_fingerprint"):
             load_bundle_facts(out, format="archive")

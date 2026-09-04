@@ -240,7 +240,10 @@ class TestCompareStoredBundleFactsPair:
         the loader (``bundle_facts_serialization.bundle_facts_from_dict``)
         applied a blind ``str(...)`` coercion, so the two were
         indistinguishable by the time they reached this function's own
-        mismatch/empty checks (Codex review, PR #1060, round 8)."""
+        mismatch/empty checks (Codex review, PR #1060, round 8). The
+        loader now delegates to ``storage.guards.identity_text()`` (round
+        11), which raises ``TypeError`` rather than this module's usual
+        ``ValueError``."""
         import json
 
         old_path = tmp_path / "old.bundlefacts.json"
@@ -262,7 +265,7 @@ class TestCompareStoredBundleFactsPair:
             variant_fingerprint="1",
         )
 
-        with pytest.raises(ValueError, match="variant_fingerprint"):
+        with pytest.raises(TypeError, match="variant_fingerprint"):
             compare_stored_bundle_facts_pair(old_path, new_path)
 
     def test_explicit_null_variant_fingerprint_is_refused_not_defaulted(
@@ -293,7 +296,7 @@ class TestCompareStoredBundleFactsPair:
             tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
         )
 
-        with pytest.raises(ValueError, match="variant_fingerprint"):
+        with pytest.raises(TypeError, match="variant_fingerprint"):
             compare_stored_bundle_facts_pair(old_path, new_path)
 
     def test_new_only_manifest_is_not_silently_discarded(self, tmp_path: Path) -> None:
