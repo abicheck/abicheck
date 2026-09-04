@@ -38,14 +38,17 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of base commit 2a88a5bd (the constant family's SemanticIR cutover --
-# Phase 6B's second detector cohort -- was built on and merges this
-# content forward), which itself carries forward 62679b1 (PR #1041, the
-# typedef family's SemanticIR cutover -- Phase 6B's first detector
-# cohort), fd197d59 (PR #1025, the PDB EntityId/SemanticIR slice),
-# b2d8eaaf (PR #1024, the multi-TU manifest occurrence-detail fix),
-# bb14e8e (PR #1021), and PR #1019's own status-sync fixes. Update this
-# file in the same PR that changes a concept's landed status.
+# as of base commit bfb40222 (Track 4's 7B ledger/plan-table drift fix --
+# updating the run_outcome concept's removal_gate to describe the landed
+# release-fan-out investigation and its parity test -- was built on and
+# merges this content forward), which itself carries forward 2a88a5bd (the
+# constant family's SemanticIR cutover -- Phase 6B's second detector
+# cohort), 62679b1 (PR #1041, the typedef family's SemanticIR cutover --
+# Phase 6B's first detector cohort), fd197d59 (PR #1025, the PDB
+# EntityId/SemanticIR slice), b2d8eaaf (PR #1024, the multi-TU manifest
+# occurrence-detail fix), bb14e8e (PR #1021), and PR #1019's own
+# status-sync fixes. Update this file in the same PR that changes a
+# concept's landed status.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -56,7 +59,7 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: 2a88a5bd
+as_of_commit: bfb40222
 as_of_date: "2026-09-03"
 
 concepts:
