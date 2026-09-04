@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import io
 import json as _json
+import os
 import re
 import tarfile
 import zipfile
@@ -429,27 +430,77 @@ def path_is_a_real_zip_container(path: Path) -> bool:
     compressed envelope's own header metadata, with no matching local file
     header anywhere in the actual byte stream -- fails this immediately
     with ``BadZipFile``.
+
+    **Preflights the central directory's own claimed size/entry count
+    before ever constructing ``zipfile.ZipFile`` (Codex review, round 14,
+    fresh evidence).** ``ZipFile.__init__`` eagerly parses the *entire*
+    central directory -- unbounded by this function's own design, which
+    otherwise only ever touches a small, fixed-size window (the EOCD tail,
+    one member's local file header). An otherwise-ordinary file (an ELF
+    binary, say) with an appended ZIP whose central directory claims an
+    enormous entry count or byte size would reach that unbounded parse on
+    every single automatic operand classification, before either operand
+    is known to be a bundle-facts document at all. ``_looks_like_stored_
+    bundle_facts_archive`` (this module's sibling in ``bundle_compare_
+    operand.py``) already guards its own ``ZipFile`` construction this way,
+    via ``BundleArchiveReader.open`` -> ``reject_absurd_central_directory``;
+    this general zip probe reuses the identical guard directly (same
+    ``MAX_ARCHIVE_MEMBERS`` cap ``bundle_archive.py`` itself enforces, so a
+    real, valid wheel or the G40 archive is never rejected here that
+    wouldn't already be rejected by opening it for real) rather than a
+    second, independently-tuned bound.
     """
+    from ..errors import SnapshotError
+    from ..storage.bundle_archive import MAX_ARCHIVE_MEMBERS
+    from ..storage.bundle_archive_cd_guard import reject_absurd_central_directory
+
     try:
         if not zipfile.is_zipfile(path):
             return False
-        with zipfile.ZipFile(path) as zf:
-            names = zf.namelist()
-            if not names:
-                return False
+        # A single shared, already-open fd carried from the preflight
+        # below through to ZipFile's own construction -- the same
+        # path-substitution-race defense BundleArchiveReader.open applies
+        # (reject_absurd_central_directory's own docstring), rather than
+        # reopening *path* a second time for ZipFile.
+        with open(path, "rb") as fp:
             try:
-                with zf.open(names[0]):
-                    pass
-            except zipfile.BadZipFile:
-                # A declared member with no real local file header behind
-                # it -- the central directory (and therefore namelist())
-                # can be entirely forged without one (round 10's own
-                # finding); this is what actually proves real zip content.
+                validated_size = reject_absurd_central_directory(
+                    fp, path, max_entries=MAX_ARCHIVE_MEMBERS
+                )
+            except SnapshotError:
+                # Claims an absurd entry count/byte size -- refuse to hand
+                # this to ZipFile's own unbounded parse at all. Not
+                # "definitely not a stored bundle-facts document" (an
+                # oversized real wheel is conceivable), but this
+                # classification helper's whole contract is a cheap,
+                # bounded probe -- an operand this expensive to even
+                # examine is treated the same as "not a zip container"
+                # rather than paying the unbounded cost to find out.
                 return False
-            return True
+            # Narrows (not closes -- see reject_absurd_central_directory's
+            # own docstring) the window between that preflight and
+            # ZipFile's own independent, unbounded scan below.
+            if os.fstat(fp.fileno()).st_size != validated_size:
+                return False
+            fp.seek(0)
+            with zipfile.ZipFile(fp) as zf:
+                names = zf.namelist()
+                if not names:
+                    return False
+                try:
+                    with zf.open(names[0]):
+                        pass
+                except zipfile.BadZipFile:
+                    # A declared member with no real local file header
+                    # behind it -- the central directory (and therefore
+                    # namelist()) can be entirely forged without one
+                    # (round 10's own finding); this is what actually
+                    # proves real zip content.
+                    return False
+                return True
     except Exception:
-        # zipfile.is_zipfile()/ZipFile() are documented to raise on some
-        # malformed inputs rather than only ever returning False/empty --
-        # never let a corrupt or truncated candidate turn a classification
-        # helper into a crash.
+        # zipfile.is_zipfile()/ZipFile()/open() are documented (or known
+        # in practice) to raise on some malformed inputs rather than only
+        # ever returning False/empty -- never let a corrupt or truncated
+        # candidate turn a classification helper into a crash.
         return False

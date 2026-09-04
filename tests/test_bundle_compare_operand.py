@@ -604,6 +604,34 @@ class TestLooksLikeStoredBundleFacts:
         p.write_bytes(b"PK\x03\x04" + b"\x00" * 32)
         assert looks_like_stored_bundle_facts(p) is False
 
+    def test_zip_with_an_absurd_central_directory_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 14), fresh evidence:
+        ``path_is_a_real_zip_container`` used to construct ``zipfile.
+        ZipFile(path)`` directly, which eagerly parses the *entire*
+        central directory -- unlike every other check this classifier
+        performs, that parse is unbounded by the claimed entry count/byte
+        size at all. An otherwise-ordinary operand (e.g. an ELF binary)
+        with an appended, hand-crafted EOCD claiming an absurd entry count
+        reached that unbounded parse on *every* automatic operand
+        classification, before either operand is known to carry the
+        marker at all. The same ``reject_absurd_central_directory`` preflight
+        ``_looks_like_stored_bundle_facts_archive`` already applies (via
+        ``BundleArchiveReader.open``) must reject this before ``ZipFile``
+        is ever constructed here too -- classified as "not a real zip
+        container" (and therefore falls through to the ordinary marker
+        scan, which also finds nothing) rather than paying the unbounded
+        parse cost."""
+        import struct
+
+        p = tmp_path / "elf_with_appended_absurd_zip.bin"
+        # No real central directory backs this EOCD at all -- the guard
+        # must fire before zipfile.ZipFile ever tries to parse one.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 65000, 0, 0, 0)
+        p.write_bytes(b"\x7fELF" + b"junk" * 8 + b"PK\x03\x04" + b"junk" + eocd)
+        assert looks_like_stored_bundle_facts(p) is False
+
     def test_package_archive_with_nested_marker_text_is_not_stored(
         self, tmp_path: Path
     ) -> None:

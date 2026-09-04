@@ -344,6 +344,21 @@ other half of why an escape hatch was not added back in a different shape).
    no spurious gap violation is possible, and the scan's own end-of-loop
    fallback correctly reports the answer as inconclusive instead.
 
+17. **``path_is_a_real_zip_container``'s ``zipfile.ZipFile(path)``
+   construction itself parsed the whole central directory unbounded,
+   unlike this classifier's every other check (Codex review, round 14,
+   fresh evidence).** An otherwise-ordinary operand (an ELF binary, say)
+   with an appended ZIP whose central directory claims an absurd entry
+   count or byte size reached that unbounded parse on *every* automatic
+   operand classification, before either operand is even known to carry
+   the marker at all -- unlike :func:`_looks_like_stored_bundle_facts_
+   archive`, whose own ``ZipFile`` construction (via ``BundleArchiveReader.
+   open``) already runs behind ``reject_absurd_central_directory``'s bounded
+   preflight. Answered by applying that identical guard (same
+   ``MAX_ARCHIVE_MEMBERS`` cap, same shared-fd race narrowing) to this
+   general zip probe too, before it ever constructs ``ZipFile`` --
+   see :func:`path_is_a_real_zip_container`'s own updated docstring.
+
 **Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
 stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd
 skippable frame) can embed not just a forged central-directory record
