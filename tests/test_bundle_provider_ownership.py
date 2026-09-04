@@ -39,6 +39,7 @@ from abicheck.bundle import (
     InstantiationManifest,
     ManifestEntry,
     _compute_resolution_graph,
+    load_manifest,
 )
 from abicheck.checker_policy import ChangeKind
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding
@@ -352,3 +353,44 @@ class TestMatchEntryDeadlineCheckpoint:
         [(target, kind, matched, providers)] = _match_entry(entry, new)
         assert (target, kind, matched) == ("foo", "symbol", ["foo"])
         assert [p.library for p in providers] == ["liba.so"]
+
+
+class TestLoadManifestRequiresLibraryForRequiredProvider:
+    """`load_manifest` rejects `optional_provider: false` with no
+    `library` (Codex review, security P2, PR H): every wrong-provider
+    check downstream (`_manifest_ownership_findings`,
+    `_detect_manifest_drift`) is itself gated on `entry.library is not
+    None`, so accepting this shape silently degrades a declared
+    *required*-provider promise into the always-permissive
+    `optional_provider: true` default -- any matching library would
+    satisfy it."""
+
+    def test_rejects_required_provider_with_no_library(self, tmp_path: Path) -> None:
+        path = tmp_path / "manifest.json"
+        path.write_text(
+            '{"version": 1, "provides": ['
+            '{"symbol": "foo", "optional_provider": false}'
+            "]}",
+        )
+        with pytest.raises(ValueError, match="requires a 'library'"):
+            load_manifest(path)
+
+    def test_required_provider_with_library_still_loads(self, tmp_path: Path) -> None:
+        path = tmp_path / "manifest.json"
+        path.write_text(
+            '{"version": 1, "provides": ['
+            '{"symbol": "foo", "library": "liba.so", "optional_provider": false}'
+            "]}",
+        )
+        m = load_manifest(path)
+        assert m.entries[0].library == "liba.so"
+        assert m.entries[0].optional_provider is False
+
+    def test_optional_provider_default_still_allows_no_library(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "manifest.json"
+        path.write_text('{"version": 1, "provides": [{"symbol": "foo"}]}')
+        m = load_manifest(path)
+        assert m.entries[0].library is None
+        assert m.entries[0].optional_provider is True

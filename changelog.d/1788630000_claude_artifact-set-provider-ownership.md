@@ -37,3 +37,14 @@
   symbol/pattern/template promise as satisfied, closing a false-negative
   path an attacker-crafted ELF could otherwise exploit to make a broken
   ownership contract read as `COMPATIBLE` with zero findings.
+- **Security**: `load_manifest` now rejects a `provides:` entry that sets
+  `optional_provider: false` without also naming a `library` -- every
+  wrong-provider check downstream is itself gated on the entry having a
+  declared library, so this shape previously loaded silently and behaved
+  exactly like the always-permissive `optional_provider: true` default,
+  letting any matching library satisfy what was declared a required,
+  named-provider promise.
+- `_match_entry`'s per-target manifest-matching loop now calls
+  `deadline.check()`, so a large pattern/template manifest can no longer
+  overrun a small `--budget` well past the point `run_scan_set` would
+  otherwise report the overflow.

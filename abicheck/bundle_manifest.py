@@ -198,6 +198,21 @@ def _parse_manifest_entry(path: Path, raw: dict[str, object]) -> ManifestEntry:
             f"(got {type(optional_provider).__name__} {optional_provider!r}): {raw!r}",
         )
     library = str(raw["library"]) if raw.get("library") else None
+    if not optional_provider and library is None:
+        # Codex review, security P2, PR H: `optional_provider: false` with
+        # no `library` is a malformed promise, not a permissive one -- every
+        # `_manifest_ownership_findings`/`_detect_manifest_drift` wrong-
+        # provider check is itself gated on `entry.library is not None`
+        # (there is no library to compare a matched provider against), so
+        # silently accepting this shape here would have any matching
+        # library satisfy what the manifest declared a *required*, named
+        # provider for -- indistinguishable from the always-permissive
+        # `optional_provider: true` default despite explicitly opting out
+        # of it.
+        raise ValueError(
+            f"manifest {path}: 'optional_provider: false' requires a "
+            f"'library' naming the expected provider: {raw!r}",
+        )
     if shape == "template":
         insts = _parse_template_instantiations(path, raw)
         return ManifestEntry(
