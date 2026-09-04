@@ -1,0 +1,294 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The first real multi-artifact `ProjectSnapshot` package writer — ADR-062
+A1.4/A1.5 (`docs/contribute/plans/storage-format-v2.md`).
+
+`storage/package.py`'s manifest/refs/`ObjectStore` object model and
+`storage/import_v1.py`'s per-artifact section split have existed since
+ADR-062 Phase 1 landed, but nothing before this module actually assembled a
+*multi*-artifact package from them: every existing caller of
+`import_legacy_snapshot` builds exactly one `ArtifactRef` under exactly one
+`VariantRef`. A real release is N libraries under one shared variant, plus
+cross-library evidence (today: an `InstantiationManifest`) that belongs to
+the *project*, not to any one library — that is what `BundleFacts`
+(`abicheck/bundle_facts.py`) already models for the live-`.so` comparison
+path, and what this module gives a stored, content-addressed counterpart to.
+
+`write_bundle_facts_package` takes a real `BundleFacts` (already carrying N
+already-dumped `AbiSnapshot`s, exactly as `capture_bundle_facts` produces)
+and an `ObjectStore`, and returns one `PackageManifest` naming N
+`ArtifactRef`s under one `VariantRef` — calling `import_legacy_snapshot`
+once per library against the *same* store (so byte-identical section
+content across libraries collapses to one stored object automatically, the
+same digest-addressing property A1.5's own design note relies on) and
+merging the resulting one-artifact manifests' `StorageVersions` into a
+single package-wide record. `read_bundle_facts_package` is the exact
+inverse: given a `PackageManifest` and the `ObjectStore` it was written
+into, it reconstructs an equivalent `BundleFacts` via `export_legacy_snapshot`
+per artifact — the same round-trip guarantee A1.3's one-artifact case
+already has, generalized to N.
+
+**What is genuinely project-level vs. per-artifact, per the plan's own
+split.** `BundleFacts.manifest` (an `InstantiationManifest`) is the first
+real `PackageManifest.project_sections` entry: it promises entries across
+the *whole* bundle, not one library, so it is stored once and referenced
+from the manifest itself rather than duplicated into every artifact's own
+sections. `BundleFacts.filesystem_aliases`/`.library_filenames`, despite
+living on `BundleFacts` today keyed by library name, are genuinely
+per-artifact facts (real on-disk symlink/filename evidence for *one*
+library) — they move onto that library's own `ArtifactRef.native_identity`
+instead, using the two string keys this module defines
+(`_NATIVE_IDENTITY_FILENAME_KEY`/`_NATIVE_IDENTITY_ALIASES_KEY`) rather than
+a new schema field, since `native_identity` is already exactly the
+`str -> str` per-artifact fact map D6 designates for this.
+
+**Why this lives at the flat root, not in `storage/`.** Same reason
+`project_snapshot_store.py`/`project_snapshot_legacy.py` do (see their own
+module docstrings): `storage/` may depend only on `model`
+(`storage/AGENTS.md`, "Permitted imports"), so it cannot itself import
+`serialization.py` (to turn a live `AbiSnapshot` into the legacy document
+`import_legacy_snapshot`/`export_legacy_snapshot` operate on) or
+`bundle_facts.py`/`bundle_manifest.py` (the live `BundleFacts`/
+`InstantiationManifest` types this module bridges). Classified `workflows`
+in `architecture/modules.yaml`, the same layer `bundle_facts.py` itself is
+classified under — this module coordinates dump/compare-shaped state across
+`model`/`storage`/`extract`/`compare`/`policy`, which is exactly what that
+layer is for.
+
+**A schema-version consistency requirement this module adds, not one
+`StorageVersions` already had.** `StorageVersions.source_schema_version` is
+one value for the *whole package* (D2), but `import_legacy_snapshot` is
+called once per library, each returning its own opinion of that value. A
+real bundle capture emits every library under one abicheck build, so they
+always agree in practice; `write_bundle_facts_package` still checks this
+explicitly and raises rather than silently picking one, since a package
+that silently discarded a genuine per-library disagreement would let a
+`export_legacy_snapshot` reader apply the wrong producer-epoch semantics to
+the libraries whose real version it discarded.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
+
+from .bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
+from .bundle_manifest import manifest_from_dict, manifest_to_dict
+from .serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
+from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
+from .storage.package import (
+    ArtifactRef,
+    ObjectRef,
+    ObjectStore,
+    PackageManifest,
+    VariantRef,
+)
+from .storage.versioning import StorageVersions
+
+if TYPE_CHECKING:
+    from .model import AbiSnapshot
+
+__all__ = [
+    "INSTANTIATION_MANIFEST_SECTION_KIND",
+    "read_bundle_facts_package",
+    "write_bundle_facts_package",
+]
+
+#: `PackageManifest.project_sections` key for `BundleFacts.manifest` — the
+#: one project-level fact this module knows how to store today (A1.5's own
+#: "the instantiation manifest is the first real `project_sections` entry").
+INSTANTIATION_MANIFEST_SECTION_KIND = "instantiation_manifest"
+
+#: `ArtifactRef.native_identity` keys `BundleFacts.library_filenames`/
+#: `.filesystem_aliases` are folded onto, per library -- see the module
+#: docstring's "genuinely project-level vs. per-artifact" section.
+_NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
+_NATIVE_IDENTITY_ALIASES_KEY = "filesystem_aliases"
+#: `filesystem_alias_basenames` returns real filesystem basenames, which can
+#: never themselves contain a newline -- safe as a separator for folding a
+#: tuple of them into one `native_identity` string value without inventing a
+#: JSON-inside-JSON encoding for a mapping that is otherwise plain text.
+_ALIASES_SEPARATOR = "\n"
+
+#: `VariantRef.captured` coordinate key `BundleFacts.variant_fingerprint` is
+#: folded onto -- `captured`, not `declared`, since a fingerprint is what a
+#: real capture run actually observed, never a value `.abicheck.yml` states
+#: ahead of time (`VariantRef`'s own docstring distinguishes the two maps).
+_VARIANT_FINGERPRINT_KEY = "variant_fingerprint"
+
+
+def write_bundle_facts_package(
+    facts: BundleFacts, *, store: ObjectStore, variant_id: str = "default"
+) -> PackageManifest:
+    """Write *facts* into *store*, returning the resulting multi-artifact
+    `PackageManifest` — one `ArtifactRef` per `facts.per_library_snapshots`
+    entry, all under one `VariantRef` named *variant_id*.
+
+    Each library is imported via `import_legacy_snapshot` against the same
+    *store*, so content shared byte-for-byte across libraries (a common
+    header, an identical DWARF-derived section) is written once regardless
+    of how many libraries reference it — `ObjectStore` addressing is by
+    digest, not by declared kind or caller, so no separate dedup pass is
+    needed beyond this loop's own repeated `store.put()` calls.
+
+    Raises `ValueError` if the per-library imports disagree on
+    `source_schema_version` — see the module docstring's "schema-version
+    consistency requirement" section for why that is checked explicitly
+    rather than silently resolved.
+    """
+    artifact_refs: list[ArtifactRef] = []
+    section_schema_versions: dict[str, int] = {}
+    source_schema_version: int | None = None
+    for library_name, snapshot in facts.per_library_snapshots.items():
+        document = snapshot_to_dict(snapshot)
+        library_manifest = import_legacy_snapshot(
+            document,
+            store=store,
+            artifact_id=library_name,
+            max_known_schema_version=SCHEMA_VERSION,
+            variant_id=variant_id,
+        )
+        (artifact,) = library_manifest.artifact_refs
+
+        native_identity = dict(artifact.native_identity)
+        filename = facts.library_filenames.get(library_name)
+        if filename:
+            native_identity[_NATIVE_IDENTITY_FILENAME_KEY] = filename
+        aliases = facts.filesystem_aliases.get(library_name)
+        if aliases:
+            native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = _ALIASES_SEPARATOR.join(
+                sorted(aliases)
+            )
+        if native_identity != dict(artifact.native_identity):
+            artifact = replace(artifact, native_identity=native_identity)
+        artifact_refs.append(artifact)
+
+        for kind, version in library_manifest.versions.section_schema_versions.items():
+            existing = section_schema_versions.get(kind)
+            if existing is not None and existing != version:
+                raise ValueError(
+                    f"library {library_name!r} reports section_schema_versions"
+                    f"[{kind!r}] = {version}, which disagrees with {existing} "
+                    "already recorded from an earlier library in the same "
+                    "bundle -- a package's StorageVersions carries one schema "
+                    "version per section for the whole package"
+                )
+            section_schema_versions[kind] = version
+
+        library_source_schema_version = library_manifest.versions.source_schema_version
+        if source_schema_version is None:
+            source_schema_version = library_source_schema_version
+        elif source_schema_version != library_source_schema_version:
+            raise ValueError(
+                f"library {library_name!r} has source_schema_version "
+                f"{library_source_schema_version}, which disagrees with "
+                f"{source_schema_version} already recorded from an earlier "
+                "library in the same bundle -- a package's StorageVersions "
+                "carries one schema version for the whole package, so a "
+                "bundle whose members were captured under different abicheck "
+                "producer epochs cannot be represented as one package"
+            )
+
+    variant_captured: dict[str, str] = {}
+    if facts.variant_fingerprint:
+        variant_captured[_VARIANT_FINGERPRINT_KEY] = facts.variant_fingerprint
+    variant = VariantRef(
+        variant_id=variant_id,
+        captured=variant_captured,
+        artifact_ids=tuple(facts.per_library_snapshots),
+    )
+
+    project_sections: dict[str, ObjectRef] = {}
+    if facts.manifest is not None:
+        digest = store.put(manifest_to_dict(facts.manifest))
+        project_sections[INSTANTIATION_MANIFEST_SECTION_KIND] = ObjectRef(
+            kind=INSTANTIATION_MANIFEST_SECTION_KIND, digest=digest
+        )
+
+    versions = StorageVersions(
+        section_schema_versions=section_schema_versions,
+        source_schema_version=source_schema_version or 0,
+    )
+    return PackageManifest(
+        versions=versions,
+        variant_refs=(variant,),
+        artifact_refs=tuple(artifact_refs),
+        project_sections=project_sections,
+    )
+
+
+def read_bundle_facts_package(
+    manifest: PackageManifest, *, store: ObjectStore, variant_id: str = "default"
+) -> BundleFacts:
+    """The exact inverse of `write_bundle_facts_package`: reconstruct a
+    `BundleFacts` equivalent, at the semantic-digest level, to the one that
+    was written -- reading *variant_id*'s artifacts back from *store* via
+    `export_legacy_snapshot`.
+
+    Raises `ValueError` if *variant_id* is not one of *manifest*'s
+    `variant_refs`, or if any of its member artifacts' sections cannot be
+    read back from *store* (surfaces whatever `export_legacy_snapshot`
+    itself raises).
+    """
+    variant = next(
+        (v for v in manifest.variant_refs if v.variant_id == variant_id), None
+    )
+    if variant is None:
+        raise ValueError(
+            f"{variant_id!r} is not a variant_id in this PackageManifest "
+            f"(known: {sorted(v.variant_id for v in manifest.variant_refs)})"
+        )
+    artifacts_by_id = {
+        artifact.artifact_id: artifact for artifact in manifest.artifact_refs
+    }
+    source_schema_version = manifest.versions.source_schema_version
+
+    per_library_snapshots: dict[str, AbiSnapshot] = {}
+    filesystem_aliases: dict[str, tuple[str, ...]] = {}
+    library_filenames: dict[str, str] = {}
+    for artifact_id in variant.artifact_ids:
+        artifact = artifacts_by_id[artifact_id]
+        document = export_legacy_snapshot(
+            artifact, store=store, source_schema_version=source_schema_version
+        )
+        per_library_snapshots[artifact_id] = snapshot_from_dict(document)
+
+        filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
+        if filename:
+            library_filenames[artifact_id] = filename
+        aliases_text = artifact.native_identity.get(_NATIVE_IDENTITY_ALIASES_KEY)
+        if aliases_text:
+            filesystem_aliases[artifact_id] = tuple(
+                aliases_text.split(_ALIASES_SEPARATOR)
+            )
+
+    variant_fingerprint = variant.captured.get(
+        _VARIANT_FINGERPRINT_KEY, DEFAULT_VARIANT_FINGERPRINT
+    )
+
+    instantiation_manifest = None
+    manifest_ref = manifest.project_sections.get(INSTANTIATION_MANIFEST_SECTION_KIND)
+    if manifest_ref is not None:
+        raw: Any = store.get(manifest_ref.digest)
+        instantiation_manifest = manifest_from_dict(raw)
+
+    return BundleFacts(
+        variant_fingerprint=variant_fingerprint,
+        per_library_snapshots=per_library_snapshots,
+        manifest=instantiation_manifest,
+        filesystem_aliases=filesystem_aliases,
+        library_filenames=library_filenames,
+    )

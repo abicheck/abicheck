@@ -45,14 +45,15 @@ reads or writes a byte of an actual file.
 
 `PackageManifest`, `VariantRef`, and `ArtifactRef` are the in-memory
 document model of `manifest.json`'s content plus the per-variant and
-per-artifact ref documents it names — one Python object graph, split across
-files only by whatever writer chooses to serialize it that way. Splitting
-the *object model* to match today would be premature: no writer exists yet
-to honor the split, and one in-memory root a future writer fans out to disk
-is easier to get right than three independently-loaded models kept
-consistent by convention. `variant_ref_relpath`/`artifact_ref_relpath`/
-`object_relpath` already fix the path convention such a writer must follow,
-so a future filesystem-backed implementation can't invent a second layout.
+per-artifact ref documents it names — one Python object graph, fanned out to
+disk by `abicheck/project_snapshot_store.py`'s `write_project_manifest`
+(`variant_ref_relpath`/`artifact_ref_relpath`/`object_relpath` fix the path
+convention that writer follows, so a future implementation can't invent a
+second layout). `PackageManifest.project_sections` (ADR-062 A1.4/A1.5) is
+the multi-artifact counterpart: cross-library evidence stored once and
+referenced by every `ArtifactRef` that shares it — `abicheck/
+bundle_facts_store.py` is the first real producer of a `PackageManifest`
+naming more than one `ArtifactRef`.
 """
 
 from __future__ import annotations
@@ -356,6 +357,21 @@ def _normalized_text_mapping(raw: Any, field_name: str) -> Mapping[str, str]:
     return MappingProxyType(dict(sorted(normalized.items())))
 
 
+def _object_ref_mapping(raw: Any, field_name: str) -> Mapping[str, ObjectRef]:
+    """A `str -> ObjectRef` mapping, guarded and key-sorted -- shared by
+    `ArtifactRef.sections` and `PackageManifest.project_sections` (ADR-062
+    D8/A1.5). `_normalized_text_mapping`'s shape, one level over: a key is a
+    `decision_key`, a value is checked to actually be an `ObjectRef`.
+    """
+    _mapping(raw, field_name)
+    out: dict[str, ObjectRef] = {}
+    for key, value in raw.items():
+        out[_decision_key(key, f"{field_name} key")] = _instance_of(
+            value, ObjectRef, f"{field_name}[{key!r}]"
+        )
+    return MappingProxyType(dict(sorted(out.items())))
+
+
 @dataclass(frozen=True)
 class ObjectRef:
     """A reference to one content-addressed object — ADR-062 D7.
@@ -547,15 +563,8 @@ class ArtifactRef:
             "native_identity",
             _normalized_text_mapping(self.native_identity, "native_identity"),
         )
-        sections_raw = self.sections
-        _mapping(sections_raw, "sections")
-        sections: dict[str, ObjectRef] = {}
-        for key, value in sections_raw.items():
-            sections[_decision_key(key, "sections key")] = _instance_of(
-                value, ObjectRef, f"sections[{key!r}]"
-            )
         object.__setattr__(
-            self, "sections", MappingProxyType(dict(sorted(sections.items())))
+            self, "sections", _object_ref_mapping(self.sections, "sections")
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -611,6 +620,14 @@ class PackageManifest:
     versions: StorageVersions = field(default_factory=StorageVersions)
     variant_refs: tuple[VariantRef, ...] = ()
     artifact_refs: tuple[ArtifactRef, ...] = ()
+    #: Project-level, cross-artifact objects — ADR-062 D7/A1.4/A1.5: an
+    #: instantiation manifest, a shared `BuildSourcePack`/source graph, and
+    #: similar evidence belonging to the *project*, not one artifact's own
+    #: D8 `sections`. Keyed like `ArtifactRef.sections` (a section-kind
+    #: string), but lives once here instead of once per artifact, so
+    #: byte-identical shared evidence collapses to one stored object across
+    #: every artifact that references it (digest addressing, no extra dedup).
+    project_sections: Mapping[str, ObjectRef] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _instance_of(self.versions, StorageVersions, "versions")
@@ -686,6 +703,12 @@ class PackageManifest:
                     f"variant_id names it {sorted(owned)}"
                 )
 
+        object.__setattr__(
+            self,
+            "project_sections",
+            _object_ref_mapping(self.project_sections, "project_sections"),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"versions": self.versions.to_dict()}
         if self.variant_refs:
@@ -694,6 +717,10 @@ class PackageManifest:
             out["artifact_refs"] = [
                 artifact.to_dict() for artifact in self.artifact_refs
             ]
+        if self.project_sections:
+            out["project_sections"] = {
+                key: ref.to_dict() for key, ref in self.project_sections.items()
+            }
         return out
 
     @classmethod
@@ -701,10 +728,16 @@ class PackageManifest:
         _mapping(data, "a package manifest")
         raw_variants = _row_sequence(data.get("variant_refs", ()), "variant_refs")
         raw_artifacts = _row_sequence(data.get("artifact_refs", ()), "artifact_refs")
+        raw_project_sections = data.get("project_sections", {})
+        _mapping(raw_project_sections, "project_sections")
         return cls(
             versions=StorageVersions.from_dict(data.get("versions", {})),
             variant_refs=tuple(VariantRef.from_dict(row) for row in raw_variants),
             artifact_refs=tuple(ArtifactRef.from_dict(row) for row in raw_artifacts),
+            project_sections={
+                key: ObjectRef.from_dict(value)
+                for key, value in raw_project_sections.items()
+            },
         )
 
 
