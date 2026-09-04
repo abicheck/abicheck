@@ -64,8 +64,22 @@ in-flight comparison needs), and calls
 ``bundle_facts.compare_bundle_from_facts()`` with that real
 ``new_signature_evidence`` populated -- closing the literal gap Phase 12's own
 "Known gap" note named: "no end-to-end CLI invocation" exercising the Phase 4
-parity guarantee. It is reachable from a real Python caller today; it is not
-reachable from ``abicheck compare ...`` yet.
+parity guarantee. Reachable from ``abicheck compare ...`` since CLI cleanup
+phase two, PR I (``frontends/cli/commands/compare_bundle_facts.py``), which
+routes to it whenever OLD_INPUT classifies as a stored ``BundleFacts``
+document and NEW_INPUT does not.
+
+:func:`compare_stored_bundle_facts_pair` is PR I's stored/stored sibling --
+both sides already resolved, persisted ``BundleFacts`` documents, so it
+reads no binaries and parses no header AST on either side at all: a pure
+in-memory per-library diff plus the same shared
+``bundle_facts.compare_bundle_from_facts()`` bundle-level call. Also
+reachable from ``abicheck compare ...`` (the same dispatch module, once
+NEW_INPUT classifies as stored too). The remaining operand shape --
+live/stored (OLD_INPUT live, NEW_INPUT a stored document) -- has no driver
+yet and is rejected outright by ``compare_bundle_operand_dispatch.py``; see
+that module's own docstring and PR I's tracking in
+``docs/contribute/plans/cli-cleanup-phase-two.md``.
 """
 
 from __future__ import annotations
@@ -480,4 +494,100 @@ def compare_release_against_bundle_facts(
         policy=policy,
         policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
+    )
+
+
+def compare_stored_bundle_facts_pair(
+    old_facts_path: Path,
+    new_facts_path: Path,
+    *,
+    manifest_path: Path | None = None,
+    system_providers: list[str] | None = None,
+    cohorts: list[str] | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    suppress: SuppressionList | None = None,
+    old_max_json_object_nodes: int | None = None,
+    new_max_json_object_nodes: int | None = None,
+) -> BundleDiffResult:
+    """End-to-end driver: two stored ``BundleFacts`` documents compared
+    against each other -- the stored/stored operand shape (CLI cleanup
+    phase two, PR I).
+
+    No binaries are read and no header AST is parsed on either side --
+    both sides are already resolved, per-library ``AbiSnapshot``s, so this
+    driver is a pure in-memory diff: matched-key intersection, then one
+    ``service.compare_snapshots()`` call per matched library, exactly the
+    same Tier-2 chokepoint every other comparison entry point in this
+    codebase uses (never ``checker.compare`` directly). Mirrors
+    :func:`compare_release_against_bundle_facts`'s own final step (a direct
+    call into :func:`~abicheck.bundle_facts.compare_bundle_from_facts`,
+    never :func:`compare_bundle_sides`/:func:`resolve_bundle_side`) for the
+    identical reason documented there: each stored document is already
+    loaded in memory for the per-library matching loop below, and routing
+    through ``StoredBundleFactsInput``/``resolve_bundle_side`` instead would
+    reload and re-parse both documents from disk a second time for no
+    benefit.
+
+    A library present in only one of the two documents' own
+    ``per_library_snapshots`` is simply not diffed, the same "not itself a
+    release fan-out's ``--fail-on-removed-library``/added-library
+    accounting" narrowing :func:`compare_release_against_bundle_facts`'s
+    own docstring already states for its NEW-live side -- neither stored
+    side can name a *set* of on-disk libraries to fail on the absence of,
+    both are already a fixed, resolved snapshot.
+
+    *old_max_json_object_nodes*/*new_max_json_object_nodes*, each when
+    given, override ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` for that
+    side's own load -- forwarded to ``serialization.load_bundle_facts``,
+    mirroring :class:`StoredBundleFactsInput`'s own field of the same
+    purpose. ``None`` (the default) uses the library default for that side.
+
+    *manifest_path*/*system_providers*/*cohorts*/*policy*/*policy_file*/
+    *suppress* all mean exactly what they mean on
+    :func:`compare_release_against_bundle_facts` -- see that function's own
+    docstring for the full account of each. *policy*/*policy_file* are
+    forwarded to every per-library ``service.compare_snapshots()`` call
+    *and* to the final ``compare_bundle_from_facts()`` call, so
+    ``BundleDiffResult.bundle_verdict`` is scored under the same policy as
+    every per-library diff, not just the live-NEW-side driver's own case.
+    """
+    from . import service
+    from .bundle_facts import bundle_snapshot_from_facts, compare_bundle_from_facts
+    from .bundle_manifest import load_manifest
+    from .serialization import load_bundle_facts
+
+    old_facts = load_bundle_facts(
+        old_facts_path, max_json_object_nodes=old_max_json_object_nodes
+    )
+    new_facts = load_bundle_facts(
+        new_facts_path, max_json_object_nodes=new_max_json_object_nodes
+    )
+
+    matched_keys = sorted(
+        set(old_facts.per_library_snapshots) & set(new_facts.per_library_snapshots)
+    )
+    per_library_results: list[DiffResult] = []
+    for key in matched_keys:
+        diff = service.compare_snapshots(
+            old_facts.per_library_snapshots[key],
+            new_facts.per_library_snapshots[key],
+            suppress,
+            policy=policy,
+            policy_file=policy_file,
+        )
+        per_library_results.append(diff)
+
+    manifest = load_manifest(manifest_path) if manifest_path is not None else None
+    new_bundle_snapshot = bundle_snapshot_from_facts(new_facts)
+    return compare_bundle_from_facts(
+        old_facts,
+        new_bundle_snapshot,
+        per_library_results,
+        manifest=manifest,
+        system_providers=system_providers,
+        cohorts=cohorts,
+        policy=policy,
+        policy_file=policy_file,
+        new_signature_evidence=dict(new_facts.per_library_snapshots),
     )

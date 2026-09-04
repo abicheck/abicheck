@@ -147,9 +147,18 @@ def _load_library_overrides(
     return overrides.headers, overrides.includes, overrides.compile
 
 
-def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
-    """Handle a ``compare OLD_FACTS NEW_DIR`` invocation where OLD_FACTS
+def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any) -> None:
+    """Handle a ``compare OLD_FACTS NEW_INPUT`` invocation where OLD_FACTS
     classified as a stored BundleFacts document.
+
+    *new_is_stored* (CLI cleanup phase two, PR I), when true, means
+    NEW_INPUT classified as a stored BundleFacts document too -- both sides
+    are then diffed by
+    ``bundle_side_input.compare_stored_bundle_facts_pair`` (a pure in-memory
+    per-library diff, no binaries read, no header AST parsed on either
+    side) instead of ``compare_release_against_bundle_facts`` (which
+    extracts and dumps NEW_INPUT as a live directory/package). The default
+    ``False`` is the original stored/live shape, unchanged.
 
     *kwargs* is ``compare_cmd``'s already-parsed, already-``normalize_sided_
     options``-processed option dict -- the same dict that would otherwise be
@@ -187,6 +196,10 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     compare_release_against_bundle_facts = (
         _bundle_side_input.compare_release_against_bundle_facts
     )
+    # PR I: same importlib indirection as compare_release_against_bundle_
+    # facts above, and for the identical reason -- both live in
+    # bundle_side_input.py.
+    compare_stored_bundle_facts_pair = _bundle_side_input.compare_stored_bundle_facts_pair
     from ....cli_compare_release_helpers import _exit_compare_release
 
     # known_libraries_for_new_side lives in workflows/bundle_facts_library_
@@ -203,7 +216,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     from ..options.params import _load_suppression_and_policy
     from .compare_bundle_facts_rejections import reject_unsupported_options
 
-    reject_unsupported_options(kwargs)
+    reject_unsupported_options(kwargs, new_is_stored=new_is_stored)
 
     old_facts_path: Path = kwargs["old_input"]
     new_dir: Path = kwargs["new_input"]
@@ -235,198 +248,230 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         if s.strip()
     ]
 
-    # Codex review: NEW_INPUT is documented ("a live release directory/
-    # package") to accept a package archive (wheel/deb/rpm/tar), but
-    # compare_release_against_bundle_facts() treats any non-directory path
-    # as a single library file -- a package operand silently produced zero
-    # matches instead of the shared libraries inside it. Extract it first,
-    # the same way the live release fan-out does (_extract_if_package),
-    # sharing that primitive rather than re-implementing package detection
-    # here. --devel-pkg new=... is honored the same way too (its header_dir
-    # becomes the NEW-side header root when no explicit --new-header was
-    # given, and its discovered include roots are appended) -- --debug-info
-    # is rejected above rather than silently dropped, since this driver has
-    # no debug-dir parameter to forward it to.
-    from ....cli_compare_release_helpers import (
-        _discover_include_roots,
-        _extract_if_package,
-    )
-    from ....errors import SnapshotError
-    from ....workflows.extraction import detect_extractor, is_package
+    if new_is_stored:
+        # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
+        # document too -- no extraction, no header AST, no live NEW-side
+        # resolution at all (compare_stored_bundle_facts_pair() is a pure
+        # in-memory diff of both sides' already-persisted per-library
+        # AbiSnapshots). --max-json-object-nodes applies to *both* sides'
+        # load here (there is only the one, unscoped flag) rather than just
+        # OLD_INPUT's, unlike the stored/live branch below.
+        from ....errors import SnapshotError
 
-    _temp_dir_paths: list[str] = []
-
-    def _make_temp_dir(prefix: str) -> Path:
-        import tempfile
-
-        path = tempfile.mkdtemp(prefix=prefix)
-        _temp_dir_paths.append(path)
-        return Path(path)
-
-    try:
-        # Codex review: extraction itself must be inside this scope --
-        # make_temp_dir() records the directory before extractor.extract()
-        # runs, so a malformed/corrupt archive that matches a known
-        # extension (a real format, bad content) raises *after* the temp
-        # dir already exists; extracting outside this try/finally leaked it
-        # even without --keep-extracted. It also must be inside the
-        # except (SnapshotError, ValueError) boundary just below (Codex
-        # review, fresh evidence) -- _extract_if_package raises
-        # SnapshotError for a malformed-but-recognized archive, and that
-        # used to propagate past this function as a raw Python traceback
-        # instead of the clean CLI error every other SnapshotError here
-        # produces.
         try:
-            lib_dir, _new_debug_dir, header_dir, _new_symbols_file = (
-                _extract_if_package(
-                    new_dir,
-                    None,
-                    kwargs.get("devel_pkg2"),
-                    _make_temp_dir,
-                    is_package,
-                    detect_extractor,
-                )
-            )
-            if header_dir is not None and depth != "binary":
-                # Codex review: --depth binary's uniform `headers = []`
-                # clear above (dispatch()'s own comment) must survive
-                # package/--devel-pkg extraction too -- without this guard,
-                # a NEW_INPUT package (or `--devel-pkg new=...`) that
-                # discovers its own header_dir would reassign `headers`
-                # right back to a non-empty list here, silently re-enabling
-                # L2 header extraction for that library under a depth that
-                # promises pure L0/L1 evidence with no header AST at all.
-                if not headers:
-                    headers = [header_dir]
-                includes = includes + _discover_include_roots(header_dir)
-
-            per_library_headers: dict[str, list[Path]] | None = None
-            per_library_includes: dict[str, list[Path]] | None = None
-            per_library_compile: dict[str, Any] | None = None
-            manifest_path = kwargs.get("bundle_facts_library_manifest")
-            if manifest_path is not None:
-                # G38 Phase 17: known_libraries is derived from the same
-                # primitives compare_release_against_bundle_facts() itself
-                # uses on this identical lib_dir, so a manifest entry naming
-                # a library outside the bundle is a hard, immediate error
-                # instead of silently never being looked up.
-                include_private_dso = bool(kwargs.get("include_private_dso", False))
-                new_library_paths = known_libraries_for_new_side(
-                    lib_dir, include_private_dso=include_private_dso
-                )
-                per_library_headers, per_library_includes, per_library_compile = (
-                    _load_library_overrides(
-                        Path(manifest_path),
-                        known_libraries=set(new_library_paths),
-                        selected_paths=new_library_paths,
-                    )
-                )
-                if depth == "binary":
-                    # Codex review: the uniform `headers` clear above only
-                    # covers the uniform operand -- a manifest-supplied
-                    # per-library header root would otherwise still run L2
-                    # extraction for that one library under --depth binary,
-                    # reporting findings outside the requested depth.
-                    per_library_headers = {}
-                    per_library_includes = {}
-                    per_library_compile = {}
-
-            result = compare_release_against_bundle_facts(
+            result = compare_stored_bundle_facts_pair(
                 old_facts_path,
-                lib_dir,
-                headers=headers or None,
-                includes=includes or None,
-                per_library_headers=per_library_headers,
-                per_library_includes=per_library_includes,
-                per_library_compile=per_library_compile,
-                header_backend=header_backend,
-                compile=compile_context,
-                new_version=kwargs.get("new_version", "new"),
-                lang=kwargs.get("lang", "c++"),
-                # Codex review, fresh evidence: kwargs["lang_explicit"] is
-                # compare_cmd's own ctx.get_parameter_source("lang") ==
-                # COMMANDLINE detection (compare.py, mirroring run_compare's
-                # identical lang_explicit computation) -- without threading
-                # it through, an explicit --lang c++ on a language-ambiguous
-                # NEW-side header was indistinguishable from Click's own
-                # default and silently let resolve_input() auto-detect past
-                # it, which can change the extracted API and findings.
-                lang_explicit=bool(kwargs.get("lang_explicit", False)),
-                include_private_dso=bool(kwargs.get("include_private_dso", False)),
+                new_dir,
                 manifest_path=kwargs.get("manifest_path"),
                 system_providers=bundle_system_providers or None,
                 cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
                 policy=kwargs["policy"],
                 policy_file=policy_file,
                 suppress=suppression,
-                include_dependencies=bool(kwargs.get("include_dependencies", False)),
-                max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                old_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                new_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
             )
-        except BundleFactsLibraryOverridesError as exc:
-            # Codex review, fresh evidence: compare_release_against_bundle_
-            # facts() itself re-validates the manifest's per-library keys
-            # against the libraries actually matched between OLD_FACTS and
-            # NEW_INPUT (a check known_libraries_for_new_side()'s earlier,
-            # NEW-side-only pass cannot make) -- this is a malformed-CLI-
-            # input case exactly like every other BundleFactsLibraryOverrides
-            # Error in this module, so it gets the same exit-64 usage-error
-            # translation rather than falling into the generic ValueError
-            # clause below (exit 1).
-            raise click.UsageError(str(exc)) from exc
-        # TypeError (Codex review, fresh evidence): a malformed nested
-        # build_mode/contract field inside one of OLD_FACTS's per-library
-        # snapshots is rejected rather than coerced at the storage boundary
-        # (storage AGENTS.md invariant 6) -- bundle_facts_from_dict()'s own
-        # per_library_snapshots comprehension calls snapshot_from_dict()
-        # with no nested guard, so that TypeError propagates all the way
-        # here and must be caught alongside ValueError like every other
-        # malformed-OLD_FACTS shape.
+        # Same CLI-boundary translation the stored/live branch below applies
+        # to compare_release_against_bundle_facts() -- see its own comments
+        # for exactly why each of these four exception types is caught here.
         except (SnapshotError, TypeError, ValueError, OSError) as exc:
-            # Same CLI-boundary translation every other SnapshotError-raising
-            # entry point uses (cli_resolve.py et al.) -- without this, a
-            # container-node-budget rejection (or any other SnapshotError) would
-            # surface as a raw Python traceback instead of a clean CLI error.
-            # Also catches ValueError (Codex review): a malformed-but-parseable
-            # OLD_FACTS document -- missing/wrong-shaped 'per_library_snapshots',
-            # a bad 'filesystem_aliases'/'library_filenames' entry
-            # (bundle_facts_serialization.bundle_facts_from_dict and
-            # storage.bundle_facts_validation's validators all raise plain
-            # ValueError, not SnapshotError, for these) -- would otherwise leak
-            # the same raw traceback. json.JSONDecodeError (genuinely malformed
-            # JSON, from the plain-JSON load path) is itself a ValueError
-            # subclass, so it's covered by the same clause. OSError (Codex
-            # review, fresh evidence) covers load_bundle_facts()'s own
-            # IsADirectoryError/PermissionError/etc when OLD_INPUT -- a plain
-            # click.Path(exists=True) argument, not dir_okay=False, since the
-            # ordinary live-directory compare mode needs a directory there --
-            # turns out to be a directory or otherwise unreadable file.
             raise click.ClickException(str(exc)) from exc
-    finally:
-        # Mirrors the live release fan-out's own --keep-extracted handling
-        # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
-        # the caller asked to keep it for debugging.
-        import shutil as _shutil
+    else:
+        # Codex review: NEW_INPUT is documented ("a live release directory/
+        # package") to accept a package archive (wheel/deb/rpm/tar), but
+        # compare_release_against_bundle_facts() treats any non-directory path
+        # as a single library file -- a package operand silently produced zero
+        # matches instead of the shared libraries inside it. Extract it first,
+        # the same way the live release fan-out does (_extract_if_package),
+        # sharing that primitive rather than re-implementing package detection
+        # here. --devel-pkg new=... is honored the same way too (its header_dir
+        # becomes the NEW-side header root when no explicit --new-header was
+        # given, and its discovered include roots are appended) -- --debug-info
+        # is rejected above rather than silently dropped, since this driver has
+        # no debug-dir parameter to forward it to.
+        from ....cli_compare_release_helpers import (
+            _discover_include_roots,
+            _extract_if_package,
+        )
+        from ....errors import SnapshotError
+        from ....workflows.extraction import detect_extractor, is_package
 
-        if not kwargs.get("keep_extracted"):
-            for _td in _temp_dir_paths:
-                _shutil.rmtree(_td, ignore_errors=True)
-        elif _temp_dir_paths:
-            click.echo(
-                f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
-            )
+        _temp_dir_paths: list[str] = []
+
+        def _make_temp_dir(prefix: str) -> Path:
+            import tempfile
+
+            path = tempfile.mkdtemp(prefix=prefix)
+            _temp_dir_paths.append(path)
+            return Path(path)
+
+        try:
+            # Codex review: extraction itself must be inside this scope --
+            # make_temp_dir() records the directory before extractor.extract()
+            # runs, so a malformed/corrupt archive that matches a known
+            # extension (a real format, bad content) raises *after* the temp
+            # dir already exists; extracting outside this try/finally leaked it
+            # even without --keep-extracted. It also must be inside the
+            # except (SnapshotError, ValueError) boundary just below (Codex
+            # review, fresh evidence) -- _extract_if_package raises
+            # SnapshotError for a malformed-but-recognized archive, and that
+            # used to propagate past this function as a raw Python traceback
+            # instead of the clean CLI error every other SnapshotError here
+            # produces.
+            try:
+                lib_dir, _new_debug_dir, header_dir, _new_symbols_file = (
+                    _extract_if_package(
+                        new_dir,
+                        None,
+                        kwargs.get("devel_pkg2"),
+                        _make_temp_dir,
+                        is_package,
+                        detect_extractor,
+                    )
+                )
+                if header_dir is not None and depth != "binary":
+                    # Codex review: --depth binary's uniform `headers = []`
+                    # clear above (dispatch()'s own comment) must survive
+                    # package/--devel-pkg extraction too -- without this guard,
+                    # a NEW_INPUT package (or `--devel-pkg new=...`) that
+                    # discovers its own header_dir would reassign `headers`
+                    # right back to a non-empty list here, silently re-enabling
+                    # L2 header extraction for that library under a depth that
+                    # promises pure L0/L1 evidence with no header AST at all.
+                    if not headers:
+                        headers = [header_dir]
+                    includes = includes + _discover_include_roots(header_dir)
+
+                per_library_headers: dict[str, list[Path]] | None = None
+                per_library_includes: dict[str, list[Path]] | None = None
+                per_library_compile: dict[str, Any] | None = None
+                manifest_path = kwargs.get("bundle_facts_library_manifest")
+                if manifest_path is not None:
+                    # G38 Phase 17: known_libraries is derived from the same
+                    # primitives compare_release_against_bundle_facts() itself
+                    # uses on this identical lib_dir, so a manifest entry naming
+                    # a library outside the bundle is a hard, immediate error
+                    # instead of silently never being looked up.
+                    include_private_dso = bool(kwargs.get("include_private_dso", False))
+                    new_library_paths = known_libraries_for_new_side(
+                        lib_dir, include_private_dso=include_private_dso
+                    )
+                    per_library_headers, per_library_includes, per_library_compile = (
+                        _load_library_overrides(
+                            Path(manifest_path),
+                            known_libraries=set(new_library_paths),
+                            selected_paths=new_library_paths,
+                        )
+                    )
+                    if depth == "binary":
+                        # Codex review: the uniform `headers` clear above only
+                        # covers the uniform operand -- a manifest-supplied
+                        # per-library header root would otherwise still run L2
+                        # extraction for that one library under --depth binary,
+                        # reporting findings outside the requested depth.
+                        per_library_headers = {}
+                        per_library_includes = {}
+                        per_library_compile = {}
+
+                result = compare_release_against_bundle_facts(
+                    old_facts_path,
+                    lib_dir,
+                    headers=headers or None,
+                    includes=includes or None,
+                    per_library_headers=per_library_headers,
+                    per_library_includes=per_library_includes,
+                    per_library_compile=per_library_compile,
+                    header_backend=header_backend,
+                    compile=compile_context,
+                    new_version=kwargs.get("new_version", "new"),
+                    lang=kwargs.get("lang", "c++"),
+                    # Codex review, fresh evidence: kwargs["lang_explicit"] is
+                    # compare_cmd's own ctx.get_parameter_source("lang") ==
+                    # COMMANDLINE detection (compare.py, mirroring run_compare's
+                    # identical lang_explicit computation) -- without threading
+                    # it through, an explicit --lang c++ on a language-ambiguous
+                    # NEW-side header was indistinguishable from Click's own
+                    # default and silently let resolve_input() auto-detect past
+                    # it, which can change the extracted API and findings.
+                    lang_explicit=bool(kwargs.get("lang_explicit", False)),
+                    include_private_dso=bool(kwargs.get("include_private_dso", False)),
+                    manifest_path=kwargs.get("manifest_path"),
+                    system_providers=bundle_system_providers or None,
+                    cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
+                    policy=kwargs["policy"],
+                    policy_file=policy_file,
+                    suppress=suppression,
+                    include_dependencies=bool(kwargs.get("include_dependencies", False)),
+                    max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                )
+            except BundleFactsLibraryOverridesError as exc:
+                # Codex review, fresh evidence: compare_release_against_bundle_
+                # facts() itself re-validates the manifest's per-library keys
+                # against the libraries actually matched between OLD_FACTS and
+                # NEW_INPUT (a check known_libraries_for_new_side()'s earlier,
+                # NEW-side-only pass cannot make) -- this is a malformed-CLI-
+                # input case exactly like every other BundleFactsLibraryOverrides
+                # Error in this module, so it gets the same exit-64 usage-error
+                # translation rather than falling into the generic ValueError
+                # clause below (exit 1).
+                raise click.UsageError(str(exc)) from exc
+            # TypeError (Codex review, fresh evidence): a malformed nested
+            # build_mode/contract field inside one of OLD_FACTS's per-library
+            # snapshots is rejected rather than coerced at the storage boundary
+            # (storage AGENTS.md invariant 6) -- bundle_facts_from_dict()'s own
+            # per_library_snapshots comprehension calls snapshot_from_dict()
+            # with no nested guard, so that TypeError propagates all the way
+            # here and must be caught alongside ValueError like every other
+            # malformed-OLD_FACTS shape.
+            except (SnapshotError, TypeError, ValueError, OSError) as exc:
+                # Same CLI-boundary translation every other SnapshotError-raising
+                # entry point uses (cli_resolve.py et al.) -- without this, a
+                # container-node-budget rejection (or any other SnapshotError) would
+                # surface as a raw Python traceback instead of a clean CLI error.
+                # Also catches ValueError (Codex review): a malformed-but-parseable
+                # OLD_FACTS document -- missing/wrong-shaped 'per_library_snapshots',
+                # a bad 'filesystem_aliases'/'library_filenames' entry
+                # (bundle_facts_serialization.bundle_facts_from_dict and
+                # storage.bundle_facts_validation's validators all raise plain
+                # ValueError, not SnapshotError, for these) -- would otherwise leak
+                # the same raw traceback. json.JSONDecodeError (genuinely malformed
+                # JSON, from the plain-JSON load path) is itself a ValueError
+                # subclass, so it's covered by the same clause. OSError (Codex
+                # review, fresh evidence) covers load_bundle_facts()'s own
+                # IsADirectoryError/PermissionError/etc when OLD_INPUT -- a plain
+                # click.Path(exists=True) argument, not dir_okay=False, since the
+                # ordinary live-directory compare mode needs a directory there --
+                # turns out to be a directory or otherwise unreadable file.
+                raise click.ClickException(str(exc)) from exc
+        finally:
+            # Mirrors the live release fan-out's own --keep-extracted handling
+            # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
+            # the caller asked to keep it for debugging.
+            import shutil as _shutil
+
+            if not kwargs.get("keep_extracted"):
+                for _td in _temp_dir_paths:
+                    _shutil.rmtree(_td, ignore_errors=True)
+            elif _temp_dir_paths:
+                click.echo(
+                    f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
+                )
 
     if not result.per_library:
         # Codex review: an empty NEW_INPUT (or one whose canonical library
         # keys match none of OLD_FACTS's per_library_snapshots) makes
-        # compare_release_against_bundle_facts() return with an empty
-        # per_library list -- nothing was actually compared, yet
-        # _exit_compare_release below would score that as NO_CHANGE (exit
-        # 0), reporting a successful compatibility result for a comparison
-        # that never ran. Fail loudly instead: this is a usage/operational
-        # error (a wrong NEW_INPUT, a canonical-key mismatch), not a clean
-        # bill of health.
+        # compare_release_against_bundle_facts()/compare_stored_bundle_
+        # facts_pair() return with an empty per_library list -- nothing was
+        # actually compared, yet _exit_compare_release below would score
+        # that as NO_CHANGE (exit 0), reporting a successful compatibility
+        # result for a comparison that never ran. Fail loudly instead: this
+        # is a usage/operational error (a wrong NEW_INPUT, a canonical-key
+        # mismatch), not a clean bill of health.
+        _new_desc = (
+            f"{new_dir}'s stored per_library_snapshots" if new_is_stored else str(new_dir)
+        )
         raise click.ClickException(
-            f"No library in {new_dir} matched any library in "
+            f"No library in {_new_desc} matched any library in "
             f"{old_facts_path}'s stored per_library_snapshots -- nothing "
             "was compared. Check that NEW_INPUT and OLD_FACTS reference "
             "the same release."
@@ -525,7 +570,9 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             # disk, or a non-directory *parent* path component.
             raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
 
-    text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
+    text = _render(
+        result, fmt, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored
+    )
     if output is not None:
         _safe_write_output(Path(output), text)
     else:
@@ -537,7 +584,11 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # secondary format can legitimately differ from the primary one.
         assert secondary_fmt is not None
         secondary_text = _render(
-            result, secondary_fmt, old_facts_path=old_facts_path, new_dir=new_dir
+            result,
+            secondary_fmt,
+            old_facts_path=old_facts_path,
+            new_dir=new_dir,
+            new_is_stored=new_is_stored,
         )
         _safe_write_output(Path(secondary_output), secondary_text)
     if output_dir is not None:
@@ -572,13 +623,21 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     _exit_compare_release(result.verdict.value, fail_on_removed=False, removed_keys=[])
 
 
-def _render(result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path) -> str:
+def _render(
+    result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False
+) -> str:
     if fmt == "markdown":
-        return _render_markdown(result, old_facts_path=old_facts_path, new_dir=new_dir)
-    return _render_json(result, old_facts_path=old_facts_path, new_dir=new_dir)
+        return _render_markdown(
+            result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored
+        )
+    return _render_json(
+        result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored
+    )
 
 
-def _render_json(result: Any, *, old_facts_path: Path, new_dir: Path) -> str:
+def _render_json(
+    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False
+) -> str:
     from ....report.run_outcome import run_outcome_dict_for_diff_result
     from ....reporter import to_json
 
@@ -605,7 +664,14 @@ def _render_json(result: Any, *, old_facts_path: Path, new_dir: Path) -> str:
     summary: dict[str, object] = {
         "mode": "bundle_facts",
         "old_bundle_facts": str(old_facts_path),
+        # PR I stored/stored: `new_dir` keeps its established key/meaning
+        # even when NEW_INPUT is itself a stored document too (its path,
+        # not a live release directory) -- `new_is_stored` is the new,
+        # additive signal a consumer checks to tell the two shapes apart,
+        # rather than a field rename that would break an existing consumer
+        # keyed on `new_dir`.
         "new_dir": str(new_dir),
+        "new_is_stored": new_is_stored,
         "verdict": result.verdict.value,
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
@@ -629,14 +695,17 @@ def _render_json(result: Any, *, old_facts_path: Path, new_dir: Path) -> str:
     return json.dumps(summary, indent=2)
 
 
-def _render_markdown(result: Any, *, old_facts_path: Path, new_dir: Path) -> str:
+def _render_markdown(
+    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False
+) -> str:
     from ....bundle import render_bundle_findings_markdown
 
+    new_label = "stored facts" if new_is_stored else "release directory"
     lines = [
         "# Bundle-facts comparison",
         "",
         f"- OLD (stored facts): `{old_facts_path}`",
-        f"- NEW (release directory): `{new_dir}`",
+        f"- NEW ({new_label}): `{new_dir}`",
         f"- **Verdict:** `{result.verdict.value}`",
         f"- Per-library verdict: `{result.per_library_verdict.value}`",
         f"- Bundle verdict: `{result.bundle_verdict.value}`",

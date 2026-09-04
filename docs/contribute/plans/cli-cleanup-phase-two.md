@@ -5043,10 +5043,11 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
 PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
       (prerequisite DONE; operand        explicit artifact_type discriminator
        classification + flag deletion    on BundleFacts, operand classification
-       DONE 2026-09-03; full             instead of a mode flag, and one
-       BundleCompareRequest unification  BundleCompareRequest over live/live +
-       not started)                      stored/live + live/stored +
-                                       stored/stored, with the full
+       DONE 2026-09-03; stored/stored    instead of a mode flag, and one
+       execution engine DONE            BundleCompareRequest over live/live +
+       2026-09-04; live/stored and       stored/live + live/stored +
+       full evaluation/gate/report/      stored/stored, with the full
+       dry-run unification not started)
                                        evaluation/gate/report/dry-run surface
                                        answered once. Shares PR G2's own
                                        GateOptions prerequisite.
@@ -5090,21 +5091,61 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        marker-less legacy v1 document);
                                        `compare_bundle_operand_dispatch.py`
                                        is the frontends-boundary translation
-                                       (a stored NEW_INPUT is a
-                                       click.UsageError, live/stored and
-                                       stored/stored still having no
-                                       execution engine). `--old-bundle-facts`
+                                       (a stored NEW_INPUT paired with a
+                                       *live* OLD_INPUT is a
+                                       click.UsageError -- live/stored is
+                                       the one shape still with no execution
+                                       engine). `--old-bundle-facts`
                                        and its former help text are gone, no
                                        deprecation alias, per this plan's
-                                       standing stance. **Still not
-                                       started, and still this row's own
-                                       open design question:** the actual
-                                       BundleCompareRequest unification --
+                                       standing stance. **Stored/stored
+                                       execution engine landed
+                                       2026-09-04:**
+                                       bundle_side_input.
+                                       compare_stored_bundle_facts_pair()
+                                       diffs two already-persisted
+                                       BundleFacts documents directly --
+                                       matched-key intersection, then one
+                                       service.compare_snapshots() call per
+                                       matched library (no binaries read, no
+                                       header AST parsed on either side),
+                                       delegating the bundle-level call to
+                                       the same bundle_facts.
+                                       compare_bundle_from_facts() every
+                                       other operand shape already shares.
+                                       compare_bundle_facts.py's dispatch()
+                                       selects between the two stored-
+                                       OLD_INPUT drivers on the new
+                                       new_is_stored flag, and
+                                       compare_bundle_facts_rejections.py
+                                       gained the NEW-side-scoped mirror of
+                                       every OLD-side extraction-only
+                                       rejection (--header new=,
+                                       --ast-frontend, --devel-pkg new=,
+                                       --bundle-facts-library-manifest,
+                                       --include-private-dso,
+                                       --keep-extracted, an explicit
+                                       --version new=,
+                                       --include-system-declarations) for
+                                       when NEW_INPUT is stored too, since
+                                       neither side has anything left to
+                                       re-extract. **Still not started, and
+                                       still this row's own open design
+                                       question:** live/stored (a live
+                                       OLD_INPUT compared against a stored
+                                       NEW_INPUT) -- the mirror image of the
+                                       stored/live driver, with every
+                                       OLD-side extraction option newly
+                                       meaningful and every NEW-side one of
+                                       those newly rejected -- and, across
+                                       all four operand shapes, the actual
                                        one evaluation/gate/report/dry-run
-                                       path across all four operand
-                                       combinations, live/stored and
-                                       stored/stored gaining a real engine
-                                       instead of a clean rejection, and
+                                       path unification (today each stored
+                                       shape still renders its own narrower
+                                       `mode: "bundle_facts"` envelope
+                                       through compare_bundle_facts.py
+                                       rather than the shared ExitDecision/
+                                       report pipeline live/live uses), and
                                        whether that unification reuses
                                        GateOptions as-is or needs a broader
                                        one.

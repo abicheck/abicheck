@@ -741,15 +741,16 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # CLI cleanup phase two, PR I: OLD_INPUT/NEW_INPUT are classified
     # automatically for bundle-facts routing, replacing the removed
     # --old-bundle-facts flag -- see compare_bundle_operand_dispatch.py's
-    # own docstring (a stored NEW_INPUT is rejected there; OLD_INPUT
-    # classified as stored short-circuits the ordinary live-binary/
-    # directory dispatch entirely, never reaching run_compare/
-    # _dispatch_release_compare -- see compare_bundle_facts.py's own
-    # module docstring for why that lives here rather than as a branch
-    # inside cli_compare_helpers.run_compare itself).
+    # own docstring (stored NEW_INPUT + live OLD_INPUT is rejected there;
+    # OLD_INPUT classified as stored -- alone, or with NEW_INPUT stored
+    # too -- short-circuits the ordinary live-binary/directory dispatch
+    # entirely, never reaching run_compare/_dispatch_release_compare -- see
+    # compare_bundle_facts.py's own module docstring for why that lives
+    # here rather than as a branch inside cli_compare_helpers.run_compare).
     from .compare_bundle_operand_dispatch import resolve_bundle_compare_dispatch
 
-    if resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"]):
+    _bundle_operands = resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"])
+    if _bundle_operands.old_is_stored:
         from ....cli_helpers_compare import discover_project_config
         from ....cli_options import resolve_compile_context
         from .compare_bundle_facts import (
@@ -792,7 +793,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         # re-derivation from raw kwargs silently drop them.
         kwargs["includes"] = tuple(_merged_includes)
         kwargs["new_includes_only"] = ()
-        dispatch_bundle_facts(compile_context=_compile_context, **kwargs)
+        dispatch_bundle_facts(compile_context=_compile_context, new_is_stored=_bundle_operands.new_is_stored, **kwargs)
         return
     kwargs.pop("max_json_object_nodes", None)
     reject_bundle_facts_manifest_without_old_bundle_facts(kwargs)

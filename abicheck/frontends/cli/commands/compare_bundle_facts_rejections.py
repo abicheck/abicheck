@@ -50,10 +50,17 @@ from typing import Any
 import click
 
 
-def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
+def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = False) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
     OLD_INPUT has no channel to honor. See this module's own docstring for
-    the design."""
+    the design.
+
+    *new_is_stored* (CLI cleanup phase two, PR I), when true, means
+    NEW_INPUT classified as a stored BundleFacts document too -- every
+    check below still applies (neither stored side has any of these
+    channels), plus the NEW-side-specific extraction options rejected at
+    the bottom of this function, which only make sense when NEW_INPUT is a
+    *live* directory/package (the default, ``False``, unchanged)."""
     fmt = kwargs.get("fmt", "json")
     if fmt not in ("json", "markdown"):
         raise click.UsageError(
@@ -503,4 +510,83 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         raise click.UsageError(
             "--demangle/--no-demangle is not supported together with "
             "a stored-bundle-facts OLD_INPUT."
+        )
+    if new_is_stored:
+        _reject_new_side_extraction_options_for_stored_pair(kwargs)
+
+
+def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) -> None:
+    """PR I stored/stored: the NEW-side-scoped mirror of every OLD-side
+    extraction-only rejection above, applied once NEW_INPUT classifies as a
+    stored BundleFacts document too -- ``compare_stored_bundle_facts_pair()``
+    reads no binaries and parses no header AST on *either* side, so every
+    flag that would only ever apply to a *live* NEW_INPUT directory/package
+    has no channel to honor here either, the identical reasoning the
+    OLD-side checks above already establish for OLD_INPUT."""
+    if (
+        kwargs.get("new_headers_only")
+        or kwargs.get("new_includes_only")
+        or kwargs.get("headers")
+        or kwargs.get("includes")
+    ):
+        raise click.UsageError(
+            "--header new=.../--include new=... (or the uniform --header/"
+            "--include) are not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: neither side has "
+            "any header re-extraction available."
+        )
+    if kwargs.get("new_header_backend") is not None or kwargs.get("header_backend") not in (
+        None,
+        "auto",
+    ):
+        # `header_backend` (the uniform/base value) defaults to the literal
+        # string "auto", never None (cli_options._split_sided_frontend) --
+        # unlike `old_header_backend`/`new_header_backend`, which really do
+        # default to None. Checking `is not None` here would reject every
+        # ordinary invocation, since the untouched default is always
+        # present; only a value that actually differs from that silent
+        # default means the flag was really given.
+        raise click.UsageError(
+            "--ast-frontend is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: neither side has "
+            "any header re-extraction available."
+        )
+    if kwargs.get("devel_pkg2") is not None:
+        raise click.UsageError(
+            "--devel-pkg new=... is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: there is no live "
+            "NEW-side package to extract a devel companion package's "
+            "headers into."
+        )
+    if kwargs.get("bundle_facts_library_manifest") is not None:
+        raise click.UsageError(
+            "--bundle-facts-library-manifest is not supported when both "
+            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
+            "there is no live NEW-side library set to apply per-library "
+            "header/include/compile overrides to."
+        )
+    if kwargs.get("include_private_dso"):
+        raise click.UsageError(
+            "--include-private-dso is not supported when both OLD_INPUT "
+            "and NEW_INPUT are stored BundleFacts documents: neither side "
+            "discovers shared libraries from a live directory/package."
+        )
+    if kwargs.get("keep_extracted"):
+        raise click.UsageError(
+            "--keep-extracted is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: neither side is "
+            "ever extracted to a temporary directory."
+        )
+    if kwargs.get("new_version") not in (None, "", "new"):
+        raise click.UsageError(
+            "--version new=... is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: NEW_INPUT's own "
+            "per-library snapshots already carry whatever version they "
+            "were captured with."
+        )
+    if kwargs.get("include_dependencies"):
+        raise click.UsageError(
+            "--include-system-declarations is not supported when both "
+            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
+            "there is no live NEW-side resolution for it to scope."
         )
