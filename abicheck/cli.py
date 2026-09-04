@@ -122,10 +122,19 @@ from . import (  # noqa: E402  — must run after `main` is defined
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
 )
+from .cli_options import variant_options  # noqa: E402
 from .frontends.cli.commands import (  # noqa: E402
     compare as _compare_cmd,  # noqa: F401  — registers compare
     dump as _dump_cmd,  # noqa: F401  — registers dump
 )
+from .frontends.cli.commands.compare import compare_cmd  # noqa: E402
+
+# ADR-062 A1.7: --old-variant/--new-variant, applied to the already-
+# registered `compare` command from here (not compare.py itself, capped at
+# 800 lines) -- click.option() appends directly to compare_cmd.params
+# (click.decorators._param_memo's isinstance(f, Command) branch), the same
+# mechanism a stacked @click.option decorator uses, as a function call.
+variant_options(compare_cmd)
 
 if __name__ == "__main__":
     main()

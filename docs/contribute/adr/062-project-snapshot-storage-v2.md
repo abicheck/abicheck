@@ -94,18 +94,30 @@ favor of the single `VariantRef.sections` one — including rewriting
 the internal layout being retired) with the same adversarial-review rigor
 the original had.
 
+**A1.7 (stored/live and stored/stored release-comparison CLI reachability)
+is also implemented**: `abicheck compare` (directory/package release
+fan-out, `cli_compare_release.py`) now accepts a multi-artifact
+`ProjectSnapshot` package directory as either operand, unpacked via
+`workflows.release_package.resolve_release_package_map` into
+per-library single-artifact sub-packages the existing single-artifact
+resolution path already reads unchanged; `--old-variant`/`--new-variant`
+select among multiple declared variants. Directory packages only — the
+`.tar.zst` transport form (A1.1's own remainder, below) is not yet produced
+by anything, so nothing yet exercises this against one.
+
 Digest-deduplicated shared evidence beyond what the two slices above already
 give, variant capture, and the `.tar.zst` transport form (the remainder of
-A1.5-A1.8) remain not implemented, along with `BuildSourcePack`/project
+A1.5/A1.6/A1.1) remain not implemented, along with `BuildSourcePack`/project
 source-graph dedup (the ~57-59 MB-per-artifact finding this ADR's Context
-names), `bundle_variants:` capture wiring, stored/live release-comparison
-CLI reachability, and non-ELF artifact membership — note this is the
+names), `bundle_variants:` capture wiring, and non-ELF artifact
+membership (A1.8) — note this is the
 **remainder of Phase 1**, not Phase 2 (Phase 2 is the separate
 scale/performance work: lazy loading, streaming encode, cache migration,
 indexes). A full per-item design for A1.1's `.tar.zst` remainder and
-A1.5-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
-now exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
-"Phase 1" section — design only, not implemented by that addition; the
+A1.5/A1.6/A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
+exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
+"Phase 1" section (A1.7's own entry there is now a landing note, not only a
+design); the
 object model these items build on (`PackageManifest.artifact_refs`/
 `variant_refs`, `ArtifactRef.kind`/`.sections`) already supports every one
 of them without a schema change, which is why each item below is scoped as

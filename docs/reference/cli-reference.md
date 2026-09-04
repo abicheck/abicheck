@@ -120,6 +120,8 @@ Compare two ABI surfaces and report changes.
 | `--use-cases` | no | — | An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 amendment) whose declared use cases this comparison's own findings are attributed to: for each use case, which changes its resolved entrypoints can be shown to reach. Needs a source graph on at least one side (dump --sources/--build-info, or the always-on header-only graph). Read-only -- an unattributed finding is an absence of proof, not proof the finding is harmless, so this never moves a verdict or an exit code. Validate a manifest on its own with `abicheck project validate-use-cases`. |
 | `--require-complete-analysis` | no | `False` | P0.4: fail the build when analysis\_assurance.status is not 'complete', independent of the compatibility verdict. Contributes exit 1, folded with max the same way --contract's coverage axis is (ADR-049 Phase 7): it raises a clean 0 to 1 and never lowers a 2/4. Single-pair compares only, not the directory/package release fan-out. See docs/reference/exit-codes.md. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+| `--old-variant` | no | — | Which build variant to compare when OLD is a stored ProjectSnapshot package directory declaring more than one. Defaults to the package's only variant when it declares exactly one; a usage error otherwise. No-op for a live directory/archive/single-file operand. |
+| `--new-variant` | no | — | The --old-variant counterpart for NEW. |
 
 ## `compat`
 

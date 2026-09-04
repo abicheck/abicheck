@@ -127,7 +127,9 @@ reconciled (Track 1): `bundle_facts_store.py` is now a thin wrapper over
 `bundle_facts_serialization.bundle_facts_to_dict`/`bundle_facts_from_dict`
 plus `storage.import_bundle_facts`, so one physical layout serves both the
 live-object and document entry points; see A1.4's own entry below.
-A1.5-A1.8 remain open. See "Landed in Phase 1" below.
+**A1.7 is now also implemented** (directory packages only, matching A1.1's
+own "everything but `.tar.zst`" scope); A1.5, A1.6, and A1.8 remain open.
+See "Landed in Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
   directory abstraction, with a deterministic `.tar.zst` transport form.
@@ -171,7 +173,9 @@ A1.5-A1.8 remain open. See "Landed in Phase 1" below.
   capture pipeline is told which variant it is producing, and both declared
   and captured coordinates are stored and verified.
 - **A1.7** Stored/live and stored/stored release comparison is reachable
-  from the standard CLI.
+  from the standard CLI. **Implemented** for directory packages (the
+  `.tar.zst` transport form remains A1.1's own open item) — see "Landed in
+  Phase 1" below and A1.7's own detailed entry.
 - **A1.8** Non-ELF artifacts (PE, Mach-O, Python-visible, header-only) are
   retained as project members with bundle-level *resolution* declared as an
   ELF-only capability rather than silently excluded.
@@ -225,11 +229,15 @@ nothing in the existing pipeline changes behavior.
    `ArtifactRef.native_identity` shape. Both are published/read through
    `project_snapshot_store.py`'s `write_project_manifest`/
    `read_project_manifest` — see A1.4's own entry above.
-5. **Open, designed below**: the `.tar.zst` transport form (the remainder of
+5. **Landed**: stored/live release-comparison reachability (A1.7) —
+   `cli_compare_release.py`'s per-library fan-out now accepts a
+   multi-artifact `ProjectSnapshot` package directory as either operand,
+   via `workflows.release_package.resolve_release_package_map`; see
+   A1.7's own entry below.
+6. **Open, designed below**: the `.tar.zst` transport form (the remainder of
    A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
-   (the remainder of A1.4/A1.5), `bundle_variants:` CLI wiring (A1.6),
-   stored/live release-comparison reachability (A1.7), and non-ELF artifact
-   membership (A1.8).
+   (the remainder of A1.4/A1.5), `bundle_variants:` CLI wiring (A1.6), and
+   non-ELF artifact membership (A1.8).
 
 `AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
 re-sort the whole mapping per call, so building a ledger of *n* overrides
@@ -523,18 +531,23 @@ not captured" half of finding #7.
 
 #### A1.7 — stored/live and stored/stored release comparison from the standard CLI
 
-**Status: not implemented.** `compare`/`scan --against` already accept a
-directory package as an operand (ADR-063 Phase 8's landing note); what's
-missing is a *release-level* command that compares two packages (or a
-package against a live directory of binaries) library-by-library and
-variant-by-variant, the multi-artifact counterpart to
+**Status: implemented** (directory packages; the `.tar.zst` transport form
+remains A1.1's own open item — this item consumes whatever A1.1 eventually
+produces there unchanged, since it only ever reads a `ProjectSnapshot`
+*directory*). `compare`/`scan --against` already accepted a *single-artifact*
+directory package as an operand (ADR-063 Phase 8's landing note); this item
+is the multi-artifact counterpart: a *release-level* fan-out that compares
+two packages (or a package against a live directory of binaries)
+library-by-library and variant-by-variant, the multi-artifact counterpart to
 `cli_compare_release.py`'s existing directory-of-`.so`-files fan-out.
 
 **Goal.** `stored/live`, `live/stored`, and `stored/stored` release
 comparisons are reachable the same way `live/live` already is — not a
 second, parallel command family, per this plan's "Relationship to G38"
 principle of one container format and this repository's admission bar
-against a second vocabulary next to an established one.
+against a second vocabulary next to an established one. **Met**: there is no
+new root command — `compare <old> <new>` fans out to the release engine for
+this operand shape exactly as it already did for a loose directory.
 
 **Design.** `cli_compare_release.py`'s existing per-library fan-out
 (`_compare_release_libraries`, and — per this ADR-063 work's own D1
@@ -542,41 +555,87 @@ migration above — `_resolve_stranded_library`) already resolves each
 library through the shared `CompareRequest`/`DumpRequest` pipelines; this
 item's job is giving that fan-out a *package* as one of its two top-level
 operands (today: two directories of loose files) — unpacking a
-`.tar.zst`/directory package into the same `old_map`/`new_map: dict[str,
-Path]` shape the fan-out already builds from a loose directory, keyed by
-`ArtifactRef.artifact_id`, so every downstream step (matching, per-pair
-comparison, bundle analysis, `--bundle-facts-out`) is unchanged code
-operating on resolved paths — a package is a *source* for that map, not a
-new code path through the fan-out. `--old-variant`/`--new-variant` select
-which `VariantRef` to compare when a package carries more than one
-(defaulting to the package's only variant when it carries exactly one, a
-usage error when it carries several and neither flag is given — the same
-"ambiguity is a hard usage error, not a silent first-match" discipline
-`SymbolIdentityIndex`'s `unique_alias_match` already establishes for a
-different kind of ambiguity elsewhere in this codebase).
+directory package into the same `old_map`/`new_map: dict[str, Path]` shape
+the fan-out already builds from a loose directory, so every downstream step
+(matching, per-pair comparison, bundle analysis, `--bundle-facts-out`) is
+unchanged code operating on resolved paths — a package is a *source* for
+that map, not a new code path through the fan-out.
+`workflows.release_package.resolve_release_package_map` does the
+unpacking: for each artifact in the selected variant, it materializes a
+real, independently-readable single-artifact `ProjectSnapshot` sub-package
+directory (written via `write_project_manifest`, sharing the multi-artifact
+package's own `objects/` store via a symlink rather than copying section
+content), so the existing single-artifact resolution path
+(`workflows.input_resolution._resolve_project_snapshot_directory`) reads
+each one completely unchanged. Each sub-package is keyed by the same
+canonical library-matching key a live directory operand's own
+`_build_match_map`/`binary_utils._canonical_library_key` computes (read off
+`ArtifactRef.native_identity`'s `library_filename`/`library_name` fact,
+falling back to the artifact's own opaque `artifact_id` when neither is
+recorded), which is what lets a stored-side map match a live-side or another
+stored-side one for the same library. `cli_resolve.classify_compare_operand`
+now distinguishes a *single*-artifact package directory (still resolved
+directly as one snapshot, A1.3's original "file" classification, unchanged)
+from a *multi*-artifact one (now classified `"directory"`, routing to the
+release fan-out) via `_package_dir_is_multi_artifact`. `--old-variant`/
+`--new-variant` select which `VariantRef` to compare when a package carries
+more than one (defaulting to the package's only variant when it carries
+exactly one, a usage error — `click.UsageError`, exit 64 — when it carries
+several and neither flag is given — the same "ambiguity is a hard usage
+error, not a silent first-match" discipline `SymbolIdentityIndex`'s
+`unique_alias_match` already establishes for a different kind of ambiguity
+elsewhere in this codebase).
 
-**Files.** `cli_compare_release.py` (accept a package path — file or
-directory — as either operand, detected via `project_snapshot_legacy.
-is_project_snapshot_package_dir`/a `.tar.zst` magic-byte sniff already
-established for the single-file path per ADR-059); `project_snapshot_
-legacy.py` or the new `bundle_facts_store.py` (A1.4/A1.5) for the
-package → `{artifact_id: resolved snapshot}` resolution a stored-side
-operand needs (a live-side operand keeps resolving through the existing
-binary-directory path unchanged).
+**Files.** `cli_resolve.py` (`classify_compare_operand`'s multi- vs.
+single-artifact split); `cli_compare_release_matrix.py`
+(`_resolve_release_package_side`, wired into `_prepare_compare_release_inputs`);
+`cli_compare_release.py`/`frontends/cli/commands/compare.py`/`cli_options.py`
+(the `--old-variant`/`--new-variant` flags and their plumbing from `compare`
+through to the release engine — deliberately routed around
+`cli_compare_helpers.py`'s `run_compare`, itself already at its own
+no-growth line ceiling, via `ctx.meta`/`ctx.params` rather than a new typed
+parameter on that function); `project_snapshot_legacy.py`
+(`materialize_release_variant_artifacts`, the storage-layer half: one
+sub-package directory per artifact, named by the artifact's own already-
+unique, already-safe `artifact_id` — never by a caller-controlled display
+name, which is exactly the source of a directory-collision risk an earlier
+revision of this item had); `workflows/release_package.py` (the
+workflows-layer half `materialize_release_variant_artifacts`'s
+`{artifact_id: (Path, ArtifactRef)}` is re-keyed through — canonical-key
+matching needs `binary_utils._canonical_library_key`, `extract`-classified,
+which `storage`-classified `project_snapshot_legacy.py` may not import; see
+that module's own docstring for the full dependency-direction account).
+Deliberately does **not** yet build on `bundle_facts_store.py`'s own
+`ArtifactRef.native_identity` conventions any more tightly than reading the
+same two well-known keys (`library_filename`/`library_name`) both of
+today's not-yet-reconciled multi-artifact writers (`bundle_facts_store.py`
+and `storage/import_bundle_facts.py`) already stamp — see A1.4's own entry
+above for the reconciliation this still owes.
 
-**Tests.** All three of `stored/live`, `live/stored`, `stored/stored`
-against a small real fixture package (2-3 libraries), each asserted to
-produce the identical `DiffResult` set a `live/live` run over the
-equivalent loose-file directories would — the "Stored-versus-live parity"
-row this plan's own Validation corpus section already commits to,
-finally exercised by a real test rather than only stated as a corpus
-requirement.
+**Tests.** `tests/test_cli_compare_release_project_snapshot_package.py`:
+all three of `stored/live`, `live/stored`, `stored/stored` against a
+3-library fixture package (one breaking removal, one compatible addition,
+one no-change member — enough to tell a real per-library fan-out apart from
+one that collapsed every member onto the same verdict), each asserted to
+produce the same per-library verdict/finding-count outcomes a `live/live`
+run over the equivalent loose-file directories would — the "Stored-versus-live
+parity" row this plan's own Validation corpus section already commits to,
+now exercised by a real test rather than only stated as a corpus
+requirement. Also covers the ambiguous-variant usage error and
+`--old-variant` disambiguation.
 
 **Acceptance criteria.** Closes finding #7's "no coherent multi-variant
-baseline from a normal workflow" for the comparison half (A1.6 above
-closes the capture half); no new root CLI command (`AGENTS.md`'s admission
-bar) — this is `compare`'s existing release fan-out gaining a new operand
-shape, not a new verb.
+baseline from a normal workflow" for the comparison half (A1.6 above still
+owns the capture half — `bundle_variants:` CLI wiring remains open); no new
+root CLI command (`AGENTS.md`'s admission bar) — this is `compare`'s
+existing release fan-out gaining a new operand shape, not a new verb.
+**Known limitation carried forward, not closed by this item**: two variants
+of one package cannot share a library name today, since
+`bundle_facts_store._artifact_id_for_library` derives `ArtifactRef.artifact_id`
+from the library name alone, not `(variant, name)` — a real multi-variant
+capture (A1.6) will need that reconciled before this item's variant
+selection is exercised against a real multi-variant capture rather than a
+hand-assembled fixture.
 
 ---
 
@@ -732,6 +791,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/import_v1.py` | `export_legacy_snapshot`, `import_legacy_snapshot` (A1.2) |
 | `abicheck/storage/import_bundle_facts.py` | `BUNDLE_FACTS_ARTIFACT_TYPE`, `export_bundle_facts`, `import_bundle_facts` (A1.4: a persisted G38 BundleFacts document, folded into a one-variant, multi-artifact PackageManifest by calling import_v1 once per library and attaching the container's own composition facts to VariantRef.sections) |
 | `abicheck/storage/import_baseline_set.py` | `export_baseline_set`, `import_baseline_set` (A1.4's other half: an actions/baseline-produced baseline set's manifest.json plus its already-resolved per-library snapshot documents, folded the same way) |
+| `abicheck/storage/variant_composition.py` | `read_variant_composition_library_filenames`, `read_variant_composition_manifest_payload` (A1.7: single-variant reads of import_bundle_facts.py's own composition layout, split into its own module purely to keep that module under the 800-line production cap. The manifest reader reads just one variant's own composition-embedded manifest back, for a single-artifact materialized sub-package that never has the full multi-artifact PackageManifest export_bundle_facts itself needs; the filenames reader recovers the same variant's real, possibly-versioned on-disk filenames, since import_bundle_facts itself stamps only the bundle key onto each artifact's own native_identity) |
 | `abicheck/storage/sectioned_document.py` | `SECTION_SCHEMA_VERSIONS_KEY`, `SECTIONS_KEY`, `from_sectioned_document`, `is_sectioned_document`, `to_sectioned_document` (Phase 8 redesign: the D8 section split packaged as one JSON document instead of a directory-backed package -- see the module's own docstring) |
 
 `ObjectRef`/`VariantRef`/`ArtifactRef`/`PackageManifest` are the in-memory

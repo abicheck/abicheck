@@ -1397,6 +1397,8 @@ from .frontends.cli.options.release import (  # noqa: E402
     evidence_options as evidence_options,
     header_graph_options as header_graph_options,
     release_options as release_options,
+    variant_kwargs_from_context as variant_kwargs_from_context,
+    variant_options as variant_options,
     warn_deprecated_header_graph_flags as warn_deprecated_header_graph_flags,
 )
 
