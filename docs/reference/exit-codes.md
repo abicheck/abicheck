@@ -351,6 +351,23 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > ever exits `0`/`1`/`64`, never a verdict code; see
 > [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
+> **`scan --artifact-set`** (auditing 2+ libraries together, ADR-056) shares
+> this exact table with one addition: as of 2026-09-04, a member's own
+> evidence-contract abort exits the whole set at the identical dedicated `7`
+> above (`service_scan._aggregate_scan_set_verdict`), not a generic `1` —
+> before this date the set-level process floored at `1` for this axis
+> specifically because it had no per-member OS exit code of its own to
+> report, which made a `format: text` `--artifact-set` Action step
+> indistinguishable from a genuine CLI usage error at exit `1`. Re-checking
+> that constraint found it didn't actually block a dedicated code: the
+> *set's* own single process exit was always free to use `7`, since
+> `--artifact-set` accepts no severity policy (`--severity-preset`/
+> `--exit-code-scheme` are rejected outright) and no other code path ever
+> returned it. Exit `1` for a set is unambiguous too, now that it's no
+> longer shared: it means either a genuine CLI/operational error, or the
+> unrelated `BUNDLE_INCOMPLETE` case (the cross-library audit itself
+> couldn't run, with no worse per-member problem already reported).
+
 ### `scan --against` and severity (mirrors `compare`)
 
 `scan --against` accepts the same severity surface as `compare` —

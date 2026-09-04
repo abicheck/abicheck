@@ -3953,6 +3953,46 @@ second top-level spelling of the same fact.
 > specifically — a separate, not-yet-scoped piece of work, unchanged by
 > this round.
 
+> **Update (2026-09-04): the `--format text` gap closed too, via the exit-
+> code approach after all.** Round 6's "does NOT generalize" conclusion
+> rested on "the set's own process exit is floored at a generic 1 with no
+> room for a distinct value" — re-reading `_aggregate_scan_set_verdict`
+> (`abicheck/service_scan.py`) against the actual current code found that
+> premise wrong, not the conclusion drawn from it: `run_scan_set` rejects
+> `severity_preset`/`exit_code_scheme` outright for every `--artifact-set`
+> request (`_reject_comparison_only_fields`), so the severity scheme's own
+> "1 = addition/quality error" meaning documented for `scan --against`
+> never actually applied to a set, and the *only* two producers of exit `1`
+> were this function's own evidence-contract-error floor and the sibling
+> `BUNDLE_INCOMPLETE` floor in `run_scan_set` — there was no other claimant
+> on exit `1`, so nothing stopped reassigning the evidence-contract-error
+> case to the identical dedicated `7` the single-binary path already uses.
+> This also fixes a latent inconsistency the old floor carried: each
+> member's own `ScanResult.exit_code` already recorded `7` for this abort
+> (`workflows/scan_abort_result.py`'s `_SCAN_ABORT_VERDICTS`) while the
+> *set's* aggregate exit read `1` for the identical cause — the set-level
+> code now agrees with what its own members already reported. `action/
+> run.sh`'s exit-`7` dispatch (previously single-binary-only) now fires
+> unconditionally for `--artifact-set` too, with an artifact-set-specific
+> `::error::` message pointing at the report's `per_artifact` entries (no
+> single command-level stderr line exists for a set the way it does for one
+> binary); the exit-`1` dispatch's own JSON-`compat_verdict` check for this
+> case (added in Round 6, restored after the marker-file rewrite regressed
+> it) is removed as dead code, not hardened further — the class of forgery
+> it was exposed to (trusting an attacker-influenced member's own JSON
+> report at a *shared* exit code) is closed by removing the shared exit
+> code entirely, the same resolution the single-binary axis reached after
+> three earlier rounds of hardening the same mechanism instead of replacing
+> it. Real, executing regression tests (`tests/test_scan_artifact_set_
+> coverage.py::TestArtifactSetDryRunPreview::test_real_run_exits_7_on_
+> evidence_contract_error`, and `tests/test_action_run_sh_scan_evidence_
+> contract_error.py`'s new artifact-set cases, including two that run the
+> real CLI end-to-end and feed its real exit code into the real bash
+> dispatch — the same discipline the single-binary fix used). This closes
+> the `--artifact-set`/PR G2 gap completely; see `docs/reference/exit-
+> codes.md`'s `scan --artifact-set` note and `docs/use/github-action.md`'s
+> `exit-code` output row for the user-facing statement.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects

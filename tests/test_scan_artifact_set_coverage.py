@@ -148,9 +148,11 @@ class TestArtifactSetRepeatableOptionBranches:
     ) -> None:
         # Codex review: --depth source with no --sources/--build-info/
         # --build-config would fail the real run with EVIDENCE_CONTRACT_ERROR
-        # (exit 1); the dry-run must flag it (as a DryRunResult.block(), not
-        # a plain note -- so its own exit code matches the real run's) rather
-        # than silently price a run that would never actually execute.
+        # (exit 7, see test_real_run_exits_7_on_evidence_contract_error
+        # below); the dry-run must flag it (as a DryRunResult.block(),
+        # always exit 1 regardless of the real run's own cause-specific exit
+        # code -- see estimate_artifact_set()'s own docstring) rather than
+        # silently price a run that would never actually execute.
         p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
         _write_elf_shared_object_stub(p1)
         _write_elf_shared_object_stub(p2)
@@ -162,6 +164,31 @@ class TestArtifactSetRepeatableOptionBranches:
             ],
         )
         assert result.exit_code == 1, result.output
+        assert "EVIDENCE_CONTRACT_ERROR" in result.output
+
+    def test_real_run_exits_7_on_evidence_contract_error(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # New capability closing the last --artifact-set/--format text
+        # signal gap the cli-cleanup-phase-two plan's PR G2 section left
+        # open (2026-09-04): the *real* (non-dry-run) --artifact-set run
+        # now uses the identical dedicated exit code 7 the single-binary
+        # `scan` path already uses for this axis
+        # (`service_scan._aggregate_scan_set_verdict`), not the generic
+        # exit 1 every other CLI-usage/crash error also produces -- so a
+        # `format: text` Action step can now tell the two apart from the
+        # process exit code alone, with no JSON report needed.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--depth", "source",
+            ],
+        )
+        assert result.exit_code == 7, result.output
         assert "EVIDENCE_CONTRACT_ERROR" in result.output
 
     def test_dry_run_blocks_on_an_inert_build_config_with_no_query(

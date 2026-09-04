@@ -895,10 +895,34 @@ def _aggregate_scan_set_verdict(
     2. Else, the worst compatibility verdict across `per_artifact` + the
        bundle layer's own verdict (`_SCAN_SET_COMPAT_ORDER`), with the
        matching exit code.
-    3. Any member ``EVIDENCE_CONTRACT_ERROR`` floors the exit code at 1
-       without lowering a worse one from step 2, and becomes the reported
-       verdict only when step 2's worst was NO_CHANGE/COMPATIBLE/
-       COMPATIBLE_WITH_RISK; a stronger API_BREAK/BREAKING keeps that string.
+    3. Any member ``EVIDENCE_CONTRACT_ERROR`` becomes the reported verdict,
+       at the same dedicated exit code the single-binary path uses
+       (``cli_scan.py``'s ``_EXIT_EVIDENCE_CONTRACT_ERROR = 7``), only when
+       step 2's worst was NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK; a
+       stronger API_BREAK/BREAKING keeps that verdict and exit code, since
+       an evidence gap in one member never demotes a confirmed break found
+       in another. **Design decision (2026-09-04, closing the "--artifact-
+       set / --format text" gap the cli-cleanup-phase-two plan's PR G2
+       section left open):** the plan's own Round 6 update called this
+       "does NOT generalize" because the *set's* own process exit was
+       assumed floored at a generic 1 with "no room" for a distinct value —
+       but re-reading this function shows exit 1 was never actually
+       *load-bearing* here: ``run_scan_set`` never resolves a severity
+       policy (`_reject_comparison_only_fields` rejects `severity_preset`/
+       `exit_code_scheme` outright for every `--artifact-set` request, so
+       the severity-scheme "1 = addition/quality error" meaning `scan
+       --against` documents never applies to a set), and the only two
+       producers of exit 1 were this floor and the sibling
+       ``BUNDLE_INCOMPLETE`` floor in `run_scan_set` below. Reassigning
+       *this* floor to 7 — the exact code the single-binary path already
+       dedicates to the identical failure — costs nothing (no other
+       ``ScanSetResult`` path ever returns 7) and gains a real, kernel-
+       reported, unforgeable signal a `format: text` Action step can switch
+       on directly, closing the gap the JSON-only workaround
+       (`action/run.sh`'s `_json_report_src`/`compat_verdict` check) could
+       never reach. The exit-code approach *does* generalize; the plan's
+       prior conclusion was an under-verified guess, per this file's own
+       instruction to check before assuming.
     4. Any member ``NOT_COMPARABLE`` becomes the reported verdict/exit 6
        under that same condition, outranking step 3 (Codex review:
        previously exited 0 here, dropping the run_outcome.operational
@@ -920,10 +944,13 @@ def _aggregate_scan_set_verdict(
     exit_code = _SCAN_SET_COMPAT_EXIT.get(worst_verdict, 0)
     no_stronger_break = worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]
 
-    if any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact):
-        exit_code = max(exit_code, 1)
-        if no_stronger_break:
-            worst_verdict = "EVIDENCE_CONTRACT_ERROR"
+    if no_stronger_break and any(
+        a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact
+    ):
+        # Dedicated exit code, not a generic floor -- see the docstring's
+        # "Design decision" note above. A stronger API_BREAK/BREAKING
+        # already dominates via `no_stronger_break` and keeps its own 2/4.
+        worst_verdict, exit_code = "EVIDENCE_CONTRACT_ERROR", 7
     if no_stronger_break and any(
         a.result.verdict == "NOT_COMPARABLE" for a in per_artifact
     ):
@@ -1109,10 +1136,15 @@ def estimate_artifact_set(
     ``bundle_audit`` entry. Third return value: a blocker message, or
     ``None`` -- set only when ``collect_mode != "off"`` (mirrors
     ``scan_engine._check_scan_evidence_contract``'s short-circuit) and no
-    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``
-    (exit 1). Kept out of *notes* so the caller routes it through
-    :meth:`DryRunResult.block` instead. Fourth value *unknown_layers* names
-    per-layer unknown-marked members (totals alone can't tell zero from unknown).
+    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``.
+    The blocker message itself is a :meth:`DryRunResult.block` (a preview-
+    time usage-error signal, always exit 1 regardless of cause) -- distinct
+    from the *real run's* exit code, which since 2026-09-04 is the same
+    dedicated 7 for both a single-artifact scan and an ``--artifact-set``
+    member (`_aggregate_scan_set_verdict`'s own docstring). Kept out of
+    *notes* so the caller routes it through :meth:`DryRunResult.block`
+    instead. Fourth value *unknown_layers* names per-layer unknown-marked
+    members (totals alone can't tell zero from unknown).
     """
     sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(
         req
@@ -1129,9 +1161,8 @@ def estimate_artifact_set(
         blocker = (
             f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
             "and --build-config declares no build.query -- the real run "
-            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1 for this "
-            "--artifact-set member; a single-artifact scan uses exit 7), "
-            "not run as priced below."
+            "would fail with EVIDENCE_CONTRACT_ERROR (exit 7), not run as "
+            "priced below."
         )
     for member_path in member_paths:
         member_req = replace(req, binaries=[member_path], mode="audit")
@@ -1867,10 +1898,12 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         # P2 regression (Codex review): bundle_incomplete previously left the exit code purely a function of the per-
         # member verdicts -- the cross-library audit itself never ran, but a set where every member scanned clean
         # (COMPATIBLE/NO_CHANGE/COMPATIBLE_WITH_RISK) still exited 0, so a CI gate that only checks the exit code
-        # silently accepted a skipped audit as a full pass. Floor the exit code at 1 (mirroring the per-member
-        # EVIDENCE_CONTRACT_ERROR contract in ``_aggregate_scan_set_verdict`` above) and surface a dedicated
-        # BUNDLE_INCOMPLETE verdict when no worse, already-dominant member problem
-        # (API_BREAK/BREAKING/EVIDENCE_CONTRACT_ERROR/BUDGET_OVERFLOW) is already being reported.
+        # silently accepted a skipped audit as a full pass. Floor the exit code at 1 and surface a dedicated
+        # BUNDLE_INCOMPLETE verdict when no worse, already-dominant member problem is already being reported --
+        # `_aggregate_scan_set_verdict` above already returns its own dedicated 7 (not 1) when the dominant problem
+        # is an EVIDENCE_CONTRACT_ERROR member, so this `max(exit_code, 1)` is a genuine no-op in that case
+        # (API_BREAK/BREAKING/EVIDENCE_CONTRACT_ERROR/BUDGET_OVERFLOW all already exit >= 1) and only actually
+        # floors the true "audit skipped, nothing else wrong" case to 1.
         exit_code = max(exit_code, 1)
         if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
             verdict = "BUNDLE_INCOMPLETE"
