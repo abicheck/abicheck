@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 
 from .errors import AstContextMissingError, ValidationError
 from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.artifact.compile_context_gate import side_effective_compile_context
 from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
@@ -611,7 +612,6 @@ def execute_dump_request(
             :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
-    from . import service
     from .dependency_info import populate_side_dependency_info
     from .evidence_depth import depth_rank, gated_source_label
 
@@ -722,62 +722,22 @@ def execute_dump_request(
                 ),
             )
         )
-        # Codex review, PR #1037 (six rounds -- see git history for the
-        # narrower, now-superseded gates this replaced): `with_assurance()`
-        # alone leaves `compile_contexts` empty. `resolution.
-        # effective_compile_context`, when the P0.3 fold produced one AND a
-        # header-AST parse actually ran *this invocation*, is what
-        # `ResolvedExecutionContext.compile_contexts`'s own docstring wants
-        # -- documented absent, not placeholder-valued, otherwise.
-        # `DumpResult.effective_compile_context` stays unconditional either
-        # way (a separate, pre-existing field).
-        #
-        # "Did a header-AST parse run" is answered by detecting the format of
-        # the *actually-resolved* target, mirroring `resolve_input`'s own
-        # dispatch order rather than any single proxy: `resolved.fmt`/
-        # `snap.from_headers`/`snap.platform` each disagree with reality for
-        # some input shape (a loaded JSON/Perl snapshot short-circuits with
-        # no parse at all, yet can carry a stale `from_headers=True`/
-        # `platform` from whatever dump produced the file; a GNU ld linker
-        # script resolves `fmt=None` on its own text path even though
-        # `resolve_input` follows it and does run a real parse on the target
-        # underneath). `sniff_text_format` first rules out the two verbatim-
-        # load formats (same check `resolve_input` itself applies first, so
-        # a JSON snapshot whose own bytes coincidentally contain literal
-        # `INPUT(...)`-shaped text is never fed to the linker-script probe);
-        # only then does `resolve_linker_script_chain` -- the identical
-        # primitive `checker.compare`'s own same-binary hashing already uses
-        # for "what does this input actually resolve to" -- follow any
-        # script to its real target for detection.
-        #
-        # `side.dump_manifest is None`: a manifest-driven dump's real
-        # header-AST parse runs under its own manifest-authoritative
-        # `dump_manifest.frontend_context` (e.g. `"device"`), not the
-        # request-derived context resolved here -- recording it would risk a
-        # wrong (`"host"`) toolchain, so this case is excluded rather than
-        # reconstructed (a documented gap; the manifest path already carries
-        # no `evaluation_config`/other resolved fields either).
-        # `side.path` is guaranteed non-None here -- the `is None` branch
-        # above already raised before this point.
-        parsed_fmt = service.detect_binary_format(side.path)
-        if parsed_fmt is None and service.sniff_text_format(side.path) not in (
-            "json",
-            "perl",
-        ):
-            from .binary_utils import resolve_linker_script_chain
-
-            parsed_fmt = service.detect_binary_format(
-                resolve_linker_script_chain(side.path)
-            )
-        if (
-            resolution.effective_compile_context is not None
-            and snap.from_headers
-            and parsed_fmt is not None
-            and side.dump_manifest is None
-        ):
+        # `with_assurance()` alone leaves `compile_contexts` empty --
+        # `side_effective_compile_context` (shared with the compare path)
+        # answers whether `resolution.effective_compile_context` is safe to
+        # record, including its own format detection (following a GNU ld
+        # linker script to its real target). `side.path` is guaranteed
+        # non-None here -- the `is None` branch above already raised.
+        side_ctx = side_effective_compile_context(
+            resolution.effective_compile_context,
+            snap,
+            side.path,
+            dump_manifest=side.dump_manifest,
+        )
+        if side_ctx is not None:
             resolved_execution_context = dataclasses.replace(
                 resolved_execution_context,
-                compile_contexts={"input": resolution.effective_compile_context},
+                compile_contexts={"input": side_ctx},
             )
     return DumpResult(
         resolved=resolved,

@@ -66,9 +66,13 @@ from .policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
+from .workflows.artifact.compile_context_gate import (
+    SideCompileInput,
+    resolved_pair_compile_contexts,
+)
 from .workflows.artifact.execute import (
+    _resolve_side_snapshot_impl,
     enforce_requested_depth,
-    resolve_side_snapshot,
 )
 
 if TYPE_CHECKING:
@@ -76,6 +80,7 @@ if TYPE_CHECKING:
 
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.artifact.execute import SideResolution
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
@@ -96,25 +101,14 @@ class ResolvedComparePair:
     """Both sides of a comparison, resolved and ready to classify.
 
     The seam between :func:`resolve_compare_request` and
-    :func:`classify_compare_pair`. It carries what classification genuinely
-    needs beyond the two snapshots — the detected binary formats (for a front
-    end reporting on them) and each side's resolved
-    :class:`~abicheck.service_compare_evidence.SideEvidence` (whose
-    ``collect_mode`` drives the embedded build-source diff).
+    :func:`classify_compare_pair`: the detected binary formats, and each
+    side's resolved ``SideEvidence`` (``collect_mode`` drives the embed diff).
 
-    ``resolved_execution_context`` (One Semantic Pipeline PR 1, sub-phase 4B):
-    the :class:`~abicheck.workflows.resolved_execution_context.
-    ResolvedExecutionContext` built from this same request's own, otherwise-
-    discarded :class:`~abicheck.workflows.plan.AnalysisPlan`
-    (:func:`resolve_compare_request` already calls ``AnalysisPlanner.resolve``
-    for its pre-flight check — not a second resolution). Optional and
-    additive — no existing consumer reads it yet, closing 4B's own "no live
-    caller wired" gap for ``compare``. Carries no ``evaluation_config``/
-    ``compile_contexts`` yet: those resolve one layer up
-    (``cli_compare_receipt.py``, past a Click context this shared pipeline
-    lacks) and out of :func:`~abicheck.service_input_resolution.
-    resolve_side_snapshot`'s own internals, respectively — attaching either
-    later is follow-on work this field does not block.
+    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B)
+    is the :class:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext` built from this request's own AnalysisPlan,
+    plus each side's resolved ``CompileContext`` when ``compile_context_gate``
+    judges it safe — still no ``evaluation_config`` (resolves one layer up).
     """
 
     old: AbiSnapshot
@@ -360,8 +354,8 @@ def resolve_compare_request(
         fmt: str | None,
         public_headers: list[Path],
         public_header_dirs: list[Path],
-    ) -> AbiSnapshot:
-        return resolve_side_snapshot(
+    ) -> SideResolution:
+        return _resolve_side_snapshot_impl(
             side,
             evidence,
             lang=lang,
@@ -378,7 +372,7 @@ def resolve_compare_request(
             notify=notify,
         )
 
-    def _resolve_old_side() -> AbiSnapshot:
+    def _resolve_old_side() -> SideResolution:
         return _resolve_side(
             request.old,
             old_evidence,
@@ -387,7 +381,7 @@ def resolve_compare_request(
             old_public_header_dirs,
         )
 
-    def _resolve_new_side() -> AbiSnapshot:
+    def _resolve_new_side() -> SideResolution:
         return _resolve_side(
             request.new,
             new_evidence,
@@ -397,14 +391,15 @@ def resolve_compare_request(
         )
 
     if not allow_parallel or resolve_sides_sequentially(request):
-        old = _resolve_old_side()
-        new = _resolve_new_side()
+        old_res = _resolve_old_side()
+        new_res = _resolve_new_side()
     else:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             old_future = pool.submit(_resolve_old_side)
             new_future = pool.submit(_resolve_new_side)
-            old = old_future.result()
-            new = new_future.result()
+            old_res = old_future.result()
+            new_res = new_future.result()
+    old, new = old_res.snapshot, new_res.snapshot
 
     # ADR-055 D1: `--follow-deps`'s transitive DependencyInfo. After both sides
     # resolve, not inside `_resolve_side`: it reads the on-disk ELF, so it
@@ -413,6 +408,21 @@ def resolve_compare_request(
     enforce_requested_depth(request.depth, (("old", old), ("new", new)))
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
+    compile_contexts = resolved_pair_compile_contexts(
+        SideCompileInput(
+            old_res.effective_compile_context,
+            old,
+            required_path(request.old, "old"),
+            request.old.dump_manifest,
+        ),
+        SideCompileInput(
+            new_res.effective_compile_context,
+            new,
+            required_path(request.new, "new"),
+            request.new.dump_manifest,
+        ),
+    )
+
     return ResolvedComparePair(
         old=old,
         new=new,
@@ -420,7 +430,9 @@ def resolve_compare_request(
         new_fmt=new_fmt,
         old_evidence=old_evidence,
         new_evidence=new_evidence,
-        resolved_execution_context=ResolvedExecutionContext.from_plan(plan),
+        resolved_execution_context=ResolvedExecutionContext.from_plan(
+            plan, compile_contexts=compile_contexts
+        ),
     )
 
 
@@ -551,32 +563,20 @@ def classify_compare_pair(
     )
     note_if_same_binary_compared(result)
 
-    # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
-    # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`
-    # were only ever stamped by the CLI's own `cli_compare_helpers.
-    # _report_compare_result` -- this shared classification half of
-    # `run_compare_request` (the typed Python API / MCP `abi_compare` entry
-    # point) never populated either, so a direct caller passing an explicit,
-    # successfully-resolved `CompareRequest.depth` still read
-    # `requested_depth=None`/`depth_satisfied=None` and could report
-    # `status="complete"` even though a depth was genuinely requested.
-    # `request.depth` is `None` only when the caller never set it, mirroring
-    # the CLI's identical `if depth is not None` guard. Recomputes
-    # `analysis_assurance` the same way `checker.compare()` itself does
-    # (`old_pack`/`new_pack` from each snapshot's own *embedded*
-    # `build_source`, since `InputSpec.sources`/`build_info` are embedded
-    # into `old`/`new` before `resolve_compare_request` ever returns), so
-    # `layer_coverage`/`requested_depth` are reflected too.
-    #
-    # P0.4 follow-up (P2 review): every consumer of the depth *value*
-    # normalizes case before using it (`enforce_requested_depth`, line 194's
-    # `.lower() == "binary"` check), so a valid request like
-    # `depth="HEADERS"` reached this assignment with its original casing
-    # preserved -- breaking every downstream reader expecting the lowercase
-    # `EVIDENCE_DEPTH_VALUES` spelling. Stamp the same lowercased form the
-    # rest of this module already normalizes to, not the raw request string.
-    if request.depth is not None:
-        result.requested_depth = request.depth.lower()
+    # P0.4 follow-up (P2 review, discussion_r3787839902): stamps
+    # `DiffResult.requested_depth` for `analysis_assurance` below, preferring
+    # `pair.resolved_execution_context`'s value over `request.depth` only
+    # when the two agree (a caller may pass a *different* `request` than
+    # built `pair`; a disagreement defers to `request.depth`, what `old`/
+    # `new` above were actually projected to -- Codex review).
+    normalized_request_depth = (
+        request.depth.lower() if request.depth is not None else None
+    )
+    context = pair.resolved_execution_context
+    if context is not None and context.requested_depth == normalized_request_depth:
+        result.requested_depth = context.requested_depth
+    elif normalized_request_depth is not None:
+        result.requested_depth = normalized_request_depth
     from .analysis_assurance import compute_analysis_assurance
 
     result.analysis_assurance = compute_analysis_assurance(
