@@ -165,6 +165,23 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 
+def _entity_id_is_extern_c(entity_id: EntityId | None) -> bool:
+    """Whether *entity_id* was built via the ``is_extern_c`` branch of
+    :func:`~abicheck.model.identity.entity_id_for_function`/
+    :func:`~abicheck.model.identity.entity_id_for_variable` (``extra ==
+    ("extern_c",)``).
+
+    :class:`Variable` carries no ``is_extern_c`` field of its own the way
+    :class:`Function` does, so this is the one Darwin-safe signal
+    :func:`_variable_key` has available -- both header-AST backends already
+    route their Darwin-aware ``is_extern_c`` determination (leading-
+    underscore-tolerant, unlike a raw ``mangled == name`` comparison)
+    through this same constructor argument when building a variable's
+    entity id, so reading it back here costs no new computation.
+    """
+    return entity_id is not None and entity_id.extra == ("extern_c",)
+
+
 def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     """``entity_key`` for a :class:`Function`, scoped by TU for
     internal-linkage declarations.
@@ -261,8 +278,27 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     ``is_static`` is not.
     :func:`~abicheck.extract.headers.scope_segments.entity_is_record_member`
     withholds trust in the ``is_static`` fallback for exactly this case.
+
+    **Third known, accepted limitation, closed (macOS CI, fresh evidence):**
+    ``fn.mangled == fn.name`` is not proof of "no C++ mangling" on a Darwin
+    target -- the platform's linker convention prepends a leading
+    underscore to *every* global symbol clang emits, C or C++, mangled or
+    not (see ``dumper_clang.py``'s own ``parse_variables`` docstring and
+    ``known-gaps.md``'s Mach-O-leading-underscore entries for the same
+    quirk hitting other call sites). A real ``static`` C function parsed in
+    C mode therefore reports ``mangled="_helper"`` against ``name="helper"``
+    on macOS -- never equal -- so this branch's ``mangled == name`` test
+    silently missed every plain-C/`extern "C"` declaration on that
+    platform, falling through to :func:`_has_local_linkage_mangling`, which
+    finds no Itanium marker in a bare Darwin-decorated name and wrongly
+    reports non-local linkage. Each header-AST backend's own
+    ``parse_functions()`` already computes ``is_extern_c`` the Darwin-aware
+    way (gated ``symbol_candidates`` de-prefixing, not a raw equality), so
+    reading that field here instead of re-deriving the same signal from a
+    platform-fragile string comparison closes the gap for every backend at
+    once.
     """
-    if fn.mangled == fn.name:
+    if fn.mangled == fn.name or fn.is_extern_c:
         is_local = fn.is_static and not entity_is_record_member(fn.entity_id)
     else:
         is_local = _has_local_linkage_mangling(fn.mangled)
@@ -315,8 +351,23 @@ def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
     checks whether ``var.entity_id.scope`` ends in a
     :class:`~abicheck.model.identity.Record` segment, which is populated
     from the real scope walk regardless of mangling success.
+
+    **Third known, accepted limitation, closed (macOS CI, fresh evidence):**
+    the identical Darwin gap :func:`_function_key`'s own docstring now
+    documents applies here too -- ``var.mangled == var.name`` is not proof
+    of "no C++ mangling" on a Darwin target, since its linker convention
+    prepends a leading underscore to every global symbol, mangled or not.
+    A plain-C (or `extern "C"`) file-scope variable therefore never
+    satisfies this branch's raw equality check on macOS, falling through
+    to :func:`_has_local_linkage_mangling` and wrongly reporting non-local
+    linkage. Unlike :class:`Function`, :class:`Variable` carries no
+    ``is_extern_c`` field to read directly, but ``var.entity_id`` was built
+    from the identical Darwin-aware determination each backend's own
+    ``parse_variables()`` already makes -- :func:`_entity_id_is_extern_c`
+    reads that back instead of re-deriving the same signal from a
+    platform-fragile string comparison.
     """
-    if var.mangled == var.name:
+    if var.mangled == var.name or _entity_id_is_extern_c(var.entity_id):
         is_local = var.is_static and not entity_is_record_member(var.entity_id)
     else:
         is_local = _has_local_linkage_mangling(var.mangled)
