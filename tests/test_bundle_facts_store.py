@@ -282,6 +282,24 @@ class TestReadBundleFactsPackage:
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             read_bundle_facts_package(manifest, store=store)
 
+    def test_rejects_the_single_artifact_that_itself_crosses_the_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """A one-artifact variant has no *next* iteration to catch an
+        over-budget artifact at -- the artifact that itself crosses the
+        budget must be rejected on the spot, not returned successfully
+        (Codex review, second finding on this same guard)."""
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        monkeypatch.setattr(module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            read_bundle_facts_package(manifest, store=store)
+
 
 class TestBundleFactsPackageThroughDirectoryStore:
     """The full round trip through the real, filesystem-backed D6 layout --

@@ -365,24 +365,29 @@ def read_bundle_facts_package(
     # ...)`, `ObjectStore.get()` has no bounded-read parameter to abort a
     # single oversized fetch mid-decode (that would be a real `ObjectStore`
     # protocol change -- ADR-062 Phase 2's A2.1 scope, not this fix), so one
-    # single artifact's own sections can still exceed the budget before the
-    # check below has anything to compare against; every artifact *after*
-    # the one that first exceeds it is refused.
+    # single artifact's own sections can still be fully parsed before its own
+    # decoded size is known. The budget is checked *immediately* after that
+    # parse, before the artifact's snapshot is retained in
+    # `per_library_snapshots` -- checking only ahead of the *next* iteration
+    # (an earlier revision of this fix) let the one artifact that actually
+    # crosses the budget, including the last artifact in a variant, be
+    # retained and returned successfully with no subsequent iteration left to
+    # catch it (Codex review, second finding on this same guard).
     decoded_bytes_so_far = 0
     for artifact_id in variant.artifact_ids:
-        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise ValueError(
-                f"variant {variant_id!r}'s reconstructed artifacts exceed "
-                f"DEFAULT_MAX_BUNDLE_DECODED_BYTES "
-                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- reached while "
-                f"reconstructing {artifact_id!r}; refusing to continue "
-                "reconstructing further members"
-            )
         artifact = artifacts_by_id[artifact_id]
         document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
         decoded_bytes_so_far += len(json.dumps(document).encode("utf-8"))
+        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise ValueError(
+                f"variant {variant_id!r}'s reconstructed artifacts exceed "
+                f"DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- reached while "
+                f"reconstructing {artifact_id!r}; refusing to retain it or "
+                "reconstruct further members"
+            )
         per_library_snapshots[artifact_id] = snapshot_from_dict(document)
 
         filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
