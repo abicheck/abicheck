@@ -343,6 +343,40 @@ class TestRequestedDepthPropagationSharedPipeline:
         assert aa.depth_satisfied is False, aa
         assert aa.status != "complete", aa
 
+    def test_classify_compare_pair_no_context_and_no_depth_leaves_it_none(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion to the two tests above: covers the one remaining branch
+        of ``classify_compare_pair``'s depth-stamping guard (ADR-063
+        Track 3) -- a hand-built ``ResolvedComparePair`` with no context
+        *and* a request with no ``depth`` at all, so neither the
+        context-agrees branch nor the ``request.depth``-fallback branch
+        fires and ``requested_depth`` stays at its default ``None``."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.service_compare_pipeline import (
+            ResolvedComparePair,
+            classify_compare_pair,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+        pair = ResolvedComparePair(
+            old=old,
+            new=new,
+            old_fmt=None,
+            new_fmt=None,
+            old_evidence=evidence,
+            new_evidence=evidence,
+        )
+        result = classify_compare_pair(request, pair).diff
+
+        assert result.requested_depth is None, result
+
     def _pair_with_context(
         self,
         old: AbiSnapshot,
@@ -678,7 +712,8 @@ class TestExportAccountingDedupsLegacyPersistedOverlap:
         )
         for snap in (old, new):
             snap.build_source = BuildSourcePack(
-                root=tmp_path / "legacy-overlapping-pack", source_abi=surface,
+                root=tmp_path / "legacy-overlapping-pack",
+                source_abi=surface,
             )
 
         result = checker.compare(old, new)
@@ -691,6 +726,8 @@ class TestExportAccountingDedupsLegacyPersistedOverlap:
         assert aa.export_accounting.internal == 2
         assert aa.export_accounting.unaccounted == 0
         assert aa.export_accounting.source_linked == 2
+
+
 class TestGraphCompletenessConditionallyApplicableFamily:
     """PR #767 follow-up (P2 review): the round-9 ``!=`` fix above (Finding 2
     in that round) is too aggressive for a *conditionally applicable* pass
