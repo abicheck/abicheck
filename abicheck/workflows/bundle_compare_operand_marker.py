@@ -126,17 +126,23 @@ def decode_json_string_token(token: bytes) -> str | None:
 def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
     """Scan a bounded, possibly-truncated JSON byte prefix for the root
     object's own ``"artifact_type"`` member. Returns ``(value, definitive)``:
-    *value* is the marker's raw (still JSON-string-escaped) value, or
-    ``None`` if no such *direct* member was found; *definitive* is ``True``
-    when that answer cannot change no matter how much more of the document
-    a caller might decode (the marker was found; the root object closed
-    within *prefix* without one; or *prefix* was proven not to be a JSON
-    object at all), and ``False`` only when the scan ran out of *prefix*
-    before the root object closed -- a genuinely truncated view, where a
-    larger *prefix* could still change the answer (used by
-    ``looks_like_stored_bundle_facts`` to decide whether re-scanning a
+    *value* is the *last* root-level ``artifact_type`` member's raw (still
+    JSON-string-escaped) value seen so far (matching ``json.loads()``'s own
+    last-key-wins duplicate handling -- point 13), or ``None`` if none was
+    seen at all; *definitive* is ``True`` when *value* cannot change no
+    matter how much more of the document a caller might decode (the root
+    object closed within *prefix*, with or without a match; or *prefix* was
+    proven not to be a JSON object at all), and ``False`` only when the
+    scan ran out of *prefix* before the root object closed -- a genuinely
+    truncated view, where a larger *prefix* could still reveal a later
+    duplicate that overrides *value*. Even then, *value* is still whatever
+    was found so far, not discarded -- a caller with no larger window left
+    to try can still use it as a best-effort answer (used by
+    ``looks_like_stored_bundle_facts`` both to decide whether re-scanning a
     larger decoded window is worth the extra decode cost -- Codex review,
-    round 8, fresh evidence).
+    round 8, fresh evidence -- and, once no larger window is left, as that
+    final fallback -- Codex review, round 11, fresh evidence, see the
+    closing-brace-less branch's own comment below for why).
 
     Depth-aware (a nested ``artifact_type`` at any deeper level is never
     matched -- ``bundle_compare_operand``'s own docstring, point 3) and
@@ -261,8 +267,25 @@ def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
     # duplicate marker later in the document, not yet seen, could still
     # override *last_marker_value* the same way it would for the root-
     # closed case above, so an inconclusive truncation must not report a
-    # value found so far as definitive either).
-    return None, False
+    # value found so far as *definitive*). Still returns whatever
+    # *last_marker_value* was seen, though, rather than discarding it
+    # (Codex review, round 11, fresh evidence): a real, large
+    # ``--bundle-facts-out`` document -- the writer always emits the
+    # marker first, so this is the ordinary case for any sufficiently
+    # large library, nothing to do with a duplicate key at all -- can
+    # exceed even :data:`MARKER_SCAN_BYTES` before its own root object
+    # closes. Discarding an already-found value here (an earlier version
+    # of this function, from the round-10 duplicate-key fix, did exactly
+    # that) silently broke every such document once neither probe window
+    # could reach the closing brace; the caller now uses this "best
+    # candidate so far" as its own final fallback once it has no larger
+    # window left to try (see ``bundle_compare_operand.
+    # looks_like_stored_bundle_facts``), accepting the same narrow,
+    # already-documented residual gap as the closing-brace case (a
+    # duplicate marker positioned beyond the largest window that would
+    # override this one is not detected) rather than a full document
+    # scan.
+    return last_marker_value, False
 
 
 def decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:

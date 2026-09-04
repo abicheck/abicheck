@@ -112,6 +112,38 @@ class TestLooksLikeStoredBundleFacts:
         assert p.stat().st_size > 8192
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_marker_first_large_document_exceeding_scan_cap_is_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 11, P1): a real --bundle-facts-out
+        document -- the writer always emits the marker first, nothing to
+        do with a duplicate key -- can exceed _MARKER_SCAN_BYTES before
+        its own root object closes, simply from having enough ordinary
+        snapshot facts. The round-10 duplicate-key fix must not silently
+        discard an already-found marker just because neither probe window
+        reaches the closing brace."""
+        padding_library = {
+            f"function_{i}": {"symbol": f"_Z{i}foo", "return_type": "int"}
+            for i in range(400)
+        }
+        p = tmp_path / "large_marker_first.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "artifact_type": "abicheck.bundle-facts",
+                    "schema_version": 2,
+                    "per_library_snapshots": {
+                        f"lib{i}.so": padding_library for i in range(80)
+                    },
+                }
+            )
+        )
+        # Premise check: the document's own root object doesn't close
+        # within either probe window, exactly the scenario the finding
+        # describes.
+        assert p.stat().st_size > 1024 * 1024
+        assert looks_like_stored_bundle_facts(p) is True
+
     def test_tar_member_deliberately_named_as_the_marker_is_not_stored(
         self, tmp_path: Path
     ) -> None:

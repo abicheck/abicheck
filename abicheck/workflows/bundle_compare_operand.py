@@ -279,6 +279,30 @@ PR #1042, three rounds):**
    whichever occurrence a real decoder would have kept -- this repo's own
    writer never emits a duplicate key at all, so the common case (a
    single occurrence) is unaffected either way.
+14. **Point 13's own fix discarded an already-found marker for any
+   document too large for the root object to close within either probe
+   window (Codex review, round 11, fresh evidence, P1).** Recording
+   rather than returning a match (point 13) means the scan must reach the
+   root object's closing brace to know its answer is final -- but a real
+   ``--bundle-facts-out`` document (the writer always emits the marker
+   first; this has nothing to do with a duplicate key) can be larger than
+   :data:`MARKER_SCAN_BYTES` before its own root closes, simply by having
+   enough ordinary snapshot facts. Point 13's version of
+   :func:`root_level_artifact_type` returned ``None`` whenever the scan
+   ran out of prefix, discarding *last_marker_value* outright -- silently
+   breaking every such document once neither probe window could reach the
+   closing brace, even though the marker was found in the first few
+   bytes. Answered by returning *last_marker_value* (not ``None``) from
+   the inconclusive branch too, and having
+   :func:`looks_like_stored_bundle_facts` use the widest probe's own
+   answer as an explicit final fallback once no larger window is left to
+   try, whether or not that probe was itself definitive -- restoring the
+   pre-point-13 behavior for the (overwhelmingly common) undecorated
+   case, while keeping point 13's duplicate-key correctness intact for
+   any document small enough for either probe to actually prove it.
+   Accepted, narrow residual gap of the same shape as the paragraph
+   below: a duplicate marker positioned beyond :data:`MARKER_SCAN_BYTES`
+   that would override this fallback answer is not detected.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`MARKER_SCAN_BYTES` of
@@ -337,10 +361,16 @@ def _looks_like_stored_bundle_facts_archive(path: Path) -> bool:
 def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
     """One probe of :func:`looks_like_stored_bundle_facts`'s marker check
     at decoded-prefix size *n*. Returns ``(is_stored, definitive)``:
-    *is_stored* is ``True``/``False`` once decided, or ``None`` while still
-    inconclusive; *definitive* mirrors :func:`root_level_artifact_type`'s
-    own meaning -- ``False`` only when a larger *n* might still change the
-    answer (a genuinely truncated decode), never on a confirmed match.
+    *is_stored* is ``True``/``False`` for the *last* root-level marker
+    match seen so far (matching ``json.loads()``'s own last-key-wins
+    duplicate handling), or ``None`` if none was seen at all; *definitive*
+    mirrors :func:`root_level_artifact_type`'s own meaning -- ``False``
+    only when a larger *n* might still change the answer (a genuinely
+    truncated decode, whether or not a candidate was already found). A
+    non-``None`` *is_stored* does **not** imply ``definitive`` is ``True``
+    (Codex review, round 11, fresh evidence) -- the caller decides whether
+    to trust an inconclusive candidate as a final fallback once it has no
+    larger window left to try (see :func:`looks_like_stored_bundle_facts`).
     """
     from ..snapshot_io import bounded_decoded_prefix
 
@@ -366,7 +396,14 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
     from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
 
     decoded_value = decode_json_string_token(value)
-    return decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE, True
+    # *definitive* is propagated as-is, not hardcoded True (Codex review,
+    # round 11, fresh evidence): root_level_artifact_type() can now return
+    # a non-None *value* -- the last marker seen so far -- even when the
+    # scan was truncated before the root object closed (its own
+    # duplicate-key-safe "best candidate" contract), so a match here is
+    # not automatically final; the caller decides whether to trust it or
+    # escalate to a larger window.
+    return decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE, definitive
 
 
 def looks_like_stored_bundle_facts(path: Path) -> bool:
@@ -436,6 +473,18 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     if definitive:
         return bool(is_stored)
     is_stored, _definitive = _marker_lookup_at_window(path, MARKER_SCAN_BYTES)
+    # Whether or not *this* probe was itself definitive, its own answer is
+    # the best one available -- no larger window is left to try, so it is
+    # used as the final fallback rather than discarded (Codex review,
+    # round 11, fresh evidence). A real --bundle-facts-out document with
+    # the marker first (the ordinary case for any sufficiently large
+    # library, nothing to do with a duplicate key) can exceed even
+    # MARKER_SCAN_BYTES before its own root object closes; treating that
+    # as "inconclusive, so not stored" silently broke every such document.
+    # Accepted, narrow residual gap, same shape as the reordered-marker
+    # gap this module's own docstring already documents: a duplicate
+    # marker positioned beyond MARKER_SCAN_BYTES that would override this
+    # one is not detected.
     return bool(is_stored)
 
 
