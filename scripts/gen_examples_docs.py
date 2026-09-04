@@ -599,16 +599,45 @@ class RuleFamily:
     duplicates: list[Case]
     variants: list[Case]  # (case, axis) pairs kept as Case; axis on case.relation_axis
     scenarios: list[Case]
+    # Multi-library bundle scenarios (ADR-023) that compose this rule too --
+    # kept separate from `scenarios` because bundle cases use a different
+    # ground-truth shape (no single `expected` verdict) and never get a
+    # generated case page of their own (`_load_cases()` excludes them), so
+    # there's no `../<name>.md` to link to. (name, short_title) pairs, not
+    # `Case` objects -- a Codex review found the original cut left these
+    # relationships (e.g. case90/92/93 -> exported-function-removed) visible
+    # in ground_truth.json and the coverage report but silently absent here.
+    bundle_scenarios: list[tuple[str, str]]
+
+
+def _bundle_scenario_related_rules() -> dict[str, list[tuple[str, str]]]:
+    """rule_slug -> [(bundle_case_name, short_title), ...] for every
+    multi-library bundle case's own `related_rules` -- read directly from
+    the taxonomy block, since `_load_cases()` deliberately excludes bundle
+    cases (see its own docstring) before any Case-based grouping runs."""
+    data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
+    verdicts: dict[str, dict] = data["verdicts"]
+    taxonomy: dict[str, dict] = data.get("taxonomy") or {}
+    out: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for name, meta in verdicts.items():
+        if not (meta.get("category") == "bundle" or meta.get("bundle") is True):
+            continue
+        entry = taxonomy.get(name) or {}
+        for slug in entry.get("related_rules") or []:
+            out[slug].append((name, _case_title(name)))
+    return out
 
 
 def _build_rule_families(cases: list[Case]) -> dict[str, RuleFamily]:
     families: dict[str, RuleFamily] = {}
+
+    def _get(slug: str) -> RuleFamily:
+        return families.setdefault(slug, RuleFamily(slug, None, [], [], [], []))
+
     for c in cases:
         if c.entity != "rule" or not c.rule_slug:
             continue
-        fam = families.setdefault(
-            c.rule_slug, RuleFamily(c.rule_slug, None, [], [], [])
-        )
+        fam = _get(c.rule_slug)
         if c.relation_type is None:
             fam.canonical = c
         elif c.relation_type == "duplicate":
@@ -619,8 +648,9 @@ def _build_rule_families(cases: list[Case]) -> dict[str, RuleFamily]:
         if c.entity != "scenario":
             continue
         for slug in c.related_rules:
-            fam = families.setdefault(slug, RuleFamily(slug, None, [], [], []))
-            fam.scenarios.append(c)
+            _get(slug).scenarios.append(c)
+    for slug, bundles in _bundle_scenario_related_rules().items():
+        _get(slug).bundle_scenarios.extend(bundles)
     return families
 
 
@@ -669,6 +699,16 @@ def _render_rule_family_page(fam: RuleFamily) -> str:
         for c in sorted(fam.scenarios, key=lambda c: _case_sort_key(c.name)):
             lines.append(f"- [{c.name}](../{c.name}.md) — {_short_title(c.title)}\n")
         lines.append("\n")
+    if fam.bundle_scenarios:
+        lines.append(
+            "## Used by multi-library bundle scenarios\n\n"
+            "_ADR-023 bundle cases aren't part of this single-library "
+            "catalog (see `examples/README.md`), so these aren't linked "
+            "pages here — see the case's own README under `examples/`._\n\n"
+        )
+        for name, title in sorted(fam.bundle_scenarios):
+            lines.append(f"- `{name}` — {title}\n")
+        lines.append("\n")
     return "".join(lines)
 
 
@@ -682,8 +722,8 @@ def _render_by_rule_index(families: dict[str, RuleFamily]) -> str:
         "[Rule coverage](../../../contribute/catalog-coverage.md) for the "
         "aggregate counts this table is drawn from. "
         "[← back to all examples](../index.md)\n\n",
-        "| Rule | Canonical case | Duplicate(s) | Variant(s) | Scenario(s) |\n",
-        "|---|---|---|---|---|\n",
+        "| Rule | Canonical case | Duplicate(s) | Variant(s) | Scenario(s) | Bundle scenario(s) |\n",
+        "|---|---|---|---|---|---|\n",
     ]
     for slug in sorted(families):
         fam = families[slug]
@@ -699,9 +739,13 @@ def _render_by_rule_index(families: dict[str, RuleFamily]) -> str:
         scenario_cell = (
             ", ".join(f"[{c.name}](../{c.name}.md)" for c in fam.scenarios) or "—"
         )
+        bundle_cell = (
+            ", ".join(f"`{name}`" for name, _title in sorted(fam.bundle_scenarios))
+            or "—"
+        )
         lines.append(
             f"| [`{slug}`]({slug}.md) | {canonical_cell} | {dup_cell} | "
-            f"{var_cell} | {scenario_cell} |\n"
+            f"{var_cell} | {scenario_cell} | {bundle_cell} |\n"
         )
     return "".join(lines)
 

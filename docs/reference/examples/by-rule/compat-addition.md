@@ -14,3 +14,9 @@ _Canonical rule slug:_ `compat-addition`. [← back to all rules](index.md)
 - [case108_task_class_removed](../case108_task_class_removed.md) — `task` Class Removed (historical ABI break — vtable angle)
 - [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) — concurrent_unordered_map API Drift
 
+## Used by multi-library bundle scenarios
+
+_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
+
+- `case92_bundle_provider_changed` — Bundle — Symbol Provider Migration
+

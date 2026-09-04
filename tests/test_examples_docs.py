@@ -200,6 +200,28 @@ def test_build_rule_families_groups_canonical_duplicate_variant_and_scenarios() 
     assert fam.scenarios == [scenario]
 
 
+def test_build_rule_families_includes_bundle_scenarios() -> None:
+    """A multi-library bundle case (ADR-023) composing a rule via its own
+    taxonomy `related_rules` must still show up on that rule's family page,
+    even though bundle cases are excluded from `_load_cases()`/the `cases`
+    list entirely (different ground-truth shape, no generated case page) --
+    a Codex review found the original cut silently dropped this
+    relationship, disagreeing with both ground_truth.json and the coverage
+    report. Real ground_truth.json data: case90/92/93 all compose
+    exported-function-removed via a multi-library bundle scenario."""
+    mod = _load_generator_module()
+    families = mod._build_rule_families([])
+    fam = families["exported-function-removed"]
+    bundle_names = {name for name, _title in fam.bundle_scenarios}
+    assert "case90_bundle_intra_dep_removed" in bundle_names
+    assert "case92_bundle_provider_changed" in bundle_names
+    assert "case93_bundle_manifest_drift" in bundle_names
+    # Never rendered as a dangling link -- bundle cases have no case page.
+    page = mod._render_rule_family_page(fam)
+    assert "](../case90_bundle_intra_dep_removed.md)" not in page
+    assert "`case90_bundle_intra_dep_removed`" in page
+
+
 def test_by_rule_index_lists_every_family_including_scenario_only_slugs() -> None:
     """A rule_slug named only in a scenario's related_rules (no rule-entity
     case demonstrates it alone yet) still gets a family entry, so every

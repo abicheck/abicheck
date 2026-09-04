@@ -7,3 +7,9 @@ _Canonical rule slug:_ `soname-inconsistent`. [← back to all rules](index.md)
 
 - [case50_soname_inconsistent](../case50_soname_inconsistent.md) — SONAME Inconsistent (Wrong Major Version) (🟡 COMPATIBLE_WITH_RISK)
 
+## Used by multi-library bundle scenarios
+
+_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
+
+- `case84_bundle_soname_skew` — Multi-Library Bundle SONAME Skew
+

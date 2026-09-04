@@ -7,3 +7,9 @@ _Canonical rule slug:_ `return-type`. [← back to all rules](index.md)
 
 - [case10_return_type](../case10_return_type.md) — Return Type Change (🔴 BREAKING)
 
+## Used by multi-library bundle scenarios
+
+_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
+
+- `case91_bundle_intra_signature_drift` — Bundle — Intra-Bundle extern-C Signature Drift
+

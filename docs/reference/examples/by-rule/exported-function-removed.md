@@ -23,3 +23,11 @@ _Same demonstration restated with no distinguishing condition — not additional
 - [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) — Call-Graph-Reachable Break Survives Suppression
 - [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) — Ordinary Exported Function's Internal Call Is Not Public-Reachable
 
+## Used by multi-library bundle scenarios
+
+_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
+
+- `case90_bundle_intra_dep_removed` — Bundle — Intra-Bundle Removed Symbol
+- `case92_bundle_provider_changed` — Bundle — Symbol Provider Migration
+- `case93_bundle_manifest_drift` — Bundle — Instantiation Manifest Drift
+
