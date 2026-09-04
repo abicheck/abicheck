@@ -1514,6 +1514,36 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "compare --old-bundle-facts (G38 Phase 17's single-invocation stored-"
+        "BundleFacts flag, superseded by CLI cleanup phase two's PR I -- "
+        "automatic operand classification from the `artifact_type` marker,"
+        " see `bundle_compare_operand.py`)",
+        ("--old-bundle-facts",),
+        frozenset(
+            {
+                "AGENTS.md",
+                # G38's own phased plan: the flag's design, its later shift
+                # to a boolean, and the 2026-09-03 note recording it as
+                # since-superseded -- all in this plan's own historical-
+                # record capacity.
+                "contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md",
+                # This plan's index row for G38 and for CLI cleanup phase
+                # two both name the flag to describe what shipped and was
+                # later removed.
+                "contribute/plans/index.md",
+                # The removal's own plan: names the flag throughout as the
+                # subject being deleted (before/after tables, the deletion
+                # checklist, the worked example of the second-engine
+                # problem it existed to retire).
+                "contribute/plans/cli-cleanup-phase-two.md",
+                # A worked example predating the removal, illustrating the
+                # (now-superseded) `--bundle-facts-out`/`--old-bundle-facts`
+                # round trip.
+                "contribute/plans/learning-series-page-specs.md",
+            }
+        ),
+    ),
 )
 
 

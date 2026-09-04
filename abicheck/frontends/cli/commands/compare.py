@@ -460,20 +460,12 @@ def _embed_inline_source_side(
 # ── Release (directory/package) comparison knobs (ADR-037 D7) ────────────────
 @release_options
 # ── Stored bundle-facts OLD side (G38 Phase 13 follow-up) ────────────────────
-# OLD_INPUT is reinterpreted as a persisted BundleFacts document (produced by
-# a prior `compare --bundle-facts-out`) rather than a live directory/package;
-# see compare_bundle_facts.py for why this is a flag on OLD_INPUT rather
-# than a new required argument or root command.
-@click.option(
-    "--old-bundle-facts",
-    "old_bundle_facts",
-    is_flag=True,
-    default=False,
-    help="Treat OLD_INPUT as a stored BundleFacts document (from a "
-    "prior --bundle-facts-out), not a live library/directory. "
-    "NEW_INPUT stays a live release directory/package. Only "
-    "--format json/markdown are available in this mode.",
-)
+# OLD_INPUT is automatically classified as a persisted BundleFacts document
+# (produced by a prior `compare --bundle-facts-out`) rather than a live
+# directory/package -- CLI cleanup phase two, PR I: the former
+# `--old-bundle-facts` flag is gone; see
+# workflows/bundle_compare_operand.py for the classifier and
+# compare_bundle_facts.py for the dispatch it still routes to.
 @click.option(
     "--max-json-object-nodes",
     "max_json_object_nodes",
@@ -481,11 +473,13 @@ def _embed_inline_source_side(
     default=None,
     help="Override the JSON container-node budget "
     "(bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES, 1,000,000) "
-    "when decoding OLD_INPUT with --old-bundle-facts. A real "
+    "when decoding OLD_INPUT, if it is a stored BundleFacts "
+    "document (see workflows/bundle_compare_operand.py). A real "
     "per-library facts blob for a large, template-heavy "
     "library (e.g. SYCL/DPC++) can legitimately need well "
     "over the default to decode; this is the supported way "
-    "to raise it, instead of patching the budget in code.",
+    "to raise it, instead of patching the budget in code. "
+    "Meaningless (and a no-op) otherwise.",
 )
 @bundle_facts_manifest_options  # G38 Phase 17
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
@@ -744,13 +738,18 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ``profile`` key before delegating to the typed run_compare signature.
     apply_compare_profile(ctx, kwargs)
 
-    # --old-bundle-facts short-circuits the ordinary live-binary/directory
-    # dispatch entirely (never reaches run_compare/_dispatch_release_compare):
-    # OLD_INPUT is already a resolved, stored BundleFacts document, not
-    # something to classify as a single file/directory/package. See
-    # compare_bundle_facts.py's module docstring for why this lives here
-    # rather than as a branch inside cli_compare_helpers.run_compare itself.
-    if kwargs.pop("old_bundle_facts", False):
+    # CLI cleanup phase two, PR I: OLD_INPUT/NEW_INPUT are classified
+    # automatically for bundle-facts routing, replacing the removed
+    # --old-bundle-facts flag -- see compare_bundle_operand_dispatch.py's
+    # own docstring (a stored NEW_INPUT is rejected there; OLD_INPUT
+    # classified as stored short-circuits the ordinary live-binary/
+    # directory dispatch entirely, never reaching run_compare/
+    # _dispatch_release_compare -- see compare_bundle_facts.py's own
+    # module docstring for why that lives here rather than as a branch
+    # inside cli_compare_helpers.run_compare itself).
+    from .compare_bundle_operand_dispatch import resolve_bundle_compare_dispatch
+
+    if resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"]):
         from ....cli_helpers_compare import discover_project_config
         from ....cli_options import resolve_compile_context
         from .compare_bundle_facts import (

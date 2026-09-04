@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI dispatch for ``compare --old-bundle-facts`` (G38 Phase 13 follow-up).
+"""CLI dispatch for a stored-bundle-facts OLD_INPUT `compare` (G38 Phase 13
+follow-up; CLI cleanup phase two, PR I).
 
 ``bundle_side_input.compare_release_against_bundle_facts`` was fully
 implemented and parity-tested but, per its own module docstring, deliberately
@@ -27,7 +28,10 @@ This module is the thin CLI adapter that closes that gap without touching
 either capped file: :func:`dispatch` is called directly from
 ``compare.compare_cmd`` (a sibling in this same package, which has headroom)
 *before* the ordinary ``run_compare``/``_dispatch_release_compare`` machinery
-ever runs, whenever ``--old-bundle-facts`` is set. It resolves the small,
+ever runs, whenever OLD_INPUT classifies as a stored BundleFacts document
+(``workflows/bundle_compare_operand.py`` -- PR I replaced the former
+``--old-bundle-facts`` flag with automatic operand classification). It
+resolves the small,
 purpose-built option subset ``compare_release_against_bundle_facts`` actually
 needs from the same parsed ``compare`` kwargs (already normalized by
 ``normalize_sided_options``), calls it, and renders the resulting
@@ -144,7 +148,8 @@ def _load_library_overrides(
 
 
 def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
-    """Handle a ``compare OLD_FACTS NEW_DIR --old-bundle-facts`` invocation.
+    """Handle a ``compare OLD_FACTS NEW_DIR`` invocation where OLD_FACTS
+    classified as a stored BundleFacts document.
 
     *kwargs* is ``compare_cmd``'s already-parsed, already-``normalize_sided_
     options``-processed option dict -- the same dict that would otherwise be

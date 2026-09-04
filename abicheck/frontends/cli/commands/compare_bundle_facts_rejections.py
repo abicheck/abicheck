@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare --old-bundle-facts`` unsupported-option guards.
+"""A stored-bundle-facts-OLD_INPUT ``compare``'s unsupported-option guards.
 
 Split out of ``compare_bundle_facts.py`` (which sits at the architecture
 no-growth 800-line production cap) purely to make room for the next
@@ -51,12 +51,13 @@ import click
 
 
 def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
-    """Raise ``click.UsageError`` for any flag ``--old-bundle-facts`` has no
-    channel to honor. See this module's own docstring for the design."""
+    """Raise ``click.UsageError`` for any flag a stored-bundle-facts
+    OLD_INPUT has no channel to honor. See this module's own docstring for
+    the design."""
     fmt = kwargs.get("fmt", "json")
     if fmt not in ("json", "markdown"):
         raise click.UsageError(
-            f"--format {fmt} is not available with --old-bundle-facts: only "
+            f"--format {fmt} is not available with a stored-bundle-facts OLD_INPUT: only "
             "json/markdown are supported for a stored-bundle-facts "
             "comparison. Choose one of: json, markdown."
         )
@@ -83,13 +84,13 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # unsupported primary --format is, rather than silently skipped.
         raise click.UsageError(
             f"--write {secondary_fmt}=... is not available with "
-            "--old-bundle-facts: only json/markdown are supported for a "
+            "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
             "stored-bundle-facts comparison."
         )
     if kwargs.get("fail_on_removed"):
         raise click.UsageError(
             "--fail-on-removed-library is not supported together with "
-            "--old-bundle-facts: answering it would require re-scanning "
+            "a stored-bundle-facts OLD_INPUT: answering it would require re-scanning "
             "OLD_FACTS a second time, defeating the point of handing in an "
             "already-loaded facts document. Diff the stored facts' own "
             "per_library_snapshots keys against the release directory "
@@ -98,7 +99,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
     if kwargs.get("bundle_facts_out") is not None:
         raise click.UsageError(
             "--bundle-facts-out is not supported together with "
-            "--old-bundle-facts: the OLD side is already a stored facts "
+            "a stored-bundle-facts OLD_INPUT: the OLD side is already a stored facts "
             "document, so there is nothing new to persist from it."
         )
     if kwargs.get("dry_run"):
@@ -109,7 +110,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # bundles this whole flag exists for. Rejected rather than given a
         # real resolve-and-validate-only rendering of its own in this PR.
         raise click.UsageError(
-            "--dry-run is not supported together with --old-bundle-facts."
+            "--dry-run is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("contract_mode") is not None:
         # Codex review: compare_release_against_bundle_facts() has no
@@ -120,7 +121,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # for with no indication anything was skipped. Rejected rather than
         # silently unscoped.
         raise click.UsageError(
-            "--contract is not supported together with --old-bundle-facts."
+            "--contract is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("severity_preset") is not None or kwargs.get("pack_paths"):
         # Codex review: --severity-preset/--pack drive run_compare's
@@ -134,7 +135,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # the live release fan-out uses for it.
         raise click.UsageError(
             "--severity-preset/--pack are not supported together with "
-            "--old-bundle-facts."
+            "a stored-bundle-facts OLD_INPUT."
         )
     # Codex review: reuse the exact rejection the live release fan-out
     # already applies to a directory/package operand -- this driver's own
@@ -186,7 +187,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # L3-L5 collected, no manifest-declared includes applied.
         raise click.UsageError(
             "--sources/--build-info/--dump-manifest are not supported "
-            "together with --old-bundle-facts: this driver has no channel "
+            "together with a stored-bundle-facts OLD_INPUT: this driver has no channel "
             "for inline build/source evidence on either side."
         )
     if (
@@ -199,7 +200,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # this dispatch never loads or forwards probe_matrix_old/
         # probe_matrix_new -- silently never folded.
         raise click.UsageError(
-            "--probe-matrix is not supported together with --old-bundle-facts."
+            "--probe-matrix is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("post_manifest_path") is not None:
         # Codex review: --post-manifest's public_surface_allowlist is
@@ -209,7 +210,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # the manifest would scope out of the surface stays in the finding
         # set/verdict regardless.
         raise click.UsageError(
-            "--post-manifest is not supported together with --old-bundle-facts."
+            "--post-manifest is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("scope_public_headers") is False:
         # Codex review, same root cause: --no-scope-public-headers has no
@@ -219,7 +220,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # ignored.
         raise click.UsageError(
             "--no-scope-public-headers is not supported together with "
-            "--old-bundle-facts."
+            "a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("debug_info2") is not None or kwargs.get("debug_info1") is not None:
         # Codex review, same root cause as the package-extraction fix
@@ -234,7 +235,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # re-extract debug info from either, the same reason old=-scoped
         # --header/--include are rejected.
         raise click.UsageError(
-            "--debug-info is not supported together with --old-bundle-facts."
+            "--debug-info is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("devel_pkg1") is not None:
         # Codex review, fresh evidence: --devel-pkg new=... is honored (its
@@ -243,7 +244,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # to feed at all -- OLD_FACTS is already a resolved, stored
         # snapshot -- so it was silently discarded rather than applied.
         raise click.UsageError(
-            "--devel-pkg old=... is not supported together with --old-bundle-facts."
+            "--devel-pkg old=... is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if (
         kwargs.get("pdb_path") is not None
@@ -257,7 +258,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # resolution, no PDB"), so a NEW-side PE DLL would always fall back
         # to binary-only extraction regardless of what was given here.
         raise click.UsageError(
-            "--pdb-path is not supported together with --old-bundle-facts."
+            "--pdb-path is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if (
         kwargs.get("follow_deps")
@@ -272,7 +273,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # change section would silently never be produced.
         raise click.UsageError(
             "--follow-deps/--search-path/--ld-library-path are not "
-            "supported together with --old-bundle-facts."
+            "supported together with a stored-bundle-facts OLD_INPUT."
         )
     if (
         kwargs.get("debug_format_opt") is not None
@@ -293,7 +294,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # than silently comparing a different ABI surface than asked for.
         raise click.UsageError(
             "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
-            "--debug-root are not supported together with --old-bundle-facts."
+            "--debug-root are not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if (
         kwargs.get("pattern_verdicts")
@@ -308,7 +309,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # silently never happens even though the CLI accepted the flag.
         raise click.UsageError(
             "--pattern-verdicts/--explain-patterns/--surface-metrics are "
-            "not supported together with --old-bundle-facts."
+            "not supported together with a stored-bundle-facts OLD_INPUT."
         )
     depth = kwargs.get("depth")
     if depth in ("build", "source"):
@@ -323,7 +324,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # header-only depth.
         raise click.UsageError(
             f"--depth {depth} is not supported together with "
-            "--old-bundle-facts: this driver has no channel for L3-L5 "
+            "a stored-bundle-facts OLD_INPUT: this driver has no channel for L3-L5 "
             "build/source evidence."
         )
     if kwargs.get("show_only"):
@@ -338,7 +339,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # release-shaped comparison path. Rejected rather than partially
         # honored ahead of that pre-existing gap.
         raise click.UsageError(
-            "--show-only is not supported together with --old-bundle-facts."
+            "--show-only is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("report_mode") not in (None, "full") or kwargs.get("show_filtered"):
         # Codex review: same root cause as --show-only above -- report_mode
@@ -348,7 +349,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # live release fan-out's own per-library to_json() calls.
         raise click.UsageError(
             "--report-mode/--show-filtered are not supported together "
-            "with --old-bundle-facts."
+            "with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("jobs"):
         # Codex review: compare_release_against_bundle_facts() processes
@@ -359,7 +360,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # wall-clock time, and dispatch() has no way to tell a default 0
         # apart from the flag never having been given at all.
         raise click.UsageError(
-            "--jobs is not supported together with --old-bundle-facts."
+            "--jobs is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("no_bundle_analysis"):
         # Codex review: compare_release_against_bundle_facts() has no
@@ -369,7 +370,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # different verdict/exit code than requested (bundle_verdict folds
         # into result.verdict). Rejected rather than silently unscoped.
         raise click.UsageError(
-            "--no-bundle-analysis is not supported together with --old-bundle-facts."
+            "--no-bundle-analysis is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     # Codex review: kwargs["config"] is compare.py's own resolved value --
     # an explicit --config, or (since a later review round) the same
@@ -451,7 +452,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             raise click.UsageError(
                 f"{config_path} declares "
                 f"{', '.join(_unsupported_config_blocks)} settings, which "
-                "are not supported together with --old-bundle-facts: "
+                "are not supported together with a stored-bundle-facts OLD_INPUT: "
                 "compare_release_against_bundle_facts() has no channel to "
                 "honor them (same reason --severity-preset/--pack/"
                 "--no-scope-public-headers are rejected as explicit "
@@ -470,7 +471,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # discarded rather than applied or rejected.
         raise click.UsageError(
             "--header old=.../--include old=... are not supported together "
-            "with --old-bundle-facts: OLD_FACTS is already a resolved, "
+            "with a stored-bundle-facts OLD_INPUT: OLD_FACTS is already a resolved, "
             "stored snapshot with no header re-extraction available."
         )
     if kwargs.get("old_header_backend") is not None:
@@ -482,7 +483,7 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # resolved and cannot be re-extracted under a different frontend.
         raise click.UsageError(
             "--ast-frontend old=... is not supported together with "
-            "--old-bundle-facts: OLD_FACTS is already a resolved, stored "
+            "a stored-bundle-facts OLD_INPUT: OLD_FACTS is already a resolved, stored "
             "snapshot with no header re-extraction available."
         )
     if kwargs.get("demangle") is not None:
@@ -501,5 +502,5 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # would show one.
         raise click.UsageError(
             "--demangle/--no-demangle is not supported together with "
-            "--old-bundle-facts."
+            "a stored-bundle-facts OLD_INPUT."
         )

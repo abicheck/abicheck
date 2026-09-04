@@ -89,7 +89,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--no-pattern-verdicts",
         "--no-scope-public-headers",
         "--nostdinc",
-        "--old-bundle-facts",
         "--output",
         "--output-dir",
         "--pack",

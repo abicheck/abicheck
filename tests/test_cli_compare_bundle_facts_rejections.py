@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare --old-bundle-facts`` early-rejection tests -- split out of
+"""A stored-bundle-facts-OLD_INPUT ``compare``'s early-rejection tests --
+split out of
 ``test_cli_compare_bundle_facts.py`` (which sits at the architecture
 no-growth test-file cap) to keep this addition's tests together without
 pushing that file over it.
@@ -44,6 +45,22 @@ from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.cli import main
 from abicheck.cli_resolve import _resolve_input
 from abicheck.serialization import save_bundle_facts
+
+#: A minimal but *classifiable* stand-in OLD_INPUT for these tests: CLI
+#: cleanup phase two, PR I replaced the explicit ``--old-bundle-facts`` flag
+#: with automatic operand classification keyed on the ``artifact_type``
+#: marker (``workflows/bundle_compare_operand.py``) -- a bare ``"{}"``
+#: (this file's previous stand-in, back when the flag forced the
+#: interpretation regardless of shape) no longer classifies as bundle
+#: facts at all, so every test below that only cares about reaching
+#: ``compare_bundle_facts.dispatch()``'s own early rejections needs a
+#: document that actually carries the marker to get routed there in the
+#: first place. Never fully loaded/validated in any of these tests (every
+#: rejection here fires before ``load_bundle_facts()`` ever runs).
+_STUB_BUNDLE_FACTS_JSON = (
+    '{"artifact_type": "abicheck.bundle-facts", "schema_version": 2, '
+    '"per_library_snapshots": {}}'
+)
 
 
 def _invoke(*args: str) -> tuple[int, str]:
@@ -104,7 +121,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_dry_run_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -112,7 +129,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--dry-run",
             "--format",
             "json",
@@ -123,7 +139,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_contract_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -131,7 +147,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--contract",
             "public",
             "--format",
@@ -151,7 +166,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--format",
             "json",
         )
@@ -176,6 +190,17 @@ class TestCompareOldBundleFactsEarlyRejections:
         facts_path.write_text(
             json.dumps(
                 {
+                    # Carries the artifact_type marker (CLI cleanup phase
+                    # two, PR I) so this document is auto-classified as
+                    # bundle facts and actually reaches
+                    # compare_bundle_facts.dispatch() -- a bare
+                    # per_library_snapshots-only v1 shape no longer
+                    # classifies on its own (workflows/
+                    # bundle_compare_operand.py's own docstring: the legacy
+                    # shape-fallback tier is out of scope for automatic
+                    # classification).
+                    "artifact_type": "abicheck.bundle-facts",
+                    "schema_version": 2,
                     "per_library_snapshots": {
                         "libfoo.so": {
                             "library": "libfoo.so",
@@ -209,7 +234,6 @@ class TestCompareOldBundleFactsEarlyRejections:
                 "compare",
                 str(facts_path),
                 str(new_dir),
-                "--old-bundle-facts",
                 "--format",
                 "json",
             ],
@@ -224,7 +248,10 @@ class TestCompareOldBundleFactsEarlyRejections:
         # OSError) when OLD_INPUT is a directory -- OLD_INPUT is a plain
         # click.Path(exists=True) argument (not dir_okay=False, since the
         # ordinary live-directory compare mode needs a directory there), so
-        # `compare a_dir/ new/ --old-bundle-facts` reaches this path and
+        # `compare a_dir/ new/` reaches this path when a_dir/ would otherwise
+        # classify as bundle facts (it never does -- a directory always
+        # fails the classifier's is_file() check -- kept here as a
+        # regression guard) and
         # previously leaked a raw traceback instead of a clean CLI error.
         old_dir = tmp_path / "old_dir"
         old_dir.mkdir()
@@ -235,7 +262,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--old-bundle-facts",
             "--format",
             "json",
         )
@@ -254,7 +280,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # what compare_cmd forwards to dispatch(), not
         # compare_release_against_bundle_facts's own behavior.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -271,7 +297,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--lang",
             "c++",
             "--format",
@@ -285,7 +310,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -302,7 +327,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--format",
             "json",
         )
@@ -316,7 +340,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # Codex review: dispatch() used to re-derive `includes` from the raw
         # CLI kwargs instead of the compile-context-resolved, config-merged
         # list -- so a `.abicheck.yml` `compile.include_dirs` entry was
-        # silently dropped for --old-bundle-facts even though it reached
+        # silently dropped for a stored-bundle-facts OLD_INPUT even though it reached
         # every other compare dispatch path. Proven directly by monkeypatching
         # the real dispatch() out and capturing what compare_cmd forwards to
         # it, rather than indirectly through a full gcc-built bundle: what
@@ -324,7 +348,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # compare_release_against_bundle_facts's own behavior (already
         # covered by TestCompareOldBundleFacts).
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -345,7 +369,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -364,7 +387,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # so the run always exited through the legacy verdict mapping
         # regardless of what was requested.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -372,7 +395,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--severity-preset",
             "strict",
             "--format",
@@ -384,7 +406,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_exit_code_scheme_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -392,7 +414,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--exit-code-scheme",
             "severity",
             "--format",
@@ -406,7 +427,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # Codex review: --pack drives run_compare's pack-application path,
         # which this dispatcher never calls.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         pack_path = tmp_path / "pack.yaml"
@@ -416,7 +437,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--pack",
             str(pack_path),
             "--format",
@@ -431,7 +451,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # compare_release_against_bundle_facts() -- the driver always scopes
         # to the public surface via service.compare_snapshots's own default.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -439,7 +459,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--no-scope-public-headers",
             "--format",
             "json",
@@ -453,7 +472,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # directly from the binary itself and has no debug-dir parameter to
         # forward a --debug-info package's extracted contents to.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         debug_pkg = tmp_path / "libreal-dbg.tar"
@@ -463,7 +482,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--debug-info",
             f"new={debug_pkg}",
             "--format",
@@ -480,7 +498,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # only ever renders json/markdown, so the secondary artifact was
         # silently never written.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -488,7 +506,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--write",
             f"sarif={tmp_path / 'out.sarif'}",
             "--format",
@@ -503,7 +520,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # --sources/--build-info, which this dispatcher never reads on
         # either side.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -511,7 +528,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--depth",
             "build",
             "--format",
@@ -523,7 +539,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_depth_source_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -531,7 +547,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--depth",
             "source",
             "--format",
@@ -547,7 +562,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # analysis, so --no-bundle-analysis was silently accepted and
         # ignored.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -555,7 +570,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--no-bundle-analysis",
             "--format",
             "json",
@@ -580,7 +594,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         import abicheck.bundle_side_input as bundle_side_input
 
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         header_file = tmp_path / "foo.h"
@@ -600,7 +614,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--depth",
             "binary",
             "--header",
@@ -640,7 +653,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--output-dir",
             str(output_dir),
             "--format",
@@ -685,7 +697,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "-o",
             str(out_path),
             "--format",
@@ -702,7 +713,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # extraction sat outside the try/finally, that directory was never
         # cleaned up even without --keep-extracted.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         malformed_archive = tmp_path / "release.tar.gz"
         malformed_archive.write_bytes(b"not a real gzip/tar stream")
 
@@ -712,7 +723,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(malformed_archive),
-            "--old-bundle-facts",
             "--format",
             "json",
         )
@@ -728,7 +738,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # would otherwise be silently unapplied, the same silent-divergence
         # bug --severity-preset is rejected for as an explicit CLI flag.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -738,7 +748,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -750,7 +759,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_config_scope_block_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -760,7 +769,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -777,7 +785,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # non-compile blocks (severity/scope/suppression/exit_code_scheme)
         # are unsupported here.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -794,7 +802,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -808,7 +815,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # either side, so inline build/source evidence was silently
         # dropped.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         src_dir = tmp_path / "src"
@@ -818,7 +825,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--sources",
             f"new={src_dir}",
             "--format",
@@ -833,7 +839,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # _reject_flags_unsupported_for_set_inputs, so a single-pair-only
         # flag like --used-by was accepted but never consumed.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         app_path = tmp_path / "app"
@@ -843,7 +849,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--used-by",
             str(app_path),
             "--format",
@@ -855,7 +860,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_require_complete_analysis_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -863,7 +868,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--require-complete-analysis",
             "--format",
             "json",
@@ -878,7 +882,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # compare_release_against_bundle_facts()'s per-library
         # service.resolve_input() call is never given any of them.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -886,7 +890,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--dwarf-only",
             "--format",
             "json",
@@ -901,7 +904,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # but the per-library call here never passes pattern_verdicts/
         # surface_metrics -- always False regardless of the flag.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -909,7 +912,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--pattern-verdicts",
             "--format",
             "json",
@@ -920,7 +922,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_config_debug_block_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -930,7 +932,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -946,11 +947,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         # Codex review: with no explicit --config at all, run_compare's own
         # cfg_path still falls back to the cwd-upward auto-discovered
         # .abicheck.yml (discover_project_config()) -- compare.py's
-        # --old-bundle-facts branch previously never did this, so an
+        # stored-bundle-facts-OLD_INPUT branch previously never did this, so an
         # auto-discovered config's severity:/scope:/etc. blocks (and even
         # its compile: block) were silently invisible to this mode.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         (tmp_path / ".abicheck.yml").write_text("severity:\n  preset: strict\n")
@@ -960,7 +961,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--format",
             "json",
         )
@@ -974,7 +974,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # comparison and verdict, but this dispatch never loads or
         # forwards probe_matrix_old/probe_matrix_new.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         old_matrix = tmp_path / "old_matrix.json"
@@ -986,7 +986,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--probe-matrix",
             f"old={old_matrix}",
             "--probe-matrix",
@@ -1003,7 +1002,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # applied via a parameter compare_release_against_bundle_facts()
         # doesn't have.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         manifest_path = tmp_path / "post_manifest.json"
@@ -1013,7 +1012,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--post-manifest",
             str(manifest_path),
             "--format",
@@ -1032,7 +1030,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # collapse_versioned_symbols (scope_public left None) previously
         # passed the config check unrejected.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -1042,7 +1040,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -1054,7 +1051,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_config_scope_public_symbols_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -1064,7 +1061,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",
@@ -1080,7 +1076,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # service.resolve_input() call -- a NEW-side PE DLL would always
         # fall back to binary-only extraction regardless of what was given.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         pdb_path = tmp_path / "new.pdb"
@@ -1090,7 +1086,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--pdb-path",
             f"new={pdb_path}",
             "--format",
@@ -1104,7 +1099,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # Codex review: --follow-deps's DT_NEEDED dependency-graph walk has
         # no parameter on compare_release_against_bundle_facts() either.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -1112,7 +1107,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--follow-deps",
             "--format",
             "json",
@@ -1126,7 +1120,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # reporter.to_json(diff) with no show_only argument -- the filter
         # was accepted but every change stayed in the output regardless.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
@@ -1134,7 +1128,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--show-only",
             "breaking",
             "--format",
@@ -1151,7 +1144,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # this check unrejected even though this driver's own JSON
         # rendering never re-merges redundant_changes.
         facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text("{}")
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
@@ -1161,7 +1154,6 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--old-bundle-facts",
             "--config",
             str(config_path),
             "--format",

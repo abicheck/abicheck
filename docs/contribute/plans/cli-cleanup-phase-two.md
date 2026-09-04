@@ -3923,6 +3923,35 @@ second top-level spelling of the same fact.
 > round:** the `--artifact-set` member-level signal — whether the
 > exit-code approach generalizes to it is its own, separate design
 > question, not attempted here — and the typed-API `gate.*` pack field.
+>
+> **Update (2026-09-03, Round 6): the `--artifact-set` member-level signal
+> is closed for `--format json`, still open for `--format text`.** PR
+> #1032's sixth Codex review round found that the marker-file/exit-code
+> rewrite above had silently deleted `action/run.sh`'s pre-existing
+> JSON-verdict check for this exact axis while replacing the single-binary
+> mechanism — regressing `--artifact-set` from "disambiguated via JSON" to
+> "always generic `ERROR`" with nothing catching it. The check (`_json_
+> report_src`/`_report_query` reading `compat_verdict ==
+> "EVIDENCE_CONTRACT_ERROR"`, ahead of `_is_cli_error`) is restored,
+> proven by a regression test that fails against the pre-fix state and
+> passes against the fix
+> (`test_exit_1_artifact_set_evidence_contract_error_from_json_report`).
+> The exit-code approach does **not** generalize here and was not
+> attempted: `service_scan._aggregate_scan_set_verdict` still floors the
+> *set's* own process exit at `1` (a single scan process spawning many
+> in-process member scans has no per-member OS exit code to report), so
+> this axis is disambiguated from the JSON report's `compat_verdict`, the
+> same way `--artifact-set` already disambiguates every other exit-1 cause.
+> **Genuinely still open:** a `format: text` `--artifact-set` step has no
+> such report to read — the Action never injects a `--write json=...`
+> secondary for `--artifact-set` (`run.sh`'s own comment: "`--artifact-set`
+> has no single-artifact JSON shape to render a second time"). Closing that
+> needs either a `--format text` artifact-set abort marker of its own (the
+> same forgeability concerns the single-binary marker hit would need
+> re-litigating for the multi-process/multi-member shape) or teaching the
+> Action to request a JSON secondary for `--artifact-set` runs
+> specifically — a separate, not-yet-scoped piece of work, unchanged by
+> this round.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4599,6 +4628,10 @@ baseline is now reachable from the CLI instead of only from the Python API /
 a private driver, which is what an oneDAL-scale release scan needs:
 
 ```bash
+# Pre-removal invocation (Phase 17, superseded 2026-09-03 by PR I's
+# automatic operand classification — the flag no longer exists; the same
+# comparison is now just `abicheck compare old.bundle-facts.json
+# new-release/`, with OLD_INPUT's own artifact_type marker classifying it).
 abicheck compare old.bundle-facts.json new-release/ --old-bundle-facts
 ```
 
@@ -4991,24 +5024,28 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        preset/exit_code_scheme fields, both
                                        resolved through the identical
                                        GateOptions object; see PR 4's own
-                                       section for the full account); still
-                                       open: a real --artifact-set
-                                       member-level evidence-contract signal
-                                       for the Action (the --format text
-                                       gap's remaining half -- a member's
-                                       abort never reaches the single-binary
-                                       catch site's own exit code at all)
+                                       section for the full account);
+                                       --artifact-set's own member-level
+                                       evidence-contract signal for the
+                                       Action closed for --format json
+                                       (2026-09-03, Round 6 -- the JSON-
+                                       verdict check a marker-file/exit-code
+                                       rewrite had silently regressed is
+                                       restored); still open: the same
+                                       signal for --format text, since the
+                                       Action never requests a JSON
+                                       secondary for --artifact-set runs
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;
                                        syntax refinement (DONE) was the one
                                        piece independent of the semantics work
 PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
-      (prerequisite DONE; classifier/    explicit artifact_type discriminator
-       request/deletion not started)     on BundleFacts, operand classification
-                                       instead of a mode flag, and one
-                                       BundleCompareRequest over live/live +
-                                       stored/live + live/stored +
+      (prerequisite DONE; operand        explicit artifact_type discriminator
+       classification + flag deletion    on BundleFacts, operand classification
+       DONE 2026-09-03; full             instead of a mode flag, and one
+       BundleCompareRequest unification  BundleCompareRequest over live/live +
+       not started)                      stored/live + live/stored +
                                        stored/stored, with the full
                                        evaluation/gate/report/dry-run surface
                                        answered once. Shares PR G2's own
@@ -5032,13 +5069,46 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        "GateOptions" section, not yet the
                                        shared cross-front-end object this
                                        row's own BundleCompareRequest sketch
-                                       implies. The BundleCompareRequest
-                                       unification and the deletion below
-                                       are not started; whether they reuse
-                                       this GateOptions class as-is or need
-                                       a broader one is this row's own design
-                                       question to resolve, not decided here
-      └─ then DELETE compare --old-bundle-facts
+                                       implies.
+                                       **Operand classification + flag
+                                       deletion landed 2026-09-03**:
+                                       workflows/bundle_compare_operand.py's
+                                       BundleCompareRequest classifies
+                                       OLD_INPUT/NEW_INPUT (marker-only, a
+                                       bounded-prefix check -- deliberately
+                                       not the full looks_like_bundle_facts_
+                                       document() two-tier check, since this
+                                       classifier runs unconditionally on
+                                       every `compare` call, including the
+                                       overwhelming majority whose OLD_INPUT
+                                       is an ordinary AbiSnapshot about to be
+                                       parsed as one right after
+                                       classification says "not bundle
+                                       facts" -- see that module's own
+                                       docstring for the accepted, narrow
+                                       gap this leaves for a genuinely
+                                       marker-less legacy v1 document);
+                                       `compare_bundle_operand_dispatch.py`
+                                       is the frontends-boundary translation
+                                       (a stored NEW_INPUT is a
+                                       click.UsageError, live/stored and
+                                       stored/stored still having no
+                                       execution engine). `--old-bundle-facts`
+                                       and its former help text are gone, no
+                                       deprecation alias, per this plan's
+                                       standing stance. **Still not
+                                       started, and still this row's own
+                                       open design question:** the actual
+                                       BundleCompareRequest unification --
+                                       one evaluation/gate/report/dry-run
+                                       path across all four operand
+                                       combinations, live/stored and
+                                       stored/stored gaining a real engine
+                                       instead of a clean rejection, and
+                                       whether that unification reuses
+                                       GateOptions as-is or needs a broader
+                                       one.
+      └─ DELETE compare --old-bundle-facts — DONE 2026-09-03
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
       (NEW, not started)                --bundle-system-providers/--bundle-
                                        cohort and per-library header/compile
