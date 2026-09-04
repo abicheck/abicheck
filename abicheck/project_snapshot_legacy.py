@@ -404,7 +404,7 @@ def materialize_release_variant_artifacts(
 
     result: dict[str, tuple[Path, ArtifactRef]] = {}
     for artifact_id in variant.artifact_ids:
-        _variant, artifact = read_variant_artifact_pair(
+        full_variant, artifact = read_variant_artifact_pair(
             root_path, variant_id, artifact_id
         )
 
@@ -412,19 +412,53 @@ def materialize_release_variant_artifacts(
         sub_dir.mkdir(parents=True, exist_ok=True)
         if objects_source.is_dir():
             _populate_objects_dir(sub_dir, objects_source)
+        # Every section kind this sub-package's manifest ends up
+        # referencing needs a matching `section_schema_versions` entry
+        # (`write_project_manifest`'s own validation) -- not just the
+        # artifact's own sections, but also the *variant*-level and
+        # *project*-level ones carried through below (Codex review, fresh
+        # evidence: `storage.import_bundle_facts`' own writer stores
+        # filenames/aliases/manifest under `VariantRef.sections`, and
+        # `bundle_facts_store.write_bundle_facts_package` stores its
+        # InstantiationManifest under `PackageManifest.project_sections` --
+        # neither lives on the artifact itself, so dropping them here
+        # silently discarded that bundle-wide evidence from every stored
+        # release comparison sourced from either writer).
+        relevant_kinds = (
+            set(artifact.sections)
+            | set(full_variant.sections)
+            | set(summary.project_sections)
+        )
         trimmed_versions = replace(
             summary.versions,
             section_schema_versions={
                 kind: version
                 for kind, version in summary.versions.section_schema_versions.items()
-                if kind in artifact.sections
+                if kind in relevant_kinds
             },
         )
-        trimmed_variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
+        # `full_variant.sections`/`summary.project_sections` are carried
+        # through unchanged, on every single-artifact sub-package cut from
+        # this variant -- they describe the *whole* original variant/
+        # project, not this one library, but that is the correct shape
+        # here: `build_bundle_snapshot_mixed` (and any other stored-release
+        # reader) needs this bundle-wide evidence available from whichever
+        # one sub-package it happens to read first, since nothing else
+        # would carry it once the original multi-artifact package's own
+        # `refs/variants/<id>.json` is gone. Every `ObjectRef` referenced
+        # stays resolvable: `_populate_objects_dir` links/copies the
+        # *entire* `objects/` store above, not just this artifact's own
+        # digests.
+        trimmed_variant = VariantRef(
+            variant_id=variant_id,
+            artifact_ids=(artifact_id,),
+            sections=full_variant.sections,
+        )
         sub_manifest = PackageManifest(
             versions=trimmed_versions,
             variant_refs=(trimmed_variant,),
             artifact_refs=(artifact,),
+            project_sections=summary.project_sections,
         )
         write_project_manifest(sub_dir, sub_manifest)
         result[artifact_id] = (sub_dir, artifact)

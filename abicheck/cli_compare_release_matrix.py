@@ -608,19 +608,26 @@ def _resolve_release_package_side(
 
     if not is_project_snapshot_package_dir(side_dir):
         return None
+    from .errors import SnapshotError
+
     dest_root = make_temp_dir("abicheck_relpkg_")
     try:
         return resolve_release_package_map(
             side_dir, variant_id=variant_id, dest_root=dest_root
         )
-    except ValueError as exc:
-        # Ambiguous-variant selection and a same-key artifact collision are
-        # both usage errors (a malformed/ambiguous *input*, not an abicheck
-        # bug) -- translated the same way `_build_match_map`'s own
-        # `AmbiguousLibraryMatchError` -> `click.ClickException` already is,
-        # rather than propagating as an unhandled `ValueError` (which Click
-        # would surface as a generic exit 1 traceback instead of a normal
-        # exit-64 usage error).
+    except (ValueError, OSError, SnapshotError) as exc:
+        # Ambiguous-variant selection and a same-key artifact collision
+        # (ValueError), a missing/unreadable ref or object file (OSError),
+        # and a corrupt/incompatible stored document (SnapshotError) are all
+        # usage errors (a malformed *input*, not an abicheck bug) -- a
+        # package that already passed `is_project_snapshot_package_dir`'s
+        # own manifest read can still fail deeper (a missing artifact ref,
+        # a dangling object digest) once materialization actually walks its
+        # full ref/object graph. Translated the same way `_build_match_map`'s
+        # own `AmbiguousLibraryMatchError` -> `click.ClickException` already
+        # is, rather than propagating as an unhandled exception (which Click
+        # would surface as a generic exit-1 traceback instead of a normal
+        # exit-64 usage error) (Codex review).
         raise click.UsageError(str(exc)) from exc
 
 

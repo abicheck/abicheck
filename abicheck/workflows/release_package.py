@@ -71,25 +71,37 @@ _NATIVE_IDENTITY_LIBRARY_NAME_KEY = "library_name"
 
 
 def is_multi_artifact_package(path: str | Path) -> bool:
-    """Whether the `ProjectSnapshot` package directory at *path* declares
-    more than one artifact, **or** more than one variant -- ADR-062 A1.7's
-    disambiguator between a single-artifact package
-    (`cli_resolve.classify_compare_operand` keeps reading it directly as one
-    snapshot, A1.3's original "file" shape, unchanged since before A1.7) and
-    a real multi-library/multi-variant release (routed to the release
-    fan-out instead, the same as a loose directory of `.so` files).
+    """Whether the `ProjectSnapshot` package directory at *path* should be
+    routed through the release fan-out rather than read directly as one
+    snapshot -- true whenever it does *not* declare exactly one artifact
+    under exactly one variant, ADR-062 A1.7's disambiguator between a
+    genuinely single-artifact package (`cli_resolve.classify_compare_operand`
+    keeps reading it directly, A1.3's original "file" shape, unchanged since
+    before A1.7) and everything else (routed to the release fan-out instead,
+    the same as a loose directory of `.so` files).
 
-    The variant-count arm matters even for a package that happens to
-    publish exactly one artifact overall: a package can validly declare two
-    variants where only one of them owns that artifact (e.g. `v1` owns it,
-    `v2` is a real, deliberately empty variant). A1.3's single-artifact
-    reader (`project_snapshot_legacy.read_legacy_snapshot_document`) has no
-    `--old-variant`/`--new-variant` selection logic at all -- it always
-    reads the package's sole artifact unconditionally -- so treating such a
-    package as "file" would silently ignore an explicit
-    `--old-variant v2`/`--new-variant v2` and compare `v1`'s artifact
-    instead, rather than either honoring the selection (an empty variant,
-    correctly comparing zero libraries) or raising on it (Codex review).
+    Three shapes route to the fan-out, not just "more than one artifact":
+
+    - **More than one artifact** -- the obvious multi-library release case.
+    - **Zero artifacts** -- a real, valid package can declare a variant with
+      no member libraries at all (an empty release, or the *unselected*
+      side of a multi-variant package where every artifact belongs to a
+      different variant). A1.3's single-artifact reader
+      (`project_snapshot_legacy.read_legacy_snapshot_document`) hard-requires
+      exactly one artifact and raises otherwise -- so a zero-artifact
+      package must reach the fan-out (which already handles an empty
+      `old_map`/`new_map` as a valid "nothing to compare" release) rather
+      than that reader's usage error (Codex review).
+    - **More than one variant** -- matters even when exactly one artifact
+      exists overall: a package can validly declare two variants where only
+      one of them owns that artifact (e.g. `v1` owns it, `v2` is a real,
+      deliberately empty variant). The single-artifact reader has no
+      `--old-variant`/`--new-variant` selection logic at all -- it always
+      reads the package's sole artifact unconditionally -- so treating such
+      a package as "file" would silently ignore an explicit
+      `--old-variant v2`/`--new-variant v2` and compare `v1`'s artifact
+      instead, rather than either honoring the selection (an empty variant,
+      correctly comparing zero libraries) or raising on it (Codex review).
 
     Read-only, best-effort: `False` -- never raises -- for anything that
     fails to parse as a readable manifest; the caller has normally already
@@ -101,7 +113,7 @@ def is_multi_artifact_package(path: str | Path) -> bool:
         summary = read_manifest_summary(path)
     except (SnapshotError, OSError, ValueError, TypeError):
         return False
-    return len(summary.artifact_ids) > 1 or len(summary.variant_ids) > 1
+    return len(summary.artifact_ids) != 1 or len(summary.variant_ids) != 1
 
 
 def _release_match_key(artifact: ArtifactRef) -> str:
@@ -198,6 +210,14 @@ def resolve_release_package_map(
 #: name portability.
 _DISPLAY_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
 
+#: A conservative cap for the *whole* generated display directory name,
+#: comfortably under the common 255-byte path-component limit
+#: `storage.ref_ids.safe_ref_id` itself is sized against (`artifact_id`
+#: alone may be up to 250 UTF-8 bytes there -- see `_display_dirname`'s own
+#: docstring for why the naive "80-byte key prefix + full artifact_id"
+#: shape could exceed 255 on its own).
+_MAX_DISPLAY_DIRNAME_BYTES = 200
+
 
 def _display_dirname(key: str, artifact_id: str) -> str:
     """A readable display directory name for *artifact_id*, prefixed by a
@@ -216,8 +236,24 @@ def _display_dirname(key: str, artifact_id: str) -> str:
     never colliding), keeping it in full makes every generated name
     collision-free regardless of what `key` sanitizes to (Codex review,
     fresh evidence on this same guard, twice).
+
+    The sanitized `key` prefix's own budget is whatever's left of
+    `_MAX_DISPLAY_DIRNAME_BYTES` after reserving room for the full
+    `artifact_id` plus its separator -- `artifact_id` alone may be up to
+    250 UTF-8 bytes (`storage.ref_ids.safe_ref_id`'s own ceiling), so an
+    unconditional 80-byte prefix could push the combined name past a
+    common 255-byte path-component limit and make the materializing
+    `rename()` fail with `ENAMETOOLONG` (Codex review, fresh evidence: a
+    long but individually valid `artifact_id`). When that budget leaves no
+    room for any prefix at all, the name degrades to the bare
+    `artifact_id` -- still valid and collision-free, just less readable.
     """
-    sanitized = _DISPLAY_DIRNAME_UNSAFE.sub("_", key).strip(". ")[:80]
+    sanitized = _DISPLAY_DIRNAME_UNSAFE.sub("_", key).strip(". ")
+    artifact_bytes = len(artifact_id.encode("utf-8"))
+    prefix_budget = max(0, _MAX_DISPLAY_DIRNAME_BYTES - artifact_bytes - 1)
+    # `sanitized` is pure ASCII after the substitution above, so a
+    # character-count slice is also a byte-count slice.
+    sanitized = sanitized[:prefix_budget]
     if not sanitized or sanitized in (".", ".."):
-        sanitized = "lib"
+        return artifact_id
     return f"{sanitized}-{artifact_id}"

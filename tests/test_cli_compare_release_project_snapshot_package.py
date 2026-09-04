@@ -743,3 +743,96 @@ class TestMultiVariantSingleArtifactClassification:
         assert doc["libraries"] == []
         assert doc["unmatched_new"] == ["liba.so.json"]
         assert ec == 0
+
+
+class TestMaterializationPreservesBundleComposition:
+    """Codex review, sixth round: `materialize_release_variant_artifacts`
+    built each single-artifact sub-package's own `VariantRef`/
+    `PackageManifest` from scratch (`artifact_ids=(artifact_id,)`, no
+    `sections`, no `project_sections`), silently dropping the *variant*-
+    and *project*-level evidence a real writer may have attached --
+    `storage.import_bundle_facts`'s own writer stores captured
+    `filesystem_aliases`/`library_filenames`/instantiation-manifest under
+    `VariantRef.sections` (`BUNDLE_COMPOSITION_SECTION_KIND`), not under
+    any one `ArtifactRef.native_identity` -- a completely different
+    contract than `bundle_facts_store.write_bundle_facts_package`'s own
+    per-artifact `native_identity` keys. A stored release sourced from
+    that writer lost this evidence for every single library on
+    materialization."""
+
+    def test_variant_composition_section_survives_materialization(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.serialization import snapshot_to_dict
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+        from abicheck.storage.import_bundle_facts import (
+            BUNDLE_FACTS_ARTIFACT_TYPE,
+            import_bundle_facts,
+        )
+        from abicheck.storage.package import ArtifactRef
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        doc = {
+            "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+            "schema_version": 2,
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {
+                "liba.so": snapshot_to_dict(
+                    _snap("liba.so", "1.0", [_fn("foo", "_Z3foov")])
+                ),
+                "libb.so": snapshot_to_dict(_snap("libb.so", "1.0", [])),
+            },
+            "filesystem_aliases": {"liba.so": ["liba.so.1"]},
+            "library_filenames": {"liba.so": "liba.so.1.2.3"},
+            "manifest": {"provides": [{"symbol": "liba_init"}]},
+        }
+
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = import_bundle_facts(
+            doc, store=store, max_known_schema_version=43, variant_id="v1"
+        )
+        write_project_manifest(pkg, manifest)
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert resolved  # at least one materialized sub-package
+
+        # Every materialized sub-package must carry the composition
+        # forward -- pick any one and read its own manifest back.
+        sub_dir = next(iter(resolved.values()))
+        from abicheck.project_snapshot_store import read_project_manifest
+
+        sub_manifest = read_project_manifest(sub_dir)
+        assert len(sub_manifest.variant_refs) == 1
+        assert BUNDLE_COMPOSITION_SECTION_KIND in sub_manifest.variant_refs[0].sections
+        assert (
+            BUNDLE_COMPOSITION_SECTION_KIND
+            in sub_manifest.versions.section_schema_versions
+        )
+
+        # And the referenced object is actually readable through this
+        # sub-package's own object store (not a dangling digest) -- decoded
+        # the same way `import_bundle_facts.export_bundle_facts` itself
+        # reads this section back.
+        from abicheck.storage.dto import SectionDTO, bundle_composition_from_dto
+        from abicheck.storage.import_v1 import export_legacy_snapshot
+
+        sub_store = DirectoryObjectStore(sub_dir)
+        composition_ref = sub_manifest.variant_refs[0].sections[
+            BUNDLE_COMPOSITION_SECTION_KIND
+        ]
+        composition_dto = SectionDTO.from_dict(sub_store.get(composition_ref.digest))
+        composition = bundle_composition_from_dto(composition_dto)
+        assert composition["filesystem_aliases"]["liba.so"] == ["liba.so.1"]
+        assert composition["library_filenames"]["liba.so"] == "liba.so.1.2.3"
+
+        # Sanity: the artifact's own section is still independently
+        # readable too (the fix must not have broken the existing path).
+        (artifact,) = sub_manifest.artifact_refs
+        assert isinstance(artifact, ArtifactRef)
+        document = export_legacy_snapshot(
+            artifact, store=sub_store, source_schema_version=43
+        )
+        assert document["library"] in {"liba.so", "libb.so"}
