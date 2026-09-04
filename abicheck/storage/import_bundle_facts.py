@@ -330,7 +330,21 @@ def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     "not decoded, only partitioned" contract for content it doesn't
     itself own), so it is never in the pair-list shape here. Decoding it
     unconditionally would raise on export for a document that import
-    itself accepted unchanged (Codex review, fresh evidence)."""
+    itself accepted unchanged (Codex review, fresh evidence).
+
+    *entry* itself is checked against `Mapping` before conversion: a stored
+    `provides` entry that is instead a JSON list of `[key, value]` pairs
+    (e.g. `[["symbol", "foo"]]`) would otherwise convert via a plain
+    `dict(entry)` into a valid-looking mapping, silently accepting contract
+    evidence `manifest_from_dict` itself rejects outright -- the identical
+    "untrusted stored shape must not convert for free" risk
+    `_decode_template_instantiation_pairs` already guards for the nested
+    instantiation pairs, one level up (Codex review, fresh evidence)."""
+    if not isinstance(entry, Mapping):
+        raise ValueError(
+            "a stored manifest 'provides' entry must be a mapping, not "
+            f"{type(entry).__name__} ({entry!r})"
+        )
     exported = dict(entry)
     if "template" in exported and "instantiations" in exported:
         exported["instantiations"] = [
@@ -614,9 +628,10 @@ def export_bundle_facts(
     manifest was not built by it, or was hand-edited), if that section (or
     any artifact's own section) is not advertised in this package's
     `section_schema_versions`, if the stored composition's
-    `variant_fingerprint` is not a string, or if a stored template
-    instantiation names the same parameter more than once -- or whatever
-    *on_document* itself raises.
+    `variant_fingerprint` is not a string, if a stored manifest `provides`
+    entry is not itself a mapping, or if a stored template instantiation
+    names the same parameter more than once -- or whatever *on_document*
+    itself raises.
     """
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None

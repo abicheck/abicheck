@@ -640,3 +640,20 @@ class TestImportBundleFacts:
         )
         with pytest.raises(ValueError, match="more than once"):
             export_bundle_facts(doctored, store=store)
+
+    def test_export_rejects_a_non_mapping_stored_manifest_entry(self) -> None:
+        """A stored `provides` entry that is a JSON list of `[key, value]`
+        pairs (e.g. `[["symbol", "foo"]]`) would otherwise convert via a
+        plain `dict(entry)` into a valid-looking mapping, silently
+        accepting contract evidence `manifest_from_dict` itself rejects
+        outright -- the identical risk the duplicate-instantiation-
+        parameter check above guards against one level down, here one
+        level up (Codex review, fresh evidence)."""
+        doctored, store = self._doctored_composition_manifest(
+            {
+                "variant_fingerprint": "default",
+                "manifest": {"provides": [[["symbol", "liba_init"]]]},
+            }
+        )
+        with pytest.raises(ValueError, match="mapping"):
+            export_bundle_facts(doctored, store=store)

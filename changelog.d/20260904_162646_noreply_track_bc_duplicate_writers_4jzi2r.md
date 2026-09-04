@@ -32,4 +32,7 @@
   decoded, so a hand-edited package cannot drop that section from
   `section_schema_versions` while keeping it in `VariantRef.sections` to
   smuggle an unversioned variant fingerprint or instantiation manifest
-  into a comparison.
+  into a comparison. `export_bundle_facts` also now rejects a stored
+  manifest `provides` entry that is not itself a mapping (e.g. a JSON list
+  of `[key, value]` pairs), instead of silently accepting it via a plain
+  `dict(entry)` conversion.
