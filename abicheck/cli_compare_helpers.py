@@ -52,6 +52,7 @@ from .cli_compare_options import (
     _reject_set_input_flags,
     _resolve_debug_roots,
     _resolve_demangle,
+    _resolve_profile_severity_preset,
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
@@ -119,6 +120,7 @@ def _resolve_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
+    severity_preset_from_profile: bool = False,
     scope_public_headers: bool,
     debug_format_opt: str | None,
     debug_format: str | None,
@@ -136,6 +138,7 @@ def _resolve_compare_config(
     (``None`` when there is no config), captured by the same read so an
     ADR-049 receipt can prove *which revision* of the file supplied a value
     rather than only naming its path (Codex review, fresh evidence).
+    *severity_preset_from_profile*: see :func:`_resolve_profile_severity_preset`.
     """
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
     from .workflows.extraction import load_build_config_with_digest
@@ -149,6 +152,9 @@ def _resolve_compare_config(
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
+    severity_preset = _resolve_profile_severity_preset(
+        severity_preset, from_profile=severity_preset_from_profile, project_cfg=project_cfg
+    )
     resolved_cfg = resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
@@ -1423,9 +1429,12 @@ def run_compare(
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
+    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
+    _injected = (ctx.meta.get(_RUN_PROFILE_META_KEY) or {}).get("injected", {})
     cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
+        severity_preset_from_profile="severity_preset" in _injected,
         scope_public_headers=scope_public_headers,
         debug_format_opt=debug_format_opt,
         debug_format=debug_format,

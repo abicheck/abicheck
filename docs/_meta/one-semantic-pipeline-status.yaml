@@ -346,15 +346,20 @@ concepts:
       EffectiveGate/EffectiveEvaluationConfig target); and
       cli_compare_receipt.resolve_release_pack_application unconditionally
       rejected a --pack asserting contract.unresolved for a release
-      comparison. The first gap's exit-code-scheme half closed 2026-09-04:
-      policy.release_gate_options.resolve_gate_pack_exit_code_scheme is now
-      the one function both callers use for that piece, guarded by tests/
-      test_release_gate_pack_fold_parity.py's parity property; the
-      *severity-level* application itself (a dataclasses.replace on an
-      already-resolved SeverityConfig vs. six raw-string overrides) remains
-      expressed twice against its two different pre-resolution shapes,
-      still the P0 EffectiveGate/EffectiveEvaluationConfig target's job to
-      collapse for real. The second gap (the contract.unresolved rejection)
+      comparison. The first gap's exit-code-scheme half was mooted
+      2026-09-04, not closed: CLI cleanup phase two PR G2 deleted
+      --exit-code-scheme/exit_code_scheme entirely (ADR-064 -- the gate
+      algorithm is now purely derived from whether a severity setting is in
+      effect, so there is no scheme value left for two callers to agree or
+      disagree on). apply_release_gate_pack remains the one function both
+      callers use for the severity-only fold that survives (a
+      dataclasses.replace on an already-resolved SeverityConfig vs. six
+      raw-string overrides), still expressed twice against its two
+      different pre-resolution shapes -- still the P0
+      EffectiveGate/EffectiveEvaluationConfig target's job to collapse for
+      real; tests/test_release_gate_pack_fold_parity.py's parity property
+      was rewritten to assert the surviving severity-only behavior. The
+      second gap (the contract.unresolved rejection)
       closed 2026-09-04 too (Track 2): re-reading the rejection's own
       reasoning against the already-confirmed plumbing found no hazard it
       didn't already cover, so the unconditional rejection was replaced with
