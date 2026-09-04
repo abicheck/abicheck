@@ -119,14 +119,16 @@ class _TypeResolver:
         # Track resolution in progress for cycle detection
         self._resolving_name: set[int] = set()
         self._resolving_size: set[int] = set()
-        # P2 review, fresh evidence: a type reached only through name()/
-        # size() resolution (e.g. a struct member's referenced scalar/
-        # pointer/qualifier type) has its own name_off read here via
-        # _str_at(), previously discarding the validity signal entirely --
-        # an out-of-range offset on such a type silently substituted a
-        # kind-default name (e.g. "int") with no completeness signal at
-        # all, invisible to every direct extractor's own invalid_strings
-        # accumulator since it never calls _str_at directly for this type.
+        # P2 review, two rounds: a type reached only through name()/size()
+        # resolution (e.g. a struct member's referenced scalar/pointer/
+        # qualifier type) is invisible to every direct extractor's own
+        # invalid_strings accumulator. Round 1: its own name_off, read here
+        # via _str_at(), previously discarded the validity signal, silently
+        # substituting a kind-default name (e.g. "int") for an out-of-range
+        # offset. Round 2: an out-of-range type_id itself (m_type naming an
+        # index past the parsed type table) also resolved silently, to a
+        # "<btf:N>" placeholder name and a size of 0. Despite the name, this
+        # accumulator now records both shapes of "resolution was incomplete".
         self._invalid_strings = invalid_strings
 
     def _resolve_cached(
@@ -188,6 +190,14 @@ class _TypeResolver:
             return "void"
         t = self._get(type_id)
         if t is None:
+            # P2 review, fresh evidence: an out-of-range type reference
+            # (e.g. a struct member's m_type naming an index past the
+            # parsed type table) previously resolved to this placeholder
+            # with no completeness signal at all -- the member's own name
+            # may be perfectly valid, so no direct extractor's own
+            # invalid_strings accumulator ever observes this failure.
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return f"<btf:{type_id}>"
 
         kind = t.kind
@@ -257,6 +267,9 @@ class _TypeResolver:
             return 0
         t = self._get(type_id)
         if t is None:
+            # See the matching comment in _resolve_name.
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return 0
 
         kind = t.kind

@@ -287,6 +287,30 @@ class TestFailedRecordCountNonExceptionTruncation:
         db = self._db([(LF_FIELDLIST, b"")])
         assert db.failed_record_count == 0
 
+    def test_fieldlist_with_trailing_partial_subleaf_tag_marks_failed(self) -> None:
+        """P2 review, fresh evidence: the reviewer's exact reported shape --
+        a fully framed LF_FIELDLIST ending with exactly one non-padding
+        byte. The loop's own ``pos + 2 <= len(d)`` guard never examines
+        that trailing byte (not enough left for even a 2-byte sub-leaf
+        tag), so it previously exited silently with ``complete`` still
+        True -- the lone byte could be all that survived of a truncated
+        sub-record's own tag."""
+        db = self._db([(LF_FIELDLIST, b"\x01")])  # not a pad byte (< 0xF0)
+        assert db.failed_record_count == 1
+
+    def test_fieldlist_with_trailing_pad_byte_is_not_counted(self) -> None:
+        """Positive control: a single legitimate trailing LF_PAD1 byte
+        (0xF1, skip=1) must still be accepted, not flagged."""
+        db = self._db([(LF_FIELDLIST, b"\xf1")])
+        assert db.failed_record_count == 0
+
+    def test_fieldlist_with_pad_overshooting_buffer_marks_failed(self) -> None:
+        """A trailing pad byte whose own claimed skip length exceeds what
+        actually remains (e.g. 0xFF claims skip=15, only 1 byte present)
+        is itself malformed and must not be silently accepted."""
+        db = self._db([(LF_FIELDLIST, b"\xff")])
+        assert db.failed_record_count == 1
+
     def test_lf_structure_with_unterminated_name(self) -> None:
         """P2 review, fresh evidence beyond the resolved non-exception-
         truncation thread: a fully-framed LF_STRUCTURE whose fixed header is

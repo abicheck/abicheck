@@ -353,6 +353,26 @@ class TestInvalidStringOffsetPropagatesToPartial:
         assert meta.extraction_partial is True
         assert "S" in meta.structs
 
+    def test_out_of_range_member_type_reference_marks_partial(self) -> None:
+        """P2 review, round 3: the CTF sibling of the identical BTF finding
+        -- an otherwise well-formed struct member whose type index names a
+        type past the parsed type table previously resolved silently, with
+        no completeness signal at all."""
+        b = CtfBuilder()
+        info = (CTF_K_STRUCT << 24) | (1 & 0xFFFF)
+        s_name = b.add_string("S")
+        m_name = b.add_string("field")
+        out_of_range_type = 99  # no type_id 99 exists -- only 0 (void), 1 (S)
+        member = struct.pack("<II", m_name, (out_of_range_type << 16) | 0)
+        entry = struct.pack("<III", s_name, info, 4) + member
+        b._type_entries.append(entry)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        assert meta.structs["S"].fields[0].type_name == "<ctf:99>"
+        assert meta.structs["S"].fields[0].byte_size == 0
+
 
 class TestUnterminatedStringMarksPartial:
     """CTF sibling of the identical BTF finding (P2 review, round 2): an

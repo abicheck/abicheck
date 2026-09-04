@@ -902,6 +902,19 @@ class TypeDatabase:
             # 4-byte alignment within fieldlist
             pos = (new_pos + 3) & ~3
 
+        # P2 review, fresh evidence: the loop's own `pos + 2 <= len(d)`
+        # guard never examines a trailing tail shorter than 2 bytes -- a
+        # sub-record whose 2-byte leaf tag itself was cut to 0-1 bytes
+        # exits the loop silently with `complete` still True. Consume any
+        # legitimate trailing LF_PAD* byte(s) the same way the loop body
+        # does; anything left over (including a pad claim overshooting the
+        # buffer) is a genuine truncation.
+        while pos < len(d) and d[pos] >= 0xF0:
+            skip = d[pos] & 0x0F
+            pos += skip if skip > 0 else 1
+        if pos != len(d):
+            complete = False
+
         self._fieldlists[ti] = members
         return complete
 

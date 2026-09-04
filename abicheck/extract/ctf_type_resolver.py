@@ -205,6 +205,9 @@ class _TypeResolver:
             return "void"
         t = self._get(type_id)
         if t is None:
+            # See the matching comment on __init__'s invalid_strings param.
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return f"<ctf:{type_id}>"
 
         kind = t.kind
@@ -225,6 +228,9 @@ class _TypeResolver:
             return 0
         t = self._get(type_id)
         if t is None:
+            # See the matching comment on __init__'s invalid_strings param.
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return 0
 
         kind = t.kind

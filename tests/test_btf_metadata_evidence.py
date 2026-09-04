@@ -200,6 +200,27 @@ class TestInvalidStringOffsetPropagatesToPartial:
         # Best-effort resolution still substitutes the kind default.
         assert meta.structs["S"].fields[0].type_name == "int"
 
+    def test_out_of_range_member_type_reference_marks_partial(self) -> None:
+        """P2 review, round 3: an otherwise well-formed struct member whose
+        ``m_type`` names a type index past the parsed type table previously
+        resolved to a ``"<btf:N>"`` placeholder name and a size of 0 with
+        no completeness signal at all -- neither the member's own name nor
+        any direct extractor's accumulator ever observes this failure."""
+        b = BtfBuilder()
+        info = (BTF_KIND_STRUCT << 24) | (1 & 0xFFFF)
+        s_name = b.add_string("S")
+        m_name = b.add_string("field")
+        out_of_range_type = 99  # no type_id 99 exists -- only 0 (void), 1 (S)
+        member = struct.pack("<III", m_name, out_of_range_type, 0)
+        entry = struct.pack("<III", s_name, info, 4) + member
+        b._type_entries.append(entry)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        assert meta.structs["S"].fields[0].type_name == "<btf:99>"
+        assert meta.structs["S"].fields[0].byte_size == 0
+
 
 class TestUnterminatedStringMarksPartial:
     """P2 review, round 2: a name offset in-bounds but with no NUL
