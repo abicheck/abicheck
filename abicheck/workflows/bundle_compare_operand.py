@@ -138,6 +138,17 @@ PR #1042, three rounds):**
    escalating-retry ceiling) instead of its 4 KiB sniff default, generous
    enough for any realistic reordered document while remaining one bounded
    read.
+6. **The candidate key token must be *decoded*, not compared by its raw
+   spelling (Codex review, round 5, fresh evidence).** A conforming JSON
+   producer may escape the key (``"artifact\\u005ftype"`` for
+   ``artifact_type``) without changing what it means --
+   ``load_bundle_facts()`` accepts it fine, since ordinary JSON decoding
+   collapses the escape either way. Comparing the raw token bytes against
+   the literal spelling ``b'"artifact_type"'`` would reject that
+   (technically valid, if unnecessary) escaped key. Answered by
+   :func:`_decode_json_string_token`, the same ``json.loads``-based
+   decoding the marker's *value* already went through from the start --
+   now shared by both halves of the check instead of only the value half.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
@@ -154,6 +165,7 @@ than chased further.
 
 from __future__ import annotations
 
+import json as _json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -171,6 +183,10 @@ from pathlib import Path
 #: exactly "ignore" for a token kind this scan doesn't care about.
 _JSON_STRUCTURE_TOKEN_RE = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]', re.DOTALL)
 
+#: The root marker key, as JSON actually compares it -- decoded, not the
+#: raw token spelling. See :func:`_decode_json_string_token`.
+_ARTIFACT_TYPE_KEY = "artifact_type"
+
 #: How much decoded prefix :func:`looks_like_stored_bundle_facts` asks
 #: :func:`abicheck.snapshot_io.bounded_decoded_prefix` for -- deliberately
 #: far above that function's own ``_SNIFF_BYTES`` (4 KiB) default (Codex
@@ -187,6 +203,29 @@ _JSON_STRUCTURE_TOKEN_RE = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]', re.DOTAL
 #: ``bounded_decoded_prefix`` itself already makes explicit for its own
 #: escalating-retry ceiling.
 _MARKER_SCAN_BYTES = 1024 * 1024
+
+
+def _decode_json_string_token(token: bytes) -> str | None:
+    """Decode a raw, still-quoted-and-escaped JSON string *token* (as
+    matched by :data:`_JSON_STRUCTURE_TOKEN_RE`) into its real string
+    value, or ``None`` if it isn't valid JSON string syntax after all
+    (the token regex accepts any ``\\.`` escape pair, including one
+    ``json.loads`` itself would reject, e.g. ``\\q`` -- rejecting rather
+    than raising keeps this scan's own "never raises" contract). Used for
+    *both* a candidate key and the marker's value, so an escaped spelling
+    of either (``"artifact\\u005ftype"`` for the key,
+    ``"abicheck.bundle\\u002dfacts"`` for the value) is compared the same
+    way ``json.loads()`` itself would compare it -- a raw-byte comparison
+    against the token's literal spelling would silently reject a
+    (technically valid, if unnecessary) escaped key or value that
+    ``load_bundle_facts()`` accepts fine (Codex review, round 5, fresh
+    evidence, for the key half; the value half was already decoded this
+    way from the start)."""
+    try:
+        decoded = _json.loads(token)
+    except ValueError:
+        return None
+    return decoded if isinstance(decoded, str) else None
 
 
 def _root_level_artifact_type(prefix: bytes) -> bytes | None:
@@ -258,7 +297,9 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
             just_saw_colon = False
             pending_key_is_marker = False
         else:
-            pending_key_is_marker = depth == 1 and tok == b'"artifact_type"'
+            pending_key_is_marker = (
+                depth == 1 and _decode_json_string_token(tok) == _ARTIFACT_TYPE_KEY
+            )
     return None
 
 
@@ -323,13 +364,8 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     # escapes intact) -- decode it the same way json.loads() would rather
     # than comparing escaped bytes to an unescaped constant, so a
     # (technically valid, if unnecessary) escaped spelling still matches.
-    import json as _json
-
-    try:
-        decoded_value = _json.loads(value)
-    except ValueError:
-        return False
-    return bool(decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE)
+    decoded_value = _decode_json_string_token(value)
+    return decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE
 
 
 @dataclass(frozen=True)

@@ -111,6 +111,23 @@ class TestLooksLikeStoredBundleFacts:
         assert p.stat().st_size > 8192
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_escaped_marker_key_still_classifies_as_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 5): a conforming JSON producer may
+        escape a key without changing what it means -- \\u005f is just
+        "_" -- and load_bundle_facts() accepts that fine since ordinary
+        JSON decoding collapses the escape either way. The classifier must
+        decode the candidate key the same way rather than comparing its
+        raw, still-escaped spelling against the literal "artifact_type"
+        token."""
+        p = tmp_path / "escaped_key.json"
+        p.write_text(
+            '{"artifact\\u005ftype": "abicheck.bundle-facts", '
+            '"schema_version": 2, "per_library_snapshots": {}}'
+        )
+        assert looks_like_stored_bundle_facts(p) is True
+
     def test_artifact_type_as_a_sibling_value_does_not_confuse_the_scan(
         self, tmp_path: Path
     ) -> None:
