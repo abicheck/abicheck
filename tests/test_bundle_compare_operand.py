@@ -372,6 +372,51 @@ class TestLooksLikeStoredBundleFacts:
         assert json.loads(p.read_text())["artifact_type"] == "other"
         assert looks_like_stored_bundle_facts(p) is False
 
+    def test_duplicate_root_marker_key_null_last_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 15), fresh evidence: the
+        round-10 fix above only updated the recorded candidate when the
+        *winning* duplicate value was itself a JSON string. A duplicate
+        whose last value is `null` (or any other non-string scalar) must
+        clear an earlier string match too -- json.loads()'s own final
+        value for this key is `null`, never equal to the marker string,
+        so the scanner must agree."""
+        p = tmp_path / "duplicate_key_null_last.json"
+        p.write_text(
+            '{"artifact_type": "abicheck.bundle-facts", "artifact_type": '
+            'null, "schema_version": 2, "per_library_snapshots": {}}'
+        )
+        assert json.loads(p.read_text())["artifact_type"] is None
+        assert looks_like_stored_bundle_facts(p) is False
+
+    def test_duplicate_root_marker_key_number_last_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Same as above, for a numeric duplicate value."""
+        p = tmp_path / "duplicate_key_number_last.json"
+        p.write_text(
+            '{"artifact_type": "abicheck.bundle-facts", "artifact_type": '
+            '42, "schema_version": 2, "per_library_snapshots": {}}'
+        )
+        assert json.loads(p.read_text())["artifact_type"] == 42
+        assert looks_like_stored_bundle_facts(p) is False
+
+    def test_duplicate_root_marker_key_object_last_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Same finding, for a nested-object duplicate value -- the round
+        15 report itself only named scalars, but the same last-key-wins
+        gap applies to any non-string value shape, generalized here per
+        CLAUDE.md's bug-class regression-testing principle."""
+        p = tmp_path / "duplicate_key_object_last.json"
+        p.write_text(
+            '{"artifact_type": "abicheck.bundle-facts", "artifact_type": '
+            '{"nested": 1}, "schema_version": 2, "per_library_snapshots": {}}'
+        )
+        assert json.loads(p.read_text())["artifact_type"] == {"nested": 1}
+        assert looks_like_stored_bundle_facts(p) is False
+
     def test_gzip_with_many_tiny_members_and_a_leading_marker_is_stored(
         self, tmp_path: Path
     ) -> None:

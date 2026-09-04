@@ -359,6 +359,21 @@ other half of why an escape hatch was not added back in a different shape).
    general zip probe too, before it ever constructs ``ZipFile`` --
    see :func:`path_is_a_real_zip_container`'s own updated docstring.
 
+18. **A duplicate root-level marker key whose later value isn't itself a
+   JSON string left an earlier string match in place (Codex review, round
+   15, fresh evidence).** Point 13's last-key-wins fix only updated
+   ``last_marker_value`` when the *winning* value was itself a string
+   token; a later occurrence whose value is a scalar (``null``, a bool, a
+   number) or a nested object/array left whatever an earlier string
+   occurrence had already recorded untouched, so a document like
+   ``{"artifact_type":"abicheck.bundle-facts",...,"artifact_type":null}``
+   -- for which a real decoder's final value is ``null``, never equal to
+   the marker string -- still reported the first, superseded match.
+   Answered by clearing ``last_marker_value`` whenever a duplicate key's
+   value turns out not to be a string, for every non-string value shape
+   (scalar and nested-container alike), not only the scalar case the
+   review itself reported.
+
 **Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
 stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd
 skippable frame) can embed not just a forged central-directory record

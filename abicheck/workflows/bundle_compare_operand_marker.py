@@ -217,6 +217,17 @@ def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
     RE`'s own docstring for the full account of why the previous paragraph's
     whitespace-only gap check would otherwise misreport this exact case as
     definitively invalid.
+
+    A duplicate root-level ``artifact_type`` member whose *later* value is
+    not itself a JSON string (a number/``true``/``false``/``null`` scalar,
+    or a nested object/array) clears any earlier string match rather than
+    leaving it in place (Codex review, round 15, fresh evidence, generalized
+    to every non-string value shape rather than only the reported scalar
+    case) -- the same last-key-wins semantics point 13 already established
+    for a *string* duplicate applies just as much when the winning value
+    isn't a string at all: a real decoder's value for that key is then
+    never equal to the marker string, so a scan that kept reporting an
+    earlier string occurrence would disagree with ``json.loads()`` itself.
     """
     stripped = prefix.lstrip(b" \t\r\n")
     if not stripped.startswith(b"{"):
@@ -242,6 +253,15 @@ def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
         expected_pos = m.end()
         tok = m.group(0)
         if tok in (b"{", b"["):
+            # A nested object/array can also be a duplicate marker key's
+            # *value* (``"artifact_type":{...}`` or ``[...]``) -- not a
+            # string, so it overrides an earlier string match the same
+            # last-key-wins way a bare scalar value does just below (round
+            # 15's own finding, generalized: any non-string duplicate
+            # value must clear a previously recorded candidate, not only
+            # the scalar case actually reported).
+            if depth == 1 and just_saw_colon and pending_key_is_marker:
+                last_marker_value = None
             depth += 1
             just_saw_colon = False
             pending_key_is_marker = False
@@ -268,7 +288,21 @@ def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
             # A bare number/true/false/null scalar -- always a value
             # (JSON has no unquoted key syntax), so it can never complete
             # the marker (whose value is a JSON string) and never starts a
-            # pending key.
+            # pending key. If this scalar is itself the value of a
+            # duplicate "artifact_type" key, though, it *overrides* an
+            # earlier string match the same way json.loads()'s own
+            # last-key-wins dict construction would (Codex review, round
+            # 15, fresh evidence) -- an earlier version of this branch left
+            # *last_marker_value* untouched here, so a document ending
+            # ...,"artifact_type":"abicheck.bundle-facts",...,
+            # "artifact_type":null} kept reporting the first (string)
+            # occurrence even though a real decoder's final value for that
+            # key is `null`, which never equals the marker string. Cleared
+            # unconditionally rather than only when it happens to already
+            # hold a match -- clearing a `None` is a no-op, so this needs
+            # no extra branch.
+            if just_saw_colon and pending_key_is_marker:
+                last_marker_value = None
             just_saw_colon = False
             pending_key_is_marker = False
             continue
