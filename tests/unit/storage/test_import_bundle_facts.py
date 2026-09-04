@@ -500,3 +500,80 @@ class TestImportBundleFacts:
         assert isinstance(single.variant_refs[0], VariantRef)
         with pytest.raises(ValueError, match=BUNDLE_COMPOSITION_SECTION_KIND):
             export_bundle_facts(single, store=store)
+
+    def _doctored_composition_manifest(
+        self, payload: dict[str, Any]
+    ) -> tuple[PackageManifest, InMemoryObjectStore]:
+        """A manifest whose `BUNDLE_COMPOSITION_SECTION_KIND` section holds
+        *payload* verbatim -- unlike every other test here, built by storing
+        a `SectionDTO` directly rather than through `import_bundle_facts`,
+        so its own on-import validation (which `import_bundle_facts` itself
+        always applies) cannot have run. Simulates a hand-assembled or
+        corrupted package, exactly the class of input `export_bundle_facts`
+        must not trust."""
+        from abicheck.storage.dto import bundle_composition_to_dto
+        from abicheck.storage.package import ObjectRef, VariantRef
+
+        store = InMemoryObjectStore()
+        doc = _bundle_document()
+        real_manifest = import_bundle_facts(doc, store=store)
+        composition_dto = bundle_composition_to_dto(payload)
+        digest = store.put(composition_dto.to_dict())
+        doctored_variant = VariantRef(
+            variant_id="default",
+            artifact_ids=real_manifest.variant_refs[0].artifact_ids,
+            sections={
+                BUNDLE_COMPOSITION_SECTION_KIND: ObjectRef(
+                    kind=BUNDLE_COMPOSITION_SECTION_KIND, digest=digest
+                )
+            },
+        )
+        doctored = PackageManifest(
+            versions=real_manifest.versions,
+            variant_refs=(doctored_variant,),
+            artifact_refs=real_manifest.artifact_refs,
+        )
+        return doctored, store
+
+    def test_export_rejects_a_non_string_stored_variant_fingerprint(self) -> None:
+        """`import_bundle_facts` itself rejects a non-string
+        `variant_fingerprint` outright, but that check only runs for a
+        document that actually went through it -- a composition section
+        built or stored some other way is untrusted content too.
+        `bundle_facts_from_dict()` unconditionally coerces this field via
+        `str(...)`, so a stored non-string value would otherwise silently
+        become a different string, possibly colliding with a genuinely
+        distinct, already-string fingerprint elsewhere and letting
+        `pair_variants()` compare the wrong variants (Codex review)."""
+        doctored, store = self._doctored_composition_manifest(
+            {"variant_fingerprint": 1, "manifest": None}
+        )
+        with pytest.raises(ValueError, match="variant_fingerprint"):
+            export_bundle_facts(doctored, store=store)
+
+    def test_export_rejects_a_stored_instantiation_with_a_duplicate_parameter(
+        self,
+    ) -> None:
+        """A stored template instantiation naming the same parameter twice
+        (e.g. `[["T", "int"], ["T", "float"]]`) must be rejected, not
+        silently collapsed to its last value by a plain `dict(pairs)`
+        conversion -- the identical risk `_validated_manifest_entry`'s own
+        import-time coercion guards against, reapplied on the read side for
+        content that never went through it (Codex review)."""
+        doctored, store = self._doctored_composition_manifest(
+            {
+                "variant_fingerprint": "default",
+                "manifest": {
+                    "provides": [
+                        {
+                            "template": "acme::train_ops",
+                            "instantiations": [
+                                [["T", "int"], ["T", "float"]],
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+        with pytest.raises(ValueError, match="more than once"):
+            export_bundle_facts(doctored, store=store)

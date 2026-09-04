@@ -274,6 +274,47 @@ def _validated_manifest_entry(raw: Any) -> dict[str, Any]:
     return normalized
 
 
+def _decode_template_instantiation_pairs(pairs: Any) -> dict[str, str]:
+    """One stored `[[key, value], ...]` template-instantiation pair list
+    (`_validated_manifest_entry`'s own order-preserving encoding), decoded
+    back to `{key: value}` -- strictly, since this reads untrusted stored
+    content back into contract evidence a comparison scores findings
+    against.
+
+    A plain `dict(pairs)` conversion silently keeps only the *last* value
+    for a repeated parameter name, collapsing e.g. two `T` entries into one
+    and describing a different promised template signature than the one
+    actually stored (Codex review) -- rejected here instead, alongside a
+    malformed pair (not a two-element `[key, value]` list of strings).
+    """
+    if not isinstance(pairs, list):
+        raise ValueError(
+            "a stored template instantiation must be a list of [key, value] "
+            f"pairs, not {type(pairs).__name__} ({pairs!r})"
+        )
+    decoded: dict[str, str] = {}
+    for pair in pairs:
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not isinstance(pair[0], str)
+            or not isinstance(pair[1], str)
+        ):
+            raise ValueError(
+                "a stored template instantiation pair must be "
+                f"[<str parameter>, <str value>], got {pair!r}"
+            )
+        parameter, value = pair
+        if parameter in decoded:
+            raise ValueError(
+                f"a stored template instantiation names parameter "
+                f"{parameter!r} more than once: {pairs!r} -- the package is "
+                "corrupted or was hand-edited"
+            )
+        decoded[parameter] = value
+    return decoded
+
+
 def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     """Inverse of `_validated_manifest_entry`'s order-preserving
     `instantiations` encoding: reconstructs each *template* entry's
@@ -293,7 +334,8 @@ def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     exported = dict(entry)
     if "template" in exported and "instantiations" in exported:
         exported["instantiations"] = [
-            dict(pairs) for pairs in exported["instantiations"]
+            _decode_template_instantiation_pairs(pairs)
+            for pairs in exported["instantiations"]
         ]
     return exported
 
@@ -560,11 +602,13 @@ def export_bundle_facts(
     already been retained in memory, raises from this callback to abort
     before the next document is fetched.
 
-    Raises `ValueError` if *variant_id* names no variant in *manifest*, or if
+    Raises `ValueError` if *variant_id* names no variant in *manifest*, if
     that variant carries no `BUNDLE_COMPOSITION_SECTION_KIND` section (never
     produced by anything but `import_bundle_facts` itself, so this means the
-    manifest was not built by it, or was hand-edited) -- or whatever
-    *on_document* itself raises.
+    manifest was not built by it, or was hand-edited), if the stored
+    composition's `variant_fingerprint` is not a string, or if a stored
+    template instantiation names the same parameter more than once -- or
+    whatever *on_document* itself raises.
     """
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
@@ -651,12 +695,32 @@ def export_bundle_facts(
             ],
         }
 
+    # `import_bundle_facts` itself rejects a non-string `variant_fingerprint`
+    # outright (mirrored above), but that check runs only for a document
+    # that actually went through `import_bundle_facts` -- a `VariantRef
+    # .sections[BUNDLE_COMPOSITION_SECTION_KIND]` object built or stored some
+    # other way is untrusted content this reader must not silently trust
+    # either. `bundle_facts_serialization.bundle_facts_from_dict()`
+    # unconditionally coerces this field via `str(...)`, so a stored
+    # non-string value (e.g. the JSON number `1`) would otherwise silently
+    # become the string `"1"` here -- possibly colliding with a genuinely
+    # distinct, already-string `"1"` fingerprint from another variant and
+    # letting `pair_variants()` compare the wrong variants (Codex review).
+    raw_variant_fingerprint = composition.get(
+        "variant_fingerprint", _DEFAULT_VARIANT_FINGERPRINT
+    )
+    if not isinstance(raw_variant_fingerprint, str):
+        raise ValueError(
+            f"variant {variant_id!r}'s stored variant_fingerprint must be a "
+            f"string, not {type(raw_variant_fingerprint).__name__} "
+            f"({raw_variant_fingerprint!r}) -- the package is corrupted or "
+            "was hand-edited"
+        )
+
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
         "schema_version": _BUNDLE_FACTS_SCHEMA_VERSION,
-        "variant_fingerprint": composition.get(
-            "variant_fingerprint", _DEFAULT_VARIANT_FINGERPRINT
-        ),
+        "variant_fingerprint": raw_variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),

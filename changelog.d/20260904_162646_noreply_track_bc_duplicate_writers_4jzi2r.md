@@ -16,4 +16,9 @@
   a possibly-untrusted package has already been retained in memory —
   `bundle_facts_store.py`'s reader uses it to reapply the same read-side
   byte and alias-element-count budgets its previous implementation
-  enforced.
+  enforced. `export_bundle_facts` also now rejects a stored, non-string
+  `variant_fingerprint` and a stored template instantiation naming the same
+  parameter more than once, instead of silently coercing/collapsing either
+  — content that reaches it without going through `import_bundle_facts`'s
+  own validation (a hand-assembled or corrupted package) is untrusted the
+  same way any other stored section content is.
