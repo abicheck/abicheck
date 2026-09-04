@@ -640,6 +640,14 @@ def _embed_inline_source_side(
                    "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
                    "compares only, not the directory/package release fan-out. "
                    "See docs/reference/exit-codes.md.")
+@click.option("--old-variant", "old_variant", default=None, metavar="VARIANT_ID",
+              help="Which build variant to compare when OLD is a stored "
+                   "ProjectSnapshot package directory declaring more than one "
+                   "(ADR-062 A1.7). Defaults to the package's only variant "
+                   "when it declares exactly one; a usage error otherwise. "
+                   "No-op for a live directory/archive/single-file operand.")
+@click.option("--new-variant", "new_variant", default=None, metavar="VARIANT_ID",
+              help="The --old-variant counterpart for NEW.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

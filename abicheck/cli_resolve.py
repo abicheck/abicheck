@@ -477,23 +477,53 @@ def classify_compare_operand(path: Path) -> str:
 
     * ``"package"``   — a recognised archive/package (RPM/Deb/tar/conda/wheel);
       a *set* input that fans out to per-library comparison.
-    * ``"directory"`` — a plain directory of libraries; also a set input.
+    * ``"directory"`` — a plain directory of libraries, or a *multi-artifact*
+      stored ``ProjectSnapshot`` package directory (ADR-062 A1.7); also a set
+      input, fanned out through the identical release engine.
     * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
       ``compare`` cannot pair as a library (hint the user at ``appcompat``).
-    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a ``--project-
-      snapshot-dir`` package dir (storage-v2, ADR-062/063).
+    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a *single-artifact*
+      ``ProjectSnapshot`` package dir (storage-v2, ADR-062/063's original
+      A1.3 "one-artifact project" shape) -- read directly as one snapshot,
+      unchanged since before A1.7.
     """
     from .workflows.extraction import is_package
     from .workflows.storage import is_project_snapshot_package_dir
 
     if path.is_dir():
-        return "file" if is_project_snapshot_package_dir(path) else "directory"
+        if is_project_snapshot_package_dir(path):
+            return "directory" if _package_dir_is_multi_artifact(path) else "file"
+        return "directory"
     if is_package(path):
         return "package"
     norm, fmt = _normalize_binary_input(path)
     if fmt == "elf" and _looks_like_application(norm):
         return "app"
     return "file"
+
+
+def _package_dir_is_multi_artifact(path: Path) -> bool:
+    """Whether the `ProjectSnapshot` package directory at *path* declares
+    more than one artifact -- ADR-062 A1.7's disambiguator between a
+    single-artifact package (read directly as one snapshot, A1.3's original
+    shape, ``classify_compare_operand`` returns ``"file"``) and a real
+    multi-library release (routed to the set/release fan-out instead, the
+    same as a loose directory of `.so` files). Read-only, best-effort:
+    ``False`` -- never raises -- for anything that fails to parse as a
+    readable manifest, the same fail-safe-to-"file" convention
+    ``is_project_snapshot_package_dir`` itself already applies (its own
+    caller has already confirmed *path* passes that check, so this should
+    not normally fail; if it somehow does, falling through to the
+    single-artifact "file" path is what every pre-A1.7 caller already did).
+    """
+    from .errors import SnapshotError
+    from .project_snapshot_store import read_manifest_summary
+
+    try:
+        summary = read_manifest_summary(path)
+    except (SnapshotError, OSError, ValueError, TypeError):
+        return False
+    return len(summary.artifact_ids) > 1
 
 
 def _resolve_compare_snapshots(

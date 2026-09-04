@@ -276,6 +276,23 @@ if TYPE_CHECKING:
     default=None,
     help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).",
 )
+@click.option(
+    "--old-variant",
+    "old_variant",
+    default=None,
+    metavar="VARIANT_ID",
+    help="Which build variant to compare when OLD_DIR is a stored "
+    "ProjectSnapshot package declaring more than one (ADR-062 A1.7). "
+    "Defaults to the package's only variant when it declares exactly one; "
+    "a usage error otherwise. No-op for a live directory/archive operand.",
+)
+@click.option(
+    "--new-variant",
+    "new_variant",
+    default=None,
+    metavar="VARIANT_ID",
+    help="The --old-variant counterpart for NEW_DIR.",
+)
 # ── Severity (shared family, ADR-037 D3; mirrors `compare`) ───────────────────
 @severity_options
 def compare_release_cmd(
@@ -356,6 +373,12 @@ def compare_release_cmd(
     # (`_prepare_compare_release_inputs`). `()` (the default) is a true
     # no-op.
     config_includes: tuple[Path, ...] = (),
+    # ADR-062 A1.7: which `VariantRef` to resolve on each side, when that
+    # side is a stored `ProjectSnapshot` package directory declaring more
+    # than one -- a true no-op (`None`) for every live directory/archive
+    # operand and for a package declaring exactly one variant.
+    old_variant: str | None = None,
+    new_variant: str | None = None,
     # D1: `compare`'s directory/package fan-out forwards the one `--depth`
     # value it can actually honour on this path -- `"binary"` (an explicit
     # assertion that clears header/build/source evidence, matching a
@@ -501,6 +524,9 @@ def compare_release_cmd(
                 discover_shared_libraries,
                 is_package,
                 _is_elf_shared_object,
+                old_variant=old_variant,
+                new_variant=new_variant,
+                make_temp_dir=_make_temp_dir,
             )
 
             if fmt != "json":

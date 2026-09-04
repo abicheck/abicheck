@@ -1376,6 +1376,8 @@ def run_compare(
     new_dump_manifest: Path | None = None,
     frontend_context: str = "host",
     require_complete_analysis: bool = False,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1676,6 +1678,8 @@ def run_compare(
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
             depth=release_depth,
+            old_variant=old_variant,
+            new_variant=new_variant,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

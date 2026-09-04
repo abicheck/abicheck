@@ -587,6 +587,45 @@ def _strip_diff_results_and_adjust_verdict(
     return worst_verdict
 
 
+def _resolve_release_package_side(
+    side_dir: Path,
+    variant_id: str | None,
+    make_temp_dir: Callable[[str], Path],
+) -> dict[str, Path] | None:
+    """``None`` when *side_dir* is not a stored `ProjectSnapshot` package
+    directory -- the caller falls back to its existing live-discovery path
+    unchanged. Otherwise, *side_dir* is unpacked via
+    `project_snapshot_legacy.resolve_project_snapshot_release_map` into the
+    same canonical-key -> `Path` shape `_build_match_map` builds from a live
+    directory of `.so` files (ADR-062 A1.7), so `_match_release_keys`'s own
+    ``set(old_map) & set(new_map)`` matches a stored-side library against a
+    live-side or another stored-side one by the identical key.
+    """
+    if not side_dir.is_dir():
+        return None
+    from .project_snapshot_legacy import (
+        is_project_snapshot_package_dir,
+        resolve_project_snapshot_release_map,
+    )
+
+    if not is_project_snapshot_package_dir(side_dir):
+        return None
+    dest_root = make_temp_dir("abicheck_relpkg_")
+    try:
+        return resolve_project_snapshot_release_map(
+            side_dir, variant_id=variant_id, dest_root=dest_root
+        )
+    except ValueError as exc:
+        # Ambiguous-variant selection and a same-key artifact collision are
+        # both usage errors (a malformed/ambiguous *input*, not an abicheck
+        # bug) -- translated the same way `_build_match_map`'s own
+        # `AmbiguousLibraryMatchError` -> `click.ClickException` already is,
+        # rather than propagating as an unhandled `ValueError` (which Click
+        # would surface as a generic exit 1 traceback instead of a normal
+        # exit-64 usage error).
+        raise click.UsageError(str(exc)) from exc
+
+
 def _prepare_compare_release_inputs(
     old_dir: Path,
     new_dir: Path,
@@ -610,6 +649,10 @@ def _prepare_compare_release_inputs(
     discover_shared_libraries: Callable[..., list[Path]],
     is_package: Callable[[Path], bool],
     is_elf_shared_object: Callable[[Path], bool],
+    *,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
+    make_temp_dir: Callable[[str], Path] | None = None,
 ) -> tuple[
     Path | None,
     Path | None,
@@ -624,7 +667,30 @@ def _prepare_compare_release_inputs(
     list[str],
     list[str],
 ]:
-    """Prepare inputs/maps/keys for compare-release command."""
+    """Prepare inputs/maps/keys for compare-release command.
+
+    *old_variant*/*new_variant* and *make_temp_dir* (ADR-062 A1.7) are the
+    stored-side plumbing for a `ProjectSnapshot` package operand -- ``None``
+    (the default) leaves every pre-existing loose-directory/archive caller
+    unaffected. When a side *is* a package directory, its variant is
+    unpacked into per-library sub-package directories
+    (`_resolve_release_package_side`) instead of running the live
+    extraction/discovery path for that side; the two sides are resolved
+    fully independently, so a `stored/live` or `live/stored` release is the
+    same code path as `stored/stored`/`live/live`, just with one side's
+    branch taken instead of the other's.
+    """
+    old_pkg_map = (
+        _resolve_release_package_side(old_dir, old_variant, make_temp_dir)
+        if make_temp_dir is not None
+        else None
+    )
+    new_pkg_map = (
+        _resolve_release_package_side(new_dir, new_variant, make_temp_dir)
+        if make_temp_dir is not None
+        else None
+    )
+
     old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
         old_dir,
         debug_info1,
@@ -635,25 +701,34 @@ def _prepare_compare_release_inputs(
         debug_info2,
         devel_pkg2,
     )
-    old_files = _discover_files(
-        old_dir,
-        old_lib_dir,
-        include_private_dso,
-        discover_shared_libraries,
-        is_package,
-    )
-    new_files = _discover_files(
-        new_dir,
-        new_lib_dir,
-        include_private_dso,
-        discover_shared_libraries,
-        is_package,
-    )
-    if dso_only:
-        old_files = [f for f in old_files if is_elf_shared_object(f)]
-        new_files = [f for f in new_files if is_elf_shared_object(f)]
-    old_map, old_warns = _build_match_map(old_files)
-    new_map, new_warns = _build_match_map(new_files)
+    old_files: list[Path] = []
+    new_files: list[Path] = []
+    if old_pkg_map is not None:
+        old_map, old_warns = dict(old_pkg_map), []
+    else:
+        old_files = _discover_files(
+            old_dir,
+            old_lib_dir,
+            include_private_dso,
+            discover_shared_libraries,
+            is_package,
+        )
+        if dso_only:
+            old_files = [f for f in old_files if is_elf_shared_object(f)]
+        old_map, old_warns = _build_match_map(old_files)
+    if new_pkg_map is not None:
+        new_map, new_warns = dict(new_pkg_map), []
+    else:
+        new_files = _discover_files(
+            new_dir,
+            new_lib_dir,
+            include_private_dso,
+            discover_shared_libraries,
+            is_package,
+        )
+        if dso_only:
+            new_files = [f for f in new_files if is_elf_shared_object(f)]
+        new_map, new_warns = _build_match_map(new_files)
     warning_msgs: list[str] = [
         f"Warning: {warning}" for warning in (old_warns + new_warns)
     ]
