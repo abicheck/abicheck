@@ -256,6 +256,51 @@ class TestLayoutDescriptorDiff:
         new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
         assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
 
+    def test_vptr_flagged_via_confirmed_trivially_copyable_despite_uncollected_vtable(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence, second round: a confirmed
+        ``is_trivially_copyable=True`` is equally conclusive as
+        ``is_standard_layout=True`` -- trivial copyability requires every
+        special member function to be trivial, which itself requires no
+        virtual functions/virtual base classes.
+        """
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_trivially_copyable=True,
+                    is_trivially_copyable_fact=Fact.present(True),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
+
+    def test_vptr_not_flagged_when_trivially_copyable_confirmed_false(self) -> None:
+        # A confirmed is_trivially_copyable=False says nothing about
+        # polymorphism either way -- must not be treated as the fallback
+        # signal.
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    vtable=[],
+                    vptr_offset_bits=None,
+                    vtable_fact=Fact.not_collected(),
+                    vptr_offset_bits_fact=Fact.not_collected(),
+                    is_trivially_copyable=False,
+                    is_trivially_copyable_fact=Fact.present(False),
+                )
+            ],
+        )
+        new = _snap("2", types=[_rec(vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)])
+        assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
     def test_trivially_copyable_lost(self) -> None:
         old = _snap("1", types=[_rec(is_trivially_copyable=True)])
         new = _snap("2", types=[_rec(is_trivially_copyable=False)])
@@ -339,11 +384,25 @@ class TestLayoutDescriptorDiff:
         must not fire a phantom LAYOUT_UNVERIFIABLE."""
         old = _snap(
             "1",
-            types=[_rec(name="A", size_bits=None, is_standard_layout=None, is_trivially_copyable=None)],
+            types=[
+                _rec(
+                    name="A",
+                    size_bits=None,
+                    is_standard_layout=None,
+                    is_trivially_copyable=None,
+                )
+            ],
         )
         new = _snap(
             "2",
-            types=[_rec(name="A", size_bits=None, is_standard_layout=True, is_trivially_copyable=True)],
+            types=[
+                _rec(
+                    name="A",
+                    size_bits=None,
+                    is_standard_layout=True,
+                    is_trivially_copyable=True,
+                )
+            ],
         )
         assert ChangeKind.LAYOUT_UNVERIFIABLE not in _kinds(old, new)
 

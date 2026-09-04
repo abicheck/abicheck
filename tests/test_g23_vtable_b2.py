@@ -395,3 +395,34 @@ class TestReconstructionFactStatus:
         )
         types = {"P": rec}
         assert _is_polymorphic("P", types, {}) is None
+
+    def test_uncollected_vtable_confirmed_non_polymorphic_via_trivially_copyable(
+        self,
+    ):
+        # Codex review, fresh evidence, second round: is_trivially_copyable
+        # is equally conclusive as is_standard_layout -- mirrors the
+        # sibling test above.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_trivially_copyable=True,
+            is_trivially_copyable_fact=Fact.present(True),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is False
+
+    def test_uncollected_vtable_stays_indeterminate_when_trivially_copyable_confirmed_false(
+        self,
+    ):
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_trivially_copyable=False,
+            is_trivially_copyable_fact=Fact.present(False),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None

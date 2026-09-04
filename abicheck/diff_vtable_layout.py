@@ -56,6 +56,7 @@ from .model import (
     AbiSnapshot,
     FactStatus,
     RecordType,
+    fact_confirmed_true,
     is_non_abi_surface_type,
     resolved_fact_value,
     stdlib_namespaces_excluded,
@@ -124,13 +125,17 @@ def _is_polymorphic(
     hand-constructed or future snapshot that could set the two out of
     sync, not a fix for an observed gap.
 
-    A confirmed ``is_standard_layout=True`` is a third, independent way to
-    trust the empty reading (Codex review, fresh evidence — mirrors
-    ``diff_layout._check_vptr_introduced``'s identical fallback): the C++
-    standard-layout requirement excludes virtual functions and virtual base
-    classes transitively, so it conclusively proves *this record's own*
-    vtable is empty even when ``vtable_fact`` itself wasn't collected. It
-    only substitutes for the ``vtable_fact`` check above, not for the
+    A confirmed ``is_standard_layout=True`` -- or, equally conclusively
+    (Codex review, fresh evidence, second round), a confirmed
+    ``is_trivially_copyable=True`` -- is a third, independent way to trust
+    the empty reading (mirrors ``diff_layout._check_vptr_introduced``'s
+    identical fallback): the C++ standard-layout requirement excludes
+    virtual functions and virtual base classes transitively, and trivial
+    copyability requires every special member function to be trivial,
+    which itself requires no virtual functions/virtual base classes -- so
+    either trait alone conclusively proves *this record's own* vtable is
+    empty even when ``vtable_fact`` itself wasn't collected. Either only
+    substitutes for the ``vtable_fact`` check above, not for the
     transitive base walk below — a base whose *own* evidence is missing
     still degrades that base to indeterminate on its own terms.
     """
@@ -146,14 +151,11 @@ def _is_polymorphic(
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact
-    standard_layout_fact = rec.is_standard_layout_fact
-    own_confirmed_non_polymorphic_by_standard_layout = (
-        standard_layout_fact is not None
-        and standard_layout_fact.status is FactStatus.PRESENT
-        and standard_layout_fact.value is True
-    )
+    own_confirmed_non_polymorphic_by_other_trait = fact_confirmed_true(
+        rec.is_standard_layout_fact
+    ) or fact_confirmed_true(rec.is_trivially_copyable_fact)
     own_vtable_confirmed_empty = (
-        own_confirmed_non_polymorphic_by_standard_layout
+        own_confirmed_non_polymorphic_by_other_trait
         or vtable_facts_reliable
         and (vtable_fact is None or vtable_fact.status is FactStatus.PRESENT)
     )
