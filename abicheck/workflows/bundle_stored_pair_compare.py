@@ -68,7 +68,7 @@ def compare_stored_bundle_facts_pair(
     No binaries are read and no header AST is parsed on either side --
     both sides are already resolved, per-library ``AbiSnapshot``s, so this
     driver is a pure in-memory diff: matched-key intersection, then one
-    ``service.compare_snapshots()`` call per matched library, exactly the
+    ``workflows.compare_policy.compare_snapshots()`` call per matched library, exactly the
     same Tier-2 chokepoint every other comparison entry point in this
     codebase uses (never ``checker.compare`` directly). Mirrors
     :func:`~abicheck.bundle_side_input.compare_release_against_bundle_facts`'s
@@ -119,7 +119,7 @@ def compare_stored_bundle_facts_pair(
     *suppress* all mean exactly what they mean on
     ``compare_release_against_bundle_facts`` -- see that function's own
     docstring for the full account of each. *policy*/*policy_file* are
-    forwarded to every per-library ``service.compare_snapshots()`` call
+    forwarded to every per-library ``workflows.compare_policy.compare_snapshots()`` call
     *and* to the final ``compare_bundle_from_facts()`` call, so
     ``BundleDiffResult.bundle_verdict`` is scored under the same policy as
     every per-library diff, not just the live-NEW-side driver's own case.
@@ -140,7 +140,7 @@ def compare_stored_bundle_facts_pair(
     from ..bundle_facts import bundle_snapshot_from_facts, compare_bundle_from_facts
     from ..bundle_manifest import load_manifest
     from ..serialization import load_bundle_facts
-    from ..service import compare_snapshots
+    from .compare_policy import compare_snapshots
 
     old_facts = load_bundle_facts(
         old_facts_path, max_json_object_nodes=old_max_json_object_nodes
@@ -149,6 +149,27 @@ def compare_stored_bundle_facts_pair(
         new_facts_path, max_json_object_nodes=new_max_json_object_nodes
     )
 
+    # Codex review, PR #1060, fresh evidence after the mismatch check just
+    # below landed: an empty variant_fingerprint carries no real identity
+    # evidence at all (bundle_multibuild.variant_fingerprint() itself never
+    # produces one -- the no-coordinates case is the DEFAULT_VARIANT_
+    # FINGERPRINT sentinel, never "" -- but the plain BundleFacts loader
+    # preserves an empty string verbatim if the document was hand-authored
+    # or otherwise malformed), so two such documents comparing "" == ""
+    # would pass the equality check below despite neither side actually
+    # attesting to being the same build. Reject rather than let an
+    # identity-free coincidence stand in for a real match, mirroring
+    # bundle_multibuild._index_by_fingerprint's own identical rejection for
+    # the multi-variant case.
+    for _facts, _path in ((old_facts, old_facts_path), (new_facts, new_facts_path)):
+        if not _facts.variant_fingerprint:
+            raise ValueError(
+                f"{_path} has an empty variant_fingerprint -- "
+                "variant_fingerprint() never produces one (the no-coordinates "
+                "case is the DEFAULT_VARIANT_FINGERPRINT sentinel, not ''), "
+                "so this document did not come from it; fix the input rather "
+                "than comparing it on an empty, non-identifying key"
+            )
     if old_facts.variant_fingerprint != new_facts.variant_fingerprint:
         raise ValueError(
             f"{old_facts_path} and {new_facts_path} were captured from "
@@ -175,7 +196,21 @@ def compare_stored_bundle_facts_pair(
         )
         per_library_results.append(diff)
 
-    manifest = load_manifest(manifest_path) if manifest_path is not None else None
+    # Codex review, PR #1060: compare_bundle_from_facts()'s own precedence
+    # (an explicit manifest, else old_facts.manifest) is the wrong contract
+    # here -- it was written for the stored/live driver, whose NEW side is
+    # never itself a BundleFacts document with its own captured manifest.
+    # Both sides genuinely can carry one here, so this mirrors
+    # compare_bundle_sides()'s own three-tier precedence instead: an
+    # explicit --manifest always wins, then OLD's own captured manifest,
+    # then NEW's -- rather than silently discarding a real NEW-only
+    # manifest (which would drop its BUNDLE_MANIFEST_INSTANTIATION_REMOVED
+    # coverage entirely).
+    manifest = (
+        load_manifest(manifest_path)
+        if manifest_path is not None
+        else (old_facts.manifest or new_facts.manifest)
+    )
     new_bundle_snapshot = bundle_snapshot_from_facts(new_facts)
     return compare_bundle_from_facts(
         old_facts,

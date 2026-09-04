@@ -607,3 +607,31 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
             "already fully-resolved snapshots with no way to project them "
             "back down to symbols-only evidence."
         )
+    # Codex review, fresh evidence: compare_cmd builds a real CompileContext
+    # from these before calling dispatch() (resolve_compile_context), but
+    # this stored/stored branch never consumes compile_context at all --
+    # neither side does any header-frontend extraction, so every one of
+    # these was silently accepted and discarded rather than applied or
+    # rejected.
+    if (
+        kwargs.get("compiler_path") is not None
+        or kwargs.get("compiler_prefix") is not None
+        or kwargs.get("compiler_option_tokens")
+        or kwargs.get("sysroot") is not None
+        or kwargs.get("nostdinc")
+        or kwargs.get("frontend_context") not in (None, "host")
+    ):
+        raise click.UsageError(
+            "--compiler/--compiler-prefix/--compiler-option/--sysroot/"
+            "--nostdinc/--frontend-context are not supported when both "
+            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
+            "neither side runs any header-frontend extraction for a compile "
+            "context to configure."
+        )
+    if kwargs.get("lang_explicit"):
+        raise click.UsageError(
+            "--lang is not supported when both OLD_INPUT and NEW_INPUT are "
+            "stored BundleFacts documents: neither side's language is "
+            "re-detected or re-parsed from headers, so there is nothing "
+            "left for it to select."
+        )

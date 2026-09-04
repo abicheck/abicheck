@@ -255,6 +255,22 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--depth binary" in out
 
+    def test_compiler_is_rejected(self, tmp_path: Path) -> None:
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--compiler", "clang++")
+
+        assert code == 64
+        assert "--compiler" in out
+
+    def test_explicit_lang_is_rejected(self, tmp_path: Path) -> None:
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--lang", "c")
+
+        assert code == 64
+        assert "--lang" in out
+
     def test_default_invocation_is_not_rejected_by_any_new_side_check(
         self, tmp_path: Path
     ) -> None:

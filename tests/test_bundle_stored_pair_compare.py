@@ -207,3 +207,65 @@ class TestCompareStoredBundleFactsPair:
 
         assert [d.library for d in result.per_library] == ["libcore.so"]
         assert result.verdict == Verdict.NO_CHANGE
+
+    def test_empty_variant_fingerprint_is_refused_even_when_both_sides_match(
+        self, tmp_path: Path
+    ) -> None:
+        """An empty fingerprint carries no real identity evidence --
+        ``variant_fingerprint()`` itself never produces one -- so two
+        documents both carrying "" must not be treated as a match just
+        because they're equal (Codex review, PR #1060, fresh evidence)."""
+        old_path = self._facts_path(
+            tmp_path,
+            "old.bundlefacts.json",
+            "old",
+            Visibility.PUBLIC,
+            variant_fingerprint="",
+        )
+        new_path = self._facts_path(
+            tmp_path,
+            "new.bundlefacts.json",
+            "new",
+            Visibility.PUBLIC,
+            variant_fingerprint="",
+        )
+
+        with pytest.raises(ValueError, match="empty variant_fingerprint"):
+            compare_stored_bundle_facts_pair(old_path, new_path)
+
+    def test_new_only_manifest_is_not_silently_discarded(self, tmp_path: Path) -> None:
+        """When no explicit --manifest is given and only the NEW document
+        captured one, it must still be consulted -- compare_bundle_from_
+        facts()'s own precedence (explicit, else OLD's manifest) silently
+        drops a NEW-only manifest, which would hide a real missing-symbol
+        regression (Codex review, PR #1060)."""
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.serialization import save_bundle_facts
+
+        old_path = self._facts_path(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        fn = Function(
+            name="core_fn", mangled="core_fn", return_type="int", visibility=Visibility.PUBLIC
+        )
+        new_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="new",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[fn],
+        )
+        new_facts = capture_bundle_facts(
+            {"libcore.so": new_snapshot},
+            manifest=InstantiationManifest(
+                entries=(ManifestEntry(symbol="promised_but_missing"),)
+            ),
+        )
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(new_facts, new_path)
+
+        result = compare_stored_bundle_facts_pair(old_path, new_path)
+
+        assert any(
+            f.kind.name == "BUNDLE_MANIFEST_INSTANTIATION_REMOVED"
+            for f in result.bundle_findings
+        )
