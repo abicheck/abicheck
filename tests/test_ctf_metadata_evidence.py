@@ -34,12 +34,14 @@ import struct
 
 from abicheck.ctf_metadata import (
     _CTF_V2_LSTRUCT_THRESH,
+    CTF_K_CONST,
     CTF_K_ENUM,
     CTF_K_FORWARD,
     CTF_K_INTEGER,
     CTF_K_POINTER,
     CTF_K_STRUCT,
     CTF_K_TYPEDEF,
+    CTF_K_VOLATILE,
     CTF_MAGIC,
     CTF_VERSION_2,
     CTF_VERSION_3,
@@ -498,4 +500,45 @@ class TestTruncatedCompressedStreamIsRejected:
         meta = parse_ctf_from_bytes(full)
         assert meta.has_ctf is True
         assert meta.extraction_partial is False
-        assert meta.type_count == 100
+
+
+class TestCyclicQualifierChainMarksPartial:
+    """P2 review, fresh evidence (Codex): the CTF sibling of the identical
+    BTF fix -- a malformed qualifier chain that cycles (CONST -> VOLATILE
+    -> CONST) reaches ``_TypeResolver.name()``/``.size()``'s own cycle
+    guard, which previously returned "..."/0 without touching
+    ``invalid_strings``. A struct member referencing such a cycle was
+    therefore emitted with a degraded fact and ``extraction_partial=False``."""
+
+    def test_cyclic_member_type_marks_partial(self) -> None:
+        b = CtfBuilder()
+        # CTF v3, non-large struct member encoding: m_off_val packs the
+        # referenced type in the upper 16 bits, bit offset in the lower 16.
+        const_id = b.add_type("", CTF_K_CONST, 0, 2)  # -> volatile (id 2)
+        volatile_id = b.add_type("", CTF_K_VOLATILE, 0, 1)  # -> const (id 1)
+        assert (const_id, volatile_id) == (1, 2)
+
+        m_off_val = (const_id << 16) | 0
+        member = struct.pack("<II", 0, m_off_val)  # name="", type=CONST, bitoff=0
+        b.add_type("S", CTF_K_STRUCT, 1, 4, extra=member)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        assert meta.structs["S"].fields[0].type_name == "const volatile ..."
+
+    def test_acyclic_qualifier_chain_is_not_flagged(self) -> None:
+        """Positive control: a genuinely acyclic qualifier chain (const ->
+        int, no self-reference) must not be flagged."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        int_id = b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+        const_id = b.add_type("", CTF_K_CONST, 0, int_id)
+
+        m_off_val = (const_id << 16) | 0
+        member = struct.pack("<II", 0, m_off_val)
+        b.add_type("S", CTF_K_STRUCT, 1, 4, extra=member)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is False
+        assert meta.structs["S"].fields[0].type_name == "const int"

@@ -401,6 +401,106 @@ class TestPackedTypedefIncompletePropagation:
         assert "Packed" in meta.packed_structs
 
 
+class TestPackedMemberIncompletePropagation:
+    """P1 review, fresh evidence (Codex): distinct from
+    TestPackedTypedefIncompletePropagation above (a malformed typedef
+    *target*), this is a member *inside* an already-resolved, named struct
+    whose own DW_AT_type is unresolvable. That failure is caught deep
+    inside _get_type_align (called from _check_packed, reached from
+    _walk_cu's direct DW_TAG_structure_type branch, not
+    _check_packed_typedef) and previously returned 0 (the same value a
+    legitimate composite-type skip returns) with no completeness signal at
+    all -- so a packing change hiding behind that one bad member was
+    silently missed under --require-complete-analysis while
+    evidence_state still reported "parsed"."""
+
+    def test_malformed_member_type_marks_partial(self) -> None:
+        bad_member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "x", "DW_AT_type": _Attr(999, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "Named", "DW_AT_byte_size": 4},
+            children=[bad_member],
+        )
+        root = _Die("DW_TAG_compile_unit", children=[struct])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+            patch(
+                "abicheck.dwarf_advanced._resolve_die_ref",
+                side_effect=RuntimeError("bad ref"),
+            ),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+        # The struct itself was seen (registered by name) but its one
+        # member's type never resolved, so no packing verdict for it can
+        # be trusted -- it must not be silently reported "not packed".
+        assert "Named" in meta.all_struct_names
+        assert "Named" not in meta.packed_structs
+
+    def test_resolvable_misaligned_member_is_not_flagged(self) -> None:
+        """Positive control: a fully-resolvable named struct with a
+        genuinely misaligned field must not be flagged, and its packing
+        must still be recorded correctly -- proving the fix didn't disturb
+        the ordinary packed-struct detection path."""
+        char_member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "c", "DW_AT_type": _Attr(20, "DW_FORM_ref_addr")},
+        )
+        int_member = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "i",
+                "DW_AT_type": _Attr(21, "DW_FORM_ref_addr"),
+                "DW_AT_data_member_location": _Attr(1),
+            },
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "Named", "DW_AT_byte_size": 5},
+            children=[char_member, int_member],
+        )
+        root = _Die("DW_TAG_compile_unit", children=[struct])
+        cu = _CU(top_die=root, offset=0)
+        char_type = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "char", "DW_AT_byte_size": 1}, offset=20
+        )
+        int_type = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=21
+        )
+        cu._die_map = {20: char_type, 21: int_type}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "parsed"
+        assert "Named" in meta.packed_structs
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -829,6 +929,14 @@ def test_serialization_empty_sets_roundtrip() -> None:
 @pytest.mark.skipif(sys.platform != "linux", reason="ELF/DWARF tests require Linux")
 def test_packed_struct_detected_from_real_dwarf() -> None:
     """Compile a packed struct with gcc -g and verify DWARF detection."""
+    # A real (non-inline, non-empty) function is required here, not just
+    # the packed-struct global: this session's own "total absence of CFI
+    # sections is incomplete" fix (see test_cfi_decode_completeness.py)
+    # means a translation unit with no function bodies at all emits an
+    # .eh_frame with no real FDEs, which now correctly downgrades
+    # evidence_state to "partial" -- that fixture shape would no longer
+    # exercise this test's actual intent (a clean "parsed" packed-struct
+    # detection), so give it one real function to keep unwind data present.
     src = """
 typedef struct __attribute__((packed)) {
     char a;
@@ -836,6 +944,10 @@ typedef struct __attribute__((packed)) {
     double c;    /* misaligned: offset 5 */
 } PackedCtx;
 PackedCtx g_ctx;
+
+__attribute__((noinline)) int touch_ctx(void) {
+    return g_ctx.b + (int)g_ctx.c;
+}
 """
     with tempfile.TemporaryDirectory() as td:
         so = Path(td) / "libpacked.so"

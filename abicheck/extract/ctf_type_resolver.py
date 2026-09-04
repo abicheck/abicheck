@@ -122,6 +122,11 @@ class _TypeResolver:
         if type_id in self._name_cache:
             return self._name_cache[type_id]
         if type_id in self._resolving_name:
+            # See the matching comment in btf_type_resolver._TypeResolver
+            # (P2 review): a cyclic qualifier chain must mark resolution
+            # incomplete, not just substitute a placeholder silently.
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return "..."
         self._resolving_name.add(type_id)
         try:
@@ -135,6 +140,8 @@ class _TypeResolver:
         if type_id in self._size_cache:
             return self._size_cache[type_id]
         if type_id in self._resolving_size:
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return 0
         self._resolving_size.add(type_id)
         try:

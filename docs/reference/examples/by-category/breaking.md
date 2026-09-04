@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_107 case(s)._ [← back to all examples](../index.md)
+_108 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -17,6 +17,7 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case11_global_var_type](../case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
 | [case12_function_removed](../case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case14_cpp_class_size](../case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
+| [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Removed | 🔴 BREAKING | Breaking |
 | [case17_template_abi](../case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
 | [case18_dependency_leak](../case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |
 | [case19_enum_member_removed](../case19_enum_member_removed.md) | Enum Member Removed | 🔴 BREAKING | Breaking |

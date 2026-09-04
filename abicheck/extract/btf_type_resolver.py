@@ -147,6 +147,15 @@ class _TypeResolver:
         if type_id in cache:
             return cache[type_id]
         if type_id in resolving:
+            # P2 review, fresh evidence: a cyclic qualifier chain (e.g. a
+            # malformed CONST -> VOLATILE -> CONST reference loop) resolves
+            # to this cycle-guard placeholder just like an out-of-range
+            # type_id or an unhandled kind -- but previously did so without
+            # recording the same completeness signal, so a struct member
+            # referencing the cycle was silently emitted with a plausible-
+            # looking "..."/0 fact and no signal that resolution degraded.
+            if self._invalid_strings is not None:
+                self._invalid_strings.append(True)
             return cycle_value
         resolving.add(type_id)
         try:

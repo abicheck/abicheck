@@ -42,12 +42,14 @@ from __future__ import annotations
 import struct
 
 from abicheck.btf_metadata import (
+    BTF_KIND_CONST,
     BTF_KIND_ENUM,
     BTF_KIND_FUNC,
     BTF_KIND_FUNC_PROTO,
     BTF_KIND_INT,
     BTF_KIND_STRUCT,
     BTF_KIND_TYPEDEF,
+    BTF_KIND_VOLATILE,
     BTF_MAGIC,
     BTF_VERSION,
     parse_btf_from_bytes,
@@ -316,3 +318,50 @@ class TestUnsupportedVersionMarksPartial:
         must not be flagged."""
         meta = parse_btf_from_bytes(self._build_with_version(BTF_VERSION))
         assert meta.extraction_partial is False
+
+
+class TestCyclicQualifierChainMarksPartial:
+    """P2 review, fresh evidence (Codex): a malformed BTF qualifier chain
+    that cycles (e.g. CONST -> VOLATILE -> CONST) reaches
+    ``_TypeResolver._resolve_cached``'s own cycle guard, which previously
+    substituted its placeholder ("..."/0) without touching
+    ``invalid_strings`` -- unlike an out-of-range type_id or an unhandled
+    kind, both already covered above. A struct member referencing such a
+    cycle was therefore emitted with a plausible-looking degraded name/size
+    fact and ``extraction_partial=False``, so a channel-specific assurance
+    consumer (e.g. ``--require-complete-analysis``) had no signal the
+    layout it was trusting was actually degraded."""
+
+    def test_cyclic_member_type_marks_partial(self) -> None:
+        b = BtfBuilder()
+        # Reserve ids 1 (CONST) and 2 (VOLATILE) up front, then forward-
+        # reference each other -- BTF type ids are plain integers, so the
+        # cycle doesn't need to exist yet when each add_type call runs.
+        const_id = b.add_type("", BTF_KIND_CONST, 0, 2)  # -> volatile (id 2)
+        volatile_id = b.add_type("", BTF_KIND_VOLATILE, 0, 1)  # -> const (id 1)
+        assert (const_id, volatile_id) == (1, 2)
+
+        member = struct.pack("<III", 0, const_id, 0)  # name="", type=CONST, offset=0
+        b.add_type("S", BTF_KIND_STRUCT, 1, 4, extra=member)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        # The struct/field are still emitted (best-effort degraded output)
+        # -- only the completeness signal was missing, not the struct.
+        assert "S" in meta.structs
+        assert meta.structs["S"].fields[0].type_name == "const volatile ..."
+
+    def test_acyclic_qualifier_chain_is_not_flagged(self) -> None:
+        """Positive control: a genuinely acyclic qualifier chain (const ->
+        int, no self-reference) must not be flagged."""
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        int_id = b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+        const_id = b.add_type("", BTF_KIND_CONST, 0, int_id)
+
+        member = struct.pack("<III", 0, const_id, 0)
+        b.add_type("S", BTF_KIND_STRUCT, 1, 4, extra=member)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is False
+        assert meta.structs["S"].fields[0].type_name == "const int"

@@ -4,14 +4,15 @@
   ],
   "architectures": [],
   "category": "A",
-  "digest": "sha256:f8e02c4347cba855225cc6e8710400493d2859866747e7d8e365ec64ca91d1dc",
+  "digest": "sha256:b5c29ca7cb79bc7bfb76dfbfc018249f515f0e7da7f48f165f1d3e694fb5c4be",
   "expected": {
     "kinds": [
-      "runtime_floor_raised"
+      "runtime_floor_raised",
+      "frame_register_changed"
     ],
     "min_evidence": "L0",
     "resolved_from": "examples/ground_truth.json",
-    "verdict": "COMPATIBLE_WITH_RISK"
+    "verdict": "BREAKING"
   },
   "inputs": "examples/case15_noexcept_change",
   "invocation": {},

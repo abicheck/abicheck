@@ -1,21 +1,34 @@
 # Case 15: `noexcept` Removed
 
-**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
+**Category:** Breaking | **Verdict:** 🔴 BREAKING
 
 ## Verdict and consumer impact
 
 `reset()` keeps its mangled symbol name in both versions (Itanium C++ ABI
 does not fold `noexcept` into function-symbol mangling), so existing
-binaries still resolve the call — this is not a linkage break. What
-changes is the *contract*: v2's implementation now `throw`s, which pulls in
-`__cxa_throw` and `std::runtime_error`, and that raises the library's
-minimum required `libstdc++.so.6` version from `GLIBCXX_3.4` to
-`GLIBCXX_3.4.21`. Deploying v2 onto a system whose libstdc++ predates that
-version means the `.so` fails to *load* at all. Separately — and outside
-what a binary-ABI tool can see — code compiled against v1's `noexcept`
-guarantee may have omitted exception landing pads; if v2's `reset()` throws
-at runtime, the exception escapes a `noexcept` frame and the process calls
-`std::terminate`.
+binaries still *resolve* the call — this is not a linkage break in the
+classic "symbol missing" sense. What changes is the *contract*: v2's
+implementation now `throw`s, which pulls in `__cxa_throw` and
+`std::runtime_error`, and that raises the library's minimum required
+`libstdc++.so.6` version from `GLIBCXX_3.4` to `GLIBCXX_3.4.21`. Deploying
+v2 onto a system whose libstdc++ predates that version means the `.so`
+fails to *load* at all. Separately — and outside what a binary-ABI tool can
+see — code compiled against v1's `noexcept` guarantee may have omitted
+exception landing pads; if v2's `reset()` throws at runtime, the exception
+escapes a `noexcept` frame and the process calls `std::terminate`.
+
+There is also a genuine *binary-visible* signal here, not just the
+deployment-risk one above: GCC's codegen for `Buffer::reset()` switches
+its unwind-frame convention from a plain `rsp`-relative CFA (v1, no-throw)
+to an `rbp`-based frame (v2, now needs a reliable frame for exception
+unwinding) — a real `.eh_frame`/DWARF CFI fact abicheck's DWARF advanced
+channel reports as `frame_register_changed`. Per
+[`docs/use/policies.md`](../../docs/use/policies.md), this is grouped with
+`calling_convention_changed` as a calling-convention-adjacent signal that
+defaults to `BREAKING` (only relaxed under the opt-in `plugin_abi`
+policy, for plugins built from the same toolchain as their host) — so
+this case's default verdict is `BREAKING`, not `COMPATIBLE_WITH_RISK`,
+whenever debug info is present to see it.
 
 ## Old/new diff
 
@@ -39,7 +52,7 @@ abicheck compare libv1.so libv2.so
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE_WITH_RISK (exit 0)
+Verdict: BREAKING (exit 4)
 
 Deployment Risk Changes:
 - symbol_version_required_added: New symbol version requirement:
@@ -49,18 +62,39 @@ Deployment Risk Changes:
   (required by: std::runtime_error::runtime_error(char const*)@GLIBCXX_3.4.21)
 - imported_symbol_added (x6): new imports pulled in by the throw path
   (__cxa_throw, __cxa_allocate_exception, std::runtime_error ctor/dtor, ...)
+
+Breaking Changes (with debug info):
+- frame_register_changed: Frame/CFA register changed: reset()
+  (rsp -> rbp)
 ```
+
+With no debug info at all (`abicheck compare libv1.so libv2.so`, no `-H`/
+headers, no `-g` on the compile line), only the first block is visible and
+the verdict is `COMPATIBLE_WITH_RISK` — see "Minimum evidence" below.
+`frame_register_changed` needs DWARF CFI (`.eh_frame`), which the `v1.cpp`/
+`v2.cpp` build above already compiles with `-g`, matching this catalog's
+own debug-headers validation tier.
 
 ## Minimum evidence
 
 `min_evidence: L0` — the ELF dynamic section's version-requirement table
-(`VERNEED`) alone is enough: v2's `.so` records a dependency on
-`GLIBCXX_3.4.21` that v1 doesn't have, because linking `__cxa_throw` /
-`std::runtime_error` pulls in symbols versioned against that release. No
-DWARF or headers are needed to see the new runtime floor — `noexcept`
-itself, notably, is *not* observable at this evidence level at all (it
-isn't in DWARF or the symbol table); this run reports the deployment-risk
-side of the change, not the `noexcept` removal itself.
+(`VERNEED`) alone is enough to see the *deployment-risk* finding: v2's
+`.so` records a dependency on `GLIBCXX_3.4.21` that v1 doesn't have,
+because linking `__cxa_throw` / `std::runtime_error` pulls in symbols
+versioned against that release. No DWARF or headers are needed for that
+part — `noexcept` itself, notably, is *not* observable at this evidence
+level at all (it isn't in DWARF or the symbol table).
+
+That L0-only view is where this case's verdict *used* to stop, at
+`COMPATIBLE_WITH_RISK`. With DWARF present — this build already compiles
+`-g`, so every validation run in this catalog sees it — abicheck's DWARF
+advanced channel goes further: it reads real `.eh_frame` unwind data (via
+pyelftools) and reports `frame_register_changed` for `reset()`, which is
+itself a real, binary-level signal (see "Verdict and consumer impact"
+above), pushing the verdict to `BREAKING`. A `min_evidence: L0` case can
+still surface an additional, higher-tier finding at a higher evidence
+level — the field documents the floor for the *documented deployment-risk*
+finding, not a ceiling on what richer evidence can also reveal.
 
 ## Why abicheck catches it
 
@@ -69,7 +103,10 @@ the two versions' minimum-required-symbol-version sets per imported
 library. When v2 references a versioned symbol that requires a newer
 `GLIBCXX_x.y.z` than anything v1 required, abicheck flags a runtime-floor
 increase — a real deployment constraint even though the library's own
-exported ABI is unchanged.
+exported ABI is unchanged. Separately, abicheck's DWARF advanced channel
+decodes each function's `.eh_frame`/`.debug_frame` call-frame information
+(CFI) and records the dominant canonical-frame-address (CFA) register per
+function; a change there (`rsp` -> `rbp`) is `frame_register_changed`.
 
 ## Runtime failure demonstration
 
@@ -117,10 +154,14 @@ destructor skipped. Treat the *outcome* as toolchain- and
 control-flow-dependent rather than fixed; what is guaranteed is that the
 caller's no-throw assumption no longer holds. See
 [Exception Unwinding](../../docs/learn/exception-unwinding-abi.md) for the
-machinery. Binary linkage is fine
-(the symbol resolves); the crash is a source-level contract violation
-`abicheck compare` cannot see from the binaries alone, which is exactly
-why the verdict is `COMPATIBLE_WITH_RISK` rather than `BREAKING`.
+machinery. The *source-level* contract violation above (a caller compiled
+against v1's `noexcept` promise) is still something `abicheck compare`
+cannot see from the binaries alone — the symbol still resolves, and
+`noexcept` itself never reaches DWARF or the symbol table. But it is no
+longer the whole story: v2's `reset()` also carries a real, binary-level
+signal (`frame_register_changed`, see above), which is why the verdict is
+`BREAKING` rather than `COMPATIBLE_WITH_RISK` whenever debug info is
+present to see it.
 
 ## Safe redesign
 
@@ -160,4 +201,5 @@ echo "exit: $?"   # → 0 — abidiff misses this change entirely
 
 - [C++ `noexcept` specifier](https://en.cppreference.com/w/cpp/language/noexcept_spec)
 - [P0012R1: `noexcept` as part of the function type](https://wg21.link/P0012R1)
-- [`checker_policy.py` — `RISK_KINDS`](../../abicheck/checker_policy.py)
+- [`checker_policy.py` — `BREAKING_KINDS`](../../abicheck/checker_policy.py)
+- [`docs/use/policies.md`](../../docs/use/policies.md) — `plugin_abi` policy, which relaxes `frame_register_changed` to `COMPATIBLE`

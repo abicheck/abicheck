@@ -1438,18 +1438,19 @@
    ]
   },
   "case15_noexcept_change": {
-   "abi_break": false,
+   "abi_break": true,
    "api_break": true,
    "bad_practice": false,
-   "category": "risk",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "breaking",
+   "expected": "BREAKING",
    "min_evidence": "L0",
-   "note": "noexcept change itself is COMPATIBLE; GLIBCXX version requirement is deployment risk",
+   "note": "the deployment-risk (GLIBCXX runtime floor) finding alone is visible at L0 and would read COMPATIBLE_WITH_RISK there; with debug info present (this catalog's actual run tier) abicheck's DWARF/CFI channel additionally reports frame_register_changed for reset() (rsp -> rbp, since GCC now emits a frame pointer for the throwing implementation) -- a real binary-level (not source-level) signal, raising the verdict to BREAKING. Was previously masked by a CFI-extraction bug (pyelftools EH_CFI_entries()/CFI_entries() vs. the wrong get_-prefixed names this parser called) that made this detector dead code against every real binary; fixed in this same PR.",
    "platforms": [
     "linux"
    ],
    "expected_kinds": [
-    "runtime_floor_raised"
+    "runtime_floor_raised",
+    "frame_register_changed"
    ]
   },
   "case160_public_api_internal_dep_added": {

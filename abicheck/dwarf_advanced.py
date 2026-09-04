@@ -250,7 +250,9 @@ def _process_cu(
     _walk_cu(top, meta, CU, incomplete=incomplete)
 
 
-def _get_type_align(member_die: Any, CU: Any) -> int:
+def _get_type_align(
+    member_die: Any, CU: Any, *, incomplete: list[bool] | None = None
+) -> int:
     """Return the natural alignment of a member's type in bytes.
 
     Strategy (in order):
@@ -261,7 +263,11 @@ def _get_type_align(member_die: Any, CU: Any) -> int:
        We must not use byte_size as a proxy for alignment of composite types —
        a struct { int a; char b; } is size=8 but alignment=4.
 
-    Returns 0 when alignment cannot be determined reliably (caller should skip).
+    Returns 0 when alignment cannot be determined reliably (caller should
+    skip) -- a *legitimate* skip (a genuinely composite member type) does not
+    mark `incomplete`; only the `except` branch below (an unresolvable
+    DW_AT_type on the member itself) does. See the P1 review comment on
+    ``_check_packed``'s own docstring for why this matters.
     """
     if "DW_AT_type" not in member_die.attributes:
         return 0
@@ -291,6 +297,13 @@ def _get_type_align(member_die: Any, CU: Any) -> int:
         # 3. Composite / array / enum etc.: cannot infer alignment from size
         return 0
     except Exception:  # noqa: BLE001
+        # P1 review, fresh evidence (Codex): a member with an unresolvable
+        # DW_AT_type reaches this branch and was silently treated the same
+        # as a legitimate composite-type skip (natural == 0), letting
+        # _check_packed miss a genuine misaligned-field packing fact while
+        # meta.evidence_state still reported "parsed".
+        if incomplete is not None:
+            incomplete.append(True)
         return 0
 
 
@@ -334,7 +347,7 @@ def _walk_cu(
             sname = _attr_str(die, "DW_AT_name")
             if sname and _attr_int(die, "DW_AT_byte_size") > 0:
                 meta.all_struct_names.add(sname)
-            _check_packed(die, meta, CU, override_name=None)
+            _check_packed(die, meta, CU, override_name=None, incomplete=incomplete)
 
         elif tag == "DW_TAG_typedef":
             # Anonymous struct typedef: `typedef struct {...} Name` — struct has no
@@ -783,7 +796,7 @@ def _check_packed_typedef(
     if target_name:
         return  # named struct — will be registered under its own name
 
-    _check_packed(target, meta, CU, override_name=typedef_name)
+    _check_packed(target, meta, CU, override_name=typedef_name, incomplete=incomplete)
 
 
 def _check_packed(
@@ -791,6 +804,8 @@ def _check_packed(
     meta: AdvancedDwarfMetadata,
     CU: Any,
     override_name: str | None = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     """Detect if struct has misaligned fields → __attribute__((packed)).
 
@@ -798,6 +813,14 @@ def _check_packed(
     This correctly handles primitive types (alignment == size) while skipping
     composite types where size != alignment (e.g. struct{int,char} is size=8, align=4).
     A single misaligned primitive field is sufficient to classify the struct as packed.
+
+    `incomplete` is threaded through to `_get_type_align()` (P1 review,
+    Codex): a member whose own DW_AT_type is unresolvable must mark the
+    advanced channel's evidence_state "partial", the same way a malformed
+    typedef target already does in `_check_packed_typedef` -- otherwise a
+    packing change hiding behind that one bad member is silently missed
+    under `--require-complete-analysis` while evidence_state still reads
+    "parsed".
     """
     name = override_name or _attr_str(die, "DW_AT_name")
     if not name:
@@ -822,7 +845,7 @@ def _check_packed(
         offset = _decode_member_location(child)
 
         # Get natural alignment via type tag (NOT byte_size of composite types)
-        natural = _get_type_align(child, CU)
+        natural = _get_type_align(child, CU, incomplete=incomplete)
         if natural <= 1:
             continue  # char/bool/unknown composite: cannot determine — skip
 

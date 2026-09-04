@@ -31,9 +31,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 108 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 30 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -275,7 +275,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [12](case12_function_removed/README.md) | Function Removed from Shared Library | Breaking | 🔴 BREAKING |
 | [13](case13_symbol_versioning/README.md) | Symbol Versioning Script | Quality | 🟢 COMPATIBLE |
 | [14](case14_cpp_class_size/README.md) | C++ Class Size Change | Breaking | 🔴 BREAKING |
-| [15](case15_noexcept_change/README.md) | `noexcept` Removed | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [15](case15_noexcept_change/README.md) | `noexcept` Removed | Breaking | 🔴 BREAKING |
 | [16](case16_inline_to_non_inline/README.md) | Inline → Non-inline (ODR / Symbol Appearance) | Addition | 🟢 COMPATIBLE |
 | [17](case17_template_abi/README.md) | Template Instantiation ABI Change | Breaking | 🔴 BREAKING |
 | [18](case18_dependency_leak/README.md) | Dependency ABI Leak | Breaking | 🔴 BREAKING (bad practice) |

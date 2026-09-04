@@ -16,9 +16,9 @@ Use this catalog to:
 
 | Verdict | Count | What it means |
 |---------|-------|---------------|
-| 🔴 [BREAKING](by-verdict/breaking.md) | 107 | ABI breaks: existing consumers will fail at runtime. |
+| 🔴 [BREAKING](by-verdict/breaking.md) | 108 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 17 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 31 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 30 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 30 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 7 | Identical ABI/API — baseline control cases. |
 
@@ -39,9 +39,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 107 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [Breaking](by-category/breaking.md) | 108 | Listed in `BREAKING_KINDS` — runtime ABI break. |
 | [API Break](by-category/api_break.md) | 17 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 31 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [Risk](by-category/risk.md) | 30 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 7 | Identical ABI/API — sanity-check baselines. |
@@ -66,7 +66,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case12_function_removed](case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case13_symbol_versioning](case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case14_cpp_class_size](case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
-| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Removed | 🔴 BREAKING | Breaking |
 | [case16_inline_to_non_inline](case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case17_template_abi](case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
 | [case18_dependency_leak](case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |

@@ -3,11 +3,10 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_31 case(s)._ [← back to all examples](../index.md)
+_30 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
-| [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
