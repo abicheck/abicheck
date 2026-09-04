@@ -183,6 +183,41 @@ def _manifest_document_for_storage(manifest: InstantiationManifest) -> dict[str,
     return document
 
 
+def _decode_instantiation(inst: Any) -> dict[str, str]:
+    """One `_manifest_document_for_storage`-encoded instantiation
+    (`[{"parameter": k, "value": v}, ...]`), decoded back to `{k: v}` --
+    strictly, since this reads untrusted stored content back into contract
+    evidence a comparison scores findings against.
+
+    A plain `{pair["parameter"]: pair["value"] for pair in inst}`
+    comprehension silently keeps only the *last* pair for a repeated
+    parameter name, collapsing e.g. two `T` entries into one and describing
+    a different promised template signature than the one actually stored
+    (Codex review) -- rejected here instead, alongside a malformed pair
+    (not a mapping, or a non-string `parameter`/`value`).
+    """
+    decoded: dict[str, str] = {}
+    for pair in inst:
+        if (
+            not isinstance(pair, dict)
+            or not isinstance(pair.get("parameter"), str)
+            or not isinstance(pair.get("value"), str)
+        ):
+            raise ValueError(
+                "a stored template instantiation pair must be "
+                f'{{"parameter": <str>, "value": <str>}}, got {pair!r}'
+            )
+        parameter = pair["parameter"]
+        if parameter in decoded:
+            raise ValueError(
+                f"a stored template instantiation names parameter "
+                f"{parameter!r} more than once: {inst!r} -- the package is "
+                "corrupted or was hand-edited"
+            )
+        decoded[parameter] = pair["value"]
+    return decoded
+
+
 def _manifest_document_from_storage(document: Any) -> Any:
     """The exact inverse of `_manifest_document_for_storage`."""
     if isinstance(document, dict):
@@ -192,8 +227,7 @@ def _manifest_document_from_storage(document: Any) -> Any:
             instantiations = entry.get("instantiations")
             if instantiations:
                 entry["instantiations"] = [
-                    {pair["parameter"]: pair["value"] for pair in inst}
-                    for inst in instantiations
+                    _decode_instantiation(inst) for inst in instantiations
                 ]
     return document
 
@@ -228,6 +262,21 @@ def write_bundle_facts_package(
             f"DEFAULT_MAX_LIBRARY_COUNT ({DEFAULT_MAX_LIBRARY_COUNT}) -- "
             "refusing to write a package read_bundle_facts_package would "
             "itself then refuse to reconstruct"
+        )
+    if not facts.variant_fingerprint:
+        # `bundle_multibuild._index_by_fingerprint` already rejects an
+        # empty `variant_fingerprint` outright ("variant_fingerprint()
+        # itself never produces one"); this writer previously *omitted* the
+        # coordinate instead, so it round-tripped silently into
+        # `DEFAULT_VARIANT_FINGERPRINT` on read -- a directly-constructed
+        # `BundleFacts(variant_fingerprint="")` could then pair with a
+        # legitimate "default" variant it was never actually part of
+        # (Codex review). Rejected here for the identical reason, rather
+        # than normalized.
+        raise ValueError(
+            "facts.variant_fingerprint must not be empty -- "
+            "bundle_multibuild._index_by_fingerprint already rejects an "
+            "empty, non-identifying fingerprint the same way"
         )
     artifact_refs: list[ArtifactRef] = []
     section_schema_versions: dict[str, int] = {}
@@ -291,12 +340,9 @@ def write_bundle_facts_package(
                 "producer epochs cannot be represented as one package"
             )
 
-    variant_captured: dict[str, str] = {}
-    if facts.variant_fingerprint:
-        variant_captured[_VARIANT_FINGERPRINT_KEY] = facts.variant_fingerprint
     variant = VariantRef(
         variant_id=variant_id,
-        captured=variant_captured,
+        captured={_VARIANT_FINGERPRINT_KEY: facts.variant_fingerprint},
         artifact_ids=tuple(facts.per_library_snapshots),
     )
 
@@ -406,9 +452,30 @@ def read_bundle_facts_package(
     # crosses the budget, including the last artifact in a variant, be
     # retained and returned successfully with no subsequent iteration left to
     # catch it (Codex review, second finding on this same guard).
+    # Cross-check each artifact's own `sections` against the package-wide
+    # `section_schema_versions` `project_snapshot_legacy.py`'s single-
+    # artifact reader already applies (Codex review) -- but only the
+    # "extra" direction, safely generalizable to N artifacts: a package
+    # this writer produced advertises the *union* of every library's own
+    # section kinds (a header-only library legitimately has no "binary"
+    # section, a library dumped at a shallower depth legitimately has no
+    # "debug" section), so one artifact carrying *fewer* kinds than the
+    # union is expected, not corruption -- exactly why that sibling
+    # function's own check is gated to a genuinely single-artifact package.
+    # An artifact carrying a kind the union never advertises at all,
+    # though, is unambiguous: no legitimate write of this package could
+    # have produced it.
+    advertised_sections = set(manifest.versions.section_schema_versions)
     decoded_bytes_so_far = 0
     for artifact_id in variant.artifact_ids:
         artifact = artifacts_by_id[artifact_id]
+        extra_sections = set(artifact.sections) - advertised_sections
+        if extra_sections:
+            raise ValueError(
+                f"artifact {artifact_id!r} has section(s) {sorted(extra_sections)} "
+                "that this package's section_schema_versions does not "
+                "advertise -- the package is corrupted or was hand-edited"
+            )
         document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )

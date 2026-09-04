@@ -482,3 +482,77 @@ class TestWriteBundleFactsPackageSchemaVersionConsistency:
 
         with pytest.raises(ValueError, match="disagrees with"):
             write_bundle_facts_package(facts, store=store)
+
+
+class TestWriteBundleFactsPackageVariantFingerprint:
+    def test_empty_variant_fingerprint_is_rejected_not_normalized(self) -> None:
+        """`bundle_multibuild._index_by_fingerprint` already rejects an
+        empty fingerprint outright -- silently normalizing it into
+        `DEFAULT_VARIANT_FINGERPRINT` on write would let malformed facts
+        pair with a legitimate default variant instead (Codex review)."""
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        facts.variant_fingerprint = ""
+        store = InMemoryObjectStore()
+
+        with pytest.raises(ValueError, match="variant_fingerprint"):
+            write_bundle_facts_package(facts, store=store)
+
+
+class TestManifestDecodeRejectsCorruption:
+    def test_rejects_a_stored_instantiation_with_a_duplicate_parameter(self) -> None:
+        """A dict comprehension over untrusted stored pairs would silently
+        keep only the last of a repeated parameter name, describing a
+        different promised template signature than the one actually stored
+        (Codex review)."""
+        from abicheck.bundle_facts_store import _manifest_document_from_storage
+
+        corrupted = {
+            "provides": [
+                {
+                    "template": "acme::train_ops",
+                    "instantiations": [
+                        [
+                            {"parameter": "T", "value": "int"},
+                            {"parameter": "T", "value": "float"},
+                        ]
+                    ],
+                }
+            ]
+        }
+
+        with pytest.raises(ValueError, match="more than once"):
+            _manifest_document_from_storage(corrupted)
+
+
+class TestReadBundleFactsPackageSectionCrossCheck:
+    def test_refuses_an_artifact_carrying_an_unadvertised_section(self) -> None:
+        """An artifact whose own `sections` names a kind the package-wide
+        `section_schema_versions` never advertises at all is unambiguous
+        corruption -- no legitimate write of this package could have
+        produced it -- unlike a *missing* section, which a legitimate
+        multi-artifact package's per-library variation can produce on its
+        own (Codex review)."""
+        import dataclasses
+
+        from abicheck.storage.package import ObjectRef
+
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+        (artifact,) = manifest.artifact_refs
+        bogus_digest = store.put({"bogus": "content"})
+        corrupted_artifact = dataclasses.replace(
+            artifact,
+            sections={
+                **artifact.sections,
+                "not_a_real_section": ObjectRef(
+                    kind="not_a_real_section", digest=bogus_digest
+                ),
+            },
+        )
+        corrupted_manifest = dataclasses.replace(
+            manifest, artifact_refs=(corrupted_artifact,)
+        )
+
+        with pytest.raises(ValueError, match="not_a_real_section"):
+            read_bundle_facts_package(corrupted_manifest, store=store)
