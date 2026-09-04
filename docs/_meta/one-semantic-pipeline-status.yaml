@@ -347,19 +347,24 @@ concepts:
     authority: mixed
     removal_gate: >-
       Phase 8B (multi-artifact-canonical-storage): typed DTOs for every
-      section beyond semantic_ir, multi-artifact ProjectSnapshot
-      packages, and baseline-set/BundleFacts folded into sections. First
-      PR landed 2026-09-03: storage.types_section_codec.TypesSection is
-      the "types" legacy section's own typed DTO (wired through
-      storage.dto.types_to_dto/types_from_dto in place of the generic
-      legacy_section_to_dto pass-through envelope), chosen first because
-      it is the simplest case -- exactly one field, always required when
-      the section is present, with none of the schema-version-dependent
-      optional-field sparsity that made provenance/debug/binary
-      considered-and-deferred. On-disk payload shape is unchanged. The
-      remaining seven legacy sections (binary/declarations/layout/debug/
-      build/graph/provenance), multi-artifact ProjectSnapshot packages,
-      and folding baseline-set/BundleFacts into sections all remain open.
+      section beyond semantic_ir, and multi-artifact ProjectSnapshot
+      packages. First PR landed 2026-09-03:
+      storage.types_section_codec.TypesSection is the "types" legacy
+      section's own typed DTO (wired through storage.dto.types_to_dto/
+      types_from_dto in place of the generic legacy_section_to_dto
+      pass-through envelope), chosen first because it is the simplest
+      case -- exactly one field, always required when the section is
+      present, with none of the schema-version-dependent optional-field
+      sparsity that made provenance/debug/binary considered-and-deferred.
+      On-disk payload shape is unchanged. A second PR (2026-09-04,
+      ADR-063 Track C 8B) landed folding baseline-set/BundleFacts
+      documents into that same sectioned representation
+      (storage.import_bundle_facts/import_baseline_set, reusing
+      import_legacy_snapshot per library and attaching container-level
+      composition/metadata facts to VariantRef.sections) -- this item is
+      closed. The remaining seven legacy sections (binary/declarations/
+      layout/debug/build/graph/provenance) and multi-artifact
+      ProjectSnapshot packages still remain open.
 
   report_document:
     primitive: complete
