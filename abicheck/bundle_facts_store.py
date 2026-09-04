@@ -91,7 +91,7 @@ from .bundle_facts import (
     DEFAULT_VARIANT_FINGERPRINT,
     BundleFacts,
 )
-from .bundle_manifest import manifest_from_dict, manifest_to_dict
+from .bundle_manifest import InstantiationManifest, manifest_from_dict, manifest_to_dict
 from .serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .storage.package import (
@@ -101,7 +101,7 @@ from .storage.package import (
     PackageManifest,
     VariantRef,
 )
-from .storage.versioning import StorageVersions
+from .storage.versioning import StorageVersions, check_reader_compatibility
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -154,6 +154,47 @@ def _decode_aliases(encoded: str) -> tuple[str, ...]:
             f"JSON array of strings, got {encoded!r}"
         )
     return tuple(decoded)
+
+
+def _manifest_document_for_storage(manifest: InstantiationManifest) -> dict[str, Any]:
+    """`manifest_to_dict(manifest)`, with each template entry's
+    `instantiations` re-expressed as an order-preserving array.
+
+    `ObjectStore.put()` canonicalizes every mapping by sorting its keys
+    (ADR-062 D5), but `bundle_manifest._expand_instantiations()` reads an
+    instantiation's *insertion* order as template-argument order -- exactly
+    the "one template-instantiation mapping uses insertion order to carry
+    template-argument order" case D5 itself names as needing an array, never
+    a map, ahead of the canonicalizing store (Codex review: an
+    out-of-alphabetical-order instantiation like `{"Z": "int", "A":
+    "float"}` silently became `T<float, int>` instead of the promised
+    `T<int, float>`). Encoded as `[{"parameter": k, "value": v}, ...]` per
+    instantiation -- a list is never key-sorted, only a mapping is.
+    """
+    document: dict[str, Any] = manifest_to_dict(manifest)
+    for entry in document.get("provides", []):
+        instantiations = entry.get("instantiations")
+        if instantiations:
+            entry["instantiations"] = [
+                [{"parameter": key, "value": value} for key, value in inst.items()]
+                for inst in instantiations
+            ]
+    return document
+
+
+def _manifest_document_from_storage(document: Any) -> Any:
+    """The exact inverse of `_manifest_document_for_storage`."""
+    if isinstance(document, dict):
+        for entry in document.get("provides") or ():
+            if not isinstance(entry, dict):
+                continue
+            instantiations = entry.get("instantiations")
+            if instantiations:
+                entry["instantiations"] = [
+                    {pair["parameter"]: pair["value"] for pair in inst}
+                    for inst in instantiations
+                ]
+    return document
 
 
 def write_bundle_facts_package(
@@ -237,7 +278,7 @@ def write_bundle_facts_package(
 
     project_sections: dict[str, ObjectRef] = {}
     if facts.manifest is not None:
-        digest = store.put(manifest_to_dict(facts.manifest))
+        digest = store.put(_manifest_document_for_storage(facts.manifest))
         project_sections[INSTANTIATION_MANIFEST_SECTION_KIND] = ObjectRef(
             kind=INSTANTIATION_MANIFEST_SECTION_KIND, digest=digest
         )
@@ -263,10 +304,23 @@ def read_bundle_facts_package(
     `export_legacy_snapshot`.
 
     Raises `ValueError` if *variant_id* is not one of *manifest*'s
-    `variant_refs`, or if any of its member artifacts' sections cannot be
+    `variant_refs`, if any of its member artifacts' sections cannot be
     read back from *store* (surfaces whatever `export_legacy_snapshot`
-    itself raises).
+    itself raises), or if *manifest* itself is not readable by this build
+    (D2's two fail-closed version axes) -- checked here rather than only
+    trusting a caller to have routed *manifest* through
+    `project_snapshot_store.read_manifest_summary` first, since
+    `PackageManifest`/`StorageVersions` are public and constructible
+    directly (Codex review; the identical reasoning `check_reader_
+    compatibility`'s own docstring already states for exactly this "public
+    reader boundary" gap).
     """
+    compatibility = check_reader_compatibility(manifest.versions)
+    if not compatibility.readable:
+        raise ValueError(
+            f"this PackageManifest is not readable by this build: "
+            f"{compatibility.reason}"
+        )
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
     )
@@ -323,7 +377,9 @@ def read_bundle_facts_package(
     manifest_ref = manifest.project_sections.get(INSTANTIATION_MANIFEST_SECTION_KIND)
     if manifest_ref is not None:
         raw: Any = store.get(manifest_ref.digest)
-        instantiation_manifest = manifest_from_dict(raw)
+        instantiation_manifest = manifest_from_dict(
+            _manifest_document_from_storage(raw)
+        )
 
     return BundleFacts(
         variant_fingerprint=variant_fingerprint,

@@ -142,6 +142,32 @@ class TestReadBundleFactsPackage:
         assert round_tripped.manifest is not None
         assert round_tripped.manifest.entries[0].symbol == "_Z3fooi"
 
+    def test_round_trips_template_instantiation_argument_order(self) -> None:
+        """`ObjectStore.put()` canonicalizes a mapping by sorting its keys,
+        but `_expand_instantiations()` reads an instantiation's *insertion*
+        order as template-argument order -- an out-of-alphabetical-order
+        instantiation must not silently reorder into a different, unpromised
+        symbol on round trip (Codex review)."""
+        instantiation_manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    template="acme::train_ops",
+                    instantiations=({"Z": "int", "A": "float"},),
+                ),
+            )
+        )
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so")}, manifest=instantiation_manifest
+        )
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        round_tripped = read_bundle_facts_package(manifest, store=store)
+
+        assert round_tripped.manifest is not None
+        (entry,) = round_tripped.manifest.entries
+        assert entry.display_name() == "acme::train_ops<int, float>"
+
     def test_missing_variant_fingerprint_defaults(self) -> None:
         facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
         store = InMemoryObjectStore()
@@ -187,6 +213,26 @@ class TestReadBundleFactsPackage:
 
         with pytest.raises(ValueError, match="not a variant_id"):
             read_bundle_facts_package(manifest, store=store, variant_id="nope")
+
+    def test_refuses_an_incompatible_comparison_contract_version(self) -> None:
+        """A `PackageManifest` is public and constructible directly, so a
+        caller that builds or loads one without routing it through
+        `project_snapshot_store.read_manifest_summary` must still be refused
+        here at this public reader boundary (Codex review)."""
+        import dataclasses
+
+        from abicheck.storage.versioning import StorageVersions
+
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+        incompatible = dataclasses.replace(
+            manifest,
+            versions=StorageVersions(comparison_contract_version=999),
+        )
+
+        with pytest.raises(ValueError, match="not readable"):
+            read_bundle_facts_package(incompatible, store=store)
 
     def test_empty_bundle_round_trips_to_no_libraries(self) -> None:
         facts = BundleFacts()
