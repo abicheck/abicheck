@@ -242,6 +242,7 @@
       ],
       "legacy_paths": [
         "abicheck/analysis_assurance.py",
+        "abicheck/analysis_assurance_graph.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
         "abicheck/contract_coverage_exit.py",
@@ -604,6 +605,7 @@
     "__main__.py",
     "_compiler_options.py",
     "analysis_assurance.py",
+    "analysis_assurance_graph.py",
     "annotations.py",
     "annotations_step_summary.py",
     "appcompat.py",
