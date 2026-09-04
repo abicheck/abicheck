@@ -528,7 +528,7 @@ use_cases:
       COMPATIBLE_WITH_RISK kinds (relro_weakened, pie_disabled,
       stack_canary_removed, fortify_source_weakened, writable_executable_segment).
       A shipped, turnkey policy (abicheck/policies/security.yaml) is referenced
-      by name as `--policy-file security` and promotes all hardening kinds to
+      by name as `--policy security` and promotes all hardening kinds to
       break. Validated end-to-end: real hardened-vs-unhardened .so parsing
       (integration), the diff detectors and policy gating (unit), and the
       built-in policy resolution.
@@ -799,10 +799,10 @@ use_cases:
       fallback would be rewritten into `typedef float float;` (PR review). The
       durable cure is a castxml built against a newer Clang, or the libclang
       extractor (G4). Per-side L2 backend selection
-      (`--old-ast-frontend`/`--new-ast-frontend` on `compare`,
-      each inheriting `--ast-frontend`) so a release whose new headers need the
-      host toolchain parses on clang while the old release keeps the castxml schema
-      reference — the backend mirror of `--header old=`/`--header new=`
+      (side-qualified `--ast-frontend old=.../new=...` on `compare`) so a
+      release whose new headers need the host toolchain parses on clang
+      while the old release keeps the castxml schema reference — the
+      backend mirror of `--header old=`/`--header new=`
       (tests/test_cli_new_features.py::TestPerSideHeaderBackend). A recognised
       host-toolchain signature now raises the dedicated `HeaderToolchainError`
       (a `SnapshotError` subclass, so existing `except SnapshotError` handling

@@ -1418,10 +1418,6 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "AGENTS.md",
                 "contribute/known-gaps.md",
                 "reference/github-action-inputs.md",
-                # A point-in-time use-case record describing the shipped
-                # security-policy hardening feature by the flag spelling it
-                # had then, in its own historical-record capacity.
-                "docs/contribute/usecase-registry.yaml",
             }
         ),
     ),
@@ -1437,15 +1433,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " on compare: --ast-frontend old=castxml --ast-frontend new=clang,"
         " ADR-040 Lever 1's prefix convention)",
         ("--old-ast-frontend", "--new-ast-frontend"),
-        frozenset(
-            {
-                "AGENTS.md",
-                # A point-in-time use-case record describing the shipped
-                # per-side L2 backend selection feature by its then-current
-                # flag spelling, in its own historical-record capacity.
-                "docs/contribute/usecase-registry.yaml",
-            }
-        ),
+        frozenset({"AGENTS.md"}),
     ),
     (
         "--include-dependencies (renamed --include-system-declarations: it"
