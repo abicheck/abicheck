@@ -1300,6 +1300,18 @@ class TypeDatabase:
         if ti < _TI_BASE:
             kind = ti & 0xFF
             mode = (ti >> 8) & 0x0F
+            if kind not in _SIMPLE_TYPE_NAMES:
+                # P2 review, fresh evidence (Codex): a valid CodeView
+                # simple kind this module's own name/size tables don't
+                # cover (e.g. T_HRESULT 0x08) previously rendered as an
+                # opaque "<simple:0x..>" placeholder -- the same kind of
+                # substitution the ti>=_TI_BASE unresolvable-reference
+                # branch below already records -- without ever recording
+                # it, so a struct/enum whose member only degrades via a
+                # missing simple-kind mapping (never a missing TPI entry)
+                # left the basic channel reading "parsed" despite an
+                # actually-degraded field.
+                self._unresolved_type_refs.add(ti)
             base = _SIMPLE_TYPE_NAMES.get(kind, f"<simple:0x{kind:02x}>")
             if mode == 0:
                 return base
@@ -1367,6 +1379,13 @@ class TypeDatabase:
         if ti < _TI_BASE:
             kind = ti & 0xFF
             mode = (ti >> 8) & 0x0F
+            if kind not in _SIMPLE_TYPE_SIZES:
+                # See the identical unmapped-simple-kind note in
+                # _resolve_type_name() above -- recorded independently
+                # here since type_size() may be called on a ti whose
+                # type_name() was never resolved (the two caches are
+                # populated separately).
+                self._unresolved_type_refs.add(ti)
             if mode == 0:
                 return _SIMPLE_TYPE_SIZES.get(kind, 0)
             # Pointer modes: size depends on the CodeView SimpleTypeMode

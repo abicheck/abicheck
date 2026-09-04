@@ -1092,6 +1092,49 @@ class TestTypeDatabaseExtended:
         assert db.type_size(ti) == 8  # best-effort default
         assert db.unresolved_type_ref_count == 1
 
+    def test_unmapped_direct_simple_kind_marks_unresolved(self) -> None:
+        """A valid CodeView simple kind this module's own tables don't
+        cover (e.g. T_HRESULT, 0x08) must not read as a resolved 0-byte
+        field with no completeness signal -- P2 review, fresh evidence
+        (Codex): previously fell through to the generic
+        "<simple:0x..>"/0 defaults exactly like a genuinely unresolvable
+        ti>=_TI_BASE reference, but unlike that sibling case, was never
+        recorded via unresolved_type_ref_count, so a struct whose member
+        only degrades via a missing simple-kind mapping (never a missing
+        TPI entry) left the basic channel reading "parsed" despite an
+        actually-degraded field."""
+        db = self._make_db([])
+        ti = 0x0008  # mode=0x00 (Direct), kind=0x08 (T_HRESULT, unmapped)
+        name = db.type_name(ti)
+        assert name == "<simple:0x08>"
+        assert db.type_size(ti) == 0
+        assert db.unresolved_type_ref_count == 1
+
+    def test_unmapped_pointer_kind_marks_unresolved_independent_of_mode(
+        self,
+    ) -> None:
+        """The same unmapped-kind gap under a real, well-defined pointer
+        mode -- the pointer's own size is still correctly decoded (kind
+        doesn't affect a pointer's width), but the referent kind being
+        unmapped is still an unresolved reference in its own right."""
+        db = self._make_db([])
+        ti = 0x0408  # mode=0x04 (near32), kind=0x08 (T_HRESULT, unmapped)
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 4  # near32's own well-defined width
+        assert db.unresolved_type_ref_count == 1
+
+    def test_mapped_simple_kind_size_only_lookup_is_not_flagged(self) -> None:
+        """Calling only type_size() (never type_name()) on a *mapped*
+        simple kind must not spuriously mark it unresolved -- the two
+        caches are populated independently, so this pins that the new
+        check in _resolve_type_size() only fires for a genuinely
+        unmapped kind, not merely because type_name() was never called."""
+        db = self._make_db([])
+        ti = 0x0074  # mode=0x00 (Direct), kind=0x74 (int, mapped)
+        assert db.type_size(ti) == 4
+        assert db.unresolved_type_ref_count == 0
+
     def test_pointer_lvalue_reference(self) -> None:
         """LValueReference pointer mode (1)."""
         # attrs: mode=1 at bits 5-7 → (1 << 5) = 0x20, plus near64 marker
