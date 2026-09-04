@@ -153,9 +153,10 @@ PR #1042, three rounds):**
    from the start can satisfy every token-level check above while never
    being a real ``BundleFacts`` document at all (Codex review, round 6,
    fresh evidence).** A ``.tar``/``.tar.gz`` release package's very first
-   bytes are its first member's ``name`` field -- unlike every other
-   archive format this module rules out, tar has no leading magic, so a
-   member deliberately named e.g. ``{"artifact_type":"abicheck.bundle-
+   bytes are its first member's ``name`` field -- tar has no leading magic
+   at all (point 8 below covers zip's own, structurally different variant
+   of this same problem), so a member deliberately named e.g.
+   ``{"artifact_type":"abicheck.bundle-
    facts"}`` decodes to bytes that are a complete, valid, gap-free JSON
    object satisfying points 1-6 with nothing left to catch it: the marker
    scan finds and returns the value before ever reaching the bytes that
@@ -171,6 +172,23 @@ PR #1042, three rounds):**
    bytes can never accidentally satisfy that check, so this closes the gap
    with no false-negative risk on a real stored-facts document, unlike
    point 2's reverted filename-suffix veto.
+8. **The zip format's own variant of point 7 (Codex review, round 7,
+   fresh evidence).** Unlike tar, zip *does* have a fixed magic
+   (``PK\\x03\\x04``) -- but the format explicitly permits arbitrary bytes
+   *before* the first local file header (this is how a self-extracting
+   archive works), and a real zip reader (Python's own ``zipfile``, the
+   ``WheelExtractor`` this repo already uses) locates entries via the
+   central directory at the *end* of the file, not by requiring the magic
+   at byte 0. A real ``.whl`` prepended with a crafted ``{"artifact_type":
+   "abicheck.bundle-facts"}`` preamble is still a perfectly valid wheel to
+   every real zip reader, fails :func:`_looks_like_stored_bundle_facts_
+   archive`'s own byte-0-only G40 magic check, and falls through to the
+   marker scan on that preamble -- the same class of gap as point 7, not
+   closable by a leading-magic check since zip's own magic isn't
+   necessarily at the front. Answered by
+   :func:`_path_is_a_real_zip_container`, ``zipfile.is_zipfile()`` on
+   *path* itself (not a bounded prefix -- the central directory it needs
+   may be well past :data:`_MARKER_SCAN_BYTES` into a real, larger wheel).
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
@@ -191,6 +209,7 @@ import io
 import json as _json
 import re
 import tarfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -378,11 +397,14 @@ def _decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:
     """``True`` when *prefix* is the start of a genuine tar stream (Codex
     review, PR #1042, round 6, fresh evidence).
 
-    Every other archive format this module rules out (the G40 zip archive,
-    wheel/deb/rpm/conda) starts with a fixed magic that can never begin with
-    ``{`` -- but a tar stream's very first bytes *are* its first member's
-    ``name`` field, attacker- or tool-controlled content with no leading
-    magic at all. A ``.tar``/``.tar.gz``/``.tar.bz2``/``.tar.xz`` release
+    Every *other* archive format this module rules out by fixed magic
+    (deb/rpm/conda, and the G40/wheel zip container -- see this function's
+    own sibling, :func:`_path_is_a_real_zip_container`, for why zip needs
+    its own dedicated, whole-file check rather than a magic-byte veto)
+    cannot begin with ``{`` at all -- but a tar stream's very first bytes *are*
+    its first member's ``name`` field, attacker- or tool-controlled content
+    with no leading magic at all. A ``.tar``/``.tar.gz``/``.tar.bz2``/
+    ``.tar.xz`` release
     package whose first member is deliberately named a complete, valid,
     self-closing JSON object (e.g. ``{"artifact_type":"abicheck.bundle-
     facts"}``) satisfies every check :func:`_root_level_artifact_type` can
@@ -405,6 +427,41 @@ def _decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:
         # is_tarfile() is documented to raise on some malformed inputs
         # rather than only ever returning False -- never let a corrupt or
         # truncated candidate turn a classification helper into a crash.
+        return False
+
+
+def _path_is_a_real_zip_container(path: Path) -> bool:
+    """``True`` when *path* is a genuine zip container -- a wheel, the G40
+    archive, or any other zip-based format -- *anywhere* in the file, not
+    just at byte 0 (Codex review, PR #1042, round 7, fresh evidence).
+
+    The ZIP format's central directory sits at the *end* of the file and is
+    what a real zip reader (Python's own ``zipfile``, the ``WheelExtractor``
+    this repo already uses) actually trusts; the format explicitly permits
+    arbitrary bytes *before* the first local file header (this is how a
+    self-extracting archive or an executable-prefixed zip works). A real
+    ``.whl`` prepended with a hand-crafted ``{"artifact_type":"abicheck.
+    bundle-facts"}`` preamble is still a perfectly valid zip to every real
+    zip reader, and -- since :func:`_looks_like_stored_bundle_facts_archive`
+    only recognizes the G40 archive by its *own* magic at byte 0, this
+    prepended file fails that check and falls through here -- would satisfy
+    :func:`_root_level_artifact_type`'s own scan on the raw (uncompressed,
+    so undecoded-prefix-equals-raw-file) leading bytes exactly the way
+    round 6's crafted tar member name did. Checked against *path* itself
+    (unlike the tar check, this cannot be answered from a bounded prefix
+    alone -- the central directory it needs may be well past
+    :data:`_MARKER_SCAN_BYTES` into a real, larger wheel), which
+    ``zipfile.is_zipfile()`` already does correctly regardless of file
+    size: it seeks from the end of the file to locate the end-of-central-
+    directory record, the same way a real zip reader does, rather than
+    reading forward from byte 0. Real plain/compressed ``BundleFacts`` JSON
+    is never zip-shaped at the container level (only the G40 archive format
+    is, and that is already ruled in or out before this ever runs), so
+    there is no collision risk with a genuine stored-facts document.
+    """
+    try:
+        return zipfile.is_zipfile(path)
+    except OSError:
         return False
 
 
@@ -442,15 +499,17 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     ``False`` for anything that is not a regular file (a directory), or
     that this module's bounded prefix reader cannot decode at all (corrupt,
     or a format ``snapshot_io`` doesn't recognize). A real package archive
-    (wheel/deb/rpm/conda) is not special-cased by *filename* -- the
-    depth-scoped marker scan (this module's own docstring, points 3-4)
-    already cannot match one by content, so excluding it by suffix would
-    only reintroduce point 2's false-negative on a genuine stored-facts
-    document with a package-like filename suffix. A tar-based archive is
-    the one exception, ruled out by decoded *content* rather than filename
-    (point 7, :func:`_decoded_prefix_is_a_real_tar_stream`) -- a
-    filename-blind check, so it carries none of point 2's false-negative
-    risk. Never raises, never fully decompresses or JSON-parses a
+    (deb/rpm/conda) is not special-cased by *filename* -- the depth-scoped
+    marker scan (this module's own docstring, points 3-4) already cannot
+    match one by content, so excluding it by suffix would only reintroduce
+    point 2's false-negative on a genuine stored-facts document with a
+    package-like filename suffix. Tar- and zip-based archives (wheels
+    included) are the exceptions, each ruled out by structural *content*
+    rather than filename (points 7-8,
+    :func:`_decoded_prefix_is_a_real_tar_stream` and
+    :func:`_path_is_a_real_zip_container`) -- filename-blind checks, so
+    neither carries point 2's false-negative risk. Never raises, never
+    fully decompresses or JSON-parses a
     plain-JSON candidate -- see this module's own docstring for why. A
     ``True`` answer still leaves full validation to the ordinary
     bundle-facts read path (``load_bundle_facts`` / ``bundle_facts_from_
@@ -460,6 +519,14 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
         return False
     if _looks_like_stored_bundle_facts_archive(path):
         return True
+    if _path_is_a_real_zip_container(path):
+        # Already ruled out being the one legitimate zip-shaped encoding
+        # (the G40 archive, just above) -- any other zip container reaching
+        # here (a wheel, possibly with a crafted preamble) is never a real
+        # BundleFacts document. Checked before decoding a prefix at all,
+        # since this check needs the true end of the file, not a bounded
+        # window of it (see _path_is_a_real_zip_container's own docstring).
+        return False
     from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
     from ..snapshot_io import bounded_decoded_prefix
 

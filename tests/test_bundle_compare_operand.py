@@ -156,6 +156,30 @@ class TestLooksLikeStoredBundleFacts:
         )
         assert looks_like_stored_bundle_facts(p) is False
 
+    def test_wheel_with_a_forged_json_preamble_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 7): zip permits arbitrary bytes
+        before its first local file header (self-extracting archives rely
+        on this), and a real zip reader locates entries via the central
+        directory at the *end* of the file, not the magic at byte 0. A
+        real .whl prepended with a crafted marker preamble is still a
+        perfectly valid wheel to zipfile/WheelExtractor, fails the G40
+        byte-0-only magic check, and must not fall through to the marker
+        scan on that preamble."""
+        whl_path = tmp_path / "fake_package-1.0-py3-none-any.whl"
+        with open(whl_path, "wb") as fh:
+            fh.write(_MARKER_JSON.encode())
+        with zipfile.ZipFile(whl_path, "a") as zf:
+            zf.writestr("fake_package/__init__.py", "")
+            zf.writestr("fake_package-1.0.dist-info/METADATA", "Name: fake_package\n")
+        # Sanity-check the fixture is itself still a real, readable wheel,
+        # exactly as the finding describes.
+        assert zipfile.is_zipfile(whl_path)
+        with zipfile.ZipFile(whl_path) as zf:
+            assert "fake_package/__init__.py" in zf.namelist()
+        assert looks_like_stored_bundle_facts(whl_path) is False
+
     def test_escaped_marker_key_still_classifies_as_stored(
         self, tmp_path: Path
     ) -> None:
