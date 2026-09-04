@@ -386,6 +386,7 @@ def write_bundle_facts_package(
     section_schema_versions: dict[str, int] = {}
     source_schema_version: int | None = None
     decoded_bytes_so_far = 0
+    alias_nodes_so_far = 0
     for library_name, snapshot in facts.per_library_snapshots.items():
         artifact_id = _artifact_id_for_library(library_name)
         # sha256 collisions are astronomically unlikely, but this is a
@@ -414,9 +415,26 @@ def write_bundle_facts_package(
         if filename:
             native_identity[_NATIVE_IDENTITY_FILENAME_KEY] = filename
         aliases = facts.filesystem_aliases.get(library_name)
-        encoded_aliases = _encode_aliases(aliases) if aliases else None
-        if encoded_aliases:
+        encoded_aliases: str | None = None
+        if aliases:
+            encoded_aliases = _encode_aliases(aliases)
             native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = encoded_aliases
+            # `read_bundle_facts_package`'s own `_decode_aliases` enforces a
+            # bundle-wide node total, not just a per-array cap -- this
+            # writer must not hand back a package that check then refuses
+            # (Codex review, fresh evidence on this same guard, a third
+            # time): `+1` for the array node itself, matching what
+            # `check_json_container_budget` counts.
+            alias_nodes_so_far += len(aliases) + 1
+            if alias_nodes_so_far > DEFAULT_MAX_JSON_CONTAINER_NODES:
+                raise ValueError(
+                    f"facts.filesystem_aliases' total element count exceeds "
+                    f"DEFAULT_MAX_JSON_CONTAINER_NODES "
+                    f"({DEFAULT_MAX_JSON_CONTAINER_NODES}) -- reached while "
+                    f"encoding {library_name!r}; refusing to write a package "
+                    "read_bundle_facts_package would itself then refuse to "
+                    "reconstruct"
+                )
         if native_identity != dict(artifact.native_identity):
             artifact = replace(artifact, native_identity=native_identity)
         artifact_ids.append(artifact_id)

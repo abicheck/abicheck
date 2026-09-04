@@ -464,6 +464,27 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             write_bundle_facts_package(facts, store=store)
 
+    def test_refuses_to_write_past_the_alias_node_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """`read_bundle_facts_package`'s own `_decode_aliases` enforces a
+        bundle-wide alias-node total -- the writer must not hand back a
+        package that check then refuses (Codex review, fresh evidence on
+        this same guard, a third time)."""
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        facts.filesystem_aliases["liba.so"] = tuple(f"alias{i}" for i in range(10))
+        facts.filesystem_aliases["libb.so"] = tuple(f"alias{i}" for i in range(10))
+        store = InMemoryObjectStore()
+
+        monkeypatch.setattr(module, "DEFAULT_MAX_JSON_CONTAINER_NODES", 11)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_JSON_CONTAINER_NODES"):
+            write_bundle_facts_package(facts, store=store)
+
 
 class TestBundleFactsPackageThroughDirectoryStore:
     """The full round trip through the real, filesystem-backed D6 layout --
