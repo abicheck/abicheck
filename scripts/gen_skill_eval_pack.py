@@ -82,6 +82,7 @@ import hashlib
 import json
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +102,6 @@ SCENARIOS = EVAL_DIR / "scenarios.yaml"
 RUBRIC = EVAL_DIR / "rubric.yaml"
 TRIGGER_CORPUS = ROOT / "tests" / "agent_skills" / "trigger_corpus.yaml"
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
-EXAMPLES = example_catalog.EXAMPLES_DIR
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
 #: Bumped when the pack's own shape changes, so a consumer reading an older
@@ -202,29 +202,43 @@ def _load_scenarios() -> dict[str, Any]:
     return yaml.safe_load(SCENARIOS.read_text(encoding="utf-8"))
 
 
-def _fixture_paths(scenario: dict[str, Any]) -> list[Path]:
+def _fixture_paths(
+    scenario: dict[str, Any],
+    *,
+    case_dir: Callable[[str], Path] = example_catalog.case_dir,
+) -> list[Path]:
     """Every file whose content the scenario feeds the agent.
 
     Category A resolves to the examples/ case directory plus that case's own
     ground-truth entry; Category B to its declared fixture tree. A scenario
     whose inputs change must go stale, so the closure is hashed, not the path.
+
+    *case_dir* resolves a case name to its on-disk directory -- production
+    callers use the default (``example_catalog.case_dir``, Phase 3,
+    docs/contribute/plans/examples-catalog-split.md), so Phase 4's directory
+    split needs no change here; a test injects its own resolver instead of
+    monkeypatching a flat root, mirroring ``fixture_sync.sync_fixtures``'s
+    identical parameter.
     """
     if scenario["category"] == "A":
-        # EXAMPLES (not example_catalog.case_dir directly) so
-        # tests/test_skill_eval_pack.py's `monkeypatch.setattr(gen, "EXAMPLES",
-        # tmp_path)` seam still redirects this to a throwaway root.
-        case_dir = EXAMPLES / scenario["case"]
-        return _tree_files(case_dir) if case_dir.is_dir() else []
+        resolved = case_dir(scenario["case"])
+        return _tree_files(resolved) if resolved.is_dir() else []
     fixture = ROOT / scenario["fixture"]
     return _tree_files(fixture) if fixture.is_dir() else []
 
 
-def _scenario_digest(scenario: dict[str, Any], ground_truth: dict[str, Any]) -> str:
+def _scenario_digest(
+    scenario: dict[str, Any],
+    ground_truth: dict[str, Any],
+    *,
+    case_dir: Callable[[str], Path] = example_catalog.case_dir,
+) -> str:
     h = hashlib.sha256()
     h.update(json.dumps(scenario, sort_keys=True).encode())
     h.update(b"\0")
     for path in sorted(
-        _fixture_paths(scenario), key=lambda p: p.relative_to(ROOT).as_posix()
+        _fixture_paths(scenario, case_dir=case_dir),
+        key=lambda p: p.relative_to(ROOT).as_posix(),
     ):
         h.update(path.relative_to(ROOT).as_posix().encode())
         h.update(b"\0")
@@ -409,8 +423,9 @@ def build_pack() -> dict[str, Any]:
     scenarios: dict[str, Any] = {}
     for scenario in manifest["scenarios"]:
         if scenario["category"] == "A":
-            # EXAMPLES, not example_catalog.case_dir -- see _fixture_paths above.
-            fixture_root = (EXAMPLES / scenario["case"]).relative_to(ROOT).as_posix()
+            fixture_root = (
+                example_catalog.case_dir(scenario["case"]).relative_to(ROOT).as_posix()
+            )
         else:
             fixture_root = scenario["fixture"]
         # The pack is the cross-repository interface, so a scenario entry has
