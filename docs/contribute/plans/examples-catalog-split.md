@@ -311,13 +311,19 @@ into the mutation sandbox because tests read fixture/ground-truth data from
 it) needs `catalog` added; `gen_examples_docs.py`'s hard-coded `Source
 files: examples/<case>/` / `Source: examples/<case>/README.md` path
 templates need to resolve through the catalog manifest/resolver instead of
-a literal prefix; and `tests/test_probe_examples.py`'s
-`PROBES_DIR = Path(__file__).parent.parent / "examples" / "probes"` needs
-to move to `catalog/probes/` alongside the directory itself (found by a
-Codex review on the PR that added this diagram) — unlike the
-`ground_truth.json` readers Phase 3 already gave a real `example_catalog`
-resolver to point at, there is no probes-directory equivalent yet, so this
-one is genuinely Phase 4's to introduce, not fixable ahead of the move.
+a literal prefix; and every hardcoded `examples/probes/` reference needs to
+move to `catalog/probes/` alongside the directory itself (found by two
+Codex review rounds on the PR that added this diagram) —
+`tests/test_probe_examples.py`'s `PROBES_DIR = Path(__file__).parent.parent
+/ "examples" / "probes"`, `tests/test_cli_probe.py`'s identical inline
+join, `docs/use/probe-harness.md`'s source link and copyable
+`load_probe_spec("examples/probes/onedpl.yaml")` snippet, and
+`docs/contribute/usecase-registry.yaml`'s two `examples:` fixture-path
+lists. Unlike the `ground_truth.json` readers Phase 3 already gave a real
+`example_catalog` resolver to point at, there is no probes-directory
+equivalent yet, so this whole class is genuinely Phase 4's to introduce
+(a probes-directory resolver plus updating each consumer above), not
+fixable ahead of the move.
 
 ## Taxonomy visibility on the public docs site
 
