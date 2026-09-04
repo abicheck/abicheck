@@ -39,6 +39,30 @@ from unittest.mock import MagicMock
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _parse_frame_registers
 
 
+def _fde_getitem(pc_begin: int, address_range: int = 4):
+    """Build a real per-key ``__getitem__`` side_effect for a mock FDE.
+
+    P2 review, fresh evidence (Codex): _parse_frame_registers now also
+    reads ``entry["address_range"]`` (for its alternate-entry-point range
+    check) alongside ``entry["initial_location"]`` -- a mock FDE whose
+    ``__getitem__`` returns the same constant for every key (this file's
+    former pattern) made ``address_range`` silently equal ``pc_begin``,
+    producing a huge, accidental coverage range that could mask a
+    genuinely-uncovered function in an unrelated test. Returns a small,
+    realistic default width (4 bytes) so existing exact-match assertions
+    are unaffected by the new range check.
+    """
+
+    def _getitem(key: str) -> int:
+        if key == "initial_location":
+            return pc_begin
+        if key == "address_range":
+            return address_range
+        raise KeyError(key)
+
+    return _getitem
+
+
 def _fde_with_symbol(mock_dwarf, mock_elf, decode_error) -> None:
     """Wire up an FDE at a known exported address whose get_decoded()
     raises. Shared by both bug-class regression tests below."""
@@ -55,7 +79,7 @@ def _fde_with_symbol(mock_dwarf, mock_elf, decode_error) -> None:
     fde = MagicMock()
     fde.__class__ = type("FDE", (), {})
     fde.__class__.__name__ = "FDE"
-    fde.__getitem__ = MagicMock(return_value=0x1000)
+    fde.__getitem__ = MagicMock(side_effect=_fde_getitem(0x1000))
     fde.get_decoded.side_effect = decode_error
     mock_dwarf.EH_CFI_entries.return_value = [fde]
 
@@ -110,7 +134,7 @@ class TestHelperLevelDecodeFailurePropagates:
         fde = MagicMock()
         fde.__class__ = type("FDE", (), {})
         fde.__class__.__name__ = "FDE"
-        fde.__getitem__ = MagicMock(return_value=0x1000)
+        fde.__getitem__ = MagicMock(side_effect=_fde_getitem(0x1000))
         fde.get_decoded.return_value = decoded
         mock_dwarf = MagicMock()
         mock_dwarf.EH_CFI_entries.return_value = [fde]
@@ -228,7 +252,7 @@ class TestUnmatchedExportedFunctionMarksIncomplete:
         fde = MagicMock()
         fde.__class__ = type("FDE", (), {})
         fde.__class__.__name__ = "FDE"
-        fde.__getitem__ = MagicMock(return_value=0x1000)
+        fde.__getitem__ = MagicMock(side_effect=_fde_getitem(0x1000))
         decoded = MagicMock()
         decoded.table = []
         fde.get_decoded.return_value = decoded
@@ -271,7 +295,7 @@ class TestUnmatchedExportedFunctionMarksIncomplete:
         fde = MagicMock()
         fde.__class__ = type("FDE", (), {})
         fde.__class__.__name__ = "FDE"
-        fde.__getitem__ = MagicMock(return_value=0x1000)
+        fde.__getitem__ = MagicMock(side_effect=_fde_getitem(0x1000))
         decoded = MagicMock()
         decoded.table = []
         fde.get_decoded.return_value = decoded
@@ -282,15 +306,20 @@ class TestUnmatchedExportedFunctionMarksIncomplete:
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
 
 
-def _fde_for(addr: int, *, cfa_reg: int | None = None) -> MagicMock:
+def _fde_for(
+    addr: int, *, cfa_reg: int | None = None, address_range: int = 4
+) -> MagicMock:
     """Build a mock FDE at *addr*. When *cfa_reg* is given, its decoded
     table carries one real CFA row (register number *cfa_reg*) so
     ``_extract_cfa_reg_from_fde`` resolves an actual register name instead
-    of the "no CFA data" ``None`` an empty table always produces."""
+    of the "no CFA data" ``None`` an empty table always produces.
+    *address_range* is the FDE's own covered-range width (default a small,
+    realistic 4 bytes; widen it to exercise the alternate-entry-point
+    range check)."""
     fde = MagicMock()
     fde.__class__ = type("FDE", (), {})
     fde.__class__.__name__ = "FDE"
-    fde.__getitem__ = MagicMock(return_value=addr)
+    fde.__getitem__ = MagicMock(side_effect=_fde_getitem(addr, address_range))
     decoded = MagicMock()
     if cfa_reg is None:
         decoded.table = []
@@ -613,3 +642,86 @@ class TestArmThumbAddressNormalization:
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
         assert set(meta.frame_registers) == {"odd_addr_fn"}
+
+
+class TestAlternateEntryPointCoverage:
+    """P2 review, fresh evidence (Codex): an exported STT_FUNC is
+    considered covered only when its address exactly equals an FDE's
+    ``initial_location`` -- but a valid assembly library can expose an
+    *alternate entry point* inside another function's FDE range (e.g. a
+    fast-path variant sharing its slow-path sibling's unwind info), whose
+    every instruction is still covered by that same FDE. The exact-match
+    check alone leaves such a symbol in ``uncovered_funcs`` forever,
+    wrongly downgrading a fully-instrumented binary to "partial"."""
+
+    def test_alternate_entry_point_within_fde_range_is_covered(self) -> None:
+        """Reproduces the reviewer's exact scenario: ``foo`` at the FDE's
+        own start (0x1000), ``bar`` exported 4 bytes later (0x1004) with
+        no FDE of its own -- both addresses are covered by the same
+        16-byte-wide FDE."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        foo = _sym("foo", 0x1000)
+        bar = _sym("bar", 0x1004)
+        dyn.iter_symbols.return_value = [foo, bar]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [
+            _fde_for(0x1000, cfa_reg=7, address_range=16)
+        ]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        # foo received its own frame-register facts (the exact FDE match);
+        # bar is recognized as covered but never gets its own facts, since
+        # no FDE names it directly -- there is nothing to attach.
+        assert "foo" in meta.frame_registers
+        assert "bar" not in meta.frame_registers
+
+    def test_address_past_fde_range_is_still_uncovered(self) -> None:
+        """Negative control: an address just past the FDE's own range
+        (0x1000 + 16 = 0x1010) must still be flagged -- the range check
+        must not over-correct into treating every later address as
+        covered."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        foo = _sym("foo", 0x1000)
+        far = _sym("far_fn", 0x1010)
+        dyn.iter_symbols.return_value = [foo, far]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [
+            _fde_for(0x1000, cfa_reg=7, address_range=16)
+        ]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+    def test_address_before_fde_start_is_still_uncovered(self) -> None:
+        """Negative control: an address before the FDE's own start must
+        not be swept in by the range check either."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        foo = _sym("foo", 0x2000)
+        before = _sym("before_fn", 0x1FF0)
+        dyn.iter_symbols.return_value = [foo, before]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [
+            _fde_for(0x2000, cfa_reg=7, address_range=16)
+        ]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False

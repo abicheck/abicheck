@@ -359,6 +359,43 @@ class TestToDwarfMetadata:
         assert "simple" in dwarf.structs
 
 
+class TestCtfExtractionFailedMapsToFailedState:
+    """P2 review, fresh evidence (Codex): CTF sibling of the identical BTF
+    fix -- an existing but malformed CTF section previously mapped to
+    evidence_state="not_available" through to_dwarf_metadata(),
+    indistinguishable from a binary that never had a CTF section at all.
+    Every early return inside parse_ctf_from_bytes now marks
+    extraction_failed."""
+
+    def test_bad_preamble_marks_failed(self) -> None:
+        meta = parse_ctf_from_bytes(b"not a real CTF section")
+        assert meta.has_ctf is False
+        assert meta.extraction_failed is True
+        assert meta.to_dwarf_metadata().evidence_state == "failed"
+
+    def test_section_bounds_exceed_data_marks_failed(self) -> None:
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+        data = b.build()
+        # Truncate past the preamble+header so the declared section bounds
+        # exceed the actual (now-shorter) data.
+        truncated = data[:16]
+        meta = parse_ctf_from_bytes(truncated)
+        assert meta.has_ctf is False
+        assert meta.extraction_failed is True
+        assert meta.to_dwarf_metadata().evidence_state == "failed"
+
+    def test_genuinely_absent_section_stays_not_available(self) -> None:
+        """Positive control: a binary with no CTF section at all must not
+        be conflated with a failed parse."""
+        meta = CtfMetadata()  # the same empty result parse_ctf_metadata
+        # returns for `raw is None`, never routed through
+        # parse_ctf_from_bytes at all.
+        assert meta.extraction_failed is False
+        assert meta.to_dwarf_metadata().evidence_state == "not_available"
+
+
 class TestCtfStringTableSentinel:
     """P2 review, fresh evidence (Codex): CTF sibling of the identical BTF
     fix -- offset 0 in the CTF string section is reserved for the empty

@@ -143,6 +143,16 @@ class BtfMetadata:
     has_btf: bool = False
     type_count: int = 0
     extraction_partial: bool = False  # any stage below raised+caught (P2 review)
+    # P2 review, fresh evidence (Codex): set when parse_btf_from_bytes was
+    # handed a real, existing .BTF section's bytes but a header/section-
+    # bound/type-table failure meant nothing could be extracted from it at
+    # all -- distinct from has_btf=False on its own, which also (and far
+    # more commonly) means the section was never present in the binary to
+    # begin with. to_dwarf_metadata() maps this to evidence_state="failed"
+    # rather than "not_available", so an explicitly requested extractor
+    # (e.g. --debug-format btf) that failed is distinguishable from one
+    # that had nothing to extract.
+    extraction_failed: bool = False
 
     # TypeMetadataSource protocol
     @property
@@ -168,8 +178,12 @@ class BtfMetadata:
         typedefs are not included in DwarfMetadata. Callers needing full
         BTF data should use BtfMetadata directly.
         """
-        parsed_state = "partial" if self.extraction_partial else "parsed"
-        state = parsed_state if self.has_btf else "not_available"
+        if self.extraction_failed:
+            state = "failed"
+        elif self.has_btf:
+            state = "partial" if self.extraction_partial else "parsed"
+        else:
+            state = "not_available"
         return DwarfMetadata(
             structs=dict(self.structs),
             enums=dict(self.enums),
@@ -659,7 +673,14 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
 
     Returns ``BtfMetadata()`` on any error.  Never raises.
     """
-    empty = BtfMetadata()
+    # P2 review, fresh evidence (Codex): every early return below is
+    # reached only after this function was handed a real section's bytes
+    # (parse_btf_metadata already returns its own, unmarked empty result
+    # for a genuinely absent .BTF section before ever calling this
+    # function) -- a header/section-bound/type-table failure here always
+    # means an existing section could not be parsed, not that there was
+    # nothing to parse. See BtfMetadata.extraction_failed's own docstring.
+    empty = BtfMetadata(extraction_failed=True)
 
     try:
         header = _parse_header(data)

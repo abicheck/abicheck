@@ -147,6 +147,15 @@ class CtfMetadata:
     has_ctf: bool = False
     type_count: int = 0
     extraction_partial: bool = False  # any stage below raised+caught (P2 review)
+    # P2 review, fresh evidence (Codex): mirrors BtfMetadata.
+    # extraction_failed's own docstring -- set when parse_ctf_from_bytes
+    # was handed a real, existing CTF section's bytes but a preamble/
+    # decompression/header/section-bound/type-table failure meant nothing
+    # could be extracted from it at all, distinct from has_ctf=False on its
+    # own (far more commonly: the section was never present to begin
+    # with). to_dwarf_metadata() maps this to evidence_state="failed"
+    # rather than "not_available".
+    extraction_failed: bool = False
 
     # TypeMetadataSource protocol
     @property
@@ -167,8 +176,12 @@ class CtfMetadata:
 
     def to_dwarf_metadata(self) -> DwarfMetadata:
         """Convert to DwarfMetadata for checker compatibility."""
-        parsed_state = "partial" if self.extraction_partial else "parsed"
-        state = parsed_state if self.has_ctf else "not_available"
+        if self.extraction_failed:
+            state = "failed"
+        elif self.has_ctf:
+            state = "partial" if self.extraction_partial else "parsed"
+        else:
+            state = "not_available"
         return DwarfMetadata(
             structs=dict(self.structs),
             enums=dict(self.enums),
@@ -731,7 +744,15 @@ def parse_ctf_from_bytes(data: bytes, pointer_size: int = 8) -> CtfMetadata:
 
     Returns ``CtfMetadata()`` on any error.  Never raises.
     """
-    empty = CtfMetadata()
+    # P2 review, fresh evidence (Codex): every early return below is
+    # reached only after this function was handed a real section's bytes
+    # (parse_ctf_metadata already returns its own, unmarked empty result
+    # for a genuinely absent CTF section before ever calling this
+    # function) -- a preamble/decompression/header/section-bound/type-
+    # table failure here always means an existing section could not be
+    # parsed, not that there was nothing to parse. See CtfMetadata.
+    # extraction_failed's own docstring.
+    empty = CtfMetadata(extraction_failed=True)
 
     # P2 review, fresh evidence (Codex): read only the 4-byte preamble
     # first -- _parse_header()'s own full v3-header-size enforcement must

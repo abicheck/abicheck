@@ -40,6 +40,7 @@ Coverage note:
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
+import bisect
 import collections
 import logging
 import re
@@ -1319,6 +1320,48 @@ def _extract_cfa_reg_from_fde(
         return None
 
 
+def _uncovered_after_range_check(
+    uncovered_funcs: set[int], fde_ranges: list[tuple[int, int]]
+) -> set[int]:
+    """Drop from *uncovered_funcs* every address that falls inside some
+    FDE's own covered address range, not only an address an FDE names
+    exactly via ``initial_location``.
+
+    P2 review, fresh evidence (Codex): a valid assembly library can expose
+    an *alternate entry point* -- a second global symbol placed a few
+    bytes into another function's FDE range (e.g. a fast-path variant
+    sharing its slow-path sibling's unwind info) -- with no FDE of its
+    own. Every instruction at that address is still covered by the
+    enclosing FDE and its CFI state is derivable there, but the exact-
+    match check above (``uncovered_funcs.discard(pc_begin)``) never
+    recognizes it, wrongly reporting a fully-instrumented binary as
+    incomplete.
+
+    Ranges are merged before the sweep so an address correctly resolves
+    even when it falls under a range that isn't the closest-starting one
+    (overlapping FDE ranges are not expected in practice, but merging
+    costs little and removes the assumption entirely).
+    """
+    if not fde_ranges:
+        return uncovered_funcs
+    fde_ranges = sorted(fde_ranges)
+    merged: list[list[int]] = []
+    for start, end in fde_ranges:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    starts = [r[0] for r in merged]
+
+    still_uncovered: set[int] = set()
+    for addr in uncovered_funcs:
+        idx = bisect.bisect_right(starts, addr) - 1
+        if idx >= 0 and merged[idx][0] <= addr < merged[idx][1]:
+            continue  # covered by this FDE's range as an alternate entry point
+        still_uncovered.add(addr)
+    return still_uncovered
+
+
 def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) -> bool:
     """Extract CFA register convention + callee-saved regs for exported functions.
 
@@ -1426,6 +1469,15 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         # already-seen function is skipped rather than silently
         # overwriting it.
         seen_funcs: set[int] = set()
+        # P2 review, fresh evidence (Codex): every FDE's own covered
+        # address range ([initial_location, initial_location+address_range)),
+        # collected alongside the per-FDE loop below so an exported
+        # *alternate entry point* -- a second global symbol placed a few
+        # bytes into another function's FDE range, a real shape in
+        # hand-written assembly libraries -- can be recognized as covered
+        # even though no FDE's own initial_location names it exactly.
+        # Resolved once, after the loop, via _uncovered_after_range_check.
+        fde_ranges: list[tuple[int, int]] = []
         for cfi_src in cfi_sources:
             for entry in cfi_src:
                 try:
@@ -1433,6 +1485,9 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                         continue
                     pc_begin: int = entry["initial_location"]
                     uncovered_funcs.discard(pc_begin)
+                    address_range = entry["address_range"]
+                    if isinstance(address_range, int) and address_range > 0:
+                        fde_ranges.append((pc_begin, pc_begin + address_range))
                     if pc_begin in seen_funcs:
                         continue
                     sym_names = addr_to_syms.get(pc_begin, [])
@@ -1470,10 +1525,15 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                     complete = False
 
         if uncovered_funcs:
+            uncovered_funcs = _uncovered_after_range_check(uncovered_funcs, fde_ranges)
+
+        if uncovered_funcs:
             # At least one exported function symbol's address was never
-            # named by any FDE's own initial_location -- its CFI (and thus
-            # frame-register/callee-saved facts) was never evaluated at
-            # all, not merely skipped on a decode error.
+            # named by any FDE's own initial_location, nor did it fall
+            # inside any FDE's covered address range as an alternate entry
+            # point -- its CFI (and thus frame-register/callee-saved
+            # facts) was never evaluated at all, not merely skipped on a
+            # decode error.
             log.debug(
                 "_parse_frame_registers: %d exported function(s) have no matching FDE",
                 len(uncovered_funcs),

@@ -622,6 +622,46 @@ class TestToDwarfMetadata:
         assert meta.to_dwarf_metadata().evidence_state == "partial"
 
 
+class TestBtfExtractionFailedMapsToFailedState:
+    """P2 review, fresh evidence (Codex): an existing but malformed .BTF
+    section (a real header/section-bound/type-table failure) previously
+    mapped to evidence_state="not_available" through to_dwarf_metadata(),
+    indistinguishable from a binary that never had a .BTF section at all
+    -- so an explicitly requested extractor (--debug-format btf) that
+    failed read back the same as one with nothing to extract. Every early
+    return inside parse_btf_from_bytes now marks extraction_failed."""
+
+    def test_bad_header_marks_failed(self) -> None:
+        meta = parse_btf_from_bytes(b"not a real BTF section")
+        assert meta.has_btf is False
+        assert meta.extraction_failed is True
+        assert meta.to_dwarf_metadata().evidence_state == "failed"
+
+    def test_section_bounds_exceed_data_marks_failed(self) -> None:
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+        data = b.build()
+        # Truncate past the header so the declared type/str section
+        # bounds exceed the actual (now-shorter) data.
+        truncated = data[:16]
+        meta = parse_btf_from_bytes(truncated)
+        assert meta.has_btf is False
+        assert meta.extraction_failed is True
+        assert meta.to_dwarf_metadata().evidence_state == "failed"
+
+    def test_genuinely_absent_section_stays_not_available(self) -> None:
+        """Positive control: a binary with no .BTF section at all (the far
+        more common has_btf=False shape) must not be conflated with a
+        failed parse -- extraction_failed stays False, and the mapped
+        state stays "not_available", not "failed"."""
+        meta = BtfMetadata()  # the same empty result parse_btf_metadata
+        # returns for `raw is None`, never routed through
+        # parse_btf_from_bytes at all.
+        assert meta.extraction_failed is False
+        assert meta.to_dwarf_metadata().evidence_state == "not_available"
+
+
 class TestBtfStringTableSentinel:
     """P2 review, fresh evidence (Codex): offset 0 in the BTF string
     section is reserved by include/uapi/linux/btf.h -- it must always be
