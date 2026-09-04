@@ -50,10 +50,17 @@ from typing import Any
 import click
 
 
-def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
+def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = False) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
     OLD_INPUT has no channel to honor. See this module's own docstring for
-    the design."""
+    the design.
+
+    *new_is_stored* (CLI cleanup phase two, PR I), when true, means
+    NEW_INPUT classified as a stored BundleFacts document too -- every
+    check below still applies (neither stored side has any of these
+    channels), plus the NEW-side-specific extraction options rejected at
+    the bottom of this function, which only make sense when NEW_INPUT is a
+    *live* directory/package (the default, ``False``, unchanged)."""
     fmt = kwargs.get("fmt", "json")
     if fmt not in ("json", "markdown"):
         raise click.UsageError(
@@ -486,6 +493,20 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             "a stored-bundle-facts OLD_INPUT: OLD_FACTS is already a resolved, stored "
             "snapshot with no header re-extraction available."
         )
+    if kwargs.get("old_version") not in (None, "", "old"):
+        # Codex review, fresh evidence: neither compare_release_against_
+        # bundle_facts() nor compare_stored_bundle_facts_pair() has an
+        # old_version parameter at all -- OLD_INPUT is always a stored,
+        # already-resolved document in this dispatcher (regardless of
+        # whether NEW_INPUT is too), and its per-library snapshots already
+        # carry whatever version they were captured with, so a requested
+        # --version old=... was silently discarded rather than applied or
+        # rejected, on either side of this shape.
+        raise click.UsageError(
+            "--version old=... is not supported together with "
+            "a stored-bundle-facts OLD_INPUT: OLD_FACTS's own per-library "
+            "snapshots already carry whatever version they were captured with."
+        )
     if kwargs.get("demangle") is not None:
         # Codex review, fresh evidence: --demangle/--no-demangle is
         # documented to apply to markdown output, but this dispatcher's
@@ -504,3 +525,269 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             "--demangle/--no-demangle is not supported together with "
             "a stored-bundle-facts OLD_INPUT."
         )
+    if new_is_stored:
+        _reject_new_side_extraction_options_for_stored_pair(kwargs)
+
+
+def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) -> None:
+    """PR I stored/stored: the NEW-side-scoped mirror of every OLD-side
+    extraction-only rejection above, applied once NEW_INPUT classifies as a
+    stored BundleFacts document too -- ``compare_stored_bundle_facts_pair()``
+    reads no binaries and parses no header AST on *either* side, so every
+    flag that would only ever apply to a *live* NEW_INPUT directory/package
+    has no channel to honor here either, the identical reasoning the
+    OLD-side checks above already establish for OLD_INPUT."""
+    if (
+        kwargs.get("new_headers_only")
+        or kwargs.get("new_includes_only")
+        or kwargs.get("headers")
+        or kwargs.get("includes")
+    ):
+        raise click.UsageError(
+            "--header new=.../--include new=... (or the uniform --header/"
+            "--include) are not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: neither side has "
+            "any header re-extraction available."
+        )
+    if kwargs.get("new_header_backend") is not None or kwargs.get("header_backend") not in (
+        None,
+        "auto",
+    ):
+        # `header_backend` (the uniform/base value) defaults to the literal
+        # string "auto", never None (cli_options._split_sided_frontend) --
+        # unlike `old_header_backend`/`new_header_backend`, which really do
+        # default to None. Checking `is not None` here would reject every
+        # ordinary invocation, since the untouched default is always
+        # present; only a value that actually differs from that silent
+        # default means the flag was really given.
+        raise click.UsageError(
+            "--ast-frontend is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: neither side has "
+            "any header re-extraction available."
+        )
+    if kwargs.get("devel_pkg2") is not None:
+        raise click.UsageError(
+            "--devel-pkg new=... is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: there is no live "
+            "NEW-side package to extract a devel companion package's "
+            "headers into."
+        )
+    if kwargs.get("bundle_facts_library_manifest") is not None:
+        raise click.UsageError(
+            "--bundle-facts-library-manifest is not supported when both "
+            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
+            "there is no live NEW-side library set to apply per-library "
+            "header/include/compile overrides to."
+        )
+    if kwargs.get("include_private_dso"):
+        raise click.UsageError(
+            "--include-private-dso is not supported when both OLD_INPUT "
+            "and NEW_INPUT are stored BundleFacts documents: neither side "
+            "discovers shared libraries from a live directory/package."
+        )
+    if kwargs.get("dso_only"):
+        # Codex review, PR #1060, round 7: the live release fan-out
+        # (cli_compare_release.py's _prepare_compare_release_inputs)
+        # explicitly filters both old/new library maps to skip executables
+        # for this flag -- a persisted BundleFacts document carries no
+        # per-library "was this an executable, not a real .so" fact at all
+        # (capture_bundle_facts() only ever stores what
+        # bundle_snapshot_from_facts() can reconstruct from an AbiSnapshot),
+        # so there is no channel to apply the same selection here. Reject
+        # rather than silently compare every intersecting entry including
+        # ones a live --dso-only run would have skipped.
+        raise click.UsageError(
+            "--dso-only is not supported when both OLD_INPUT and NEW_INPUT "
+            "are stored BundleFacts documents: a persisted document carries "
+            "no per-library executable/library distinction to filter by."
+        )
+    if kwargs.get("keep_extracted"):
+        raise click.UsageError(
+            "--keep-extracted is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: neither side is "
+            "ever extracted to a temporary directory."
+        )
+    if kwargs.get("new_version") not in (None, "", "new"):
+        raise click.UsageError(
+            "--version new=... is not supported when both OLD_INPUT and "
+            "NEW_INPUT are stored BundleFacts documents: NEW_INPUT's own "
+            "per-library snapshots already carry whatever version they "
+            "were captured with."
+        )
+    if kwargs.get("include_dependencies"):
+        raise click.UsageError(
+            "--include-system-declarations is not supported when both "
+            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
+            "there is no live NEW-side resolution for it to scope."
+        )
+    # --depth binary/headers are genuinely supported for stored/stored
+    # (Codex review, PR #1060, fresh evidence): compare_stored_bundle_
+    # facts_pair() enforces the requested depth as a floor
+    # (enforce_requested_depth) and then projects both sides via policy.
+    # depth_projection.project_snapshot_to_depth() as a ceiling before
+    # diffing, the same primitives every other resolved-snapshot
+    # comparison path in this codebase already pairs -- an earlier version
+    # of this check rejected --depth binary outright on the mistaken
+    # premise that no such projection primitive existed. --depth build/
+    # source are still rejected, unconditionally, above: this driver has
+    # no channel to *collect* L3-L5 evidence on either side, only to
+    # enforce and project already-resolved evidence.
+    # Codex review, fresh evidence: compare_cmd builds a real CompileContext
+    # from these before calling dispatch() (resolve_compile_context), but
+    # this stored/stored branch never consumes compile_context at all --
+    # neither side does any header-frontend extraction, so every one of
+    # these was silently accepted and discarded rather than applied or
+    # rejected.
+    if (
+        kwargs.get("compiler_path") is not None
+        or kwargs.get("compiler_prefix") is not None
+        or kwargs.get("compiler_option_tokens")
+        or kwargs.get("sysroot") is not None
+        or kwargs.get("nostdinc")
+        or kwargs.get("frontend_context") not in (None, "host")
+    ):
+        raise click.UsageError(
+            "--compiler/--compiler-prefix/--compiler-option/--sysroot/"
+            "--nostdinc/--frontend-context are not supported when both "
+            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
+            "neither side runs any header-frontend extraction for a compile "
+            "context to configure."
+        )
+    if kwargs.get("lang_explicit"):
+        raise click.UsageError(
+            "--lang is not supported when both OLD_INPUT and NEW_INPUT are "
+            "stored BundleFacts documents: neither side's language is "
+            "re-detected or re-parsed from headers, so there is nothing "
+            "left for it to select."
+        )
+
+
+def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
+    """Raise ``click.UsageError`` when *config_path* -- an *explicitly*
+    given ``--config`` (Click parameter-source COMMANDLINE, checked by the
+    caller, ``compare_bundle_facts.resolve_dispatch_compile_context``)
+    -- declares real ``compile:`` settings that a stored/stored comparison
+    has no channel to honor (Codex review, PR #1060). An *ambient*,
+    auto-discovered ``.abicheck.yml`` is deliberately not checked this way
+    at all -- see that function's own docstring for why the two cases
+    differ: an explicit ``--config`` is a request the user expects
+    honored, while an ambient one silently applying nothing is exactly the
+    point of not letting an unrelated project default break a stored/
+    stored comparison. Lives here rather than in ``compare_bundle_facts.py``
+    purely to keep that file under its own architecture line cap -- this
+    module already owns every other stored/stored-specific rejection."""
+    from ....workflows.extraction import load_build_config
+
+    try:
+        bc = load_build_config(Path(config_path))
+    except ValueError as exc:
+        raise click.UsageError(f"cannot parse build config {config_path}: {exc}") from exc
+    if (
+        bc.compile_frontend is not None
+        or bc.compile_std is not None
+        or bc.compile_include_dirs
+        or bc.compile_defines
+        or bc.compile_sysroot is not None
+        or bc.compile_nostdinc is not None
+    ):
+        raise click.UsageError(
+            f"{config_path} declares compile: settings, which are not "
+            "supported when both OLD_INPUT and NEW_INPUT are stored "
+            "BundleFacts documents: neither side runs any header-frontend "
+            "extraction for them to configure. Omit --config to let an "
+            "ambient project config, if any, stay harmlessly unused here "
+            "instead, or use a --config that declares no compile: block."
+        )
+
+
+#: (Click parameter dest, CLI flag) pairs for the expose_value=False
+#: AST-override flags reject_ast_override_flags_for_stored_pair() checks --
+#: shared so the two never drift, since neither name is derivable from the
+#: other mechanically (Click's default dest derivation is one-way).
+_AST_OVERRIDE_FLAGS: tuple[tuple[str, str], ...] = (
+    ("allow_ast_frontend_fallback", "--allow-ast-frontend-fallback"),
+    ("allow_unsupported_castxml", "--allow-unsupported-castxml"),
+)
+
+
+def reject_ast_override_flags_for_stored_pair(ctx: click.Context) -> None:
+    """Raise ``click.UsageError`` for an explicitly-given
+    ``--allow-ast-frontend-fallback``/``--allow-unsupported-castxml`` on a
+    stored/stored comparison (Codex review, PR #1060, round 11).
+
+    Both flags are ``expose_value=False`` (``cli_options.
+    _scoped_env_flag_callback`` sets a scoped env var as a side effect and
+    never adds a ``kwargs`` entry at all), so ``reject_unsupported_
+    options()`` -- which reads only ``kwargs`` -- can never see either flag
+    to reject it: neither side of a stored/stored comparison runs any
+    header-frontend AST extraction for either flag to affect, so both were
+    silently accepted and had no effect. ``ctx.get_parameter_source()``
+    still answers ``COMMANDLINE`` for an ``expose_value=False`` option --
+    Click records the source at parse time regardless of exposure -- so
+    this checks the one place that survives instead of ``kwargs``."""
+    for dest, flag in _AST_OVERRIDE_FLAGS:
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError(
+                f"{flag} is not supported when both OLD_INPUT and NEW_INPUT "
+                "are stored BundleFacts documents: neither side runs any "
+                "header-frontend AST extraction for it to affect."
+            )
+
+
+def exit_bundle_facts_not_comparable(
+    exc: Exception, *, fmt: str = "markdown", output: Path | None = None
+) -> None:
+    """Translate a ``ProfileMismatchError``/``ScopeMismatchError`` raised
+    from inside a per-library ``compare_snapshots()`` call into a clean CLI
+    failure, exit 16 -- the same code native ``compare``'s own ADR-050 D2
+    comparability gate uses (``frontends.cli.runtime._EXIT_NOT_COMPARABLE``),
+    rather than the generic exit-1 ``click.ClickException`` translation the
+    sibling ``except (SnapshotError, TypeError, ValueError, OSError)``
+    clause gives every other malformed-input case (Codex review, PR #1060,
+    round 12). Neither exception type is a ``ValueError``/``TypeError``/
+    ``SnapshotError`` (both are plain ``AbicheckError``), so it previously
+    reached neither clause and surfaced as a raw traceback instead. Shared
+    by both the stored/stored and stored/live dispatch branches, which both
+    diff each matched library through the identical ``compare_snapshots()``
+    chokepoint.
+
+    *fmt*/*output* (Codex review, PR #1060, round 14), when ``fmt ==
+    "json"``, get a machine-readable refusal document written the same way
+    an ordinary successful comparison's JSON would be (``-o`` or stdout) --
+    a stored-pair refusal must be consumable by the same scripts/report
+    aggregator native compare's own ``_report_not_comparable`` JSON output
+    already is; silently leaving the requested report file unwritten (the
+    prior stderr-only behavior) was itself a gap this round found. The
+    envelope mirrors this dispatcher's own ordinary ``mode: "bundle_facts"``
+    shape rather than native compare's schema-versioned ``compare_report.
+    schema.json`` document -- the two were never the same schema even for a
+    successful comparison here, so inventing schema conformance only for
+    the refusal case would be a new, undocumented contract, not a fix.
+    Every other format (``markdown``/``html``/``review``, and the default)
+    gets only the stderr message, matching native compare's own identical
+    "no equivalent document convention" choice for those formats."""
+    import sys
+
+    from ....errors import ProfileMismatchError
+
+    kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+    click.echo(
+        f"Error: not comparable: {exc}\n"
+        "Two matched libraries were not extracted under a comparable "
+        "profile/scope contract (ADR-050 D1/D2), so no verdict was "
+        "produced for this bundle.",
+        err=True,
+    )
+    if fmt == "json":
+        import json as _json
+
+        from ....frontends.cli.runtime import _write_or_echo
+
+        document = {
+            "mode": "bundle_facts",
+            "verdict": None,
+            "not_comparable": True,
+            "reason": {"kind": kind, "message": str(exc)},
+        }
+        _write_or_echo(output, _json.dumps(document, indent=2))
+    sys.exit(16)

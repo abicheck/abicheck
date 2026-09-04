@@ -220,6 +220,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     from .storage.bundle_facts_validation import (
         validated_alias_map,
         validated_filename_map,
+        validated_variant_fingerprint,
     )
 
     schema_version = int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION))
@@ -319,7 +320,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     raw_manifest = d.get("manifest")
     return BundleFacts(
         schema_version=schema_version,
-        variant_fingerprint=str(
+        variant_fingerprint=validated_variant_fingerprint(
             d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
         ),
         per_library_snapshots={
