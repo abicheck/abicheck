@@ -34,6 +34,7 @@ import pytest
 from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_compare_operand import (
+    SMALL_MARKER_SCAN_BYTES,
     BundleCompareRequest,
     classify_bundle_compare_operands,
     looks_like_stored_bundle_facts,
@@ -604,6 +605,27 @@ class TestLooksLikeStoredBundleFacts:
             assert value == py_value
         else:
             assert value != value  # NaN's own reflexive inequality
+        assert looks_like_stored_bundle_facts(p) is True
+
+    def test_all_whitespace_small_probe_is_inconclusive_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 19): a real, valid JSON document
+        may legally carry enough leading whitespace to fill the entire
+        small-probe window (SMALL_MARKER_SCAN_BYTES) before its root ``{``
+        even appears -- json.loads() (and load_bundle_facts()) accepts
+        this without complaint. root_level_artifact_type() used to treat
+        an all-whitespace stripped prefix the same as a real non-
+        whitespace byte that isn't ``{`` -- a definitive "not an object"
+        -- so the classifier never escalated to the larger probe and
+        misclassified this document as not stored. It must now read as
+        inconclusive at the small probe and correctly classify as stored
+        once the larger probe runs."""
+        payload = (" " * (SMALL_MARKER_SCAN_BYTES + 1000)) + _MARKER_JSON
+        p = tmp_path / "leading_whitespace.json"
+        p.write_text(payload)
+        # Premise check: this is still a real, valid BundleFacts document.
+        assert json.loads(payload)["artifact_type"] == "abicheck.bundle-facts"
         assert looks_like_stored_bundle_facts(p) is True
 
     def test_gzip_fextra_forging_a_zip_eocd_is_still_stored(

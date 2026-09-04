@@ -398,6 +398,25 @@ other half of why an escape hatch was not added back in a different shape).
    Answered by adding ``NaN``/``-?Infinity`` as their own token
    alternatives alongside ``true``/``false``/``null``.
 
+21. **An all-whitespace small probe was scored as a definitive rejection
+   instead of inconclusive (Codex review, round 19, fresh evidence).**
+   :func:`root_level_artifact_type` stripped the probe's leading JSON
+   whitespace and, whenever what remained didn't start with ``{``, returned
+   ``(None, True)`` -- "definitively not an object, no larger probe would
+   help." That conflated two different cases: a real non-whitespace byte
+   that isn't ``{`` (genuinely definitive -- that byte's position doesn't
+   move with a larger prefix) and the *entire* prefix being whitespace
+   (genuinely unknown -- a real, valid document can legally carry enough
+   leading whitespace to fill a whole small-probe window before its root
+   ``{`` even appears, exactly what :func:`~abicheck.serialization.
+   load_bundle_facts` still accepts). The second case was scored the same
+   as the first, so :func:`looks_like_stored_bundle_facts` never escalated
+   to the larger probe and misclassified a genuinely stored document as
+   not stored. Answered by checking for an entirely-empty stripped prefix
+   first and returning ``(None, False)`` (inconclusive) for it, leaving the
+   original non-whitespace-byte check -- now genuinely definitive on its
+   own -- as the sole ``(None, True)`` path.
+
 **Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
 stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd
 skippable frame) can embed not just a forged central-directory record

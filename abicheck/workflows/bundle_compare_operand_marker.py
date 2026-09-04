@@ -261,9 +261,20 @@ def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
     earlier string occurrence would disagree with ``json.loads()`` itself.
     """
     stripped = prefix.lstrip(b" \t\r\n")
+    if not stripped:
+        # The entire prefix was JSON whitespace -- genuinely inconclusive,
+        # not "not an object" (Codex review, round 19, fresh evidence): a
+        # real, valid document can legally carry enough leading whitespace
+        # to fill an entire probe window before its root `{` even appears,
+        # and this scan has no evidence either way about what follows. The
+        # non-whitespace-prefix case just below is the one that's actually
+        # definitive -- a real byte was seen and it wasn't `{`.
+        return None, False
     if not stripped.startswith(b"{"):
-        # Not even the shape of a JSON object -- no amount of additional
-        # decoded content changes that.
+        # A real, non-whitespace byte was seen and it isn't `{` -- not even
+        # the shape of a JSON object, and that byte's position doesn't move
+        # with a larger prefix, so no amount of additional decoded content
+        # changes this answer.
         return None, True
     depth = 0
     just_saw_colon = False
