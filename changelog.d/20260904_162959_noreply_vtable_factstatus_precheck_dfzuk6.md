@@ -2,20 +2,20 @@
 A new changelog fragment. See changelog.d/README.md for the workflow.
 -->
 
-### Documentation
+### Fixed
 
-- **`TYPE_VTABLE_CHANGED` evidence-gating cluster: `FactStatus` pre-check
-  formally investigated and declined.** ADR-063 Track 4's 5B closure
-  re-examined whether consolidating the shared vtable-evidence predicate
-  into `abicheck/compare/vtable_evidence.py` changed the safety of adding
-  a direct `vtable_fact.status` check to `diff_types_vtable.py`'s
-  `TYPE_VTABLE_CHANGED` cluster — it does not, since DWARF still reports a
-  per-TU capture gap as genuinely `PRESENT`. A narrower `NOT_COLLECTED`/
-  `FAILED`-only check was also investigated and declined: it would
-  short-circuit two evidence streams independent of `vtable_fact`'s own
-  status. No behavior change; the full reasoning is recorded once,
-  canonically, in `diff_types_vtable.py`'s own module docstring, with
-  short pointers from `compare/vtable_evidence.py`, the plan, and the
-  status ledger, and a new regression test
-  (`tests/test_vtable_evidence_guard.py::TestExplicitFactStatusWouldNotSafelyGateThisGuard`)
-  proving the fallback streams still fire.
+- **`TYPE_VTABLE_CHANGED` no longer fabricates a vtable-removed finding
+  when comparing against a PDB-derived snapshot.** PDB's real extractor
+  never captures vtable data for any record, which previously let an
+  unrelated `size_bits` delta (or a cross-format Itanium-vs-MSVC
+  mangling mismatch) drive a fabricated `TYPE_VTABLE_CHANGED` BREAKING
+  finding reporting the PDB side's vtable as confirmed-empty rather than
+  simply unknown. `compare.vtable_evidence.vtable_transition_is_evidenced`
+  (shared by `diff_types_vtable.py`'s `TYPE_VTABLE_CHANGED` detector and
+  `diff_cxx_rules.virtual_method_addition`) now declines outright whenever
+  either side's `vtable_fact` is not `PRESENT`/`PARTIAL`, before either
+  fallback evidence stream runs. This is disjoint from, and does not
+  change, the existing DWARF per-TU capture-gap heuristic (`Fact.
+  present([])` on that path stays `PRESENT`, so it never trips the new
+  check) — the fix is scoped to backends that never capture vtable data
+  at all, which today is only PDB.

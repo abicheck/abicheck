@@ -101,65 +101,89 @@ virtual-base list on both sides) no longer leaves *both* detectors silently
 declining -- ``virtual_method_addition`` now falls through to its own
 signature-based override check instead.
 
-**ADR-063 Track 4, 5B final closure (this revision): re-examined and
-declined, not merely re-stated.** The consolidation above removed the
-*import-cycle* constraint that previously blocked ``virtual_method_
-addition`` from consulting this cluster's real verdict -- and that
-constraint, now resolved, was never what stood between this cluster and a
-direct ``FactStatus`` pre-check in the first place. Re-checked from
-scratch rather than assumed: the consolidation changes nothing about what
-DWARF's own per-TU extraction can observe, so the false positive this
-guard exists to suppress -- ``Fact.present([])``, genuinely ``PRESENT``,
-for a class whose virtual methods live in a translation unit only the
-*other* side's debug info covers -- is exactly as unable to be
-distinguished from a genuinely non-polymorphic class via ``vtable_fact.
-status`` alone as it was before this module existed. Nothing about moving
-the predicate's location changes what evidence its own inputs carry.
+**ADR-063 Track 4, 5B final closure (this revision): re-examined, and a
+real, narrow ``FactStatus`` check landed -- not a pure decline.** The
+consolidation above removed the *import-cycle* constraint that previously
+blocked ``virtual_method_addition`` from consulting this cluster's real
+verdict -- and that constraint, now resolved, was never what stood
+between this cluster and a direct ``FactStatus`` pre-check in the first
+place. Re-checked from scratch rather than assumed: the consolidation
+changes nothing about what DWARF's own per-TU extraction can observe, so
+the false positive this guard exists to suppress -- ``Fact.present([])``,
+genuinely ``PRESENT``, for a class whose virtual methods live in a
+translation unit only the *other* side's debug info covers -- remains
+exactly as unable to be distinguished from a genuinely non-polymorphic
+class via ``vtable_fact.status`` alone as it was before this module
+existed. That half of the investigation stands: this guard's DWARF-gap
+heuristic is unchanged, and still does not consult ``vtable_fact.status``
+for that reason.
 
-The narrower case the previous revision of this docstring left open --
-gating specifically on ``vtable_fact.status`` being ``NOT_COLLECTED``/
-``FAILED`` (as opposed to conflating it with a confirmed-``PRESENT([])``
-empty read) -- was investigated on its own merits and is also declined,
-for a different reason than the disjoint-case argument above:
+The narrower question -- gating specifically on ``vtable_fact.status``
+being ``NOT_COLLECTED``/``FAILED``/otherwise-not-``is_present`` (as
+opposed to conflating it with a confirmed-``PRESENT([])`` empty read) --
+was investigated twice on this PR, with a materially different outcome
+the second time. The first pass concluded declined-as-redundant-or-unsafe,
+reasoning that ``resolved_fact_value``'s existing collapse already
+excludes a non-present side from the "both sides captured something"
+branch (making a direct check redundant there), and that using the status
+to short-circuit the two fallback evidence streams (owned virtual
+functions, ``size_bits``/``virtual_bases_fact``) would be unsafe if either
+stream ever legitimately fires for a real, non-present-status side. Codex
+review supplied the fact that first pass was missing: ``pdb_model.py``'s
+``_record_from_layout`` -- the real PDB extractor, not a hand-built test
+fixture -- never sets ``vtable``/``vtable_fact`` at all for any record,
+which the ``RecordType.__post_init__`` bridge (``model/fact.py``'s
+``bridge_legacy_and_fact``) resolves to ``Fact.not_collected()``
+unconditionally, for *every* PDB-derived record, entirely independent of
+``AbiSnapshot.clang_vtable_facts_reliable`` (a clang/castxml-only
+concept the PDB path never touches). Traced further: this makes the
+"redundant or unsafe" framing wrong, not just incomplete --
+``resolved_fact_value``'s reading of a real serialized ``NOT_COLLECTED``
+fact for a fresh (post-v26) snapshot is exactly the collapse the redundancy
+argument described, but the fallback streams are NOT merely theoretically
+independent of ``vtable_fact.status`` -- in a cross-backend comparison
+against a PDB side, they can and do fire on that same status, and
+following them produces a *reachable, confirmed* fabricated
+``TYPE_VTABLE_CHANGED`` (an apparent vtable removal) driven by nothing
+but an unrelated size delta or a mangling-scheme artifact of comparing
+Itanium-mangled and MSVC-mangled function maps. Since PDB is also the
+*only* current producer of a non-``is_present`` ``vtable_fact`` at all --
+DWARF and both header-AST backends (castxml, clang) always construct this
+field explicitly as ``Fact.present(...)``/``Fact.partial(...)``, never
+omitted, confirmed by direct inspection of every real ``RecordType(...)``
+construction site in ``dwarf_snapshot.py``, ``extract/headers/castxml/
+records.py``, and ``extract/headers/clang/records.py`` -- a decline gated
+on ``not is_present`` cannot affect any comparison among those backends:
+their own legitimate use of the fallback streams is never reached by it,
+because they never carry a non-present status to trigger it.
 
-* The one branch such a check *could* replace -- ``vtable_transition_
-  is_evidenced``'s own "both sides captured something" affirmative --
-  already can't fire when either side is ``NOT_COLLECTED``/``FAILED``:
-  ``resolved_fact_value`` collapses both statuses to the same falsy
-  default a confirmed-empty ``PRESENT([])`` reads as, so the truthiness
-  check already excludes them. A direct status read there would be
-  redundant, not a new capability.
-* Where it would NOT be redundant is short-circuiting *before* the two
-  fallback evidence streams run -- the class's own retained virtual
-  functions (``snapshot.functions``) and the ``size_bits``/
-  ``virtual_bases_fact`` layout check. Both are independent projections of
-  the debug info that carry no relationship to ``vtable_fact``'s own
-  status: a producer failure recorded against ``vtable_fact``
-  specifically says nothing about whether ``size_bits`` was captured, or
-  whether the class's own virtual methods still resolve. Using
-  ``vtable_fact.status`` to skip those checks would silence a real,
-  independently-evidenced finding purely because an unrelated field on the
-  same record carries a decline-worthy status -- trading this guard's
-  fabrication guard for exactly the under-detection lever the plan's own
-  5B "Known gap surfaced by review" note already names for this
-  sub-phase (a decline-rather-than-fabricate gate silencing the *sole*
-  signal for its break class). ``tests/test_vtable_evidence_guard.py``'s
-  ``TestExplicitFactStatusWouldNotSafelyGateThisGuard`` is the executable
-  form of this argument: an explicit ``NOT_COLLECTED``/``FAILED``
-  ``vtable_fact`` still lets the owned-virtual-function and size-delta
-  streams fire, and demonstrates the "both sides populated" branch is
-  already unreachable for either status, matching the redundancy claim
-  above rather than merely asserting it.
+That combination -- a check that only ever fires for a backend
+(structurally, unconditionally) incapable of contributing real vtable
+evidence, and never for a backend that can -- is exactly the shape a safe
+direct ``FactStatus`` check needs, and it lands here:
+``compare.vtable_evidence.vtable_transition_is_evidenced`` now declines
+outright (``False``) whenever either side's ``vtable_fact`` is not
+``is_present`` (``PRESENT``/``PARTIAL``), before either fallback stream
+runs. This is disjoint from, and does not touch, the DWARF per-TU
+ambiguity above: DWARF's own capture gap always reads ``PRESENT``, so it
+never trips this new check either way -- the guard's original heuristic
+still carries that case, unchanged. ``tests/test_vtable_evidence_guard.py``'s
+``TestExplicitFactStatusWouldNotSafelyGateThisGuard`` class, which the
+first pass wrote to prove the (then-believed) unsafe direction, was
+rewritten once this landed to instead pin the new, correct contract: an
+explicit ``NOT_COLLECTED``/``FAILED`` ``vtable_fact`` now declines
+regardless of what the fallback streams would otherwise say, on both
+sides and in both directions.
 
 This closes ADR-063 Phase 5B's own removal gate for the ``vtable`` field
-family as a formal, investigated decline -- the same disposition 2B's
-`entity:` alias promotion and 6B's own undone cohort items received, per
+family as a landed, narrowly-scoped fix -- not a decline -- per
 ``docs/contribute/plans/one-semantic-pipeline.md``'s 5B section and
-``docs/_meta/one-semantic-pipeline-status.yaml``'s ``facts`` concept.
-Reopening this needs evidence this predicate's inputs do not carry today
-(a per-finding provider record naming which translation unit each side's
-debug info actually covered, or a polymorphism walk over both base
-chains) -- not a different way of reading the fields already here.
+``docs/_meta/one-semantic-pipeline-status.yaml``'s ``facts`` concept. What
+remains open, unchanged from before this closure: the DWARF per-TU
+ambiguity itself, which needs evidence this predicate's inputs do not
+carry today (a per-finding provider record naming which translation unit
+each side's debug info actually covered, or a polymorphism walk over both
+base chains) -- not a different way of reading the fields already here.
 """
 
 from __future__ import annotations
@@ -449,32 +473,21 @@ def _diff_type_vtable(
         # _vtable_transition_is_evidenced for the same discipline applied to
         # a different (genuinely ambiguous, rather than known-wrong) cause.
         #
-        # This early return also carries a load-bearing side effect for the
-        # `old_value`/`new_value` strings built below (Codex review, Track 4
-        # 5B closure): they come from `resolved_fact_value(...,  [])`, which
-        # cannot distinguish "confirmed empty" from "not collected" any more
-        # than `_vtable_transition_is_evidenced` can. A `vtable_fact.status`
-        # of NOT_COLLECTED reaching that construction would render as an
-        # empty vtable rather than an unknown one -- but today it never can:
-        # `storage/fact_backfill.apply_case_a_fact_backfill` is the only
-        # producer of `Fact.not_collected()` for this field, gated on the
-        # identical `clang_vtable_facts_reliable` flag this function's own
-        # `vtable_facts_reliable` parameter is ANDed from
-        # (`diff_types.py`/`diff_symbols.py`), so a NOT_COLLECTED status on
-        # either side always makes this whole-snapshot flag False first and
-        # this function returns above before `old_value`/`new_value` are
-        # ever built. No producer sets `Fact.failed(...)` for this field at
-        # all. This coupling is verified, not assumed -- but it is a
-        # cross-module coincidence, not a structural guarantee: a future
-        # producer setting NOT_COLLECTED/FAILED here for a *different*
-        # reason (not tied to `clang_vtable_facts_reliable`) would
-        # reintroduce exactly this fabrication risk, unguarded. See the
-        # plan's own 5B "Known gap surfaced by review" note (Track 4 entry)
-        # for the full account; `tests/test_vtable_evidence_guard.py`
-        # exercises `_vtable_transition_is_evidenced` directly (bypassing
-        # this early return) specifically to test that function's own
-        # contract in isolation, which is why its fixtures can reach a
-        # combination this real call path cannot.
+        # `old_value`/`new_value` below are built from `resolved_fact_value
+        # (...,  [])`, which on its own cannot distinguish "confirmed empty"
+        # from "not collected" -- so a NOT_COLLECTED status reaching that
+        # construction would render as an empty vtable rather than an
+        # unknown one. This early return catches that for the
+        # clang-legacy-unreliable case specifically; the general case (any
+        # side whose `vtable_fact` is not PRESENT/PARTIAL -- PDB's own
+        # `vtable_fact`, always NOT_COLLECTED on every record, being the
+        # one real producer today) is caught structurally, earlier, by
+        # `_vtable_transition_is_evidenced` itself (ADR-063 Track 4, 5B
+        # final closure -- see this module's own docstring and `compare/
+        # vtable_evidence.py`'s), so this function never reaches `old_value`/
+        # `new_value` construction for that case either, by the same
+        # discipline this early return already applies for the
+        # clang-legacy-unreliable one.
         return []
     if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
         return []

@@ -100,17 +100,23 @@ concepts:
       (_vtable_transition_is_evidenced/
       _vtable_transition_rests_on_unresolved_evidence, since moved to
       compare/vtable_evidence.vtable_transition_is_evidenced) — is closed
-      as a formal, investigated decline (Track 4, 2026-09-04), not left
-      open. Full reasoning lives once, canonically, in
+      with a landed, narrowly-scoped FactStatus fix (Track 4, 2026-09-04),
+      not a decline. Full reasoning lives once, canonically, in
       diff_types_vtable.py's own module docstring ("Track 4, 5B final
-      closure" section) and is not repeated here: in short, neither the
-      shared-predicate consolidation (a separate, already-merged PR) nor a
-      narrower NOT_COLLECTED/FAILED-only check changes the safety
-      analysis, since DWARF's own per-TU capture gap is structurally
-      invisible to FactStatus either way, and the narrower check would
-      trade the guard's fabrication protection for a real under-detection
-      lever. Proven via tests/test_vtable_evidence_guard.py::
-      TestExplicitFactStatusWouldNotSafelyGateThisGuard. This closes the
+      closure" section) and is not repeated here: in short, the DWARF
+      per-TU capture gap remains structurally invisible to FactStatus
+      either way (unchanged, still handled by the guard's original
+      heuristic), but a narrower "either side not is_present" check was
+      found — via Codex review, not assumed — to be both safe and
+      necessary: pdb_model.py's real PDB extractor never captures vtable
+      data at all, unconditionally NOT_COLLECTED on every record,
+      independent of clang_vtable_facts_reliable, and following either
+      fallback evidence stream for that status fabricated a real,
+      reachable TYPE_VTABLE_CHANGED finding. vtable_transition_is_evidenced
+      now declines outright on that status before either stream runs, safe
+      because DWARF/both header-AST backends never produce a non-present
+      vtable_fact. Proven via tests/test_vtable_evidence_guard.py::
+      TestNonPresentVtableFactIsDeclinedOutright. This closes the
       removal gate for every one of the five originally-named fields
       (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
       separately tracked: seven case-(a) fields (default, the five
