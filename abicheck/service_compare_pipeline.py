@@ -67,8 +67,9 @@ from .policy.depth_projection import (
     project_snapshot_to_depth,
 )
 from .workflows.artifact.execute import (
+    _resolve_side_snapshot_impl,
     enforce_requested_depth,
-    resolve_side_snapshot,
+    side_effective_compile_context,
 )
 
 if TYPE_CHECKING:
@@ -76,6 +77,7 @@ if TYPE_CHECKING:
 
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.artifact.execute import SideResolution
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
@@ -102,19 +104,20 @@ class ResolvedComparePair:
     :class:`~abicheck.service_compare_evidence.SideEvidence` (whose
     ``collect_mode`` drives the embedded build-source diff).
 
-    ``resolved_execution_context`` (One Semantic Pipeline PR 1, sub-phase 4B):
-    the :class:`~abicheck.workflows.resolved_execution_context.
+    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase
+    4B): the :class:`~abicheck.workflows.resolved_execution_context.
     ResolvedExecutionContext` built from this same request's own, otherwise-
     discarded :class:`~abicheck.workflows.plan.AnalysisPlan`
     (:func:`resolve_compare_request` already calls ``AnalysisPlanner.resolve``
-    for its pre-flight check — not a second resolution). Optional and
-    additive — no existing consumer reads it yet, closing 4B's own "no live
-    caller wired" gap for ``compare``. Carries no ``evaluation_config``/
-    ``compile_contexts`` yet: those resolve one layer up
+    for its pre-flight check — not a second resolution), plus each side's
+    resolved :class:`~abicheck.compile_context.CompileContext` when
+    :func:`~abicheck.workflows.artifact.execute.side_effective_compile_context`
+    judges it safe to record. Optional — :func:`classify_compare_pair` reads
+    its ``requested_depth`` when present, falling back to ``request.depth``
+    otherwise (see that function's own comment). Still carries no
+    ``evaluation_config``: that resolves one layer up
     (``cli_compare_receipt.py``, past a Click context this shared pipeline
-    lacks) and out of :func:`~abicheck.service_input_resolution.
-    resolve_side_snapshot`'s own internals, respectively — attaching either
-    later is follow-on work this field does not block.
+    lacks) — attaching it later is follow-on work this field does not block.
     """
 
     old: AbiSnapshot
@@ -360,8 +363,8 @@ def resolve_compare_request(
         fmt: str | None,
         public_headers: list[Path],
         public_header_dirs: list[Path],
-    ) -> AbiSnapshot:
-        return resolve_side_snapshot(
+    ) -> SideResolution:
+        return _resolve_side_snapshot_impl(
             side,
             evidence,
             lang=lang,
@@ -378,7 +381,7 @@ def resolve_compare_request(
             notify=notify,
         )
 
-    def _resolve_old_side() -> AbiSnapshot:
+    def _resolve_old_side() -> SideResolution:
         return _resolve_side(
             request.old,
             old_evidence,
@@ -387,7 +390,7 @@ def resolve_compare_request(
             old_public_header_dirs,
         )
 
-    def _resolve_new_side() -> AbiSnapshot:
+    def _resolve_new_side() -> SideResolution:
         return _resolve_side(
             request.new,
             new_evidence,
@@ -397,14 +400,15 @@ def resolve_compare_request(
         )
 
     if not allow_parallel or resolve_sides_sequentially(request):
-        old = _resolve_old_side()
-        new = _resolve_new_side()
+        old_res = _resolve_old_side()
+        new_res = _resolve_new_side()
     else:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             old_future = pool.submit(_resolve_old_side)
             new_future = pool.submit(_resolve_new_side)
-            old = old_future.result()
-            new = new_future.result()
+            old_res = old_future.result()
+            new_res = new_future.result()
+    old, new = old_res.snapshot, new_res.snapshot
 
     # ADR-055 D1: `--follow-deps`'s transitive DependencyInfo. After both sides
     # resolve, not inside `_resolve_side`: it reads the on-disk ELF, so it
@@ -413,6 +417,22 @@ def resolve_compare_request(
     enforce_requested_depth(request.depth, (("old", old), ("new", new)))
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
+    # One Semantic Pipeline plan, sub-phase 4B: thread each side's resolved
+    # `CompileContext` into the context too (mirrors `execute_dump_request`'s
+    # identical fold on the dump path) -- `side_effective_compile_context`
+    # is the one place that decides whether recording it here is safe.
+    compile_contexts: dict[str, CompileContext] = {}
+    old_ctx = side_effective_compile_context(
+        old_res, old, old_fmt, dump_manifest=request.old.dump_manifest
+    )
+    if old_ctx is not None:
+        compile_contexts["old"] = old_ctx
+    new_ctx = side_effective_compile_context(
+        new_res, new, new_fmt, dump_manifest=request.new.dump_manifest
+    )
+    if new_ctx is not None:
+        compile_contexts["new"] = new_ctx
+
     return ResolvedComparePair(
         old=old,
         new=new,
@@ -420,7 +440,9 @@ def resolve_compare_request(
         new_fmt=new_fmt,
         old_evidence=old_evidence,
         new_evidence=new_evidence,
-        resolved_execution_context=ResolvedExecutionContext.from_plan(plan),
+        resolved_execution_context=ResolvedExecutionContext.from_plan(
+            plan, compile_contexts=compile_contexts
+        ),
     )
 
 

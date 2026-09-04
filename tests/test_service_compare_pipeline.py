@@ -171,17 +171,112 @@ class TestResolvedExecutionContextWiring:
         assert pair.resolved_execution_context.requested_depth == depth
         assert pair.resolved_execution_context.evidence.requested_depth == depth
 
-    def test_no_evaluation_config_or_compile_contexts_resolved_here(
-        self, tmp_path, monkeypatch
-    ):
+    def test_no_evaluation_config_resolved_here(self, tmp_path, monkeypatch):
         """This seam resolves before ADR-049 D7 evaluation config exists for
         the native CLI (see the field's own docstring on ``ResolvedComparePair``)
         -- asserted explicitly so a future change that starts silently
-        fabricating either is caught rather than passing by accident."""
+        fabricating it is caught rather than passing by accident."""
         pair = self._resolve(self._request(tmp_path), monkeypatch)
 
         assert pair.resolved_execution_context.evaluation_config is None
+
+    def test_compile_contexts_empty_for_a_binary_only_fake_snapshot(
+        self, tmp_path, monkeypatch
+    ):
+        """``_resolve`` fakes ``resolve_input`` with a bare, non-header-scoped
+        ``AbiSnapshot`` (``from_headers`` defaults ``False``) -- ``side_
+        effective_compile_context``'s own gate (ADR-063 Track 3) means no
+        entry is recorded for either side. See
+        ``test_compile_contexts_carries_each_sides_resolved_context`` below
+        for the positive case."""
+        pair = self._resolve(self._request(tmp_path), monkeypatch)
+
         assert dict(pair.resolved_execution_context.compile_contexts) == {}
+
+    def test_compile_contexts_carries_each_sides_resolved_context(
+        self, tmp_path, monkeypatch
+    ):
+        """ADR-063 Track 3 (One Semantic Pipeline plan, sub-phase 4B):
+        ``resolve_compare_request`` now switched from ``resolve_side_snapshot``
+        to ``_resolve_side_snapshot_impl`` so it can recover each side's own
+        ``SideResolution.effective_compile_context`` and thread it into
+        ``ResolvedExecutionContext.compile_contexts`` -- mirroring
+        ``execute_dump_request``'s identical, already-landed dump-path fold
+        (``side_effective_compile_context``, shared by both). Faking
+        ``_resolve_side_snapshot_impl`` directly (rather than
+        ``resolve_input``, as ``_resolve`` above does) is what lets this test
+        supply a header-scoped snapshot with a real ``effective_compile_context``
+        -- the fake in ``_resolve`` deliberately can't (see the test above)."""
+        from abicheck import service_compare_pipeline
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        old_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+        new_ctx = CompileContext(gcc_option_tokens=("-std=c++17",))
+
+        def _fake_impl(side, evidence, **kwargs):
+            ctx = old_ctx if side.version == "old" else new_ctx
+            return SideResolution(
+                snapshot=AbiSnapshot(
+                    library="libtest", version=side.version, from_headers=True
+                ),
+                effective_includes=(),
+                effective_compile_context=ctx,
+            )
+
+        monkeypatch.setattr(
+            service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
+        )
+        pair = service_compare_pipeline.resolve_compare_request(self._request(tmp_path))
+
+        assert dict(pair.resolved_execution_context.compile_contexts) == {
+            "old": old_ctx,
+            "new": new_ctx,
+        }
+
+    def test_compile_contexts_excludes_a_manifest_driven_side(
+        self, tmp_path, monkeypatch
+    ):
+        """A manifest-driven side's real header-AST parse runs under its own
+        manifest-authoritative ``frontend_context``, not the request-derived
+        context this fold resolved (``side_effective_compile_context``'s own
+        docstring) -- recording it here would risk stating a wrong
+        toolchain, so that side is excluded even though a compile context
+        was resolved for it."""
+        from abicheck import service_compare_pipeline
+        from abicheck.compile_context import CompileContext
+        from abicheck.workflows.artifact.execute import SideResolution
+
+        old_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
+        new_ctx = CompileContext(gcc_option_tokens=("-std=c++17",))
+
+        def _fake_impl(side, evidence, **kwargs):
+            ctx = old_ctx if side.version == "old" else new_ctx
+            return SideResolution(
+                snapshot=AbiSnapshot(
+                    library="libtest", version=side.version, from_headers=True
+                ),
+                effective_includes=(),
+                effective_compile_context=ctx,
+            )
+
+        monkeypatch.setattr(
+            service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
+        )
+        from dataclasses import replace
+
+        from abicheck.dump_manifest import DumpManifest
+
+        request = self._request(tmp_path)
+        request = replace(
+            request,
+            old=replace(request.old, dump_manifest=DumpManifest(base_dir=tmp_path)),
+        )
+        pair = service_compare_pipeline.resolve_compare_request(request)
+
+        assert dict(pair.resolved_execution_context.compile_contexts) == {
+            "new": new_ctx
+        }
 
     def test_wiring_does_not_change_the_resolved_snapshots_or_formats(
         self, tmp_path, monkeypatch

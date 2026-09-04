@@ -76,6 +76,7 @@ __all__ = [
     "embed_side_build_source",
     "enforce_requested_depth",
     "resolve_side_snapshot",
+    "side_effective_compile_context",
 ]
 
 
@@ -794,3 +795,34 @@ def enforce_requested_depth(
                 "declarations) or lower depth to match what is actually "
                 "available."
             )
+
+
+def side_effective_compile_context(
+    resolution: SideResolution,
+    snapshot: AbiSnapshot,
+    fmt: str | None,
+    *,
+    dump_manifest: object | None,
+) -> CompileContext | None:
+    """The `CompileContext` to record for one side's `ResolvedExecutionContext.
+    compile_contexts`, or `None` when recording it would be wrong or absent.
+
+    Shared by ``service_dump_pipeline.execute_dump_request`` and
+    ``service_compare_pipeline.resolve_compare_request`` (Codex review,
+    PR #1037; lifted out of the dump path's own inline conditional once the
+    compare path needed the identical gate). Only when a header-AST parse
+    actually ran *this invocation* (``snapshot.from_headers``), the binary
+    format was successfully detected (``fmt is not None``), and the side
+    isn't a manifest-driven dump -- whose own real header-AST parse runs
+    under its own manifest-authoritative ``frontend_context`` (e.g.
+    ``"device"``), not the request-derived context this fold resolved, so
+    recording it here would risk stating a wrong (``"host"``) toolchain.
+    """
+    if (
+        resolution.effective_compile_context is not None
+        and snapshot.from_headers
+        and fmt is not None
+        and dump_manifest is None
+    ):
+        return resolution.effective_compile_context
+    return None

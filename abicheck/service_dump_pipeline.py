@@ -53,6 +53,7 @@ from .workflows.artifact import ResolvedArtifactPlan
 from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
+    side_effective_compile_context,
 )
 from .workflows.artifact.resolve import (
     is_raw_source_tree,
@@ -722,41 +723,17 @@ def execute_dump_request(
                 ),
             )
         )
-        # Codex review, PR #1037 (six rounds -- see git history for the
-        # narrower, now-superseded gates this replaced): `with_assurance()`
-        # alone leaves `compile_contexts` empty. `resolution.
-        # effective_compile_context`, when the P0.3 fold produced one AND a
-        # header-AST parse actually ran *this invocation*, is what
-        # `ResolvedExecutionContext.compile_contexts`'s own docstring wants
-        # -- documented absent, not placeholder-valued, otherwise.
-        # `DumpResult.effective_compile_context` stays unconditional either
-        # way (a separate, pre-existing field).
-        #
-        # "Did a header-AST parse run" is answered by detecting the format of
-        # the *actually-resolved* target, mirroring `resolve_input`'s own
-        # dispatch order rather than any single proxy: `resolved.fmt`/
+        # `with_assurance()` alone leaves `compile_contexts` empty --
+        # `side_effective_compile_context` (shared with the compare path,
+        # see its own docstring) answers whether `resolution.
+        # effective_compile_context` is safe to record. "Did a header-AST
+        # parse run" is answered by detecting the format of the
+        # *actually-resolved* target, mirroring `resolve_input`'s own
+        # dispatch order rather than any single proxy (`resolved.fmt`/
         # `snap.from_headers`/`snap.platform` each disagree with reality for
-        # some input shape (a loaded JSON/Perl snapshot short-circuits with
-        # no parse at all, yet can carry a stale `from_headers=True`/
-        # `platform` from whatever dump produced the file; a GNU ld linker
-        # script resolves `fmt=None` on its own text path even though
-        # `resolve_input` follows it and does run a real parse on the target
-        # underneath). `sniff_text_format` first rules out the two verbatim-
-        # load formats (same check `resolve_input` itself applies first, so
-        # a JSON snapshot whose own bytes coincidentally contain literal
-        # `INPUT(...)`-shaped text is never fed to the linker-script probe);
-        # only then does `resolve_linker_script_chain` -- the identical
-        # primitive `checker.compare`'s own same-binary hashing already uses
-        # for "what does this input actually resolve to" -- follow any
-        # script to its real target for detection.
-        #
-        # `side.dump_manifest is None`: a manifest-driven dump's real
-        # header-AST parse runs under its own manifest-authoritative
-        # `dump_manifest.frontend_context` (e.g. `"device"`), not the
-        # request-derived context resolved here -- recording it would risk a
-        # wrong (`"host"`) toolchain, so this case is excluded rather than
-        # reconstructed (a documented gap; the manifest path already carries
-        # no `evaluation_config`/other resolved fields either).
+        # some input shape): `sniff_text_format` first rules out the two
+        # verbatim-load formats, then `resolve_linker_script_chain` follows
+        # any GNU ld linker script to its real target for detection.
         # `side.path` is guaranteed non-None here -- the `is None` branch
         # above already raised before this point.
         parsed_fmt = service.detect_binary_format(side.path)
@@ -769,15 +746,13 @@ def execute_dump_request(
             parsed_fmt = service.detect_binary_format(
                 resolve_linker_script_chain(side.path)
             )
-        if (
-            resolution.effective_compile_context is not None
-            and snap.from_headers
-            and parsed_fmt is not None
-            and side.dump_manifest is None
-        ):
+        side_ctx = side_effective_compile_context(
+            resolution, snap, parsed_fmt, dump_manifest=side.dump_manifest
+        )
+        if side_ctx is not None:
             resolved_execution_context = dataclasses.replace(
                 resolved_execution_context,
-                compile_contexts={"input": resolution.effective_compile_context},
+                compile_contexts={"input": side_ctx},
             )
     return DumpResult(
         resolved=resolved,
