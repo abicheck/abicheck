@@ -492,7 +492,11 @@ def fact_known_qualified(
     *name* alone) since a matched pair's two sides can carry different
     qualified identities."""
     return both_known_backed_fact_qualified(
-        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old,
+        new,
+        old_qualified_key,
+        new_qualified_key,
+        bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
@@ -517,7 +521,11 @@ def fact_same_producer_qualified(
     why the two need different answers.
     """
     return same_producer_backed_fact_qualified(
-        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old,
+        new,
+        old_qualified_key,
+        new_qualified_key,
+        bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
@@ -745,7 +753,9 @@ def _bits_str_from_bytes_str(value: str | None) -> str | None:
         return value
 
 
-def _malformed_unit_typed_transition(kind: ChangeKind, old: object, new: object) -> tuple[object, object] | None:
+def _malformed_unit_typed_transition(
+    kind: ChangeKind, old: object, new: object
+) -> tuple[object, object] | None:
     """None for the plain str|None shape byte/spelling conversions require, else a kind-tagged fallback so malformed bytes/bits transitions never wrongly compare equal."""
     ok = (old is None or isinstance(old, str)) and (new is None or isinstance(new, str))
     return None if ok else ((kind, hashable_value(old)), (kind, hashable_value(new)))

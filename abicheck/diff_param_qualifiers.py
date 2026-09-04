@@ -55,6 +55,7 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.fact_comparison import compare_facts
 from .compare.va_list_diff import diff_va_list_params
 from .diff_helpers import make_change
 from .finding_identity_ctor_dtor import iter_matched_function_pairs
@@ -69,12 +70,29 @@ def param_restrict_changes(
     The evidence gates live with the registration in ``diff_symbols.py``, not
     here, since they are snapshot-level questions; by the time this runs both
     sides are known to be header-derived with reliable restrict facts.
+
+    That whole-snapshot gate (``clang_restrict_facts_reliable`` on both
+    sides) only says the producer is trustworthy when it ran — it does not
+    guarantee ``is_restrict_fact`` reached ``PRESENT`` for *this specific*
+    parameter (ADR-063 Phase 5B, mirroring ``compare.va_list_diff.
+    diff_va_list_params``'s identical reasoning for the sibling ``Param``
+    qualifier fact). Each pair is gated through :func:`~.compare.
+    fact_comparison.compare_facts` rather than the old bare-value
+    comparison, so a parameter whose evidence is incomplete on either side
+    is skipped instead of silently read as "confirmed not restrict".
     """
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if p_old.is_restrict != p_new.is_restrict:
-                direction = "added" if p_new.is_restrict else "removed"
+            restrict_cmp = compare_facts(
+                p_old.is_restrict_fact, p_new.is_restrict_fact, False
+            )
+            if not restrict_cmp.is_comparable:
+                continue
+            old_is_restrict = bool(restrict_cmp.old_value)
+            new_is_restrict = bool(restrict_cmp.new_value)
+            if old_is_restrict != new_is_restrict:
+                direction = "added" if new_is_restrict else "removed"
                 changes.append(
                     make_change(
                         ChangeKind.PARAM_RESTRICT_CHANGED,
@@ -82,8 +100,8 @@ def param_restrict_changes(
                         name=f_old.name,
                         detail=direction,
                         old=str(p_old.name or i),
-                        old_value=f"restrict={p_old.is_restrict}",
-                        new_value=f"restrict={p_new.is_restrict}",
+                        old_value=f"restrict={old_is_restrict}",
+                        new_value=f"restrict={new_is_restrict}",
                         entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )

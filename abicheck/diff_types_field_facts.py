@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.fact_comparison import compare_facts
 from .detector_registry import registry
 from .diff_helpers import (
     build_type_map as _build_type_map,
@@ -128,60 +129,98 @@ def _check_field_qualifier_pair(
     a field carries no EntityId of its own (EntityKind.FIELD is declared but
     unimplemented), so every field-level finding here is stamped with the
     record's identity instead, threaded down from the caller.
+
+    The caller's own ``header_cv_facts_reliable`` gate (``_diff_field_
+    qualifiers``, below) is a *whole-snapshot* flag -- it says the producer
+    is trustworthy when it ran, not that ``is_const_fact``/``is_volatile_
+    fact``/``is_mutable_fact`` actually reached ``PRESENT`` for *this
+    specific* field (ADR-063 Phase 5B, mirroring ``compare.va_list_diff.
+    diff_va_list_params``'s identical reasoning for ``Param.is_va_list``,
+    the same "case-(a) boolean, one whole-snapshot reliability flag" shape).
+    Each qualifier is gated independently through :func:`~.compare.
+    fact_comparison.compare_facts` rather than the old bare-value
+    comparison, so a field whose evidence is incomplete on either side is
+    skipped instead of silently read as "confirmed not const/volatile/
+    mutable" -- a fabrication risk no known real producer currently
+    triggers (both header backends always state the fact explicitly once
+    they run at all), but declining to trust an available signal is always
+    safe, and this closes the same class of gap ADR-063 Phase 5B's vtable/
+    vptr_offset_bits slice closed for a hybrid/mixed-producer dump or a
+    future producer that can leave one field's CV facts uncollected inside
+    an otherwise-reliable snapshot.
     """
     changes: list[Change] = []
 
-    if not f_old.is_const and f_new.is_const:
-        changes.append(
-            make_change(
-                ChangeKind.FIELD_BECAME_CONST,
-                symbol=name,
-                name=name,
-                detail=fname,
-                old_value="non-const",
-                new_value="const",
-                entity_id=entity_id,
-            )
+    const_cmp = compare_facts(f_old.is_const_fact, f_new.is_const_fact, False)
+    if const_cmp.is_comparable:
+        old_is_const, new_is_const = (
+            bool(const_cmp.old_value),
+            bool(const_cmp.new_value),
         )
-    elif f_old.is_const and not f_new.is_const:
-        changes.append(
-            make_change(
-                ChangeKind.FIELD_LOST_CONST,
-                symbol=name,
-                name=name,
-                detail=fname,
-                old_value="const",
-                new_value="non-const",
-                entity_id=entity_id,
+        if not old_is_const and new_is_const:
+            changes.append(
+                make_change(
+                    ChangeKind.FIELD_BECAME_CONST,
+                    symbol=name,
+                    name=name,
+                    detail=fname,
+                    old_value="non-const",
+                    new_value="const",
+                    entity_id=entity_id,
+                )
             )
-        )
+        elif old_is_const and not new_is_const:
+            changes.append(
+                make_change(
+                    ChangeKind.FIELD_LOST_CONST,
+                    symbol=name,
+                    name=name,
+                    detail=fname,
+                    old_value="const",
+                    new_value="non-const",
+                    entity_id=entity_id,
+                )
+            )
 
-    if not f_old.is_volatile and f_new.is_volatile:
-        changes.append(
-            make_change(
-                ChangeKind.FIELD_BECAME_VOLATILE,
-                symbol=name,
-                name=name,
-                detail=fname,
-                old_value="non-volatile",
-                new_value="volatile",
-                entity_id=entity_id,
-            )
+    volatile_cmp = compare_facts(f_old.is_volatile_fact, f_new.is_volatile_fact, False)
+    if volatile_cmp.is_comparable:
+        old_is_volatile, new_is_volatile = (
+            bool(volatile_cmp.old_value),
+            bool(volatile_cmp.new_value),
         )
-    elif f_old.is_volatile and not f_new.is_volatile:
-        changes.append(
-            make_change(
-                ChangeKind.FIELD_LOST_VOLATILE,
-                symbol=name,
-                name=name,
-                detail=fname,
-                old_value="volatile",
-                new_value="non-volatile",
-                entity_id=entity_id,
+        if not old_is_volatile and new_is_volatile:
+            changes.append(
+                make_change(
+                    ChangeKind.FIELD_BECAME_VOLATILE,
+                    symbol=name,
+                    name=name,
+                    detail=fname,
+                    old_value="non-volatile",
+                    new_value="volatile",
+                    entity_id=entity_id,
+                )
             )
-        )
+        elif old_is_volatile and not new_is_volatile:
+            changes.append(
+                make_change(
+                    ChangeKind.FIELD_LOST_VOLATILE,
+                    symbol=name,
+                    name=name,
+                    detail=fname,
+                    old_value="volatile",
+                    new_value="non-volatile",
+                    entity_id=entity_id,
+                )
+            )
 
-    if not f_old.is_mutable and f_new.is_mutable:
+    mutable_cmp = compare_facts(f_old.is_mutable_fact, f_new.is_mutable_fact, False)
+    if not mutable_cmp.is_comparable:
+        return changes
+    old_is_mutable, new_is_mutable = (
+        bool(mutable_cmp.old_value),
+        bool(mutable_cmp.new_value),
+    )
+    if not old_is_mutable and new_is_mutable:
         changes.append(
             make_change(
                 ChangeKind.FIELD_BECAME_MUTABLE,
@@ -193,7 +232,7 @@ def _check_field_qualifier_pair(
                 entity_id=entity_id,
             )
         )
-    elif f_old.is_mutable and not f_new.is_mutable:
+    elif old_is_mutable and not new_is_mutable:
         changes.append(
             make_change(
                 ChangeKind.FIELD_LOST_MUTABLE,
@@ -220,7 +259,10 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     fact. Comparing such a snapshot against a fresh dump of unchanged
     headers would otherwise misreport a false ``FIELD_BECAME_CONST``/
     ``VOLATILE``/``MUTABLE`` purely from the tool upgrade (Codex review,
-    PR #582).
+    PR #582). ADR-063 Phase 5B adds a finer-grained, per-field
+    ``FactStatus`` check inside ``_check_field_qualifier_pair`` alongside
+    this whole-snapshot gate, not in place of it — see that function's own
+    docstring.
     """
     if not (old.header_cv_facts_reliable and new.header_cv_facts_reliable):
         return []
@@ -443,6 +485,22 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
     variant can carry `[[deprecated]]` too, and ``_diff_unions`` never
     checks ``deprecated`` at all.
+
+    **ADR-063 Phase 5B investigated, and deliberately did NOT convert, this
+    detector (and its three ``deprecated`` siblings plus ``EnumType.
+    is_scoped``) to a direct ``compare_facts(f_old.deprecated_fact, ...)``
+    read.** A real conversion attempt regressed a genuine end-to-end test:
+    a legacy pre-qualification-fix ``--ast-frontend hybrid`` snapshot's
+    JSON carries no per-declaration ``deprecated_fact`` key, always
+    serializes *some* legacy ``deprecated`` value (no "omitted" concept),
+    and the legacy-load correction deliberately does not force such a
+    snapshot's reconstructed fact to ``NOT_COLLECTED`` for a hybrid
+    producer -- so a direct ``Fact[T]`` read cannot recover the one
+    ambiguity ``AbiSnapshot.fact_provenance`` (this detector's actual gate,
+    a separate G28-Phase-3 mechanism) exists to resolve for that shape. See
+    ``docs/contribute/plans/one-semantic-pipeline.md``'s 5B section for the
+    full trace, recorded per this repo's "say so explicitly and record the
+    gap" convention.
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)

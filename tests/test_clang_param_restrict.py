@@ -50,7 +50,7 @@ from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper_clang import _clang_param_is_restrict
 from abicheck.dumper_clang_qualifiers import _declarator_group
-from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model import AbiSnapshot, Fact, Function, Param, Visibility
 
 
 def _param_node(qual_type: str, desugared: str | None = None) -> dict:
@@ -666,3 +666,41 @@ class TestLegacyClangBaselineSuppression:
             functions=[_func(False)],
         )
         assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+
+
+def _func_with_restrict_fact(fact: Fact[bool]) -> Function:
+    return Function(
+        name="memcopy",
+        mangled="memcopy",
+        return_type="void",
+        params=[Param(name="dst", type="void *", is_restrict_fact=fact)],
+        visibility=Visibility.PUBLIC,
+    )
+
+
+class TestParamRestrictFactStatusGating:
+    """ADR-063 Phase 5B: ``param_restrict_changes`` reads ``is_restrict_
+    fact.status`` directly, per parameter, additive to the whole-snapshot
+    ``clang_restrict_facts_reliable`` gate above (mirrors
+    ``compare.va_list_diff.diff_va_list_params``'s identical treatment of
+    the sibling ``Param`` qualifier fact)."""
+
+    def test_uncollected_old_side_declines(self) -> None:
+        old = _snap(
+            ast_producer="clang",
+            clang_restrict_facts_reliable=True,
+            functions=[_func_with_restrict_fact(Fact.not_collected())],
+        )
+        new = _snap(
+            ast_producer="clang",
+            clang_restrict_facts_reliable=True,
+            functions=[_func(True)],
+        )
+        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+
+    def test_confirmed_present_still_fires(self) -> None:
+        # Unaffected: an ordinary construction backfills to Fact.present(...)
+        # and behaves exactly as before.
+        old = _snap(ast_producer="clang", functions=[_func(False)])
+        new = _snap(ast_producer="clang", functions=[_func(True)])
+        assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(compare(old, new))

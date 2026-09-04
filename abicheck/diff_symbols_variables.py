@@ -27,6 +27,7 @@ from typing import Any
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.fact_comparison import compare_facts
 from .diff_helpers import make_change
 from .model import AccessLevel, Variable
 from .name_classification import _find_matching_close
@@ -57,17 +58,35 @@ def var_access_changes(
     ``_diff_var_access`` (G31 Phase C continued — see
     ``AbiSnapshot.castxml_var_access_facts_reliable``'s own docstring for
     the full reasoning); by the time this runs both sides are known-safe.
+
+    That whole-snapshot gate only says the producer is trustworthy when it
+    ran — it does not guarantee ``access_fact`` reached ``PRESENT`` for
+    *this specific* variable (ADR-063 Phase 5B, the same "case-(a) field,
+    one whole-snapshot reliability flag" shape ``compare.va_list_diff.
+    diff_va_list_params`` already closed for ``Param.is_va_list``). Each
+    pair is gated through :func:`~.compare.fact_comparison.compare_facts`
+    rather than the old bare-value comparison, so a variable whose evidence
+    is incomplete on either side is skipped instead of silently read as
+    "confirmed public" (``AccessLevel.PUBLIC`` is both this field's normal
+    resting value and a real answer — see ``Variable.access``'s own
+    comment in ``model/declarations.py``).
     """
     changes: list[Change] = []
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)
         if v_new is None:
             continue
-        if v_old.access == v_new.access:
+        access_cmp = compare_facts(
+            v_old.access_fact, v_new.access_fact, AccessLevel.PUBLIC
+        )
+        if not access_cmp.is_comparable:
+            continue
+        old_access, new_access = access_cmp.old_value, access_cmp.new_value
+        if old_access == new_access:
             continue
         kind = (
             ChangeKind.VAR_ACCESS_CHANGED
-            if _is_access_narrowing(v_old.access, v_new.access)
+            if _is_access_narrowing(old_access, new_access)
             else ChangeKind.VAR_ACCESS_WIDENED
         )
         changes.append(
@@ -75,8 +94,8 @@ def var_access_changes(
                 kind,
                 symbol=mangled,
                 name=v_old.name,
-                old=v_old.access.value,
-                new=v_new.access.value,
+                old=old_access.value if old_access is not None else "?",
+                new=new_access.value if new_access is not None else "?",
                 entity_id=v_old.entity_id or v_new.entity_id,
             )
         )
@@ -255,7 +274,9 @@ def _strip_trailing_declarator_const(canonical_type: str) -> str:
             # compare unequal (Codex review, PR #589).
             new_span = re.sub(r"\bconst\b", "", span).strip()
             return canonical_type[: pos + 1] + new_span + canonical_type[span_end:]
-        if span_end < len(canonical_type) and _has_real_trailing_group(canonical_type, span_end + 1):
+        if span_end < len(canonical_type) and _has_real_trailing_group(
+            canonical_type, span_end + 1
+        ):
             return canonical_type
     return _TRAILING_CONST_RE.sub("", canonical_type)
 

@@ -21,11 +21,81 @@ Split out of ``diff_types.py`` to stay under its line-count cap (ADR-063
 Phase 0's detector migration pushed it over) -- a genuine leaf module (must
 not import from ``diff_types`` at all, to avoid an import cycle:
 ``diff_types.py`` imports ``_diff_type_vtable`` back for its own use, the
-only symbol this module exports). Everything else here
-(``_vtable_transition_is_evidenced``/``_vtable_transition_rests_on_
-unresolved_evidence``/``_layout_evidence_is_unverifiable``/
-``_owned_virtual_signatures``/``_owned_virtual_signatures_for_record``) is
-private to this cluster and was already only ever called from within it.
+only symbol this module exports). ``_vtable_transition_is_evidenced``/
+``_vtable_transition_rests_on_unresolved_evidence``/
+``_layout_evidence_is_unverifiable``/``_owned_virtual_signatures`` are
+private to this cluster and only ever called from within it.
+``_virtual_signatures_by_owner`` is the one exception (Codex review, fresh
+evidence): ``diff_vtable_layout._is_polymorphic`` also imports it directly
+as a sixth positive-evidence path (a retained ``Function.is_virtual``
+proves polymorphism independent of ``RecordType.vtable``, the same
+"different projection of the same debug info" reasoning this cluster
+already relies on) rather than reimplementing its own copy of the
+owner-matching logic -- built on the same *exact*-match identity
+``_owned_virtual_signatures_for_record`` uses (a single-owner query, still
+private to this cluster, that ``_virtual_signatures_by_owner`` now shares
+its ``owner_class_of`` matching with), not ``_owned_virtual_signatures``'s
+eager namespace-suffix matching: that new caller uses a match as an
+unconditional affirmative ``True``, the opposite safety direction from
+this cluster's own suppression-oriented use, where over-inclusion only
+ever widens "keep the finding," never fabricates one (Codex review, second
+round, caught the first attempt reusing the eager variant here). Grouped
+by owner once instead of scanning the whole function map per query (Codex
+review, third round -- that new caller can query many distinct owners
+against the same mapping while walking an inheritance graph). This does
+not reintroduce the import-cycle constraint above: ``diff_vtable_layout.
+py`` imports nothing from ``diff_types`` itself, only from this leaf
+module.
+
+**ADR-063 Phase 5B (vtable/vptr_offset_bits slice) re-audit, landed.** The
+plan's own "Deliberately not attempted" note (5B's first PR) flagged this
+cluster's evidence-gap guards -- built before ``Fact[T]`` existed, inferring
+"evidence missing" indirectly from ``size_bits``/virtual-signature
+heuristics rather than reading ``FactStatus`` directly -- as needing "its
+own dedicated slice with equal scrutiny." That scrutiny landed a genuine,
+safe direct-``FactStatus`` improvement in the two *sibling* vtable
+detectors this cluster correlates with (``diff_layout._check_vptr_
+introduced``'s own per-record old-side check; ``diff_vtable_layout._is_
+polymorphic``'s own per-record check) -- both self-contained, with no
+other detector's coverage assumption riding on their exact decline
+condition.
+
+**This cluster's own two guards were re-verified and deliberately left
+unchanged.** ``_vtable_transition_is_evidenced``'s "both sides captured
+something" branch and its class's-own-virtual-functions/size-delta
+fallbacks are not, on inspection, a stand-in for a direct ``FactStatus``
+check the way ``diff_layout``'s snapshot-wide ``vtable_facts_reliable``
+flag was: DWARF's own vtable extraction (``dwarf_snapshot.py``) reports
+``Fact.present([])`` -- genuinely ``PRESENT``, not ``NOT_COLLECTED`` --
+for a class whose virtual methods happen to live in a translation unit
+only the *other* side's debug info covers (the exact false-positive this
+guard's own docstring documents fixing). ``FactStatus`` cannot see that
+gap at all: from DWARF's own local perspective, per-TU coverage loss is
+indistinguishable from a genuinely non-polymorphic class, so both sides
+read ``PRESENT`` either way. A direct ``vtable_fact.status`` pre-check
+would therefore not replace the heuristic here -- it would only catch the
+disjoint case of a genuinely *uncollected* fact (``NOT_COLLECTED``/
+``FAILED``), and adding it as an unconditional decline was found, on
+tracing the actual call graph, to be **unsafe**: ``diff_cxx_rules.
+virtual_method_addition`` defers to this cluster ("``TYPE_VTABLE_CHANGED``
+covers this case") precisely in the one-side-uncollected/other-side-
+populated shape, relying on today's heuristic (not a ``FactStatus`` read)
+to still find real evidence there and fire. Declining outright on
+``NOT_COLLECTED`` would silently desynchronize the two detectors and drop
+coverage neither would then provide -- see ``virtual_method_addition``'s
+own docstring for the full trace, including why fixing it properly (making
+that function consult this cluster's own evidenced/not-evidenced verdict
+before deferring) needs an import this leaf module's own no-cycle
+constraint (above) does not allow without further restructuring. Recorded
+here, not silently left implicit, per this repo's own "say so explicitly
+and record the gap" convention -- the sub-phase's own "vtable... all five
+fields gated" removal gate is therefore still open for ``vtable`` through
+this specific cluster, even though the two sibling detectors it correlates
+with are now gated (Codex review, fresh evidence: this cluster never reads
+``vptr_offset_bits``/``vptr_offset_bits_fact`` at all -- see the "NOT
+consulted here" comment in the body below -- so ``vptr_offset_bits``
+itself carries no residual gap through this cluster; it is fully gated via
+``diff_layout._check_vptr_introduced``'s own direct-status pre-check).
 """
 
 from __future__ import annotations
@@ -380,6 +450,35 @@ def _owned_virtual_signatures_for_record(
         for mangled, fn in funcs.items()
         if getattr(fn, "is_virtual", False) and owner_class_of(fn) == qualified
     }
+
+
+def _virtual_signatures_by_owner(
+    funcs: Mapping[str, Function],
+) -> dict[str, set[str]]:
+    """Every virtual member function in *funcs*, grouped by exact owning-
+    class identity (same ``owner_class_of`` exact match
+    ``_owned_virtual_signatures_for_record`` uses) -- computed once instead
+    of that function's own per-query full scan.
+
+    Built for ``diff_vtable_layout._is_polymorphic``'s retained-virtual-
+    ``Function`` evidence path (Codex review, fresh evidence): a caller
+    that queries *many* distinct owners against the same ``funcs`` mapping
+    (walking a whole inheritance graph) turns an O(records) scan into
+    O(records × functions) if it calls ``_owned_virtual_signatures_for_
+    record`` fresh each time. One pass here, then each caller query is a
+    plain dict lookup.
+    """
+    from .diff_cxx_rules import owner_class_of
+
+    index: dict[str, set[str]] = {}
+    for mangled, fn in funcs.items():
+        if not getattr(fn, "is_virtual", False):
+            continue
+        owner = owner_class_of(fn)
+        if owner is None:
+            continue
+        index.setdefault(owner, set()).add(mangled)
+    return index
 
 
 def _diff_type_vtable(
