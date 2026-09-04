@@ -192,8 +192,14 @@ def write_bundle_facts_package(
 
     def _charge_snapshot(library_name: str, snapshot_document: Any) -> None:
         nonlocal decoded_bytes_so_far
+        # `library_name` becomes a `per_library_snapshots` key in the
+        # written document, exactly the way `export_bundle_facts`'s own
+        # `on_document` hook charges the recovered library name on the way
+        # back in -- charging only `snapshot_document` here would let a
+        # `BundleFacts` with an arbitrarily large key produce a package
+        # `read_bundle_facts_package` then refuses to reopen (Codex review).
         decoded_bytes_so_far = _charge_running_bytes(
-            snapshot_document,
+            {"library_name": library_name, "snapshot": snapshot_document},
             decoded_bytes_so_far,
             context=(
                 "facts.per_library_snapshots' encoded documents "

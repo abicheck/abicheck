@@ -534,6 +534,52 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
             "checked -- the check is not incremental"
         )
 
+    def test_charges_the_library_name_against_the_write_side_decoded_size_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """`library_name` becomes a `per_library_snapshots` key in the
+        written document, exactly the way `export_bundle_facts`'s own
+        `on_document` hook charges the recovered library name on the read
+        side -- an arbitrarily large key must be charged on write too, or
+        `write_bundle_facts_package` can hand back a package
+        `read_bundle_facts_package` then refuses to reopen (Codex review).
+        The library name here is the `per_library_snapshots` *dict key*,
+        deliberately distinct from the (small) `AbiSnapshot.library` field,
+        so only the fix under test -- not the snapshot's own size -- can
+        catch this."""
+        import abicheck.bundle_facts_store as module
+        from abicheck.serialization import snapshot_to_dict
+        from abicheck.storage.bundle_archive_json_guard import bounded_encode_utf8
+
+        long_name = "liba" + "x" * 10_000 + ".so"
+        facts = capture_bundle_facts({long_name: _snapshot("liba.so")})
+        store = InMemoryObjectStore()
+
+        # Charging uses `bounded_encode_utf8` (indent=2), not a compact
+        # `json.dumps` -- computed via the identical primitive so the
+        # budget below is exact, not a guess that happens to work.
+        def _encoded_len(obj: Any) -> int:
+            encoded = bounded_encode_utf8(obj, 2**31)
+            assert encoded is not None
+            return len(encoded)
+
+        snapshot_only_bytes = _encoded_len(snapshot_to_dict(_snapshot("liba.so")))
+        document = module.bundle_facts_to_dict(facts)
+        composition_only_bytes = _encoded_len(
+            {k: v for k, v in document.items() if k != "per_library_snapshots"}
+        )
+        # Enough for the snapshot document plus the small composition
+        # content, too small once the (large) library name is also
+        # charged.
+        monkeypatch.setattr(
+            module,
+            "DEFAULT_MAX_BUNDLE_DECODED_BYTES",
+            snapshot_only_bytes + composition_only_bytes + 32,
+        )
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            write_bundle_facts_package(facts, store=store)
+
     def test_refuses_to_write_past_the_alias_node_budget(
         self, monkeypatch: Any
     ) -> None:

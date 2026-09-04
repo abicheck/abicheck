@@ -45,4 +45,6 @@
   by `write_bundle_facts_package` to charge each library's encoded size as
   it is converted, rather than only after every member of a possibly-large
   `BundleFacts` has already been converted and retained in one combined
-  document.
+  document -- including the library name itself (a `per_library_snapshots`
+  dict key), not only its snapshot document, mirroring the read side's
+  identical charge.
