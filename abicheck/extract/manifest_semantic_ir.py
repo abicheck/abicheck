@@ -258,7 +258,35 @@ def _locally_linked_declaration_locations_in_fragment(
     occurrence into two. Keying by each declaration's own source location
     within the entity id's bucket is what lets the caller check "is THIS
     occurrence's own declaration local", not "is any declaration sharing
-    this entity id local anywhere in the fragment"."""
+    this entity id local anywhere in the fragment".
+
+    **Known, accepted limitation** (Codex review, fresh evidence, seventh
+    round): this per-location keying still cannot distinguish two
+    colliding-``EntityId`` declarations that *also* share the identical
+    ``source_location`` string -- both landing on the same source line, or
+    (``extract/headers/clang/context.py``'s own ``source_location``
+    behavior) a nested declaration clang omits line info for, which falls
+    back to the bare filename and can coincide with another declaration's
+    own bare-filename fallback. Deeper still: :func:`~abicheck.extract.
+    semantic_normalizer.normalize_header_ast` (called by this module's
+    :func:`manifest_semantic_ir`) already keys its own raw occurrence dict
+    by ``OccurrenceId`` (``entity_id`` + that same location string)
+    *before* this function's classification ever runs, so a genuine
+    same-location collision may have already collapsed the two raw
+    declarations into one entry there -- data this function's own
+    per-location set can no longer recover regardless of how it keys.
+    Closing this needs declaration-level identity carried into
+    ``normalize_header_ast``'s own occurrence construction (an index or
+    similarly disambiguator-independent key, not a location string that
+    can coincide), which reaches a shared, foundational function well
+    beyond this module's own scope and every one of its other callers,
+    not something to change speculatively without a real toolchain to
+    verify the combined result against. Left as a tracked residual --
+    see ``tests/regressions/manifest.py``'s ``identity.platform_decorated_
+    mangled_name`` entry -- given how many independent coincidences must
+    align to reach it (a same-fragment ``EntityId`` collision between a
+    genuinely local and a genuinely external declaration, *and* those two
+    declarations additionally sharing one exact source location)."""
     local: dict[EntityId, set[str]] = defaultdict(set)
     for fn in fragment.functions:
         if fn.entity_id is not None and _is_locally_linked_function(fn):

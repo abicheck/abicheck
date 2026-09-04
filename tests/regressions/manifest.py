@@ -895,6 +895,41 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="https://github.com/abicheck/abicheck/pull/1048",
             ),
+            KnownGap(
+                description=(
+                    "extract/manifest_semantic_ir.py's own per-fragment "
+                    "locality classification (keying by each declaration's "
+                    "source location within a colliding EntityId's bucket) "
+                    "still cannot distinguish two colliding-EntityId "
+                    "declarations that also share the identical source "
+                    "location -- both on the same source line, or a nested "
+                    "declaration clang omits line info for, falling back "
+                    "to a bare filename that can coincide with another "
+                    "declaration's own fallback. Deeper still: "
+                    "extract.semantic_normalizer.normalize_header_ast "
+                    "already keys its own raw occurrence dict by "
+                    "OccurrenceId (entity_id + that same location string) "
+                    "before this module's locality classification ever "
+                    "runs, so a genuine same-location collision may "
+                    "already have collapsed the two raw declarations into "
+                    "one entry there -- data no per-location keying "
+                    "downstream can recover. Closing this needs "
+                    "declaration-level identity carried into normalize_"
+                    "header_ast's own occurrence construction (an index or "
+                    "similarly disambiguator-independent key), which "
+                    "reaches a shared, foundational function well beyond "
+                    "this module and every one of its other callers -- not "
+                    "something to change speculatively without a real "
+                    "toolchain to verify the combined result against. "
+                    "Left as a tracked residual given how many independent "
+                    "coincidences must align to reach it (a same-fragment "
+                    "EntityId collision between a genuinely local and a "
+                    "genuinely external declaration, AND those two "
+                    "declarations additionally sharing one exact source "
+                    "location)."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1048",
+            ),
         ),
     ),
 )
