@@ -2093,12 +2093,12 @@
     },
     {
       "path": "tests/test_scan_artifact_set.py",
-      "baseline_lines": 1373,
+      "baseline_lines": 1407,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +5 lines (CLI cleanup phase two, PR J): the test asserting --bundle-system-providers required --artifact-set was rewritten to assert the flag itself is gone (No such option), since there is no longer a per-run 'supplied without --artifact-set' state to reject.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +5 lines (CLI cleanup phase two, PR J): the test asserting --bundle-system-providers required --artifact-set was rewritten to assert the flag itself is gone (No such option), since there is no longer a per-run 'supplied without --artifact-set' state to reject. +34 lines (2026-09-04, Codex review): added test_cwd_abicheck_yml_bundle_block_reaches_scan_request, proving --artifact-set now discovers .abicheck.yml's bundle: block cwd-upward (not just from --build-config/--sources) after a review round found the config was silently never read in that case.",
       "review_by": "2026-11-30"
     },
     {

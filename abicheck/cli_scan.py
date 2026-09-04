@@ -831,9 +831,8 @@ def _run_artifact_set(
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
-    # PR J: --bundle-system-providers removed as a CLI flag -- sourced from
-    # .abicheck.yml's `bundle:` block, auto-discovered from *sources*.
-    _, _bundle_cfg, _ = _discover_scan_project_config(build_config, sources, None)
+    # PR J: --bundle-system-providers -> .abicheck.yml bundle: (Codex review).
+    _, _bundle_cfg, _ = _discover_scan_project_config(build_config, sources, None, allow_cwd_discovery=True)
     bsp = tuple(_bundle_cfg.bundle_system_providers) if _bundle_cfg else ()
 
     req = ScanRequest(
@@ -1046,21 +1045,24 @@ def _resolve_scan_evaluation_config(
 
 def _discover_scan_project_config(
     build_config: Path | None, sources: Path | None, against: Path | None,
+    *, allow_cwd_discovery: bool = False
 ) -> tuple[Path | None, Any, str | None]:
     """Resolve the project config for this scan, with the digest that parsed it.
 
     Returns ``(cfg_path, project_cfg, sha256)``. An explicitly-bound
     ``--build-config`` that cannot be parsed is a usage error; an
     auto-discovered one is best-effort and degrades to a warning with
-    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention --
-    a config the user never explicitly bound to shouldn't fail a run it wasn't
-    asked to affect.
+    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention.
+    The cwd-upward fallback runs only when *against* is given (a plain
+    audit never needs severity/scope/suppression) or *allow_cwd_discovery*
+    opts in -- the artifact-set audit path does this for ``bundle:`` alone
+    (PR J, Codex review), with no other audit-mode consumer to widen.
     """
     from .workflows.extraction import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
-    if cfg_path is None and not explicit_config and against is not None:
+    if cfg_path is None and not explicit_config and (against is not None or allow_cwd_discovery):
         from .cli_helpers_compare import discover_project_config
 
         cfg_path = discover_project_config()

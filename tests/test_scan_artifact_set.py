@@ -305,6 +305,40 @@ class TestArtifactSetCompileContextForwarding:
         assert req.compile.sysroot == sysroot_dir
         assert req.compile.nostdinc is True
 
+    def test_cwd_abicheck_yml_bundle_block_reaches_scan_request(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review, fresh evidence: --bundle-system-providers has no CLI
+        # flag any more (PR J), and its .abicheck.yml replacement was only
+        # ever discovered from an explicit --build-config or --sources --
+        # never cwd-upward, unlike compare's own directory/package fan-out --
+        # so a cwd .abicheck.yml with neither given was silently never read.
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.service_scan import ScanSetResult
+
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        (tmp_path / ".abicheck.yml").write_text(
+            'bundle:\n  system_providers: ["libvendor.so.1"]\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        captured: dict[str, object] = {}
+
+        def _fake_run_scan_set(req):
+            captured["req"] = req
+            return ScanSetResult(verdict="COMPATIBLE", exit_code=0)
+
+        monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["req"].bundle_system_providers == ("libvendor.so.1",)
+
 
 class TestArtifactSetSourceMethodSelection:
     """P2 regression (Codex review): omitting --depth must opt an
