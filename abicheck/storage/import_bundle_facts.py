@@ -65,7 +65,7 @@ provenance.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
@@ -538,7 +538,11 @@ def import_bundle_facts(
 
 
 def export_bundle_facts(
-    manifest: PackageManifest, *, store: ObjectStore, variant_id: str = "default"
+    manifest: PackageManifest,
+    *,
+    store: ObjectStore,
+    variant_id: str = "default",
+    on_document: Callable[[Any, str], None] | None = None,
 ) -> dict[str, Any]:
     """The exact inverse of `import_bundle_facts`: every artifact under
     *variant_id* is read back via `export_legacy_snapshot`, the variant's own
@@ -546,10 +550,21 @@ def export_bundle_facts(
     `bundle_composition_from_dto`, and both are reassembled into one
     `bundle_facts_serialization.bundle_facts_from_dict()`-shaped document.
 
+    *on_document*, when given, is called once per reconstructed document --
+    the bundle-composition section first, then each artifact's own exported
+    snapshot document, in `variant.artifact_ids` order -- with that document
+    and a short description of what it is. This module has no size/count
+    budget of its own (see its own module docstring); a caller wanting to
+    bound aggregate decoded size *as* each piece is reconstructed, rather
+    than only after every member of a possibly-untrusted `manifest` has
+    already been retained in memory, raises from this callback to abort
+    before the next document is fetched.
+
     Raises `ValueError` if *variant_id* names no variant in *manifest*, or if
     that variant carries no `BUNDLE_COMPOSITION_SECTION_KIND` section (never
     produced by anything but `import_bundle_facts` itself, so this means the
-    manifest was not built by it, or was hand-edited).
+    manifest was not built by it, or was hand-edited) -- or whatever
+    *on_document* itself raises.
     """
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
@@ -564,6 +579,11 @@ def export_bundle_facts(
         )
     composition_dto = SectionDTO.from_dict(store.get(composition_ref.digest))
     composition = bundle_composition_from_dto(composition_dto)
+    if on_document is not None:
+        on_document(
+            composition,
+            f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} section",
+        )
 
     source_schema_version = manifest.versions.source_schema_version
     per_library_snapshots: dict[str, Any] = {}
@@ -610,9 +630,15 @@ def export_bundle_facts(
                 "manifest was not produced by import_bundle_facts, or was "
                 "hand-edited"
             )
-        per_library_snapshots[library_name] = export_legacy_snapshot(
+        snapshot_document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
+        if on_document is not None:
+            on_document(
+                snapshot_document,
+                f"artifact {artifact_id!r} (library {library_name!r})",
+            )
+        per_library_snapshots[library_name] = snapshot_document
 
     raw_manifest = composition.get("manifest")
     if raw_manifest is None:

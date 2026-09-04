@@ -263,6 +263,67 @@ class TestReadBundleFactsPackage:
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             read_bundle_facts_package(manifest, store=store)
 
+    def test_charges_each_reconstructed_artifact_incrementally(
+        self, monkeypatch: Any
+    ) -> None:
+        """The decoded-byte budget must be checked *as* each artifact is
+        reconstructed, not only after every member of the variant has
+        already been retained in memory -- a budget set just above one
+        artifact's own size must still reject a second, later artifact
+        rather than letting the whole (over-budget) bundle through because
+        the check only ran once, at the end."""
+        import json
+
+        import abicheck.bundle_facts_store as module
+        from abicheck.storage.import_v1 import export_legacy_snapshot
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        one_artifact_document = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        one_artifact_bytes = len(json.dumps(one_artifact_document).encode("utf-8"))
+        # Comfortably above one artifact's own size (plus the small
+        # bundle-composition section charged first), too small once a
+        # second, same-sized artifact is also charged.
+        monkeypatch.setattr(
+            module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", one_artifact_bytes + 64
+        )
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            read_bundle_facts_package(manifest, store=store)
+
+    def test_refuses_to_eagerly_reconstruct_past_the_alias_node_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """The alias element-count budget applies on the read side too, not
+        only when writing -- a hand-assembled bundle-composition section
+        carrying more aliases than `DEFAULT_MAX_JSON_CONTAINER_NODES` must
+        be refused even while comfortably under the byte ceiling."""
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        facts.filesystem_aliases["liba.so"] = tuple(f"alias{i}" for i in range(10))
+        facts.filesystem_aliases["libb.so"] = tuple(f"alias{i}" for i in range(10))
+        store = InMemoryObjectStore()
+
+        # Write with a comfortably large node budget so the package itself
+        # is producible, then tighten it back down for the read.
+        monkeypatch.setattr(module, "DEFAULT_MAX_JSON_CONTAINER_NODES", 10_000)
+        manifest = write_bundle_facts_package(facts, store=store)
+        monkeypatch.setattr(module, "DEFAULT_MAX_JSON_CONTAINER_NODES", 11)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_JSON_CONTAINER_NODES"):
+            read_bundle_facts_package(manifest, store=store)
+
 
 class TestBundleFactsPackageThroughDirectoryStore:
     """The full round trip through the real, filesystem-backed D6 layout --

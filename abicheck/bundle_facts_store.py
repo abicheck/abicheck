@@ -64,14 +64,19 @@ their callers (this module, and `storage/import_baseline_set.py`'s own
 sibling adapter) are expected to bound their own input/output. This module
 keeps the exact budgets its own previous implementation enforced
 (`DEFAULT_MAX_LIBRARY_COUNT`, `DEFAULT_MAX_BUNDLE_DECODED_BYTES`,
-`DEFAULT_MAX_JSON_CONTAINER_NODES` for `filesystem_aliases`), checked before
-handing a document to `import_bundle_facts` (so this writer never produces a
-package its own reader would then refuse) and before decoding one back into
-a live `BundleFacts` (so an untrusted, hand-assembled `PackageManifest`
-cannot force this reader to eagerly materialize unbounded content).
+`DEFAULT_MAX_JSON_CONTAINER_NODES` for `filesystem_aliases`): checked
+up front before handing a document to `import_bundle_facts` (so this writer
+never produces a package its own reader would then refuse), and -- on the
+way back in, where a `PackageManifest` may be untrusted, hand-assembled
+input -- incrementally, via `export_bundle_facts`'s own `on_document` hook,
+which charges the aggregate decoded-byte and alias-element budgets as each
+piece (the bundle-composition section, then each artifact) is reconstructed,
+rather than only after every member has already been retained in memory.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from .bundle_facts import (
     DEFAULT_MAX_BUNDLE_DECODED_BYTES,
@@ -92,30 +97,46 @@ __all__ = [
 ]
 
 
-def _charge_document_bytes(document: object, *, context: str) -> None:
-    """Raise if *document* (already a plain JSON-able structure) would
-    exceed `DEFAULT_MAX_BUNDLE_DECODED_BYTES` when encoded.
+def _charge_running_bytes(
+    document: object, charged_so_far: int, *, context: str
+) -> int:
+    """*charged_so_far* plus *document*'s own encoded byte size, raising
+    before materializing an oversized *aggregate* rather than after.
 
     `bounded_encode_utf8` -- the same primitive `bundle_facts.py`'s own G40
     archive uses -- streams the encode and aborts as soon as the running
-    byte count would cross the limit, rather than materializing a
-    (potentially huge) JSON string first just to measure it.
+    byte count would cross the *remaining* allowance, so a caller charging
+    several documents in sequence (as `read_bundle_facts_package` does, one
+    per reconstructed artifact/section) never fully materializes the one
+    document that pushes the running total over the limit.
     """
-    if bounded_encode_utf8(document, DEFAULT_MAX_BUNDLE_DECODED_BYTES) is None:
+    remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - charged_so_far, 0)
+    encoded = bounded_encode_utf8(document, remaining)
+    if encoded is None:
         raise ValueError(
             f"{context} exceed DEFAULT_MAX_BUNDLE_DECODED_BYTES "
             f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes)"
         )
+    return charged_so_far + len(encoded)
 
 
-def _alias_element_count(facts: BundleFacts) -> int:
-    """The total node count `facts.filesystem_aliases` would cost to decode
-    back (one node per alias element, plus one for each array itself) --
-    the same node-count amplification `DEFAULT_MAX_JSON_CONTAINER_NODES`
-    guards against elsewhere (many short strings can stay well under a byte
-    budget while still costing one Python-object allocation per element).
+def _charge_document_bytes(document: object, *, context: str) -> None:
+    """`_charge_running_bytes` for a single, standalone document."""
+    _charge_running_bytes(document, 0, context=context)
+
+
+def _alias_element_count(aliases_by_library: object) -> int:
+    """The total node count *aliases_by_library* (a `{library:
+    [alias, ...]}`-shaped mapping, live or already-decoded) would cost to
+    decode back (one node per alias element, plus one for each array
+    itself) -- the same node-count amplification `DEFAULT_MAX_JSON_
+    CONTAINER_NODES` guards against elsewhere (many short strings can stay
+    well under a byte budget while still costing one Python-object
+    allocation per element).
     """
-    return sum(len(aliases) + 1 for aliases in facts.filesystem_aliases.values())
+    if not isinstance(aliases_by_library, dict):
+        return 0
+    return sum(len(aliases) + 1 for aliases in aliases_by_library.values())
 
 
 def write_bundle_facts_package(
@@ -152,7 +173,7 @@ def write_bundle_facts_package(
             "bundle_multibuild._index_by_fingerprint already rejects an "
             "empty, non-identifying fingerprint the same way"
         )
-    alias_nodes = _alias_element_count(facts)
+    alias_nodes = _alias_element_count(facts.filesystem_aliases)
     if alias_nodes > DEFAULT_MAX_JSON_CONTAINER_NODES:
         raise ValueError(
             f"facts.filesystem_aliases' total element count exceeds "
@@ -217,13 +238,35 @@ def read_bundle_facts_package(
             f"({DEFAULT_MAX_LIBRARY_COUNT}) -- refusing to eagerly reconstruct "
             "every member into memory at once"
         )
-    document = export_bundle_facts(manifest, store=store, variant_id=variant_id)
     # A *few* individually large artifacts (or a large bundle-composition
     # section) can amplify past the count bound above just as well as many
-    # small ones -- charged post-hoc against the exact same aggregate
-    # ceiling `write_bundle_facts_package` itself enforces on the way in.
-    _charge_document_bytes(
-        document,
-        context=f"variant {variant_id!r}'s reconstructed bundle facts",
+    # small ones. `export_bundle_facts`'s own `on_document` hook charges each
+    # reconstructed piece (the bundle-composition section, then each
+    # artifact) against the running aggregate *as it is produced*, so the one
+    # document that pushes the total over the limit is rejected on the spot
+    # -- not after every member of a possibly-untrusted `manifest` has
+    # already been retained in memory. The bundle-composition section is
+    # also where `filesystem_aliases` lives, so its own node-count budget
+    # (the same amplification concern `write_bundle_facts_package` guards on
+    # the way in) is checked at that same point.
+    decoded_bytes_so_far = 0
+    alias_nodes_so_far = 0
+
+    def _charge(piece: Any, context: str) -> None:
+        nonlocal decoded_bytes_so_far, alias_nodes_so_far
+        decoded_bytes_so_far = _charge_running_bytes(
+            piece, decoded_bytes_so_far, context=context
+        )
+        if isinstance(piece, dict) and "filesystem_aliases" in piece:
+            alias_nodes_so_far += _alias_element_count(piece["filesystem_aliases"])
+            if alias_nodes_so_far > DEFAULT_MAX_JSON_CONTAINER_NODES:
+                raise ValueError(
+                    f"{context}'s filesystem_aliases total element count "
+                    f"exceeds DEFAULT_MAX_JSON_CONTAINER_NODES "
+                    f"({DEFAULT_MAX_JSON_CONTAINER_NODES})"
+                )
+
+    document = export_bundle_facts(
+        manifest, store=store, variant_id=variant_id, on_document=_charge
     )
     return bundle_facts_from_dict(document)
