@@ -385,6 +385,19 @@ other half of why an escape hatch was not added back in a different shape).
    escaped byte left to pair it with (``_JSON_STRUCTURE_TOKEN_RE``'s own
    updated docstring has the full account).
 
+20. **The scalar alternatives didn't cover every scalar the real decoder
+   accepts (Codex review, round 17, fresh evidence).** ``json.dumps()``'s
+   default ``allow_nan=True`` (this repo's own writer never overrides it)
+   lets a real ``AbiSnapshot`` field holding a non-finite float serialize
+   as the bare literals ``NaN``/``Infinity``/``-Infinity`` -- valid input
+   to ``json.loads()`` (and ``load_bundle_facts()``) by that same default,
+   but not one of this scan's own recognized scalar tokens, so one
+   appearing anywhere in an otherwise-ordinary nested value created the
+   same false structural-violation gap every other unrecognized-token
+   finding above describes, discarding an already-found root marker.
+   Answered by adding ``NaN``/``-?Infinity`` as their own token
+   alternatives alongside ``true``/``false``/``null``.
+
 **Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
 stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd
 skippable frame) can embed not just a forged central-directory record

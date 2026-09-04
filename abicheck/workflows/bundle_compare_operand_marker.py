@@ -100,8 +100,23 @@ from pathlib import Path
 #: alternative also consume a trailing lone backslash with no partner
 #: byte, rather than requiring a complete escape pair right up to the
 #: buffer's own end.
+#:
+#: **The scalar alternatives didn't cover every scalar the real decoder
+#: accepts (Codex review, round 17, fresh evidence).** ``json.dumps()``'s
+#: default ``allow_nan=True`` (unchanged by this repo's own writer) lets a
+#: real ``AbiSnapshot`` field holding a non-finite float serialize as the
+#: bare literals ``NaN``/``Infinity``/``-Infinity`` -- valid input to
+#: ``json.loads()`` (and therefore ``load_bundle_facts()``) by the same
+#: default, but not one of this scan's own recognized scalar tokens. Left
+#: unrecognized, one of these appearing anywhere in an otherwise-ordinary
+#: nested value creates exactly the same false non-whitespace-gap
+#: violation every other unrecognized-token finding above already
+#: describes, discarding an already-found root marker. Added as their own
+#: alternatives (``NaN``, and ``-?Infinity`` covering both signs in one
+#: alternative) alongside ``true``/``false``/``null``.
 _JSON_STRUCTURE_TOKEN_RE = re.compile(
-    rb'"(?:[^"\\]|\\.)*"|"(?:[^"\\]|\\.)*\\?\Z|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null',
+    rb'"(?:[^"\\]|\\.)*"|"(?:[^"\\]|\\.)*\\?\Z|[{}\[\]:,]'
+    rb"|-?\d[\d.eE+-]*|true|false|null|NaN|-?Infinity",
     re.DOTALL,
 )
 

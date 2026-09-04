@@ -569,6 +569,37 @@ class TestLooksLikeStoredBundleFacts:
         assert b[4096:4097] == b"\\"
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_non_finite_float_value_does_not_break_the_scan(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 17): json.dumps()'s default
+        allow_nan=True lets a real AbiSnapshot field holding a non-finite
+        float serialize as the bare literal Infinity/-Infinity/NaN --
+        valid input to json.loads() (and load_bundle_facts()) by that
+        same default, but not a token the scanner recognized before this
+        fix. Left unrecognized, each of these creates the same false
+        non-whitespace-gap violation any other unrecognized token would,
+        discarding the already-found root marker."""
+        for literal, py_value in [
+            ("Infinity", float("inf")),
+            ("-Infinity", float("-inf")),
+            ("NaN", None),  # NaN != NaN, checked separately below
+        ]:
+            payload = (
+                '{"artifact_type":"abicheck.bundle-facts","schema_version":2,'
+                f'"per_library_snapshots":{{"libx.so":{{"source_mtime":{literal}}}}}}}'
+            )
+            p = tmp_path / f"non_finite_{literal.strip('-')}.json"
+            p.write_text(payload)
+            loaded = json.loads(payload)
+            value = loaded["per_library_snapshots"]["libx.so"]["source_mtime"]
+            # Premise check: json.loads() really does accept this literal.
+            if py_value is not None:
+                assert value == py_value
+            else:
+                assert value != value  # NaN's own reflexive inequality
+            assert looks_like_stored_bundle_facts(p) is True
+
     def test_gzip_fextra_forging_a_zip_eocd_is_still_stored(
         self, tmp_path: Path
     ) -> None:
