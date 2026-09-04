@@ -146,10 +146,12 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > docstring on current `main`: both binary formats now route through
 > `execute_dump_request` via `frontends.cli.dump_execute.
 > execute_dump_cli_run`, and `handle_non_elf_dump` is kept only for its own
-> direct unit tests. PR C's row now reads DONE — see the row itself for the
-> corrected text. This is exactly the "generated status, not hand-kept
-> prose" gap the 2026-09-01 checkpoint's "Generated plan status" bullet
-> already named as a durable problem, caught here as a live instance of it.
+> direct unit tests — that part of the row is DONE. (PR C's
+> config-discovery half is a separate, narrower story — see the "Net
+> effect" paragraph below and the row itself, not restated here.) This is
+> exactly the "generated status, not hand-kept prose" gap the 2026-09-01
+> checkpoint's "Generated plan status" bullet already named as a durable
+> problem, caught here as a live instance of it.
 >
 > **New context for PR I/PR J from #1053** (merged the same day, just
 > before #1042, base also `48152645`): ADR-062/ADR-063 Track C 8B folded
@@ -175,8 +177,11 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > SemanticIR consumer authority, the producer/consumer compiler split
 > (G34), storage v2 scale work — is real but is not this plan's scope**;
 > it belongs to `docs/contribute/plans/one-semantic-pipeline.md`,
-> `duplication-and-convergence-assessment.md`, and
-> `storage-format-v2.md` respectively, and is not duplicated here.
+> `duplication-and-convergence-assessment.md`,
+> `g34-producer-consumer-compiler-profile-separation.md` (per
+> `plans/index.md`'s own G34 row — not one of the other three plans named
+> here, corrected 2026-09-04), and `storage-format-v2.md` respectively, and
+> is not duplicated here.
 > One item from that review *is* already tracked here and re-confirmed
 > unchanged: `contract=public`'s remaining unresolved-loss count (see the
 > 2026-09-01 checkpoint's own bullet) — still blocked on the same
@@ -189,24 +194,16 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > signal gap), PR H (artifact-set provider-ownership semantics — not
 > started), PR I's full `BundleCompareRequest` unification (classification
 > + flag deletion done; the unification itself not started), and PR J
-> (bundle topology out of CLI flags — not started). **PR C's status took
-> two rounds of correction on this very PR (Codex review) to state
-> precisely — recorded here so a future pass doesn't re-litigate it.**
-> Binary-format migration (ELF + PE/Mach-O) is done. Config-discovery
-> dry-run/execution parity is done for `scan` (both the auto-discovery and
-> explicit-`--config` cases — `ScanRequest` carries `build_config` as a
-> real field) and done for `dump`/`compare`'s auto-discovery case
-> (`12492deb`, 2026-09-01), but **`dump`/`compare` have no `build_config`
-> field on `InputSpec` at all**, so an explicit `--config` naming a file
-> auto-discovery wouldn't itself find is invisible to their own
-> `--dry-run` pre-flight even though real execution honors it — a real,
-> narrower open residual, not covered by `12492deb` or by
-> `one-semantic-pipeline.md`'s "Phase 4 is now complete" line (that line
-> is about the parameters the four pre-flight call sites already have, not
-> about `dump`/`compare` gaining a request-level seam they don't have).
-> See PR C's own row and the "Re-verified, unchanged, still open" bullet
-> below for the full account. PR A/B/D/E/F and PR 1/1b/2 are done; PR C is
-> done except for that one residual.
+> (bundle topology out of CLI flags — not started). PR C is done for
+> binary-format migration and for `scan`'s config-discovery dry-run
+> parity, with one real, narrower open residual (`dump`/`compare`'s
+> explicit-`--config` case) — see the "Configuration discovery (PR C's
+> tail)" bullet under "Re-verified, unchanged, still open" below for the
+> single full account; it took three rounds of Codex review on this PR to
+> reach that precise a statement (recorded so a future pass doesn't
+> re-litigate it, and this paragraph deliberately doesn't restate the
+> account itself, per the same review's DRY finding). PR A/B/D/E/F and PR
+> 1/1b/2 are done.
 
 ## Problem
 
@@ -5109,24 +5106,19 @@ PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        PE/Mach-O toolchain was available to
                                        verify against a real binary.
                                        Config-discovery dry-run/execution
-                                       parity: `12492deb` (2026-09-01)
-                                       closed the auto-discovery case for
-                                       all of `scan`, `dump`, and `compare`,
-                                       and closed `scan`'s explicit
-                                       `--config` case too (`ScanRequest`
-                                       carries `build_config` as a real
-                                       field). `dump`/`compare` have no
-                                       `build_config` field on `InputSpec`
-                                       at all, so their own explicit
-                                       `--config` case is not forwarded to
-                                       the pre-flight check and remains a
-                                       real, narrower open residual — see
-                                       the "Re-verified, unchanged, still
-                                       open" bullet's own corrected entry
-                                       below for the full account (this row
-                                       has been wrong in both directions
-                                       across two prior corrections on
-                                       #1059; this is the precise version)
+                                       parity is closed for `scan` (both
+                                       cases) and for `dump`/`compare`'s
+                                       auto-discovery case, with one real,
+                                       narrower residual for their explicit
+                                       `--config` case — see the
+                                       "Configuration discovery (PR C's
+                                       tail)" bullet under "Re-verified,
+                                       unchanged, still open" below for the
+                                       single full account (this row no
+                                       longer restates it, to stop the two
+                                       copies drifting apart the way they
+                                       did across three corrections on
+                                       #1059)
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
