@@ -177,10 +177,32 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     already covers) still fell through to "not local" here, unfixed by
     that first round. Normalized the same way
     ``_itanium_strip_prefix`` already does for this exact quirk: one
-    leading underscore is stripped before the check, never gated on the
-    target actually being Darwin, since a real Itanium mangled name is
-    never introduced by two leading underscores followed by ``Z`` on any
-    platform -- there is no other symbol shape this could misfire on.
+    leading underscore is stripped before the check, unconditionally
+    rather than gated on the target actually being Darwin.
+
+    **Known, accepted limitation** (Codex review, fresh evidence, fifth
+    round): the unconditional strip is not perfectly safe -- an explicit
+    ``asm("__ZL3foo")`` label on a *non*-Darwin target is a real, distinct
+    mangled identity a programmer chose to write (exactly the same
+    "asm label, not linker decoration" shape ``extract/headers/clang/
+    functions.py``'s own ``is_extern_c`` determination already documents
+    and gates on ``is_darwin_target`` for), not a decoration artifact --
+    stripping its leading underscore here would misread it as local
+    linkage. Gating this strip on the actual target the same way that
+    call site does would need a target triple threaded through every
+    :class:`~abicheck.tu_fragment.TuFragment`/``Function``/``Variable``
+    reaching this module, which none of them carry today, and even a
+    target gate is not fully sufficient on its own (that call site's own
+    docstring: a real ``asm("_foo")`` label is just as possible ON Darwin
+    as off it). Left undone rather than guess-fixed with an unverified
+    partial gate: a real, explicit asm-label mangled name that happens to
+    collide with this exact quirk's decorated-Itanium shape (``__Z...``
+    on a non-Darwin symbol) is vanishingly rare in practice compared to
+    the Darwin quirk this closes on every real Darwin CI run, and no
+    toolchain matrix was available to verify a target-gated version
+    against. See ``tests/regressions/manifest.py``'s
+    ``identity.platform_decorated_mangled_name`` entry for the tracked
+    residual.
     """
     if mangled.startswith("__Z"):
         mangled = mangled[1:]

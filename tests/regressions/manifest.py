@@ -869,6 +869,32 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="https://github.com/abicheck/abicheck/pull/1048",
             ),
+            KnownGap(
+                description=(
+                    "The Itanium-marker-normalization half of this fix "
+                    "(`tu_merge._has_local_linkage_mangling`/"
+                    "`_looks_itanium_mangled` stripping one leading "
+                    "underscore before the `_Z` check) is unconditional, "
+                    "not gated on the target actually being Darwin -- "
+                    "`extract/headers/clang/functions.py`'s own "
+                    "`is_extern_c` determination gates its analogous "
+                    "de-prefixed fallback on `is_darwin_target` precisely "
+                    'because a real, explicit `asm("__ZL3foo")` label on '
+                    "a non-Darwin target is a genuine, distinct mangled "
+                    "identity, not decoration, and this fix's own "
+                    "normalization has no target context available to "
+                    "apply the identical gate. Such a symbol is "
+                    "misclassified as local linkage. Left undone rather "
+                    "than guess-fixed: closing it needs a target triple "
+                    "threaded through every TuFragment/Function/Variable "
+                    "reaching this module (none carry one today), and "
+                    "even a target gate would not be fully sufficient "
+                    "(the same asm-label shape is possible ON Darwin too) "
+                    "-- see `tu_merge._has_local_linkage_mangling`'s own "
+                    "docstring for the full account."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1048",
+            ),
         ),
     ),
 )
