@@ -124,9 +124,9 @@ an unknown-key error.
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
-`compile:`, `debug:`, `exit_code_scheme:`, `version:`, `risk_rules:`,
-`crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are the
-recognized top-level keys. See the
+`compile:`, `debug:`, `bundle:`, `exit_code_scheme:`, `version:`,
+`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
+`baseline:` are the recognized top-level keys. See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
 cover what each block does, its effective defaults, and behavior that isn't
@@ -246,6 +246,25 @@ forces the ELF debug format for both sides (was `--debug-format`);
 headers are available (was `--dwarf-only`); `debuginfod:` (default `false`)
 enables debuginfod network resolution (was `--debuginfod`); `debuginfod_url:`
 overrides `DEBUGINFOD_URLS` (was `--debuginfod-url`).
+
+---
+
+### `bundle:`
+
+Cross-library bundle-analysis topology (CLI cleanup phase two, PR J) — the
+sole source for both settings now, replacing the removed
+`--bundle-system-providers`/`--bundle-cohort` CLI flags: `system_providers:`
+(a list of extra sonames to treat as system-provided, extending the built-in
+libc/libstdc++/libgcc/libtbb allow-list) and `cohorts:` (a list of
+co-versioned library name prefixes enabling the `BUNDLE_SONAME_SKEW` check).
+Entries are stripped of surrounding whitespace and empty entries dropped at
+parse time. `system_providers:` applies to `compare`'s directory/package
+fan-out and `scan --artifact-set` alike; `cohorts:` (the SONAME-skew check)
+applies to compare only — an `--artifact-set` audit has no old/new release
+pair to detect a skew between, so it has no effect there. Distinct from the
+plural `bundles:` block below, which serves a different, unrelated purpose
+(the `project` command family's target declarations). See
+[Multi-binary § The bundle-analysis flags](../use/multi-binary.md#the-bundle-analysis-flags).
 
 ---
 

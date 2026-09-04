@@ -1567,6 +1567,9 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # Same "formerly ..." historical framing, in the use-case
                 # registry's bundle_soname_skew entry.
                 "docs/contribute/usecase-registry.yaml",
+                # Same "replacing the removed ..." historical framing, in
+                # the canonical config-file reference's own bundle: section.
+                "reference/config-file.md",
             }
         ),
     ),
