@@ -822,6 +822,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/dwarf_metadata.py",
+      "baseline_lines": 803,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Crossed the 800-line production maximum (2026-09-04, P1 review): a swallowed per-DIE type-resolution failure inside an otherwise-successful CU (a malformed DW_AT_type reference caught by _resolve_type/_process_typedef/_expand_anonymous_member/_resolve_inner_type_info, each returning a placeholder rather than raising) previously left cu_failed untouched, so a run could read back evidence_state=\"parsed\" despite silently losing a field/typedef/nested-type fact. Fixed by threading a keyword-only `incomplete: list[bool] | None = None` out-param through the entire DIE-walk/type-resolution call chain (mirrors the existing `truncated`/`decode_failed`/`invalid_strings` completeness-signal pattern used elsewhere in this codebase), folded into evidence_state alongside the existing cu_failed/skeleton_cus check. Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/dwarf_snapshot.py",
       "baseline_lines": 1994,
       "target": "see ADR-061 ownership map",

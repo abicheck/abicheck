@@ -155,6 +155,28 @@ class _TypeResolver:
             self._invalid_strings.append(True)
         return name
 
+    # Every kind _resolve_name_simple/_resolve_name_array/CTF_K_FUNCTION
+    # actually handle (P2 review, CTF sibling of the identical BTF fix): a
+    # kind outside this set falls to both resolvers' placeholder fallback
+    # with no useful name *or* size.
+    _KNOWN_KINDS = frozenset(
+        {
+            CTF_K_INTEGER,
+            CTF_K_FLOAT,
+            CTF_K_POINTER,
+            CTF_K_ARRAY,
+            CTF_K_FUNCTION,
+            CTF_K_STRUCT,
+            CTF_K_UNION,
+            CTF_K_ENUM,
+            CTF_K_FORWARD,
+            CTF_K_TYPEDEF,
+            CTF_K_VOLATILE,
+            CTF_K_CONST,
+            CTF_K_RESTRICT,
+        }
+    )
+
     def _resolve_name_array(self, t: CtfType) -> str:
         """Return the name string for a CTF array type."""
         if self._version >= CTF_VERSION_3 and len(t.extra) >= 12:
@@ -225,6 +247,11 @@ class _TypeResolver:
         if kind == CTF_K_FUNCTION:
             return f"{self.name(t.size_or_type)}(...)"
 
+        # P2 review: an in-range type whose own kind isn't recognized at
+        # all (not in _KNOWN_KINDS) previously fell to this placeholder
+        # with no completeness signal either.
+        if self._invalid_strings is not None:
+            self._invalid_strings.append(True)
         return f"<ctf_kind_{kind}:{type_id}>"
 
     def _resolve_size(self, type_id: int) -> int:
@@ -275,4 +302,10 @@ class _TypeResolver:
         if kind in (CTF_K_TYPEDEF, CTF_K_VOLATILE, CTF_K_CONST, CTF_K_RESTRICT):
             return self.size(t.size_or_type)
 
+        # A recognized-but-legitimately-sizeless kind (CTF_K_FORWARD/
+        # FUNCTION -- e.g. a function has no byte size) falls through to 0
+        # here without being incomplete; only a genuinely unrecognized kind
+        # (P2 review) is flagged, mirroring _resolve_name's fallback.
+        if self._invalid_strings is not None and kind not in self._KNOWN_KINDS:
+            self._invalid_strings.append(True)
         return 0

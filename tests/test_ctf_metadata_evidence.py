@@ -35,6 +35,7 @@ import struct
 from abicheck.ctf_metadata import (
     _CTF_V2_LSTRUCT_THRESH,
     CTF_K_ENUM,
+    CTF_K_FORWARD,
     CTF_K_INTEGER,
     CTF_K_POINTER,
     CTF_K_STRUCT,
@@ -372,6 +373,40 @@ class TestInvalidStringOffsetPropagatesToPartial:
         assert "S" in meta.structs
         assert meta.structs["S"].fields[0].type_name == "<ctf:99>"
         assert meta.structs["S"].fields[0].byte_size == 0
+
+    def test_unsupported_in_range_member_kind_marks_partial(self) -> None:
+        """P2 review, round 4: the CTF sibling of the identical BTF finding
+        -- a struct member referencing a real, in-range type record whose
+        own ``kind`` value isn't recognized at all."""
+        b = CtfBuilder()
+        unsupported_kind = 31
+        b._type_entries.append(  # type_id 1: a real record, unsupported kind
+            struct.pack("<III", 0, unsupported_kind << 24, 0)
+        )
+        info = (CTF_K_STRUCT << 24) | (1 & 0xFFFF)
+        s_name = b.add_string("S")
+        m_name = b.add_string("field")
+        member = struct.pack("<II", m_name, (1 << 16) | 0)  # references type_id 1
+        entry = struct.pack("<III", s_name, info, 4) + member
+        b._type_entries.append(entry)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        assert (
+            meta.structs["S"].fields[0].type_name == f"<ctf_kind_{unsupported_kind}:1>"
+        )
+        assert meta.structs["S"].fields[0].byte_size == 0
+
+    def test_recognized_but_legitimately_sizeless_kind_is_not_flagged(self) -> None:
+        """Positive control: CTF_K_FORWARD is a *recognized* kind with no
+        meaningful byte size -- its legitimate size=0 must not be mistaken
+        for the unsupported-kind shape above."""
+        b = CtfBuilder()
+        b.add_type("fwd", CTF_K_FORWARD, 0, 0)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is False
 
 
 class TestUnterminatedStringMarksPartial:

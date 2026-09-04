@@ -178,6 +178,33 @@ class _TypeResolver:
         )
         return result
 
+    # Every kind _resolve_named_kind/_resolve_compound_kind actually handle
+    # (P2 review): a kind outside this set falls to both resolvers'
+    # placeholder fallback with no useful name *or* size, unlike a kind that
+    # IS recognized here but legitimately has no size concept at all (e.g.
+    # BTF_KIND_FUNC_PROTO/BTF_KIND_VAR) -- those must not be flagged.
+    _KNOWN_KINDS = frozenset(
+        {
+            BTF_KIND_STRUCT,
+            BTF_KIND_UNION,
+            BTF_KIND_ENUM,
+            BTF_KIND_ENUM64,
+            BTF_KIND_INT,
+            BTF_KIND_FLOAT,
+            BTF_KIND_FWD,
+            BTF_KIND_FUNC,
+            BTF_KIND_VAR,
+            BTF_KIND_PTR,
+            BTF_KIND_ARRAY,
+            BTF_KIND_TYPEDEF,
+            BTF_KIND_VOLATILE,
+            BTF_KIND_CONST,
+            BTF_KIND_RESTRICT,
+            BTF_KIND_FUNC_PROTO,
+            BTF_KIND_TYPE_TAG,
+        }
+    )
+
     def _get(self, type_id: int) -> BtfType | None:
         if 0 <= type_id < len(self._types):
             return self._types[type_id]
@@ -213,6 +240,14 @@ class _TypeResolver:
         compound = self._resolve_compound_kind(kind, t, tname)
         if compound is not None:
             return compound
+        # P2 review, fresh evidence: an in-range type whose own kind this
+        # resolver simply doesn't handle (neither a named nor a compound
+        # kind) previously fell to this placeholder with no completeness
+        # signal either -- the same silent-substitution shape as an
+        # out-of-range type_id, just triggered by an unsupported kind
+        # instead of a missing record.
+        if self._invalid_strings is not None:
+            self._invalid_strings.append(True)
         return f"<btf_kind_{kind}:{type_id}>"
 
     def _resolve_named_kind(self, kind: int, t: BtfType, tname: str) -> str | None:
@@ -317,4 +352,11 @@ class _TypeResolver:
         ):
             return self.size(t.size_or_type)
 
+        # A recognized-but-legitimately-sizeless kind (BTF_KIND_FWD/FUNC/
+        # FUNC_PROTO/VAR -- e.g. a function has no byte size) falls through
+        # to 0 here without being incomplete; only a genuinely unhandled
+        # kind (P2 review) -- one _KNOWN_KINDS doesn't recognize at all --
+        # is flagged, mirroring _resolve_name's identical fallback.
+        if self._invalid_strings is not None and kind not in self._KNOWN_KINDS:
+            self._invalid_strings.append(True)
         return 0

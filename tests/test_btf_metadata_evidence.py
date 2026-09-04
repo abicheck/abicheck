@@ -221,6 +221,45 @@ class TestInvalidStringOffsetPropagatesToPartial:
         assert meta.structs["S"].fields[0].type_name == "<btf:99>"
         assert meta.structs["S"].fields[0].byte_size == 0
 
+    def test_unsupported_in_range_member_kind_marks_partial(self) -> None:
+        """P2 review, round 4: an otherwise well-formed struct member whose
+        ``m_type`` names a real, in-range type record -- but one whose own
+        ``kind`` value (31, the reviewer's exact repro; no real BTF_KIND_*
+        constant reaches that high) neither name nor size resolution
+        recognizes at all. Distinct from the out-of-range-type-id case
+        above: the record genuinely exists, its *kind* is what's
+        unsupported."""
+        b = BtfBuilder()
+        unsupported_kind = 31
+        b._type_entries.append(  # type_id 1: a real record, unsupported kind
+            struct.pack("<III", 0, unsupported_kind << 24, 0)
+        )
+        info = (BTF_KIND_STRUCT << 24) | (1 & 0xFFFF)
+        s_name = b.add_string("S")
+        m_name = b.add_string("field")
+        member = struct.pack("<III", m_name, 1, 0)  # references type_id 1
+        entry = struct.pack("<III", s_name, info, 4) + member
+        b._type_entries.append(entry)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        assert (
+            meta.structs["S"].fields[0].type_name == f"<btf_kind_{unsupported_kind}:1>"
+        )
+        assert meta.structs["S"].fields[0].byte_size == 0
+
+    def test_recognized_but_legitimately_sizeless_kind_is_not_flagged(self) -> None:
+        """Positive control: BTF_KIND_FUNC_PROTO is a *recognized* kind with
+        no meaningful byte size (a function type has no size) -- its
+        legitimate size=0 must not be mistaken for the unsupported-kind
+        shape above."""
+        b = BtfBuilder()
+        b.add_type("", BTF_KIND_FUNC_PROTO, 0, 0)  # type_id 1: fn() -> void
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is False
+
 
 class TestUnterminatedStringMarksPartial:
     """P2 review, round 2: a name offset in-bounds but with no NUL

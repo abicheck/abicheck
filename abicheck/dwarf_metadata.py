@@ -144,6 +144,16 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
 
     # Per-parse type-resolution cache: (cu_offset, die_offset) → (name, byte_size)
     type_cache: dict[tuple[int, int], tuple[str, int]] = {}
+    # P1 review, fresh evidence: a per-DIE type-resolution failure inside an
+    # otherwise-successful CU (a malformed DW_AT_type reference caught by
+    # _resolve_type()/_process_typedef()/_expand_anonymous_member()/
+    # _resolve_inner_type_info(), each returning a placeholder rather than
+    # raising) previously left cu_failed untouched -- the CU-level try/except
+    # below only ever sees an exception that escaped every one of those inner
+    # catches. Shared across the whole parse (mirrors type_cache's own
+    # per-parse scope) and threaded through the full DIE-walk/type-resolution
+    # call chain; folded into evidence_state after the CU loop.
+    incomplete: list[bool] = []
 
     # P2 review: this standalone entry point (still public, re-exported by
     # dwarf_unified.py's shim) previously never stamped evidence_state at
@@ -166,7 +176,7 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
             # parse_dwarf_from_session's identical skeleton-CU downgrade.
             skeleton_cus += 1
         try:
-            _process_cu(CU, meta, type_cache)
+            _process_cu(CU, meta, type_cache, incomplete=incomplete)
         except Exception as exc:  # noqa: BLE001
             meta.cu_failed += 1
             log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
@@ -183,6 +193,10 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
             if meta.cu_failed and meta.cu_failed == meta.cu_total
             else "partial"
         )
+    elif incomplete:
+        # Every CU-level try/except succeeded, but at least one per-DIE
+        # type reference inside one of them could not be resolved.
+        meta.evidence_state = "partial"
 
     return meta
 
@@ -191,10 +205,12 @@ def _process_cu(
     CU: Any,
     meta: DwarfMetadata,
     type_cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     """Walk all DIEs in one Compilation Unit (iterative, no recursion)."""
     top_die = CU.get_top_DIE()
-    _walk_die_iter(top_die, meta, CU, type_cache)
+    _walk_die_iter(top_die, meta, CU, type_cache, incomplete=incomplete)
 
 
 def _walk_die_iter(
@@ -202,6 +218,8 @@ def _walk_die_iter(
     meta: DwarfMetadata,
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     """Iterative depth-first DIE traversal with scope-qualified names.
 
@@ -232,13 +250,15 @@ def _walk_die_iter(
             next_scope = f"{scope}::{die_name}" if scope else die_name
         elif tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
             qualified = f"{scope}::{die_name}" if (scope and die_name) else die_name
-            _process_struct(die, meta, CU, type_cache, scope_prefix=scope)
+            _process_struct(
+                die, meta, CU, type_cache, scope_prefix=scope, incomplete=incomplete
+            )
             if die_name:
                 next_scope = qualified  # nested types use this as their scope
         elif tag == "DW_TAG_enumeration_type":
             _process_enum(die, meta, CU, scope_prefix=scope)
         elif tag == "DW_TAG_typedef":
-            _process_typedef(die, meta, CU, type_cache)
+            _process_typedef(die, meta, CU, type_cache, incomplete=incomplete)
         elif tag == "DW_TAG_base_type" and die_name:
             bsize = _attr_int(die, "DW_AT_byte_size")
             if bsize:
@@ -256,6 +276,8 @@ def _process_typedef(
     meta: DwarfMetadata,
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     """If a typedef points to an anonymous struct/enum, register it under the typedef name."""
     typedef_name = _attr_str(die, "DW_AT_name")
@@ -266,6 +288,11 @@ def _process_typedef(
     try:
         target = _resolve_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
+        # P1 review: a malformed DW_AT_type reference here was previously
+        # invisible to the CU-level failure accounting -- this typedef's
+        # anonymous-struct/enum backfill is silently skipped.
+        if incomplete is not None:
+            incomplete.append(True)
         return
 
     tag = target.tag
@@ -274,7 +301,12 @@ def _process_typedef(
     if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
         if not target_name and typedef_name not in meta.structs:
             _process_struct_named(
-                target, meta, CU, type_cache, override_name=typedef_name
+                target,
+                meta,
+                CU,
+                type_cache,
+                override_name=typedef_name,
+                incomplete=incomplete,
             )
     elif tag == "DW_TAG_enumeration_type":
         if not target_name and typedef_name not in meta.enums:
@@ -292,12 +324,16 @@ def _process_struct(
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
     scope_prefix: str = "",
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     name = _attr_str(die, "DW_AT_name")
     if not name:
         return  # anonymous — handled via typedef in _process_typedef
     qualified = f"{scope_prefix}::{name}" if scope_prefix else name
-    _process_struct_named(die, meta, CU, type_cache, override_name=qualified)
+    _process_struct_named(
+        die, meta, CU, type_cache, override_name=qualified, incomplete=incomplete
+    )
 
 
 def _process_struct_named(
@@ -306,6 +342,8 @@ def _process_struct_named(
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
     override_name: str | None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     name = override_name or _attr_str(die, "DW_AT_name")
     if not name:
@@ -337,10 +375,12 @@ def _process_struct_named(
                     child.attributes["DW_AT_data_member_location"].value
                 )
             layout.fields.extend(
-                _expand_anonymous_member(child, CU, type_cache, anon_offset)
+                _expand_anonymous_member(
+                    child, CU, type_cache, anon_offset, incomplete=incomplete
+                )
             )
         else:
-            fi = _process_member(child, CU, type_cache)
+            fi = _process_member(child, CU, type_cache, incomplete=incomplete)
             if fi is not None:
                 layout.fields.append(fi)
 
@@ -363,6 +403,8 @@ def _expand_anonymous_member(
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
     byte_offset: int,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> list[FieldInfo]:
     """Inline the fields of an anonymous struct/union member.
 
@@ -375,6 +417,11 @@ def _expand_anonymous_member(
     try:
         target = _resolve_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
+        # P1 review: a malformed DW_AT_type reference here was previously
+        # invisible to the CU-level failure accounting -- this anonymous
+        # member's fields are silently dropped.
+        if incomplete is not None:
+            incomplete.append(True)
         return []
     if target.tag not in (
         "DW_TAG_structure_type",
@@ -387,7 +434,7 @@ def _expand_anonymous_member(
     for child in target.iter_children():
         if child.tag != "DW_TAG_member":
             continue
-        fi = _process_member(child, CU, type_cache)
+        fi = _process_member(child, CU, type_cache, incomplete=incomplete)
         if fi is None:
             continue
         # Adjust offset: anonymous member byte_offset + inner field offset
@@ -408,6 +455,8 @@ def _process_member(
     die: Any,
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> FieldInfo | None:
     name = _attr_str(die, "DW_AT_name")
     if not name:
@@ -434,7 +483,9 @@ def _process_member(
         bit_offset = 0
 
     # Resolve field type
-    type_name, field_byte_size = _resolve_type(die, CU, type_cache)
+    type_name, field_byte_size = _resolve_type(
+        die, CU, type_cache, incomplete=incomplete
+    )
 
     return FieldInfo(
         name=name,
@@ -508,14 +559,23 @@ def _resolve_type(
     die: Any,
     CU: Any,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
     """Return (type_name, byte_size) for the type referenced by *die*."""
     if "DW_AT_type" not in die.attributes:
         return ("unknown", 0)
     try:
         type_die = _resolve_ref(die, "DW_AT_type", CU)
-        return _die_to_type_info(type_die, CU, depth=0, cache=cache)
+        return _die_to_type_info(
+            type_die, CU, depth=0, cache=cache, incomplete=incomplete
+        )
     except Exception:  # noqa: BLE001
+        # P1 review, fresh evidence: a malformed DW_AT_type reference here was
+        # previously invisible to the CU-level failure accounting -- this
+        # field/return/parameter type silently falls back to "unknown".
+        if incomplete is not None:
+            incomplete.append(True)
         return ("unknown", 0)
 
 
@@ -524,6 +584,8 @@ def _die_to_type_info(  # noqa: PLR0911
     CU: Any,
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
     """Recursively resolve a type DIE to (name, byte_size).
 
@@ -538,7 +600,7 @@ def _die_to_type_info(  # noqa: PLR0911
     if cache_key in cache:
         return cache[cache_key]
 
-    result = _compute_type_info(die, CU, depth, cache)
+    result = _compute_type_info(die, CU, depth, cache, incomplete=incomplete)
     cache[cache_key] = result
     return result
 
@@ -548,6 +610,8 @@ def _compute_type_info(
     CU: Any,
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
     tag = die.tag
 
@@ -566,29 +630,39 @@ def _compute_type_info(
 
     if tag == "DW_TAG_pointer_type":
         return _compute_pointer_like_info(
-            die, CU, depth, cache, suffix=" *", fallback="void *"
+            die, CU, depth, cache, suffix=" *", fallback="void *", incomplete=incomplete
         )
 
     if tag in ("DW_TAG_reference_type", "DW_TAG_rvalue_reference_type"):
         suffix = " &&" if tag == "DW_TAG_rvalue_reference_type" else " &"
         return _compute_pointer_like_info(
-            die, CU, depth, cache, suffix=suffix, fallback=f"?{suffix}"
+            die,
+            CU,
+            depth,
+            cache,
+            suffix=suffix,
+            fallback=f"?{suffix}",
+            incomplete=incomplete,
         )
 
     if tag in ("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type"):
         qualifier = tag.split("_")[2].lower()
-        return _compute_qualified_type_info(die, CU, depth, cache, qualifier)
+        return _compute_qualified_type_info(
+            die, CU, depth, cache, qualifier, incomplete=incomplete
+        )
 
     if tag == "DW_TAG_atomic_type":
         # Spelled "_Atomic" (not the generic tag.split() lowercase form) so it
         # matches the C11 keyword diff_atomic.py's _has_atomic() looks for.
-        return _compute_qualified_type_info(die, CU, depth, cache, "_Atomic")
+        return _compute_qualified_type_info(
+            die, CU, depth, cache, "_Atomic", incomplete=incomplete
+        )
 
     if tag == "DW_TAG_typedef":
-        return _compute_typedef_info(die, CU, depth, cache)
+        return _compute_typedef_info(die, CU, depth, cache, incomplete=incomplete)
 
     if tag == "DW_TAG_array_type":
-        return _compute_array_type_info(die, CU, depth, cache)
+        return _compute_array_type_info(die, CU, depth, cache, incomplete=incomplete)
 
     if tag == "DW_TAG_subroutine_type":
         return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))
@@ -611,8 +685,10 @@ def _compute_pointer_like_info(
     cache: dict[tuple[int, int], tuple[str, int]],
     suffix: str,
     fallback: str,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
-    pointee = _resolve_inner_type_name(die, CU, depth, cache)
+    pointee = _resolve_inner_type_name(die, CU, depth, cache, incomplete=incomplete)
     size = _attr_int(die, "DW_AT_byte_size") or 0
     if pointee is None:
         return (fallback, size)
@@ -625,8 +701,10 @@ def _compute_qualified_type_info(
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
     qualifier: str,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
-    inner = _resolve_inner_type_info(die, CU, depth, cache)
+    inner = _resolve_inner_type_info(die, CU, depth, cache, incomplete=incomplete)
     if inner is None:
         return (qualifier, 0)
     inner_name, size = inner
@@ -638,9 +716,11 @@ def _compute_typedef_info(
     CU: Any,
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
     name = _attr_str(die, "DW_AT_name")
-    inner = _resolve_inner_type_info(die, CU, depth, cache)
+    inner = _resolve_inner_type_info(die, CU, depth, cache, incomplete=incomplete)
     if inner is None:
         return (name or "typedef", 0)
     inner_name, size = inner
@@ -652,9 +732,11 @@ def _compute_array_type_info(
     CU: Any,
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int]:
     size = _attr_int(die, "DW_AT_byte_size")
-    inner_name = _resolve_inner_type_name(die, CU, depth, cache)
+    inner_name = _resolve_inner_type_name(die, CU, depth, cache, incomplete=incomplete)
     return (f"{inner_name}[]", size) if inner_name is not None else ("array", size)
 
 
@@ -663,13 +745,21 @@ def _resolve_inner_type_info(
     CU: Any,
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> tuple[str, int] | None:
     if "DW_AT_type" not in die.attributes:
         return None
     try:
         inner_die = _resolve_ref(die, "DW_AT_type", CU)
-        return _die_to_type_info(inner_die, CU, depth + 1, cache)
+        return _die_to_type_info(inner_die, CU, depth + 1, cache, incomplete=incomplete)
     except Exception:  # noqa: BLE001
+        # P1 review, fresh evidence: a malformed DW_AT_type reference here was
+        # previously invisible to the CU-level failure accounting -- the
+        # enclosing pointer/qualifier/array/typedef falls back to a
+        # placeholder inner type with no completeness signal.
+        if incomplete is not None:
+            incomplete.append(True)
         return None
 
 
@@ -678,8 +768,10 @@ def _resolve_inner_type_name(
     CU: Any,
     depth: int,
     cache: dict[tuple[int, int], tuple[str, int]],
+    *,
+    incomplete: list[bool] | None = None,
 ) -> str | None:
-    inner = _resolve_inner_type_info(die, CU, depth, cache)
+    inner = _resolve_inner_type_info(die, CU, depth, cache, incomplete=incomplete)
     return inner[0] if inner is not None else None
 
 

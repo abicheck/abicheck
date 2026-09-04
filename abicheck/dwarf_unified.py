@@ -180,6 +180,15 @@ def parse_dwarf_from_session(
     # Per-binary type-resolution cache: (cu_offset, die_offset) → (type_name, byte_size).
     # DIE offsets are only unique within one ELF file — do not share across binaries.
     type_cache: dict[tuple[int, int], tuple[str, int]] = {}
+    # P1 review, fresh evidence: same gap as dwarf_metadata._parse's own
+    # `incomplete` list -- a per-DIE type-resolution failure inside an
+    # otherwise-successful CU (a malformed DW_AT_type reference) previously
+    # left cu_failed untouched here too, since this is the unified dump path
+    # `dumper.py` actually uses for a real ELF dump, not just the standalone
+    # parser. Threaded through `_meta_process_cu` (dwarf_metadata._process_cu)
+    # the same way; folded into meta.evidence_state below alongside the
+    # cu_failed/skeleton_cus check.
+    incomplete: list[bool] = []
 
     skeleton_cus = 0
     for CU in session.dwarf.iter_CUs():
@@ -199,7 +208,7 @@ def parse_dwarf_from_session(
             # incomplete rather than attempt full DWO/DWP resolution here.
             skeleton_cus += 1
         try:
-            _meta_process_cu(CU, meta, type_cache)
+            _meta_process_cu(CU, meta, type_cache, incomplete=incomplete)
         except Exception as exc:  # noqa: BLE001
             meta.cu_failed += 1
             log.warning("parse_dwarf: meta CU skipped in %s: %s", session.path, exc)
@@ -263,6 +272,13 @@ def parse_dwarf_from_session(
                 if channel.cu_failed and channel.cu_failed == channel.cu_total
                 else "partial"
             )
+
+    if incomplete and meta.evidence_state == "parsed":
+        # Every CU-level try/except succeeded, but at least one per-DIE type
+        # reference inside one of them could not be resolved. Only downgrades
+        # a clean "parsed" -- an already partial/failed state from the
+        # cu_failed/skeleton_cus check above is not overwritten.
+        meta.evidence_state = "partial"
 
     if not cfi_complete and adv.evidence_state == "parsed":
         # P1 review, fresh evidence: mirrors dwarf_advanced.
