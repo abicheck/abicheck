@@ -246,6 +246,9 @@ def _looks_itanium_mangled(mangled: str) -> bool:
     prefer :func:`_has_local_linkage_mangling`'s own direct read of the
     mangled name over the ``is_extern_c`` fallback, exactly as it already
     does for the plain ``fn.mangled != fn.name`` case.
+
+    **Known, accepted limitation** (PR #1048, eighth round): a genuine
+    ``extern "C"`` free declaration literally named e.g. ``_ZL3foo`` collides byte-for-byte with this grammar -- see ``identity.platform_decorated_mangled_name`` in ``tests/regressions/manifest.py``.
     """
     if mangled.startswith("__Z"):
         mangled = mangled[1:]

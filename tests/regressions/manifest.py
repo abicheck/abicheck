@@ -930,6 +930,44 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="https://github.com/abicheck/abicheck/pull/1048",
             ),
+            KnownGap(
+                description=(
+                    "tu_merge._looks_itanium_mangled (and its extract/"
+                    "manifest_semantic_ir.py mirror) cannot distinguish a "
+                    'genuinely mangling-free `extern "C"` free '
+                    "declaration whose literal identifier happens to "
+                    "collide byte-for-byte with the Itanium local-linkage "
+                    "grammar (e.g. named `_ZL3foo`) from a real "
+                    "compiler-mangled local symbol -- both produce the "
+                    "identical decorated string, and unlike the "
+                    'class-nested-in-`extern "C"` case this guard was '
+                    "built to catch (round four, above), there is no "
+                    "structural difference in the string itself to key "
+                    "on. Both cases share the identical `is_extern_c=True` "
+                    "flag; only the nested-member case has that flag "
+                    "wrongly inherited (dumper_clang.py's `_walk` "
+                    "mis-propagates it into a nested CXXRecordDecl -- a "
+                    "free, non-nested declaration gets no such incorrect "
+                    "propagation), so telling the two apart needs a "
+                    "caller-supplied record-membership signal independent "
+                    "of `is_extern_c` itself. `entity_id.scope` cannot "
+                    "supply it: `entity_id_for_function`/`entity_id_for_"
+                    "variable` unconditionally erase scope for the "
+                    "`is_extern_c` branch regardless of whether that flag "
+                    "was correctly or wrongly set, so the information is "
+                    "already lost by the time it reaches this module -- "
+                    "closing this needs an upstream, cross-module change "
+                    "to how Function/Variable/EntityId carry that bit, not "
+                    "a fix this module can make on its own. Left as a "
+                    "tracked residual: it requires an identifier "
+                    'simultaneously (a) genuinely extern "C", (b) not a '
+                    "class member, and (c) spelled to exactly collide "
+                    "with the Itanium local-linkage grammar -- no real "
+                    "codebase has been observed to use such a "
+                    "deliberately reserved-looking name."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1048",
+            ),
         ),
     ),
 )
