@@ -5258,10 +5258,22 @@ PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
                                        `scan --artifact-set` alike, replaced
                                        by a new `.abicheck.yml` `bundle:`
                                        block (`system_providers:`/
-                                       `cohorts:`) resolved through the same
-                                       `ResolvedCompareConfig` merge point
-                                       `severity:`/`scope:`/`suppression:`
-                                       already use — a new, independent
+                                       `cohorts:`) -- `compare`'s directory/
+                                       package fan-out reads it through the
+                                       same `ResolvedCompareConfig` merge
+                                       point `severity:`/`scope:`/
+                                       `suppression:` already use, but `scan
+                                       --artifact-set` resolves it through
+                                       its own, separate
+                                       `_discover_scan_project_config` +
+                                       raw `BuildConfig` read (Codex review,
+                                       fresh evidence -- correcting an
+                                       earlier overstatement here that both
+                                       paths share one merge point; unifying
+                                       them behind one workflow-owned
+                                       resolved-bundle-topology object is a
+                                       real, separate cleanup this pass did
+                                       not attempt). A new, independent
                                        top-level key, deliberately *not*
                                        folded into the existing plural
                                        `bundles:`/`BundleSpec` block
