@@ -65,7 +65,7 @@ unaffected. Each of the 197 entries carries:
 | Field | Meaning |
 |---|---|
 | `entity` | `rule` or `scenario` |
-| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; audit-ness doesn't determine `entity` (`operation` carries it instead, below) — the G20 rule cases (143-146) are `entity: rule` with `operation: audit`, but the G20 capability scenarios (147, 148, 151) are `entity: scenario` and *also* carry `operation: audit`. An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way; corrected here after an external review caught the doc/implementation mismatch. |
+| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; audit-ness doesn't determine `entity` (`operation` carries it instead, below) — the G20 rule cases (143-146) are `entity: rule` with `operation: audit`, but the G20 capability scenarios (147-151) are `entity: scenario` and *also* carry `operation: audit`. An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way; corrected here after an external review caught the doc/implementation mismatch. |
 | `operation` | `compare` (an old/new comparison — the default) or `audit` (a single-release scan, `ground_truth.json`'s own `mode: "audit"`) — orthogonal to `entity`/`scenario_kind` |
 | `ecosystem` | `generic`, `onetbb`, `sycl`, `onemkl`, or `linux-kernel` |
 | `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for the four G20 audit rules |
@@ -123,8 +123,9 @@ section now reports the two counts separately for this reason.
 | `symbol-version-node-removed` | case65_symbol_version_removed | variant (symbol-versioning) | case139_symbol_version_node_removed (adds the "symbol name persists, folded into a different node" nuance) |
 | `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | variant (specialization) | case190_public_inline_function_references_internal_constant (narrows to the inline-function case) |
 
-Each variant case's README gained a short "Related rule" cross-reference to
-its canonical case (e.g. `examples/case12_function_removed/README.md`,
+Each non-canonical case's README (variant or duplicate alike) gained a
+short "Related rule" cross-reference to its canonical case (e.g.
+`examples/case12_function_removed/README.md`,
 `examples/case47_inline_to_outlined/README.md`).
 
 **Clusters reviewed and deliberately *not* merged**, because they share a
@@ -133,7 +134,7 @@ verdict — each keeps its own default rule_slug: `case03`/`16`/`47`/`62`/`185`
 (`func_added` from four unrelated causes — plain addition, un-inlining twice
 over, vtable-slot reuse, opaque-struct-plus-accessor); `case07`/`14`/`17`/
 `18`/`36`/`40`/`44`/`48` (`type_size_changed` from eight unrelated causes —
-case07/case14 *are* the C/C++ duplicate pair above, the other six are
+case07/case14 *are* the C/C++ variant pair above, the other six are
 distinct mechanisms: template instantiation, transitive dependency leak,
 anonymous union, compound multi-axis stress case, cyclic self-reference,
 embedding propagation); `case09`/`38` (a compound four-changes-at-once
@@ -260,10 +261,11 @@ examples/
     ├── compare-release/      # already landed (Phase 5, 1 of 8)
     ├── audit-release/
     ├── compare-project/
-    ├── source-aware-analysis/
+    ├── evidence-depth/
+    ├── build-source-evidence/
     ├── python-api/
     ├── github-actions/
-    └── suppressions/
+    └── suppressions/         # one directory per PHASE5_TARGET_WORKFLOWS entry
 
 catalog/
 ├── README.md

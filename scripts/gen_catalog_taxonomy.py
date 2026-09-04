@@ -65,7 +65,7 @@ are orthogonal to implementation language and independent of the physical
                      `mode: "audit"`). Orthogonal to `entity`/`scenario_kind`:
                      an audit case may be either entity -- the G20 rule
                      cases (143-146) stay entity="rule", but the G20
-                     capability scenarios (147, 148, 151) are entity=
+                     capability scenarios (147-151) are entity=
                      "scenario" and also carry mode="audit" -- so "which
                      release-evaluation operation does this case exercise"
                      doesn't have to be inferred from either the entity or
