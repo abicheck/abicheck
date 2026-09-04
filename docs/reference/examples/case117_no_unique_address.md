@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `type_size_changed`, `type_field_offset_changed` |
 | **Source files** | `examples/case117_no_unique_address/` |
+| **Rule family** | [`no-unique-address`](by-rule/no-unique-address.md) |
 
 **Category:** Modern C/C++ Contract | **Verdict:** 🔴 BREAKING
 
@@ -149,4 +151,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: No unique address](by-rule/no-unique-address.md)._

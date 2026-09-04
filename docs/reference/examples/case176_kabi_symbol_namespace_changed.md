@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `kabi_symbol_namespace_changed` |
 | **Source files** | `examples/case176_kabi_symbol_namespace_changed/` |
+| **Ecosystem** | [Linux kernel](by-ecosystem/linux-kernel.md) |
+| **Related rules** | [`symbol-export-namespace-changed`](by-rule/symbol-export-namespace-changed.md) |
 
 **Category:** Linux Kernel Module ABI (kABI) | **Verdict:** 🔴 BREAKING
 
@@ -112,4 +115,4 @@ fixture pair.
 - `v1.symvers`
 - `v2.symvers`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md)._

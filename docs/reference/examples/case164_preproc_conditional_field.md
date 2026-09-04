@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | ✅ **NO_CHANGE** |
 | **Category** | No Change |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case164_preproc_conditional_field/` |
+| **Rule family** | [`preproc-conditional-field`](by-rule/preproc-conditional-field.md) |
 
 **Category:** Build-Context Reconciliation (ADR-039) | **Verdict:** ✅ NO_CHANGE
 (only with `--reconcile-build-context`; a context-free header read
@@ -128,4 +130,4 @@ tool, so there is nothing to reproduce with them here.
 - `v1.abi.json`
 - `v2.abi.json`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Preproc conditional field](by-rule/preproc-conditional-field.md)._

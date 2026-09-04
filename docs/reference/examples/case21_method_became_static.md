@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_static_changed` |
 | **Source files** | `examples/case21_method_became_static/` |
+| **Rule family** | [`method-became-static`](by-rule/method-became-static.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +142,4 @@ shape here.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Method became static](by-rule/method-became-static.md)._

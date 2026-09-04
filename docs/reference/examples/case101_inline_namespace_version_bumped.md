@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `inline_namespace_version_bumped` |
 | **Source files** | `examples/case101_inline_namespace_version_bumped/` |
+| **Rule family** | [`inline-namespace-version-bumped`](by-rule/inline-namespace-version-bumped.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -147,4 +149,4 @@ not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace version bumped](by-rule/inline-namespace-version-bumped.md)._

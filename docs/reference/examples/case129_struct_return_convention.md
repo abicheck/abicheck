@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `struct_return_convention_changed` |
 | **Source files** | `examples/case129_struct_return_convention/` |
+| **Rule family** | [`struct-return-convention`](by-rule/struct-return-convention.md) |
 
 **Category:** Calling Convention | **Verdict:** 🔴 BREAKING
 
@@ -134,4 +136,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Struct return convention](by-rule/struct-return-convention.md)._

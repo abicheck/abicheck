@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `examples/case74_detail_base_class_changed/` |
+| **Rule family** | [`detail-base-class-changed`](by-rule/detail-base-class-changed.md) |
 
 **Category:** Internal-leak | **Verdict:** 🔴 BREAKING
 
@@ -174,4 +176,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Detail base class changed](by-rule/detail-base-class-changed.md)._

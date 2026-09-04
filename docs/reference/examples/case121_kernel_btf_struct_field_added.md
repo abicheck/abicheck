@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `struct_size_changed` |
 | **Source files** | `examples/case121_kernel_btf_struct_field_added/` |
+| **Ecosystem** | [Linux kernel](by-ecosystem/linux-kernel.md) |
+| **Related rules** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md) |
 
 **Category:** Kernel BTF / Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -125,4 +128,4 @@ invocation is given here.
 - `v1.btf`
 - `v2.btf`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md)._

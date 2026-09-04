@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `struct_packing_changed` |
 | **Source files** | `examples/case56_struct_packing_changed/` |
+| **Rule family** | [`struct-packing-changed`](by-rule/struct-packing-changed.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -133,4 +135,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Struct packing changed](by-rule/struct-packing-changed.md)._

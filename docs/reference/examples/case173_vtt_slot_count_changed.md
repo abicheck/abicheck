@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `vtt_slot_count_changed` |
 | **Source files** | `examples/case173_vtt_slot_count_changed/` |
+| **Rule family** | [`vtt-slot-count-changed`](by-rule/vtt-slot-count-changed.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -143,4 +145,4 @@ mismatch, whether or not it happens to segfault on this particular run.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtt slot count changed](by-rule/vtt-slot-count-changed.md)._

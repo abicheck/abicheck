@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_virtual_became_pure` |
 | **Source files** | `examples/case23_pure_virtual_added/` |
+| **Rule family** | [`pure-virtual-added`](by-rule/pure-virtual-added.md) |
 
 **Verdict:** 🔴 BREAKING
 **abicheck verdict: BREAKING**
@@ -133,4 +135,4 @@ Became pure virtual: direct instantiation causes SIGABRT
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pure virtual added](by-rule/pure-virtual-added.md)._

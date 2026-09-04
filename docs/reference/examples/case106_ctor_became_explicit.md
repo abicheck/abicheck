@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `ctor_explicit_added` |
 | **Source files** | `examples/case106_ctor_became_explicit/` |
+| **Rule family** | [`ctor-became-explicit`](by-rule/ctor-became-explicit.md) |
 
 **Category:** Source API contract | **Verdict:** 🟠 API_BREAK
 
@@ -108,4 +110,4 @@ g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Ctor became explicit](by-rule/ctor-became-explicit.md)._

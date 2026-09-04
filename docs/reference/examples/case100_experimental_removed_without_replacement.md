@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `experimental_removed_without_replacement`, `func_removed` |
 | **Source files** | `examples/case100_experimental_removed_without_replacement/` |
+| **Rule family** | [`experimental-removed-without-replacement`](by-rule/experimental-removed-without-replacement.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -147,4 +149,4 @@ environment (`abidiff` is not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Experimental removed without replacement](by-rule/experimental-removed-without-replacement.md)._

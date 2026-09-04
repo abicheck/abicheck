@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule · audit |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `public_to_internal_dependency` |
 | **Source files** | `examples/case181_xcheck_public_to_internal_dependency/` |
+| **Rule family** | [`xcheck-public-to-internal-dependency`](by-rule/xcheck-public-to-internal-dependency.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -140,4 +142,4 @@ edges at all).
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Xcheck public to internal dependency](by-rule/xcheck-public-to-internal-dependency.md)._

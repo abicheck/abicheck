@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `symbol_version_node_removed` |
 | **Source files** | `examples/case65_symbol_version_removed/` |
+| **Rule family** | [`symbol-version-node-removed`](by-rule/symbol-version-node-removed.md) |
 
 **Category:** Symbol Versioning | **Verdict:** 🔴 BREAKING
 
@@ -154,4 +156,4 @@ abidiff v1.xml v2.xml
 - `v2.h`
 - `v2.map`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol version node removed](by-rule/symbol-version-node-removed.md)._

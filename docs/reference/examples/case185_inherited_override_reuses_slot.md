@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case185_inherited_override_reuses_slot/` |
+| **Rule family** | [`inherited-override-reuses-slot`](by-rule/inherited-override-reuses-slot.md) |
 
 **Category:** Addition | **Verdict:** ✅ COMPATIBLE (exit 0)
 
@@ -130,4 +132,4 @@ python3 -m abicheck.cli compare \
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inherited override reuses slot](by-rule/inherited-override-reuses-slot.md)._

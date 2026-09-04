@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_became_const` |
 | **Source files** | `examples/case39_var_const/` |
+| **Rule family** | [`var-const`](by-rule/var-const.md) |
 
 **Category:** Global Variable Qualifiers | **Verdict:** 🔴 BREAKING
 
@@ -147,4 +149,4 @@ echo "exit: $?"   # → 12 (detected at binary level)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Var const](by-rule/var-const.md)._

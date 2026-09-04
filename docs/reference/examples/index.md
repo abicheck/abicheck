@@ -46,6 +46,23 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 7 | Identical ABI/API — sanity-check baselines. |
 
+## Browse by rule
+
+Several cases demonstrate the same atomic compatibility rule under a different condition (variant) or restate it with no distinguishing condition (duplicate); a scenario composes several rules at once. See [Rule families](by-rule/index.md) for the complete grouping, and [Rule coverage](../../contribute/catalog-coverage.md) for the aggregate rule/variant/duplicate counts.
+
+
+## Browse by ecosystem
+
+> Ecosystem counts also include the multi-library bundle scenarios (ADR-023) that this page's own headline and **All cases** table don't -- those cases have no single verdict/category and no generated page of their own (see `examples/README.md` for their own index), so they're deliberately excluded above but included here to match the taxonomy and [catalog-coverage.md](../../contribute/catalog-coverage.md).
+
+| Ecosystem | Cases |
+|-----------|-------|
+| [Generic (language/platform-level, no specific project)](by-ecosystem/generic.md) | 184 |
+| [oneTBB](by-ecosystem/onetbb.md) | 7 |
+| [SYCL](by-ecosystem/sycl.md) | 2 |
+| [oneMKL](by-ecosystem/onemkl.md) | 1 |
+| [Linux kernel](by-ecosystem/linux-kernel.md) | 3 |
+
 ## All cases
 
 > **Gaps in the numbering are expected.** Some case numbers (e.g. 84, 90–93) are **multi-library bundle cases** that are not part of this single-library catalog; they are documented in the repository under `examples/` and indexed in `examples/README.md`. The list below is sorted by case number.

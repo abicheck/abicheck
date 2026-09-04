@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `concept_tightened` |
 | **Source files** | `examples/case105_concept_tightening/` |
+| **Rule family** | [`concept-tightening`](by-rule/concept-tightening.md) |
 
 **Category:** Subtle source break / regression suite | **Verdict:** 🟠 API_BREAK
 
@@ -192,4 +194,4 @@ for whoever was relying on the relaxed contract.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Concept tightening](by-rule/concept-tightening.md)._

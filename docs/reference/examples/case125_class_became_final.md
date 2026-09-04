@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `type_became_final` |
 | **Source files** | `examples/case125_class_became_final/` |
+| **Rule family** | [`class-became-final`](by-rule/class-became-final.md) |
 
 **Category:** API Break | **Verdict:** 🟠 API_BREAK
 
@@ -119,4 +121,4 @@ abicheck's own object-only mode does. Only a header-aware comparison
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Class became final](by-rule/class-became-final.md)._

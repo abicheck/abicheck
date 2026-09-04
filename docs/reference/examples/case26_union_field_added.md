@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `union_field_added`, `type_size_changed` |
 | **Source files** | `examples/case26_union_field_added/` |
+| **Rule family** | [`union-field-added`](by-rule/union-field-added.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -128,4 +130,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union field added](by-rule/union-field-added.md)._

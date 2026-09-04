@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `glibcxx_dual_abi_flip_detected`, `func_removed` |
 | **Source files** | `examples/case104_glibcxx_dual_abi_flip/` |
+| **Rule family** | [`glibcxx-dual-abi-flip`](by-rule/glibcxx-dual-abi-flip.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -164,4 +166,4 @@ environment (`abidiff` is not installed here).
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Glibcxx dual abi flip](by-rule/glibcxx-dual-abi-flip.md)._

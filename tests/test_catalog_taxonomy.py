@@ -93,6 +93,54 @@ def test_variant_of_names_a_real_case():
             )
 
 
+def test_relation_type_agrees_with_variant_of_and_axis():
+    """relation_type is derived from variant_of/relation_axis
+    (gen_catalog_taxonomy.build_taxonomy) rather than hand-entered, so this
+    pins the contract directly: null exactly when variant_of is null,
+    "duplicate" exactly when variant_of is set with no axis, "variant"
+    exactly when variant_of is set with an axis. relation_axis itself is
+    null on every case that isn't a "variant"."""
+    gt = _load_ground_truth()
+    for case_name, entry in gt["taxonomy"].items():
+        variant_of = entry["variant_of"]
+        relation_type = entry["relation_type"]
+        relation_axis = entry["relation_axis"]
+        if variant_of is None:
+            assert relation_type is None, (
+                f"{case_name}: {relation_type=} with no variant_of"
+            )
+            assert relation_axis is None, (
+                f"{case_name}: {relation_axis=} with no variant_of"
+            )
+        elif relation_axis is None:
+            assert relation_type == "duplicate", (
+                f"{case_name}: expected relation_type='duplicate' with no "
+                f"axis, got {relation_type!r}"
+            )
+        else:
+            assert relation_type == "variant", (
+                f"{case_name}: expected relation_type='variant' with "
+                f"relation_axis={relation_axis!r}, got {relation_type!r}"
+            )
+
+
+def test_operation_is_audit_only_for_audit_mode_cases():
+    """operation is "audit" or "compare" only, and "audit" appears exactly
+    on the cases ground_truth.json itself marks mode: "audit" -- pins the
+    field against its own source of truth rather than just its enum."""
+    gt = _load_ground_truth()
+    verdicts = gt["verdicts"]
+    for case_name, entry in gt["taxonomy"].items():
+        assert entry["operation"] in ("compare", "audit"), (
+            f"{case_name}: unexpected operation={entry['operation']!r}"
+        )
+        is_audit_mode = verdicts[case_name].get("mode") == "audit"
+        assert (entry["operation"] == "audit") == is_audit_mode, (
+            f"{case_name}: operation={entry['operation']!r} but "
+            f"mode == 'audit' is {is_audit_mode}"
+        )
+
+
 def test_related_rules_are_non_empty_strings():
     gt = _load_ground_truth()
     for case_name, entry in gt["taxonomy"].items():

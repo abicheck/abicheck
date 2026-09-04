@@ -7,18 +7,19 @@ Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the ca
 ## Rule coverage
 
 - **177 distinct compatibility rules** in total -- **160** demonstrated by at least one rule-entity case (across **167 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet).
-- **7 of the rule-entity-backed rules** have a demonstrated variant beyond their canonical case (7 variant cases total -- see the per-family breakdown below) -- these are robustness demonstrations of an already-counted rule, not additional rules.
-- **153 rule-entity-backed rules** have exactly one demonstrated case so far, with no variant yet.
+- **5 of the rule-entity-backed rules** have a demonstrated *variant* beyond their canonical case -- a genuine robustness demonstration under a different condition (5 variant cases total -- see the per-family breakdown below); these are robustness demonstrations of an already-counted rule, not additional rules.
+- **2 of the rule-entity-backed rules** also have a *duplicate* -- the same demonstration restated with no distinguishing condition (2 duplicate cases total); these don't add robustness coverage and are candidates for eventual removal, not a variant to keep. (A family can appear in both this count and the variant count above if it has one of each.)
+- **153 rule-entity-backed rules** have exactly one demonstrated case so far, with no variant or duplicate yet.
 
-| Rule | Canonical case | Variant case(s) |
-|---|---|---|
-| `embedded-type-size-increased` | `case07_struct_layout` | `case14_cpp_class_size` |
-| `enum-member-value-changed` | `case08_enum_value_change` | `case20_enum_member_value_changed` |
-| `executable-stack-flag-changed` | `case49_executable_stack` | `case136_executable_stack_removed` |
-| `exported-function-removed` | `case01_symbol_removal` | `case12_function_removed` |
-| `inline-function-outlined` | `case16_inline_to_non_inline` | `case47_inline_to_outlined` |
-| `public-api-gains-internal-dependency` | `case160_public_api_internal_dep_added` | `case190_public_inline_function_references_internal_constant` |
-| `symbol-version-node-removed` | `case65_symbol_version_removed` | `case139_symbol_version_node_removed` |
+| Rule | Canonical case | Variant case(s) | Duplicate case(s) |
+|---|---|---|---|
+| `embedded-type-size-increased` | `case07_struct_layout` | `case14_cpp_class_size` |  |
+| `enum-member-value-changed` | `case08_enum_value_change` | `case20_enum_member_value_changed` |  |
+| `executable-stack-flag-changed` | `case49_executable_stack` |  | `case136_executable_stack_removed` |
+| `exported-function-removed` | `case01_symbol_removal` |  | `case12_function_removed` |
+| `inline-function-outlined` | `case16_inline_to_non_inline` | `case47_inline_to_outlined` |  |
+| `public-api-gains-internal-dependency` | `case160_public_api_internal_dep_added` | `case190_public_inline_function_references_internal_constant` |  |
+| `symbol-version-node-removed` | `case65_symbol_version_removed` | `case139_symbol_version_node_removed` |  |
 
 ## Scenario coverage
 

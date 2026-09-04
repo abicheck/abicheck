@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case03_compat_addition/` |
+| **Rule family** | [`compat-addition`](by-rule/compat-addition.md) |
 
 **Category:** Symbol API | **Verdict:** ✅ COMPATIBLE
 
@@ -114,4 +116,4 @@ echo "exit: $?"   # → 4 (abidiff's convention: any ABI change, including a
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Compat addition](by-rule/compat-addition.md)._

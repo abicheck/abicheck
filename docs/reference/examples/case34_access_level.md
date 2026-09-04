@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `method_access_changed` |
 | **Source files** | `examples/case34_access_level/` |
+| **Rule family** | [`access-level`](by-rule/access-level.md) |
 
 **Category:** C++ Access Control | **Verdict:** 🟠 API_BREAK
 
@@ -160,4 +162,4 @@ echo "exit: $?"
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Access level](by-rule/access-level.md)._

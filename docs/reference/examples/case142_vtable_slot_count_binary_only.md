@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `vtable_slot_count_changed` |
 | **Source files** | `examples/case142_vtable_slot_count_binary_only/` |
+| **Rule family** | [`vtable-slot-count-binary-only`](by-rule/vtable-slot-count-binary-only.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -143,4 +145,4 @@ place.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable slot count binary only](by-rule/vtable-slot-count-binary-only.md)._
