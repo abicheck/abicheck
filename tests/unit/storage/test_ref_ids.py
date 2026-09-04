@@ -109,6 +109,20 @@ class TestResolveRefIds:
         digest = result["a/b"].removeprefix("lib-")
         assert len(digest) == 64
 
+    def test_a_literal_name_shaped_like_an_opaque_id_never_keeps_its_spelling(
+        self,
+    ) -> None:
+        """A literal name that already has the exact shape `_opaque_ref_id`
+        produces (`lib-<64 hex chars>`) must not keep that spelling: a
+        second, genuinely different name could independently hash to the
+        identical opaque id, and `PackageManifest` would then reject an
+        otherwise-valid import as a duplicate `artifact_id` (Codex review,
+        fresh evidence -- the literal-id and opaque-id namespaces were not
+        disjoint)."""
+        opaque_shaped_literal = "lib-" + "a" * 64
+        result = resolve_ref_ids([opaque_shaped_literal], opaque_prefix="lib")
+        assert result[opaque_shaped_literal] != opaque_shaped_literal
+
     def test_an_empty_name_sequence_returns_an_empty_mapping(self) -> None:
         assert resolve_ref_ids([], opaque_prefix="lib") == {}
 

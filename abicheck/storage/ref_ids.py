@@ -170,6 +170,25 @@ def reject_filesystem_collisions(ids: list[str], record_kind: str) -> None:
         seen[folded] = ref_id
 
 
+def _looks_opaque(name: str, prefix: str) -> bool:
+    """Whether *name* already has the exact shape `_opaque_ref_id` itself
+    produces (`f"{prefix}-{64 lowercase hex chars}"`) -- the one string
+    shape `resolve_ref_ids` reserves for its own generated ids. A name
+    that happens to already look like this must never keep its literal
+    spelling: a literal `LIBFOO.SO` and a literal
+    `lib-<sha256("LIBFOO.SO")>` would otherwise both resolve to the exact
+    same opaque id (the first via `_opaque_ref_id`, the second by simply
+    keeping its own already-opaque-shaped literal spelling), and
+    `PackageManifest` would reject the import as a duplicate `artifact_id`
+    even though both names are individually valid (Codex review, fresh
+    evidence: the literal-id and opaque-id namespaces were not disjoint)."""
+    digest_length = 64
+    if not name.startswith(f"{prefix}-"):
+        return False
+    digest = name[len(prefix) + 1 :]
+    return len(digest) == digest_length and all(c in "0123456789abcdef" for c in digest)
+
+
 def _opaque_ref_id(name: str, prefix: str) -> str:
     """A deterministic id derived from *name* guaranteed to pass
     `safe_ref_id` and never collide (up to sha256) with another name's own
@@ -253,7 +272,12 @@ def resolve_ref_ids(names: Sequence[str], *, opaque_prefix: str) -> dict[str, st
         except ValueError:
             is_safe = False
         is_canonical = name == _folded(name)
-        result[name] = (
-            name if is_safe and is_canonical else _opaque_ref_id(name, opaque_prefix)
+        # A name already shaped like this function's own opaque output
+        # never keeps its literal spelling -- see `_looks_opaque`'s own
+        # docstring for why that's required to keep the two namespaces
+        # disjoint.
+        keeps_literal = (
+            is_safe and is_canonical and not _looks_opaque(name, opaque_prefix)
         )
+        result[name] = name if keeps_literal else _opaque_ref_id(name, opaque_prefix)
     return result

@@ -276,12 +276,22 @@ def _validated_manifest_entry(raw: Any) -> dict[str, Any]:
 
 def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     """Inverse of `_validated_manifest_entry`'s order-preserving
-    `instantiations` encoding: reconstructs each instantiation as a plain
-    `dict`, built from its stored `[[key, value], ...]` pair list in the
-    same order, for callers of `export_bundle_facts` that expect the same
-    shape `bundle_manifest.manifest_entry_from_dict` itself accepts."""
+    `instantiations` encoding: reconstructs each *template* entry's
+    instantiations as a plain `dict`, built from its stored `[[key,
+    value], ...]` pair list in the same order, for callers of
+    `export_bundle_facts` that expect the same shape `bundle_manifest
+    .manifest_entry_from_dict` itself accepts.
+
+    Only applied to a `template`-shaped entry: `_validated_manifest_entry`
+    only produces (and validates) the pair-list encoding for that shape --
+    a `symbol`/`pattern` entry's own `instantiations` key, if present, is
+    an ignored extra field never rewritten at import time (this adapter's
+    "not decoded, only partitioned" contract for content it doesn't
+    itself own), so it is never in the pair-list shape here. Decoding it
+    unconditionally would raise on export for a document that import
+    itself accepted unchanged (Codex review, fresh evidence)."""
     exported = dict(entry)
-    if "instantiations" in exported:
+    if "template" in exported and "instantiations" in exported:
         exported["instantiations"] = [
             dict(pairs) for pairs in exported["instantiations"]
         ]
@@ -370,7 +380,14 @@ def import_bundle_facts(
     # would refuse a real, already-supported persisted document.
     try:
         raw_container_schema_version = int(raw_container_schema_version_value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # `OverflowError`, not just `TypeError`/`ValueError`: a JSON number
+        # like `1e999` decodes to the float `inf`, and `int(inf)` raises
+        # `OverflowError`, not `ValueError` -- `bundle_facts_serialization
+        # .looks_like_bundle_facts_document` already handles this exact
+        # representation; this adapter must too, or malformed input is
+        # misreported as an unhandled crash rather than the documented
+        # `ValueError` (Codex review, fresh evidence).
         raise ValueError(
             "bundle_facts_document schema_version must be coercible to an "
             f"int, got {raw_container_schema_version_value!r}"

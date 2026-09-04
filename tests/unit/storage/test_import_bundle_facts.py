@@ -146,6 +146,17 @@ class TestImportBundleFacts:
         with pytest.raises(IncompatibleSnapshotSchemaError):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 
+    def test_rejects_an_overflowing_schema_version_as_malformed(self) -> None:
+        """A JSON exponent like `1e999` decodes to the float `inf`, and
+        `int(inf)` raises `OverflowError`, not `ValueError`/`TypeError` --
+        `bundle_facts_serialization.looks_like_bundle_facts_document`
+        already handles this exact representation; this adapter must
+        raise the same documented `ValueError` rather than letting
+        `OverflowError` escape unhandled (Codex review, fresh evidence)."""
+        doc = _bundle_document(schema_version=float("inf"))
+        with pytest.raises(ValueError, match="schema_version"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
     def test_rejects_schema_version_2_without_artifact_type(self) -> None:
         doc = _bundle_document()
         del doc["artifact_type"]
@@ -281,6 +292,23 @@ class TestImportBundleFacts:
         doc = _bundle_document(manifest={"provides": [bad_entry]})
         with pytest.raises(ValueError, match="manifest"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_a_symbol_entrys_ignored_instantiations_field_still_exports(self) -> None:
+        """A `symbol`/`pattern` entry's own `instantiations` key, if
+        present, is an ignored extra field never rewritten at import time
+        -- `_validated_manifest_entry` only produces the order-preserving
+        pair-list encoding for a `template`-shaped entry. Export must not
+        unconditionally try to decode every entry's `instantiations` as
+        that encoding, or an entry the canonical reader itself accepts
+        (extra fields are never rejected) would crash on export instead of
+        round-tripping unchanged (Codex review, fresh evidence)."""
+        doc = _bundle_document(
+            manifest={"provides": [{"symbol": "x", "instantiations": 3}]}
+        )
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["manifest"]["provides"][0]["instantiations"] == 3
 
     def test_a_float_manifest_entry_symbol_is_coerced_to_a_string(self) -> None:
         """`_parse_manifest_entry` unconditionally coerces `symbol` via
