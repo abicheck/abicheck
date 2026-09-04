@@ -73,6 +73,60 @@ class _GatePackApplication(Protocol):
     def resolved_exit_code_scheme(self) -> str | None: ...
 
 
+def resolve_gate_pack_exit_code_scheme(
+    *,
+    pack_exit_code_scheme: str | None,
+    pack_resolved_exit_code_scheme: str | None,
+    severity_levels_present: bool,
+    current_scheme: str | None,
+) -> str | None:
+    """The exit-code-scheme a gate pack's contribution resolves to, shared
+    by :func:`apply_release_gate_pack` (the release fan-out's raw-string
+    shape) and :func:`~abicheck.pack_application.apply_to_compare_config`
+    (single-pair ``compare``'s already-resolved ``ResolvedCompareConfig``
+    shape).
+
+    This is the one piece of "which way does the scheme move" reasoning
+    both callers previously re-derived independently (ADR-063 Track A,
+    7B) -- and the specific piece with a real regression history (Codex
+    review, PR #1032: an earlier ``apply_to_compare_config`` revision
+    re-derived ``"severity" if severity_active else ...`` here instead of
+    reading the resolver's own answer, which silently overrode an
+    explicitly selected ``--exit-code-scheme legacy`` whenever a gate pack
+    assigned a severity level). Three-tier precedence, in order:
+
+    1. *pack_exit_code_scheme* -- the pack's own explicit ``gate.
+       exit_code_scheme`` assignment, when it supplied one.
+    2. *pack_resolved_exit_code_scheme* -- **only** consulted when the pack
+       supplied a severity level with no explicit scheme of its own: a
+       severity level *is* severity being configured, so it can move an
+       unstated ``auto`` scheme toward ``"severity"``, exactly as a level
+       set in ``.abicheck.yml`` already does. This is deliberately the
+       resolver's *own already-decided* answer (which already folds the
+       pack's own levels into its ``auto`` computation and lets an
+       explicit ``--exit-code-scheme``/``.abicheck.yml`` value outrank it)
+       -- never a value re-derived here from ``severity_levels_present``
+       alone, which is exactly the bug this function's docstring opens
+       with.
+    3. *current_scheme* -- the pre-pack value, unchanged, when neither of
+       the above resolved anything (no pack, or a pack that touched
+       neither field).
+
+    Callers pass their own already-resolved "no pack" fallback as
+    *current_scheme*: :func:`apply_release_gate_pack` passes the release
+    fan-out's own raw ``release_exit_code_scheme`` (leaving it untouched on
+    a full miss, which is the identical outcome as returning it unchanged
+    here), and :func:`~abicheck.pack_application.apply_to_compare_config`
+    passes ``resolved_cfg.exit_code_scheme``.
+    """
+    scheme = pack_exit_code_scheme
+    if scheme is None and severity_levels_present:
+        scheme = pack_resolved_exit_code_scheme
+    if scheme is None:
+        scheme = current_scheme
+    return scheme
+
+
 def apply_release_gate_pack(
     pack_application: _GatePackApplication | None,
     *,
@@ -104,22 +158,20 @@ def apply_release_gate_pack(
     its own to fold onto the way :func:`~abicheck.pack_application.
     apply_to_compare_config` does for a single-pair ``compare`` -- its
     severity/exit-code-scheme resolution is a set of raw CLI-or-config
-    strings, re-derived at several call sites. So this mirrors that
-    function's *logic* against the release fan-out's raw-string shape
-    instead: a pack-supplied ``gate.severity.<category>`` overrides the
-    matching raw string (only ever reached when nothing more explicit --
-    ``--severity-<category>``/``.abicheck.yml`` -- already stated it,
-    since :func:`~abicheck.pack_application.pack_application` already
-    excludes a field an explicit source shadowed), and a pack-supplied
-    ``gate.exit_code_scheme`` overrides *that* raw string the same way --
-    with the identical "resolver's own already-decided ``auto`` answer,
-    not a re-derivation" fallback when only a severity level moved and no
-    scheme was directly assigned (see ``apply_to_compare_config``'s own
-    docstring for why re-deriving one here would be wrong: a severity
-    level *is* severity being configured, and the resolver's own
-    ``resolved_exit_code_scheme`` already reflects that while still
-    letting an explicit ``--exit-code-scheme``/``.abicheck.yml`` value
-    outrank it).
+    strings, re-derived at several call sites, so applying a pack-supplied
+    ``gate.severity.<category>`` is necessarily shaped differently here
+    (overriding one of six independent optional raw strings, only ever
+    reached when nothing more explicit -- ``--severity-<category>``/
+    ``.abicheck.yml`` -- already stated it, since :func:`~abicheck.
+    pack_application.pack_application` already excludes a field an explicit
+    source shadowed) than it is for ``apply_to_compare_config`` (a single
+    ``dataclasses.replace`` on an already-resolved ``SeverityConfig``).
+
+    The exit-code-scheme fold is **not** independently re-derived, though:
+    :func:`resolve_gate_pack_exit_code_scheme` is the identical function
+    both this and ``apply_to_compare_config`` call for that piece (ADR-063
+    Track A, 7B) -- see its own docstring for the three-tier precedence and
+    the regression history behind it.
 
     A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
     contributed neither field -- every pre-existing invocation reaches the
@@ -142,11 +194,12 @@ def apply_release_gate_pack(
         )
         severity_quality_issues = levels.get("quality_issues", severity_quality_issues)
         severity_addition = levels.get("addition", severity_addition)
-    scheme = pack_application.exit_code_scheme
-    if scheme is None and levels:
-        scheme = pack_application.resolved_exit_code_scheme
-    if scheme is not None:
-        release_exit_code_scheme = scheme
+    release_exit_code_scheme = resolve_gate_pack_exit_code_scheme(
+        pack_exit_code_scheme=pack_application.exit_code_scheme,
+        pack_resolved_exit_code_scheme=pack_application.resolved_exit_code_scheme,
+        severity_levels_present=bool(levels),
+        current_scheme=release_exit_code_scheme,
+    )
     return (
         release_exit_code_scheme,
         severity_preset,

@@ -21,17 +21,35 @@ does not expose either flag at all; the build-config matrix's own
 independent suppression/policy load is a synthetic pseudo-pair with no real
 per-library dispatch to route through).
 
-One real, still-open, *already self-documented* duplication remained:
-`release_gate_options.py`'s own module docstring states plainly that
+One real, self-documented duplication remained at investigation time:
+`release_gate_options.py`'s own module docstring stated plainly that
 `apply_release_gate_pack` "mirrors [`apply_to_compare_config`'s] *logic*...
 instead" of sharing it, because the release fan-out has no
 `ResolvedCompareConfig`-shaped object of its own to fold packs onto (a full
-unification is ADR-064's own named, deferred "PR G2" prerequisite work, not
-attempted here). Two independently-reasoned implementations of one
-algorithm is exactly this repo's own AGENTS.md "Primitive-level property
-tests" case -- so rather than a risky, out-of-scope rewrite, this test pins
-the two implementations to agree on outcome, so a change to one that
-silently drifts from the other fails here first.
+unification of the two *severity-level* applications is still ADR-064's own
+named, deferred "PR G2" prerequisite work -- see below). Two
+independently-reasoned implementations of one algorithm is exactly this
+repo's own AGENTS.md "Primitive-level property tests" case -- so rather than
+a risky, out-of-scope rewrite, this test was written to pin the two
+implementations to agree on outcome, so a change to one that silently drifts
+from the other fails here first.
+
+**The exit-code-scheme half of that duplication has since been closed**
+(ADR-063 Track A, 7B, follow-up PR): `policy.release_gate_options
+.resolve_gate_pack_exit_code_scheme` is now the one function both
+`apply_release_gate_pack` and `apply_to_compare_config` call for "which way
+does the scheme move" -- the specific piece with the real regression history
+(Codex review, PR #1032) this module's own docstring above describes. What
+remains genuinely separate is the *severity-level* application itself
+(`dataclasses.replace` on an already-resolved `SeverityConfig` for
+`apply_to_compare_config`, six independent raw-string overrides for
+`apply_release_gate_pack`) -- not duplicated logic so much as the same
+update expressed against two different pre-resolution data shapes, which is
+exactly the "no `ResolvedCompareConfig`-shaped object to fold onto" gap PR G2
+is scoped to close for real. This test is kept, unchanged in what it
+asserts, as the black-box parity guard over the whole fold (both the now-
+shared piece and the still-separate one) rather than being narrowed now that
+part of what it guards is implemented once instead of twice.
 
 **Scope, precisely.** Both sides are driven from the identical "pre-pack"
 severity/scheme state -- a real `ResolvedCompareConfig` built by

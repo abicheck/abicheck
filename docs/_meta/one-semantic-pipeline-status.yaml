@@ -336,9 +336,32 @@ concepts:
       first, falling back to the pre-existing verdict/severity.exit_code
       field only when no run_outcome block is present. The release
       fan-out's own "independent pair-semantics reimplementation" half of
-      this sub-phase's scope is untouched -- a shared pair-operation
-      executor across cli_compare_release.py/cli_compare_release_helpers.py/
-      cli_compare_release_matrix.py needs its own dedicated slice.
+      this sub-phase's scope got its dedicated investigation 2026-09-03:
+      reading cli_compare_release.py/cli_compare_release_helpers.py/
+      cli_compare_release_matrix.py/cli_compare_release_pairwise.py closely
+      found most duplication axes (depth, suppression, pack policy/
+      namespace overrides, compile context, contract evaluation; severity/
+      exit-code-scheme gate resolution via ADR-064's GateOptions; report
+      composition; the build-config matrix pseudo-pair) already unified or
+      structurally justified, leaving exactly one real gap: pack_
+      application.apply_to_compare_config (single-pair compare) and
+      policy.release_gate_options.apply_release_gate_pack (the release
+      fan-out) independently re-deriving the same exit-code-scheme fold
+      logic, since the release fan-out has no ResolvedCompareConfig-shaped
+      object of its own to fold onto. The exit-code-scheme half of that gap
+      closed 2026-09-04: policy.release_gate_options.
+      resolve_gate_pack_exit_code_scheme is now the one function both
+      callers use for that piece (pack_application.py, a legacy_root_
+      module, imports it -- the direction the architecture gate allows;
+      the reverse import is what its own docstring already explains is
+      forbidden), guarded by tests/test_release_gate_pack_fold_parity.py.
+      What remains open is narrower: the *severity-level* application
+      itself is still expressed twice against two different pre-resolution
+      shapes (a dataclasses.replace on an already-resolved SeverityConfig
+      vs. six raw-string overrides) -- collapsing that for real needs the
+      release fan-out to hold a ResolvedCompareConfig-shaped object of its
+      own, which is still ADR-064's own named, deferred "PR G2"
+      prerequisite work.
 
   sectioned_storage:
     primitive: complete

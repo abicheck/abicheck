@@ -840,14 +840,46 @@ sub-phase:
 **Net effect**: the "shared pair-operation executor" the plan text's one-line
 goal names is, on inspection, substantially already real — just distributed
 across several independently-landed mechanisms rather than one function —
-with exactly one concrete, still-open gap (the `apply_to_compare_config`/
-`apply_release_gate_pack` duplication) that has its own named, deferred
-follow-up ("PR G2") and is now guarded by a parity test rather than left to
-silent drift in the meantime. Recorded here per this repo's own "say so
-explicitly and record the gap" convention rather than closing 7B's own
+with exactly one concrete gap identified (the `apply_to_compare_config`/
+`apply_release_gate_pack` duplication), guarded by a parity test rather than
+left to silent drift in the meantime. Recorded here per this repo's own "say
+so explicitly and record the gap" convention rather than closing 7B's own
 status row on an incomplete account, or forcing a premature rewrite of
 carefully-built, recently-landed code (`GateOptions`) to manufacture a
 bigger diff.
+
+**The exit-code-scheme half of that one gap landed (2026-09-04).** Reading
+both fold functions side by side found their *scheme* resolution --
+specifically the "which way does the scheme move" precedence with the real
+regression history (Codex review, PR #1032) `apply_to_compare_config`'s own
+docstring already documents -- was expressible as one pure function over
+primitive values (a pack's own explicit scheme, the resolver's already-
+decided fallback scheme, whether the pack supplied a severity level, and the
+pre-pack scheme), independent of which of the two different pre-resolution
+shapes (`ResolvedCompareConfig` vs. six raw strings) the caller holds.
+`policy.release_gate_options.resolve_gate_pack_exit_code_scheme` is that
+function; both `apply_release_gate_pack` (same module) and
+`apply_to_compare_config` (`pack_application.py`) now call it instead of
+each re-deriving the identical three-tier precedence. The dependency points
+the direction ADR-061 requires: `pack_application.py` is a `legacy_root_
+module`, unrestricted by the architecture gate's layer-import check (that
+check only fires for modules *under* a migrated package directory), so it
+importing from `policy.release_gate_options` is not the "migrated layer
+imports unclassified module" violation the reverse direction would be
+(`policy.release_gate_options`'s own module docstring, still accurate,
+explains why it cannot import `pack_application.py`). `tests/
+test_release_gate_pack_fold_parity.py` is kept as the black-box guard over
+the whole fold, updated to record that its scheme half is now one function
+rather than two.
+
+**What remains genuinely open**: the *severity-level* application itself --
+`dataclasses.replace` on an already-resolved `SeverityConfig` on one side,
+six independent raw-string overrides on the other -- is the same update
+expressed against two different pre-resolution data shapes, not duplicated
+logic in the way the scheme resolution was. Collapsing that difference for
+real needs the release fan-out to hold a `ResolvedCompareConfig`-shaped
+object of its own to fold onto, which is still ADR-064's own named, deferred
+"PR G2" prerequisite work, not attempted here.
 
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
