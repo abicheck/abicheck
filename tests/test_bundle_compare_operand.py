@@ -57,9 +57,7 @@ class TestLooksLikeStoredBundleFacts:
         p.write_text(json.dumps(json.loads(_MARKER_JSON), indent=2))
         assert looks_like_stored_bundle_facts(p) is True
 
-    def test_reordered_root_keys_still_classify_as_stored(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reordered_root_keys_still_classify_as_stored(self, tmp_path: Path) -> None:
         """Codex review, PR #1042 (round 3): bundle_facts_to_dict always
         writes artifact_type first, but a document re-serialized by
         another conforming tool (a pretty-printer, a key-sorting
@@ -154,8 +152,7 @@ class TestLooksLikeStoredBundleFacts:
         unconstrained token scan otherwise would."""
         p = tmp_path / "garbage_gap.json"
         p.write_bytes(
-            b'{"schema_version":2,\x00\x01\x02"artifact_type":'
-            b'"abicheck.bundle-facts"}'
+            b'{"schema_version":2,\x00\x01\x02"artifact_type":"abicheck.bundle-facts"}'
         )
         assert looks_like_stored_bundle_facts(p) is False
 
@@ -181,6 +178,47 @@ class TestLooksLikeStoredBundleFacts:
         assert zipfile.is_zipfile(whl_path)
         with zipfile.ZipFile(whl_path) as zf:
             assert "fake_package/__init__.py" in zf.namelist()
+        assert looks_like_stored_bundle_facts(whl_path) is False
+
+    def test_real_wheel_with_a_gzip_marker_preamble_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 9): a real wheel (real members, a
+        genuine central directory) can legitimately carry a complete,
+        independently-decodable gzip stream as its own permitted zip
+        preamble (the same "arbitrary bytes before the first local
+        header" allowance round 7 exploited with plain JSON). An earlier
+        round's fix ("skip the zip check whenever the file already looks
+        gzip-compressed") would misidentify this exact file as "not
+        zip-shaped" and let the marker scan run on the decoded preamble --
+        the fix must check for real zip *members*, not merely whether the
+        raw file starts with a compression magic."""
+        payload = json.dumps(
+            {
+                "artifact_type": "abicheck.bundle-facts",
+                "schema_version": 2,
+                "per_library_snapshots": {},
+                # Padding past the small-probe window so the marker is
+                # found without ever reading past the gzip member's own
+                # end into the zip bytes that follow it.
+                "padding": "x" * 5000,
+            }
+        ).encode()
+        buf = io.BytesIO()
+        buf.write(gzip.compress(payload))
+        with zipfile.ZipFile(buf, "a") as zf:
+            zf.writestr("fake_package/__init__.py", "")
+            zf.writestr("fake_package-1.0.dist-info/METADATA", "Name: fake_package\n")
+        raw = buf.getvalue()
+        whl_path = tmp_path / "fake_package-1.0-py3-none-any.whl"
+        whl_path.write_bytes(raw)
+        # Premise check: the fixture really is both a valid zip with real
+        # members and starts with gzip magic, exactly as the finding
+        # describes.
+        assert zipfile.is_zipfile(whl_path)
+        with zipfile.ZipFile(whl_path) as zf:
+            assert "fake_package/__init__.py" in zf.namelist()
+        assert raw[:2] == b"\x1f\x8b"
         assert looks_like_stored_bundle_facts(whl_path) is False
 
     def test_gzip_with_many_tiny_members_and_a_leading_marker_is_stored(
@@ -236,9 +274,9 @@ class TestLooksLikeStoredBundleFacts:
         def _gzip_with_eocd_in_extra_field(payload: bytes) -> bytes:
             co = zlib.compressobj(9, zlib.DEFLATED, -15)
             compressed = co.compress(payload) + co.flush()
-            trailer = struct.pack(
-                "<I", zlib.crc32(payload) & 0xFFFFFFFF
-            ) + struct.pack("<I", len(payload) & 0xFFFFFFFF)
+            trailer = struct.pack("<I", zlib.crc32(payload) & 0xFFFFFFFF) + struct.pack(
+                "<I", len(payload) & 0xFFFFFFFF
+            )
             tail_after_header = compressed + trailer
             header_prefix = (
                 b"\x1f\x8b\x08"
@@ -248,9 +286,7 @@ class TestLooksLikeStoredBundleFacts:
             )
             si = b"AB"
             comment_len = len(tail_after_header)
-            eocd = struct.pack(
-                "<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len
-            )
+            eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len)
             subfield = si + struct.pack("<H", len(eocd)) + eocd
             return (
                 header_prefix

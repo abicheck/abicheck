@@ -218,13 +218,38 @@ PR #1042, three rounds):**
    ``FEXTRA`` sub-field is attacker- (or, per that module's own comment,
    even innocuously-) controlled bytes that can coincidentally land an
    ``EOCD``-shaped sequence at the file's tail, which has nothing to do
-   with whether the file is really a zip container. Answered the same way
-   that sibling module already does: skip the zip-container check entirely
-   whenever :func:`abicheck.snapshot_io.detect_snapshot_compression`
-   reports the candidate as already gzip/zstd-compressed -- a real wheel
-   (point 8's own scenario) is never itself gzip/zstd-wrapped at the outer
-   container level, so this carries no false-negative risk on the case
-   point 8 exists to catch.
+   with whether the file is really a zip container. Point 11 below is the
+   *actual* answer landed for this -- an earlier version of this point
+   answered it by skipping the zip check whenever ``detect_snapshot_
+   compression`` reported the candidate as already gzip/zstd-compressed,
+   which round 9 (fresh evidence, immediately below) proved wrong in the
+   opposite direction and superseded.
+11. **The "skip when already compressed" answer to point 10 was itself
+   exploitable, the other way (Codex review, round 9, fresh evidence).**
+   ZIP's own "arbitrary bytes before the first local header" allowance
+   (point 8) can *itself be* a complete, independently-decodable
+   gzip/zstd stream -- a real ``.whl`` (with real members, a genuine
+   central directory, everything a real zip reader needs) can legitimately
+   carry such a stream as its own permitted preamble, with that stream
+   decoding to JSON carrying the marker. Point 10's "skip whenever already
+   gzip/zstd-compressed" gate would misidentify this exact file as "not
+   zip-shaped, already gzip" and let the marker scan run on the decoded
+   preamble, misclassifying a genuine wheel as stored facts (routing
+   ``compare`` to the gzip ``BundleFacts`` loader, which then fails
+   reading the zip's own trailing bytes as a bogus second gzip member).
+   The real distinguishing signal was never "does the raw file start with
+   a compression magic" -- it is whether the zip *has any real members* at
+   all: round 8's coincidental ``FEXTRA``-embedded EOCD always describes
+   zero (``total_entries``/``cd_size``/``cd_offset`` all zero -- there is
+   no reason to embed a whole fake central directory just to satisfy this
+   check), while a real wheel necessarily has one or more. Answered by
+   dropping the compression-based gate entirely and instead checking
+   ``ZipFile(path).namelist()`` for at least one real entry
+   (:func:`_path_is_a_real_zip_container`'s own updated contract) --
+   applies unconditionally, regardless of what compression (if any)
+   precedes the real zip content, and correctly lets round 8's
+   zero-member coincidence through while still catching round 9's
+   genuine, member-bearing archive.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
@@ -495,9 +520,11 @@ def _decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:
 
 
 def _path_is_a_real_zip_container(path: Path) -> bool:
-    """``True`` when *path* is a genuine zip container -- a wheel, the G40
-    archive, or any other zip-based format -- *anywhere* in the file, not
-    just at byte 0 (Codex review, PR #1042, round 7, fresh evidence).
+    """``True`` when *path* is a genuine zip container carrying at least
+    one real member -- a wheel, the G40 archive, or any other zip-based
+    format -- *anywhere* in the file, not just at byte 0 (Codex review,
+    PR #1042, round 7, fresh evidence; the *member-count* refinement is
+    round 9's, see below).
 
     The ZIP format's central directory sits at the *end* of the file and is
     what a real zip reader (Python's own ``zipfile``, the ``WheelExtractor``
@@ -518,14 +545,50 @@ def _path_is_a_real_zip_container(path: Path) -> bool:
     ``zipfile.is_zipfile()`` already does correctly regardless of file
     size: it seeks from the end of the file to locate the end-of-central-
     directory record, the same way a real zip reader does, rather than
-    reading forward from byte 0. Real plain/compressed ``BundleFacts`` JSON
-    is never zip-shaped at the container level (only the G40 archive format
-    is, and that is already ruled in or out before this ever runs), so
-    there is no collision risk with a genuine stored-facts document.
+    reading forward from byte 0.
+
+    **Requires at least one real central-directory entry, not merely a
+    structurally plausible EOCD (Codex review, round 9, fresh evidence).**
+    Round 8 taught the reverse lesson about ``zipfile.is_zipfile()``: a
+    coincidental EOCD-shaped byte sequence (a crafted gzip ``FEXTRA``
+    sub-field) can satisfy it for a file with no real zip content at all,
+    which is why ``looks_like_stored_bundle_facts`` no longer trusts a bare
+    ``is_zipfile()`` verdict as sufficient reason to *reject* an otherwise
+    valid gzip/zstd-compressed ``BundleFacts`` document either -- but round
+    9 showed the same coin has another face: a genuine, structurally valid
+    zip (a real wheel, with real members) can *itself* be prefixed with a
+    complete, independently-decodable gzip/zstd stream as its own permitted
+    "arbitrary preamble," where that preamble decodes to JSON carrying the
+    marker. A bare ``detect_snapshot_compression() != NONE`` skip (round
+    8's own fix) would then wrongly treat this as "already gzip, never
+    zip-shaped" and let the marker scan run and misclassify a real wheel as
+    stored facts. The actual distinguishing signal between round 8's
+    coincidence and round 9's genuine archive is not "does the raw file
+    start with a compression magic" but whether the zip *has any real
+    entries*: round 8's crafted EOCD always describes zero
+    (``total_entries``/``cd_size``/``cd_offset`` all zero -- there is no
+    legitimate reason to embed a whole fake central directory inside a
+    gzip ``FEXTRA`` sub-field just to satisfy this check, and neither
+    ``FEXTRA``'s own format nor practical size limits make that
+    attractive), while a real wheel necessarily has one or more real
+    members (that is what makes it a wheel at all). Checking
+    ``ZipFile(path).namelist()`` for at least one entry -- not just
+    ``is_zipfile()`` -- makes this veto apply exactly when it should:
+    always, on real zip content, regardless of whatever compressed
+    preamble might precede it, and never on a compressed document whose
+    only zip-shaped feature is a coincidental, empty-EOCD collision deep
+    inside its own header.
     """
     try:
-        return zipfile.is_zipfile(path)
-    except OSError:
+        if not zipfile.is_zipfile(path):
+            return False
+        with zipfile.ZipFile(path) as zf:
+            return bool(zf.namelist())
+    except Exception:
+        # zipfile.is_zipfile()/ZipFile() are documented to raise on some
+        # malformed inputs rather than only ever returning False/empty --
+        # never let a corrupt or truncated candidate turn a classification
+        # helper into a crash.
         return False
 
 
@@ -618,27 +681,23 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
         return False
     if _looks_like_stored_bundle_facts_archive(path):
         return True
-    from ..snapshot_io import SnapshotCompression, detect_snapshot_compression
-
-    if detect_snapshot_compression(path) is SnapshotCompression.NONE and (
-        _path_is_a_real_zip_container(path)
-    ):
+    if _path_is_a_real_zip_container(path):
         # Already ruled out being the one legitimate zip-shaped encoding
-        # (the G40 archive, just above) -- any other zip container reaching
-        # here (a wheel, possibly with a crafted preamble) is never a real
-        # BundleFacts document. Checked only for an *uncompressed* candidate
-        # (Codex review, round 8, fresh evidence): zipfile.is_zipfile()
-        # scans path's raw bytes for an EOCD signature, but a gzip/zstd-
-        # compressed BundleFacts document's raw bytes are its *compressed*
-        # envelope, not JSON -- a crafted (or, per storage/bundle_archive.py's
-        # own long-standing precedent for this exact risk, even an
-        # innocuous) gzip FEXTRA sub-field can coincidentally land an
-        # EOCD-shaped byte sequence at the file's tail, which is a
-        # *decompression* concern this check has no business evaluating.
-        # Skipping it here mirrors sniff_bundle_archive_format's own
-        # `_JSON_ENVELOPE_MAGIC_PREFIXES` short-circuit for the identical
-        # reason. Checked before decoding a prefix at all, since this check
-        # needs the true end of the file, not a bounded window of it (see
+        # (the G40 archive, just above) -- any other zip container with
+        # real members reaching here (a wheel, possibly with a crafted or
+        # even a genuinely compressed preamble -- see this function's own
+        # docstring, round 9) is never a real BundleFacts document.
+        # Deliberately *not* gated on "is this candidate already gzip/zstd-
+        # compressed" (an earlier round's fix, reverted): that gate was
+        # itself wrong the other way -- a real wheel can legitimately carry
+        # a complete, independently-decodable compressed stream as its own
+        # permitted zip preamble, which would have been misidentified as
+        # "already gzip, not zip" and let through. Checking for real
+        # members (not just a bare is_zipfile() verdict) is what correctly
+        # separates that genuine case from round 8's own coincidental,
+        # zero-member EOCD collision without needing any such gate at all.
+        # Checked before decoding a prefix at all, since this check needs
+        # the true end of the file, not a bounded window of it (see
         # _path_is_a_real_zip_container's own docstring).
         return False
     # Two-phase probe (Codex review, round 8, fresh evidence): try a small
