@@ -1,7 +1,11 @@
 # ADR-064: One Canonical Gate Algorithm and Exit-Decision Precedence
 
 **Date:** 2026-08-30
-**Status:** Accepted — partially implemented. `ExitDecision`'s three-axis
+**Status:** Accepted — substantially implemented. **Stage 2 (the
+`--exit-code-scheme` removal itself) landed 2026-09-04** — see the
+"Update (2026-09-04)" note further down; the one remaining open item is
+the unrelated typed-request `gate.*` pack field (`--pack` stays CLI-only,
+ADR-049 D8). `ExitDecision`'s three-axis
 core (compatibility gate, contract coverage, analysis assurance) shipped
 additively as PR G1 (#789, `abicheck/policy/exit_decision.py`) before this
 ADR was written. Of this ADR's own two-stage plan (see "Staged landing,
@@ -144,10 +148,44 @@ single-binary half of the `--format text` gap completely (not just
 hardens it further); the `--artifact-set` member-level signal (below)
 remains a separate, open question — the case-code approach may or may not
 generalize to it, and that design question has not been attempted here.
+**Update (2026-09-04): both remaining open items closed — stage 2 landed.**
+The `--artifact-set` member-level evidence-contract signal question (left
+open above as "may or may not generalize") was re-investigated against the
+current code rather than assumed: `run_scan_set` already unconditionally
+rejects `--severity-preset`/`--exit-code-scheme` for every set input
+(`_reject_comparison_only_fields`), so the severity-scheme meaning of exit
+`1` never applied to `--artifact-set` in the first place, and the *only*
+two producers of exit `1` on that path were the evidence-contract-error
+floor and the sibling `BUNDLE_INCOMPLETE` floor — so the dedicated `7`
+(the same code the single-binary path above already uses) generalizes
+cleanly with no new signal needed:
+`service_scan._aggregate_scan_set_verdict` now returns `("EVIDENCE_CONTRACT_ERROR",
+7)` for a set member's abort the same way the single-binary path does, and
+`action/run.sh`'s existing `case $ABICHECK_EXIT in ... 7) ...` arm now
+prints a set-aware message. See `docs/reference/exit-codes.md`'s
+`scan --artifact-set` callout and
+[cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s own
+2026-09-04 update for the full account.
+
+**Stage 2 itself — the `--exit-code-scheme` removal — also landed
+(2026-09-04),** per ADR-064's own design below: `--exit-code-scheme`,
+`.abicheck.yml`'s top-level `exit_code_scheme:` key, the `kind: gate` pack
+schema's `gate.exit_code_scheme` assignable field, and
+`CompareRequest`/`ScanRequest`'s `exit_code_scheme` typed-API fields are all
+deleted outright — there is no manual override anywhere any more. The
+already-resolved, purely-derived value (`ResolvedCompareConfig.
+exit_code_scheme`, `GateOptions.exit_code_scheme`, the JSON report's
+`gate.exit_code_scheme`/`effective_config_fields["gate.exit_code_scheme"]`,
+and the unrelated, still-live `scoped_exit_code_scheme` result field) keeps
+its name and shape everywhere it already existed as an output — only its
+*settability* was removed, exactly this section's "Deleting the selector...
+Decision" below describes. See
+[cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4/PR G2"
+section for the file-by-file account.
+
 Still open: a typed request's own `gate.*` pack field (`--pack` stays a
-CLI-only selector, ADR-049 D8); the `--artifact-set` member-level
-evidence-contract signal; and **stage 2**, the `--exit-code-scheme`
-removal itself. See
+CLI-only selector, ADR-049 D8) — unrelated to either item above, and not
+attempted here. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov

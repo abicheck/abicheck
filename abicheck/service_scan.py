@@ -253,7 +253,7 @@ class ScanRequest:
     # can't rebind a later field (Codex review).
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
     severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
-    exit_code_scheme: str | None = field(default=None, kw_only=True)
+    # No exit_code_scheme field any more -- PR G2 deleted the manual selector.
 
 
 @dataclass(frozen=True)
@@ -842,8 +842,10 @@ class ScanResult:
         }
 
     @staticmethod
-    def _from_abort(axis: ScanAbortAxis, p: dict[str, object] | None) -> ScanResult:
-        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p))
+    def _from_abort(
+        axis: ScanAbortAxis, p: dict[str, object] | None, *, msg: str | None = None
+    ) -> ScanResult:
+        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p, msg=msg))
 
 
 @dataclass(frozen=True)
@@ -895,10 +897,13 @@ def _aggregate_scan_set_verdict(
     2. Else, the worst compatibility verdict across `per_artifact` + the
        bundle layer's own verdict (`_SCAN_SET_COMPAT_ORDER`), with the
        matching exit code.
-    3. Any member ``EVIDENCE_CONTRACT_ERROR`` floors the exit code at 1
-       without lowering a worse one from step 2, and becomes the reported
-       verdict only when step 2's worst was NO_CHANGE/COMPATIBLE/
-       COMPATIBLE_WITH_RISK; a stronger API_BREAK/BREAKING keeps that string.
+    3. Any member ``EVIDENCE_CONTRACT_ERROR`` becomes the reported verdict,
+       at the same dedicated exit code the single-binary path uses
+       (``cli_scan.py``'s ``_EXIT_EVIDENCE_CONTRACT_ERROR = 7``), only when
+       step 2's worst was NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK; a
+       stronger API_BREAK/BREAKING keeps that verdict/exit. This 7 (not a
+       generic 1) closes the "--artifact-set / --format text" gap the
+       cli-cleanup-phase-two plan's PR G2 section left open.
     4. Any member ``NOT_COMPARABLE`` becomes the reported verdict/exit 6
        under that same condition, outranking step 3 (Codex review:
        previously exited 0 here, dropping the run_outcome.operational
@@ -920,10 +925,11 @@ def _aggregate_scan_set_verdict(
     exit_code = _SCAN_SET_COMPAT_EXIT.get(worst_verdict, 0)
     no_stronger_break = worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]
 
-    if any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact):
-        exit_code = max(exit_code, 1)
-        if no_stronger_break:
-            worst_verdict = "EVIDENCE_CONTRACT_ERROR"
+    if no_stronger_break and any(
+        a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact
+    ):
+        # Dedicated exit code, not a generic floor -- see step 3 above.
+        worst_verdict, exit_code = "EVIDENCE_CONTRACT_ERROR", 7
     if no_stronger_break and any(
         a.result.verdict == "NOT_COMPARABLE" for a in per_artifact
     ):
@@ -1109,10 +1115,14 @@ def estimate_artifact_set(
     ``bundle_audit`` entry. Third return value: a blocker message, or
     ``None`` -- set only when ``collect_mode != "off"`` (mirrors
     ``scan_engine._check_scan_evidence_contract``'s short-circuit) and no
-    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``
-    (exit 1). Kept out of *notes* so the caller routes it through
+    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``.
+    The blocker message itself is a :meth:`DryRunResult.block` (always exit
+    1) -- distinct from the *real run's* dedicated exit 7 (both single-
+    artifact and ``--artifact-set``; see `_aggregate_scan_set_verdict`'s own
+    docstring). Kept out of *notes* so the caller routes it through
     :meth:`DryRunResult.block` instead. Fourth value *unknown_layers* names
-    per-layer unknown-marked members (totals alone can't tell zero from unknown).
+    per-layer unknown-marked members (totals alone can't tell zero from
+    unknown).
     """
     sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(
         req
@@ -1129,9 +1139,8 @@ def estimate_artifact_set(
         blocker = (
             f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
             "and --build-config declares no build.query -- the real run "
-            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1 for this "
-            "--artifact-set member; a single-artifact scan uses exit 7), "
-            "not run as priced below."
+            "would fail with EVIDENCE_CONTRACT_ERROR (exit 7), not run as "
+            "priced below."
         )
     for member_path in member_paths:
         member_req = replace(req, binaries=[member_path], mode="audit")
@@ -1163,7 +1172,6 @@ _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "contract_mode": lambda r: r.contract_mode is not None,
     "max_findings": lambda r: r.max_findings is not None,
     "severity_preset": lambda r: r.severity_preset is not None,  # ADR-064/PR G2
-    "exit_code_scheme": lambda r: r.exit_code_scheme is not None,
 }
 
 
@@ -1276,7 +1284,6 @@ def _scan_request_config(req: ScanRequest) -> Any:
                 # is what the declared-params guard exists to prevent).
                 "pack_paths": (),
                 "severity_preset": req.severity_preset,  # ADR-064/PR G2
-                "exit_code_scheme": req.exit_code_scheme,
             },
             typed={"policy", "scope_public_headers"},
             policy_file=req.policy_file,
@@ -1465,10 +1472,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
     except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
         return ScanResult._from_abort("budget_overflow", exc.prior_decision)
-    except _EvidenceContractError:
-        # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
-        # the programmatic API honors the same contract as the CLI (pinned_explicit).
-        return ScanResult._from_abort("evidence_contract_error", None)
+    except _EvidenceContractError as exc:  # auto-strict, ADR-037 D5
+        return ScanResult._from_abort("evidence_contract_error", None, msg=exc.message)
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
         # have run/aborted. Best-effort: a removal/unlock error never masks the outcome.
@@ -1647,8 +1652,8 @@ def _run_scan_one_member(
         )
     except _BudgetOverflow as exc:
         return ScanResult._from_abort("budget_overflow", exc.prior_decision)
-    except _EvidenceContractError:
-        return ScanResult._from_abort("evidence_contract_error", None)
+    except _EvidenceContractError as exc:
+        return ScanResult._from_abort("evidence_contract_error", None, msg=exc.message)
     finally:
         drain_build_dir_cleanups(build_dir_cleanups)
 
@@ -1864,13 +1869,8 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # discovery-failure path above already uses.
     if set(audit.snapshot.libraries) != set(libraries):
         verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
-        # P2 regression (Codex review): bundle_incomplete previously left the exit code purely a function of the per-
-        # member verdicts -- the cross-library audit itself never ran, but a set where every member scanned clean
-        # (COMPATIBLE/NO_CHANGE/COMPATIBLE_WITH_RISK) still exited 0, so a CI gate that only checks the exit code
-        # silently accepted a skipped audit as a full pass. Floor the exit code at 1 (mirroring the per-member
-        # EVIDENCE_CONTRACT_ERROR contract in ``_aggregate_scan_set_verdict`` above) and surface a dedicated
-        # BUNDLE_INCOMPLETE verdict when no worse, already-dominant member problem
-        # (API_BREAK/BREAKING/EVIDENCE_CONTRACT_ERROR/BUDGET_OVERFLOW) is already being reported.
+        # P2 regression: a skipped audit must not silently exit 0 when every
+        # member scanned clean (a no-op for a worse per-member 7/2/4/5).
         exit_code = max(exit_code, 1)
         if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
             verdict = "BUNDLE_INCOMPLETE"

@@ -598,23 +598,13 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
 
     def _run(self, tmp_path: Path, *extra: str) -> int:
         old_p, new_p = self._changed_signature_pair(tmp_path)
-        return (
-            CliRunner()
-            .invoke(
-                main,
-                [
-                    "compare",
-                    str(old_p),
-                    str(new_p),
-                    "--required-symbol",
-                    "_Z5pub_bi",
-                    "--exit-code-scheme",
-                    "severity",
-                    *extra,
-                ],
-            )
-            .exit_code
-        )
+        argv = [
+            "compare", str(old_p), str(new_p),
+            "--required-symbol", "_Z5pub_bi",
+            "--severity-preset", "default",
+            *extra,
+        ]
+        return CliRunner().invoke(main, argv).exit_code
 
     def test_a_required_symbol_still_gates_under_an_unresolvable_domain(
         self, tmp_path: Path
@@ -681,13 +671,18 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         # The scoped view agrees with it rather than contradicting it.
         assert report["verdict"] == "BREAKING"
 
-    @pytest.mark.parametrize("scheme", ["legacy", "severity"])
+    @pytest.mark.parametrize(
+        "extra_flags",
+        [pytest.param((), id="legacy"), pytest.param(("--severity-preset", "default"), id="severity")],
+    )
     def test_a_missing_label_carries_the_whole_canonical_shape(
-        self, tmp_path: Path, scheme: str
+        self, tmp_path: Path, extra_flags: tuple[str, ...]
     ) -> None:
         """A missing required symbol has no backing `Change`, so its
         synthesized entry got neither decision nor contribution — on what is
-        frequently the response's only blocking finding (Codex review)."""
+        frequently the response's only blocking finding (Codex review). Runs
+        under both the derived-legacy (no severity setting) and severity
+        (`--severity-preset`) schemes -- PR G2 removed the manual pin."""
         old, new = _removal_pair()
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
@@ -706,8 +701,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 "_Z7missingv",
                 "--contract",
                 "exports",
-                "--exit-code-scheme",
-                scheme,
+                *extra_flags,
                 "--format",
                 "json",
                 "-o",

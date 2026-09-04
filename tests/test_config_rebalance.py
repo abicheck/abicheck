@@ -129,12 +129,18 @@ class TestConfigPrecedence:
         )
         assert set(r.public_symbols) == {"_Z3foov"}
 
-    def test_exit_scheme_cli_beats_config(self) -> None:
-        cfg = BuildConfig(exit_code_scheme="legacy")
+    def test_exit_scheme_has_no_manual_override_any_more(self) -> None:
+        # CLI cleanup phase two PR G2: there is no `cli_exit_code_scheme`
+        # parameter, and no `BuildConfig.exit_code_scheme` field, to compete
+        # over any more -- the scheme is purely derived from whether a
+        # severity setting is in effect, exactly like `test_config_beats_
+        # default`/`test_default_when_nothing_set` above already show. A
+        # CLI `severity_preset` still "wins" in the only sense left: it is
+        # itself the thing that activates severity, same as a config one.
+        cfg = BuildConfig()  # no exit_code_scheme field exists to set
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_scope_public=None,
-            cli_exit_code_scheme="severity",
+            cli_severity_preset="strict", cli_scope_public=None,
         )
         assert r.exit_code_scheme == "severity"
 
@@ -210,7 +216,7 @@ class TestConfigRoundtrip:
             source_method="s5",
             debug_format="dwarf", debug_dwarf_only=True, debug_debuginfod=True,
             debug_debuginfod_url="https://dbginfo.example",
-            exit_code_scheme="severity", exit_code_scheme_explicit=True, version=2,
+            version=2,
         )
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
@@ -236,8 +242,7 @@ class TestConfigRoundtrip:
     def test_yaml_file_roundtrip(self, tmp_path: Path) -> None:
         cfg = BuildConfig(
             severity_preset="strict", scope_public=False,
-            suppression_strict=True, exit_code_scheme="legacy",
-            exit_code_scheme_explicit=True, version=1,
+            suppression_strict=True, version=1,
         )
         p = tmp_path / ".abicheck.yml"
         p.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
@@ -246,27 +251,19 @@ class TestConfigRoundtrip:
     def test_empty_roundtrip(self) -> None:
         cfg = BuildConfig()
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
-        assert cfg.exit_code_scheme_explicit is False
 
-    def test_explicit_exit_code_scheme_auto_is_tracked_and_roundtrips(self) -> None:
-        # Codex review, fresh evidence: `exit_code_scheme: auto` written
-        # literally must be distinguishable from an absent key -- both parse
-        # to the same string, but only the former is a real, stated
-        # selection (see compatibility_evaluation_frontend.py's
-        # `project_scheme` resolution).
-        cfg = BuildConfig.from_dict({"exit_code_scheme": "auto"})
-        assert cfg.exit_code_scheme == "auto"
-        assert cfg.exit_code_scheme_explicit is True
-        assert BuildConfig.from_dict({}).exit_code_scheme_explicit is False
-        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+    def test_top_level_exit_code_scheme_key_no_longer_exists(self) -> None:
+        # CLI cleanup phase two PR G2 deleted the top-level `exit_code_
+        # scheme:` key entirely (`BuildConfig` no longer has a matching
+        # field at all) -- it now falls through to the standard unknown-
+        # top-level-key path, which is a hard `ValueError`
+        # (`_validate_structure`), same as any other unrecognized key.
+        with pytest.raises(ValueError, match="exit_code_scheme"):
+            BuildConfig.from_dict({"exit_code_scheme": "auto"})
 
     def test_invalid_severity_level_rejected(self) -> None:
         with pytest.raises(ValueError, match="severity.abi_breaking"):
             BuildConfig.from_dict({"severity": {"abi_breaking": "nope"}})
-
-    def test_invalid_exit_scheme_rejected(self) -> None:
-        with pytest.raises(ValueError, match="exit_code_scheme"):
-            BuildConfig.from_dict({"exit_code_scheme": "loud"})
 
 
 # ── flag budget (D10.5) ────────────────────────────────────────────────────────
@@ -390,7 +387,7 @@ class TestFlagBudget:
             for opt in p.opts
         }
         for flag in ("--severity-preset", "--show-filtered", "--depth",
-                     "--exit-code-scheme", "--scope-public-headers",
+                     "--scope-public-headers",
                      # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
                      # the toolchain family (shared with dump/scan) stay visible.
                      # --gcc-path, the former spelling, is removed outright;
@@ -399,31 +396,39 @@ class TestFlagBudget:
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
 
 
-# ── exit-code scheme is explicit (D12) ─────────────────────────────────────────
+# ── exit-code scheme is fully automatic (CLI cleanup phase two PR G2) ──────────
 
 class TestExitSchemeExplicit:
-    def test_severity_flag_no_longer_flips_when_scheme_explicit(self, tmp_path: Path) -> None:
+    """Before PR G2 (ADR-037 D12), an explicit ``--exit-code-scheme``/
+    ``.abicheck.yml`` ``exit_code_scheme:`` key could force ``legacy``
+    regardless of a severity setting also being in effect. PR G2 deleted
+    that manual override -- both the CLI flag and the config key -- so a
+    severity setting now *always* flips the scheme, with nothing left able
+    to hold it at ``legacy`` instead."""
+
+    def test_severity_flag_always_flips_the_scheme_now(self, tmp_path: Path) -> None:
         old, new = _api_break_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
 
-        # auto (the default): a severity setting flips the scheme to severity, so
-        # an API_BREAK (potential_breaking=warning) yields exit 0.
+        # A severity setting flips the scheme to severity, so an API_BREAK
+        # (potential_breaking=warning) yields exit 0.
         auto = CliRunner().invoke(
             main, ["compare", str(old_f), str(new_f), "--severity-preset", "default"]
         )
         assert auto.exit_code == 0
 
-        # Explicit legacy: the same severity setting does NOT flip the scheme;
-        # the legacy verdict (API_BREAK → 2) stands.
-        legacy = CliRunner().invoke(
+        # No `--exit-code-scheme legacy` exists any more to hold it at the
+        # legacy verdict (API_BREAK -> 2) instead -- the flag itself is gone.
+        removed_flag = CliRunner().invoke(
             main,
             ["compare", str(old_f), str(new_f),
              "--severity-preset", "default", "--exit-code-scheme", "legacy"],
         )
-        assert legacy.exit_code == 2
+        assert removed_flag.exit_code == 64
+        assert "No such option" in removed_flag.output
 
-    def test_config_exit_scheme_respected(self, tmp_path: Path) -> None:
+    def test_config_exit_scheme_key_no_longer_exists(self, tmp_path: Path) -> None:
         old, new = _api_break_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
@@ -434,8 +439,13 @@ class TestExitSchemeExplicit:
             ["compare", str(old_f), str(new_f), "--config", str(cfg),
              "--severity-preset", "default"],
         )
-        # config pins legacy → severity flag does not flip it → API_BREAK == 2.
-        assert res.exit_code == 2
+        # The unrecognized `exit_code_scheme:` key is a hard error, same as
+        # any other unknown `.abicheck.yml` top-level key
+        # (`BuildConfig._validate_structure`) -- a config written before PR
+        # G2's removal no longer loads at all, rather than silently no
+        # longer pinning anything.
+        assert res.exit_code == 64, res.output
+        assert "exit_code_scheme" in res.output
 
     def test_config_applies_on_directory_dispatch(self, tmp_path: Path) -> None:
         # ADR-037 D4: a directory (set-input) compare honours .abicheck.yml too —
@@ -529,7 +539,6 @@ class TestConfigStrictness:
                 "scope": {"public": True},
                 "suppression": {"strict": True},
                 "source": {"method": "s4"},
-                "exit_code_scheme": "severity",
                 # Keys parsed by sibling modules must not trip the check.
                 "risk_rules": {},
                 "crosschecks": {},

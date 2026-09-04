@@ -67,10 +67,14 @@ class TestApplyProfileUnit:
         apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
         # profile is consumed (never forwarded to run_compare)
         assert "profile" not in kwargs
-        # ci-gate defaults land where the user didn't choose
+        # ci-gate defaults land where the user didn't choose. CLI cleanup
+        # phase two PR G2 migrated this profile from injecting
+        # exit_code_scheme: "severity" (a manual override, since deleted
+        # entirely) to injecting severity_preset: "default" -- the field
+        # that actually flips the now-purely-derived scheme to "severity".
         assert kwargs["depth"] == "headers"
         assert kwargs["fmt"] == "review"
-        assert kwargs["exit_code_scheme"] == "severity"
+        assert kwargs["severity_preset"] == "default"
 
     def test_explicit_flag_beats_profile(self) -> None:
         kwargs: dict[str, object] = {"profile": "ci-gate", "depth": None, "fmt": "json"}
@@ -169,6 +173,53 @@ class TestProfileEndToEnd:
         )
         assert result.exit_code != 0
         assert "bogus" in result.output or "Invalid value" in result.output
+
+    def test_ci_gate_profile_does_not_override_a_configured_severity_preset(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1062, fresh evidence: ``ci-gate``'s injected
+        ``severity_preset: "default"`` (CLI cleanup phase two PR G2's
+        stand-in for the deleted ``exit_code_scheme: "severity"`` selector)
+        used to silently outrank an already-configured project severity
+        preset -- indistinguishable, once in ``kwargs``, from a real
+        ``--severity-preset default`` flag. Pre-PR-G2 the profile only
+        touched the algorithm selector, never ``severity_preset``, so a
+        project's own ``severity.preset: info-only`` governed untouched.
+
+        Removing a public function is an ``abi_breaking`` finding --
+        ``info-only`` makes it purely informational (exit 0), ``default``
+        makes it an error (exit 4). Asserts the project's own ``info-only``
+        wins under ``--profile ci-gate``, matching what a bare ``compare``
+        with no profile at all already does (the negative control below).
+        """
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
+                                visibility=Visibility.PUBLIC)],
+        )
+        new = AbiSnapshot(library="libtest.so", version="2.0", functions=[])
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        config_p = tmp_path / "project.abicheck.yml"
+        config_p.write_text("severity:\n  preset: info-only\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--profile", "ci-gate", "--config", str(config_p),
+            ],
+        )
+        # Negative control: the project's own info-only preset with no
+        # profile involved at all -- same expected exit, proving the
+        # fixture itself (not the profile mechanism) is what makes this 0.
+        baseline = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--config", str(config_p)],
+        )
+        assert baseline.exit_code == 0, baseline.output
+        assert result.exit_code == 0, result.output
 
 
 class TestProfileOperandClassification:

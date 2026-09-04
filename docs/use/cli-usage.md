@@ -163,7 +163,7 @@ not a straitjacket.
 
 | Profile | Expands to | Use when |
 |---------|-----------|----------|
-| `ci-gate` | `--depth headers --format review --exit-code-scheme severity` | Blocking a PR in CI |
+| `ci-gate` | `--depth headers --format review --severity-preset default` | Blocking a PR in CI |
 | `release-cut` | `--depth source --format markdown` (recommendation always shown) | Deciding a version bump at release time |
 | `quick` | `--depth binary` (one-line summary) | A fast "just tell me" look |
 
@@ -173,9 +173,9 @@ defaults, while any flag you type still overrides the profile. Public-surface
 scoping is on by default, so the profiles don't restate it.
 
 Profiles are **single-pair-only** — they bundle single-pair knobs (`--depth`,
-`--exit-code-scheme`, the `review` digest) that the directory/package *release
+`--severity-preset`, the `review` digest) that the directory/package *release
 fan-out* doesn't accept. Passing `--profile` with two directories/packages is a
-usage error; configure release defaults (format, severity, scheme) in
+usage error; configure release defaults (format, severity) in
 `.abicheck.yml`, which the fan-out reads.
 
 ```bash

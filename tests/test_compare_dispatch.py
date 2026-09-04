@@ -30,7 +30,6 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck import cli_compare_release
-from abicheck.api_types import CompareResult
 from abicheck.cli import main
 from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -1056,9 +1055,12 @@ class TestCompareDispatch:
         assert code == 0
         assert "NO_CHANGE" in out
 
-    def test_exit_code_scheme_rejected_on_set_inputs(self, tmp_path: Path) -> None:
-        # --exit-code-scheme can't be honoured by the release fan-out, so it is
-        # rejected rather than silently ignored (ADR-037 D12).
+    def test_exit_code_scheme_flag_no_longer_exists(self, tmp_path: Path) -> None:
+        # CLI cleanup phase two PR G2 deleted --exit-code-scheme entirely
+        # (the manual algorithm selector), so it now errors as an unknown
+        # option (exit 64) on every operand shape, set inputs included --
+        # not the release-fan-out-specific "not supported" usage error this
+        # test used to check for.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -1068,8 +1070,8 @@ class TestCompareDispatch:
         code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir), "--exit-code-scheme", "legacy"
         )
-        assert code != 0
-        assert "--exit-code-scheme is not supported" in (out + err)
+        assert code == 64
+        assert "No such option" in (out + err)
 
     def test_write_now_supported_on_set_inputs(self, tmp_path: Path) -> None:
         # CLI cleanup phase two, PR E: --write now renders its secondary
@@ -1093,13 +1095,19 @@ class TestCompareDispatch:
         assert write_path.is_file()
         assert "--write is not supported" not in (out + err)
 
-    def test_config_legacy_exit_scheme_applies_to_set_inputs(self, tmp_path: Path) -> None:
-        # A project config may demote ABI-breaking findings to warnings for
-        # reporting, while still pinning the process exit to the legacy verdict
-        # scheme. Directory/package compare must preserve that CI gate.
+    def test_config_severity_block_alone_selects_severity_scheme_for_set_inputs(
+        self, tmp_path: Path
+    ) -> None:
+        # CLI cleanup phase two PR G2: there is no manual exit-code-scheme
+        # pin any more (the `exit_code_scheme:` config key is gone
+        # entirely). A project config's `severity:` block is now the *only*
+        # thing that can select the severity-aware scheme, and it does so
+        # unconditionally for a directory/package compare too -- a
+        # `severity: abi_breaking: warning` config on a BREAKING pair now
+        # demotes the exit code, since there is no way left to keep the
+        # legacy 0/2/4 mapping while a severity setting is in effect.
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text(
-            "exit_code_scheme: legacy\n"
             "severity:\n"
             "  abi_breaking: warning\n",
             encoding="utf-8",
@@ -1116,22 +1124,19 @@ class TestCompareDispatch:
             "compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"
         )
 
-        assert code == 4
+        assert code == 0
         assert json.loads(out)["verdict"] == "BREAKING"
 
-    def test_config_severity_scheme_without_severity_block_applies_to_set_inputs(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    def test_config_exit_code_scheme_key_no_longer_exists_for_set_inputs(
+        self, tmp_path: Path,
     ) -> None:
-        """Codex review on #549: exit_code_scheme: severity from .abicheck.yml,
-        with no severity: block and no --severity-* flag anywhere, must still
-        gate on the default severity preset for directory/package inputs —
-        not silently fall back to the legacy verdict exit. The single-file
-        compare path never hits this: its resolved_cfg.severity is always
-        populated (defaulting to PRESET_DEFAULT), gated only by scheme; the
-        release fan-out re-derived its severity config from the raw
-        --severity-* values alone, which are all None here."""
-        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-
+        """CLI cleanup phase two PR G2 deleted the top-level
+        `exit_code_scheme:` config key entirely (it used to force the
+        severity-aware scheme even with no `severity:` block/`--severity-*`
+        flag anywhere -- Codex review on #549). `BuildConfig` now treats any
+        unknown top-level key as a hard parse-time error, so a directory/
+        package compare with this key still present fails fast at exit 64
+        rather than silently reproducing the old forced-severity behavior."""
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("exit_code_scheme: severity\n", encoding="utf-8")
 
@@ -1142,25 +1147,13 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
 
-        # An API_BREAK finding: legacy scheme exits 2; the default severity
-        # preset (potential_breaking=warning) must exit 0 instead.
-        api_break_diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so",
-            changes=[Change(ChangeKind.ENUM_MEMBER_RENAMED, "Color::RED", "member renamed")],
-            verdict=Verdict.API_BREAK,
-        )
-        monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._run_compare_pair",
-            lambda *a, **kw: CompareResult(api_break_diff, _SNAP, _SNAP),
-        )
-
-        code, out, _ = _invoke(
+        code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir), "--config", str(cfg),
             "--format", "json", "--no-bundle-analysis",
         )
 
-        assert code == 0
-        assert json.loads(out)["verdict"] == "API_BREAK"
+        assert code == 64
+        assert "exit_code_scheme" in (out + err)
 
     @pytest.mark.parametrize(
         "flag, value, is_path",

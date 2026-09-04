@@ -74,9 +74,13 @@ def pack_option(f: F) -> F:
         "surface.internal_namespaces and contract.unresolved (the "
         "latter needs --contract, which is what computes "
         "the coverage it configures); 'kind: gate' assigns "
-        "gate.exit_code_scheme and gate.severity.<category>. Composition "
+        "gate.severity.<category> (gate.exit_code_scheme was removed along "
+        "with --exit-code-scheme, CLI cleanup phase two PR G2 -- the one "
+        "automatic gate algorithm is fully determined by whether a "
+        "severity setting is in effect, so a pack asserting it is rejected "
+        "at load time). Composition "
         "is D8's: an explicitly stated value (--policy, "
-        "--exit-code-scheme, --severity-preset, a --profile, or .abicheck.yml) "
+        "--severity-preset, a --profile, or .abicheck.yml) "
         "always outranks a pack, and two selected packs assigning "
         "different values to the same field are a usage error unless "
         "something else already states it. A manifest assigning a field "
@@ -84,15 +88,15 @@ def pack_option(f: F) -> F:
         "than silently recorded. On a directory/package (release) "
         "comparison, a 'kind: policy'/'kind: contract'/'kind: gate' pack's "
         "policy.overrides/surface.internal_namespaces/contract.unresolved/"
-        "gate.exit_code_scheme/gate.severity.<category> all apply to every "
+        "gate.severity.<category> all apply to every "
         "library uniformly (folded into the release's own resolved "
         "GateOptions); contract.unresolved still needs --contract on that "
         "release comparison, same as everywhere else. On `scan` "
         "this requires --against (a pack's only application there is "
-        "the baseline comparison), and a 'kind: gate' pack's gate.exit_"
-        "code_scheme/gate.severity.<category> apply to the baseline "
-        "comparison's exit code the same way --severity-preset/"
-        "--exit-code-scheme given directly already do.",
+        "the baseline comparison), and a 'kind: gate' pack's "
+        "gate.severity.<category> applies to the baseline "
+        "comparison's exit code the same way --severity-preset "
+        "given directly already does.",
     )(f)
     return f
 

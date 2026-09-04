@@ -1417,7 +1417,7 @@ def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
     directory/package does, and is dispatched to the identical multi-
     library ``compare_bundle_facts`` engine (``workflows.bundle_compare_
     operand``), never the single-pair path a profile's knobs (``--depth``,
-    ``--exit-code-scheme``, the ``review`` format) were designed for.
+    ``--severity-preset``, the ``review`` format) were designed for.
     Without this, ``--profile quick`` on a stored/stored pair silently
     injected e.g. ``depth="binary"`` into every library's evidence depth
     instead of being rejected the same way a directory/package operand
@@ -1454,7 +1454,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     declares **only** when the user left that option at its default.
 
     **Profiles are single-pair-only.** A profile bundles single-pair-only knobs
-    (``--depth``, ``--exit-code-scheme``) and single-pair report formats
+    (``--depth``, ``--severity-preset``) and single-pair report formats
     (``review``) that the directory/package *release fan-out* deliberately does
     not accept — the fan-out sources those from ``.abicheck.yml`` instead. Rather
     than silently drop half a profile (the codebase rejects such flags loudly on
@@ -1483,8 +1483,8 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
             f"--profile {name} is not supported for directory/package (release) "
             "comparisons, or when either operand is a stored BundleFacts "
             "document: profiles bundle single-pair-only knobs (--depth, "
-            "--exit-code-scheme, the 'review' format). Configure release defaults "
-            "in .abicheck.yml (the fan-out reads format/severity/scheme from it), "
+            "--severity-preset, the 'review' format). Configure release defaults "
+            "in .abicheck.yml (the fan-out reads format/severity from it), "
             "or compare the libraries individually to use a profile."
         )
 

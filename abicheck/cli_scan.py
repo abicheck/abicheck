@@ -640,6 +640,13 @@ def _render_artifact_set_text(result: Any) -> str:
     ]
     for member in result.per_artifact:
         lines.append(f"  {member.artifact}: {member.result.verdict}")
+        # Codex review, PR #1062: without this, "see per_artifact for why"
+        # above pointed at a reason the text renderer never printed.
+        member_message = (member.result.report or {}).get(
+            "evidence_contract_error_message"
+        )
+        if member_message:
+            lines.append(f"    reason: {member_message}")
         lines.extend(_render_member_findings_lines(member.result))
     lines.append("")
     if result.bundle_incomplete:
@@ -667,7 +674,6 @@ _COMPARISON_ONLY_FLAGS = {
     "policy": "--policy",
     "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
     "severity_preset": "--severity-preset",
-    "exit_code_scheme": "--exit-code-scheme",
     "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
     "env_matrix_path": "--env-matrix",
     "contract_mode": "--contract",
@@ -928,7 +934,7 @@ def _resolve_scan_evaluation_config(
     policy_file, resolved_cfg)`` when there is nothing to resolve, i.e. no
     ``--against`` to compare against or neither ``--contract`` nor ``--pack``
     given. *resolved_cfg* is the caller's own already-resolved
-    ``resolve_compare_config`` severity/exit-code-scheme object (``scan_cmd``'s
+    ``resolve_compare_config`` severity object (``scan_cmd``'s
     ``sev_config``/``resolved_exit_scheme`` source) -- passed through
     unchanged unless a selected gate pack contributes to it (see below).
 
@@ -940,14 +946,14 @@ def _resolve_scan_evaluation_config(
     the Click context is: which flags the user actually typed is a question
     only the front end can answer.
 
-    CLI cleanup phase two, PR B: a ``kind: gate`` pack (``gate.exit_code_
-    scheme``/``gate.severity.*``) is folded into *resolved_cfg* the same way
-    ``compare``'s own ``resolve_and_apply`` folds one into its
-    ``ResolvedCompareConfig`` -- ``gate_supported=True`` below, no longer
-    rejected. A scan's exit code has honored ``--severity-preset``/
-    ``--exit-code-scheme`` (direct CLI flags and ``.abicheck.yml``) since the
-    fix that closed the "scan never consults severity" gap; a gate pack is
-    just one more source for the same already-real gate, mirroring the
+    CLI cleanup phase two, PR B: a ``kind: gate`` pack (``gate.severity.*``
+    -- no ``gate.exit_code_scheme`` any more, PR G2 deleted it) is folded
+    into *resolved_cfg* the same way ``compare``'s own ``resolve_and_apply``
+    folds one into its ``ResolvedCompareConfig`` -- ``gate_supported=True``
+    below, no longer rejected. A scan's exit code has honored
+    ``--severity-preset`` (a direct CLI flag and ``.abicheck.yml``) since
+    the fix that closed the "scan never consults severity" gap; a gate pack
+    is just one more source for the same already-real gate, mirroring the
     release fan-out's identical slice 2 fold
     (``cli_compare_release_helpers.apply_release_gate_pack``).
     """
@@ -985,12 +991,11 @@ def _resolve_scan_evaluation_config(
             # engine is exactly what got the flag reverted once before, so
             # its contributions are folded into the policy file -- and,
             # since CLI cleanup phase two "PR B", into the resolved
-            # severity/exit-code-scheme config -- the baseline comparison
-            # runs with. `gate_supported=True`: a scan's exit code already
-            # honors `--severity-preset`/`--exit-code-scheme` (direct CLI
-            # flags and `.abicheck.yml`), so a gate pack is one more source
-            # for that same real gate rather than a field with nowhere to
-            # go.
+            # severity config -- the baseline comparison runs with.
+            # `gate_supported=True`: a scan's exit code already honors
+            # `--severity-preset` (direct CLI flag and `.abicheck.yml`), so
+            # a gate pack is one more source for that same real gate rather
+            # than a field with nowhere to go.
             from .pack_application import (
                 apply_to_compare_config,
                 check_resolved_config_applies_packs,
@@ -1020,10 +1025,10 @@ def _resolve_scan_evaluation_config(
             )
             # Same fold `compare`'s own `resolve_and_apply` applies to its
             # `ResolvedCompareConfig` -- a no-op unless a gate pack actually
-            # supplied `gate.exit_code_scheme`/`gate.severity.*`, and only
-            # ever reached for a field `resolve_compare_config` left at its
-            # built-in default (the resolver already exempts anything the
-            # CLI/profile/`.abicheck.yml` stated from pack assignment).
+            # supplied `gate.severity.*`, and only ever reached for a field
+            # `resolve_compare_config` left at its built-in default (the
+            # resolver already exempts anything the CLI/profile/
+            # `.abicheck.yml` stated from pack assignment).
             if resolved_cfg is not None:
                 resolved_cfg = apply_to_compare_config(resolved_cfg, application)
     except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
@@ -1274,17 +1279,9 @@ def _discover_scan_project_config(
 @policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
 @scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
 @severity_options  # With --against: --severity-preset, mirrors `compare`
-@click.option(
-    "--exit-code-scheme",
-    "exit_code_scheme",
-    type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
-    default=None,
-    help="With --against: exit-code scheme (mirrors `compare --exit-code-scheme`): "
-    "'legacy' (0/2/4 verdict), 'severity' (per-category error levels), or 'auto' "
-    "(severity when a severity setting is in effect, else legacy). Default: "
-    "config's exit_code_scheme, else auto. Not demoted to hidden, mirroring "
-    "`compare`'s own visible coarse override (ADR-040 D4).",
-)
+# No manual --exit-code-scheme selector any more (CLI cleanup phase two PR
+# G2, ADR-064): the one automatic gate algorithm is fully determined by
+# whether a severity setting is in effect, mirroring `compare`.
 @click.option(
     "--pattern-verdicts/--no-pattern-verdicts",
     "pattern_verdicts",
@@ -1381,7 +1378,6 @@ def scan_cmd(
     scope_public_headers: bool,
     severity_preset: str | None,
     show_suppressed: bool,
-    exit_code_scheme: str | None,
     pattern_verdicts: bool,
     env_matrix_path: Path | None,
     contract_mode: str | None,
@@ -1434,9 +1430,12 @@ def scan_cmd(
          non-CPython-extension binary. No comparison ever ran
 
     \b
-    With --against, --severity-preset/--exit-code-scheme (or
-    .abicheck.yml's severity:/exit_code_scheme) select the severity-aware
-    scheme instead, exactly as for `compare`: the 0/2/4 codes above are then
+    With --against, --severity-preset (or .abicheck.yml's severity: block,
+    or a kind: gate pack's gate.severity.<category>) selects the
+    severity-aware scheme instead, exactly as for `compare` -- there is no
+    manual scheme override any more (CLI cleanup phase two PR G2): the
+    scheme is fully determined by whether a severity setting is in effect.
+    The 0/2/4 codes above are then
     computed from the per-category error levels rather than the verdict, so
     --severity-preset info-only can exit 0 on a breaking comparison, and an
     error-level addition or quality finding can exit 1 on an otherwise
@@ -1600,13 +1599,14 @@ def scan_cmd(
     # this, a project config's `suppression.strict`/`scope.public`/
     # `scope.public_symbols`/`scope.collapse_versioned_symbols`/
     # `suppression.require_justification` applied to `compare` but silently
-    # had no effect on `scan --against`. Severity + exit-code-scheme config
-    # keys are resolved here too and now DO feed `scan --against`'s own exit
-    # code the same way `compare`'s does (see `sev_config`/`resolved_exit_
-    # scheme` below) -- previously they were required positional args of the
-    # shared function but deliberately discarded, which meant
-    # `.abicheck.yml`'s `severity:`/`exit_code_scheme` block silently had no
-    # effect on `scan --against`, unlike `compare`.
+    # had no effect on `scan --against`. The severity config key is resolved
+    # here too and now DOES feed `scan --against`'s own exit code the same
+    # way `compare`'s does (see `sev_config`/`resolved_exit_scheme` below)
+    # -- previously it was a required positional arg of the shared function
+    # but deliberately discarded, which meant `.abicheck.yml`'s `severity:`
+    # block silently had no effect on `scan --against`, unlike `compare`.
+    # (No `exit_code_scheme` config key exists any more at all, CLI cleanup
+    # phase two PR G2 -- the scheme is purely derived from severity.)
     #
     # Gated on `against is not None`: every field this resolves only means
     # anything for a baseline comparison (mirrors the "reject comparison-only
@@ -1638,7 +1638,6 @@ def scan_cmd(
             project_cfg,
             cli_severity_preset=severity_preset,
             cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-            cli_exit_code_scheme=exit_code_scheme,
         )
         scope_public_headers = resolved_cfg.scope_public
         strict_suppressions = resolved_cfg.strict_suppressions

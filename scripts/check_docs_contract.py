@@ -1544,6 +1544,46 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "--exit-code-scheme and .abicheck.yml's top-level exit_code_scheme:"
+        " key (ADR-064 / CLI cleanup phase two PR G2 -- there is no manual"
+        " gate-algorithm override any more; the algorithm is fully"
+        " determined by whether a severity setting is in effect. Note this"
+        " is distinct from the still-live, purely-derived report field"
+        " `gate.exit_code_scheme`/`scoped_exit_code_scheme`, which is not"
+        " a settable surface and is not matched by these patterns)",
+        ("--exit-code-scheme", "exit_code_scheme:"),
+        frozenset(
+            {
+                # Historical "what changed" migration note explaining the
+                # old scoped-severity fix, including that its manual pin
+                # was later removed.
+                "start/upgrading-to-0.6.md",
+                # Explains why `gate.exit_code_scheme` carries no
+                # `field_provenance` entry any more -- names the retired
+                # flag/key as the thing that used to populate it.
+                "reference/compatibility-evaluation-config.md",
+                # The "no config key any more" explanation itself names
+                # the retired key and flag.
+                "reference/config-file.md",
+                # The release-path exit-code section explains there is no
+                # manual override any more, by naming what was removed.
+                "reference/exit-codes.md",
+                # "there is no separate `exit_code_scheme:` key" sentence
+                # explaining the config file's own severity block.
+                "learn/rollout-and-governance.md",
+                # Same "no such key any more" explanation as config-file.md.
+                "use/build-evidence-setup.md",
+                # The rewritten "the two exit-code schemes" section states
+                # there is no manual override any more, by naming it.
+                "use/ci-gating.md",
+                # Historical G22 changelog-style row: names the CLI as it
+                # was designed at the time (an explicit --exit-code-scheme),
+                # accurate to that point in history.
+                "contribute/usecase-coverage-evaluation.md",
+            }
+        ),
+    ),
 )
 
 

@@ -47,7 +47,7 @@ F = TypeVar("F", bound=Callable[..., object])
 #: wins (see :func:`apply_compare_profile`), mirroring the config < CLI rule and
 #: the way ``--severity-preset`` collapses four severity flags into one token.
 #: Values are in each option's *resolved* form (``depth`` uses the canonical
-#: ``USER_DEPTHS`` rungs, ``fmt``/``exit_code_scheme`` the ``Choice`` strings,
+#: ``USER_DEPTHS`` rungs, ``fmt``/``severity_preset`` the ``Choice`` strings,
 #: booleans as ``bool``) so they can be injected without re-running conversion.
 COMPARE_PROFILES: dict[str, dict[str, object]] = {
     # CI gate: fast header-depth check, compact review digest, severity-aware
@@ -57,7 +57,17 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
     "ci-gate": {
         "depth": "headers",
         "fmt": "review",
-        "exit_code_scheme": "severity",
+        # CLI cleanup phase two PR G2: `--exit-code-scheme severity` (the
+        # manual override) no longer exists -- the one automatic gate
+        # algorithm is fully determined by whether a severity setting is
+        # in effect. `"default"` is the identical `SeverityConfig` the
+        # removed `exit_code_scheme: "severity"` entry paired with (no
+        # `severity_preset` of its own, so the resolver's `PRESET_DEFAULT`
+        # fallback applied) -- stating it explicitly here makes
+        # `severity_active` true, which is what now drives the algorithm to
+        # `"severity"` automatically, preserving this profile's exact
+        # pre-PR-G2 behavior.
+        "severity_preset": "default",
     },
     # Release cut: deepest evidence, full Markdown report with a semver/SONAME
     # recommendation appended — the "should I bump?" flow. Named "release-cut"

@@ -63,14 +63,16 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     "contract_mode",
     "pack_paths",
     # CLI cleanup phase two, "PR B": needed so this resolver's D7 precedence
-    # can tell an explicit --severity-preset/--exit-code-scheme apart from
-    # "nothing stated" -- without them a selected gate pack looked unopposed
-    # here regardless of what the CLI actually gave, which let
+    # can tell an explicit --severity-preset apart from "nothing stated" --
+    # without it a selected gate pack looked unopposed here regardless of
+    # what the CLI actually gave, which let
     # `pack_application.apply_to_compare_config` override an explicit value
     # (see this module's own docstring for the reproduced repro and why
-    # this is safe for `scan` specifically).
+    # this is safe for `scan` specifically). No `exit_code_scheme` entry any
+    # more (CLI cleanup phase two PR G2 deleted the manual selector
+    # everywhere) -- the algorithm is purely derived from whether a
+    # severity setting is in effect.
     "severity_preset",
-    "exit_code_scheme",
 )
 
 #: How a :class:`~abicheck.service_scan.ScanRequest` spells the inputs whose

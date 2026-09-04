@@ -55,6 +55,22 @@ code block is exercised too, mirroring
 ``test_action_run_sh_scan_not_comparable.py``'s own rationale: a verdict
 newly split out of the generic ``ERROR`` bucket must carry its own
 explicit ``FINAL_EXIT=1``, or the step silently starts passing.
+
+**2026-09-04: `--artifact-set` joined this exit code too.** Until this
+date, `--artifact-set` (`service_scan._aggregate_scan_set_verdict`)
+floored its own set-level exit at the generic 1 for this same axis, so a
+`format: text` artifact-set Action step had no way to tell it apart from a
+plain CLI error/crash -- the exit-1 dispatch below used to carry a
+JSON-report `compat_verdict` check just for that case (see the removed
+`test_exit_1_artifact_set_evidence_contract_error_from_json_report`/
+`..._beats_cli_error_stub` in this file's own git history). Re-reading
+`_aggregate_scan_set_verdict` showed that floor was never load-bearing --
+`run_scan_set` rejects `severity_preset`/`exit_code_scheme` outright, so
+the severity scheme's own "1 = addition/quality error" meaning never
+applied to a set, and nothing else ever produced exit 1 except the
+sibling `BUNDLE_INCOMPLETE` floor -- so the set now reports the identical
+dedicated 7 instead, closing this gap by removing the shared exit code
+rather than adding another JSON check.
 """
 
 from __future__ import annotations
@@ -64,8 +80,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-import pytest
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
@@ -156,17 +170,17 @@ def _run_exit_mapping(
     *,
     is_cli_error: bool = False,
     severity_exit: str = "0",
-    report_verdict: str = "",
+    artifact_set: bool = False,
 ) -> subprocess.CompletedProcess:
     # Stub every helper the extracted case-block calls -- this test is
     # scoped to the mapping itself. No `_evidence_contract_gated` stub any
     # more: exit 7 is its own `case` arm, dispatched purely on the numeric
     # exit code, with no predicate to stub. `_json_report_src`/`_report_query`
-    # are the pair exit 1's `--artifact-set` EVIDENCE_CONTRACT_ERROR check
-    # reads (see `test_exit_1_artifact_set_evidence_contract_error_from_
-    # json_report` below) -- stubbed here too so every exit-1 test in this
-    # module exercises the real dispatch order, not just the tests that care
-    # about this one branch.
+    # were the pair exit 1's `--artifact-set` EVIDENCE_CONTRACT_ERROR check
+    # used to read, before that check moved to exit 7 (2026-09-04,
+    # `service_scan._aggregate_scan_set_verdict`'s own "Design decision"
+    # note) -- no longer stubbed here since exit 1's dispatch no longer
+    # reads them at all.
     stubs = f"""
 _resolve_clean_exit_verdict() {{ VERDICT="COMPATIBLE"; }}
 _severity_gate_exit() {{ echo "{severity_exit}"; }}
@@ -174,12 +188,11 @@ _is_cli_error() {{ return {0 if is_cli_error else 1}; }}
 _coverage_gated() {{ return 1; }}
 _assurance_gated() {{ return 1; }}
 _escalate_verdict_to_report() {{ :; }}
-_json_report_src() {{ echo "/tmp/stub-report.json"; }}
-_report_query() {{ echo "{report_verdict}"; }}
 """
     script = (
         stubs
         + f"ABICHECK_EXIT={abicheck_exit}\n"
+        + f'SCAN_ARTIFACT_SET="{"liba.so libb.so" if artifact_set else ""}"\n'
         + 'STDERR_CONTENT=""\n'
         + _exit_case_fragment()
         + '\necho "VERDICT=$VERDICT"\n'
@@ -207,6 +220,33 @@ def test_exit_7_ignores_stderr_and_is_cli_error_stub():
     assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
 
 
+def test_exit_7_artifact_set_also_maps_to_evidence_contract_error_verdict():
+    """`--artifact-set` shares the identical dedicated exit code 7 as of
+    2026-09-04 (`service_scan._aggregate_scan_set_verdict`'s own "Design
+    decision" note) -- this closes the last `--artifact-set`/`format: text`
+    signal gap the cli-cleanup-phase-two plan's PR G2 section had left
+    open (a `format: text` artifact-set step previously had no way to tell
+    this abort apart from a genuine CLI error, since the set's own process
+    exit used to floor generically at 1). No JSON report needed, same as
+    the single-artifact case -- the numeric exit code alone dispatches."""
+    result = _run_exit_mapping(7, artifact_set=True)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+    # The artifact-set-specific message names the report's per_artifact
+    # entries rather than "the command's own error message above" (there
+    # is no single command-level stderr line for a --artifact-set member
+    # abort the way there is for a single binary).
+    assert "per_artifact entries" in result.stdout
+
+
+def test_exit_7_ignores_is_cli_error_stub_for_artifact_set_too():
+    """Same unconditional-dispatch guarantee as the single-artifact case,
+    for `--artifact-set`."""
+    result = _run_exit_mapping(7, is_cli_error=True, artifact_set=True)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
 def test_exit_1_plain_cli_error_still_maps_to_error():
     """A genuine bad-flag/crash abort at exit 1 must still classify as the
     generic ERROR bucket, unaffected by evidence-contract-error moving to
@@ -230,58 +270,24 @@ def test_exit_1_severity_error_unaffected():
     assert "VERDICT=SEVERITY_ERROR" in result.stdout
 
 
-def test_exit_1_artifact_set_evidence_contract_error_from_json_report():
-    """`--artifact-set` still floors *its own* exit code at 1 for a
-    member's evidence-contract abort (`service_scan._aggregate_scan_set_
-    verdict`, since a member's own abort is caught inside
-    `_run_scan_one_member` and never reaches `cli_scan.py`'s single-binary
-    exit-7 catch site) -- the JSON report's `compat_verdict` is the only
-    signal that tells this case apart from a genuine CLI error at exit 1,
-    so it must win the exit-1 dispatch. This is the regression Round-6
-    review caught: an earlier revision of the exit-7 redesign deleted the
-    whole JSON-verdict check without noticing `--artifact-set` still needed
-    it, silently reclassifying every such abort as generic ERROR."""
-    result = _run_exit_mapping(1, report_verdict="EVIDENCE_CONTRACT_ERROR")
-    assert result.returncode == 0, result.stderr
-    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
-
-
-def test_exit_1_artifact_set_evidence_contract_error_beats_cli_error_stub():
-    """The JSON-verdict check runs before `_is_cli_error` in the real
-    dispatch order -- even a (wrongly) true `_is_cli_error` stub must not
-    override a report that already says EVIDENCE_CONTRACT_ERROR."""
-    result = _run_exit_mapping(
-        1, is_cli_error=True, report_verdict="EVIDENCE_CONTRACT_ERROR"
-    )
-    assert result.returncode == 0, result.stderr
-    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
-
-
-@pytest.mark.parametrize(
-    "hostile_verdict",
-    [
-        "EVIDENCE_CONTRACT_ERROR ",  # trailing space
-        " EVIDENCE_CONTRACT_ERROR",  # leading space
-        "evidence_contract_error",  # wrong case
-        "EVIDENCE_CONTRACT_ERRORX",  # extra trailing char
-        "not EVIDENCE_CONTRACT_ERROR really",  # embedded, not the whole value
-        "EVIDENCE_CONTRACT_ERROR\nVERDICT=EVIDENCE_CONTRACT_ERROR",  # injected newline
-    ],
-)
-def test_exit_1_hostile_verdict_string_does_not_trigger_the_bucket(
-    hostile_verdict: str,
-) -> None:
-    """Malicious-fixture negative control (a `--artifact-set` member's JSON
-    report is derived from an attacker-influenced library/build, so its
-    `compat_verdict` field must not be trusted as anything but data): the
-    dispatch compares `$_verdict` to the literal string
-    `EVIDENCE_CONTRACT_ERROR` with bash `[[ ... == ... ]]`, not a substring
-    or regex match, so no near-miss spelling, embedded value, or injected
-    line can reach the `EVIDENCE_CONTRACT_ERROR` bucket -- it must still
-    classify as a plain CLI error (this harness's `_is_cli_error` stub
-    default) or `ERROR`, never the axis a crafted fixture is trying to
-    forge."""
-    result = _run_exit_mapping(1, is_cli_error=True, report_verdict=hostile_verdict)
+def test_exit_1_artifact_set_no_longer_reaches_evidence_contract_error():
+    """As of 2026-09-04 (`service_scan._aggregate_scan_set_verdict`'s own
+    "Design decision" note), a `--artifact-set` member's evidence-contract
+    abort no longer floors the *set's* own exit at the generic 1 at all --
+    it uses the identical dedicated exit 7 the single-binary path always
+    has (see `test_exit_7_artifact_set_also_maps_to_evidence_contract_
+    error_verdict` above). This closes the entire class of forgery the
+    superseded JSON-`compat_verdict`-at-exit-1 mechanism was exposed to
+    (a `--artifact-set` member's report is derived from an
+    attacker-influenced library/build, so trusting its `compat_verdict`
+    field at a *shared* exit code was exactly the kind of un-kernel-
+    verified signal this axis's single-binary history (this module's own
+    docstring) already rejected three times over) by removing the shared
+    exit code, not by hardening the string match further: exit 1 with
+    `--artifact-set` set is now indistinguishable, by design, from a plain
+    CLI error/crash at exit 1, since a real evidence-contract abort can no
+    longer produce that exit code at all."""
+    result = _run_exit_mapping(1, is_cli_error=True, artifact_set=True)
     assert result.returncode == 0, result.stderr
     assert "VERDICT=EVIDENCE_CONTRACT_ERROR" not in result.stdout
     assert "VERDICT=ERROR" in result.stdout
@@ -379,3 +385,87 @@ _escalate_verdict_to_report() { :; }
     result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
     assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+def _real_artifact_set_scan_no_evidence(tmp_path: Path) -> subprocess.CompletedProcess:
+    """Run the real ``abicheck scan --artifact-set ... --depth source`` CLI
+    against two minimal, real ELF shared objects with no source evidence --
+    the genuine `--artifact-set` member abort end to end (2026-09-04,
+    closing the last `--artifact-set`/`format: text` signal gap)."""
+    import struct
+
+    def _write_elf_shared_object_stub(path: Path) -> None:
+        data = bytearray(64)
+        data[0:4] = b"\x7fELF"
+        data[4] = 2  # ELFCLASS64
+        data[5] = 1  # little-endian
+        struct.pack_into("<H", data, 16, 3)  # e_type = ET_DYN
+        struct.pack_into("<Q", data, 32, 0)  # e_phoff = 0
+        struct.pack_into("<H", data, 56, 0)  # e_phnum = 0
+        path.write_bytes(bytes(data))
+
+    p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+    _write_elf_shared_object_stub(p1)
+    _write_elf_shared_object_stub(p2)
+
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "scan",
+            "--artifact-set",
+            str(p1),
+            "--artifact-set",
+            str(p2),
+            "--depth",
+            "source",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_real_artifact_set_cli_run_exits_7(tmp_path):
+    """End-to-end: the real `--artifact-set` CLI's own process exit for a
+    member's evidence-contract abort is exactly 7 (the dedicated code, not
+    the generic 1 it used to floor at), and the JSON/text report body
+    names the responsible axis."""
+    proc = _real_artifact_set_scan_no_evidence(tmp_path)
+    assert proc.returncode == 7, (proc.returncode, proc.stdout, proc.stderr)
+    assert "EVIDENCE_CONTRACT_ERROR" in proc.stdout, proc.stdout
+
+
+def test_real_artifact_set_cli_exit_code_dispatches_through_the_real_run_sh_case_block(
+    tmp_path,
+):
+    """Feed the *real* `--artifact-set` exit code into the *real,
+    unmodified* `case $ABICHECK_EXIT in ... esac` block extracted from
+    `run.sh` (with `SCAN_ARTIFACT_SET` set, matching a real artifact-set
+    Action step) -- proves the Python-side exit code and the bash-side
+    dispatch actually agree, and that the artifact-set-specific message
+    fires."""
+    proc = _real_artifact_set_scan_no_evidence(tmp_path)
+    assert proc.returncode == 7, (proc.returncode, proc.stdout, proc.stderr)
+
+    stubs = """
+_resolve_clean_exit_verdict() { VERDICT="COMPATIBLE"; }
+_severity_gate_exit() { echo "0"; }
+_is_cli_error() { return 1; }
+_coverage_gated() { return 1; }
+_assurance_gated() { return 1; }
+_escalate_verdict_to_report() { :; }
+"""
+    script = (
+        stubs
+        + f"ABICHECK_EXIT={proc.returncode}\n"
+        + 'SCAN_ARTIFACT_SET="liba.so libb.so"\n'
+        + 'STDERR_CONTENT=""\n'
+        + _exit_case_fragment()
+        + '\necho "VERDICT=$VERDICT"\n'
+    )
+    result = _run_bash_script(script)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+    assert "per_artifact entries" in result.stdout
