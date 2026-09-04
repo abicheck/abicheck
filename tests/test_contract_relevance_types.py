@@ -184,11 +184,14 @@ class TestSchemaVersionStrategy:
         # produced type graph without changing any block's shape), and
         # `EVALUATION_CONTEXT_SCHEMA_VERSION` bumped separately (GateConfig
         # gained require_complete_analysis/scope, changing the persisted
-        # evaluation_context.gate shape) -- which is the whole point of
-        # keeping four counters. Pin each one so a future change to a
-        # persisted format or algorithm has to state which concern it moved.
+        # evaluation_context.gate shape; later bumped again to 3 when CLI
+        # cleanup phase two PR G2 removed field_provenance["gate.
+        # exit_code_scheme"] from every persisted context) -- which is the
+        # whole point of keeping four counters. Pin each one so a future
+        # change to a persisted format or algorithm has to state which
+        # concern it moved.
         assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 1
-        assert EVALUATION_CONTEXT_SCHEMA_VERSION == 2
+        assert EVALUATION_CONTEXT_SCHEMA_VERSION == 3
         assert EVALUATOR_VERSION == 1
         assert IDENTITY_ALGORITHM_VERSION == 2
 

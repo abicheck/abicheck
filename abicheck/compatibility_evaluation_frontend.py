@@ -1322,7 +1322,29 @@ def resolve_compatibility_evaluation_config(
     # `exit_code_scheme` field to `severity_preset`: `ci-gate` states this
     # field now, per CLI cleanup phase two PR G2's migration, since the
     # manual algorithm selector `ci-gate` used to set no longer exists).
-    if profile is not None and profile.severity_preset is not None:
+    # Codex review, PR #1062, fresh evidence: `ci-gate`'s injected
+    # `"default"` is a placeholder that only exists to activate the
+    # algorithm (see `cli_compare_options._resolve_profile_severity_preset`,
+    # which the live gate computation already discards this candidate to
+    # match) -- once the project states its own severity policy, THAT is
+    # what actually scores the run, so omit the placeholder here too rather
+    # than let the receipt record a `run_profile`-attributed value the live
+    # gate never used.
+    project_states_severity = project is not None and any(
+        getattr(project, attr) is not None
+        for attr in (
+            "severity_preset",
+            "severity_abi_breaking",
+            "severity_potential_breaking",
+            "severity_quality_issues",
+            "severity_addition",
+        )
+    )
+    if (
+        profile is not None
+        and profile.severity_preset is not None
+        and not project_states_severity
+    ):
         profile_preset = severity_preset_identity(profile.severity_preset)
         preset_candidates.append(
             _candidate(

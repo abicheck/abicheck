@@ -287,6 +287,41 @@ class TestRunProfileLayer:
         assert ctx["field_provenance"]["gate.preset"]["layer"] == (
             "built_in_default"
         )
+
+    def test_a_configured_project_preset_outranks_the_placeholder(self, tmp_path):
+        """Codex review, PR #1062, fresh evidence: `ci-gate`'s injected
+        `"default"` is a placeholder that exists only to activate the
+        algorithm -- the live gate computation
+        (`cli_compare_options._resolve_profile_severity_preset`) already
+        discards it once the project states its own severity policy, so the
+        receipt must agree, not attribute a `run_profile`-sourced `"default"`
+        for a run that actually scored the project's `info-only`.
+
+        Not routed through `_context` (asserts exit_code in (1, 2, 4)):
+        `info-only` demotes the fixture's real API break's own severity
+        contribution to 0 -- exit 1 here is `--contract auto`'s orthogonal
+        contract-coverage axis (ADR-049 Phase 7), not the gate, which is
+        exactly the point: the gate and coverage axes are independent, and
+        this test is about the gate/receipt agreeing, not about the
+        coverage floor.
+        """
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("severity:\n  preset: info-only\n", encoding="utf-8")
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--contract", "auto", "--format", "json",
+                "--profile", "ci-gate", "--config", str(config),
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
+        assert ctx["resolved_config"]["gate"]["preset"]["id"] == "info-only"
+        prov = ctx["field_provenance"]["gate.preset"]
+        assert prov["layer"] == "project_config"
+        assert prov["path"] == str(config)
         # gate.exit_code_scheme is purely derived and carries no
         # field_provenance entry at all any more (PR G2).
         assert "gate.exit_code_scheme" not in ctx["field_provenance"]

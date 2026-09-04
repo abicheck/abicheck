@@ -791,29 +791,24 @@ outputs:
       `_effective_format`) still decides only whether the sticky PR
       comment and JSON-consuming outputs have structured detail to show,
       not whether this verdict/exit-code publish at all.
-      new-library-set (--artifact-set) scans are the one case this fix does
-      not reach: a member's `_EvidenceContractError` is caught inside
-      `service_scan._run_scan_one_member` and converted to a per-member
-      `ScanResult` there, never reaching the single-binary catch site or
-      its dedicated exit code -- a documented, unclosed gap, and the JSON
-      sidecar is never auto-requested for that mode regardless of
-      pr-comment, so a JSON report requires either format: json or the
-      run's own extra-args to have written one --
-      AND, even when a JSON report does exist, ScanSetResult's own aggregation
-      (service_scan._aggregate_scan_set_verdict) reports this verdict at
-      the set's top level only when it is the *worst* outcome across the
-      set; a sibling library with a real API_BREAK/BREAKING keeps that
-      verdict at the top level instead (still floors the overall exit code
-      at 1, per that function's own docstring), leaving the aborted
-      member's status visible only in the JSON report's own per_artifact
-      list, not in the verdict/exit-code outputs this Action publishes.
-      So "unconditionally fails the step" holds for a new-library-set scan
-      only when the evidence-contract abort is the set's own worst
-      outcome; when a sibling member's real break outranks it, this
-      Action's fail-on-api-break/fail-on-breaking inputs alone decide the
-      step's outcome, exactly as for an ordinary API_BREAK/BREAKING
-      verdict, with the sibling abort unreported by this Action), or
-      ERROR.
+      new-library-set (--artifact-set) scans reach this same dedicated exit
+      code too, as of 2026-09-04: `service_scan._aggregate_scan_set_verdict`
+      reports the set's own top-level verdict/exit as
+      EVIDENCE_CONTRACT_ERROR/7 whenever a member's `_EvidenceContractError`
+      is the *worst* outcome across the set -- unconditionally, independent
+      of `--format`/pr-comment/extra-args, the process's own exit code
+      needing no JSON report to be legible. A sibling library with a real
+      API_BREAK/BREAKING still outranks it (that verdict/exit stays at the
+      set's top level instead, per that function's own docstring), leaving
+      the aborted member's status visible only in the JSON report's own
+      per_artifact list, not in the verdict/exit-code outputs this Action
+      publishes -- so "unconditionally fails the step" holds for a
+      new-library-set scan only when the evidence-contract abort is the
+      set's own worst outcome; when a sibling member's real break outranks
+      it, this Action's fail-on-api-break/fail-on-breaking inputs alone
+      decide the step's outcome, exactly as for an ordinary
+      API_BREAK/BREAKING verdict, with the sibling abort unreported by this
+      Action), or ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
       On compare and scan alike, verdict and exit-code are different axes and
@@ -861,9 +856,9 @@ outputs:
       audit-only scan too, since the underlying precondition checks run
       regardless of whether a baseline comparison follows; this process's
       own dedicated exit code as of 2026-09-03, published unconditionally
-      for a single ARTIFACT -- see the verdict output's own description
-      above for the one remaining gap, --artifact-set member-level
-      aborts).
+      for a single ARTIFACT, and for --artifact-set too as of 2026-09-04
+      when a member's abort is the set's own worst outcome -- see the
+      verdict output's own description above for the exact condition).
       deps-compare: 0 (pass), 1 (warn),
       4 (fail). deps-tree: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.
