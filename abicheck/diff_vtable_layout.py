@@ -138,6 +138,23 @@ def _is_polymorphic(
     substitutes for the ``vtable_fact`` check above, not for the
     transitive base walk below — a base whose *own* evidence is missing
     still degrades that base to indeterminate on its own terms.
+
+    A confirmed, *non-``None``* ``vptr_offset_bits`` is a fourth,
+    unconditionally-safe positive-evidence path (Codex review, fresh
+    evidence, third round) — the mirror image of the already-rejected
+    "confirmed ``None`` proves absence" findings on this same guard's
+    sibling in ``diff_layout.py``: a *real* recorded vptr offset can only
+    exist if the class genuinely owns a vptr somewhere in its hierarchy, so
+    it settles the question the same unconditional way ``vtable``/
+    ``virtual_bases`` reading non-empty already does, regardless of this
+    record's own ``vtable_fact`` status. Unlike a confirmed ``None`` (which
+    stays ambiguous per the tri-state reasoning above), there is no
+    corresponding ambiguity in the positive direction. ``PARTIAL`` earns
+    the same trust as ``PRESENT`` here, matching ``diff_layout.
+    _check_vptr_introduced``'s own permissive treatment of this field: it
+    is a scalar, not a list, so its own ``PARTIAL`` reading carries no
+    "uncovered remainder" risk, and the direct-clang header-AST backend
+    never emits anything but ``PARTIAL`` for it.
     """
     if name in memo:
         return memo[name]
@@ -147,7 +164,14 @@ def _is_polymorphic(
         return None
     vtable = resolved_fact_value(rec.vtable_fact, [])
     virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
-    if vtable or virtual_bases:
+    vptr_fact = rec.vptr_offset_bits_fact
+    own_vptr_confirmed_present = (
+        vtable_facts_reliable
+        and vptr_fact is not None
+        and vptr_fact.is_present
+        and vptr_fact.value is not None
+    )
+    if vtable or virtual_bases or own_vptr_confirmed_present:
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact

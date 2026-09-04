@@ -502,13 +502,17 @@ the whole case-(a) inventory (`bases`/`virtual_bases` are case-(a) too but
 carry no rule there -- "no independent reliability signal" per that
 module's own docstring -- and were gated in earlier 5B PRs alongside
 `is_va_list`). Of the fifteen ruled fields specifically: seven are now
-gated on a direct `FactStatus` read (`vtable`, `is_va_list`, plus this
-session's `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/`access`),
-one (`vptr_offset_bits`) is partially gated with its own documented
-residual cluster, and seven (`default` plus the five `deprecated` surfaces
-plus `is_scoped`) remain on the pre-`Fact[T]` `fact_provenance` mechanism
-with a substantiated, tested reason recorded for each rather than left
-silently unaudited.
+gated on a direct `FactStatus` read (`vptr_offset_bits`, `is_va_list`,
+plus this session's `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/
+`access` — `vptr_offset_bits`'s only detector consumer,
+`diff_layout._check_vptr_introduced`'s own direct-status pre-check, is
+fully gated; see the corrected note further down, which this sentence
+previously contradicted, Codex review, fresh evidence),
+one (`vtable`) is partially gated with its own documented
+residual `TYPE_VTABLE_CHANGED` cluster, and seven (`default` plus the five
+`deprecated` surfaces plus `is_scoped`) remain on the pre-`Fact[T]`
+`fact_provenance` mechanism with a substantiated, tested reason recorded
+for each rather than left silently unaudited.
 
 **5B's eighth PR (2026-09-03) audited the entire remaining case-(b) field
 inventory and found it already safe — no code changes.** Every model field

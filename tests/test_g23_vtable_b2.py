@@ -426,3 +426,67 @@ class TestReconstructionFactStatus:
         )
         types = {"P": rec}
         assert _is_polymorphic("P", types, {}) is None
+
+    def test_confirmed_present_vptr_offset_bits_proves_polymorphic(self):
+        # Codex review, fresh evidence, third round: a genuinely confirmed
+        # non-None vptr_offset_bits is unconditional positive proof of
+        # polymorphism -- the mirror image of the already-rejected
+        # "confirmed None proves absence" findings (there is no ambiguity
+        # in the positive direction the way there is for a confirmed None).
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            vptr_offset_bits=0,
+            vptr_offset_bits_fact=Fact.present(0),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is True
+
+    def test_confirmed_partial_vptr_offset_bits_still_proves_polymorphic(self):
+        # PARTIAL earns the same trust as PRESENT here -- a scalar fact,
+        # so no "uncovered remainder" risk, matching diff_layout's own
+        # permissive treatment of this field.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            vptr_offset_bits=0,
+            vptr_offset_bits_fact=Fact.partial(0),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is True
+
+    def test_confirmed_none_vptr_offset_bits_does_not_prove_polymorphic(self):
+        # A confirmed None value is NOT evidence either way (tri-state
+        # ambiguity -- also covers "polymorphic only via a virtual base")
+        # -- must not trigger the new positive-evidence path, so this stays
+        # indeterminate exactly like the pre-existing uncollected-vtable
+        # case.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            vptr_offset_bits=None,
+            vptr_offset_bits_fact=Fact.present(None),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None
+
+    def test_confirmed_present_vptr_offset_bits_ignored_when_facts_unreliable(self):
+        # vtable_facts_reliable=False must suppress this positive-evidence
+        # path too, same defense-in-depth discipline as the sibling
+        # own_vtable_confirmed_empty check.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            vptr_offset_bits=0,
+            vptr_offset_bits_fact=Fact.present(0),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}, vtable_facts_reliable=False) is None
