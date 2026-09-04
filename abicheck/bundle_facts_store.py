@@ -284,16 +284,6 @@ def write_bundle_facts_package(
     decoded_bytes_so_far = 0
     for library_name, snapshot in facts.per_library_snapshots.items():
         document = snapshot_to_dict(snapshot)
-        decoded_bytes_so_far += len(json.dumps(document).encode("utf-8"))
-        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise ValueError(
-                f"facts.per_library_snapshots' encoded documents exceed "
-                f"DEFAULT_MAX_BUNDLE_DECODED_BYTES "
-                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- reached "
-                f"while encoding {library_name!r}; refusing to write a "
-                "package read_bundle_facts_package would itself then "
-                "refuse to reconstruct"
-            )
         library_manifest = import_legacy_snapshot(
             document,
             store=store,
@@ -308,10 +298,31 @@ def write_bundle_facts_package(
         if filename:
             native_identity[_NATIVE_IDENTITY_FILENAME_KEY] = filename
         aliases = facts.filesystem_aliases.get(library_name)
-        if aliases:
-            native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = _encode_aliases(aliases)
+        encoded_aliases = _encode_aliases(aliases) if aliases else None
+        if encoded_aliases:
+            native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = encoded_aliases
         if native_identity != dict(artifact.native_identity):
             artifact = replace(artifact, native_identity=native_identity)
+
+        # `native_identity` lives outside `document` entirely, and
+        # `read_bundle_facts_package` charges it too (Codex review, fresh
+        # evidence) -- mirrored here for the identical "writer must not
+        # produce what the reader refuses" reason the count/document-size
+        # mirroring above already gives.
+        decoded_bytes_so_far += (
+            len(json.dumps(document).encode("utf-8"))
+            + (len(filename.encode("utf-8")) if filename else 0)
+            + (len(encoded_aliases.encode("utf-8")) if encoded_aliases else 0)
+        )
+        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise ValueError(
+                f"facts.per_library_snapshots' encoded documents exceed "
+                f"DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- reached "
+                f"while encoding {library_name!r}; refusing to write a "
+                "package read_bundle_facts_package would itself then "
+                "refuse to reconstruct"
+            )
         artifact_refs.append(artifact)
 
         for kind, version in library_manifest.versions.section_schema_versions.items():
@@ -479,7 +490,19 @@ def read_bundle_facts_package(
         document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
-        decoded_bytes_so_far += len(json.dumps(document).encode("utf-8"))
+        # `native_identity` (the filename/aliases facts folded on at write
+        # time -- see the module docstring) lives outside `document`
+        # entirely, so it must be charged too: a budget sized exactly to
+        # the snapshot content alone still let an arbitrarily large alias
+        # array through for free (Codex review, fresh evidence beyond the
+        # artifact/project-section budget fixes above).
+        filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
+        aliases_text = artifact.native_identity.get(_NATIVE_IDENTITY_ALIASES_KEY)
+        decoded_bytes_so_far += (
+            len(json.dumps(document).encode("utf-8"))
+            + (len(filename.encode("utf-8")) if filename else 0)
+            + (len(aliases_text.encode("utf-8")) if aliases_text else 0)
+        )
         if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
             raise ValueError(
                 f"variant {variant_id!r}'s reconstructed artifacts exceed "
@@ -489,11 +512,8 @@ def read_bundle_facts_package(
                 "reconstruct further members"
             )
         per_library_snapshots[artifact_id] = snapshot_from_dict(document)
-
-        filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
         if filename:
             library_filenames[artifact_id] = filename
-        aliases_text = artifact.native_identity.get(_NATIVE_IDENTITY_ALIASES_KEY)
         if aliases_text:
             filesystem_aliases[artifact_id] = _decode_aliases(aliases_text)
 

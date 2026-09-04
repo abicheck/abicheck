@@ -337,6 +337,33 @@ class TestReadBundleFactsPackage:
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             read_bundle_facts_package(manifest, store=store)
 
+    def test_charges_native_identity_against_the_decoded_size_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """`native_identity` (the filename/aliases facts) lives outside the
+        exported snapshot document entirely -- a budget sized exactly to
+        the document alone must not let it through for free (Codex review,
+        fresh evidence beyond the artifact/project-section budget fixes)."""
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        facts.library_filenames["liba.so"] = "liba.so.1.2.3"
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        artifact_document = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        artifact_bytes = len(json.dumps(artifact_document).encode("utf-8"))
+        # Exactly the document's own size -- large enough for the document
+        # alone, too small once the filename is also charged.
+        monkeypatch.setattr(module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", artifact_bytes)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            read_bundle_facts_package(manifest, store=store)
+
     def test_refuses_a_project_section_whose_ref_kind_does_not_match(self) -> None:
         """A `project_sections` key and its `ObjectRef.kind` are two
         independent fields (Codex review) -- a corrupted or hand-assembled
