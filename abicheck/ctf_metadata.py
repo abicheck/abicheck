@@ -767,6 +767,18 @@ def parse_ctf_from_bytes(data: bytes, pointer_size: int = 8) -> CtfMetadata:
     # resolver's private _str_at(), which no direct extractor's own
     # accumulator observes.
     invalid_strings: list[bool] = []
+    # P2 review, fresh evidence (Codex): CTF sibling of the identical BTF
+    # fix -- offset 0 in the CTF string section is reserved for the empty
+    # string, the sentinel every anonymous (name_off=0) reference relies
+    # on. read_null_terminated_string() only flags an out-of-bounds offset
+    # or a missing terminator, so a string section that never actually
+    # stored that sentinel byte reads whatever bytes sit at offset 0 as a
+    # plausible, valid-looking name instead of empty -- fabricating or
+    # renaming a struct/enum/typedef with no completeness signal. Flagged
+    # once for the whole string section, mirroring btf_metadata.py's own
+    # equivalent check.
+    if not str_data or str_data[0:1] != b"\x00":
+        invalid_strings.append(True)
     resolver = _TypeResolver(
         types,
         str_data,

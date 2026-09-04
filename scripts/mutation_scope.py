@@ -149,6 +149,28 @@ def require_baseline_for_pr(
     ``selected_modules`` uses, so a test path is attributed to at most one
     module.
 
+    P2 review, fresh evidence (finding 4): the "unless that SAME module is
+    also in changed_paths" exemption above was itself unsound and has been
+    REMOVED. ``--diff-scoped`` gates mutants only in the specific
+    *functions* the diff touched in a mutated module, not the whole
+    module -- so a PR that changes ``diff_types.py``'s ``foo()`` and, in
+    the same commit, weakens ``tests/test_diff_types.py``'s existing
+    assertion for an unrelated, UNCHANGED ``bar()`` previously read as
+    "the module also changed, diff-scoped has this covered" and skipped
+    baseline drift entirely -- while diff-scoped's own function-level scope
+    never touches ``bar()`` at all, so nothing gated that weakening.
+    Correlating a test edit to the exact production function(s) it
+    exercises (so the exemption could apply only when they're proven to be
+    among the diff's own changed functions) would need a real test-to-
+    production call-graph mapping this repository has no existing
+    machinery for and that a heuristic could get wrong in either direction
+    -- rather than ship an unverified approximation, this drops the
+    exemption outright: baseline drift is required whenever an
+    ``only_mutate`` module's own test file is touched at all, full stop.
+    Diff-scoped still runs and still gates the real, function-level
+    survivors; this only removes the (unsound) shortcut around the
+    complementary drift check.
+
     A ``mutation`` label always requires baseline drift regardless of the
     diff -- it is documented as the complete check, and a label-forced run
     on a diff this function would otherwise clear must not silently report
@@ -162,7 +184,7 @@ def require_baseline_for_pr(
         if p.startswith("tests/") and p.endswith(".py")
     }
     touched_modules.discard(None)
-    return any(module not in changed_paths for module in touched_modules)
+    return bool(touched_modules)
 
 
 def rewrite_only_mutate(config_path: Path, modules: list[str]) -> None:

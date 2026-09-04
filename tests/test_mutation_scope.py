@@ -63,11 +63,17 @@ def test_no_detector_change_keeps_full_scope() -> None:
 INFRA = {".github/workflows/mutation.yml", "pyproject.toml"}
 
 
-def test_matching_module_and_its_own_test_needs_no_baseline() -> None:
-    """A source change plus its OWN paired regression test is fully covered
-    by --diff-scoped; no drift reference is needed."""
+def test_matching_module_and_its_own_test_still_needs_baseline() -> None:
+    """P2 review, fresh evidence (finding 4): a source change plus its OWN
+    paired regression test is NOT fully covered by --diff-scoped -- that
+    gate only checks mutants in the specific function(s) the diff changed,
+    not the whole module, so a test edit for a different, unchanged
+    function in the same file would escape ungated under the previous
+    exemption. Baseline drift is required whenever the module's own test
+    file is touched at all, regardless of whether the module itself also
+    changed."""
     changed = {"abicheck/diff_types.py", "tests/test_diff_types.py"}
-    assert scope.require_baseline_for_pr(changed, MODULES, labelled=False) is False
+    assert scope.require_baseline_for_pr(changed, MODULES, labelled=False) is True
 
 
 def test_test_only_change_needs_baseline() -> None:
@@ -109,14 +115,17 @@ def test_no_changes_at_all_needs_no_baseline() -> None:
     assert scope.require_baseline_for_pr(set(), MODULES, labelled=False) is False
 
 
-def test_every_module_paired_with_its_own_test_needs_no_baseline() -> None:
+def test_every_module_paired_with_its_own_test_still_needs_baseline() -> None:
     """Property: for EVERY module in only_mutate, changing it together with
-    its own test never requires baseline drift."""
+    its own test still requires baseline drift (P2 review, fresh evidence,
+    finding 4 -- see test_matching_module_and_its_own_test_still_needs_
+    baseline above for why the module-also-changed exemption was unsound
+    and removed)."""
     for module in MODULES:
         stem = Path(module).stem
         changed = {module, f"tests/test_{stem}_extra.py"}
         assert (
-            scope.require_baseline_for_pr(changed, MODULES, labelled=False) is False
+            scope.require_baseline_for_pr(changed, MODULES, labelled=False) is True
         ), module
 
 
@@ -177,17 +186,22 @@ def test_overlap_does_not_select_the_wrong_module_for_pr_scoping() -> None:
     ]
 
 
-def test_overlap_does_not_require_baseline_for_the_untouched_shorter_module() -> None:
+def test_overlap_pairing_does_not_also_flag_the_untouched_shorter_module() -> None:
     """P2 review, fresh evidence: a PR changing selectors_namespace_glob.py
-    together with its own test must NOT be told selectors.py's test glob was
-    also touched -- selectors.py was never at risk."""
+    together with its own test must not ALSO be attributed to
+    selectors.py's own (unrelated) test glob -- the overlap resolution
+    (longest-stem-wins) still applies before this check ever runs.
+    Baseline drift IS still required here (finding 4: the module-also-
+    changed exemption was unsound and removed), but for the right reason
+    -- the touched test's own paired module, not a false positive from the
+    shorter-stemmed sibling."""
     changed = {
         "abicheck/policy/selectors_namespace_glob.py",
         "tests/test_selectors_namespace_glob.py",
     }
     assert (
         scope.require_baseline_for_pr(changed, OVERLAPPING_MODULES, labelled=False)
-        is False
+        is True
     )
 
 

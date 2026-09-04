@@ -321,6 +321,73 @@ class TestToDwarfMetadata:
         assert "simple" in dwarf.structs
 
 
+class TestCtfStringTableSentinel:
+    """P2 review, fresh evidence (Codex): CTF sibling of the identical BTF
+    fix -- offset 0 in the CTF string section is reserved for the empty
+    string, the sentinel every anonymous (name_off=0) reference relies on.
+    read_null_terminated_string() only flags an out-of-bounds offset or a
+    missing terminator, so a string section that never actually stored
+    that sentinel byte reads whatever bytes sit at offset 0 as a
+    plausible-looking real name instead of the empty string it's supposed
+    to mean -- fabricating or renaming a type while the parse still
+    reports itself complete."""
+
+    @staticmethod
+    def _raw_ctf(type_data: bytes, str_data: bytes) -> bytes:
+        """Hand-assemble a CTF v3 blob, bypassing CtfBuilder's own
+        guaranteed-correct leading-NUL string section, to construct a
+        deliberately corrupt one."""
+        header = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, 0)
+        header += struct.pack(
+            "<IIIIIIII",
+            0,  # parent_label
+            0,  # parent_name
+            0,  # label_off
+            0,  # object_off
+            0,  # func_off
+            0,  # type_off
+            len(type_data),  # str_off
+            len(str_data),  # str_len
+        )
+        return header + type_data + str_data
+
+    def test_missing_leading_nul_marks_partial(self) -> None:
+        """Reproduces the exact fabricated-name scenario from the finding:
+        a struct with name_off=0 against a string section that starts
+        with a real character instead of NUL is accepted as a named
+        struct "S" -- offset 0 is supposed to mean anonymous."""
+        entry = struct.pack("<III", 0, CTF_K_STRUCT << 24, 0)
+        data = self._raw_ctf(entry, b"S\x00")
+
+        meta = parse_ctf_from_bytes(data)
+        assert meta.has_ctf is True
+        assert "S" in meta.structs
+        assert meta.extraction_partial is True
+
+    def test_empty_string_section_marks_partial(self) -> None:
+        """Sibling corruption shape: no string section at all (not even
+        the mandatory sentinel byte)."""
+        entry = struct.pack("<III", 0, CTF_K_STRUCT << 24, 0)
+        data = self._raw_ctf(entry, b"")
+
+        meta = parse_ctf_from_bytes(data)
+        assert meta.has_ctf is True
+        assert meta.extraction_partial is True
+
+    def test_wellformed_leading_nul_is_not_flagged(self) -> None:
+        """Positive control: a string section that begins with the
+        mandatory NUL sentinel (CtfBuilder's own real output) must not be
+        flagged -- proving the fix doesn't disturb the ordinary,
+        well-formed parse path."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.has_ctf is True
+        assert meta.extraction_partial is False
+
+
 # ---------------------------------------------------------------------------
 # Error handling / graceful degradation
 # ---------------------------------------------------------------------------
