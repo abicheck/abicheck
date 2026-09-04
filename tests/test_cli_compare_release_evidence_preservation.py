@@ -86,16 +86,27 @@ class TestMaterializationObjectScoping:
         for sub_dir in resolved.values():
             sub_manifest = read_project_manifest(sub_dir)
             (artifact,) = sub_manifest.artifact_refs
-            expected_count = len(artifact.sections)
-            assert expected_count > 0
-            assert len(_object_files(sub_dir)) == expected_count
+            (variant,) = sub_manifest.variant_refs
+            # The referenced digests, not the section count: `materialize_
+            # release_variant_artifacts` also carries the shared variant-
+            # level composition section into every single-artifact
+            # sub-package (Codex review -- see that function's own
+            # docstring), and a shared digest still materializes to one
+            # object file, not one per referencing section.
+            expected_digests = {ref.digest for ref in artifact.sections.values()}
+            expected_digests |= {ref.digest for ref in variant.sections.values()}
+            expected_digests |= {
+                ref.digest for ref in sub_manifest.project_sections.values()
+            }
+            assert expected_digests
+            assert len(_object_files(sub_dir)) == len(expected_digests)
 
 
 class TestEmbeddedInstantiationManifest:
     """Codex review, eighth round: nothing in the ordinary
     `compare-release` bundle-analysis path ever consulted a stored
     package's own embedded `InstantiationManifest`
-    (`write_bundle_facts_package`'s `project_sections` entry) unless the
+    (`write_bundle_facts_package`'s own composition section) unless the
     caller passed an explicit `--manifest` -- so a package's own captured
     manifest-drift contract silently went unenforced during a stored/
     stored or stored/live comparison, even after the composition-
@@ -104,9 +115,11 @@ class TestEmbeddedInstantiationManifest:
     def test_manifest_survives_materialization_and_is_read_back(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
-        from abicheck.workflows.release_package import resolve_release_package_map
+        from abicheck.workflows.release_package import (
+            read_embedded_manifest,
+            resolve_release_package_map,
+        )
 
         old_libs, _ = _old_new_libraries()
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
@@ -121,7 +134,7 @@ class TestEmbeddedInstantiationManifest:
         write_project_manifest(pkg, pkg_manifest)
 
         # Readable straight off the root package...
-        read_back = read_embedded_instantiation_manifest(pkg)
+        read_back = read_embedded_manifest(pkg)
         assert read_back is not None
         assert read_back.symbols == {"core_mul"}
 
@@ -130,17 +143,17 @@ class TestEmbeddedInstantiationManifest:
             pkg, variant_id=None, dest_root=tmp_path / "resolved"
         )
         sub_dir = next(iter(resolved.values()))
-        sub_read_back = read_embedded_instantiation_manifest(sub_dir)
+        sub_read_back = read_embedded_manifest(sub_dir)
         assert sub_read_back is not None
         assert sub_read_back.symbols == {"core_mul"}
 
     def test_no_manifest_section_reads_back_none(self, tmp_path: Path) -> None:
-        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
+        from abicheck.workflows.release_package import read_embedded_manifest
 
         old_libs, _ = _old_new_libraries()
         pkg = tmp_path / "pkg"
         _write_package(pkg, old_libs, variant_id="v1")
-        assert read_embedded_instantiation_manifest(pkg) is None
+        assert read_embedded_manifest(pkg) is None
 
     def test_release_compare_uses_the_embedded_manifest_without_a_flag(
         self, tmp_path: Path
@@ -189,13 +202,15 @@ class TestEmbeddedInstantiationManifest:
         section at all -- its own captured manifest lives only in the
         variant's `BUNDLE_COMPOSITION_SECTION_KIND` payload, which the
         earlier embedded-manifest fix never consulted."""
-        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
         from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
         from abicheck.storage.import_bundle_facts import (
             BUNDLE_FACTS_ARTIFACT_TYPE,
             import_bundle_facts,
         )
-        from abicheck.workflows.release_package import resolve_release_package_map
+        from abicheck.workflows.release_package import (
+            read_embedded_manifest,
+            resolve_release_package_map,
+        )
 
         doc = {
             "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
@@ -217,7 +232,7 @@ class TestEmbeddedInstantiationManifest:
         )
         write_project_manifest(pkg, manifest)
 
-        read_back = read_embedded_instantiation_manifest(pkg)
+        read_back = read_embedded_manifest(pkg)
         assert read_back is not None
         assert read_back.symbols == {"core_mul"}
 
@@ -225,7 +240,7 @@ class TestEmbeddedInstantiationManifest:
             pkg, variant_id=None, dest_root=tmp_path / "resolved"
         )
         sub_dir = next(iter(resolved.values()))
-        sub_read_back = read_embedded_instantiation_manifest(sub_dir)
+        sub_read_back = read_embedded_manifest(sub_dir)
         assert sub_read_back is not None
         assert sub_read_back.symbols == {"core_mul"}
 
@@ -750,8 +765,8 @@ class TestMalformedEmbeddedManifestRaises:
         self, tmp_path: Path
     ) -> None:
         from abicheck.bundle_facts import BundleFacts
-        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.workflows.release_package import read_embedded_manifest
 
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
         facts = BundleFacts(
@@ -777,7 +792,7 @@ class TestMalformedEmbeddedManifestRaises:
             object_file.write_bytes(bytes(raw))
 
         with pytest.raises(Exception):  # noqa: B017 -- any decode failure, by design
-            read_embedded_instantiation_manifest(pkg)
+            read_embedded_manifest(pkg)
 
 
 class TestBothSidesEmptyVariantsStillEnforceManifests:
@@ -838,19 +853,18 @@ class TestBothSidesEmptyVariantsStillEnforceManifests:
 
 
 class TestMismatchedManifestRefKindRaises:
-    """Codex review, fresh evidence: `project_sections[...]`'s own
-    `ObjectRef.kind` is a caller-controlled label, not verified by
-    `PackageManifest` construction -- a corrupted/hand-edited package could
-    name an `ObjectRef` of a *different* kind under the instantiation-
-    manifest key. The reader previously just made `project_level` false and
-    fell through to `None`/an unrelated fallback instead of raising,
-    letting a corrupted package silently disable its required-symbol
-    check."""
+    """Codex review, fresh evidence: a variant's own `sections[
+    BUNDLE_COMPOSITION_SECTION_KIND]` `ObjectRef.kind` is a caller-
+    controlled label, not verified by `VariantRef` construction -- a
+    corrupted/hand-edited package could name an `ObjectRef` of a
+    *different* kind there. Silently treating that as "no composition
+    declared" would let a corrupted package disable its required-symbol
+    check instead of surfacing as a usage error."""
 
     def test_mismatched_kind_raises_not_none(self, tmp_path: Path) -> None:
         from abicheck.bundle_facts import BundleFacts
-        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.workflows.release_package import read_embedded_manifest
 
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
         facts = BundleFacts(
@@ -865,10 +879,10 @@ class TestMismatchedManifestRefKindRaises:
         pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
         write_project_manifest(pkg, pkg_manifest)
 
-        manifest_json = pkg / "manifest.json"
-        doc = json.loads(manifest_json.read_text())
-        doc["project_sections"]["instantiation_manifest"]["kind"] = "something_else"
-        manifest_json.write_text(json.dumps(doc))
+        variant_ref_json = pkg / "refs" / "variants" / "v1.json"
+        doc = json.loads(variant_ref_json.read_text())
+        doc["sections"]["bundle_composition"]["kind"] = "something_else"
+        variant_ref_json.write_text(json.dumps(doc))
 
         with pytest.raises(ValueError, match="kind"):
-            read_embedded_instantiation_manifest(pkg)
+            read_embedded_manifest(pkg, "v1")

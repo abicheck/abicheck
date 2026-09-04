@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_removed`, `func_removed`, `enum_member_added`, `enum_last_member_value_changed` |
 | **Source files** | `examples/case41_type_changes/` |
+| **Rule family** | [`type-changes`](by-rule/type-changes.md) |
 
 **Category:** Type / Enum Changes | **Verdict:** 🔴 BREAKING
 
@@ -157,4 +159,4 @@ echo "exit: $?"   # → 12 (ABI change + breaking)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type changes](by-rule/type-changes.md)._

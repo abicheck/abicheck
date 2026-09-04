@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `cet_protection_weakened` |
 | **Source files** | `examples/case179_cet_protection_weakened/` |
+| **Rule family** | [`cet-protection-weakened`](by-rule/cet-protection-weakened.md) |
 
 **Category:** Security Hardening (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -115,4 +117,4 @@ hardening notes at all, so this class of finding is abicheck-specific.
 - `v1.c`
 - `v2.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Cet protection weakened](by-rule/cet-protection-weakened.md)._

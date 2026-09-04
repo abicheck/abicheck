@@ -239,7 +239,10 @@ nav:
       - Ownership & Lifetime Contracts: learn/ownership-and-lifetime.md
       - Concurrency & Initialization Contracts: learn/concurrency-and-initialization.md
   # The case catalog: every break scenario as a compilable fixture, browsable
-  # by verdict (what abicheck reports) or by category (what kind of change).
+  # by verdict (what abicheck reports), by category (what kind of change),
+  # by rule (which atomic compatibility proposition — canonical, duplicate,
+  # or variant — the taxonomy in docs/contribute/plans/examples-catalog-split.md
+  # groups it under), or by ecosystem (which real-world project it models).
   - Examples:
     - All Cases: reference/examples/index.md
     - By Verdict:
@@ -255,6 +258,13 @@ nav:
       - Addition: reference/examples/by-category/addition.md
       - Quality: reference/examples/by-category/quality.md
       - No Change: reference/examples/by-category/no_change.md
+    - By Rule: reference/examples/by-rule/index.md
+    - By Ecosystem:
+      - Generic: reference/examples/by-ecosystem/generic.md
+      - oneTBB: reference/examples/by-ecosystem/onetbb.md
+      - SYCL: reference/examples/by-ecosystem/sycl.md
+      - oneMKL: reference/examples/by-ecosystem/onemkl.md
+      - Linux kernel: reference/examples/by-ecosystem/linux-kernel.md
   # Contributor-facing docs. Internal planning artifacts (implementation plans,
   # backlog, roadmap audits, archived status notes) stay in the repo under
   # docs/contribute/ but are intentionally kept out of the published nav — see

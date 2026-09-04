@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | `examples/case97_api_depends_on_consumer_env/` |
+| **Rule family** | [`api-depends-on-consumer-env`](by-rule/api-depends-on-consumer-env.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -141,4 +143,4 @@ exit code is reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Api depends on consumer env](by-rule/api-depends-on-consumer-env.md)._

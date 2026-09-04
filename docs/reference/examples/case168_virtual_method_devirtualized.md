@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_virtual_removed` |
 | **Source files** | `examples/case168_virtual_method_devirtualized/` |
+| **Rule family** | [`virtual-method-devirtualized`](by-rule/virtual-method-devirtualized.md) |
 
 **Category:** Class Layout / Vtable | **Verdict:** 🔴 BREAKING
 
@@ -148,4 +150,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual method devirtualized](by-rule/virtual-method-devirtualized.md)._

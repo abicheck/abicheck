@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `internal_template_leaks_via_public_api`, `func_removed` |
 | **Source files** | `examples/case85_internal_template_signature_changed/` |
+| **Rule family** | [`internal-template-signature-changed`](by-rule/internal-template-signature-changed.md) |
 
 **Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +142,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal template signature changed](by-rule/internal-template-signature-changed.md)._

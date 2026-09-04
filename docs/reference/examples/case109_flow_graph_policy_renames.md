@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `typedef_removed`, `type_removed` |
 | **Source files** | `examples/case109_flow_graph_policy_renames/` |
+| **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
+| **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`public-typedef-removed`](by-rule/public-typedef-removed.md), [`tag-struct-renamed`](by-rule/tag-struct-renamed.md) |
 | **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy-escalated source break)
@@ -146,4 +149,4 @@ maintainers.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._

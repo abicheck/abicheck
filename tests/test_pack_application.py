@@ -1225,35 +1225,14 @@ class TestOnlyAppliedFieldsAreAccepted:
         summary = json.loads(with_pack.output)
         assert summary["libraries"][0]["verdict"] == "BREAKING"
 
-    @pytest.mark.parametrize("with_contract", [True, False])
-    def test_contract_unresolved_pack_still_rejected_on_a_release_comparison(
-        self, tmp_path: Path, with_contract: bool
-    ) -> None:
-        """`resolve_release_pack_application` rejects `contract.unresolved`
-        unconditionally, with or without --contract -- not because the
-        release fan-out lacks a per-library `PersistedContractContext` for
-        it (it doesn't lack one; that was an earlier review round's wrong
-        premise), but because whether lifting the rejection is safe remains
-        unverified. See that function's own docstring and ADR-063 Track 4's
-        7B ledger entry (`docs/_meta/one-semantic-pipeline-status.yaml`) for
-        the full trace and review history."""
-        pack = _pack(
-            tmp_path,
-            "unresolved.yml",
-            "id: unresolved\nversion: 1\nkind: contract\n"
-            "assignments:\n  contract.unresolved: warn\n",
-        )
-        old_dir = tmp_path / "old"
-        new_dir = tmp_path / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
-        args = ["compare", str(old_dir), str(new_dir), "--pack", str(pack)]
-        if with_contract:
-            args += ["--contract", "public"]
-        result = CliRunner().invoke(main, args)
-        assert result.exit_code == 64, result.output
-        assert "contract.unresolved" in result.output
-        assert "cannot be applied to a directory/package" in result.output
+    # `contract.unresolved` on a release comparison (with and without
+    # --contract) is covered by
+    # tests/test_release_evaluation_config.py::
+    # TestReleaseFanOutAcceptsContractUnresolvedPack -- Track 2's 7B
+    # residual: the earlier unconditional rejection this class used to pin
+    # here is gone (see `resolve_release_pack_application`'s own docstring).
+    # Homed in that sibling module instead of grown here, per this file's
+    # own no_growth debt-ledger entry (architecture/debt.yaml).
 
     def test_release_pack_resolution_direct_call_with_no_packs_is_a_no_op(
         self,

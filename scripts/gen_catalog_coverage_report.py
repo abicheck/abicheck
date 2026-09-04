@@ -3,25 +3,32 @@
 examples/catalog split (docs/contribute/plans/examples-catalog-split.md).
 
 Phases 1-2 gave every case in `examples/ground_truth.json["taxonomy"]` an
-`entity` (rule/scenario), a `rule_slug`/`variant_of` pair, a `scenario_kind`,
-and an `ecosystem`. Before this generator, every consumer that reported on
-catalog size (examples/README.md's headline, the various coverage gates)
-still collapsed all 197 cases into one flat count -- which is exactly the
-"three demonstrations of one rule count as three ABI concepts" problem the
-plan's "stop reporting all cases as semantically equal" section names. This
-script reports the same 197 cases along five *independent* dimensions
-instead:
+`entity` (rule/scenario), a `rule_slug`/`variant_of`/`relation_type`/
+`relation_axis` set, a `scenario_kind`, and an `ecosystem`. Before this
+generator, every consumer that reported on catalog size
+(examples/README.md's headline, the various coverage gates) still collapsed
+all 197 cases into one flat count -- which is exactly the "three
+demonstrations of one rule count as three ABI concepts" problem the plan's
+"stop reporting all cases as semantically equal" section names. This script
+reports the same 197 cases along five *independent* dimensions instead:
 
     rule coverage       -- how many distinct, ecosystem-neutral compatibility
                             rules the catalog demonstrates (by `rule_slug`,
-                            deduplicated -- a rule and its variant(s) count
-                            once)
+                            deduplicated -- a rule and its variant(s)/
+                            duplicate(s) count once)
     variant coverage     -- how many of those rules have a demonstrated
-                            variant beyond their canonical case, and how
-                            many variant cases that represents (canonical
-                            and variant cases reported separately -- a
-                            2-case family has exactly 1 variant, not "more
-                            than one")
+                            *variant* beyond their canonical case (a genuine
+                            robustness demonstration under a different
+                            condition -- language, evidence, public-surface,
+                            ... -- see `relation_axis`), reported separately
+                            from a plain *duplicate* (the same demonstration
+                            restated with no distinguishing condition, per
+                            `relation_type`): counting a duplicate as a
+                            variant would inflate the catalog's demonstrated-
+                            robustness claim (canonical, variant, and
+                            duplicate cases reported separately -- a 2-case
+                            family has exactly 1 variant or 1 duplicate, not
+                            "more than one")
     scenario coverage    -- scenario-entity cases broken down by
                             `scenario_kind` (case-study / project-topology /
                             capability)
@@ -105,16 +112,39 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     distinct_rule_count = len(slug_cases) + len(scenario_only_slugs)
 
     # A family's canonical case(s) are those with variant_of=None; everything
-    # else in the family is a variant case. Reported separately -- a family
-    # with 2 cases has exactly 1 variant case, not "more than one variant".
-    variant_families = {
+    # else in the family is either a genuine variant (relation_type ==
+    # "variant", a robustness demonstration under a named relation_axis) or
+    # a plain duplicate (relation_type == "duplicate", the same
+    # demonstration restated with no distinguishing condition). Reported
+    # separately -- collapsing the two is exactly what let three duplicate
+    # restatements count as three robustness variants before this split. A
+    # family with 2 cases has exactly 1 variant or 1 duplicate, not "more
+    # than one". Case counts are filtered by each case's own relation_type
+    # directly (never by which bucket its whole family fell into) so a
+    # hypothetical mixed family -- one variant case plus one duplicate case
+    # sharing the same rule_slug, not present in today's data but not ruled
+    # out by the schema either -- can't have its duplicate silently
+    # miscounted as a variant or vice versa; a family that mixes the two
+    # legitimately appears in both family sets below, not just one.
+    multi_case_families = {
         slug: cases for slug, cases in slug_cases.items() if len(cases) > 1
     }
+    variant_families = {
+        slug: cases
+        for slug, cases in multi_case_families.items()
+        if any(rules[c]["relation_type"] == "variant" for c in cases)
+    }
+    duplicate_families = {
+        slug: cases
+        for slug, cases in multi_case_families.items()
+        if any(rules[c]["relation_type"] == "duplicate" for c in cases)
+    }
+    multi_case_ids = [c for cases in multi_case_families.values() for c in cases]
     variant_case_ids = [
-        case_id
-        for cases in variant_families.values()
-        for case_id in cases
-        if rules[case_id]["variant_of"] is not None
+        c for c in multi_case_ids if rules[c]["relation_type"] == "variant"
+    ]
+    duplicate_case_ids = [
+        c for c in multi_case_ids if rules[c]["relation_type"] == "duplicate"
     ]
 
     lines = [
@@ -127,24 +157,34 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
         "`related_rules` (a generic mechanism no single-library case "
         "demonstrates alone yet).",
         f"- **{len(variant_families)} of the rule-entity-backed rules** have "
-        f"a demonstrated variant beyond their canonical case "
+        f"a demonstrated *variant* beyond their canonical case -- a genuine "
+        f"robustness demonstration under a different condition "
         f"({len(variant_case_ids)} variant cases total -- see the per-family "
-        "breakdown below) -- these are robustness demonstrations of an "
+        "breakdown below); these are robustness demonstrations of an "
         "already-counted rule, not additional rules.",
-        f"- **{len(slug_cases) - len(variant_families)} rule-entity-backed "
+        f"- **{len(duplicate_families)} of the rule-entity-backed rules** "
+        f"also have a *duplicate* -- the same demonstration restated "
+        f"with no distinguishing condition ({len(duplicate_case_ids)} "
+        "duplicate cases total); these don't add robustness coverage and "
+        "are candidates for eventual removal, not a variant to keep. (A "
+        "family can appear in both this count and the variant count above "
+        "if it has one of each.)",
+        f"- **{len(slug_cases) - len(multi_case_families)} rule-entity-backed "
         "rules** have exactly one demonstrated case so far, with no "
-        "variant yet.",
+        "variant or duplicate yet.",
         "",
-        "| Rule | Canonical case | Variant case(s) |",
-        "|---|---|---|",
+        "| Rule | Canonical case | Variant case(s) | Duplicate case(s) |",
+        "|---|---|---|---|",
     ]
-    for slug in sorted(variant_families):
-        cases = sorted(variant_families[slug])
+    for slug in sorted(multi_case_families):
+        cases = sorted(multi_case_families[slug])
         canonical = [c for c in cases if rules[c]["variant_of"] is None]
-        variants = [c for c in cases if rules[c]["variant_of"] is not None]
+        variants = [c for c in cases if rules[c]["relation_type"] == "variant"]
+        duplicates = [c for c in cases if rules[c]["relation_type"] == "duplicate"]
         lines.append(
             f"| `{slug}` | {', '.join(f'`{c}`' for c in canonical)} | "
-            f"{', '.join(f'`{c}`' for c in variants)} |"
+            f"{', '.join(f'`{c}`' for c in variants)} | "
+            f"{', '.join(f'`{c}`' for c in duplicates)} |"
         )
     lines.append("")
     return "\n".join(lines)

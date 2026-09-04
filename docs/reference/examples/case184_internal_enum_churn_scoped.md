@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | ✅ **NO_CHANGE** |
 | **Category** | No Change |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case184_internal_enum_churn_scoped/` |
+| **Rule family** | [`internal-enum-churn-scoped`](by-rule/internal-enum-churn-scoped.md) |
 
 **Category:** Public-surface scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
 
@@ -135,4 +137,4 @@ cross-tool reproduction is included here.
 - `v2.h`
 - `v2_internal.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal enum churn scoped](by-rule/internal-enum-churn-scoped.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Scenario — Capability / evidence demonstration · audit |
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `odr_type_variant` |
 | **Source files** | `examples/case149_xcheck_odr_variant/` |
+| **Related rules** | [`odr-type-variant`](by-rule/odr-type-variant.md) |
 
 **Category:** API Break (Audit) | **Verdict:** 🟠 API_BREAK
 

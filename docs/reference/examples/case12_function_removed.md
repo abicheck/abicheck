@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed` |
 | **Source files** | `examples/case12_function_removed/` |
+| **Rule family** | [`exported-function-removed`](by-rule/exported-function-removed.md) — Duplicate of [case01_symbol_removal](case01_symbol_removal.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -126,4 +128,4 @@ echo "exit: $?"   # → 12 (= 4 | 8: ABI change detected + breaking change)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported function removed](by-rule/exported-function-removed.md)._

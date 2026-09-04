@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_field_added`, `type_size_changed`, `type_field_offset_changed` |
 | **Source files** | `examples/case43_base_class_member_added/` |
+| **Rule family** | [`base-class-member-added`](by-rule/base-class-member-added.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -148,4 +150,4 @@ echo "exit: $?"   # → 4 (ABI change: base class data member added)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class member added](by-rule/base-class-member-added.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_kind_changed` |
 | **Source files** | `examples/case55_type_kind_changed/` |
+| **Rule family** | [`type-kind-changed`](by-rule/type-kind-changed.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -130,4 +132,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type kind changed](by-rule/type-kind-changed.md)._

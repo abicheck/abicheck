@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `serialization_tag_changed` |
 | **Source files** | `examples/case81_serialization_tag_reassigned/` |
+| **Rule family** | [`serialization-tag-reassigned`](by-rule/serialization-tag-reassigned.md) |
 
 **Category:** Payload ABI | **Verdict:** 🔴 BREAKING
 
@@ -133,4 +135,4 @@ is on par with changing a wire-protocol field.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Serialization tag reassigned](by-rule/serialization-tag-reassigned.md)._

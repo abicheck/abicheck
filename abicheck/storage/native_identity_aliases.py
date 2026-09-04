@@ -46,12 +46,13 @@ from __future__ import annotations
 import json
 
 from .json_budget import (
-    DEFAULT_MAX_JSON_CONTAINER_NODES,
+    DEFAULT_MAX_JSON_CONTAINER_NODES as DEFAULT_MAX_JSON_CONTAINER_NODES,
     JsonContainerBudgetExceeded,
     check_json_container_budget,
 )
 
 __all__ = [
+    "DEFAULT_MAX_JSON_CONTAINER_NODES",
     "NATIVE_IDENTITY_ALIASES_KEY",
     "NATIVE_IDENTITY_FILENAME_KEY",
     "decode_native_identity_aliases",

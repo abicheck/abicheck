@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case40_field_layout/` |
+| **Rule family** | [`field-layout`](by-rule/field-layout.md) |
 
 **Category:** Struct Field Layout | **Verdict:** 🔴 BREAKING
 
@@ -153,4 +155,4 @@ echo "exit: $?"   # → 12 (ABI change + breaking)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field layout](by-rule/field-layout.md)._

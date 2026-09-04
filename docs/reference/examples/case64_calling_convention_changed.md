@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `calling_convention_changed` |
 | **Source files** | `examples/case64_calling_convention_changed/` |
+| **Rule family** | [`calling-convention-changed`](by-rule/calling-convention-changed.md) |
 
 **Category:** Function ABI | **Verdict:** 🔴 BREAKING
 
@@ -148,4 +150,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Calling convention changed](by-rule/calling-convention-changed.md)._

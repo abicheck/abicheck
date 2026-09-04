@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | ✅ **NO_CHANGE** |
 | **Category** | No Change |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case118_internal_struct_field_added_scoped/` |
+| **Rule family** | [`internal-struct-field-added-scoped`](by-rule/internal-struct-field-added-scoped.md) |
 
 **Category:** Public-Surface Scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
 
@@ -126,4 +128,4 @@ not installed in this environment, so no such output is reproduced here.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct field added scoped](by-rule/internal-struct-field-added-scoped.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `secondary_vtable_group_changed` |
 | **Source files** | `examples/case174_secondary_vtable_group_changed/` |
+| **Rule family** | [`secondary-vtable-group-changed`](by-rule/secondary-vtable-group-changed.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -156,4 +158,4 @@ reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Secondary vtable group changed](by-rule/secondary-vtable-group-changed.md)._

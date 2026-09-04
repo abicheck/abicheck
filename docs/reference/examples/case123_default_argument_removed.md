@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `param_default_value_removed` |
 | **Source files** | `examples/case123_default_argument_removed/` |
+| **Rule family** | [`default-argument-removed`](by-rule/default-argument-removed.md) |
 
 **Category:** Modern C/C++ Contract | **Verdict:** 🟠 API_BREAK
 
@@ -140,4 +142,4 @@ comparable to abicheck's `param_default_value_removed`.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Default argument removed](by-rule/default-argument-removed.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Capability / evidence demonstration |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break, Bad practice |
 | **Detected `ChangeKind`s** | `struct_size_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `examples/case191_header_only_graph_field_type/` |
+| **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md), [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING

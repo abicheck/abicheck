@@ -467,24 +467,40 @@ def _stored_library_identity(
         # preserved `BUNDLE_COMPOSITION_SECTION_KIND` section instead (Codex
         # review, fresh evidence: a package built that way silently lost
         # this evidence here even though it was never actually missing).
-        real_filename, aliases = _composition_library_identity(path, summary, artifact)
+        real_filename, aliases, nodes_so_far = _composition_library_identity(
+            path, summary, artifact, nodes_so_far
+        )
     return real_filename, aliases, nodes_so_far
 
 
 def _composition_library_identity(
-    path: Path, summary: ManifestSummary, artifact: ArtifactRef
-) -> tuple[Path | None, tuple[str, ...]]:
-    """`_stored_library_identity`'s fallback for a package written by
-    `storage.import_bundle_facts.import_bundle_facts`: real filename/
-    aliases live in the sub-package's own preserved variant-wide
-    `BUNDLE_COMPOSITION_SECTION_KIND` section (`bundle_composition_from_dto`'s
+    path: Path, summary: ManifestSummary, artifact: ArtifactRef, nodes_so_far: int = 0
+) -> tuple[Path | None, tuple[str, ...], int]:
+    """`_stored_library_identity`'s fallback: real filename/aliases live in
+    the sub-package's own preserved variant-wide `BUNDLE_COMPOSITION_
+    SECTION_KIND` section (`bundle_composition_from_dto`'s
     `library_filenames`/`filesystem_aliases` maps), keyed by the same
-    library name `import_bundle_facts` also stashed on this artifact's own
+    library name stashed on this artifact's own
     `native_identity["library_name"]` -- not by the caller's own bundle key,
     which may differ (`workflows.release_package._release_match_key`'s own
-    docstring). Best-effort, like its caller: `(None, ())` for anything
-    that doesn't parse this way."""
+    docstring). `(None, (), nodes_so_far)` for anything genuinely absent
+    (no library name recorded, no readable variant, no composition
+    section); a *declared* section's own digest-fetch/decode failure
+    propagates instead (CodeRabbit review, security finding -- the same
+    corrupted-must-raise distinction `_stored_library_identity`'s own alias
+    decode above already makes).
+
+    *nodes_so_far*/the returned `int` thread the same aggregate alias-node
+    budget as `_stored_library_identity`'s own primary branch -- reading
+    straight from the already-decoded composition bypasses that branch's
+    `decode_native_identity_aliases` call entirely, so this fallback must
+    charge the budget itself or an oversized `filesystem_aliases` array
+    here would go completely unbounded (CodeRabbit review, security
+    finding).
+    """
+    from .errors import SnapshotError
     from .project_snapshot_store import DirectoryObjectStore, read_variant_ref
+    from .storage import native_identity_aliases as _native_identity_aliases_mod
     from .storage.dto import (
         BUNDLE_COMPOSITION_SECTION_KIND,
         SectionDTO,
@@ -493,22 +509,42 @@ def _composition_library_identity(
 
     library_name = artifact.native_identity.get("library_name")
     if not library_name or len(summary.variant_ids) != 1:
-        return None, ()
+        return None, (), nodes_so_far
+    variant_id = summary.variant_ids[0]
     try:
-        variant = read_variant_ref(path, summary.variant_ids[0])
-        composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
-        if composition_ref is None:
-            return None, ()
+        variant = read_variant_ref(path, variant_id)
+    except Exception as exc:
+        log.debug("bundle: no bundle_composition evidence for %s: %s", path, exc)
+        return None, (), nodes_so_far
+    composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
+    if composition_ref is None:
+        return None, (), nodes_so_far
+    if composition_ref.kind != BUNDLE_COMPOSITION_SECTION_KIND:
+        raise SnapshotError(
+            f"{path}: variant {variant_id!r}'s "
+            f"sections[{BUNDLE_COMPOSITION_SECTION_KIND!r}] names an "
+            f"ObjectRef of kind {composition_ref.kind!r}, not "
+            f"{BUNDLE_COMPOSITION_SECTION_KIND!r} -- the package is "
+            "corrupted or was hand-edited"
+        )
+    try:
         raw = DirectoryObjectStore(path).get(composition_ref.digest)
         composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
     except Exception as exc:
-        log.debug("bundle: no bundle_composition evidence for %s: %s", path, exc)
-        return None, ()
+        raise SnapshotError(
+            f"{path}: variant {variant_id!r}'s declared bundle_composition "
+            f"section could not be decoded: {exc}"
+        ) from exc
 
     filename = composition.get("library_filenames", {}).get(library_name)
     real_filename = Path(filename) if filename else None
-    aliases = tuple(composition.get("filesystem_aliases", {}).get(library_name, ()))
-    return real_filename, aliases
+    raw_aliases = composition.get("filesystem_aliases", {}).get(library_name, ())
+    alias_count = len(raw_aliases) + 1 if raw_aliases else 0
+    max_nodes = _native_identity_aliases_mod.DEFAULT_MAX_JSON_CONTAINER_NODES
+    if nodes_so_far + alias_count > max_nodes:
+        log.debug("bundle: filesystem_aliases over budget for %s", path)
+        return real_filename, (), nodes_so_far
+    return real_filename, tuple(raw_aliases), nodes_so_far + alias_count
 
 
 def stored_capture_identity(

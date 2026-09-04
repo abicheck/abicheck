@@ -19,9 +19,9 @@ regressions (Codex review, tenth+ rounds).
 Split out of `test_cli_compare_release_evidence_preservation.py` once that
 file crossed the 1200-line test-file cap: this module covers
 `workflows.release_package.resolve_release_package_map`'s own materialization/
-renaming/matching-key resolution, `bundle_facts_store.
-read_embedded_instantiation_manifest`'s variant selection, and
-`--bundle-facts-out`'s own manifest attribution -- rather than the evidence-
+renaming/matching-key resolution, `workflows.release_package.
+read_embedded_manifest`'s variant selection, and `--bundle-facts-out`'s own
+manifest attribution -- rather than the evidence-
 preservation topics the parent module covers. Shares fixtures/helpers with
 the grandparent module via a plain sibling import (this package has no
 `__init__.py`; see `tests/test_entity_id_carrier.py` for the same pattern).
@@ -347,15 +347,14 @@ class TestReleaseMatchKeyUsesRealStoredFilename:
 
 class TestEmbeddedManifestReadsTheSelectedVariant:
     """Codex review: a multi-variant package can carry a different manifest
-    per variant, but `read_embedded_instantiation_manifest` always returned
-    the *first* variant's manifest in package order regardless of which
-    variant was actually selected -- a later variant's own required-symbol
-    removal could go unenforced."""
+    per variant, but `read_embedded_manifest` always returned the *first*
+    variant's manifest in package order regardless of which variant was
+    actually selected -- a later variant's own required-symbol removal
+    could go unenforced."""
 
     def test_variant_id_selects_that_variants_own_manifest(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
         from abicheck.project_snapshot_store import write_project_manifest
         from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
         from abicheck.storage.import_bundle_facts import (
@@ -363,6 +362,7 @@ class TestEmbeddedManifestReadsTheSelectedVariant:
             import_bundle_facts,
         )
         from abicheck.storage.package import PackageManifest
+        from abicheck.workflows.release_package import read_embedded_manifest
 
         def _doc(library: str, fingerprint: str, symbol: str) -> dict[str, object]:
             return {
@@ -403,8 +403,8 @@ class TestEmbeddedManifestReadsTheSelectedVariant:
         )
         write_project_manifest(pkg, combined)
 
-        read_v1 = read_embedded_instantiation_manifest(pkg, variant_id="v1")
-        read_v2 = read_embedded_instantiation_manifest(pkg, variant_id="v2")
+        read_v1 = read_embedded_manifest(pkg, variant_id="v1")
+        read_v2 = read_embedded_manifest(pkg, variant_id="v2")
         assert read_v1 is not None and read_v1.symbols == {"sym1"}
         assert read_v2 is not None and read_v2.symbols == {"sym2"}, (
             "selecting variant v2 must read v2's own manifest, not v1's "
@@ -418,7 +418,16 @@ class TestMalformedStoredAliasesRaise:
     that recorded none -- silently losing a no-`DT_SONAME` provider's
     resolution edge. Only the accepted resource-limit degrade
     (`JsonContainerBudgetExceeded`/`JsonNestingTooDeepError`, see
-    `TestAliasNodeBudgetAggregation`) should still degrade silently."""
+    `TestAliasNodeBudgetAggregation`) should still degrade silently.
+
+    Since Track 1's writer reconciliation, `write_bundle_facts_package` no
+    longer stamps `library_filename`/`filesystem_aliases` on the artifact's
+    own `native_identity` at all -- every stored package's evidence now
+    flows through `bundle._composition_library_identity`'s own preserved
+    `BUNDLE_COMPOSITION_SECTION_KIND` section instead, so the malformed
+    input is injected there (`bundle_composition_from_dto` raising) rather
+    than through the now-unreachable `native_identity_aliases.decode_
+    native_identity_aliases` this test used to monkeypatch."""
 
     def test_malformed_aliases_array_raises_not_silently_degrades(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -454,12 +463,11 @@ class TestMalformedStoredAliasesRaise:
         )
         (sub_dir,) = resolved.values()
 
-        def _raise_malformed(encoded: str, n: int) -> tuple[tuple[str, ...], int]:
-            raise ValueError("not a JSON array of strings")
+        def _raise_malformed(raw: object) -> object:
+            raise ValueError("not a well-formed bundle_composition section")
 
         monkeypatch.setattr(
-            "abicheck.storage.native_identity_aliases.decode_native_identity_aliases",
-            _raise_malformed,
+            "abicheck.storage.dto.bundle_composition_from_dto", _raise_malformed
         )
         with pytest.raises(SnapshotError):
             bundle._stored_library_identity(sub_dir, 0)

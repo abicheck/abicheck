@@ -265,8 +265,8 @@ def _resolve_bundle_manifest(
     An explicit *manifest_path* always wins and fails loudly on a bad file
     (a user error, not an environmental quirk). Otherwise falls back to a
     stored side's own embedded `InstantiationManifest`
-    (`materialize_release_variant_artifacts` already preserves
-    `write_bundle_facts_package`'s `project_sections` section on disk):
+    (`materialize_release_variant_artifacts` already preserves the selected
+    variant's own composition section on disk):
     *old_root*/*new_root* (the release operands themselves) are checked
     directly first, so a package whose selected variant carries zero
     artifacts still has its own manifest consulted; *old_map*/*new_map*'s
@@ -279,7 +279,6 @@ def _resolve_bundle_manifest(
     shared search could otherwise attribute NEW's manifest to an OLD baseline lacking its own; live-comparison enforcement keeps both.
     """
     from .bundle import load_manifest
-    from .bundle_facts_store import read_embedded_instantiation_manifest
 
     if manifest_path is not None:
         try:
@@ -295,13 +294,13 @@ def _resolve_bundle_manifest(
     if not candidates:
         maps = (old_map,) if old_side_only else (old_map, new_map)
         candidates = [(p, None) for m in maps for p in m.values()]
+    from .workflows.release_package import read_embedded_manifest
+
     for candidate_root, candidate_variant in candidates:
         if not candidate_root.is_dir():
             continue
         try:
-            manifest = read_embedded_instantiation_manifest(
-                candidate_root, variant_id=candidate_variant
-            )
+            manifest = read_embedded_manifest(candidate_root, candidate_variant)
         except Exception as exc:
             raise click.UsageError(
                 f"{candidate_root}: embedded instantiation manifest is "

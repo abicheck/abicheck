@@ -43,23 +43,65 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..bundle_manifest import manifest_from_dict
 from ..project_snapshot_legacy import (
     is_project_snapshot_package_dir,
     materialize_release_variant_artifacts,
 )
 from ..project_snapshot_store import read_manifest_summary
-from ..storage.import_bundle_facts import read_variant_composition_library_filenames
+from ..storage.variant_composition import (
+    read_variant_composition_library_filenames,
+    read_variant_composition_manifest_payload,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..bundle_manifest import InstantiationManifest
     from ..storage.package import ArtifactRef
 
 __all__ = [
     "is_project_snapshot_package_dir",
     "is_multi_artifact_package",
+    "read_embedded_manifest",
     "resolve_release_package_map",
 ]
+
+
+def read_embedded_manifest(
+    root: str | Path, variant_id: str | None = None
+) -> InstantiationManifest | None:
+    """Best-effort read of a stored `ProjectSnapshot` package (or a
+    single-artifact sub-package materialized from one)'s own embedded
+    `InstantiationManifest`, from the selected variant's own
+    `BUNDLE_COMPOSITION_SECTION_KIND` composition section
+    (`storage.variant_composition.read_variant_composition_manifest_payload`
+    -- the sole physical layout `bundle_facts_store.write_bundle_facts_
+    package` now writes, since Track 1's reconciliation retired
+    `PackageManifest.project_sections`/`ArtifactRef.native_identity` for
+    this path; see `storage-format-v2.md`'s A1.4 entry).
+
+    *variant_id*, when given, reads only that one variant. `None` reads the
+    package's declared variants in package order and returns the first one
+    carrying a manifest -- for a caller (or a genuinely single-variant
+    package) with no selection to thread through.
+
+    Returns `None` for anything genuinely absent: an unreadable package, no
+    declared variants, or no variant carrying a manifest. Once a section is
+    confirmed declared, a decode failure propagates (see
+    `read_variant_composition_manifest_payload`'s own docstring) rather than
+    reading the same as "no manifest was ever recorded".
+    """
+    try:
+        summary = read_manifest_summary(root)
+    except Exception:
+        return None
+    variant_ids = (variant_id,) if variant_id is not None else tuple(summary.variant_ids)
+    for vid in variant_ids:
+        payload = read_variant_composition_manifest_payload(root, vid)
+        if payload is not None:
+            return manifest_from_dict(payload)
+    return None
 
 #: The two `ArtifactRef.native_identity` keys used, independently, by both of
 #: today's not-yet-reconciled multi-artifact package writers

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break, Bad practice |
 | **Detected `ChangeKind`s** | `struct_field_type_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `examples/case187_public_struct_private_field_type/` |
+| **Rule family** | [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
@@ -133,4 +135,4 @@ indirection instead of embedding the internal type directly.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public struct private field type](by-rule/public-struct-private-field-type.md)._

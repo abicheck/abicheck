@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `runpath_changed` |
 | **Source files** | `examples/case52_rpath_leak/` |
+| **Rule family** | [`rpath-leak`](by-rule/rpath-leak.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -114,4 +116,4 @@ non-standard paths in `DT_RPATH`/`DT_RUNPATH`. Debian's lintian reports
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Rpath leak](by-rule/rpath-leak.md)._

@@ -113,8 +113,6 @@ from .import_bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
     export_bundle_facts,
     import_bundle_facts,
-    read_variant_composition_library_filenames,
-    read_variant_composition_manifest_payload,
 )
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .legacy_sections import (
@@ -143,6 +141,10 @@ from .sectioned_document import (
     from_sectioned_document,
     is_sectioned_document,
     to_sectioned_document,
+)
+from .variant_composition import (
+    read_variant_composition_library_filenames,
+    read_variant_composition_manifest_payload,
 )
 from .versioning import (
     COMPARISON_CONTRACT_VERSION,

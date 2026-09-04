@@ -260,14 +260,15 @@ A further restriction, for the same "configure or reject" reason: `--pack`
 needs `--against` on `scan` (a pack's only application there is the baseline
 comparison's policy). On a directory/package (release) `compare`, a `kind:
 policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
-internal_namespaces`/`gate.exit_code_scheme`/`gate.severity.<category>` all
-apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1
-and 2) — the gate half is folded into the release fan-out's own resolved
-`GateOptions` object (ADR-064, landed 2026-09-02). `contract.unresolved` is
-still rejected there, with or without `--contract` (pending verification
-that lifting it is safe — see the "7B's release-fan-out investigation
-landed" section of
-[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)).
+internal_namespaces`/`contract.unresolved`/`gate.exit_code_scheme`/
+`gate.severity.<category>` all apply to every library uniformly (CLI
+cleanup phase two, "PR B" slices 1 and 2, and Track 2's 7B residual) — the
+gate half is folded into the release fan-out's own resolved `GateOptions`
+object (ADR-064, landed 2026-09-02), and `contract.unresolved` still needs
+`--contract` on that release comparison, exactly as it does everywhere else
+(see the "7B's release-fan-out investigation landed" section of
+[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)
+for the history of that rejection's own removal).
 
 ## The resolution receipt
 

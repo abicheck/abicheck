@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case44_cyclic_type_member_added/` |
+| **Rule family** | [`cyclic-type-member-added`](by-rule/cyclic-type-member-added.md) |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +144,4 @@ echo "exit: $?"   # → 4 (TYPE_SIZE_CHANGED)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Cyclic type member added](by-rule/cyclic-type-member-added.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `typedef_base_changed` |
 | **Source files** | `examples/case73_typedef_underlying_changed/` |
+| **Rule family** | [`typedef-underlying-changed`](by-rule/typedef-underlying-changed.md) |
 
 **Category:** Type ABI | **Verdict:** 🔴 BREAKING
 
@@ -146,4 +148,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Typedef underlying changed](by-rule/typedef-underlying-changed.md)._

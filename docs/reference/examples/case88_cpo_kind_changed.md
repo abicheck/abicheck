@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `cpo_kind_changed` |
 | **Source files** | `examples/case88_cpo_kind_changed/` |
+| **Rule family** | [`cpo-kind-changed`](by-rule/cpo-kind-changed.md) |
 
 ## What this case demonstrates
 
@@ -50,4 +52,4 @@ with `lib::sort` must be updated.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Cpo kind changed](by-rule/cpo-kind-changed.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `abi_relevant_build_flag_changed` |
 | **Source files** | `examples/case98_cxx_standard_floor_raised/` |
+| **Rule family** | [`cxx-standard-floor-raised`](by-rule/cxx-standard-floor-raised.md) |
 
 **Category:** Build context risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -130,4 +132,4 @@ build-context layer is for.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Cxx standard floor raised](by-rule/cxx-standard-floor-raised.md)._

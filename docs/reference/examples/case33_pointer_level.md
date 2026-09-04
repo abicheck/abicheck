@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `param_pointer_level_changed` |
 | **Source files** | `examples/case33_pointer_level/` |
+| **Rule family** | [`pointer-level`](by-rule/pointer-level.md) |
 
 **Category:** Function Signature | **Verdict:** 🔴 BREAKING
 
@@ -137,4 +139,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer level](by-rule/pointer-level.md)._

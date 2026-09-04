@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `value_abi_trait_changed` |
 | **Source files** | `examples/case69_trivial_to_nontrivial/` |
+| **Rule family** | [`trivial-to-nontrivial`](by-rule/trivial-to-nontrivial.md) |
 
 **Category:** Calling Convention | **Verdict:** 🔴 BREAKING
 
@@ -131,4 +133,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Trivial to nontrivial](by-rule/trivial-to-nontrivial.md)._

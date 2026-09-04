@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `func_visibility_changed` |
 | **Source files** | `examples/case06_visibility/` |
+| **Rule family** | [`visibility`](by-rule/visibility.md) |
 
 **Category:** Visibility | **Verdict:** 🔴 BREAKING (bad practice)
 
@@ -147,4 +149,4 @@ though it doesn't carry abicheck's `VISIBILITY_LEAK`-style framing of the
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Visibility](by-rule/visibility.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `var_added` |
 | **Source files** | `examples/case61_var_added/` |
+| **Rule family** | [`var-added`](by-rule/var-added.md) |
 
 **Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
@@ -95,4 +97,4 @@ once shipped.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Var added](by-rule/var-added.md)._

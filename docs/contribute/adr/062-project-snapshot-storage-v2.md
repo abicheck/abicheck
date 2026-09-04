@@ -56,40 +56,43 @@ already-persisted G38 `BundleFacts` document and an `actions/baseline` set
 respectively into this sectioned representation, calling
 `import_legacy_snapshot` once per library and attaching each container's own
 composition facts to `VariantRef.sections` (a new field this track added).
-**Independently, A1.4/A1.5's live-object slice is also implemented**
-(ADR-063 Track B "8B", landed in parallel): `PackageManifest.project_sections`
-(`abicheck/storage/package.py`) is D7's cross-artifact-evidence slot, and
-`abicheck/bundle_facts_store.py`'s `write_bundle_facts_package`/
-`read_bundle_facts_package` are the first real producer/reader of a
-multi-`ArtifactRef` `PackageManifest` from a *live* `BundleFacts` object — one
-`BundleFacts` becomes N `ArtifactRef`s under one shared `VariantRef`, with
-`BundleFacts.manifest` (an `InstantiationManifest`) as the first
-`project_sections` entry. `abicheck/project_snapshot_store.py`'s
-`write_project_manifest`/`read_project_manifest` publish and read both
-`VariantRef.sections` and `project_sections` back through the real D6
-directory layout.
-
-**Known gap, not yet reconciled**: these two tracks solved the identical
-plan item (A1.4, "fold `BundleFacts` into the sectioned representation")
-independently and landed with two different, non-interoperable physical
-layouts for the same composition facts — `bundle_facts_store.py` splits
-`variant_fingerprint`/`filesystem_aliases`/`library_filenames` onto
-`VariantRef.captured`/`ArtifactRef.native_identity` and stores only the
-instantiation manifest in `project_sections`, while `import_bundle_facts.py`
-bundles all four facts into one `VariantRef.sections["bundle_composition"]`
-object. A package written by one cannot be read by the other's reader. Since
-`storage/import_bundle_facts.py` already establishes "storage takes an
-already-serialized document" as this area's governing contract (matching
-`import_v1.py`), the follow-up work is to rebuild `bundle_facts_store.py`'s
-live-object writer/reader as a thin wrapper over
+**A1.4/A1.5's live-object slice is implemented too, and now reconciled onto
+the same physical layout (Track 1)**: `abicheck/bundle_facts_store.py`'s
+`write_bundle_facts_package`/`read_bundle_facts_package` are the
+producer/reader of a multi-`ArtifactRef` `PackageManifest` from a *live*
+`BundleFacts` object — one `BundleFacts` becomes N `ArtifactRef`s under one
+shared `VariantRef` — and are now a thin wrapper over
 `bundle_facts_serialization.bundle_facts_to_dict`/`bundle_facts_from_dict`
 plus `storage.import_bundle_facts.import_bundle_facts`/`export_bundle_facts`,
-retiring the separate `project_sections`/`native_identity` layout in favor of
-the single `VariantRef.sections` one — not attempted here, since it requires
-rewriting `bundle_facts_store.py`'s own ~30-test suite (much of it pinned to
+so a package written from a live object and one written from a persisted
+document share the identical `VariantRef.sections["bundle_composition"]`
+layout. `PackageManifest.project_sections` (`abicheck/storage/package.py`)
+remains D7's general cross-artifact-evidence slot, but this path no longer
+populates it. `abicheck/project_snapshot_store.py`'s `write_project_manifest`/
+`read_project_manifest` publish and read both `VariantRef.sections` and
+`project_sections` back through the real D6 directory layout.
+
+**Former known gap, now closed (Track 1)**: these two tracks briefly solved
+the identical plan item (A1.4, "fold `BundleFacts` into the sectioned
+representation") independently and landed with two different,
+non-interoperable physical layouts for the same composition facts —
+`bundle_facts_store.py` originally split `variant_fingerprint`/
+`filesystem_aliases`/`library_filenames` onto `VariantRef.captured`/
+`ArtifactRef.native_identity` and stored only the instantiation manifest in
+`project_sections`, while `import_bundle_facts.py` bundles all four facts
+into one `VariantRef.sections["bundle_composition"]` object — a package
+written by one could not be read by the other's reader. Since
+`storage/import_bundle_facts.py` already established "storage takes an
+already-serialized document" as this area's governing contract (matching
+`import_v1.py`), the fix rebuilt `bundle_facts_store.py`'s live-object
+writer/reader as a thin wrapper over `bundle_facts_serialization
+.bundle_facts_to_dict`/`bundle_facts_from_dict` plus `storage
+.import_bundle_facts.import_bundle_facts`/`export_bundle_facts`, retiring the
+separate `project_sections`/`native_identity`-for-filename/aliases layout in
+favor of the single `VariantRef.sections` one — including rewriting
+`bundle_facts_store.py`'s own test suite (much of it previously pinned to
 the internal layout being retired) with the same adversarial-review rigor
-the original had, rather than as a side effect of a merge-conflict
-resolution.
+the original had.
 
 **A1.7 (stored/live and stored/stored release-comparison CLI reachability)
 is also implemented**: `abicheck compare` (directory/package release
