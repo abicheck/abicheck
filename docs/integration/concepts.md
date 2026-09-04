@@ -58,7 +58,7 @@ its own id stays the check's reporting identity.
 
 A set of binaries shipped and versioned together, with cross-library
 dependencies — the scope `abicheck compare` (directory/package mode) and
-`--manifest` bundle analysis already operate on
+`--instantiation-manifest` bundle analysis already operate on
 ([Multi-Binary Releases](../use/multi-binary.md)). Deliberately named
 distinctly from "multiple independent targets" (bundle = S14, one report with
 cross-library findings; independent targets = S15, N separate reports).

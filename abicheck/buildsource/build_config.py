@@ -211,6 +211,17 @@ class BuildConfig:
     debug_dwarf_only: bool | None = None
     debug_debuginfod: bool | None = None
     debug_debuginfod_url: str | None = None
+    #: ``bundle:`` — release/scan bundle topology (CLI cleanup phase two,
+    #: PR J), demoted off the CLI from ``--bundle-system-providers``/
+    #: ``--bundle-cohort``: a project's system-provider allow-list extension
+    #: and co-versioned library cohort prefixes are stable, reviewed-in-a-PR
+    #: properties of the release/bundle, not a per-run invocation flag —
+    #: unlike ``severity:``/``scope:`` above, there is no CLI override at
+    #: all, so ``.abicheck.yml`` is these two fields' only source. Empty =
+    #: no extension beyond the built-in system-provider allow-list / no
+    #: declared cohorts.
+    bundle_system_providers: list[str] = field(default_factory=list)
+    bundle_cohorts: list[str] = field(default_factory=list)
     #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
     exit_code_scheme: str = "auto"
     #: Whether ``exit_code_scheme:`` was literally present -- it defaults to
@@ -239,6 +250,7 @@ class BuildConfig:
             "source",
             "compile",
             "debug",
+            "bundle",
             "exit_code_scheme",
             "version",
             "risk_rules",
@@ -278,6 +290,13 @@ class BuildConfig:
             }
         ),
         "debug": frozenset({"format", "dwarf_only", "debuginfod", "debuginfod_url"}),
+        # Distinct from the plural `bundles:` block (`project_targets.py`,
+        # ADR-047 §3 — named release groups of project *targets*, consumed
+        # only by the `project` command family). This singular `bundle:`
+        # block is release/scan-wide topology consumed directly by
+        # `compare`'s directory/package fan-out and `scan --artifact-set`,
+        # with no dependency on any `targets:`/`bundles:` declaration.
+        "bundle": frozenset({"system_providers", "cohorts"}),
     }
 
     @classmethod
@@ -387,6 +406,7 @@ class BuildConfig:
         source = _block(top, "source")
         compile_blk = _block(top, "compile")
         debug = _block(top, "debug")
+        bundle = _block(top, "bundle")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -448,6 +468,8 @@ class BuildConfig:
             debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
             debug_debuginfod=_opt_bool(debug, "debuginfod"),
             debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
+            bundle_system_providers=_strs(bundle, "system_providers"),
+            bundle_cohorts=_strs(bundle, "cohorts"),
             exit_code_scheme=_one_of(
                 _str(top, "exit_code_scheme", "auto") or "auto",
                 _EXIT_CODE_SCHEMES,
@@ -557,6 +579,16 @@ class BuildConfig:
             debug["debuginfod_url"] = self.debug_debuginfod_url
         return debug
 
+    def _bundle_block(self) -> dict[str, Any]:
+        """Non-default ``bundle:`` keys (release/scan topology; CLI cleanup
+        phase two, PR J)."""
+        bundle: dict[str, Any] = {}
+        if self.bundle_system_providers:
+            bundle["system_providers"] = list(self.bundle_system_providers)
+        if self.bundle_cohorts:
+            bundle["cohorts"] = list(self.bundle_cohorts)
+        return bundle
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -576,6 +608,7 @@ class BuildConfig:
             ("source", self._source_block()),
             ("compile", self._compile_block()),
             ("debug", self._debug_block()),
+            ("bundle", self._bundle_block()),
         ):
             if block:
                 out[key] = block

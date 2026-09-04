@@ -103,7 +103,7 @@ in [Multi-binary § References](../use/multi-binary.md#references).
 
 ## Declaring what the bundle promises
 
-`--manifest` names the symbols the release publicly promises, in three
+`--instantiation-manifest` names the symbols the release publicly promises, in three
 entry shapes: a `pattern:` over demangled names (one line freezes a
 namespace), `template:` with an `instantiations:` matrix (the shape a
 template library needs — [Template- and Header-Heavy Libraries](template-heavy-libraries.md)
@@ -113,7 +113,7 @@ imports from but does not ship (libc, libstdc++ and their kin are built
 in; add your own), and `--bundle-cohort` for the SONAME cohort above. The
 file format, verdict rules and a bootstrap script that produces a first
 over-broad manifest from a release are owned by
-[Multi-binary § `--manifest`](../use/multi-binary.md#-manifest-path-experimental).
+[Multi-binary § `--instantiation-manifest`](../use/multi-binary.md#-instantiation-manifest-path-experimental).
 
 ## Comparing against stored facts
 
@@ -153,7 +153,7 @@ profile with no build output cannot resolve a check, and a plan that
 resolves no check at all exits 1 rather than emitting an empty target set
 that would let the fold pass having checked nothing (`--allow-empty` is the
 deliberate opt-in for a bootstrap run). Without a declared target set — `--run-plan` from the project plan (the
-declarative form), or a hand-written `--manifest` — a missing report and an
+declarative form), or a hand-written `--instantiation-manifest` — a missing report and an
 intentionally absent one look identical, so a bare `aggregate reports/`
 exits 64 rather than guess; `--discovered-only` is the explicit opt-out
 that gates on whatever is present. A report that never arrived must be a

@@ -219,15 +219,21 @@ class TestArtifactSetCliValidation:
         assert result.exit_code != 0
         assert "--against is not supported with --artifact-set" in result.output
 
-    def test_rejects_bundle_system_providers_without_artifact_set(
+    def test_bundle_system_providers_flag_was_removed(
         self, runner: CliRunner, snap_a: Path
     ) -> None:
+        """CLI cleanup phase two, PR J: --bundle-system-providers is gone,
+        no deprecation alias -- the system-provider allow-list extension is
+        sourced only from .abicheck.yml's `bundle:` block now, so there is
+        no longer a "supplied without --artifact-set" combination to reject
+        (the flag itself is what Click rejects)."""
         result = runner.invoke(
             main,
             ["scan", str(snap_a), "--bundle-system-providers", "libfoo.so.1"],
         )
-        assert result.exit_code != 0
-        assert "--bundle-system-providers requires --artifact-set" in result.output
+        assert result.exit_code == 64
+        assert "No such option" in result.output
+        assert "--bundle-system-providers" in result.output
 
     def test_rejects_fewer_than_two_resolved_libraries(
         self, runner: CliRunner, tmp_path: Path

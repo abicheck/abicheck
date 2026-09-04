@@ -229,6 +229,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         kwargs.get("suppress"), kwargs["policy"], kwargs.get("policy_file_path")
     )
 
+    # CLI cleanup phase two, PR J removed --bundle-system-providers/
+    # --bundle-cohort as CLI flags in favor of .abicheck.yml's `bundle:`
+    # block, resolved on the live/live compare path via
+    # cli_helpers_compare.resolve_compare_config -- this stored-BundleFacts
+    # dispatch is a separate, narrower engine (2026-09-01 checkpoint,
+    # docs/contribute/plans/cli-cleanup-phase-two.md's "compare
+    # --old-bundle-facts is a second compare") that never consulted
+    # .abicheck.yml for anything, so it stays that way here rather than
+    # picking up an inconsistent partial config-discovery path as a side
+    # effect of this PR; folding it in is PR I's still-open
+    # BundleCompareRequest unification, not this one's scope.
+    # kwargs.get() below is now always empty (Click never populates a
+    # removed flag's key) -- kept as an explicit no-op read, not a stub, so
+    # a future PR I wiring pass has one clear line to replace.
     bundle_system_providers = [
         s.strip()
         for s in str(kwargs.get("bundle_system_providers") or "").split(",")

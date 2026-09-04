@@ -44,7 +44,9 @@ def soname_stem(soname: str) -> str:
 
 def soname_matches_providers(soname: str, providers: set[str]) -> bool:
     """True when soname (a real DT_NEEDED entry) is covered by providers
-    (built-in + --bundle-system-providers): exact, then stem match.
+    (built-in + .abicheck.yml's `bundle.system_providers:` -- CLI cleanup
+    phase two, PR J; formerly --bundle-system-providers): exact, then stem
+    match.
 
     Stem fallback only applies against a version-*generic* provider entry
     (``libfoo``/``libfoo.so``, no explicit major) -- a provider entry that

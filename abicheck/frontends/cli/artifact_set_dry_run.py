@@ -86,7 +86,9 @@ def render_artifact_set_dry_run(
         f"--artifact-set form: {'explicit path list' if explicit else 'directory'}",
         f"members ({len(members)}):",
         *(f"  - {name}: {path}" for name, path in members),
-        f"--bundle-system-providers: {', '.join(req.bundle_system_providers)}"
+        # CLI cleanup phase two, PR J: sourced from .abicheck.yml's
+        # `bundle.system_providers:`, not a CLI flag any more.
+        f"system providers (.abicheck.yml): {', '.join(req.bundle_system_providers)}"
         if req.bundle_system_providers
         else None,
     )

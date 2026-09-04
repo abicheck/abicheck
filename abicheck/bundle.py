@@ -860,7 +860,9 @@ def compare_bundle(
     #    their major SONAME inconsistently (some bumped, some lagged). A
     #    cohort-level invariant: no individual library is wrong, but the set
     #    is. Opt-in only — runs solely for the cohorts the caller declares
-    #    (compare-release --bundle-cohort). See examples/case84_bundle_soname_skew/.
+    #    (.abicheck.yml's `bundle.cohorts:`, CLI cleanup phase two, PR J --
+    #    formerly `compare-release --bundle-cohort`). See
+    #    examples/case84_bundle_soname_skew/.
     findings.extend(_detect_soname_skew(old, new, cohorts))
 
     # 8. Manifest enforcement

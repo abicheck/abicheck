@@ -527,7 +527,7 @@ class TestCompareReleaseErrorPaths:
         assert isinstance(result, BundleDiffResult)
 
     def test_bundle_analysis_bad_manifest_raises(self, tmp_path: Path) -> None:
-        """A malformed --manifest path raises ClickException."""
+        """A malformed --instantiation-manifest path raises ClickException."""
         import click
 
         from abicheck.cli_compare_release import _run_bundle_analysis

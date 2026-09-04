@@ -347,31 +347,13 @@ if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
   _warn "new-library-set is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
 fi
 
-# bundle-system-providers: the cross-library bundle-analysis layer, reached
-# by mode: compare (directory/package operands) and mode: scan (only with
-# new-library-set) -- inert everywhere else, including a mode: scan run
-# that uses the ordinary new-library input: run.sh's scan branch only
-# forwards --bundle-system-providers inside the new-library-set branch, so
-# a scalar scan silently drops it rather than erroring -- without this
-# check the Action succeeds while quietly discarding the caller's setting
-# (Codex review).
-if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
-  if [[ "$MODE" != "compare" && "$MODE" != "scan" ]]; then
-    _warn "bundle-system-providers is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
-  elif [[ "$MODE" == "scan" && -z "$NEW_LIBRARY_SET" ]]; then
-    _warn "bundle-system-providers is set but has no effect: with mode: scan it only applies when new-library-set is also set (a scalar new-library scan has no bundle-analysis layer to extend)."
-  elif [[ "$MODE" == "compare" && ( -n "$NEW_LIBRARY" || -n "$OLD_LIBRARY" ) ]] \
-    && ! { { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
-         || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; }; then
-    # cli_compare_helpers.py only reaches bundle analysis on the
-    # directory/package dispatch -- a scalar (single-file) compare
-    # operand pair silently discards this the same way a scalar scan
-    # does (Codex review). Only fires once an operand is actually set --
-    # compare's own required-input check is what should own an entirely
-    # missing old-library/new-library, not this warning.
-    _warn "bundle-system-providers is set but has no effect: with mode: compare it only applies to a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') -- a single-file compare has no bundle-analysis layer to extend."
-  fi
-fi
+# bundle-system-providers was a scalar Action input mirroring the CLI's own
+# --bundle-system-providers; CLI cleanup phase two, PR J removed both -- the
+# cross-library bundle-analysis layer's system-provider allow-list
+# extension is sourced only from build-config's own .abicheck.yml
+# `bundle.system_providers:` now, which has no per-mode "inert" state left
+# to warn about (build-config is unconditionally forwarded for every mode
+# that can reach it).
 
 # estimate, audit: deprecated scan-mode-only aliases.
 if [[ "${INPUT_ESTIMATE:-false}" == "true" && "$MODE" != "scan" ]]; then

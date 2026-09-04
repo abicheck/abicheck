@@ -9,8 +9,9 @@
 """Extract a baseline bundle manifest from a release directory.
 
 A bundle manifest (see ADR-023) is the file you pass to ``abicheck
-compare <old_dir> <new_dir> --manifest manifest.yaml`` to assert that specific
-symbols / instantiation patterns survive between releases. Hand-writing
+compare <old_dir> <new_dir> --instantiation-manifest manifest.yaml`` to
+assert that specific symbols / instantiation patterns survive between
+releases. Hand-writing
 one is impractical for libraries with thousands of exported symbols;
 this script emits a starting point that a human then curates.
 

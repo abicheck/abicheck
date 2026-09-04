@@ -55,6 +55,9 @@ LIST_SUBKEYS: dict[str, frozenset[str]] = {
     "sources": frozenset({"public_headers", "exclude"}),
     "scope": frozenset({"public_symbols"}),
     "compile": frozenset({"include_dirs", "defines"}),
+    # CLI cleanup phase two, PR J: release/scan bundle topology, demoted off
+    # the CLI from --bundle-system-providers/--bundle-cohort.
+    "bundle": frozenset({"system_providers", "cohorts"}),
 }
 # Recognized top-level keys that are scalars, not blocks (i.e. absent from
 # BuildConfig._KNOWN_BLOCK_KEYS) — the same wrong-type gap as the block

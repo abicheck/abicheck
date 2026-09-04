@@ -287,7 +287,7 @@ def _run_bundle_analysis(
     stored-baseline comparison -- rather than being sequenced by hand here.
     This function's own job narrows to what only the live release path
     needs: building the two live ``BundleSnapshot``\\ s, loading an
-    explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
+    explicit ``--instantiation-manifest``, and re-surfacing ``analyze_bundle``'s
     structured ``analysis_errors`` as the same ``click.echo(...,
     err=True)`` warnings this function has always emitted.
     """
@@ -313,8 +313,9 @@ def _run_bundle_analysis(
         try:
             manifest = load_manifest(manifest_path)
         except Exception as exc:
-            # Manifest is an *explicit* user input. A malformed --manifest
-            # is a user error, not an environmental quirk; fail loudly so
+            # Manifest is an *explicit* user input. A malformed
+            # --instantiation-manifest is a user error, not an
+            # environmental quirk; fail loudly so
             # the contract violation isn't hidden behind a stderr warning.
             raise click.ClickException(
                 f"Failed to load manifest {manifest_path}: {exc}",

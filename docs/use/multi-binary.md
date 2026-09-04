@@ -175,7 +175,7 @@ drift, SONAME skew, manifest enforcement), there is no per-library `Change`
 to suppress upstream of them at all, so the only levers are
 `--no-bundle-analysis` (turns off bundle analysis for the whole run — see
 below) and, for a symbol that genuinely comes from outside the release,
-`--bundle-system-providers` (see below).
+`.abicheck.yml`'s `bundle.system_providers:` (see below).
 
 **The sibling-consumption gate covers most, but not all, kinds — and even
 those are gated only inside `compare_bundle()` itself.** Within
@@ -247,12 +247,12 @@ summary and new top-level keys in the JSON output:
 
 ## The bundle-analysis flags
 
-### `--manifest PATH` *(Experimental)*
+### `--instantiation-manifest PATH` *(Experimental)*
 
 > **You probably don't need this flag.** For 95% of releases the
 > headers passed to `-H include/` already define the public ABI
 > contract, and the bundle layer derives the rest from ELF resolution.
-> `--manifest` covers a narrow set of cases where the contract lives
+> `--instantiation-manifest` covers a narrow set of cases where the contract lives
 > *outside* the headers. The manifest schema is still being shaped —
 > expect changes between minor versions.
 
@@ -264,7 +264,7 @@ summary and new top-level keys in the JSON output:
   still imports, `extern "C"` signature drift, provider migration.
 - Type drift propagated through template-instantiated symbols.
 
-**When `--manifest` actually adds something:**
+**When `--instantiation-manifest` actually adds something:**
 
 - **Template instantiation lists.** `extern template foo<int>;` in a
   header is just a declaration; the contract is *which specific
@@ -380,7 +380,7 @@ raises a `ValueError`.
 | Matched in new bundle but not in old bundle | `bundle_manifest_instantiation_added` | COMPATIBLE (addition) |
 
 A malformed manifest aborts the run with a `ClickException`. A failing
-`--manifest` is treated as a user error, not an environmental quirk —
+`--instantiation-manifest` is treated as a user error, not an environmental quirk —
 unlike the bundle-engine-internal failures, which degrade to per-library
 results with a warning.
 
@@ -410,30 +410,37 @@ You don't have to do this all at once. The minimal useful manifest is
 one entry per library covering the namespaces you actually want to
 freeze.
 
-### `--bundle-system-providers libfoo,libbar`
+### `.abicheck.yml`'s `bundle.system_providers:`
 
 The bundle layer needs to distinguish *intra-bundle imports* (a sibling
 should be providing this symbol) from *external imports* (the symbol
 comes from the system loader: libc, libstdc++, libgcc_s, libpthread,
 libtbb, libsycl, OpenCL, ...). The built-in allow-list handles the
-canonical set; this flag extends it.
+canonical set; this config key extends it.
 
 When to use it:
 
 - Your bundle uses an external SDK shipped outside the release tarball
   (e.g. a vendor library like `libvpl.so.2` that consumers install
   separately).
-- A `--manifest`-free workflow keeps emitting `bundle_intra_dep_removed`
+- A `--instantiation-manifest`-free workflow keeps emitting `bundle_intra_dep_removed`
   findings against symbols you know are external.
 
-Example:
+Example (`.abicheck.yml`):
 
-```bash
-abicheck compare old/ new/ \
-    --bundle-system-providers libvpl.so.2,libcuda.so.1
+```yaml
+bundle:
+  system_providers: [libvpl.so.2, libcuda.so.1]
 ```
 
-These sonames are appended to the built-in allow-list for this run only.
+```bash
+abicheck compare old/ new/
+```
+
+These sonames are appended to the built-in allow-list for every run in this
+project — a stable, reviewed-in-a-PR property of the release, not a
+per-invocation flag (CLI cleanup phase two, PR J; formerly
+`--bundle-system-providers libfoo,libbar`, one run at a time).
 
 ### `--no-bundle-analysis`
 
@@ -523,7 +530,7 @@ finding fired: a per-library finding (something in `libraries[].changes`)
 can be silenced with a [suppression](suppressions.md) if it's expected; a
 `bundle_*` finding cannot be suppressed today (see above) — your options are
 to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
-`--bundle-system-providers` as described below.
+`.abicheck.yml`'s `bundle.system_providers:` as described below.
 
 ## Comparing against a stored bundle baseline (G38 Phase 2)
 

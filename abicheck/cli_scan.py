@@ -719,7 +719,6 @@ def _run_artifact_set(
     *,
     artifact_set: tuple[str, ...],
     dry_run: bool,
-    bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -832,7 +831,10 @@ def _run_artifact_set(
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
-    bsp = tuple(s.strip() for s in bundle_system_providers.split(",") if s.strip())
+    # PR J: --bundle-system-providers removed as a CLI flag -- sourced from
+    # .abicheck.yml's `bundle:` block, auto-discovered from *sources*.
+    _, _bundle_cfg, _ = _discover_scan_project_config(build_config, sources, None)
+    bsp = tuple(_bundle_cfg.bundle_system_providers) if _bundle_cfg else ()
 
     req = ScanRequest(
         binaries=list(discovered.values()),
@@ -1356,7 +1358,6 @@ def _discover_scan_project_config(
 def scan_cmd(
     artifact: Path | None,
     artifact_set: tuple[str, ...],
-    bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -1456,8 +1457,7 @@ def scan_cmd(
     _setup_verbosity(verbose)
 
     # ADR-056: --artifact-set is mutually exclusive with the positional
-    # ARTIFACT, with --against (audit-only -- no old side for a set), and
-    # --bundle-system-providers is meaningless without --artifact-set.
+    # ARTIFACT and with --against (audit-only -- no old side for a set).
     #
     # --artifact-set is now a repeatable option (CLI cleanup phase two, PR
     # 5): `artifact_set` is the tuple Click collects, empty when unset, so
@@ -1471,7 +1471,6 @@ def scan_cmd(
     # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
-        bundle_system_providers=bundle_system_providers,
     )
     _reject_incoherent_secondary_output(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
@@ -1483,7 +1482,6 @@ def scan_cmd(
         _run_artifact_set(
             artifact_set=artifact_set,
             dry_run=dry_run,
-            bundle_system_providers=bundle_system_providers,
             header_pairs=header_pairs,
             include_pairs=include_pairs,
             public_header_dirs=public_header_dirs,

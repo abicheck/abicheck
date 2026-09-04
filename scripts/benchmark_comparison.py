@@ -2668,14 +2668,21 @@ def _run_bundle_case(
     ]
     manifest_file = entry.get("manifest_file")
     if manifest_file:
-        cmd += ["--manifest", str(case_dir / str(manifest_file))]
+        cmd += ["--instantiation-manifest", str(case_dir / str(manifest_file))]
     bundle_cohort = entry.get("bundle_cohort")
     if not bundle_cohort and "bundle_soname_skew" in (
         entry.get("expected_kinds") or []
     ):
         bundle_cohort = "libonedal_"
     if bundle_cohort:
-        cmd += ["--bundle-cohort", str(bundle_cohort)]
+        # CLI cleanup phase two, PR J: --bundle-cohort removed as a CLI
+        # flag -- cohorts are sourced from .abicheck.yml's `bundle.cohorts:`
+        # now.
+        cfg_path = old_dir.parent / ".abicheck.yml"
+        cfg_path.write_text(
+            f"bundle:\n  cohorts: [{bundle_cohort!r}]\n", encoding="utf-8"
+        )
+        cmd += ["--config", str(cfg_path)]
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV

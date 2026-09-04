@@ -1373,12 +1373,12 @@
     },
     {
       "path": "tests/test_bundle.py",
-      "baseline_lines": 4119,
+      "baseline_lines": 4129,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +10 lines (CLI cleanup phase two, PR J): --bundle-cohort/--manifest CLI-invocation tests rewritten against .abicheck.yml's bundle.cohorts: block and --instantiation-manifest respectively, with a small _write_cohorts_config helper factored out to keep the three call sites to one line each.",
       "review_by": "2026-11-30"
     },
     {
@@ -2093,12 +2093,12 @@
     },
     {
       "path": "tests/test_scan_artifact_set.py",
-      "baseline_lines": 1368,
+      "baseline_lines": 1373,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +5 lines (CLI cleanup phase two, PR J): the test asserting --bundle-system-providers required --artifact-set was rewritten to assert the flag itself is gone (No such option), since there is no longer a per-run 'supplied without --artifact-set' state to reject.",
       "review_by": "2026-11-30"
     },
     {
