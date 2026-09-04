@@ -955,16 +955,39 @@ def _normalize_arch(elf: Any) -> str:
     }.get(arch, arch)
 
 
-#: Architectures where an exported function symbol's ``st_value`` names its
-#: real code-entry address (matching what an FDE's own ``initial_location``
-#: names), so the two can be compared directly. Deliberately the same set
-#: ``_reg_name`` has register-name tables for -- every other ELF ABI this
-#: module processes falls back to a generic ``"regN"`` label, so it has no
-#: verified per-arch knowledge to justify assuming this equality holds
-#: there too (see ``_parse_frame_registers``'s own PPC64/ELFv1 note, where
-#: it provably does not: an exported symbol's ``st_value`` names its
-#: ``.opd`` function descriptor, not its code entry).
-_CODE_ENTRY_SYMBOL_ARCHES = frozenset({"x64", "x86", "aarch64"})
+#: Architectures where an exported function symbol's ``st_value`` is known
+#: to name a *function descriptor* rather than the function's real code
+#: entry -- so it cannot be compared directly against an FDE's own
+#: ``initial_location``, the way ``_build_exported_func_addrs``'s coverage
+#: check assumes for every other architecture.
+#:
+#: P1 review, fresh evidence (Codex): this was previously an ALLOWLIST
+#: (``_CODE_ENTRY_SYMBOL_ARCHES``, the same three architectures
+#: ``_reg_name`` has register-name tables for), which silently disabled the
+#: coverage check for every architecture this module doesn't have a
+#: register-name table for -- including RISC-V, ARM32, MIPS, s390x, and
+#: every other common architecture whose function symbols use ordinary
+#: direct code-entry addresses, exactly like x64/x86/aarch64. Register-name
+#: support and "does st_value name the code entry" are unrelated questions
+#: -- the coverage check never reads a register name at all, only compares
+#: addresses -- so tying the two together excluded far more architectures
+#: than the one that's actually unsafe. Flipped to a denylist: the coverage
+#: check now runs by default for any architecture, and only these
+#: documented function-descriptor ABIs are excluded. "64-bit PowerPC"
+#: covers PPC64 under its own name here since pyelftools' get_machine_arch()
+#: reports it verbatim (_normalize_arch's remap table only covers x64/x86/
+#: aarch64); this module cannot distinguish the ELFv1 (function-descriptor)
+#: and ELFv2 (direct-entry) ABI variants pyelftools' machine-arch alone
+#: doesn't record, so both stay excluded here -- conservative (a real
+#: ELFv2 binary loses the check unnecessarily) rather than risking the
+#: ELFv1 false positive this module already has documented evidence for
+#: (see ``_parse_frame_registers``'s own PPC64/ELFv1 note). "Intel IA-64"
+#: is included on the same documented-ABI-fact basis (Itanium's PLABEL
+#: convention is a well-established function-descriptor indirection, not a
+#: guess), though this module has no IA-64 fixture to verify against
+#: either -- both entries name a real, cited ABI property, not a hedge
+#: against an unknown one.
+_FUNCTION_DESCRIPTOR_ARCHES = frozenset({"64-bit PowerPC", "Intel IA-64"})
 
 
 def _build_addr_to_sym(elf: Any) -> dict[int, str]:
@@ -1291,28 +1314,30 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         # P2 review, fresh evidence (Codex): the coverage set this pass is
         # actually accountable for -- exported *functions* specifically
         # (addr_to_sym also matches exported data symbols, which never
-        # have an FDE and aren't this analysis' concern). Restricted to
-        # architectures this module actually has register-name support for
-        # (_reg_name's own x64/x86/aarch64 set): on those, a function
-        # symbol's st_value IS its code-entry address, so comparing it
-        # against an FDE's own initial_location is sound. That equality
-        # does NOT hold on every ELF ABI -- P1 review, fresh evidence,
-        # Codex: on big-endian PPC64 ELFv1, an exported STT_FUNC symbol's
-        # st_value points to its .opd function descriptor, while the FDE's
-        # initial_location names the real code entry, so this comparison
-        # would never match and every exported function would read
-        # "uncovered" on an otherwise fully-instrumented binary. This
-        # module has no verified PPC64 .opd-descriptor resolution (no
-        # register-name table, no PPC64 fixture to validate one against),
-        # so rather than ship unverified descriptor-following logic for an
-        # architecture this analysis doesn't otherwise support at all, the
-        # coverage set stays empty there -- the same "never flagged
-        # uncovered by this specific check" behavior every architecture
-        # had before this check existed.
+        # have an FDE and aren't this analysis' concern). Runs by default
+        # for any architecture: an exported STT_FUNC symbol's st_value is
+        # its real code-entry address on essentially every ELF ABI, so
+        # comparing it against an FDE's own initial_location is sound
+        # there. That equality does NOT hold on the documented function-
+        # descriptor architectures in _FUNCTION_DESCRIPTOR_ARCHES -- P1
+        # review, fresh evidence, Codex: on big-endian PPC64 ELFv1, an
+        # exported STT_FUNC symbol's st_value points to its .opd function
+        # descriptor, while the FDE's initial_location names the real code
+        # entry, so this comparison would never match and every exported
+        # function would read "uncovered" on an otherwise fully-
+        # instrumented binary. This module has no verified descriptor-
+        # following resolution for those architectures (no fixture to
+        # validate one against), so rather than ship unverified
+        # descriptor-following logic, the coverage set stays empty there
+        # only -- the same "never flagged uncovered by this specific
+        # check" behavior every architecture had before this check
+        # existed, now scoped to just the ABIs it's actually unsound for
+        # (see _FUNCTION_DESCRIPTOR_ARCHES's own docstring for why this
+        # moved from an allowlist to a denylist).
         uncovered_funcs = (
-            _build_exported_func_addrs(elf)
-            if arch_key in _CODE_ENTRY_SYMBOL_ARCHES
-            else set()
+            set()
+            if arch_key in _FUNCTION_DESCRIPTOR_ARCHES
+            else _build_exported_func_addrs(elf)
         )
         source_failed: list[bool] = []
         # P2 review, fresh evidence (Codex): consult every CFI section that

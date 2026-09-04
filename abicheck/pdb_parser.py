@@ -172,6 +172,22 @@ _SIMPLE_TYPE_SIZES: dict[int, int] = {
     0x40: 4, 0x41: 8, 0x42: 16,
 }
 
+# Simple type index pointer-mode sizes in bytes, by CodeView SimpleTypeMode
+# value (the type index's own mode nibble -- ``(ti >> 8) & 0x0F``, distinct
+# from LF_POINTER's own ptrmode attrs field). Source: Microsoft cvinfo.h /
+# llvm/DebugInfo/CodeView/TypeIndex.h's SimpleTypeMode enum -- every value
+# 0x01-0x07 is spec-defined; 0x00 (Direct, not a pointer) is handled
+# separately by the caller and never reaches this table.
+_SIMPLE_POINTER_MODE_SIZES: dict[int, int] = {
+    0x01: 2,  # NearPointer (legacy 16-bit near)
+    0x02: 4,  # FarPointer (legacy 16-bit far: 2-byte segment + 2-byte offset)
+    0x03: 4,  # HugePointer (legacy 16-bit huge)
+    0x04: 4,  # NearPointer32
+    0x05: 6,  # FarPointer32 (4-byte offset + 2-byte selector)
+    0x06: 8,  # NearPointer64
+    0x07: 16,  # NearPointer128
+}
+
 
 # ---------------------------------------------------------------------------
 # MSF (Multi-Stream File) container parser
@@ -1353,33 +1369,28 @@ class TypeDatabase:
             mode = (ti >> 8) & 0x0F
             if mode == 0:
                 return _SIMPLE_TYPE_SIZES.get(kind, 0)
-            # Pointer modes: size depends on 32-bit vs 64-bit. P2 review,
-            # fresh evidence (Codex): this previously checked mode == 0x02
-            # for "near32", but per the CodeView SimpleTypeMode encoding
+            # Pointer modes: size depends on the CodeView SimpleTypeMode
+            # value. P2 review, fresh evidence (Codex, two rounds): this
+            # previously checked mode == 0x02 for "near32" (wrong -- 0x02
+            # is the legacy 16-bit FarPointer mode; the real near32
+            # constant is 0x04), and every OTHER pointer mode fell through
+            # to a generic 8-byte default regardless of its own real,
+            # documented width -- including NearPointer128 (0x07, 16
+            # bytes), which is silently wrong the same way near32 was.
+            # Every mode 0x01-0x07 is a real, spec-documented width
             # (Microsoft cvinfo.h / llvm/DebugInfo/CodeView/TypeIndex.h's
-            # SimpleTypeMode enum) 0x02 is the legacy 16-bit FarPointer
-            # mode -- the real, modern 32-bit near-pointer mode every
-            # ordinary x86 CodeView simple-type pointer actually uses is
-            # 0x04 (NearPointer32). A member typed this way previously fell
-            # through to the 8-byte default below, reporting the wrong
-            # byte_size for every 32-bit pointer field while
-            # unresolved_type_ref_count stayed untouched, so the basic
-            # channel still reported "parsed".
-            if mode == 0x04:  # near32 (SimpleTypeMode::NearPointer32)
-                return 4
-            if mode == 0x06:  # near64 (SimpleTypeMode::NearPointer64)
-                return 8
-            # The legacy 16-bit segmented modes (NearPointer=0x01,
-            # FarPointer=0x02, HugePointer=0x03, FarPointer32=0x05,
-            # NearPointer128=0x07) are unreachable in practice -- no modern
-            # MSVC toolchain emits them for an ordinary x86/x64 build, and
-            # this module has no fixture to verify a dedicated size for
-            # each against. Rather than guess, they fall through to the
-            # same 8-byte default this branch already used before this fix,
-            # the same "unverified exotic case stays approximate" choice
-            # this codebase already makes elsewhere (e.g. PPC64 ELFv1's
-            # .opd descriptors in dwarf_advanced.py).
-            return 8  # default pointer size
+            # SimpleTypeMode enum), so -- unlike an architecture-specific
+            # unverified case such as PPC64 ELFv1's .opd descriptors in
+            # dwarf_advanced.py, which needs live resolution logic this
+            # module has no fixture to validate -- these are static,
+            # already-known constants, not a guess. Only a mode value the
+            # spec doesn't define at all (0x08-0x0F; ti's own mode field is
+            # 4 bits) is genuinely unresolvable, and is recorded as such.
+            size = _SIMPLE_POINTER_MODE_SIZES.get(mode)
+            if size is not None:
+                return size
+            self._unresolved_type_refs.add(ti)
+            return 8  # best-effort default for an undefined mode value
 
         s = self._structs.get(ti)
         if s:

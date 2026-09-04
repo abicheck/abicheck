@@ -1010,8 +1010,8 @@ class TestTypeDatabaseExtended:
         (returning 4), which this test then pinned as if it were correct.
         0x04 is the real near32 mode value; see
         test_simple_type_far_pointer_legacy_mode_is_not_near32 below for
-        the sibling proving 0x02 now correctly falls to the generic
-        default instead."""
+        the sibling proving 0x02 now resolves to its own real (not
+        near32's) size instead."""
         db = self._make_db([])
         ti = 0x0474  # mode=0x04 (near32), kind=0x74 (int)
         name = db.type_name(ti)
@@ -1031,22 +1031,66 @@ class TestTypeDatabaseExtended:
 
     def test_simple_type_far_pointer_legacy_mode_is_not_near32(self) -> None:
         """0x02 is CodeView's legacy 16-bit FarPointer mode, not near32 --
-        must not be given near32's 4-byte size. Falls to the generic
-        (unverified-exotic-mode) default, the same as any other
-        unrecognized pointer mode."""
+        must not be given near32's 4-byte size. P2 review, fresh evidence,
+        round two (Codex): resolves to its own real, spec-documented
+        4-byte width (2-byte segment + 2-byte offset), not a generic
+        default -- every mode 0x01-0x07 is a known constant, not a guess."""
         db = self._make_db([])
         ti = 0x0274  # mode=0x02 (FarPointer, legacy), kind=0x74 (int)
         name = db.type_name(ti)
         assert "*" in name
-        assert db.type_size(ti) == 8  # default ptr size, not near32's 4
+        assert db.type_size(ti) == 4  # FarPointer's own real size
 
-    def test_simple_type_other_pointer_mode(self) -> None:
-        """Unknown pointer mode should still produce pointer name."""
+    def test_simple_type_huge_pointer_mode(self) -> None:
+        """0x03 (HugePointer, legacy 16-bit) resolves to its own
+        documented 4-byte width -- same round-two fix as FarPointer above,
+        renamed from this test's previous "unknown pointer mode" framing
+        now that every mode 0x01-0x07 is individually recognized."""
         db = self._make_db([])
         ti = 0x0374  # mode=0x03, kind=0x74
         name = db.type_name(ti)
         assert "*" in name
-        assert db.type_size(ti) == 8  # default ptr size
+        assert db.type_size(ti) == 4
+
+    def test_simple_type_far_pointer32_mode(self) -> None:
+        """0x05 (FarPointer32) resolves to its own documented 6-byte width
+        (4-byte offset + 2-byte selector)."""
+        db = self._make_db([])
+        ti = 0x0574  # mode=0x05, kind=0x74
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 6
+
+    def test_simple_type_near_pointer_mode(self) -> None:
+        """0x01 (NearPointer, legacy 16-bit near) resolves to its own
+        documented 2-byte width."""
+        db = self._make_db([])
+        ti = 0x0174  # mode=0x01, kind=0x74
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 2
+
+    def test_simple_type_near_pointer_128_mode(self) -> None:
+        """0x07 (NearPointer128) resolves to its own documented 16-byte
+        width -- the exact case the finding named beyond near32/near64."""
+        db = self._make_db([])
+        ti = 0x0774  # mode=0x07, kind=0x74
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 16
+
+    def test_simple_type_undefined_pointer_mode_marks_unresolved(self) -> None:
+        """A mode value outside 0x01-0x07 (the type index's own mode
+        field is 4 bits, so 0x08-0x0F are representable but undefined by
+        the CodeView spec) is genuinely unresolvable -- must fall to the
+        generic default AND record it via unresolved_type_ref_count,
+        unlike the now-fully-decoded 0x01-0x07 range above."""
+        db = self._make_db([])
+        ti = 0x0874  # mode=0x08 (undefined), kind=0x74
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 8  # best-effort default
+        assert db.unresolved_type_ref_count == 1
 
     def test_pointer_lvalue_reference(self) -> None:
         """LValueReference pointer mode (1)."""

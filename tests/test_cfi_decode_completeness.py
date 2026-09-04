@@ -435,18 +435,33 @@ class TestEveryExportedAliasReceivesCfiFacts:
         assert set(meta.frame_registers) == {"solo_fn"}
 
 
-class TestNonCodeEntrySymbolArchExcludedFromCoverage:
+class TestFunctionDescriptorArchExcludedFromCoverage:
     """P1 review, fresh evidence (Codex): on big-endian PPC64 ELFv1, an
     exported STT_FUNC symbol's ``st_value`` points to its ``.opd`` function
     descriptor, not its code entry, so it can never equal any FDE's own
     ``initial_location`` -- every exported function on such a binary would
     wrongly read "uncovered" under the naive address-equality check. Fixed
-    by restricting the coverage set to architectures this module has
-    verified register-name support for (``_CODE_ENTRY_SYMBOL_ARCHES``)."""
+    by excluding the documented function-descriptor architectures
+    (``_FUNCTION_DESCRIPTOR_ARCHES``) from the coverage set.
 
-    def test_unmapped_arch_with_no_matching_fde_is_not_flagged(self) -> None:
+    A second P1 review round (fresh evidence, Codex) found the original
+    fix over-corrected: it excluded coverage for every architecture this
+    module lacks a register-name table for (an ALLOWLIST keyed off
+    ``_reg_name``'s own x64/x86/aarch64 set), which has nothing to do with
+    whether ``st_value`` names a real code entry -- silently disabling the
+    check for RISC-V, ARM32, MIPS, and every other direct-entry
+    architecture too. Flipped to a denylist of only the documented
+    function-descriptor ABIs; see
+    TestOtherArchitecturesGetCoverageByDefault below for the fix proving
+    a previously-excluded direct-entry architecture (RISC-V) is now
+    correctly tracked."""
+
+    def test_ppc64_with_no_matching_fde_is_not_flagged(self) -> None:
+        # "64-bit PowerPC" is pyelftools' own get_machine_arch() spelling
+        # for EM_PPC64 -- _normalize_arch has no remap entry for it, so it
+        # passes through verbatim.
         mock_elf = MagicMock()
-        mock_elf.get_machine_arch.return_value = "PPC64"
+        mock_elf.get_machine_arch.return_value = "64-bit PowerPC"
         dyn = MagicMock()
         # st_value (0x1000) deliberately never matches the FDE's own
         # initial_location (0x2000) -- the exact PPC64 .opd-descriptor
@@ -481,3 +496,48 @@ class TestNonCodeEntrySymbolArchExcludedFromCoverage:
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+
+class TestOtherArchitecturesGetCoverageByDefault:
+    """P1 review, fresh evidence (Codex): a direct-entry architecture this
+    module has no register-name table for (e.g. RISC-V) must still get
+    the coverage check -- only the documented function-descriptor ABIs in
+    _FUNCTION_DESCRIPTOR_ARCHES are excluded now, not every architecture
+    outside a small register-name-table allowlist."""
+
+    def test_riscv_with_no_matching_fde_is_flagged(self) -> None:
+        mock_elf = MagicMock()
+        # "RISC-V" is pyelftools' own get_machine_arch() spelling for
+        # EM_RISCV.
+        mock_elf.get_machine_arch.return_value = "RISC-V"
+        dyn = MagicMock()
+        sym = _sym("riscv_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x2000)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+    def test_riscv_fully_covered_is_not_flagged(self) -> None:
+        """Positive control: a fully-covered RISC-V binary must not be
+        wrongly flagged -- proving the fix only adds detection, not false
+        positives on the ordinary covered case."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "RISC-V"
+        dyn = MagicMock()
+        sym = _sym("riscv_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x1000)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
