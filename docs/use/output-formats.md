@@ -668,10 +668,19 @@ Every JSON report carries a top-level `report_schema_version` field
 > field of the same name and shape — e.g. a warning that the two compared
 > binaries are byte-identical (a possible mistaken input, not a real
 > "no ABI differences" result). Omitted when there is nothing to warn about.
+>
+> `analysis_assurance.debug_evidence` (`report_schema_version` 2.47,
+> `scan_schema_version` 1.22) is a per-side `{source, basic, advanced}`
+> receipt of what the DWARF/PDB/BTF/CTF extraction for that side actually
+> achieved (`parsed`/`partial`/`presence_only`/`failed`/`not_supported`/
+> `not_available`) — distinct from the coarser `dwarf_context_status`
+> bucket, which cannot by itself tell "fully parsed" apart from a cheap
+> section-presence probe or a partially-failed compilation-unit walk.
+> Present whenever `analysis_assurance` itself is.
 
 ```json
 {
-  "report_schema_version": "2.46",
+  "report_schema_version": "2.47",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

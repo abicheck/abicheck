@@ -688,7 +688,7 @@ from typing import Any
 #:       settings previously published an identical
 #:       ``surface.scope_to_public_surface`` value despite retaining
 #:       genuinely different findings.
-REPORT_SCHEMA_VERSION = "2.46"
+REPORT_SCHEMA_VERSION = "2.47"  #: analysis_assurance gains debug_evidence (per-side DWARF/PDB/BTF/CTF extraction-outcome receipt); additive, present whenever analysis_assurance itself is.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -1011,7 +1011,7 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        more: ``surface.scope_to_public_surface_requested`` was added,
 #:        same round as `compare`'s report_schema_version 2.46 entry.
 #: 1.21 -- ``scan --against``'s baseline summary gains ``coverage_warnings`` (Codex review), mirroring `compare`'s own top-level field of the same name/shape -- e.g. a byte-identical-binaries warning. Additive key, omitted when empty.
-SCAN_SCHEMA_VERSION = "1.21"
+SCAN_SCHEMA_VERSION = "1.22"  #: diff.analysis_assurance gains debug_evidence, compare's report_schema_version 2.47 counterpart; additive, present whenever analysis_assurance itself is.
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

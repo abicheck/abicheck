@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for BTF (BPF Type Format) parser."""
+
 from __future__ import annotations
 
 import struct
@@ -57,6 +58,7 @@ from abicheck.btf_metadata import (
 # Helpers to build synthetic BTF blobs
 # ---------------------------------------------------------------------------
 
+
 class BtfBuilder:
     """Helper to construct synthetic BTF binary blobs for testing."""
 
@@ -74,8 +76,15 @@ class BtfBuilder:
         self._str_offsets[s] = off
         return off
 
-    def add_type(self, name: str, kind: int, vlen: int, size_or_type: int,
-                 extra: bytes = b"", kflag: int = 0) -> int:
+    def add_type(
+        self,
+        name: str,
+        kind: int,
+        vlen: int,
+        size_or_type: int,
+        extra: bytes = b"",
+        kflag: int = 0,
+    ) -> int:
         """Add a type entry, return its 1-based type ID."""
         name_off = self.add_string(name) if name else 0
         info = (kflag << 31) | (kind << 24) | (vlen & 0xFFFF)
@@ -92,15 +101,24 @@ class BtfBuilder:
         type_len = len(type_data)
         str_off = type_len
         str_len = len(str_data)
-        header = struct.pack("<HBBIIIII",
-                             BTF_MAGIC, BTF_VERSION, 0, hdr_len,
-                             type_off, type_len, str_off, str_len)
+        header = struct.pack(
+            "<HBBIIIII",
+            BTF_MAGIC,
+            BTF_VERSION,
+            0,
+            hdr_len,
+            type_off,
+            type_len,
+            str_off,
+            str_len,
+        )
         return header + type_data + str_data
 
 
 # ---------------------------------------------------------------------------
 # String table
 # ---------------------------------------------------------------------------
+
 
 class TestReadString:
     def test_basic(self) -> None:
@@ -119,6 +137,7 @@ class TestReadString:
 # ---------------------------------------------------------------------------
 # Header parsing
 # ---------------------------------------------------------------------------
+
 
 class TestParseHeader:
     def test_valid_header(self) -> None:
@@ -142,6 +161,7 @@ class TestParseHeader:
 # ---------------------------------------------------------------------------
 # Type parsing
 # ---------------------------------------------------------------------------
+
 
 class TestParseTypes:
     def test_empty_section(self) -> None:
@@ -168,6 +188,7 @@ class TestParseTypes:
 # Full parse: structs
 # ---------------------------------------------------------------------------
 
+
 class TestBtfStructs:
     def test_simple_struct(self) -> None:
         b = BtfBuilder()
@@ -179,8 +200,8 @@ class TestBtfStructs:
         # Member: name_off(4) + type(4) + offset(4)
         m1_name = b.add_string("x")
         m2_name = b.add_string("y")
-        members = struct.pack("<III", m1_name, 1, 0)     # x: int at offset 0
-        members += struct.pack("<III", m2_name, 1, 32)   # y: int at offset 32 bits
+        members = struct.pack("<III", m1_name, 1, 0)  # x: int at offset 0
+        members += struct.pack("<III", m2_name, 1, 32)  # y: int at offset 32 bits
         b.add_type("point", BTF_KIND_STRUCT, 2, 8, extra=members)
 
         meta = parse_btf_from_bytes(b.build())
@@ -221,8 +242,8 @@ class TestBtfStructs:
         m1_name = b.add_string("a")
         m2_name = b.add_string("b")
         # a: 3 bits at bit 0, b: 5 bits at bit 3
-        m1_offset = (3 << 24) | 0   # bitfield_size=3, bit_offset=0
-        m2_offset = (5 << 24) | 3   # bitfield_size=5, bit_offset=3
+        m1_offset = (3 << 24) | 0  # bitfield_size=3, bit_offset=0
+        m2_offset = (5 << 24) | 3  # bitfield_size=5, bit_offset=3
         members = struct.pack("<III", m1_name, 1, m1_offset)
         members += struct.pack("<III", m2_name, 1, m2_offset)
         b.add_type("flags", BTF_KIND_STRUCT, 2, 4, extra=members, kflag=1)
@@ -246,6 +267,7 @@ class TestBtfStructs:
 # ---------------------------------------------------------------------------
 # Full parse: enums
 # ---------------------------------------------------------------------------
+
 
 class TestBtfEnums:
     def test_simple_enum(self) -> None:
@@ -311,6 +333,7 @@ class TestBtfEnums:
 # Full parse: function prototypes
 # ---------------------------------------------------------------------------
 
+
 class TestBtfFuncProtos:
     def test_function_proto(self) -> None:
         b = BtfBuilder()
@@ -323,7 +346,9 @@ class TestBtfFuncProtos:
         p2_name = b.add_string("b")
         params = struct.pack("<II", p1_name, 1)  # param a: int
         params += struct.pack("<II", p2_name, 1)  # param b: int
-        b.add_type("", BTF_KIND_FUNC_PROTO, 2, 1, extra=params)  # returns int (type_id=1)
+        b.add_type(
+            "", BTF_KIND_FUNC_PROTO, 2, 1, extra=params
+        )  # returns int (type_id=1)
 
         # Add FUNC pointing to FUNC_PROTO (id=3)
         b.add_type("add", BTF_KIND_FUNC, 0, 2)  # size_or_type = proto type_id
@@ -341,6 +366,7 @@ class TestBtfFuncProtos:
 # Full parse: typedefs
 # ---------------------------------------------------------------------------
 
+
 class TestBtfTypedefs:
     def test_typedef(self) -> None:
         b = BtfBuilder()
@@ -356,6 +382,7 @@ class TestBtfTypedefs:
 # Type resolution
 # ---------------------------------------------------------------------------
 
+
 class TestTypeResolver:
     def test_pointer_name(self) -> None:
         b = BtfBuilder()
@@ -368,7 +395,7 @@ class TestTypeResolver:
         type_start = hdr.hdr_len + hdr.type_off
         str_start = hdr.hdr_len + hdr.str_off
         str_end = str_start + hdr.str_len
-        types = _parse_types(data[type_start:type_start + hdr.type_len])
+        types = _parse_types(data[type_start : type_start + hdr.type_len])
         resolver = _TypeResolver(types, data[str_start:str_end])
         assert resolver.name(2) == "int *"
         assert resolver.size(2) == 8
@@ -384,7 +411,7 @@ class TestTypeResolver:
         type_start = hdr.hdr_len + hdr.type_off
         str_start = hdr.hdr_len + hdr.str_off
         str_end = str_start + hdr.str_len
-        types = _parse_types(data[type_start:type_start + hdr.type_len])
+        types = _parse_types(data[type_start : type_start + hdr.type_len])
         resolver = _TypeResolver(types, data[str_start:str_end], pointer_size=4)
         assert resolver.name(2) == "int *"
         assert resolver.size(2) == 4
@@ -400,7 +427,7 @@ class TestTypeResolver:
         type_start = hdr.hdr_len + hdr.type_off
         str_start = hdr.hdr_len + hdr.str_off
         str_end = str_start + hdr.str_len
-        types = _parse_types(data[type_start:type_start + hdr.type_len])
+        types = _parse_types(data[type_start : type_start + hdr.type_len])
         resolver = _TypeResolver(types, data[str_start:str_end])
         assert resolver.name(2) == "const int"
 
@@ -409,7 +436,7 @@ class TestTypeResolver:
         data = b.build()
         hdr = _parse_header(data)
         types = _parse_types(b"")
-        resolver = _TypeResolver(types, data[hdr.hdr_len + hdr.str_off:])
+        resolver = _TypeResolver(types, data[hdr.hdr_len + hdr.str_off :])
         assert resolver.name(0) == "void"
         assert resolver.size(0) == 0
 
@@ -417,6 +444,7 @@ class TestTypeResolver:
 # ---------------------------------------------------------------------------
 # to_dwarf_metadata conversion
 # ---------------------------------------------------------------------------
+
 
 class TestToDwarfMetadata:
     def test_conversion(self) -> None:
@@ -433,14 +461,66 @@ class TestToDwarfMetadata:
         assert dwarf.has_dwarf  # maps to has_btf
         assert "simple" in dwarf.structs
         assert dwarf.structs["simple"].name == "simple"
+        assert dwarf.evidence_state == "parsed"
+        assert meta.extraction_partial is False
+
+    def test_struct_extraction_failure_propagates_to_partial(self, monkeypatch) -> None:
+        """P2 review: parse_btf_from_bytes catches a struct-extraction
+        exception internally and returns a partially-populated object, but
+        must not silently claim "parsed" basic layout evidence for it."""
+        from abicheck import btf_metadata as btf_mod
+
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+
+        def boom(*_a, **_k):
+            raise RuntimeError("bad struct record")
+
+        monkeypatch.setattr(btf_mod, "_extract_structs", boom)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.has_btf is True
+        assert meta.extraction_partial is True
+
+        dwarf = meta.to_dwarf_metadata()
+        assert dwarf.has_dwarf is True
+        assert dwarf.evidence_state == "partial"
+
+    def test_enum_only_extraction_failure_still_marks_partial(
+        self, monkeypatch
+    ) -> None:
+        """Even a failure in a stage to_dwarf_metadata() doesn't itself
+        transfer (enums/func_protos/typedefs) must still downgrade the
+        converted basic-layout receipt -- an enum/func_proto/typedef bug
+        is just as much evidence the overall BTF parse was NOT fully
+        trustworthy, even though only structs/enums cross into
+        DwarfMetadata."""
+        from abicheck import btf_metadata as btf_mod
+
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+
+        def boom(*_a, **_k):
+            raise RuntimeError("bad func_proto record")
+
+        monkeypatch.setattr(btf_mod, "_extract_func_protos", boom)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert meta.to_dwarf_metadata().evidence_state == "partial"
 
 
 # ---------------------------------------------------------------------------
 # Error handling / graceful degradation
 # ---------------------------------------------------------------------------
 
+
 class TestBtfElfSection:
-    def test_read_btf_section_returns_data_and_pointer_size(self, tmp_path, monkeypatch) -> None:
+    def test_read_btf_section_returns_data_and_pointer_size(
+        self, tmp_path, monkeypatch
+    ) -> None:
         btf_data = b"btf"
 
         class FakeSection:
@@ -458,13 +538,16 @@ class TestBtfElfSection:
                 return FakeSection()
 
         import elftools.elf.elffile
+
         monkeypatch.setattr(elftools.elf.elffile, "ELFFile", FakeElf)
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"not really elf")
 
         assert _read_btf_section(elf_path) == (btf_data, 4)
 
-    def test_read_btf_section_returns_none_when_section_missing(self, tmp_path, monkeypatch) -> None:
+    def test_read_btf_section_returns_none_when_section_missing(
+        self, tmp_path, monkeypatch
+    ) -> None:
         class FakeElf:
             elfclass = 64
 
@@ -476,20 +559,27 @@ class TestBtfElfSection:
                 return None
 
         import elftools.elf.elffile
+
         monkeypatch.setattr(elftools.elf.elffile, "ELFFile", FakeElf)
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"not really elf")
 
         assert _read_btf_section(elf_path) is None
 
-    def test_parse_btf_metadata_returns_empty_when_section_missing(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("abicheck.btf_metadata._read_btf_section", lambda _path: None)
+    def test_parse_btf_metadata_returns_empty_when_section_missing(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            "abicheck.btf_metadata._read_btf_section", lambda _path: None
+        )
 
         meta = parse_btf_metadata(tmp_path / "lib.so")
 
         assert not meta.has_btf
 
-    def test_parse_btf_metadata_passes_pointer_size_from_elf(self, tmp_path, monkeypatch) -> None:
+    def test_parse_btf_metadata_passes_pointer_size_from_elf(
+        self, tmp_path, monkeypatch
+    ) -> None:
         b = BtfBuilder()
         int_enc = struct.pack("<I", 32)
         b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
@@ -534,6 +624,7 @@ class TestBtfErrorHandling:
 # TypeMetadataSource protocol
 # ---------------------------------------------------------------------------
 
+
 class TestTypeMetadataSourceProtocol:
     def test_protocol_methods(self) -> None:
         b = BtfBuilder()
@@ -557,6 +648,7 @@ class TestTypeMetadataSourceProtocol:
 
     def test_isinstance_check(self) -> None:
         from abicheck.type_metadata import TypeMetadataSource
+
         meta = BtfMetadata(has_btf=True)
         assert isinstance(meta, TypeMetadataSource)
 
@@ -564,6 +656,7 @@ class TestTypeMetadataSourceProtocol:
 # ---------------------------------------------------------------------------
 # BtfMetadata accessor methods
 # ---------------------------------------------------------------------------
+
 
 class TestBtfMetadataAccessors:
     def test_get_function_proto(self) -> None:
@@ -601,6 +694,7 @@ class TestBtfMetadataAccessors:
 # _extra_data_size coverage
 # ---------------------------------------------------------------------------
 
+
 class TestExtraDataSize:
     def test_float(self) -> None:
         assert _extra_data_size(BTF_KIND_FLOAT, 0) == 4
@@ -628,6 +722,7 @@ class TestExtraDataSize:
 # Extended type resolver coverage
 # ---------------------------------------------------------------------------
 
+
 class TestTypeResolverExtended:
     def _build_and_resolve(self, builder: BtfBuilder) -> _TypeResolver:
         data = builder.build()
@@ -635,7 +730,7 @@ class TestTypeResolverExtended:
         type_start = hdr.hdr_len + hdr.type_off
         str_start = hdr.hdr_len + hdr.str_off
         str_end = str_start + hdr.str_len
-        types = _parse_types(data[type_start:type_start + hdr.type_len])
+        types = _parse_types(data[type_start : type_start + hdr.type_len])
         return _TypeResolver(types, data[str_start:str_end])
 
     def test_float_name_and_size(self) -> None:
@@ -668,9 +763,10 @@ class TestTypeResolverExtended:
         """Array with short extra data (< 12 bytes) returns fallback values."""
         # Construct BtfType directly with truncated extra to bypass _parse_types
         void = BtfType(type_id=0, name_off=0, info=0, size_or_type=0, extra=b"")
-        array_info = (BTF_KIND_ARRAY << 24)
-        arr = BtfType(type_id=1, name_off=0, info=array_info, size_or_type=0,
-                      extra=b"\x00" * 8)  # only 8 bytes, need 12
+        array_info = BTF_KIND_ARRAY << 24
+        arr = BtfType(
+            type_id=1, name_off=0, info=array_info, size_or_type=0, extra=b"\x00" * 8
+        )  # only 8 bytes, need 12
         resolver = _TypeResolver([void, arr], b"\x00")
         assert resolver.name(1) == "[]"
         assert resolver.size(1) == 0
@@ -881,6 +977,7 @@ class TestTypeResolverExtended:
 # Header edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestParseHeaderExtended:
     def test_nonstandard_version_parses(self) -> None:
         """Non-standard BTF version should still parse."""
@@ -899,6 +996,7 @@ class TestParseHeaderExtended:
 # ---------------------------------------------------------------------------
 # Anonymous/unnamed enum and func proto edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestBtfEdgeCases:
     def test_anonymous_enum_skipped(self) -> None:
@@ -954,7 +1052,7 @@ class TestBtfEdgeCases:
         hdr = _parse_header(data)
         type_start = hdr.hdr_len + hdr.type_off
         # Truncate to only have partial type data (just the 12-byte header, no extra)
-        truncated_type_data = data[type_start:type_start + 12]
+        truncated_type_data = data[type_start : type_start + 12]
         # The int type needs 4 bytes of extra, so 12 bytes is truncated
         types = _parse_types(truncated_type_data)
         # Should get just the void sentinel since the int is truncated
@@ -963,9 +1061,9 @@ class TestBtfEdgeCases:
     def test_section_bounds_exceed_data(self) -> None:
         """Header claiming type/string sections beyond data size."""
         # Build valid header but with inflated lengths
-        hdr = struct.pack("<HBBIIIII",
-                          BTF_MAGIC, BTF_VERSION, 0, 24,
-                          0, 99999, 0, 1)  # type_len way too large
+        hdr = struct.pack(
+            "<HBBIIIII", BTF_MAGIC, BTF_VERSION, 0, 24, 0, 99999, 0, 1
+        )  # type_len way too large
         data = hdr + b"\x00"
         meta = parse_btf_from_bytes(data)
         assert not meta.has_btf

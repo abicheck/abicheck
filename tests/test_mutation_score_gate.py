@@ -67,15 +67,6 @@ def test_parse_survivors_returns_none_when_unmeasurable(text: str) -> None:
     assert gate.parse_survivors(text) is None
 
 
-def test_mutmut_subprocess_timeout_matches_the_workflow_ceiling() -> None:
-    """The Python cap must not pre-empt the GitHub Actions job deadline."""
-    workflow = (
-        Path(__file__).resolve().parent.parent / ".github" / "workflows" / "mutation.yml"
-    ).read_text(encoding="utf-8")
-    assert "timeout-minutes: 240" in workflow
-    assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 240 * 60
-
-
 def test_stats_without_a_survivor_count_are_not_a_completion_witness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -449,15 +440,24 @@ def test_diff_scoped_allows_recorded_legacy_survivors_but_rejects_delta(
     diff, baseline = _diff_scoped_env(tmp_path, monkeypatch)
     Path(baseline).write_text(
         json.dumps(
-            {"modules": {"abicheck/diff_types.py": {
-                "survivors": 10, "keys": [], "functions": {"alpha": 1}
-            }}},
+            {
+                "modules": {
+                    "abicheck/diff_types.py": {
+                        "survivors": 10,
+                        "keys": [],
+                        "functions": {"alpha": 1},
+                    }
+                }
+            },
         ),
         encoding="utf-8",
     )
-    one = _write(tmp_path, "one.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n")
+    one = _write(
+        tmp_path, "one.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+    )
     two = _write(
-        tmp_path, "two.txt",
+        tmp_path,
+        "two.txt",
         "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
         "    abicheck.diff_types.x_alpha__mutmut_2: survived\n",
     )

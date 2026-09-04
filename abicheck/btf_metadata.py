@@ -127,6 +127,7 @@ class BtfMetadata:
     typedefs: dict[str, str] = field(default_factory=dict)
     has_btf: bool = False
     type_count: int = 0
+    extraction_partial: bool = False  # any stage below raised+caught (P2 review)
 
     # TypeMetadataSource protocol
     @property
@@ -152,12 +153,14 @@ class BtfMetadata:
         typedefs are not included in DwarfMetadata. Callers needing full
         BTF data should use BtfMetadata directly.
         """
+        parsed_state = "partial" if self.extraction_partial else "parsed"
+        state = parsed_state if self.has_btf else "not_available"
         return DwarfMetadata(
             structs=dict(self.structs),
             enums=dict(self.enums),
             has_dwarf=self.has_btf,
             evidence_source="btf",
-            evidence_state="parsed" if self.has_btf else "not_available",
+            evidence_state=state,
         )
 
 
@@ -771,20 +774,24 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
         meta.structs = _extract_structs(types, resolver, str_data)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: struct extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     try:
         meta.enums = _extract_enums(types, str_data)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: enum extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     try:
         meta.func_protos = _extract_func_protos(types, resolver, str_data)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: func_proto extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     try:
         meta.typedefs = _extract_typedefs(types, resolver, str_data)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: typedef extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     return meta

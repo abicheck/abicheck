@@ -78,6 +78,59 @@ def selected_modules(
     return sorted(selected) or None
 
 
+def require_baseline_for_pr(
+    changed_paths: set[str], only_mutate: list[str], *, labelled: bool
+) -> bool:
+    """Whether this PR run needs baseline drift, not just ``--diff-scoped``.
+
+    ``--diff-scoped`` can only gate mutants in functions the diff actually
+    changed in a MUTATED production module — so a change that weakens a
+    detector test without touching that test's own paired production module
+    passes ``--diff-scoped`` having gated nothing at all for that module. Two
+    P2 review findings on the earlier bash-only ``mutation.yml`` heuristic
+    (aggregate ``mutated``/``mutated_tests`` booleans over the WHOLE
+    ``only_mutate`` + infrastructure path list) share one root cause: an
+    aggregate boolean cannot answer a per-module question.
+
+    1. A PR touching only a conventional detector test plus lane
+       infrastructure (``pyproject.toml``, this script, the workflow file)
+       matched BOTH the aggregate ``mutated`` filter (via the infrastructure
+       path) and ``mutated_tests`` -- so the old ``MATCHED_TESTS && !MATCHED``
+       condition read false and skipped the baseline requirement even though
+       no production module the test pairs with had actually changed.
+    2. A PR touching one mutated module (e.g. ``diff_types.py``) AND a
+       conventional test for a DIFFERENT module (e.g.
+       ``test_serialization_roundtrip.py``) matched the aggregate
+       ``mutated`` filter via the FIRST module -- so the same condition read
+       false even though ``serialization.py`` itself never changed and
+       ``--diff-scoped`` could not gate a weakened assertion there.
+
+    Fixed by resolving the question per module, directly from the real
+    changed-path set, rather than from any aggregate path-filter boolean:
+    for every ``only_mutate`` module whose OWN test glob
+    (``tests/test_<stem>*.py``) is touched, baseline drift is required
+    unless that SAME module is also in *changed_paths*. Infrastructure
+    paths are irrelevant to this check entirely (they say nothing about
+    which module's tests were touched), which is what makes finding 1
+    impossible by construction; checking each module independently rather
+    than folding into one aggregate boolean is what makes finding 2
+    impossible.
+
+    A ``mutation`` label always requires baseline drift regardless of the
+    diff -- it is documented as the complete check, and a label-forced run
+    on a diff this function would otherwise clear must not silently report
+    "gated nothing" and exit 0.
+    """
+    if labelled:
+        return True
+    for module in only_mutate:
+        pattern = f"tests/test_{Path(module).stem}*.py"
+        test_touched = any(fnmatch.fnmatch(p, pattern) for p in changed_paths)
+        if test_touched and module not in changed_paths:
+            return True
+    return False
+
+
 def rewrite_only_mutate(config_path: Path, modules: list[str]) -> None:
     """Replace only the TOML array, preserving the repository's comments."""
     text = config_path.read_text(encoding="utf-8")
@@ -94,7 +147,36 @@ def rewrite_only_mutate(config_path: Path, modules: list[str]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--base-ref", required=True, help="Git revision used as the merge-base"
+        "--base-ref",
+        required=True,
+        help=(
+            "Git revision this PR's mutation scope is diffed against, "
+            "resolved as 'git diff --name-only <BASE_REF>...HEAD' (three-dot: "
+            "changes on HEAD since the merge-base with <BASE_REF>, not a "
+            "literal two-sided diff). Any revision 'git diff' accepts: a "
+            "branch name (e.g. 'origin/main'), a tag, or a full/short commit "
+            "SHA. Must be resolvable in the local checkout this script runs "
+            "in (fetch it first if it isn't already present)."
+        ),
+    )
+    parser.add_argument(
+        "--print-require-baseline",
+        action="store_true",
+        help=(
+            "Instead of rewriting only_mutate, print "
+            "'require_baseline=true'/'require_baseline=false' (GITHUB_OUTPUT "
+            "format) answering require_baseline_for_pr() for this diff, and "
+            "exit without touching pyproject.toml. Pairs with --labelled."
+        ),
+    )
+    parser.add_argument(
+        "--labelled",
+        action="store_true",
+        help=(
+            "Only meaningful with --print-require-baseline: the PR carries "
+            "the 'mutation' label, which always requires baseline drift "
+            "regardless of the diff."
+        ),
     )
     args = parser.parse_args()
 
@@ -107,7 +189,16 @@ def main() -> int:
         capture_output=True,
         text=True,
     )
-    modules = selected_modules(set(result.stdout.splitlines()), only_mutate)
+    changed_paths = set(result.stdout.splitlines())
+
+    if args.print_require_baseline:
+        answer = require_baseline_for_pr(
+            changed_paths, only_mutate, labelled=args.labelled
+        )
+        print(f"require_baseline={'true' if answer else 'false'}")
+        return 0
+
+    modules = selected_modules(changed_paths, only_mutate)
     if modules is None:
         print("mutation scope: full configured scope")
     else:

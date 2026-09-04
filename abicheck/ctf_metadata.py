@@ -137,6 +137,7 @@ class CtfMetadata:
     typedefs: dict[str, str] = field(default_factory=dict)
     has_ctf: bool = False
     type_count: int = 0
+    extraction_partial: bool = False  # any stage below raised+caught (P2 review)
 
     # TypeMetadataSource protocol
     @property
@@ -157,12 +158,14 @@ class CtfMetadata:
 
     def to_dwarf_metadata(self) -> DwarfMetadata:
         """Convert to DwarfMetadata for checker compatibility."""
+        parsed_state = "partial" if self.extraction_partial else "parsed"
+        state = parsed_state if self.has_ctf else "not_available"
         return DwarfMetadata(
             structs=dict(self.structs),
             enums=dict(self.enums),
             has_dwarf=self.has_ctf,
             evidence_source="ctf",
-            evidence_state="parsed" if self.has_ctf else "not_available",
+            evidence_state=state,
         )
 
 
@@ -812,15 +815,18 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
         meta.structs = _extract_structs(types, resolver, str_data, header.version)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_ctf_from_bytes: struct extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     try:
         meta.enums = _extract_enums(types, str_data)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_ctf_from_bytes: enum extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     try:
         meta.typedefs = _extract_typedefs(types, resolver, str_data)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_ctf_from_bytes: typedef extraction failed: %s", exc)
+        meta.extraction_partial = True
 
     return meta

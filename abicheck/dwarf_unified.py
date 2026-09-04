@@ -175,9 +175,23 @@ def parse_dwarf_from_session(
     # DIE offsets are only unique within one ELF file — do not share across binaries.
     type_cache: dict[tuple[int, int], tuple[str, int]] = {}
 
+    skeleton_cus = 0
     for CU in session.dwarf.iter_CUs():
         meta.cu_total += 1
         adv.cu_total += 1
+        if _is_skeleton_cu(CU):
+            # -gsplit-dwarf: this CU is a skeleton -- its real layout/
+            # calling-convention DIEs live in an unconsumed .dwo/.dwp file
+            # (debug_resolver.py can locate one for an EXTERNAL symbol-file
+            # search, but nothing in this parse path opens and merges it).
+            # iter_CUs() and the per-CU walk below both "succeed" on a
+            # skeleton -- there is simply almost nothing under it -- so
+            # without this check the channel would be stamped "parsed" while
+            # actually carrying none of the real type/CC facts (P1 review:
+            # reproduced int->long struct-layout regression missed at
+            # NO_CHANGE/exit 0). Fail closed: report the channel as
+            # incomplete rather than attempt full DWO/DWP resolution here.
+            skeleton_cus += 1
         try:
             _meta_process_cu(CU, meta, type_cache)
         except Exception as exc:  # noqa: BLE001
@@ -191,13 +205,54 @@ def parse_dwarf_from_session(
         if low_memory:
             free_cu_die_cache(CU)
 
+    if skeleton_cus:
+        log.warning(
+            "parse_dwarf: %d/%d compilation unit(s) in %s are split-DWARF "
+            "skeletons whose real DIEs live in an unconsumed .dwo/.dwp file "
+            "-- treating both DWARF channels as incomplete",
+            skeleton_cus,
+            meta.cu_total,
+            session.path,
+        )
+
     for channel in (meta, adv):
-        if channel.cu_failed:
+        if channel.cu_failed or skeleton_cus:
             channel.evidence_state = (
-                "failed" if channel.cu_failed == channel.cu_total else "partial"
+                "failed"
+                if channel.cu_failed and channel.cu_failed == channel.cu_total
+                else "partial"
             )
 
     return meta, adv
+
+
+# DWARF5 CU unit_type values that name a split-DWARF skeleton/split unit
+# (DWARFv5 sec 7.5.1.1). Not present at all on DWARF<=4 headers -- those
+# rely solely on the DW_AT_GNU_dwo_name/DW_AT_dwo_name attribute check below.
+_DW_UT_SKELETON = 0x04
+_DW_UT_SPLIT_COMPILE = 0x05
+_SKELETON_DWO_ATTRS = ("DW_AT_GNU_dwo_name", "DW_AT_dwo_name")
+
+
+def _is_skeleton_cu(CU: Any) -> bool:
+    """Whether *CU* is a split-DWARF skeleton (``-gsplit-dwarf``).
+
+    A skeleton CU's own top DIE carries only a handful of attributes
+    (``DW_AT_GNU_dwo_name``/``DW_AT_dwo_name`` naming the ``.dwo`` that holds
+    the real DIE tree) and essentially no children -- so a normal CU walk
+    over it "succeeds" while extracting almost nothing. Never raises: an
+    unreadable top DIE is not itself proof of a skeleton, just missing
+    evidence for one, so it is treated as "not a skeleton" here and left to
+    the ordinary per-CU exception handling in the caller.
+    """
+    try:
+        unit_type = CU.header.get("unit_type")
+        if unit_type in (_DW_UT_SKELETON, _DW_UT_SPLIT_COMPILE):
+            return True
+        top = CU.get_top_DIE()
+        return any(attr in top.attributes for attr in _SKELETON_DWO_ATTRS)
+    except Exception:  # noqa: BLE001 - detection must never abort real parsing
+        return False
 
 
 # ---------------------------------------------------------------------------

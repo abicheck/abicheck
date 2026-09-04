@@ -247,21 +247,36 @@ def test_a_detector_test_change_makes_the_pr_lane_fail_closed() -> None:
     assert "require_baseline" in pr_step["env"]["REQUIRE_BASELINE"]
 
 
+def _require_baseline_step() -> dict:
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    return next(s for s in steps if s.get("id") == "require_baseline")
+
+
 def test_a_label_forced_run_also_fails_closed() -> None:
     """The `mutation` label is documented as the complete check, so a
     label-forced run on a test-only diff outside the globs must not go green
     on "gated nothing" — the one run someone explicitly asked to be thorough
-    (Codex review)."""
-    steps = _workflow()["jobs"]["resolve"]["steps"]
-    decide = next(s for s in steps if s.get("id") == "decide")
-    # Anchored on the branch that sets the flag, not on the condition text
-    # alone: the run decision one block up ORs the same three variables, so a
-    # bare substring match passed against a version that dropped the label
-    # from *this* branch (caught by falsifying the fix).
-    guard = decide["run"]
-    assert '"$LABELLED" = "true"' in guard, guard
-    assert '"$MATCHED_TESTS" = "true"' in guard, guard
-    assert '"$MATCHED" != "true"' in guard, guard
+    (Codex review).
+
+    P1 review: the earlier version of this step computed require_baseline
+    from the AGGREGATE MATCHED/MATCHED_TESTS booleans in bash, which could
+    not distinguish "the changed test's own paired production module also
+    changed" from "some OTHER module changed, or only lane infrastructure
+    did" — see scripts/mutation_scope.py's require_baseline_for_pr()
+    docstring for both concrete counterexamples this step's own decide
+    branch used to miss. Fixed by delegating to that per-module-correlated
+    Python function instead of restating the label/matched-test condition
+    in bash here at all — this test now pins that delegation (and that the
+    label threads through as --labelled) rather than the retired bash
+    condition text.
+    """
+    step = _require_baseline_step()
+    assert "require_baseline_for_pr" not in step["run"]  # invoked via the CLI
+    assert "scripts/mutation_scope.py" in step["run"]
+    assert "--print-require-baseline" in step["run"]
+    assert "--labelled" in step["run"]
+    assert "LABELLED" in step["env"]
+    assert "mutation" in str(step["env"]["LABELLED"])
 
 
 def test_labelled_prs_keep_the_full_mutation_scope() -> None:
@@ -272,7 +287,11 @@ def test_labelled_prs_keep_the_full_mutation_scope() -> None:
     a false zero-mutant success.
     """
     steps = _workflow()["jobs"]["mutmut"]["steps"]
-    scope = next(s for s in steps if s.get("name") == "Narrow mutation scope to PR-implicated detector modules")
+    scope = next(
+        s
+        for s in steps
+        if s.get("name") == "Narrow mutation scope to PR-implicated detector modules"
+    )
     condition = str(scope.get("if", ""))
     assert "github.event_name == 'pull_request'" in condition
     assert "!contains(github.event.pull_request.labels.*.name, 'mutation')" in condition
@@ -280,13 +299,25 @@ def test_labelled_prs_keep_the_full_mutation_scope() -> None:
 
 def test_the_require_baseline_signal_is_published_by_resolve() -> None:
     """Otherwise the fail-closed branch above reads an always-empty variable
-    and silently never fires."""
+    and silently never fires. The PR-path value comes from the
+    require_baseline step (real per-module diff correlation); the
+    non-PR-path value ("false", weekly/dispatch use a different mechanism
+    entirely) still comes from the decide step -- the job output falls back
+    to it only because the require_baseline step doesn't run outside a PR."""
     outputs = _workflow()["jobs"]["resolve"]["outputs"]
     assert "require_baseline" in outputs
+    assert (
+        "steps.require_baseline.outputs.require_baseline" in outputs["require_baseline"]
+    )
+    assert "steps.decide.outputs.require_baseline" in outputs["require_baseline"]
+
     steps = _workflow()["jobs"]["resolve"]["steps"]
     decide = next(s for s in steps if s.get("id") == "decide")
-    assert 'echo "require_baseline=true"' in decide["run"]
     assert 'echo "require_baseline=false"' in decide["run"]
+
+    step = _require_baseline_step()
+    assert step["if"] == "github.event_name == 'pull_request'"
+    assert '>> "$GITHUB_OUTPUT"' in step["run"]
 
 
 def test_the_mutmut_job_is_gated_on_that_decision() -> None:
@@ -671,7 +702,11 @@ def test_checkout_is_unshallow_for_the_diff_scoped_lane() -> None:
 def test_real_mutmut_parser_output_is_saved_for_failures() -> None:
     """A failed real-tool probe must identify its failing test in CI artifacts."""
     steps = _workflow()["jobs"]["mutmut"]["steps"]
-    probe = next(s for s in steps if s.get("name") == "Verify the parser against a real mutmut run")
+    probe = next(
+        s
+        for s in steps
+        if s.get("name") == "Verify the parser against a real mutmut run"
+    )
     assert "tee mutmut-real-parser-pytest.txt" in probe["run"]
     upload = next(s for s in steps if s.get("name") == "Upload mutmut results")
     assert "mutmut-real-parser-pytest.txt" in upload["with"]["path"]

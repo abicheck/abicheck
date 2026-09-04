@@ -1389,6 +1389,14 @@ def compute_analysis_assurance(
         receipt["basic"] == "parsed" and receipt["advanced"] != "parsed"
         for receipt in debug_evidence.values()
     )
+    # Symmetric complement of advanced_unavailable (P1 review): parsed
+    # dwarf_advanced with no basic dwarf channel on BOTH sides is symmetric,
+    # so _dwarf_context_status alone can't flag it, though diff_platform's
+    # layout diff still needs the basic channel and skips without it.
+    basic_unavailable = any(
+        receipt["advanced"] == "parsed" and receipt["basic"] != "parsed"
+        for receipt in debug_evidence.values()
+    )
     # Evidence states are a closed vocabulary. Any unknown state is unsafe to
     # treat as parsed: it may come from a hand-edited/third-party snapshot and
     # cannot prove the corresponding detector facts were evaluated. A wholly
@@ -1411,6 +1419,17 @@ def compute_analysis_assurance(
         notes.append(
             "parsed basic debug evidence lacks parsed DWARF-advanced "
             f"calling-convention/value-ABI capability on: {affected}"
+        )
+    if basic_unavailable:
+        affected = ", ".join(
+            side
+            for side, receipt in debug_evidence.items()
+            if receipt["advanced"] == "parsed" and receipt["basic"] != "parsed"
+        )
+        notes.append(
+            "parsed DWARF-advanced evidence lacks a parsed basic DWARF "
+            f"channel on: {affected} -- struct/enum layout comparison was "
+            "skipped for that side"
         )
     if debug_parse_incomplete:
         notes.append(
@@ -1505,6 +1524,7 @@ def compute_analysis_assurance(
         or header_context_status in ("drift_detected", "asymmetric")
         or dwarf_context_status == "asymmetric"
         or advanced_unavailable
+        or basic_unavailable
         or debug_parse_incomplete
         or dwarf_evidence_missing
         or l3_context_status == "asymmetric"

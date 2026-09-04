@@ -5,6 +5,7 @@ _walk_die_iter traversal, _process_struct with ODR, _process_member bitfields,
 _process_enum, _process_typedef, _expand_anonymous_member, _compute_type_info
 branches, _attr_str/_attr_int edge cases, and _compute_fallback_type_info.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,6 +31,7 @@ from abicheck.dwarf_metadata import (
 
 # ── Mock helpers ───────────────────────────────────────────────────────
 
+
 class _Attr:
     def __init__(self, value, form="DW_FORM_ref4"):
         self.value = value
@@ -39,8 +41,10 @@ class _Attr:
 class _Die:
     def __init__(self, tag, attrs=None, children=None, offset=0):
         self.tag = tag
-        self.attributes = {k: _Attr(v) if not isinstance(v, _Attr) else v
-                          for k, v in (attrs or {}).items()}
+        self.attributes = {
+            k: _Attr(v) if not isinstance(v, _Attr) else v
+            for k, v in (attrs or {}).items()
+        }
         self._children = list(children or [])
         self.offset = offset
 
@@ -59,10 +63,11 @@ class _CU:
         return self._top
 
     def get_DIE_from_refaddr(self, off):
-        return getattr(self, '_die_map', {}).get(off)
+        return getattr(self, "_die_map", {}).get(off)
 
 
 # ── parse_dwarf_metadata entry point ──────────────────────────────────
+
 
 class TestParseDwarfMetadata:
     def test_nonexistent_file_returns_empty(self, tmp_path):
@@ -93,6 +98,7 @@ class TestParseDwarfMetadata:
 
 
 # ── _parse with no DWARF ─────────────────────────────────────────────
+
 
 class TestParse:
     def test_no_dwarf_info(self):
@@ -126,14 +132,61 @@ class TestParse:
         with patch("abicheck.dwarf_metadata.ELFFile", return_value=mock_elf):
             result = _parse(MagicMock(), Path("/fake.so"))
         assert result.has_dwarf is True
+        # P2 review: a skipped CU must downgrade evidence_state to "partial"
+        # (not the "not_available" this standalone parser previously left
+        # it at unconditionally) -- one of two CUs failed here.
+        assert result.cu_total == 2
+        assert result.cu_failed == 1
+        assert result.evidence_state == "partial"
+
+    def test_full_success_reports_parsed(self) -> None:
+        """A clean parse (no CU raises) must stamp evidence_state="parsed",
+        not leave it at the dataclass default."""
+        mock_elf = MagicMock()
+        mock_elf.has_dwarf_info.return_value = True
+        mock_dwarf = MagicMock()
+
+        good_die = _Die("DW_TAG_compile_unit")
+        good_cu = MagicMock()
+        good_cu.cu_offset = 0
+        good_cu.get_top_DIE.return_value = good_die
+
+        mock_dwarf.iter_CUs.return_value = [good_cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with patch("abicheck.dwarf_metadata.ELFFile", return_value=mock_elf):
+            result = _parse(MagicMock(), Path("/fake.so"))
+        assert result.has_dwarf is True
+        assert result.cu_total == 1
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+
+    def test_every_cu_failing_reports_failed(self) -> None:
+        mock_elf = MagicMock()
+        mock_elf.has_dwarf_info.return_value = True
+        mock_dwarf = MagicMock()
+
+        bad_cu = MagicMock()
+        bad_cu.get_top_DIE.side_effect = RuntimeError("corrupt CU")
+        mock_dwarf.iter_CUs.return_value = [bad_cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with patch("abicheck.dwarf_metadata.ELFFile", return_value=mock_elf):
+            result = _parse(MagicMock(), Path("/fake.so"))
+        assert result.cu_total == 1
+        assert result.cu_failed == 1
+        assert result.evidence_state == "failed"
 
 
 # ── _walk_die_iter ────────────────────────────────────────────────────
 
+
 class TestWalkDieIter:
     def test_skip_tags_not_descended(self):
         """DW_TAG_subprogram subtrees are skipped."""
-        inner = _Die("DW_TAG_structure_type", {"DW_AT_name": "InnerStruct", "DW_AT_byte_size": 4})
+        inner = _Die(
+            "DW_TAG_structure_type", {"DW_AT_name": "InnerStruct", "DW_AT_byte_size": 4}
+        )
         func = _Die("DW_TAG_subprogram", children=[inner])
         root = _Die("DW_TAG_compile_unit", children=[func])
 
@@ -145,10 +198,13 @@ class TestWalkDieIter:
 
     def test_namespace_scoping(self):
         """Types inside namespaces get qualified names."""
-        struct = _Die("DW_TAG_structure_type", {
-            "DW_AT_name": "Foo",
-            "DW_AT_byte_size": 8,
-        })
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {
+                "DW_AT_name": "Foo",
+                "DW_AT_byte_size": 8,
+            },
+        )
         ns = _Die("DW_TAG_namespace", {"DW_AT_name": "MyNS"}, children=[struct])
         root = _Die("DW_TAG_compile_unit", children=[ns])
 
@@ -159,11 +215,17 @@ class TestWalkDieIter:
 
     def test_enum_processed(self):
         """DW_TAG_enumeration_type is processed."""
-        enumerator = _Die("DW_TAG_enumerator", {"DW_AT_name": "A", "DW_AT_const_value": 0})
-        enum = _Die("DW_TAG_enumeration_type", {
-            "DW_AT_name": "Color",
-            "DW_AT_byte_size": 4,
-        }, children=[enumerator])
+        enumerator = _Die(
+            "DW_TAG_enumerator", {"DW_AT_name": "A", "DW_AT_const_value": 0}
+        )
+        enum = _Die(
+            "DW_TAG_enumeration_type",
+            {
+                "DW_AT_name": "Color",
+                "DW_AT_byte_size": 4,
+            },
+            children=[enumerator],
+        )
         root = _Die("DW_TAG_compile_unit", children=[enum])
 
         meta = DwarfMetadata(has_dwarf=True)
@@ -175,19 +237,32 @@ class TestWalkDieIter:
     def test_typedef_to_anonymous_struct(self):
         """DW_TAG_typedef pointing to anonymous struct registers under typedef name."""
         # Create anonymous struct (no DW_AT_name)
-        member = _Die("DW_TAG_member", {
-            "DW_AT_name": "x",
-            "DW_AT_data_member_location": 0,
-        }, offset=10)
-        anon_struct = _Die("DW_TAG_structure_type", {
-            "DW_AT_byte_size": 4,
-        }, children=[member], offset=20)
+        member = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "x",
+                "DW_AT_data_member_location": 0,
+            },
+            offset=10,
+        )
+        anon_struct = _Die(
+            "DW_TAG_structure_type",
+            {
+                "DW_AT_byte_size": 4,
+            },
+            children=[member],
+            offset=20,
+        )
 
         # Create typedef pointing to it
-        typedef = _Die("DW_TAG_typedef", {
-            "DW_AT_name": "MyType",
-            "DW_AT_type": _Attr(20, "DW_FORM_ref_addr"),
-        }, offset=30)
+        typedef = _Die(
+            "DW_TAG_typedef",
+            {
+                "DW_AT_name": "MyType",
+                "DW_AT_type": _Attr(20, "DW_FORM_ref_addr"),
+            },
+            offset=30,
+        )
 
         root = _Die("DW_TAG_compile_unit", children=[anon_struct, typedef])
 
@@ -200,15 +275,26 @@ class TestWalkDieIter:
 
     def test_typedef_to_anonymous_enum(self):
         """DW_TAG_typedef pointing to anonymous enum registers under typedef name."""
-        enumerator = _Die("DW_TAG_enumerator", {"DW_AT_name": "VAL", "DW_AT_const_value": 1})
-        anon_enum = _Die("DW_TAG_enumeration_type", {
-            "DW_AT_byte_size": 4,
-        }, children=[enumerator], offset=50)
+        enumerator = _Die(
+            "DW_TAG_enumerator", {"DW_AT_name": "VAL", "DW_AT_const_value": 1}
+        )
+        anon_enum = _Die(
+            "DW_TAG_enumeration_type",
+            {
+                "DW_AT_byte_size": 4,
+            },
+            children=[enumerator],
+            offset=50,
+        )
 
-        typedef = _Die("DW_TAG_typedef", {
-            "DW_AT_name": "MyEnum",
-            "DW_AT_type": _Attr(50, "DW_FORM_ref_addr"),
-        }, offset=60)
+        typedef = _Die(
+            "DW_TAG_typedef",
+            {
+                "DW_AT_name": "MyEnum",
+                "DW_AT_type": _Attr(50, "DW_FORM_ref_addr"),
+            },
+            offset=60,
+        )
 
         root = _Die("DW_TAG_compile_unit", children=[anon_enum, typedef])
 
@@ -221,6 +307,7 @@ class TestWalkDieIter:
 
 
 # ── _process_struct / _process_struct_named ────────────────────────────
+
 
 class TestProcessStruct:
     def test_anonymous_struct_skipped(self):
@@ -254,7 +341,9 @@ class TestProcessStruct:
         assert meta.structs["U"].is_union is True
 
     def test_with_scope_prefix(self):
-        die = _Die("DW_TAG_structure_type", {"DW_AT_name": "Inner", "DW_AT_byte_size": 4})
+        die = _Die(
+            "DW_TAG_structure_type", {"DW_AT_name": "Inner", "DW_AT_byte_size": 4}
+        )
         meta = DwarfMetadata(has_dwarf=True)
         _process_struct(die, meta, _CU(), {}, scope_prefix="Outer")
         assert "Outer::Inner" in meta.structs
@@ -262,24 +351,39 @@ class TestProcessStruct:
     def test_anonymous_member_inlined(self):
         """Anonymous struct member fields are inlined into parent."""
         # Inner anon struct
-        inner_member = _Die("DW_TAG_member", {
-            "DW_AT_name": "y",
-            "DW_AT_data_member_location": 0,
-        })
-        anon_struct = _Die("DW_TAG_structure_type", {
-            "DW_AT_byte_size": 4,
-        }, children=[inner_member], offset=100)
+        inner_member = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "y",
+                "DW_AT_data_member_location": 0,
+            },
+        )
+        anon_struct = _Die(
+            "DW_TAG_structure_type",
+            {
+                "DW_AT_byte_size": 4,
+            },
+            children=[inner_member],
+            offset=100,
+        )
 
         # Anon member pointing to the struct
-        anon_member = _Die("DW_TAG_member", {
-            "DW_AT_data_member_location": 4,
-            "DW_AT_type": _Attr(100, "DW_FORM_ref_addr"),
-        })
+        anon_member = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_data_member_location": 4,
+                "DW_AT_type": _Attr(100, "DW_FORM_ref_addr"),
+            },
+        )
 
-        outer = _Die("DW_TAG_structure_type", {
-            "DW_AT_name": "S",
-            "DW_AT_byte_size": 8,
-        }, children=[anon_member])
+        outer = _Die(
+            "DW_TAG_structure_type",
+            {
+                "DW_AT_name": "S",
+                "DW_AT_byte_size": 8,
+            },
+            children=[anon_member],
+        )
 
         cu = _CU()
         cu._die_map = {100: anon_struct}
@@ -292,6 +396,7 @@ class TestProcessStruct:
 
 # ── _process_member ───────────────────────────────────────────────────
 
+
 class TestProcessMember:
     def test_unnamed_member_returns_none(self):
         die = _Die("DW_TAG_member", {"DW_AT_data_member_location": 0})
@@ -299,33 +404,42 @@ class TestProcessMember:
 
     def test_list_expression_offset(self):
         """DW_OP expression list: last element used as offset."""
-        die = _Die("DW_TAG_member", {
-            "DW_AT_name": "x",
-            "DW_AT_data_member_location": _Attr([0x23, 8]),
-        })
+        die = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "x",
+                "DW_AT_data_member_location": _Attr([0x23, 8]),
+            },
+        )
         fi = _process_member(die, _CU(), {})
         assert fi is not None
         assert fi.byte_offset == 8
 
     def test_empty_list_expression(self):
         """Empty DW_OP expression list → offset 0."""
-        die = _Die("DW_TAG_member", {
-            "DW_AT_name": "x",
-            "DW_AT_data_member_location": _Attr([]),
-        })
+        die = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "x",
+                "DW_AT_data_member_location": _Attr([]),
+            },
+        )
         fi = _process_member(die, _CU(), {})
         assert fi is not None
         assert fi.byte_offset == 0
 
     def test_bitfield_data_bit_offset(self):
         """DW_AT_data_bit_offset takes priority over DW_AT_bit_offset."""
-        die = _Die("DW_TAG_member", {
-            "DW_AT_name": "bf",
-            "DW_AT_data_member_location": 0,
-            "DW_AT_bit_size": 3,
-            "DW_AT_data_bit_offset": 5,
-            "DW_AT_bit_offset": 99,
-        })
+        die = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "bf",
+                "DW_AT_data_member_location": 0,
+                "DW_AT_bit_size": 3,
+                "DW_AT_data_bit_offset": 5,
+                "DW_AT_bit_offset": 99,
+            },
+        )
         fi = _process_member(die, _CU(), {})
         assert fi is not None
         assert fi.bit_size == 3
@@ -333,18 +447,22 @@ class TestProcessMember:
 
     def test_bitfield_legacy_bit_offset(self):
         """When DW_AT_data_bit_offset absent, DW_AT_bit_offset is used."""
-        die = _Die("DW_TAG_member", {
-            "DW_AT_name": "bf",
-            "DW_AT_data_member_location": 0,
-            "DW_AT_bit_size": 4,
-            "DW_AT_bit_offset": 12,
-        })
+        die = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "bf",
+                "DW_AT_data_member_location": 0,
+                "DW_AT_bit_size": 4,
+                "DW_AT_bit_offset": 12,
+            },
+        )
         fi = _process_member(die, _CU(), {})
         assert fi is not None
         assert fi.bit_offset == 12
 
 
 # ── _process_enum ─────────────────────────────────────────────────────
+
 
 class TestProcessEnum:
     def test_anonymous_enum_skipped(self):
@@ -360,18 +478,28 @@ class TestProcessEnum:
         assert "E" not in meta.enums
 
     def test_scoped_enum(self):
-        enumerator = _Die("DW_TAG_enumerator", {"DW_AT_name": "A", "DW_AT_const_value": 1})
-        die = _Die("DW_TAG_enumeration_type", {
-            "DW_AT_name": "E",
-            "DW_AT_byte_size": 4,
-        }, children=[enumerator])
+        enumerator = _Die(
+            "DW_TAG_enumerator", {"DW_AT_name": "A", "DW_AT_const_value": 1}
+        )
+        die = _Die(
+            "DW_TAG_enumeration_type",
+            {
+                "DW_AT_name": "E",
+                "DW_AT_byte_size": 4,
+            },
+            children=[enumerator],
+        )
         meta = DwarfMetadata(has_dwarf=True)
         _process_enum(die, meta, _CU(), scope_prefix="NS")
         assert "NS::E" in meta.enums
 
     def test_odr_keeps_first_enum(self):
-        die1 = _Die("DW_TAG_enumeration_type", {"DW_AT_name": "E", "DW_AT_byte_size": 4})
-        die2 = _Die("DW_TAG_enumeration_type", {"DW_AT_name": "E", "DW_AT_byte_size": 8})
+        die1 = _Die(
+            "DW_TAG_enumeration_type", {"DW_AT_name": "E", "DW_AT_byte_size": 4}
+        )
+        die2 = _Die(
+            "DW_TAG_enumeration_type", {"DW_AT_name": "E", "DW_AT_byte_size": 8}
+        )
         meta = DwarfMetadata(has_dwarf=True)
         _process_enum(die1, meta, _CU())
         _process_enum(die2, meta, _CU())
@@ -379,6 +507,7 @@ class TestProcessEnum:
 
 
 # ── _expand_anonymous_member ──────────────────────────────────────────
+
 
 class TestExpandAnonymousMember:
     def test_no_type_returns_empty(self):
@@ -390,7 +519,9 @@ class TestExpandAnonymousMember:
         die = _Die("DW_TAG_member", {"DW_AT_type": _Attr(999, "DW_FORM_ref_addr")})
         cu = _CU()
         cu._die_map = {}
-        with patch("abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")):
+        with patch(
+            "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
+        ):
             result = _expand_anonymous_member(die, cu, {}, 0)
         assert result == []
 
@@ -405,13 +536,16 @@ class TestExpandAnonymousMember:
 
 # ── _compute_type_info branches ───────────────────────────────────────
 
+
 class TestComputeTypeInfo:
     def test_base_type(self):
         die = _Die("DW_TAG_base_type", {"DW_AT_name": "long", "DW_AT_byte_size": 8})
         assert _compute_type_info(die, _CU(), 0, {}) == ("long", 8)
 
     def test_enum_type(self):
-        die = _Die("DW_TAG_enumeration_type", {"DW_AT_name": "Color", "DW_AT_byte_size": 4})
+        die = _Die(
+            "DW_TAG_enumeration_type", {"DW_AT_name": "Color", "DW_AT_byte_size": 4}
+        )
         assert _compute_type_info(die, _CU(), 0, {}) == ("enum Color", 4)
 
     def test_enum_anonymous(self):
@@ -423,7 +557,9 @@ class TestComputeTypeInfo:
         assert _compute_type_info(die, _CU(), 0, {}) == ("fn(...)", 8)
 
     def test_record_struct(self):
-        die = _Die("DW_TAG_structure_type", {"DW_AT_name": "Foo", "DW_AT_byte_size": 16})
+        die = _Die(
+            "DW_TAG_structure_type", {"DW_AT_name": "Foo", "DW_AT_byte_size": 16}
+        )
         result = _compute_type_info(die, _CU(), 0, {})
         assert result == ("Foo", 16)
 
@@ -433,63 +569,93 @@ class TestComputeTypeInfo:
         assert result == ("<anon>", 8)
 
     def test_rvalue_reference(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        rref = _Die("DW_TAG_rvalue_reference_type", {
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-            "DW_AT_byte_size": 8,
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        rref = _Die(
+            "DW_TAG_rvalue_reference_type",
+            {
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+                "DW_AT_byte_size": 8,
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(rref, cu, 0, {})
         assert result == ("int &&", 8)
 
     def test_const_qualified(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        const = _Die("DW_TAG_const_type", {
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        const = _Die(
+            "DW_TAG_const_type",
+            {
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(const, cu, 0, {})
         assert result == ("const int", 4)
 
     def test_volatile_qualified(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        vol = _Die("DW_TAG_volatile_type", {
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        vol = _Die(
+            "DW_TAG_volatile_type",
+            {
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(vol, cu, 0, {})
         assert result == ("volatile int", 4)
 
     def test_restrict_qualified(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        restrict = _Die("DW_TAG_restrict_type", {
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        restrict = _Die(
+            "DW_TAG_restrict_type",
+            {
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(restrict, cu, 0, {})
         assert result == ("restrict int", 4)
 
     def test_typedef_chain(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        td = _Die("DW_TAG_typedef", {
-            "DW_AT_name": "myint",
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        td = _Die(
+            "DW_TAG_typedef",
+            {
+                "DW_AT_name": "myint",
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(td, cu, 0, {})
         assert result == ("myint", 4)
 
     def test_array_type(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        arr = _Die("DW_TAG_array_type", {
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-            "DW_AT_byte_size": 40,
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        arr = _Die(
+            "DW_TAG_array_type",
+            {
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+                "DW_AT_byte_size": 40,
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(arr, cu, 0, {})
@@ -516,11 +682,16 @@ class TestComputeTypeInfo:
         assert result == ("typedef", 0)
 
     def test_reference_type(self):
-        base = _Die("DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10)
-        ref = _Die("DW_TAG_reference_type", {
-            "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
-            "DW_AT_byte_size": 8,
-        })
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        ref = _Die(
+            "DW_TAG_reference_type",
+            {
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+                "DW_AT_byte_size": 8,
+            },
+        )
         cu = _CU()
         cu._die_map = {10: base}
         result = _compute_type_info(ref, cu, 0, {})
@@ -539,15 +710,19 @@ class TestComputeTypeInfo:
 
 # ── _compute_fallback_type_info ───────────────────────────────────────
 
+
 class TestComputeFallbackTypeInfo:
     def test_with_name(self):
-        die = _Die("DW_TAG_whatever", {"DW_AT_name": "CustomType", "DW_AT_byte_size": 4})
+        die = _Die(
+            "DW_TAG_whatever", {"DW_AT_name": "CustomType", "DW_AT_byte_size": 4}
+        )
         result = _compute_fallback_type_info(die, "DW_TAG_whatever")
         assert result == ("CustomType", 4)
 
     def test_without_name_logs_warning(self, monkeypatch):
         """Unknown tag without name triggers warning and uses tag as name."""
         from abicheck import dwarf_metadata as dm
+
         monkeypatch.setattr(dm, "_SEEN_UNKNOWN_DWARF_TAGS", set())
 
         die = _Die("DW_TAG_exotic_vendor", {"DW_AT_byte_size": 2}, offset=42)
@@ -557,6 +732,7 @@ class TestComputeFallbackTypeInfo:
 
     def test_empty_tag(self, monkeypatch):
         from abicheck import dwarf_metadata as dm
+
         monkeypatch.setattr(dm, "_SEEN_UNKNOWN_DWARF_TAGS", set())
 
         die = _Die("", {"DW_AT_byte_size": 0}, offset=0)
@@ -566,21 +742,28 @@ class TestComputeFallbackTypeInfo:
 
 # ── _resolve_type ─────────────────────────────────────────────────────
 
+
 class TestResolveType:
     def test_no_type_attr(self):
         die = _Die("DW_TAG_member", {"DW_AT_name": "x"})
         assert _resolve_type(die, _CU(), {}) == ("unknown", 0)
 
     def test_error_in_resolution(self):
-        die = _Die("DW_TAG_member", {
-            "DW_AT_name": "x",
-            "DW_AT_type": _Attr(999, "DW_FORM_ref_addr"),
-        })
-        with patch("abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")):
+        die = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "x",
+                "DW_AT_type": _Attr(999, "DW_FORM_ref_addr"),
+            },
+        )
+        with patch(
+            "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
+        ):
             assert _resolve_type(die, _CU(), {}) == ("unknown", 0)
 
 
 # ── _resolve_inner_type_info ──────────────────────────────────────────
+
 
 class TestResolveInnerTypeInfo:
     def test_no_type_attr(self):
@@ -589,11 +772,14 @@ class TestResolveInnerTypeInfo:
 
     def test_error_returns_none(self):
         die = _Die("DW_TAG_const_type", {"DW_AT_type": _Attr(999, "DW_FORM_ref_addr")})
-        with patch("abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")):
+        with patch(
+            "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
+        ):
             assert _resolve_inner_type_info(die, _CU(), 0, {}) is None
 
 
 # ── _attr_str / _attr_int edge cases ─────────────────────────────────
+
 
 class TestAttrHelpers:
     def test_attr_str_bytes_value(self):
@@ -623,6 +809,7 @@ class TestAttrHelpers:
 
 # ── _process_typedef ──────────────────────────────────────────────────
 
+
 class TestProcessTypedef:
     def test_unnamed_typedef_skipped(self):
         die = _Die("DW_TAG_typedef", {"DW_AT_type": _Attr(10)})
@@ -638,25 +825,37 @@ class TestProcessTypedef:
         assert len(meta.structs) == 0
 
     def test_bad_ref_skipped(self):
-        die = _Die("DW_TAG_typedef", {
-            "DW_AT_name": "foo",
-            "DW_AT_type": _Attr(999),
-        })
+        die = _Die(
+            "DW_TAG_typedef",
+            {
+                "DW_AT_name": "foo",
+                "DW_AT_type": _Attr(999),
+            },
+        )
         meta = DwarfMetadata(has_dwarf=True)
-        with patch("abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")):
+        with patch(
+            "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
+        ):
             _process_typedef(die, meta, _CU(), {})
         assert len(meta.structs) == 0
 
     def test_named_target_not_registered(self):
         """Typedef to a named struct does not re-register."""
-        target = _Die("DW_TAG_structure_type", {
-            "DW_AT_name": "RealName",
-            "DW_AT_byte_size": 8,
-        }, offset=20)
-        die = _Die("DW_TAG_typedef", {
-            "DW_AT_name": "Alias",
-            "DW_AT_type": _Attr(20, "DW_FORM_ref_addr"),
-        })
+        target = _Die(
+            "DW_TAG_structure_type",
+            {
+                "DW_AT_name": "RealName",
+                "DW_AT_byte_size": 8,
+            },
+            offset=20,
+        )
+        die = _Die(
+            "DW_TAG_typedef",
+            {
+                "DW_AT_name": "Alias",
+                "DW_AT_type": _Attr(20, "DW_FORM_ref_addr"),
+            },
+        )
         cu = _CU()
         cu._die_map = {20: target}
         meta = DwarfMetadata(has_dwarf=True)

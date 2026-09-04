@@ -138,16 +138,30 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
         return meta
 
     meta.has_dwarf = True
+    meta.evidence_state = "parsed"
     dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
 
     # Per-parse type-resolution cache: (cu_offset, die_offset) → (name, byte_size)
     type_cache: dict[tuple[int, int], tuple[str, int]] = {}
 
+    # P2 review: this standalone entry point (still public, re-exported by
+    # dwarf_unified.py's shim) previously never stamped evidence_state at
+    # all, so it silently stayed at the dataclass default ("not_available")
+    # even on a fully-successful parse -- indistinguishable from "never
+    # tried". Mirror dwarf_unified.parse_dwarf_from_session's accounting
+    # (cu_total/cu_failed -> parsed/partial/failed) so every constructor of
+    # this metadata type records its actual extraction outcome, not just
+    # the unified single-pass one.
     for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
+        meta.cu_total += 1
         try:
             _process_cu(CU, meta, type_cache)
         except Exception as exc:  # noqa: BLE001
+            meta.cu_failed += 1
             log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
+
+    if meta.cu_failed:
+        meta.evidence_state = "failed" if meta.cu_failed == meta.cu_total else "partial"
 
     return meta
 

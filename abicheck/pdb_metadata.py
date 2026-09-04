@@ -135,7 +135,20 @@ def parse_pdb_debug_info(
         )
 
     meta = DwarfMetadata(has_dwarf=True, evidence_source="pdb", evidence_state="parsed")
-    adv = AdvancedDwarfMetadata(has_dwarf=True, evidence_state="parsed")
+    # The PDB advanced channel is structurally narrower than DWARF's: it
+    # extracts calling conventions for METHODS only (never free functions)
+    # and never populates value_abi_traits/return_value_sizes/
+    # return_memory_classified/frame_registers/callee_saved_regs/target_arch
+    # at all -- those detector inputs are DWARF-CFI/DW_AT-specific and have
+    # no PDB/CodeView analogue this producer implements. Reporting "parsed"
+    # here (as DWARF's advanced channel does on full success) would silently
+    # claim complete calling-convention/value-ABI evidence a PDB run never
+    # actually collected, letting a real regression in one of those fields
+    # return "no finding" with a receipt that still reads complete (P1
+    # review). "partial" honestly reflects "some but not all advanced
+    # capabilities are available" regardless of whether extraction itself
+    # hits an error below.
+    adv = AdvancedDwarfMetadata(has_dwarf=True, evidence_state="partial")
 
     # UDT name → defining source file (ADR-024 Phase 1 provenance), parsed from
     # the IPI stream. Empty when the PDB carries no IPI / source-line records.

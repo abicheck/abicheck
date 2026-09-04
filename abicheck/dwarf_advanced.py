@@ -154,14 +154,23 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
             if not has_real_dwarf_info(elf):
                 return AdvancedDwarfMetadata()
-            meta = AdvancedDwarfMetadata(has_dwarf=True)
+            meta = AdvancedDwarfMetadata(has_dwarf=True, evidence_state="parsed")
             meta.target_arch = _normalize_arch(elf)
             dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
+            # P2 review: mirror dwarf_unified's cu_total/cu_failed accounting
+            # -- this standalone entry point is still public and previously
+            # never recorded a skipped CU at all.
             for CU in dwarf.iter_CUs():
+                meta.cu_total += 1
                 try:
                     _process_cu(CU, meta)
                 except (ELFError, OSError, ValueError, KeyError) as exc:
+                    meta.cu_failed += 1
                     log.warning("parse_advanced_dwarf: skipping CU: %s", exc)
+            if meta.cu_failed:
+                meta.evidence_state = (
+                    "failed" if meta.cu_failed == meta.cu_total else "partial"
+                )
             # Parse .eh_frame / .debug_frame CFA register convention (#117)
             _parse_frame_registers(elf, dwarf, meta)
             return meta

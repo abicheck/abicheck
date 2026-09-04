@@ -125,14 +125,6 @@ class AdvancedDwarfMetadata:
     """Sprint 4 metadata extracted from a single .so."""
 
     has_dwarf: bool = False
-    # See DwarfMetadata.evidence_state.  BTF/CTF explicitly use
-    # ``not_supported``: their basic layouts must never be represented as
-    # DWARF calling-convention/value-ABI evidence.
-    evidence_state: str = "not_available"  # parsed | partial | presence_only | failed | not_supported | not_available
-    # See DwarfMetadata.cu_total/cu_failed.  Advanced and basic walks can
-    # fail independently, so each channel owns its accounting.
-    cu_total: int = 0
-    cu_failed: int = 0
     # Normalized target architecture (_normalize_arch): "x86_64", "aarch64",
     # "i386", … Empty string when unknown (e.g. arch-less mock snapshots).
     # Gates the SysV-AMD64-specific aggregate-return-convention classification.
@@ -176,3 +168,18 @@ class AdvancedDwarfMetadata:
     # Presence of rdi/rsi in the saved-registers set is a strong ELF-level signal
     # that the function uses ms_abi, even when DW_AT_calling_convention is absent (GCC gap).
     callee_saved_regs: dict[str, frozenset[str]] = field(default_factory=dict)
+    # Provenance for assurance receipts.  See DwarfMetadata.evidence_state.
+    # BTF/CTF explicitly use ``not_supported``: their basic layouts must
+    # never be represented as DWARF calling-convention/value-ABI evidence.
+    # Appended after every pre-existing field (rather than interleaved
+    # with them) and marked keyword-only so an external caller that still
+    # constructs this dataclass positionally (e.g.
+    # ``AdvancedDwarfMetadata(True, "x86_64", toolchain)``) cannot silently
+    # bind a value to the wrong field.
+    evidence_state: str = field(
+        default="not_available", kw_only=True
+    )  # parsed | partial | presence_only | failed | not_supported | not_available
+    # See DwarfMetadata.cu_total/cu_failed.  Advanced and basic walks can
+    # fail independently, so each channel owns its accounting.
+    cu_total: int = field(default=0, kw_only=True)
+    cu_failed: int = field(default=0, kw_only=True)

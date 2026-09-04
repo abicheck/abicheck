@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from abicheck import checker
 from abicheck.analysis_assurance import AnalysisAssurance
@@ -34,7 +34,7 @@ def _pair() -> tuple[AbiSnapshot, AbiSnapshot]:
     return AbiSnapshot(version="1.0", **common), AbiSnapshot(version="2.0", **common)
 
 
-def _compare(tmp_path: Path, *extra: str):
+def _compare(tmp_path: Path, *extra: str) -> Result:
     old, new = _pair()
     old_path, new_path = tmp_path / "old.json", tmp_path / "new.json"
     old_path.write_text(snapshot_to_json(old), encoding="utf-8")
@@ -60,7 +60,9 @@ def test_clean_verdict_keeps_default_exit_but_require_complete_fails(
 
 
 def _debug_snapshot(
-    version: str, dwarf: object, advanced: object | None = None
+    version: str,
+    dwarf: DwarfMetadata,
+    advanced: AdvancedDwarfMetadata | None = None,
 ) -> AbiSnapshot:
     return AbiSnapshot(
         version=version,

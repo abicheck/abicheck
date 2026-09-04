@@ -1324,7 +1324,8 @@ class TestAnalysisAssuranceCliIntegration:
             tmp_path,
             _elf_only_pair(),
             "--require-complete-analysis",
-            "--format", "json",
+            "--format",
+            "json",
         )
         assert res.exit_code == 1, res.output
         # The floor diagnostic is echoed to stderr (see

@@ -257,6 +257,174 @@ def test_symmetric_stripping_does_not_waive_without_per_side_receipt() -> None:
     assert len(errors) == 1
 
 
+def test_clean_header_evidence_blocks_basic_channel_downgrade() -> None:
+    """P1 review: diff_types.py's layout facts come from EITHER DWARF or
+    header-AST parsing, so losing DWARF alone doesn't prove a basic-channel
+    kind was undetectable when header evidence was present and clean on
+    this exact run -- release-headers/stripped-headers lanes keep headers
+    on both sides. A BREAKING->clean regression here must be reported as an
+    error, not silently waived."""
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "dwarf_context_status": "not_evaluated",
+        "header_context_status": "clean",
+        "debug_evidence": {
+            "old": {"basic": "not_available"},
+            "new": {"basic": "not_available"},
+        },
+    }
+
+    false_positives, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["type_size_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
+    )
+
+    assert false_positives == []
+    assert downgrades == []
+    assert len(errors) == 1
+
+
+def test_drift_detected_header_evidence_also_blocks_basic_downgrade() -> None:
+    """header_context_status="drift_detected" still means header evidence
+    was PRESENT (just flagged a context drift), so the same guard applies."""
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "header_context_status": "drift_detected",
+        "debug_evidence": {
+            "old": {"basic": "not_available"},
+            "new": {"basic": "not_available"},
+        },
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["type_size_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
+    )
+
+    assert downgrades == []
+    assert len(errors) == 1
+
+
+def test_missing_header_evidence_still_allows_basic_channel_downgrade() -> None:
+    """When header_context_status is anything other than clean/drift_detected
+    (not_evaluated, asymmetric, or simply absent from the receipt), the
+    basic-channel downgrade is still allowed -- headers genuinely were not
+    available as an alternate source either."""
+    guard = _guard_module()
+    for header_status in ("not_evaluated", "asymmetric", None):
+        row = _row("partial")
+        assurance: dict[str, object] = {
+            "status": "partial",
+            "debug_evidence": {
+                "old": {"basic": "not_available"},
+                "new": {"basic": "not_available"},
+            },
+        }
+        if header_status is not None:
+            assurance["header_context_status"] = header_status
+        row["analysis_assurance"] = assurance
+
+        _, downgrades, errors = guard._classify_results(
+            [row],
+            {
+                "case_break": {
+                    "expected": "BREAKING",
+                    "min_evidence": "L1",
+                    "expected_kinds": ["type_size_changed"],
+                }
+            },
+            "stripped-headers",
+            {},
+        )
+
+        assert len(downgrades) == 1, header_status
+        assert errors == [], header_status
+
+
+def test_clean_header_evidence_does_not_block_advanced_only_downgrade() -> None:
+    """header_context_status="clean" only gates BASIC-channel kinds --
+    advanced-channel kinds (calling convention/value-ABI/etc.) have no
+    header equivalent at all, so their downgrade must remain unaffected."""
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "header_context_status": "clean",
+        "debug_evidence": {
+            "old": {"basic": "parsed", "advanced": "parsed"},
+            "new": {"basic": "parsed", "advanced": "not_available"},
+        },
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["calling_convention_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
+    )
+
+    assert len(downgrades) == 1
+    assert errors == []
+
+
+def test_integer_model_changed_is_not_associated_with_any_dwarf_channel() -> None:
+    """P1 review: integer_model_changed (diff_integer_model) reads header/L2
+    typedef facts, never DWARF-advanced facts. It must never be waivable on
+    the strength of a DWARF-only evidence-loss receipt, regardless of which
+    channel(s) are missing."""
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "debug_evidence": {
+            "old": {"basic": "parsed", "advanced": "parsed"},
+            "new": {"basic": "not_available", "advanced": "not_available"},
+        },
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["integer_model_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
+    )
+
+    assert downgrades == []
+    assert len(errors) == 1
+
+
 def test_text_only_known_gap_does_not_waive_full_cli_verdict() -> None:
     guard = _guard_module()
     row = _row("complete", result_status="XFAIL")

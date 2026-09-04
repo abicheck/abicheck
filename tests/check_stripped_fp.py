@@ -59,7 +59,11 @@ _DEBUG_CHANNEL_BY_KIND = {
     "struct_return_convention_changed": "advanced",
     "struct_packing_changed": "advanced",
     "toolchain_flag_drift": "advanced",
-    "integer_model_changed": "advanced",
+    # integer_model_changed (diff_integer_model._diff_integer_model) reads
+    # AbiSnapshot.functions/typedefs -- header/L2 evidence, never DWARF-
+    # advanced facts. Deliberately absent from this map (rather than mapped
+    # to a channel) so an unrelated advanced-DWARF loss can never waive a
+    # regression in this detector (P1 review).
     "wchar_model_changed": "advanced",
     "vector_abi_changed": "advanced",
     "type_size_changed": "basic",
@@ -187,6 +191,22 @@ def _dwarf_evidence_loss_allows_downgrade(
     non_parsed_states = {"not_available", "presence_only", "partial", "failed"}
     for channel in channels:
         if not any(side.get(channel) in non_parsed_states for side in sides):
+            return False
+
+    # The "basic" DWARF channel and header (L2) evidence both populate the
+    # same model-level RecordType/EnumType facts diff_types.py compares --
+    # struct/enum layout is derivable from EITHER source. So losing DWARF
+    # alone does not prove the capability was lost: when header evidence is
+    # present and clean (or merely drift-flagged -- still present) on this
+    # exact run, the same finding should still have been caught from
+    # headers, and a BREAKING->clean regression here is a real bug, not
+    # expected evidence loss. Only "advanced"-channel kinds (calling
+    # convention/value-ABI/frame-register/toolchain facts) have no header
+    # equivalent, so this check applies only when "basic" evidence is
+    # implicated (P1 review).
+    if "basic" in channels:
+        header_context_status = assurance.get("header_context_status")
+        if header_context_status in ("clean", "drift_detected"):
             return False
     return True
 

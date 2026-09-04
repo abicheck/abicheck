@@ -1,5 +1,6 @@
 # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-arguments,too-many-return-statements
 """Sprint 4 tests: advanced DWARF detectors (calling convention, packing, toolchain drift)."""
+
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,7 +27,76 @@ from abicheck.serialization import (
     snapshot_to_json,
 )
 
+
+class TestParseAdvancedDwarfEvidenceState:
+    """P2 review: parse_advanced_dwarf must record its own extraction
+    outcome (cu_total/cu_failed -> evidence_state), mirroring
+    dwarf_unified.parse_dwarf_from_session's accounting -- previously this
+    standalone, still-public entry point never touched evidence_state at
+    all, leaving it at the "not_available" dataclass default even on a
+    fully successful parse."""
+
+    def _mock_session(self, cus: list) -> MagicMock:
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = cus
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+        return mock_elf
+
+    def test_one_of_two_cus_failing_reports_partial(self) -> None:
+        bad_cu = MagicMock()
+        bad_cu.get_top_DIE.side_effect = ValueError("corrupt CU")
+        good_cu = MagicMock()
+        good_cu.get_top_DIE.return_value = MagicMock(attributes={})
+
+        mock_elf = self._mock_session([bad_cu, good_cu])
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers"),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.has_dwarf is True
+        assert meta.cu_total == 2
+        assert meta.cu_failed == 1
+        assert meta.evidence_state == "partial"
+
+    def test_every_cu_failing_reports_failed(self) -> None:
+        bad_cu = MagicMock()
+        bad_cu.get_top_DIE.side_effect = ValueError("corrupt CU")
+
+        mock_elf = self._mock_session([bad_cu])
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers"),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_total == 1
+        assert meta.cu_failed == 1
+        assert meta.evidence_state == "failed"
+
+    def test_clean_parse_reports_parsed(self) -> None:
+        good_cu = MagicMock()
+        good_cu.get_top_DIE.return_value = MagicMock(attributes={})
+
+        mock_elf = self._mock_session([good_cu])
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers"),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_total == 1
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "parsed"
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _snap(adv: AdvancedDwarfMetadata | None) -> AbiSnapshot:
     s = AbiSnapshot(library="libx.so", version="v")
@@ -68,6 +139,7 @@ def _adv(
 
 # ── graceful degradation ──────────────────────────────────────────────────────
 
+
 def test_diff_advanced_dwarf_no_dwarf() -> None:
     old = _adv(has_dwarf=False)
     new = _adv(has_dwarf=True)
@@ -81,6 +153,7 @@ def test_diff_both_no_dwarf() -> None:
 
 
 # ── calling convention ────────────────────────────────────────────────────────
+
 
 def test_calling_convention_changed() -> None:
     old = _snap(_adv(calling={"foo": "program"}))
@@ -206,7 +279,9 @@ def test_target_arch_round_trips_through_serialization() -> None:
 def test_callee_saved_fallback_detects_calling_convention_drift() -> None:
     """ELF CFI fallback: saved rdi/rsi indicates ms_abi shift."""
     old = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12"})}))
-    new = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12", "rdi", "rsi"})}))
+    new = _snap(
+        _adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12", "rdi", "rsi"})})
+    )
     r = compare(old, new)
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.CALLING_CONVENTION_CHANGED in kinds
@@ -267,6 +342,7 @@ def test_value_abi_trait_unchanged_no_change() -> None:
 
 # ── struct packing ────────────────────────────────────────────────────────────
 
+
 def test_struct_packing_added() -> None:
     # "Ctx" must exist in old all_struct_names so diff knows it's a pre-existing
     # struct that became packed (not a brand-new packed struct, which has no ABI contract).
@@ -280,7 +356,7 @@ def test_struct_packing_added() -> None:
 
 def test_struct_packing_added_new_struct_no_report() -> None:
     """Brand-new packed struct (not in old binary) should NOT report packing change."""
-    old = _snap(_adv(packed=set()))           # "Ctx" never existed in old
+    old = _snap(_adv(packed=set()))  # "Ctx" never existed in old
     new = _snap(_adv(packed={"Ctx"}))
     r = compare(old, new)
     kinds = {c.kind for c in r.changes}
@@ -312,6 +388,7 @@ def test_struct_packing_unchanged_no_change() -> None:
 
 # ── toolchain flag drift ──────────────────────────────────────────────────────
 
+
 def test_toolchain_flag_added_compatible_warning() -> None:
     old = _snap(_adv(flags={"-fshort-enums"}))
     new = _snap(_adv(flags={"-fshort-enums", "-mabi=lp64"}))
@@ -342,8 +419,11 @@ def test_toolchain_no_drift_no_change() -> None:
 
 # ── DW_AT_producer parsing ────────────────────────────────────────────────────
 
+
 def test_parse_producer_gcc() -> None:
-    info = _parse_producer("GNU C17 13.2.1 20230812 -fshort-enums -m64 -fabi-version=18")
+    info = _parse_producer(
+        "GNU C17 13.2.1 20230812 -fshort-enums -m64 -fabi-version=18"
+    )
     assert info.compiler == "GCC"
     assert info.version == "13.2.1"
     assert "-fshort-enums" in info.abi_flags
@@ -400,9 +480,12 @@ def test_process_cu_unions_flags_across_cus() -> None:
 
 # ── JSON serialization (set → list → set roundtrip) ──────────────────────────
 
+
 def test_serialization_roundtrip_no_crash() -> None:
     """snapshot_to_json must not raise TypeError on set fields."""
-    snap = _snap(_adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"}))
+    snap = _snap(
+        _adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"})
+    )
     # This must not raise TypeError: Object of type set is not JSON serializable
     json_str = snapshot_to_json(snap)
     data = json.loads(json_str)
@@ -411,7 +494,9 @@ def test_serialization_roundtrip_no_crash() -> None:
 
 
 def test_serialization_roundtrip_set_values() -> None:
-    snap = _snap(_adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"}))
+    snap = _snap(
+        _adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"})
+    )
     d = snapshot_to_dict(snap)
     snap2 = snapshot_from_dict(d)
     assert snap2.dwarf_advanced is not None
@@ -429,6 +514,7 @@ def test_serialization_empty_sets_roundtrip() -> None:
 
 # ── Integration: real packed struct detection via DWARF ───────────────────────
 
+
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="ELF/DWARF tests require Linux")
 def test_packed_struct_detected_from_real_dwarf() -> None:
@@ -445,7 +531,8 @@ PackedCtx g_ctx;
         so = Path(td) / "libpacked.so"
         result = subprocess.run(
             ["gcc", "-g", "-shared", "-fPIC", "-o", str(so), "-x", "c", "-"],
-            input=src.encode(), capture_output=True,
+            input=src.encode(),
+            capture_output=True,
         )
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
@@ -456,6 +543,12 @@ PackedCtx g_ctx;
     assert "PackedCtx" in meta.packed_structs, (
         f"Expected 'PackedCtx' in packed_structs, got: {meta.packed_structs}"
     )
+    # P2 review: this standalone, still-public entry point must stamp
+    # evidence_state on a clean parse, not leave it at the "not_available"
+    # dataclass default.
+    assert meta.evidence_state == "parsed"
+    assert meta.cu_total >= 1
+    assert meta.cu_failed == 0
 
 
 @pytest.mark.integration
@@ -470,7 +563,8 @@ NormalCtx g;
         so = Path(td) / "libnormal.so"
         result = subprocess.run(
             ["gcc", "-g", "-shared", "-fPIC", "-o", str(so), "-x", "c", "-"],
-            input=src.encode(), capture_output=True,
+            input=src.encode(),
+            capture_output=True,
         )
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
@@ -482,6 +576,7 @@ NormalCtx g;
 
 
 # ── C3: compare()-level no-change test for value_abi_traits ──────────────────
+
 
 def test_value_abi_traits_same_no_change_emitted() -> None:
     """Same value_abi_traits in both snapshots must NOT emit VALUE_ABI_TRAIT_CHANGED."""

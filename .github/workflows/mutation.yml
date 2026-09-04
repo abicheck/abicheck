@@ -72,9 +72,23 @@ jobs:
       pull-requests: read
     outputs:
       run: ${{ steps.decide.outputs.run }}
-      require_baseline: ${{ steps.decide.outputs.require_baseline }}
+      # steps.decide sets this to "false" unconditionally for a non-PR event
+      # (weekly/dispatch runs a full baseline-backed measurement through a
+      # different path entirely, not this flag) and leaves it empty on a PR
+      # event, where the require_baseline step (real per-module diff
+      # correlation) answers it instead.
+      require_baseline: ${{ steps.require_baseline.outputs.require_baseline || steps.decide.outputs.require_baseline }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # require_baseline_for_pr (below) needs the real merge-base diff,
+          # the same reason the mutmut job's own checkout uses fetch-depth 0
+          # for --diff-scoped; a shallow clone would report every path
+          # changed relative to a synthetic root commit.
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: Detect changes to mutated modules (PR only)
         id: changed
         if: github.event_name == 'pull_request'
@@ -155,24 +169,35 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-          # Which PR runs must have a *drift* reference, not just
-          # --diff-scoped (which only looks at the functions this branch
-          # changed):
-          #   - a detector-test-only change: without changed production
-          #     functions, there is nothing for --diff-scoped to scope to and
-          #     the answer exists only as drift. A source change plus its
-          #     regression test remains covered by the diff-scoped gate;
-          #   - the `mutation` label: it is documented as the complete check,
-          #     and a label-forced run on a test-only diff outside the globs
-          #     above would otherwise print "gated nothing" and exit 0 —
-          #     green for precisely the run someone asked to be thorough
-          #     (Codex review).
-          if { [ "$MATCHED_TESTS" = "true" ] && [ "$MATCHED" != "true" ]; } \
-            || [ "$LABELLED" = "true" ]; then
-            echo "require_baseline=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "require_baseline=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Determine whether this PR run needs baseline drift
+        # Which PR runs must have a *drift* reference, not just
+        # --diff-scoped (which only looks at the functions this branch
+        # changed): a detector-test-only change, or one whose OWN paired
+        # production module the diff does not also touch -- without changed
+        # production functions in that specific module, there is nothing for
+        # --diff-scoped to scope to for it, and the answer exists only as
+        # drift. A source change plus its OWN paired regression test remains
+        # covered by the diff-scoped gate.
+        #
+        # Delegated to scripts/mutation_scope.py's require_baseline_for_pr()
+        # (real changed-path set, per-module correlation) rather than the
+        # aggregate MATCHED/MATCHED_TESTS booleans above: those booleans
+        # answer "did *anything* in a whole path-list match", which cannot
+        # distinguish "the module a changed test pairs with also changed"
+        # from "a DIFFERENT module changed, or only lane infrastructure did"
+        # (two P1 review findings against the earlier aggregate-boolean
+        # version of this step -- see that function's own docstring for
+        # both concrete counterexamples).
+        if: github.event_name == 'pull_request'
+        id: require_baseline
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'mutation') }}
+        run: |
+          FLAG=""
+          if [ "$LABELLED" = "true" ]; then FLAG="--labelled"; fi
+          python3 scripts/mutation_scope.py --base-ref "origin/$BASE_REF" \
+            --print-require-baseline $FLAG >> "$GITHUB_OUTPUT"
 
   mutmut:
     name: mutmut (detector core)
@@ -186,7 +211,19 @@ jobs:
     # runners, so keep a hard ceiling but leave enough headroom for either
     # measurement to finish and produce a receipt rather than being
     # cancelled at 120 minutes.
-    timeout-minutes: 240
+    #
+    # P2 review: this job timeout must stay STRICTLY ABOVE
+    # check_mutation_score.py's own MUTMUT_RUN_TIMEOUT_SECONDS (240 minutes)
+    # -- matching them exactly meant the whole JOB (checkout, dependency
+    # install, the real-mutmut-parser probe, scope calculation, and the
+    # result-export/artifact-upload steps that run AFTER `mutmut run`) was
+    # terminated by this outer limit before a long-but-successful `mutmut
+    # run` invocation could even hit its own inner timeout and raise
+    # `TimeoutExpired` cleanly -- so no receipt was ever written either way.
+    # 30 minutes of headroom above the inner subprocess ceiling covers those
+    # surrounding steps and leaves room for the inner timeout to actually
+    # fire and be handled.
+    timeout-minutes: 270
     steps:
       - uses: actions/checkout@v6
         with:

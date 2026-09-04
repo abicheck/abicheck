@@ -7,6 +7,7 @@ backward-compatible shims work correctly.
 Note: Tests that compile real ELF binaries are Linux-only — macOS/Windows
 compilers produce Mach-O/PE, and DWARF parsing requires ELF.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,8 +35,10 @@ from abicheck.dwarf_unified import (  # noqa: E402
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_tool(name: str) -> None:
     import shutil
+
     if shutil.which(name) is None:
         pytest.skip(f"{name} not found in PATH")
 
@@ -47,9 +50,18 @@ def _compile_so(tmp_path: Path, name: str, src: str, lang: str = "c") -> Path:
     so_file = tmp_path / f"{name}.so"
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
     r = subprocess.run(
-        [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-         "-o", str(so_file), str(src_file)],
-        capture_output=True, text=True,
+        [
+            compiler,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-fvisibility=default",
+            "-o",
+            str(so_file),
+            str(src_file),
+        ],
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         pytest.skip(f"Compilation failed: {r.stderr[:200]}")
@@ -64,7 +76,11 @@ def _compile_so(tmp_path: Path, name: str, src: str, lang: str = "c") -> Path:
 # Core correctness: unified output == separate output
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(sys.platform != "linux", reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)")
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
+)
 class TestUnifiedEqualsSepaRate:
     """parse_dwarf() must produce identical data to calling both parsers separately."""
 
@@ -79,26 +95,31 @@ class TestUnifiedEqualsSepaRate:
 
     def test_structs_identical(self, tmp_path: Path) -> None:
         _require_tool("gcc")
-        so = _compile_so(tmp_path, "libstruct",
+        so = _compile_so(
+            tmp_path,
+            "libstruct",
             "typedef struct { int x; int y; } Point;\n"
-            "Point make(int x, int y) { Point p = {x,y}; return p; }")
+            "Point make(int x, int y) { Point p = {x,y}; return p; }",
+        )
         meta, _ = parse_dwarf(so)
         meta2 = parse_dwarf_metadata(so)
         assert meta.structs == meta2.structs
 
     def test_enums_identical(self, tmp_path: Path) -> None:
         _require_tool("gcc")
-        so = _compile_so(tmp_path, "libenum",
+        so = _compile_so(
+            tmp_path,
+            "libenum",
             "typedef enum { RED=0, GREEN=1, BLUE=2 } Color;\n"
-            "Color get(void) { return RED; }")
+            "Color get(void) { return RED; }",
+        )
         meta, _ = parse_dwarf(so)
         meta2 = parse_dwarf_metadata(so)
         assert meta.enums == meta2.enums
 
     def test_toolchain_identical(self, tmp_path: Path) -> None:
         _require_tool("gcc")
-        so = _compile_so(tmp_path, "libtc",
-            "int fn(void) { return 1; }")
+        so = _compile_so(tmp_path, "libtc", "int fn(void) { return 1; }")
         _, adv = parse_dwarf(so)
         adv2 = parse_advanced_dwarf(so)
         assert adv.toolchain.compiler == adv2.toolchain.compiler
@@ -106,17 +127,21 @@ class TestUnifiedEqualsSepaRate:
 
     def test_calling_conventions_identical(self, tmp_path: Path) -> None:
         _require_tool("gcc")
-        so = _compile_so(tmp_path, "libcc",
-            "int __attribute__((cdecl)) fn(int x) { return x; }")
+        so = _compile_so(
+            tmp_path, "libcc", "int __attribute__((cdecl)) fn(int x) { return x; }"
+        )
         _, adv = parse_dwarf(so)
         adv2 = parse_advanced_dwarf(so)
         assert adv.calling_conventions == adv2.calling_conventions
 
     def test_packed_structs_identical(self, tmp_path: Path) -> None:
         _require_tool("gcc")
-        so = _compile_so(tmp_path, "libpacked",
+        so = _compile_so(
+            tmp_path,
+            "libpacked",
             "struct __attribute__((packed)) Hdr { char a; int b; };\n"
-            "struct Hdr make(void) { struct Hdr h = {'x', 1}; return h; }")
+            "struct Hdr make(void) { struct Hdr h = {'x', 1}; return h; }",
+        )
         _, adv = parse_dwarf(so)
         adv2 = parse_advanced_dwarf(so)
         assert adv.packed_structs == adv2.packed_structs
@@ -125,6 +150,7 @@ class TestUnifiedEqualsSepaRate:
 # ---------------------------------------------------------------------------
 # Error / edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestUnifiedEdgeCases:
     def test_non_elf_file_returns_empty(self, tmp_path: Path) -> None:
@@ -158,9 +184,12 @@ class TestUnifiedEdgeCases:
         mock_elf = MagicMock()
         mock_elf.get_section_by_name.return_value = None
 
-        with patch("abicheck.dwarf_unified.ELFFile", return_value=mock_elf), \
-             patch("abicheck.dwarf_unified.os.fstat") as mock_fstat:
+        with (
+            patch("abicheck.dwarf_unified.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_unified.os.fstat") as mock_fstat,
+        ):
             import stat as stat_mod
+
             mock_fstat.return_value = MagicMock(st_mode=stat_mod.S_IFREG | 0o644)
             so = tmp_path / "fake.so"
             so.write_bytes(b"\x7fELF" + b"\x00" * 60)
@@ -183,7 +212,11 @@ class TestUnifiedEdgeCases:
 # Backward-compatible shims
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(sys.platform != "linux", reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)")
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
+)
 class TestShims:
     def test_parse_dwarf_metadata_shim_returns_dwarf_metadata(
         self, tmp_path: Path
@@ -219,7 +252,11 @@ class TestShims:
 # Performance sanity: single open vs two opens
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(sys.platform != "linux", reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)")
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
+)
 class TestSingleOpen:
     def test_file_opened_once(self, tmp_path: Path) -> None:
         """parse_dwarf opens the file exactly once (not twice)."""
@@ -261,7 +298,10 @@ _SESSION_SRC = """
 """
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)")
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
+)
 class TestDwarfSession:
     """open_dwarf_session + parse_dwarf_from_session must match the one-shot API,
     and reusing a session for the snapshot build must be byte-for-byte identical."""
@@ -413,7 +453,11 @@ class TestDwarfSession:
                 raise OSError("handle already gone")
 
         sess = DwarfSession(
-            path=Path("x"), _file=_BadFile(), elf=None, dwarf=None, arch="x86_64"  # type: ignore[arg-type]
+            path=Path("x"),
+            _file=_BadFile(),
+            elf=None,
+            dwarf=None,
+            arch="x86_64",  # type: ignore[arg-type]
         )
         sess.close()  # must not raise
         assert calls == [True], "close() should still attempt to close the handle"
@@ -446,3 +490,130 @@ class TestDwarfSession:
             sess.close()
 
         assert reopens == [], f"snapshot re-opened the ELF despite a session: {reopens}"
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
+)
+class TestSplitDwarfSkeletonDetection:
+    """A skeleton CU (``-gsplit-dwarf``) must never be reported as fully
+    ``parsed`` -- its real type/calling-convention DIEs live in an
+    unconsumed ``.dwo``/``.dwp`` file, so a skeleton "succeeds" at CU
+    iteration while extracting almost nothing (P1 review: reproduced
+    int->long struct-layout regression missed at NO_CHANGE/exit 0)."""
+
+    def test_is_skeleton_cu_detects_gnu_dwo_name_attribute(self) -> None:
+        from abicheck.dwarf_unified import _is_skeleton_cu
+
+        class _FakeTopDIE:
+            attributes = {"DW_AT_GNU_dwo_name": object()}
+
+        class _FakeCU:
+            header: dict = {}
+
+            def get_top_DIE(self) -> _FakeTopDIE:
+                return _FakeTopDIE()
+
+        assert _is_skeleton_cu(_FakeCU()) is True
+
+    def test_is_skeleton_cu_detects_dwarf5_unit_type(self) -> None:
+        from abicheck.dwarf_unified import (
+            _DW_UT_SKELETON,
+            _DW_UT_SPLIT_COMPILE,
+            _is_skeleton_cu,
+        )
+
+        class _FakeCU:
+            def __init__(self, unit_type: int) -> None:
+                self.header = {"unit_type": unit_type}
+
+            def get_top_DIE(self) -> None:  # pragma: no cover - not reached
+                raise AssertionError("should short-circuit on unit_type")
+
+        assert _is_skeleton_cu(_FakeCU(_DW_UT_SKELETON)) is True
+        assert _is_skeleton_cu(_FakeCU(_DW_UT_SPLIT_COMPILE)) is True
+
+    def test_is_skeleton_cu_false_for_ordinary_cu(self) -> None:
+        from abicheck.dwarf_unified import _is_skeleton_cu
+
+        class _FakeTopDIE:
+            attributes: dict = {"DW_AT_name": object()}
+
+        class _FakeCU:
+            header = {"unit_type": 0x01}  # DW_UT_compile — ordinary CU
+
+            def get_top_DIE(self) -> _FakeTopDIE:
+                return _FakeTopDIE()
+
+        assert _is_skeleton_cu(_FakeCU()) is False
+
+    def test_is_skeleton_cu_never_raises_on_broken_top_die(self) -> None:
+        from abicheck.dwarf_unified import _is_skeleton_cu
+
+        class _FakeCU:
+            header: dict = {}
+
+            def get_top_DIE(self) -> None:
+                raise ValueError("corrupt DIE")
+
+        assert _is_skeleton_cu(_FakeCU()) is False
+
+    def test_split_dwarf_binary_marks_both_channels_partial(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end against a REAL ``-gsplit-dwarf`` binary: both DWARF
+        channels must come back ``partial`` (never ``parsed``), even though
+        every CU "successfully" iterates."""
+        _require_tool("gcc")
+        src = tmp_path / "split.c"
+        src.write_text("int square(int x) { return x * x; }\n", encoding="utf-8")
+        so = tmp_path / "libsplit.so"
+        r = subprocess.run(
+            [
+                "gcc",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-gsplit-dwarf",
+                "-fvisibility=default",
+                "-o",
+                str(so),
+                str(src),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        if r.returncode != 0:
+            pytest.skip(f"-gsplit-dwarf compilation failed: {r.stderr[:200]}")
+        with open(so, "rb") as f:
+            if f.read(4) != b"\x7fELF":
+                pytest.skip("compiled binary is not ELF")
+
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        try:
+            meta, adv = parse_dwarf_from_session(sess)
+        finally:
+            sess.close()
+
+        assert meta.cu_total >= 1
+        assert meta.evidence_state in ("partial", "failed"), meta.evidence_state
+        assert adv.evidence_state in ("partial", "failed"), adv.evidence_state
+        assert meta.evidence_state != "parsed"
+        assert adv.evidence_state != "parsed"
+
+    def test_ordinary_dwarf_binary_still_reports_parsed(self, tmp_path: Path) -> None:
+        """Sanity check: an ordinary (non-split) binary is unaffected by the
+        skeleton check and still reports ``parsed``."""
+        _require_tool("g++")
+        so = _compile_so(tmp_path, "libnotsplit", _SESSION_SRC, lang="cpp")
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        try:
+            meta, adv = parse_dwarf_from_session(sess)
+        finally:
+            sess.close()
+        assert meta.evidence_state == "parsed"
+        assert adv.evidence_state == "parsed"
