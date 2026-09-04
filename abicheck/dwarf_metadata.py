@@ -800,6 +800,20 @@ def _compute_fallback_type_info(
 ) -> tuple[str, int]:
     name = _attr_str(die, "DW_AT_name")
     size = _attr_int(die, "DW_AT_byte_size")
+    # P2 review, fresh evidence (Codex): reaching this fallback at all means
+    # the tag has no dedicated _compute_type_info() branch -- this module
+    # fundamentally doesn't understand the DIE's own type semantics, only
+    # extracting a raw best-effort name/size pair, regardless of whether a
+    # name happens to be present. A real GCC-compiled `std::nullptr_t`
+    # field (DW_TAG_unspecified_type named "decltype(nullptr)") often
+    # carries no DW_AT_byte_size at all, so _attr_int's absent-vs-zero
+    # ambiguity would otherwise let a genuine evidence gap (size never
+    # provided) read identically to a legitimately-named, fully-resolved
+    # fallback -- unconditionally marking incomplete here, not only in the
+    # no-name branch, closes that gap the same way every other placeholder-
+    # substitution site in this call chain already does.
+    if incomplete is not None:
+        incomplete.append(True)
     # Log unknown DWARF type tags so gaps in type resolution are visible.
     # This helps diagnose missing coverage for new/vendor-specific DWARF extensions.
     # abi-dumper #6: __unknown__ type entries should produce a diagnostic.
@@ -815,8 +829,6 @@ def _compute_fallback_type_info(
         # identical "DW_TAG_ptr_to_member_type" placeholder string on
         # both sides, reading as NO_CHANGE while analysis_assurance still
         # reports "parsed" -- silently masking a real field-type change.
-        if incomplete is not None:
-            incomplete.append(True)
         tag_key = tag or "<empty>"
         if tag_key not in _SEEN_UNKNOWN_DWARF_TAGS:
             _SEEN_UNKNOWN_DWARF_TAGS.add(tag_key)

@@ -265,11 +265,22 @@ def _get_type_align(
 
     Returns 0 when alignment cannot be determined reliably (caller should
     skip) -- a *legitimate* skip (a genuinely composite member type) does not
-    mark `incomplete`; only the `except` branch below (an unresolvable
-    DW_AT_type on the member itself) does. See the P1 review comment on
+    mark `incomplete`; only a *missing* DW_AT_type or an unresolvable one
+    (the `except` branch below) does. See the P1 review comment on
     ``_check_packed``'s own docstring for why this matters.
     """
     if "DW_AT_type" not in member_die.attributes:
+        # P2 review, fresh evidence (Codex): this function's only caller
+        # (_check_packed) always passes a real DW_TAG_member DIE -- a named
+        # member with no DW_AT_type at all is truncated/malformed debug
+        # info, not a legitimate type-less case (unlike, say, a function
+        # return type), and previously returned the same 0-and-skip result
+        # as a genuinely composite member type with no completeness
+        # signal. The basic parser's own `_process_member` now flags this
+        # identical shape (dwarf_metadata.py); this is its advanced-channel
+        # sibling, since the two receipts are independently persisted.
+        if incomplete is not None:
+            incomplete.append(True)
         return 0
     try:
         type_die = _resolve_die_ref(member_die, "DW_AT_type", CU)

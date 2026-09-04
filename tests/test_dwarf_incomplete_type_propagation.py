@@ -325,10 +325,18 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
             == "DW_TAG_ptr_to_member_type"
         )
 
-    def test_unsupported_tag_with_name_is_not_flagged(self) -> None:
-        """Positive control: a fallback-shape tag that DOES carry a real
-        DW_AT_name (so _compute_fallback_type_info returns real
-        information, not a placeholder) must not be flagged."""
+    def test_unsupported_tag_with_name_is_still_flagged(self) -> None:
+        """P2 review, fresh evidence (Codex): this scenario was previously
+        this module's own positive control ("a named fallback-shape tag
+        returns real information, so must not be flagged") -- but a
+        named tag reaching _compute_fallback_type_info still means this
+        module has no dedicated understanding of that tag's own type
+        semantics (only a raw best-effort name/size pair), and a real
+        GCC-compiled `std::nullptr_t` field (this exact
+        DW_TAG_unspecified_type/"decltype(nullptr)" shape) often carries
+        no DW_AT_byte_size at all -- indistinguishable from this fixture's
+        own explicit byte_size=8 via _attr_int's absent-vs-zero ambiguity.
+        Every DIE reaching this fallback is now flagged, named or not."""
         member = _Die(
             "DW_TAG_member",
             {"DW_AT_name": "field", "DW_AT_type": _Attr(71, "DW_FORM_ref_addr")},
@@ -347,11 +355,42 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
 
         result = _run_parse([struct], die_map)
         assert result.cu_failed == 0
-        assert result.evidence_state == "parsed"
+        assert result.evidence_state == "partial"
         assert (
             result.structs["HasNamedFallback"].fields[0].type_name
             == "decltype(nullptr)"
         )
+
+    def test_named_fallback_with_no_byte_size_marks_partial(self) -> None:
+        """The exact scenario the reviewer named: a real GCC
+        `std::nullptr_t` field's DW_TAG_unspecified_type genuinely carries
+        no DW_AT_byte_size attribute at all (not merely a zero value) --
+        this must be flagged the same as the fixture-supplied byte_size=8
+        case above, since _attr_int can't tell the two apart and both
+        reach the identical no-dedicated-branch fallback."""
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(72, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasNullptrT", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        # No DW_AT_byte_size at all -- the real-world GCC shape.
+        named_fallback = _Die(
+            "DW_TAG_unspecified_type",
+            {"DW_AT_name": "decltype(nullptr)"},
+            offset=72,
+        )
+        die_map = {72: named_fallback}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        field = result.structs["HasNullptrT"].fields[0]
+        assert field.type_name == "decltype(nullptr)"
+        assert field.byte_size == 0
 
 
 # ---------------------------------------------------------------------------
