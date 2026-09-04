@@ -264,6 +264,18 @@ def _decompress_if_needed(data: bytes, header: CtfHeader) -> bytes:
         if decompressor.unconsumed_tail:
             limit_mib = _MAX_DECOMPRESS // (1024 * 1024)
             raise ValueError(f"CTF decompressed data exceeds {limit_mib} MiB limit")
+        if not decompressor.eof:
+            # P2 review, fresh evidence (Codex): zlib.decompressobj().
+            # decompress() can return a complete-looking payload without
+            # raising even when the input was truncated -- cutting only the
+            # trailing checksum/end marker (as little as 1 byte) still
+            # yields every decompressed byte, since decompression itself
+            # finished before that marker is even consumed. `eof` is the
+            # one signal that actually distinguishes "the stream properly
+            # terminated" from "we simply ran out of input mid-stream" (the
+            # sibling `unconsumed_tail` check above catches the opposite
+            # shape: more compressed data than we chose to consume).
+            raise ValueError("CTF compressed stream is truncated (missing end marker)")
     except zlib.error as exc:
         raise ValueError(f"CTF decompression failed: {exc}") from exc
     # Reassemble: preamble + decompressed body

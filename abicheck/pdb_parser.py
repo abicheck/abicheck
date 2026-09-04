@@ -735,6 +735,12 @@ class TypeDatabase:
         self._size_cache: dict[int, int] = {}
         self._parsed = False
         self.failed_record_count = 0  # records _parse_record raised on (P2 review)
+        # Type indices referenced by name()/size() that resolve to no known
+        # record at all (P2 review, fresh evidence): populated lazily as
+        # type_name()/type_size() are actually called, since both are
+        # memoized and a cache hit would otherwise silently skip re-recording
+        # the same completeness gap on a later call.
+        self._unresolved_type_refs: set[int] = set()
 
     def parse_all(self) -> None:
         """Parse all TPI records into structured objects."""
@@ -1166,6 +1172,21 @@ class TypeDatabase:
         real_ti = self._fwd_to_def.get(ti, ti)
         return self._enums.get(real_ti)
 
+    @property
+    def unresolved_type_ref_count(self) -> int:
+        """Count of distinct type indices name()/size() could not resolve.
+
+        P2 review, fresh evidence: a valid ``LF_MEMBER``/``LF_ENUM`` whose
+        ``type_ti``/``utype_ti`` names an index absent from the TPI database
+        (or a ``LF_POINTER``/``LF_MODIFIER``/``LF_ARRAY`` wrapper naming one)
+        previously fell through ``type_name()``/``type_size()`` to a
+        ``"<ti:0x...>"`` placeholder and a size of 0 with no completeness
+        signal -- the same silent-fallback shape ``has_fieldlist()`` above
+        fixes for field-list references, one layer down at the individual
+        member/underlying *type* reference itself.
+        """
+        return len(self._unresolved_type_refs)
+
     def get_fieldlist(self, ti: int) -> list[Any]:
         """Get the parsed fieldlist members for type index *ti*."""
         return self._fieldlists.get(ti, [])
@@ -1287,6 +1308,11 @@ class TypeDatabase:
         if mf:
             return "fn(...)"
 
+        # Reaching here means ti >= _TI_BASE (the simple-type branch above
+        # always returns first) and matched none of the known record
+        # categories -- a genuinely unresolvable reference, not a
+        # legitimately-untyped one (P2 review, fresh evidence).
+        self._unresolved_type_refs.add(ti)
         return f"<ti:0x{ti:04x}>"
 
     def _resolve_type_size(self, ti: int, depth: int) -> int:
@@ -1328,6 +1354,16 @@ class TypeDatabase:
         if e:
             return self.type_size(e.underlying_type_ti, depth + 1)
 
+        # Procedures/member-functions are known but legitimately sizeless
+        # (a function has no byte size) -- not unresolved, mirroring
+        # type_name()'s own proc/mfunc branch above.
+        if ti in self._procedures or ti in self._mfunctions:
+            return 0
+
+        # Reaching here means ti >= _TI_BASE and matched no known record
+        # category at all -- a genuinely unresolvable reference (P2 review,
+        # fresh evidence; same shape as _resolve_type_name's fallback).
+        self._unresolved_type_refs.add(ti)
         return 0
 
     def calling_convention_name(self, cc: int) -> str:

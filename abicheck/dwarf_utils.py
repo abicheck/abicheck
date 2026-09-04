@@ -292,13 +292,27 @@ def decode_member_location(val: int | list[object] | None) -> int:
 # ---------------------------------------------------------------------------
 
 
-def resolve_type_die(die: Any, CU: Any) -> Any | None:
-    """Resolve DW_AT_type reference on *die* to a target DIE, or None."""
+def resolve_type_die(
+    die: Any, CU: Any, *, incomplete: list[bool] | None = None
+) -> Any | None:
+    """Resolve DW_AT_type reference on *die* to a target DIE, or None.
+
+    A ``None`` return is deliberately ambiguous to most callers -- "this die
+    has no DW_AT_type at all" (e.g. a void return/param, entirely legitimate)
+    and "DW_AT_type is present but malformed/unresolvable" (a genuine
+    completeness gap) previously collapsed onto the same value with no way
+    to tell them apart (P1 review, fresh evidence). The optional
+    ``incomplete`` out-param -- this codebase's established completeness-
+    signal shape (see e.g. ``type_metadata.read_null_terminated_string``) --
+    is appended to ONLY in the second case, never the first.
+    """
     if "DW_AT_type" not in die.attributes:
         return None
     try:
         return resolve_die_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
+        if incomplete is not None:
+            incomplete.append(True)
         return None
 
 

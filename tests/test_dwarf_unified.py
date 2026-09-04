@@ -30,6 +30,7 @@ from abicheck.dwarf_unified import (  # noqa: E402
     parse_dwarf_from_session,
     parse_dwarf_metadata,
 )
+from tests.test_dwarf_metadata_coverage import _CU, _Attr, _Die  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -798,3 +799,94 @@ class TestUnifiedPassDowngradesOnIncompleteCfi:
             sess.close()
 
         assert adv.evidence_state == "failed"
+
+
+class TestUnifiedPassDowngradesOnIncompleteValueAbiTraits:
+    """P1 review, fresh evidence (Codex): sibling of the above CFI gap --
+    a malformed DW_AT_type on an exported function's return/parameter
+    type, caught deep inside the advanced channel's value-ABI-trait walk,
+    previously left cu_failed untouched and evidence_state at "parsed" on
+    this unified path (the one dumper.py's real ELF dumps actually use),
+    silently omitting that function's value_abi_traits entry. Uses real
+    DIE fixtures (not MagicMock) so an unresolvable DW_AT_type reproduces
+    the same way pyelftools' own get_DIE_from_refaddr does (it raises)."""
+
+    def test_malformed_return_type_marks_advanced_channel_partial(self) -> None:
+        from abicheck import dwarf_unified as du
+
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3foov",
+                "DW_AT_type": _Attr(999, "DW_FORM_ref_addr"),
+            },
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {}
+
+        class _DwarfInfo:
+            def iter_CUs(self):
+                return [cu]
+
+        sess = DwarfSession(
+            path=Path("libtest.so"),
+            _file=object(),  # type: ignore[arg-type]
+            elf=object(),
+            dwarf=_DwarfInfo(),
+            arch="x86_64",  # type: ignore[arg-type]
+        )
+        with (
+            patch("abicheck.dwarf_unified._parse_frame_registers", return_value=True),
+            patch(
+                "abicheck.dwarf_utils.resolve_die_ref",
+                side_effect=RuntimeError("bad ref"),
+            ),
+        ):
+            meta, adv = du.parse_dwarf_from_session(sess)
+
+        assert meta.evidence_state == "parsed"  # basic channel unaffected
+        assert adv.cu_failed == 0
+        assert adv.evidence_state == "partial"
+        assert "_Z3foov" not in adv.value_abi_traits
+
+    def test_clean_function_traits_are_not_flagged(self) -> None:
+        """Positive control: a fully-resolvable by-value struct return type
+        must not be flagged, and its trait must still be recorded."""
+        from abicheck import dwarf_unified as du
+
+        struct_type = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "S", "DW_AT_byte_size": 8},
+            offset=10,
+        )
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3barv",
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {10: struct_type}
+
+        class _DwarfInfo:
+            def iter_CUs(self):
+                return [cu]
+
+        sess = DwarfSession(
+            path=Path("libtest.so"),
+            _file=object(),  # type: ignore[arg-type]
+            elf=object(),
+            dwarf=_DwarfInfo(),
+            arch="x86_64",  # type: ignore[arg-type]
+        )
+        with patch("abicheck.dwarf_unified._parse_frame_registers", return_value=True):
+            meta, adv = du.parse_dwarf_from_session(sess)
+
+        assert adv.cu_failed == 0
+        assert adv.evidence_state == "parsed"
+        assert adv.value_abi_traits["_Z3barv"] == "ret:trivial"

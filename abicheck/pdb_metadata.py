@@ -253,6 +253,17 @@ def parse_pdb_debug_info(
         adv.evidence_state = "partial"
         log.warning("parse_pdb_debug_info: toolchain info extraction failed: %s", exc)
 
+    # P2 review, fresh evidence: a valid member/enum-underlying/pointee type
+    # reference that names no known TPI record previously fell through
+    # TypeDatabase.type_name()/type_size() to a "<ti:0x...>" placeholder and
+    # a size of 0 with no completeness signal, even though the struct/enum
+    # extraction above already recorded a layout. Checking
+    # unresolved_type_ref_count *after* extraction (rather than up front
+    # alongside failed_record_count/truncated) matters because it is
+    # populated lazily, only as type_name()/type_size() are actually called.
+    if pdb.types.unresolved_type_ref_count:
+        meta.evidence_state = "partial"
+
     return meta, adv
 
 

@@ -162,6 +162,16 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
             # -- this standalone entry point is still public and previously
             # never recorded a skipped CU at all.
             skeleton_cus = 0
+            # P1 review, fresh evidence: same gap as the basic channel's own
+            # `incomplete` list (dwarf_metadata._parse) -- a malformed
+            # DW_AT_type on an exported function's return/parameter type,
+            # caught deep inside the value-ABI-trait walk
+            # (resolve_type_die/_unwrap_qualifiers/_is_nontrivial_aggregate/
+            # _type_unaligned_at, each returning a placeholder rather than
+            # raising) previously left cu_failed untouched here, silently
+            # omitting that function's value_abi_traits/return_value_sizes/
+            # return_memory_classified entries with no completeness signal.
+            incomplete: list[bool] = []
             for CU in dwarf.iter_CUs():
                 meta.cu_total += 1
                 if _is_skeleton_cu(CU):
@@ -174,7 +184,7 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                     # real calling-convention/value-ABI facts.
                     skeleton_cus += 1
                 try:
-                    _process_cu(CU, meta)
+                    _process_cu(CU, meta, incomplete=incomplete)
                 except (ELFError, OSError, ValueError, KeyError) as exc:
                     meta.cu_failed += 1
                     log.warning("parse_advanced_dwarf: skipping CU: %s", exc)
@@ -190,6 +200,11 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                     if meta.cu_failed and meta.cu_failed == meta.cu_total
                     else "partial"
                 )
+            elif incomplete:
+                # Every CU-level try/except succeeded, but at least one
+                # value-ABI-trait type reference inside one of them could
+                # not be resolved.
+                meta.evidence_state = "partial"
             # Parse .eh_frame / .debug_frame CFA register convention (#117)
             cfi_complete = _parse_frame_registers(elf, dwarf, meta)
             if not cfi_complete and meta.evidence_state == "parsed":
@@ -212,7 +227,9 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
 # ---------------------------------------------------------------------------
 
 
-def _process_cu(CU: Any, meta: AdvancedDwarfMetadata) -> None:
+def _process_cu(
+    CU: Any, meta: AdvancedDwarfMetadata, *, incomplete: list[bool] | None = None
+) -> None:
     top = CU.get_top_DIE()
 
     # Extract toolchain info from DW_AT_producer on the CU top DIE. The first CU
@@ -230,7 +247,7 @@ def _process_cu(CU: Any, meta: AdvancedDwarfMetadata) -> None:
             meta.toolchain.vector_abi_flags |= parsed.vector_abi_flags
             meta.toolchain.wchar_flags |= parsed.wchar_flags
 
-    _walk_cu(top, meta, CU)
+    _walk_cu(top, meta, CU, incomplete=incomplete)
 
 
 def _get_type_align(member_die: Any, CU: Any) -> int:
@@ -277,7 +294,13 @@ def _get_type_align(member_die: Any, CU: Any) -> int:
         return 0
 
 
-def _walk_cu(root: Any, meta: AdvancedDwarfMetadata, CU: Any) -> None:
+def _walk_cu(
+    root: Any,
+    meta: AdvancedDwarfMetadata,
+    CU: Any,
+    *,
+    incomplete: list[bool] | None = None,
+) -> None:
     """Iterative depth-first DIE walk.
 
     Does NOT descend into DW_TAG_subprogram children — we only need the
@@ -296,7 +319,9 @@ def _walk_cu(root: Any, meta: AdvancedDwarfMetadata, CU: Any) -> None:
             continue
 
         if tag in ("DW_TAG_subprogram", "DW_TAG_subroutine_type"):
-            _extract_calling_convention(die, meta, CU, cache=cache)
+            _extract_calling_convention(
+                die, meta, CU, cache=cache, incomplete=incomplete
+            )
             # Don't descend into subprogram children — not needed for CC extraction
             # and avoids traversing all local variables, params, inlined calls
             continue
@@ -339,6 +364,8 @@ def _is_nontrivial_aggregate(
     type_die: Any,
     cache: dict[int, bool] | None = None,
     CU: Any = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> bool:
     """Detect non-trivial-for-calls aggregate per Itanium C++ ABI §3.1.2.
 
@@ -369,7 +396,9 @@ def _is_nontrivial_aggregate(
         cache[key] = False  # assume trivial; overwrite below if non-trivial found
 
     class_name = _attr_str(type_die, "DW_AT_name") or ""
-    result = _check_children_nontrivial(type_die, class_name, cache, CU)
+    result = _check_children_nontrivial(
+        type_die, class_name, cache, CU, incomplete=incomplete
+    )
 
     if cache is not None and key is not None:
         cache[key] = result
@@ -381,13 +410,15 @@ def _check_children_nontrivial(
     class_name: str,
     cache: dict[int, bool] | None,
     CU: Any,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> bool:
     """Iterate children of a struct/class DIE to detect non-trivial properties."""
 
     def _member_type_is_nontrivial(ch: Any) -> bool:
         if CU is None:
             return False
-        member_type_die = _resolve_type_die(ch, CU)
+        member_type_die = _resolve_type_die(ch, CU, incomplete=incomplete)
         if member_type_die is None:
             return False
         member_tag = getattr(member_type_die, "tag", "")
@@ -397,7 +428,9 @@ def _check_children_nontrivial(
             "DW_TAG_union_type",
         ):
             return False
-        return _is_nontrivial_aggregate(member_type_die, cache=cache, CU=CU)
+        return _is_nontrivial_aggregate(
+            member_type_die, cache=cache, CU=CU, incomplete=incomplete
+        )
 
     def _is_user_defined_special_member(ch: Any) -> bool:
         name = _attr_str(ch, "DW_AT_name") or ""
@@ -436,7 +469,11 @@ def _check_children_nontrivial(
 
 
 def _unwrap_qualifiers(
-    type_die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+    type_die: Any,
+    CU: Any,
+    cache: _DwarfTypeCache | None = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> Any:
     """Unwrap transparent qualifier/typedef layers."""
     key = getattr(type_die, "offset", None)
@@ -452,7 +489,7 @@ def _unwrap_qualifiers(
             "DW_TAG_volatile_type",
             "DW_TAG_restrict_type",
         ):
-            nxt = _resolve_type_die(cur, CU)
+            nxt = _resolve_type_die(cur, CU, incomplete=incomplete)
             if nxt is None:
                 break
             cur = nxt
@@ -471,14 +508,18 @@ def _unwrap_qualifiers(
 
 
 def _value_abi_trait_for_typed_die(
-    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+    die: Any,
+    CU: Any,
+    cache: _DwarfTypeCache | None = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> str | None:
     """Return ABI trait for by-value aggregate type (or None if irrelevant).
 
     Fingerprint contains only ABI-relevant triviality, not type name.
     Type renames don't affect calling convention — including tname causes false positives.
     """
-    t0 = _resolve_type_die(die, CU)
+    t0 = _resolve_type_die(die, CU, incomplete=incomplete)
     if t0 is None:
         return None
 
@@ -491,7 +532,7 @@ def _value_abi_trait_for_typed_die(
     ):
         return None
 
-    t = _unwrap_qualifiers(t0, CU, cache=cache)
+    t = _unwrap_qualifiers(t0, CU, cache=cache, incomplete=incomplete)
     if t.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
         return None
 
@@ -499,14 +540,20 @@ def _value_abi_trait_for_typed_die(
     # Pass CU so member-type non-triviality (e.g. struct Outer { std::string s; }) is detected
     triviality = (
         "nontrivial"
-        if _is_nontrivial_aggregate(t, cache=nontrivial_cache, CU=CU)
+        if _is_nontrivial_aggregate(
+            t, cache=nontrivial_cache, CU=CU, incomplete=incomplete
+        )
         else "trivial"
     )
     return triviality  # "trivial" or "nontrivial"
 
 
 def _aggregate_byte_size_for_typed_die(
-    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+    die: Any,
+    CU: Any,
+    cache: _DwarfTypeCache | None = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> int | None:
     """Return the byte size of a by-value aggregate type (or None if irrelevant).
 
@@ -514,7 +561,7 @@ def _aggregate_byte_size_for_typed_die(
     struct/class/union types passed/returned *by value* qualify. Used to gate
     the return-convention classification on the SysV register-return threshold.
     """
-    t0 = _resolve_type_die(die, CU)
+    t0 = _resolve_type_die(die, CU, incomplete=incomplete)
     if t0 is None:
         return None
     if t0.tag in (
@@ -523,7 +570,7 @@ def _aggregate_byte_size_for_typed_die(
         "DW_TAG_rvalue_reference_type",
     ):
         return None
-    t = _unwrap_qualifiers(t0, CU, cache=cache)
+    t = _unwrap_qualifiers(t0, CU, cache=cache, incomplete=incomplete)
     if t.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
         return None
     size = _attr_int(t, "DW_AT_byte_size")
@@ -558,7 +605,12 @@ def _scalar_leaf_align(t: Any) -> int:
 
 
 def _type_unaligned_at(
-    type_die: Any, CU: Any, base_offset: int, cache: _DwarfTypeCache | None
+    type_die: Any,
+    CU: Any,
+    base_offset: int,
+    cache: _DwarfTypeCache | None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> bool:
     """Whether any scalar leaf of *type_die* lands at a misaligned absolute offset.
 
@@ -569,27 +621,33 @@ def _type_unaligned_at(
     is misaligned when ``base_offset`` is not a multiple of its natural alignment.
     By-value nesting is a DAG, so this terminates.
     """
-    t = _unwrap_qualifiers(type_die, CU, cache=cache)
+    t = _unwrap_qualifiers(type_die, CU, cache=cache, incomplete=incomplete)
     if t.tag in _SCALAR_LEAF_TAGS:
         return base_offset % _scalar_leaf_align(t) != 0
     if t.tag == "DW_TAG_array_type":
-        elem = _resolve_type_die(t, CU)
-        return elem is not None and _type_unaligned_at(elem, CU, base_offset, cache)
+        elem = _resolve_type_die(t, CU, incomplete=incomplete)
+        return elem is not None and _type_unaligned_at(
+            elem, CU, base_offset, cache, incomplete=incomplete
+        )
     if t.tag in _AGGREGATE_TAGS:
         for child in t.iter_children():
             if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
                 continue
-            mt = _resolve_type_die(child, CU)
+            mt = _resolve_type_die(child, CU, incomplete=incomplete)
             if mt is None:
                 continue
             abs_offset = base_offset + _decode_member_location(child)
-            if _type_unaligned_at(mt, CU, abs_offset, cache):
+            if _type_unaligned_at(mt, CU, abs_offset, cache, incomplete=incomplete):
                 return True
     return False
 
 
 def _aggregate_has_unaligned_member(
-    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+    die: Any,
+    CU: Any,
+    cache: _DwarfTypeCache | None = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> bool:
     """Whether a by-value aggregate return type has an unaligned member (recursively).
 
@@ -600,21 +658,26 @@ def _aggregate_has_unaligned_member(
     offsets, so e.g. ``packed R{char c; int a[1];}`` (``a[0]`` at offset 1) and
     ``packed Outer{char c; Inner{double d};}`` (``i.d`` at offset 1) are caught.
     """
-    t0 = _resolve_type_die(die, CU)
+    t0 = _resolve_type_die(die, CU, incomplete=incomplete)
     if t0 is None or t0.tag in (
         "DW_TAG_pointer_type",
         "DW_TAG_reference_type",
         "DW_TAG_rvalue_reference_type",
     ):
         return False
-    t = _unwrap_qualifiers(t0, CU, cache=cache)
+    t = _unwrap_qualifiers(t0, CU, cache=cache, incomplete=incomplete)
     if t.tag not in _AGGREGATE_TAGS:
         return False
-    return _type_unaligned_at(t, CU, 0, cache)
+    return _type_unaligned_at(t, CU, 0, cache, incomplete=incomplete)
 
 
 def _extract_calling_convention(
-    die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None
+    die: Any,
+    meta: AdvancedDwarfMetadata,
+    CU: Any,
+    cache: _DwarfTypeCache | None = None,
+    *,
+    incomplete: list[bool] | None = None,
 ) -> None:
     """Record calling conventions + DWARF value-ABI traits for ABI-exported functions.
 
@@ -652,19 +715,25 @@ def _extract_calling_convention(
 
     # Fallback value-ABI trait (for platforms where DW_AT_calling_convention is omitted)
     parts: list[str] = []
-    ret_trait = _value_abi_trait_for_typed_die(die, CU, cache=cache)
+    ret_trait = _value_abi_trait_for_typed_die(
+        die, CU, cache=cache, incomplete=incomplete
+    )
     if ret_trait is not None:
         parts.append(f"ret:{ret_trait}")
-        ret_size = _aggregate_byte_size_for_typed_die(die, CU, cache=cache)
+        ret_size = _aggregate_byte_size_for_typed_die(
+            die, CU, cache=cache, incomplete=incomplete
+        )
         if ret_size is not None:
             meta.return_value_sizes[key] = ret_size
-        if _aggregate_has_unaligned_member(die, CU, cache=cache):
+        if _aggregate_has_unaligned_member(die, CU, cache=cache, incomplete=incomplete):
             meta.return_memory_classified.add(key)
     pidx = 0
     for ch in die.iter_children():
         if ch.tag != "DW_TAG_formal_parameter":
             continue
-        ptrait = _value_abi_trait_for_typed_die(ch, CU, cache=cache)
+        ptrait = _value_abi_trait_for_typed_die(
+            ch, CU, cache=cache, incomplete=incomplete
+        )
         if ptrait is not None:
             parts.append(f"p{pidx}:{ptrait}")
         pidx += 1

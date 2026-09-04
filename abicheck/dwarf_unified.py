@@ -189,6 +189,16 @@ def parse_dwarf_from_session(
     # the same way; folded into meta.evidence_state below alongside the
     # cu_failed/skeleton_cus check.
     incomplete: list[bool] = []
+    # P1 review, fresh evidence: sibling gap in the advanced channel -- a
+    # malformed DW_AT_type on an exported function's return/parameter type,
+    # caught deep inside the value-ABI-trait walk (resolve_type_die/
+    # _unwrap_qualifiers/_is_nontrivial_aggregate/_type_unaligned_at, each
+    # returning a placeholder rather than raising), previously left cu_failed
+    # untouched -- silently omitting that function's value_abi_traits/
+    # return_value_sizes/return_memory_classified entries with no
+    # completeness signal on this unified path. Mirrors dwarf_advanced.
+    # parse_advanced_dwarf's identical standalone-entry-point fix.
+    adv_incomplete: list[bool] = []
 
     skeleton_cus = 0
     for CU in session.dwarf.iter_CUs():
@@ -213,7 +223,7 @@ def parse_dwarf_from_session(
             meta.cu_failed += 1
             log.warning("parse_dwarf: meta CU skipped in %s: %s", session.path, exc)
         try:
-            _adv_process_cu(CU, adv)
+            _adv_process_cu(CU, adv, incomplete=adv_incomplete)
         except Exception as exc:  # noqa: BLE001 - a corrupt CU must not abort the other CUs
             adv.cu_failed += 1
             log.warning("parse_dwarf: adv CU skipped in %s: %s", session.path, exc)
@@ -279,6 +289,14 @@ def parse_dwarf_from_session(
         # a clean "parsed" -- an already partial/failed state from the
         # cu_failed/skeleton_cus check above is not overwritten.
         meta.evidence_state = "partial"
+
+    if adv_incomplete and adv.evidence_state == "parsed":
+        # Sibling of the basic channel's identical incomplete-list check
+        # above: at least one value-ABI-trait type reference inside an
+        # otherwise-successful CU could not be resolved. Only downgrades a
+        # clean "parsed" -- an already partial/failed state from the
+        # cu_failed/skeleton_cus check above is not overwritten.
+        adv.evidence_state = "partial"
 
     if not cfi_complete and adv.evidence_state == "parsed":
         # P1 review, fresh evidence: mirrors dwarf_advanced.

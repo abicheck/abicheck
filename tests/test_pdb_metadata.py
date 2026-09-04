@@ -453,6 +453,61 @@ class TestPdbToDwarfMetadata:
         assert meta.structs["Empty"].fields == []
         assert meta.enums["EmptyEnum"].members == {}
 
+    def test_member_with_unresolved_type_ti_marks_partial(self, tmp_path: Path) -> None:
+        """P2 review, fresh evidence (Codex): a valid LF_MEMBER whose
+        type_ti names no known TPI record previously fell through
+        TypeDatabase.type_name()/type_size() to a "<ti:0x...>" placeholder
+        and a size of 0, with no completeness signal -- one layer below the
+        already-fixed field-list-reference gap (this is the individual
+        *member type* reference itself)."""
+        fl = _make_lf_fieldlist(
+            [_make_lf_member(0, 0x9999, 0, "bad_field")],
+        )
+        records = [
+            (LF_FIELDLIST, fl),  # 0x1000
+            (LF_STRUCTURE, _make_lf_structure(1, 0, 0x1000, 8, "S")),  # 0x1001
+        ]
+        pdb_bytes = _build_minimal_pdb(tpi_records=records)
+        pdb_file = tmp_path / "unresolved_member_type.pdb"
+        pdb_file.write_bytes(pdb_bytes)
+
+        meta, adv = parse_pdb_debug_info(pdb_file)
+
+        assert meta.evidence_state == "partial"
+        # Unlike the missing-fieldlist shape, the struct itself is still
+        # recorded -- only the one member's type is unresolvable.
+        assert "S" in meta.structs
+        field = meta.structs["S"].fields[0]
+        assert field.name == "bad_field"
+        assert field.type_name == "<ti:0x9999>"
+        assert field.byte_size == 0
+
+    def test_enum_with_unresolved_underlying_type_ti_marks_partial(
+        self, tmp_path: Path
+    ) -> None:
+        """Sibling shape: the enum's own utype_ti (underlying integer type)
+        is unresolvable rather than a member's field type."""
+        records = [
+            (LF_ENUM, _make_lf_enum(0, 0, 0x9999, 0, "BadUnderlying")),  # 0x1000
+        ]
+        pdb_bytes = _build_minimal_pdb(tpi_records=records)
+        pdb_file = tmp_path / "unresolved_enum_underlying.pdb"
+        pdb_file.write_bytes(pdb_bytes)
+
+        meta, adv = parse_pdb_debug_info(pdb_file)
+
+        assert meta.evidence_state == "partial"
+        assert "BadUnderlying" in meta.enums
+        assert meta.enums["BadUnderlying"].underlying_byte_size == 0
+
+    def test_resolvable_member_and_enum_types_are_not_flagged(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
+        """Positive control: every member/underlying type in the shared
+        fixture resolves (simple built-in types) -- must not be flagged."""
+        meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
+        assert meta.evidence_state == "parsed"
+
 
 # ---------------------------------------------------------------------------
 # Data model consistency: AdvancedDwarfMetadata from PDB
@@ -583,6 +638,7 @@ class TestPdbToAdvancedDwarfMetadata:
 # ---------------------------------------------------------------------------
 # _is_user_visible -- compiler-internal / anonymous name filtering
 # ---------------------------------------------------------------------------
+
 
 class TestIsUserVisible:
     """``_is_user_visible`` must reject a compiler-internal/anonymous name

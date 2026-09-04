@@ -26,6 +26,7 @@ from abicheck.serialization import (
     snapshot_to_dict,
     snapshot_to_json,
 )
+from tests.test_dwarf_metadata_coverage import _CU, _Attr, _Die
 
 
 class TestParseAdvancedDwarfEvidenceState:
@@ -131,6 +132,152 @@ class TestParseAdvancedDwarfEvidenceState:
             meta = parse_advanced_dwarf(Path(__file__))
 
         assert meta.evidence_state == "failed"
+
+
+class TestValueAbiTraitIncompletePropagation:
+    """P1 review, fresh evidence (Codex): a malformed DW_AT_type on an
+    exported function's return/parameter type -- caught deep inside the
+    value-ABI-trait walk (resolve_type_die/_unwrap_qualifiers/
+    _is_nontrivial_aggregate/_type_unaligned_at, each returning a
+    placeholder rather than raising) -- previously left cu_failed
+    untouched and evidence_state at "parsed", silently omitting that
+    function's value_abi_traits/return_value_sizes/
+    return_memory_classified entries with no completeness signal.
+    Exercised through the public parse_advanced_dwarf entry point, using
+    real DIE fixtures (not MagicMock) so a genuinely unresolvable
+    DW_AT_type reference reproduces the same way pyelftools' own
+    get_DIE_from_refaddr does (it raises, it does not return None)."""
+
+    def test_malformed_return_type_marks_partial(self) -> None:
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3foov",
+                "DW_AT_type": _Attr(999, "DW_FORM_ref_addr"),
+            },
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+            patch(
+                "abicheck.dwarf_utils.resolve_die_ref",
+                side_effect=RuntimeError("bad ref"),
+            ),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+        # The return type never resolved -- no ret: trait, and with no
+        # params either, this function gets no value_abi_traits entry at
+        # all, same as a "nothing ABI-relevant here" function would.
+        assert "_Z3foov" not in meta.value_abi_traits
+
+    def test_malformed_parameter_type_marks_partial(self) -> None:
+        """Sibling shape: the return type resolves fine (a plain scalar,
+        contributing no trait), but one formal parameter's type does not."""
+        int_type = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=10
+        )
+        good_param = _Die(
+            "DW_TAG_formal_parameter", {"DW_AT_type": _Attr(10, "DW_FORM_ref_addr")}
+        )
+        bad_param = _Die(
+            "DW_TAG_formal_parameter", {"DW_AT_type": _Attr(999, "DW_FORM_ref_addr")}
+        )
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3fooiP1S",
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+            children=[good_param, bad_param],
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {10: int_type}
+
+        real_resolve = __import__(
+            "abicheck.dwarf_utils", fromlist=["resolve_die_ref"]
+        ).resolve_die_ref
+
+        def _selective_resolve(die, attr_name, CU):  # noqa: ANN001, N803
+            if die.attributes[attr_name].value == 999:
+                raise RuntimeError("bad ref")
+            return real_resolve(die, attr_name, CU)
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+            patch(
+                "abicheck.dwarf_utils.resolve_die_ref", side_effect=_selective_resolve
+            ),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+        # int return type isn't an aggregate -> no ret: trait either, and
+        # the resolvable param (int, also non-aggregate) contributes
+        # nothing -- the malformed param is the only thing that could have
+        # produced a trait, so this function gets no traits entry at all,
+        # same as the return-type case above.
+        assert "_Z3fooiP1S" not in meta.value_abi_traits
+
+    def test_clean_function_traits_are_not_flagged(self) -> None:
+        """Positive control: a fully-resolvable by-value struct return type
+        (a real value-ABI-relevant shape) must not be flagged, and its
+        trait must still be recorded correctly."""
+        struct_type = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "S", "DW_AT_byte_size": 8},
+            offset=10,
+        )
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3barv",
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {10: struct_type}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "parsed"
+        assert meta.value_abi_traits["_Z3barv"] == "ret:trivial"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

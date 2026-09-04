@@ -431,3 +431,71 @@ class TestUnterminatedStringMarksPartial:
 
         meta = parse_ctf_from_bytes(b.build())
         assert meta.extraction_partial is False
+
+
+class TestTruncatedCompressedStreamIsRejected:
+    """P2 review, fresh evidence (Codex): zlib.decompressobj().decompress()
+    can return a complete-looking payload without raising even when the
+    input was truncated -- cutting only the trailing checksum/end marker
+    (as little as one byte) still yields every decompressed byte, since
+    decompression itself finished before that marker is even consumed.
+    Previously this collapsed onto the same "success" path as a genuine
+    full stream, with ``has_ctf=True`` and no completeness signal at all.
+    """
+
+    @staticmethod
+    def _compressed_ctf_blob(n_types: int) -> bytes:
+        """Build a real zlib-compressed CTF v3 blob with *n_types* simple
+        integer types -- large enough that a naive truncation still leaves
+        the decompressed body looking complete (the reviewer's own repro
+        scale)."""
+        import zlib
+
+        from abicheck.ctf_metadata import CTF_F_COMPRESS, CTF_MAGIC, CTF_VERSION_3
+
+        strings = bytearray(b"\x00")
+        str_offsets: dict[str, int] = {"": 0}
+        type_entries: list[bytes] = []
+
+        def add_string(s: str) -> int:
+            if s in str_offsets:
+                return str_offsets[s]
+            off = len(strings)
+            strings.extend(s.encode("utf-8") + b"\x00")
+            str_offsets[s] = off
+            return off
+
+        for i in range(n_types):
+            name_off = add_string(f"int{i}")
+            info = CTF_K_INTEGER << 24
+            int_enc = struct.pack("<I", 32)
+            type_entries.append(struct.pack("<III", name_off, info, 4) + int_enc)
+
+        type_data = b"".join(type_entries)
+        str_data = bytes(strings)
+        str_off = len(type_data)
+        body_header = struct.pack("<IIIIIIII", 0, 0, 0, 0, 0, 0, str_off, len(str_data))
+        body = body_header + type_data + str_data
+        compressed = zlib.compress(body)
+        preamble = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, CTF_F_COMPRESS)
+        return preamble + compressed
+
+    def test_truncated_trailer_is_rejected(self) -> None:
+        full = self._compressed_ctf_blob(100)
+        for cut in (1, 2, 3, 4):
+            truncated = full[:-cut]
+            meta = parse_ctf_from_bytes(truncated)
+            # A rejected decompression returns the empty sentinel outright
+            # (matches the existing zip-bomb-limit/zlib.error sibling
+            # failure modes in _decompress_if_needed's own caller) -- never
+            # a "successful" parse of the still-decompressed 100 types.
+            assert meta.has_ctf is False, f"cut={cut} bytes was not rejected"
+
+    def test_complete_compressed_stream_is_not_flagged(self) -> None:
+        """Positive control: a genuinely complete compressed stream must
+        still parse cleanly, with every type recovered."""
+        full = self._compressed_ctf_blob(100)
+        meta = parse_ctf_from_bytes(full)
+        assert meta.has_ctf is True
+        assert meta.extraction_partial is False
+        assert meta.type_count == 100
