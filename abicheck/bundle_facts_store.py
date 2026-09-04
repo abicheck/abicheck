@@ -94,6 +94,7 @@ from .bundle_facts import (
 )
 from .bundle_manifest import InstantiationManifest, manifest_from_dict, manifest_to_dict
 from .serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
+from .storage.bundle_archive_json_guard import bounded_encode_utf8
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .storage.package import (
     ArtifactRef,
@@ -155,6 +156,44 @@ def _decode_aliases(encoded: str) -> tuple[str, ...]:
             f"JSON array of strings, got {encoded!r}"
         )
     return tuple(decoded)
+
+
+def _charge_document_bytes(
+    document: Any, decoded_bytes_so_far: int, *, context: str
+) -> int:
+    """*decoded_bytes_so_far* plus *document*'s encoded byte size, raising
+    before materializing an oversized document rather than after.
+
+    A plain `len(json.dumps(document).encode("utf-8"))` builds a complete
+    JSON string and then a complete second byte buffer before any
+    caller-side budget check runs, so the safety guard itself could
+    exhaust memory on one single huge document (Codex review). `bounded_
+    encode_utf8` -- the same primitive `bundle_facts.py`'s own G40 archive
+    uses for the identical reason -- streams via `JSONEncoder.iterencode()`
+    and aborts as soon as the running byte count would cross the
+    *remaining* allowance, never building the oversized whole. Its default
+    `ensure_ascii=True` also sidesteps a second, unrelated failure a plain
+    `.encode("utf-8")` hits: a real POSIX filename surviving as a lone
+    surrogate (`os.fsdecode`'s `surrogateescape`) inside the document
+    raises `UnicodeEncodeError` under strict UTF-8, but round-trips as a
+    plain ASCII `\\udcXX` escape under JSON's own default escaping.
+    """
+    remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_bytes_so_far, 0)
+    encoded = bounded_encode_utf8(document, remaining)
+    if encoded is None:
+        raise ValueError(
+            f"{context} exceed DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+            f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes)"
+        )
+    return decoded_bytes_so_far + len(encoded)
+
+
+def _text_byte_length(text: str) -> int:
+    """*text*'s real byte length -- `surrogateescape`, not strict UTF-8, so
+    a real POSIX filename/alias surviving as a lone surrogate
+    (`os.fsdecode`'s own decoding convention) is measured, not rejected
+    with `UnicodeEncodeError` (Codex review)."""
+    return len(text.encode("utf-8", errors="surrogateescape"))
 
 
 def _manifest_document_for_storage(manifest: InstantiationManifest) -> dict[str, Any]:
@@ -309,11 +348,18 @@ def write_bundle_facts_package(
         # evidence) -- mirrored here for the identical "writer must not
         # produce what the reader refuses" reason the count/document-size
         # mirroring above already gives.
-        decoded_bytes_so_far += (
-            len(json.dumps(document).encode("utf-8"))
-            + (len(filename.encode("utf-8")) if filename else 0)
-            + (len(encoded_aliases.encode("utf-8")) if encoded_aliases else 0)
+        decoded_bytes_so_far = _charge_document_bytes(
+            document,
+            decoded_bytes_so_far,
+            context=(
+                "facts.per_library_snapshots' encoded documents "
+                f"(reached while encoding {library_name!r})"
+            ),
         )
+        if filename:
+            decoded_bytes_so_far += _text_byte_length(filename)
+        if encoded_aliases:
+            decoded_bytes_so_far += _text_byte_length(encoded_aliases)
         if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
             raise ValueError(
                 f"facts.per_library_snapshots' encoded documents exceed "
@@ -360,15 +406,11 @@ def write_bundle_facts_package(
     project_sections: dict[str, ObjectRef] = {}
     if facts.manifest is not None:
         manifest_document = _manifest_document_for_storage(facts.manifest)
-        decoded_bytes_so_far += len(json.dumps(manifest_document).encode("utf-8"))
-        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise ValueError(
-                f"facts' encoded documents plus its instantiation manifest "
-                f"exceed DEFAULT_MAX_BUNDLE_DECODED_BYTES "
-                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- refusing to "
-                "write a package read_bundle_facts_package would itself "
-                "then refuse to reconstruct"
-            )
+        decoded_bytes_so_far = _charge_document_bytes(
+            manifest_document,
+            decoded_bytes_so_far,
+            context=("facts' encoded documents plus its instantiation manifest"),
+        )
         digest = store.put(manifest_document)
         project_sections[INSTANTIATION_MANIFEST_SECTION_KIND] = ObjectRef(
             kind=INSTANTIATION_MANIFEST_SECTION_KIND, digest=digest
@@ -490,6 +532,14 @@ def read_bundle_facts_package(
         document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
+        decoded_bytes_so_far = _charge_document_bytes(
+            document,
+            decoded_bytes_so_far,
+            context=(
+                f"variant {variant_id!r}'s reconstructed artifacts "
+                f"(reached while reconstructing {artifact_id!r})"
+            ),
+        )
         # `native_identity` (the filename/aliases facts folded on at write
         # time -- see the module docstring) lives outside `document`
         # entirely, so it must be charged too: a budget sized exactly to
@@ -498,11 +548,10 @@ def read_bundle_facts_package(
         # artifact/project-section budget fixes above).
         filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
         aliases_text = artifact.native_identity.get(_NATIVE_IDENTITY_ALIASES_KEY)
-        decoded_bytes_so_far += (
-            len(json.dumps(document).encode("utf-8"))
-            + (len(filename.encode("utf-8")) if filename else 0)
-            + (len(aliases_text.encode("utf-8")) if aliases_text else 0)
-        )
+        if filename:
+            decoded_bytes_so_far += _text_byte_length(filename)
+        if aliases_text:
+            decoded_bytes_so_far += _text_byte_length(aliases_text)
         if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
             raise ValueError(
                 f"variant {variant_id!r}'s reconstructed artifacts exceed "
@@ -545,15 +594,14 @@ def read_bundle_facts_package(
         # -- it must be charged against the same aggregate ceiling, not
         # fetched and parsed for free once the artifacts alone already
         # passed (Codex review, third finding on this same guard).
-        decoded_bytes_so_far += len(json.dumps(raw).encode("utf-8"))
-        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise ValueError(
+        decoded_bytes_so_far = _charge_document_bytes(
+            raw,
+            decoded_bytes_so_far,
+            context=(
                 f"variant {variant_id!r}'s reconstructed artifacts plus its "
-                f"{INSTANTIATION_MANIFEST_SECTION_KIND!r} project section "
-                f"exceed DEFAULT_MAX_BUNDLE_DECODED_BYTES "
-                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- refusing to "
-                "retain it"
-            )
+                f"{INSTANTIATION_MANIFEST_SECTION_KIND!r} project section"
+            ),
+        )
         instantiation_manifest = manifest_from_dict(
             _manifest_document_from_storage(raw)
         )

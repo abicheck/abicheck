@@ -583,3 +583,20 @@ class TestReadBundleFactsPackageSectionCrossCheck:
 
         with pytest.raises(ValueError, match="not_a_real_section"):
             read_bundle_facts_package(corrupted_manifest, store=store)
+
+
+class TestBundleFactsPackageSurrogateEscapedFilenames:
+    def test_round_trips_a_filename_with_a_non_utf8_byte(self) -> None:
+        """A real POSIX basename containing a non-UTF-8 byte decodes (via
+        `os.fsdecode`) to a lone surrogate character -- a strict
+        `.encode("utf-8")` used to measure decoded size raises
+        `UnicodeEncodeError` on this, even though the canonical/object-store
+        path already supports it (Codex review)."""
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        facts.library_filenames["liba.so"] = "caf\udce9"
+        store = InMemoryObjectStore()
+
+        manifest = write_bundle_facts_package(facts, store=store)
+        round_tripped = read_bundle_facts_package(manifest, store=store)
+
+        assert round_tripped.library_filenames == {"liba.so": "caf\udce9"}
