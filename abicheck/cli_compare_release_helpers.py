@@ -251,6 +251,8 @@ def _run_bundle_analysis(
     policy: str = "strict_abi",
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
     new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
+    old_root: Path | None = None,
+    new_root: Path | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -290,6 +292,15 @@ def _run_bundle_analysis(
     explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
     structured ``analysis_errors`` as the same ``click.echo(...,
     err=True)`` warnings this function has always emitted.
+
+    *old_root*/*new_root* (ADR-062 A1.7) are the two release operands
+    themselves (a stored ``ProjectSnapshot`` package directory or a live
+    directory), used only for the embedded-``InstantiationManifest``
+    fallback below -- a package whose selected variant carries zero
+    artifacts has no entry in *old_map*/*new_map* at all to search for one
+    (Codex review, fresh evidence: a valid empty ``BundleFacts`` package
+    can still carry a manifest, and the required-symbol check was silently
+    skipped for it).
     """
     from .bundle import build_bundle_snapshot_mixed, load_manifest
     from .bundle_analysis import analyze_bundle
@@ -340,13 +351,28 @@ def _run_bundle_analysis(
         # docstring) and simply yields None, same as no manifest at all.
         from .bundle_facts_store import read_embedded_instantiation_manifest
 
-        for candidate_map in (old_map, new_map):
-            for candidate_path in candidate_map.values():
-                if not candidate_path.is_dir():
-                    continue
-                manifest = read_embedded_instantiation_manifest(candidate_path)
-                if manifest is not None:
-                    break
+        roots: list[Path] = [r for r in (old_root, new_root) if r is not None]
+        if not roots:
+            # No root threaded through (a caller that predates this
+            # parameter) -- fall back to searching stored member
+            # sub-packages, same as before. Never reaches a zero-artifact
+            # variant's own manifest (see this function's own docstring).
+            roots = [p for m in (old_map, new_map) for p in m.values()]
+        for candidate_root in roots:
+            if not candidate_root.is_dir():
+                continue
+            try:
+                manifest = read_embedded_instantiation_manifest(candidate_root)
+            except Exception as exc:
+                # A declared-but-corrupted manifest section (see that
+                # function's own docstring) is a genuine usage error, not
+                # a best-effort miss -- silently degrading here would let a
+                # required-symbol check disappear along with the evidence
+                # that named it (CodeRabbit review, security finding).
+                raise click.UsageError(
+                    f"{candidate_root}: embedded instantiation manifest is "
+                    f"declared but could not be decoded: {exc}"
+                ) from exc
             if manifest is not None:
                 break
 
@@ -663,6 +689,8 @@ def _collect_bundle_result(
     manifest_path: Path | None,
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
+    old_root: Path | None = None,
+    new_root: Path | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -676,6 +704,8 @@ def _collect_bundle_result(
     :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
     findings` reads, so both are folded into the same ``old_snapshots``/
     ``new_snapshots`` mapping this function has always built. *policy_file* (G38 Phase 16) is set on the result before ``bundle_verdict`` is read.
+    *old_root*/*new_root* (ADR-062 A1.7) are forwarded unchanged to
+    :func:`_run_bundle_analysis`'s own embedded-manifest fallback.
     """
     stashed_diffs: list[DiffResult] = []
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
@@ -706,6 +736,8 @@ def _collect_bundle_result(
         policy=policy,
         old_snapshots=old_snapshots,
         new_snapshots=new_snapshots,
+        old_root=old_root,
+        new_root=new_root,
     )
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16

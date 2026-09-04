@@ -651,25 +651,32 @@ def read_variant_composition_manifest_payload(
 
     Returns the same `bundle_manifest.manifest_from_dict()`-shaped payload
     `export_bundle_facts` builds (via the identical `_manifest_entry_for_
-    export` translation), or `None` -- never raises -- for anything that
-    isn't a readable package carrying a `BUNDLE_COMPOSITION_SECTION_KIND`
-    section for *variant_id*, or that carries one with no manifest
-    recorded. Deliberately returns a plain dict rather than an
-    `InstantiationManifest`: `storage/` may not import `bundle_manifest`
-    (this module's own docstring); the caller decodes it.
+    export` translation), or `None` for anything genuinely *absent*: no
+    readable variant, no `BUNDLE_COMPOSITION_SECTION_KIND` section for
+    *variant_id*, or a decoded composition with no manifest recorded.
+    Deliberately returns a plain dict rather than an `InstantiationManifest`:
+    `storage/` may not import `bundle_manifest` (this module's own
+    docstring); the caller decodes it.
+
+    Once a composition section is confirmed *present*, any failure to read
+    or decode it (a bad digest, a malformed payload) is raised, not
+    swallowed into `None` -- a declared-but-corrupted manifest must not
+    read the same as "no manifest was ever recorded" (CodeRabbit review,
+    security finding: a corrupted section could otherwise silently disable
+    the manifest-drift/required-symbol check it was meant to enforce).
     """
     from ..project_snapshot_store import DirectoryObjectStore, read_variant_ref
 
     try:
         variant = read_variant_ref(root, variant_id)
-        composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
-        if composition_ref is None:
-            return None
-        raw = DirectoryObjectStore(root).get(composition_ref.digest)
-        composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
     except Exception:
         return None
+    composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
+    if composition_ref is None:
+        return None
 
+    raw = DirectoryObjectStore(root).get(composition_ref.digest)
+    composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
     raw_manifest = composition.get("manifest")
     if raw_manifest is None:
         return None

@@ -778,6 +778,8 @@ def compare_release_cmd(
                     policy_file=resolve_bundle_policy_file(
                         suppress, policy, policy_file_path, pack_application
                     ),
+                    old_root=old_dir,
+                    new_root=new_dir,
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

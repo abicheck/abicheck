@@ -313,6 +313,44 @@ class TestDsoOnlyStoredFiltering:
         filtered = dso_only_package_map(resolved)
         assert set(filtered) == {"libcore.so"}
 
+    def test_stored_non_pie_executable_is_also_excluded(self, tmp_path: Path) -> None:
+        """Codex review, tenth round: `ElfMetadata` carries no `e_type`, so
+        a traditional non-PIE `ET_EXEC` (`is_pie=False`) previously passed
+        `dso_only_package_map`'s `is_pie`-only check even though the live
+        `_is_elf_shared_object` path rejects every non-`ET_DYN` file. Its
+        own `PT_INTERP` (`ElfMetadata.interpreter`) is set, like any
+        ordinary dynamically-linked executable, and its name doesn't look
+        like a shared object -- the same signal the live filename fallback
+        uses for this identical ambiguous case."""
+        from dataclasses import replace as dc_replace
+
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.workflows.release_package import (
+            dso_only_package_map,
+            resolve_release_package_map,
+        )
+
+        libs = {
+            "libcore.so": _snap("libcore.so", "1.0", [_fn("foo", "_Z3foov")]),
+            "myapp": _snap("myapp", "1.0", []),
+        }
+        libs["libcore.so"] = dc_replace(libs["libcore.so"], elf=ElfMetadata())
+        libs["myapp"] = dc_replace(
+            libs["myapp"],
+            elf=ElfMetadata(interpreter="/lib64/ld-linux-x86-64.so.2", is_pie=False),
+        )
+
+        pkg = tmp_path / "pkg"
+        _write_package(pkg, libs, variant_id="v1")
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert len(resolved) == 2
+
+        filtered = dso_only_package_map(resolved)
+        assert set(filtered) == {"libcore.so"}
+
 
 class TestBundleFactsOutPreservesStoredIdentity:
     """Codex review, eighth round: `capture_bundle_facts(library_paths=...)`
@@ -598,3 +636,207 @@ class TestReleasePackageResolutionCatchesKeyError:
 
         with pytest.raises(click.UsageError):
             _resolve_release_package_side(pkg, None, make_temp_dir)
+
+
+class TestEmbeddedManifestForEmptyVariant:
+    """Codex review: a stored package's *selected variant* can validly
+    carry zero artifacts (a real `BundleFacts` with an empty
+    `per_library_snapshots`) and still promise symbols via its own embedded
+    manifest -- `_run_bundle_analysis`'s fallback search previously only
+    ever looked inside `old_map`/`new_map`'s own member directories, which
+    a zero-artifact variant has none of, so the manifest was never
+    consulted and a promise the release entirely fails to keep produced no
+    finding at all."""
+
+    def test_empty_variant_manifest_still_gates_the_new_side(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle_facts import BundleFacts
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
+        facts = BundleFacts(
+            variant_fingerprint="gcc13-avx2",
+            per_library_snapshots={},
+            manifest=manifest,
+            filesystem_aliases={},
+            library_filenames={},
+        )
+        old_pkg = tmp_path / "old_pkg"
+        store = DirectoryObjectStore(old_pkg)
+        pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(old_pkg, pkg_manifest)
+
+        _, new_libs = _old_new_libraries()
+        new_pkg = tmp_path / "new_pkg"
+        _write_directory(new_pkg, new_libs)
+
+        ec, out = _invoke(
+            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+        )
+        doc = json.loads(out)
+        bundle_findings = doc.get("bundle_findings") or []
+        matching = [
+            f
+            for f in bundle_findings
+            if f.get("kind") == "bundle_manifest_instantiation_removed"
+            and f.get("symbol") == "core_mul"
+        ]
+        assert matching, (
+            f"expected the core_mul manifest-drift finding even though the "
+            f"old side's selected variant has zero artifacts, got: {out}"
+        )
+
+
+class TestMalformedEmbeddedManifestRaises:
+    """CodeRabbit review, security finding: a declared-but-corrupted
+    embedded manifest section previously decoded to `None`, identical to
+    "no manifest was ever recorded" -- silently disabling the manifest-
+    drift check a corrupted/hand-edited package could otherwise still
+    declare, instead of surfacing as a usage error."""
+
+    def test_corrupted_project_level_manifest_raises_not_none(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle_facts import BundleFacts
+        from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
+        facts = BundleFacts(
+            variant_fingerprint="gcc13-avx2",
+            per_library_snapshots={},
+            manifest=manifest,
+            filesystem_aliases={},
+            library_filenames={},
+        )
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(pkg, pkg_manifest)
+
+        # This zero-artifact package's own manifest is its only stored
+        # object -- corrupt it in place so DirectoryObjectStore.get()'s own
+        # digest check fails, simulating a corrupted/hand-edited package.
+        object_files = [p for p in (pkg / "objects").rglob("*") if p.is_file()]
+        assert object_files
+        for object_file in object_files:
+            raw = bytearray(object_file.read_bytes())
+            raw[-1] ^= 0xFF
+            object_file.write_bytes(bytes(raw))
+
+        with pytest.raises(Exception):  # noqa: B017 -- any decode failure, by design
+            read_embedded_instantiation_manifest(pkg)
+
+
+class TestMaterializationRenameCollision:
+    """Codex review: renaming each raw `artifact_id`-named sub-package
+    directly to its own display name can target a *different* artifact's
+    still-unrenamed raw directory. With `storage.import_bundle_facts`'s
+    own `resolve_ref_ids`-based writer (an already-safe/canonical bundle
+    key becomes its own literal `artifact_id`), a versioned library name
+    `afoo.so.1.2` resolves to release-matching key `afoo.so` (the version
+    suffix stripped) and so a display dirname of `afoo.so-afoo.so.1.2` --
+    which is a second, real sibling artifact's own literal, unrenamed raw
+    `artifact_id` directory name, if that library happens to be named
+    exactly that."""
+
+    def test_display_rename_never_collides_with_a_sibling_raw_directory(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.import_bundle_facts import (
+            BUNDLE_FACTS_ARTIFACT_TYPE,
+            import_bundle_facts,
+        )
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        colliding_key = "afoo.so-afoo.so.1.2"
+        doc = {
+            "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+            "schema_version": 2,
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {
+                "afoo.so.1.2": snapshot_to_dict(
+                    _snap("afoo.so.1.2", "1.0", [_fn("foo", "_Z3foov")])
+                ),
+                colliding_key: snapshot_to_dict(_snap(colliding_key, "1.0", [])),
+            },
+            "filesystem_aliases": {},
+            "library_filenames": {},
+            "manifest": None,
+        }
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = import_bundle_facts(
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
+        )
+        write_project_manifest(pkg, manifest)
+
+        # Must not raise ENOTEMPTY/FileExistsError.
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert set(resolved) == {"afoo.so", "afoo.so-afoo.so"}
+        for sub_dir in resolved.values():
+            assert sub_dir.is_dir()
+
+    def test_display_rename_is_order_independent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`VariantRef.artifact_ids` is always lexicographically sorted
+        (`ArtifactRef.__post_init__`), which happens to protect the
+        version-suffix-stripping collision above under normal materialize
+        order -- but `resolve_release_package_map`'s own rename logic must
+        not silently *depend* on that ordering accident to stay correct.
+        Forces the adversarial order directly (the collision "source"
+        processed before its "target") to prove the two-phase rename is
+        genuinely order-independent, not order-lucky."""
+        import abicheck.workflows.release_package as release_package_module
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+        from abicheck.storage.import_bundle_facts import (
+            BUNDLE_FACTS_ARTIFACT_TYPE,
+            import_bundle_facts,
+        )
+
+        colliding_key = "afoo.so-afoo.so.1.2"
+        doc = {
+            "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+            "schema_version": 2,
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {
+                "afoo.so.1.2": snapshot_to_dict(
+                    _snap("afoo.so.1.2", "1.0", [_fn("foo", "_Z3foov")])
+                ),
+                colliding_key: snapshot_to_dict(_snap(colliding_key, "1.0", [])),
+            },
+            "filesystem_aliases": {},
+            "library_filenames": {},
+            "manifest": None,
+        }
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = import_bundle_facts(
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
+        )
+        write_project_manifest(pkg, manifest)
+
+        real_materialize = release_package_module.materialize_release_variant_artifacts
+
+        def _reversed_order_materialize(*args: object, **kwargs: object) -> dict:
+            by_artifact_id = real_materialize(*args, **kwargs)  # type: ignore[arg-type]
+            # "afoo.so.1.2" (the collision source) forced first.
+            return dict(reversed(list(by_artifact_id.items())))
+
+        monkeypatch.setattr(
+            release_package_module,
+            "materialize_release_variant_artifacts",
+            _reversed_order_materialize,
+        )
+
+        resolved = release_package_module.resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert set(resolved) == {"afoo.so", "afoo.so-afoo.so"}
+        for sub_dir in resolved.values():
+            assert sub_dir.is_dir()

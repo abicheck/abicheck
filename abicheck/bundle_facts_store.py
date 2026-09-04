@@ -727,10 +727,15 @@ def read_embedded_instantiation_manifest(
     evidence here even after the composition section itself was preserved
     through materialization).
 
-    Returns `None` -- never raises -- for anything that isn't a readable
-    package carrying either kind of evidence: no `manifest.json`, a
-    corrupted/hand-edited section, or a package that simply never had an
-    instantiation manifest to begin with.
+    Returns `None` for anything genuinely *absent*: no `manifest.json`, or
+    a package that simply never had an instantiation manifest to begin
+    with. Once a section is confirmed *declared* (a project-level ref, or a
+    variant's own composition section naming a manifest), any failure to
+    read or decode it propagates instead of degrading to `None` -- a
+    corrupted/hand-edited section must not silently read the same as "no
+    manifest was ever recorded" (CodeRabbit review, security finding: this
+    previously let a corrupted section silently disable the manifest-drift
+    check it was meant to enforce, rather than surfacing as a usage error).
     """
     from .project_snapshot_store import DirectoryObjectStore, read_project_manifest
     from .storage.import_bundle_facts import read_variant_composition_manifest_payload
@@ -747,18 +752,12 @@ def read_embedded_instantiation_manifest(
     )
     if project_level:
         assert manifest_ref is not None
-        try:
-            raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
-            return manifest_from_dict(_manifest_document_from_storage(raw))
-        except Exception:
-            return None
+        raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
+        return manifest_from_dict(_manifest_document_from_storage(raw))
     for variant in manifest.variant_refs:
         payload = read_variant_composition_manifest_payload(
             root_path, variant.variant_id
         )
         if payload is not None:
-            try:
-                return manifest_from_dict(payload)
-            except Exception:
-                return None
+            return manifest_from_dict(payload)
     return None

@@ -169,7 +169,7 @@ def resolve_release_package_map(
     by_artifact_id = materialize_release_variant_artifacts(
         root, variant_id=variant_id, dest_root=dest_root
     )
-    result: dict[str, Path] = {}
+    keyed: list[tuple[str, str, Path, ArtifactRef]] = []
     owners: dict[str, str] = {}
     for artifact_id, (sub_dir, artifact) in by_artifact_id.items():
         key = _release_match_key(artifact)
@@ -182,22 +182,38 @@ def resolve_release_package_map(
                 "be distinguishable for compare-release's matching logic "
                 "to tell them apart"
             )
+        keyed.append((key, artifact_id, sub_dir, artifact))
+
+    # Two-phase rename (Codex review, fresh evidence): renaming straight
+    # from each raw artifact_id directory to its own display name can
+    # target a *different*, still-unrenamed artifact's raw directory --
+    # e.g. artifact_id "a" resolving to key "foo" renames to "foo-a",
+    # which collides with a real, not-yet-processed artifact_id "foo-a"
+    # directory, raising ENOTEMPTY/FileExistsError. Staging every sub-
+    # package under a name outside `_display_dirname`'s own output space
+    # first (that function's output never starts with `.`) makes the two
+    # namespaces disjoint, so no second-phase rename can ever collide with
+    # a first-phase staging name or an unprocessed raw directory.
+    staged: list[tuple[str, str, Path, ArtifactRef]] = []
+    for key, artifact_id, sub_dir, artifact in keyed:
+        staging_dir = sub_dir.with_name(f".resolving-{artifact_id}")
+        sub_dir.rename(staging_dir)
+        staged.append((key, artifact_id, staging_dir, artifact))
+
+    result: dict[str, Path] = {}
+    for key, artifact_id, staging_dir, artifact in staged:
         # `_compare_one_library`'s own `entry["library"] = old_path.name`
         # publishes this directory's basename as the release report's
         # display name for this library (JSON/Markdown/JUnit, per-library
-        # filenames, removal warnings) -- renamed here from the artifact_id
-        # `materialize_release_variant_artifacts` names it for collision
-        # safety (an opaque hash) to something a reader can actually
-        # attribute a finding to, once `key`'s own uniqueness is already
-        # settled above. Still suffixed with a short `artifact_id` prefix,
-        # so a `key` that only differs from another by a character
-        # `_DISPLAY_DIRNAME_UNSAFE` collapses (e.g. a `/` vs `:`) still
-        # cannot collide on disk (Codex review).
-        display_dir = sub_dir.with_name(_display_dirname(key, artifact_id))
-        if display_dir != sub_dir:
-            sub_dir.rename(display_dir)
-            sub_dir = display_dir
-        result[key] = sub_dir
+        # filenames, removal warnings) -- once `key`'s own uniqueness is
+        # already settled above, renamed to something a reader can attribute
+        # a finding to instead of an opaque artifact_id. Still suffixed with
+        # the full `artifact_id`, so a `key` that only differs from another
+        # by a character `_DISPLAY_DIRNAME_UNSAFE` collapses (e.g. a `/` vs
+        # `:`) still cannot collide on disk (Codex review).
+        display_dir = staging_dir.with_name(_display_dirname(key, artifact_id))
+        staging_dir.rename(display_dir)
+        result[key] = display_dir
     return result
 
 
@@ -261,13 +277,23 @@ def _display_dirname(key: str, artifact_id: str) -> str:
 
 def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     """*pkg_map* (a `resolve_release_package_map` result), restricted to
-    members whose materialized `ArtifactRef.kind` is `"elf"` *and* whose
-    stored `ElfMetadata.is_pie` is not set -- `--dso-only`'s stored-side
-    counterpart to `package._is_elf_shared_object` filtering a live
-    directory's discovered files (Codex review, fresh evidence: checking
-    `kind` alone still admitted a stored PIE/application ELF executable,
-    since `import_v1` derives `"elf"` for both a DSO and an executable --
-    the live path additionally rejects those via `is_pie`).
+    members whose materialized `ArtifactRef.kind` is `"elf"` and whose
+    stored `ElfMetadata` reads as a real shared object -- `--dso-only`'s
+    stored-side counterpart to `package._is_elf_shared_object` filtering a
+    live directory's discovered files (Codex review: checking `kind` alone
+    admitted a PIE/application executable, since `import_v1` derives
+    `"elf"` for both alike).
+
+    `ElfMetadata` carries no `e_type`, so a traditional non-PIE `ET_EXEC`
+    can't be told apart from a real DSO by `is_pie` alone (fresh evidence,
+    a second Codex round): `is_pie` alone only rejects a *PIE* executable.
+    Mirrors the live predicate's own remaining two cases instead: no
+    `PT_INTERP` (`ElfMetadata.interpreter` empty) is a real shared object
+    outright; `PT_INTERP` present but not PIE is ambiguous (an ordinary
+    executable, or a deliberately-invocable distro DSO like `libc.so.6`)
+    and falls back to the identical filename heuristic
+    (`package._has_shared_object_name`) the live path applies for that
+    same ambiguous case.
 
     Best-effort per member: a sub-package whose own kind or ELF metadata
     cannot be determined is *excluded*, not included -- `--dso-only`'s
@@ -275,6 +301,7 @@ def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     uncertainty must not silently widen it.
     """
     from ..bundle import _stored_elf_metadata
+    from ..package import _has_shared_object_name
     from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
 
     filtered: dict[str, Path] = {}
@@ -287,8 +314,11 @@ def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
         except Exception:
             continue
         elf = _stored_elf_metadata(sub_dir)
-        if elf is not None and not elf.is_pie:
-            filtered[key] = sub_dir
+        if elf is None or elf.is_pie:
+            continue
+        if elf.interpreter and not _has_shared_object_name(key):
+            continue
+        filtered[key] = sub_dir
     return filtered
 
 
