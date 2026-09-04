@@ -78,8 +78,17 @@ from .dto import (
 )
 from .guards import mapping as _mapping
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
-from .package import ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .ref_ids import resolve_ref_ids
 from .versioning import StorageVersions
+
+#: `native_identity` key `import_bundle_facts` stamps onto each per-library
+#: `ArtifactRef`, recording the library's own real name -- needed because
+#: `artifact_id` itself may be an opaque, `resolve_ref_ids`-generated id
+#: rather than the literal name (see that function's own docstring for
+#: when and why). `export_bundle_facts` reads this back to reconstruct
+#: `per_library_snapshots`' real keys.
+_LIBRARY_NAME_KEY = "library_name"
 
 __all__ = [
     "BUNDLE_FACTS_ARTIFACT_TYPE",
@@ -270,8 +279,14 @@ def import_bundle_facts(
             f"schema_version {_BUNDLE_FACTS_SCHEMA_VERSION}); refusing to import "
             "a document whose container semantics this build has not validated"
         )
-    artifact_type = bundle_facts_document.get("artifact_type")
-    if artifact_type is not None:
+    # `"artifact_type" in bundle_facts_document`, not `.get(...) is not
+    # None`: the canonical `bundle_facts_from_dict` distinguishes the key's
+    # *presence* from its value, so a document explicitly declaring
+    # `"artifact_type": null` is a malformed marker to that reader, not an
+    # absent one -- `.get()` alone would silently treat the two the same
+    # and accept a document the canonical reader rejects (Codex review).
+    if "artifact_type" in bundle_facts_document:
+        artifact_type = bundle_facts_document["artifact_type"]
         if artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
             raise ValueError(
                 f"bundle facts: unexpected artifact_type {artifact_type!r} "
@@ -307,6 +322,14 @@ def import_bundle_facts(
     # empty-but-present mapping too, which this adapter's own claim to
     # "accept what the canonical reader accepts" cannot allow.
 
+    # `resolve_ref_ids`, not the raw library name: unlike
+    # `import_legacy_snapshot`'s own caller-supplied `artifact_id`, nothing
+    # upstream of this adapter has ensured a `per_library_snapshots` key is
+    # itself ref-id-safe or collision-free (Codex review). The real name is
+    # preserved on the artifact's own `native_identity` for
+    # `export_bundle_facts` to recover.
+    artifact_ids_by_library = resolve_ref_ids(list(raw_snapshots), opaque_prefix="lib")
+
     artifact_refs = []
     section_schema_versions: dict[str, int] = {}
     source_schema_version: int | None = None
@@ -314,11 +337,18 @@ def import_bundle_facts(
         member_manifest = import_legacy_snapshot(
             snapshot_document,
             store=store,
-            artifact_id=library_name,
+            artifact_id=artifact_ids_by_library[library_name],
             variant_id=variant_id,
             max_known_schema_version=max_known_schema_version,
         )
         (artifact,) = member_manifest.artifact_refs
+        artifact = ArtifactRef(
+            artifact_id=artifact.artifact_id,
+            variant_id=artifact.variant_id,
+            kind=artifact.kind,
+            native_identity={_LIBRARY_NAME_KEY: library_name},
+            sections=artifact.sections,
+        )
         artifact_refs.append(artifact)
         section_schema_versions.update(member_manifest.versions.section_schema_versions)
         member_schema_version = member_manifest.versions.source_schema_version
@@ -421,7 +451,11 @@ def export_bundle_facts(
         artifact = next(
             a for a in manifest.artifact_refs if a.artifact_id == artifact_id
         )
-        per_library_snapshots[artifact_id] = export_legacy_snapshot(
+        # `artifact_id` itself may be an opaque `resolve_ref_ids`-generated
+        # id, not the real library name -- `native_identity` is where
+        # `import_bundle_facts` stashed the real one.
+        library_name = artifact.native_identity.get(_LIBRARY_NAME_KEY, artifact_id)
+        per_library_snapshots[library_name] = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
 

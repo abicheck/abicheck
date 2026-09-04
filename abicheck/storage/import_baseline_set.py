@@ -80,7 +80,14 @@ from .dto import (
 from .guards import mapping as _mapping
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .ref_ids import resolve_ref_ids
 from .versioning import StorageVersions
+
+#: `native_identity` key this module stamps onto each per-library
+#: `ArtifactRef`, recording the library's own real name -- needed because
+#: `artifact_id` itself may be an opaque, `resolve_ref_ids`-generated id
+#: rather than the literal name. `export_baseline_set` reads this back.
+_LIBRARY_NAME_KEY = "library_name"
 
 __all__ = [
     "export_baseline_set",
@@ -175,10 +182,12 @@ def import_baseline_set(
             f"{raw_artifacts!r}"
         )
 
-    artifact_refs: list[ArtifactRef] = []
-    section_schema_versions: dict[str, int] = {}
-    source_schema_version: int | None = None
+    # First pass: validate every entry's own shape and collect its library
+    # name, before resolving artifact ids -- `resolve_ref_ids` needs the
+    # whole set of names at once (to detect a cross-entry collision), so it
+    # cannot run per-entry inside the second, import-performing pass below.
     seen_libraries: set[str] = set()
+    libraries: list[str] = []
     for index, entry in enumerate(raw_artifacts):
         _mapping(entry, f"manifest_document['artifacts'][{index}]")
         library = entry.get("library")
@@ -198,10 +207,24 @@ def import_baseline_set(
                 f"snapshot_documents is missing an entry for library "
                 f"{library!r}, named in manifest_document['artifacts']"
             )
+        libraries.append(library)
+    # `resolve_ref_ids`, not the raw library name: unlike
+    # `import_legacy_snapshot`'s own caller-supplied `artifact_id`, nothing
+    # upstream of this adapter has ensured a library name is itself
+    # ref-id-safe or collision-free (Codex review, the same finding already
+    # fixed for `import_bundle_facts`). The real name is preserved on the
+    # artifact's own `native_identity` for `export_baseline_set` to recover.
+    artifact_ids_by_library = resolve_ref_ids(libraries, opaque_prefix="lib")
+
+    artifact_refs: list[ArtifactRef] = []
+    section_schema_versions: dict[str, int] = {}
+    source_schema_version: int | None = None
+    for index, entry in enumerate(raw_artifacts):
+        library = entry["library"]
         member_manifest = import_legacy_snapshot(
             snapshot_documents[library],
             store=store,
-            artifact_id=library,
+            artifact_id=artifact_ids_by_library[library],
             variant_id=variant_id,
             max_known_schema_version=max_known_schema_version,
         )
@@ -216,20 +239,22 @@ def import_baseline_set(
                 )
         else:
             binary_sha256 = ""
+        # `""` (absent key, or `BaselineArtifact.binary_sha256`'s own
+        # documented default) means "no staged binary" -- folded into
+        # `native_identity` only when present. A fresh `ArtifactRef`
+        # carrying the same identity/sections plus these native-identity
+        # facts -- `ArtifactRef` is a frozen dataclass, so this is
+        # reconstruction, not mutation.
+        native_identity = {_LIBRARY_NAME_KEY: library}
         if binary_sha256:
-            # `""` (absent key, or `BaselineArtifact.binary_sha256`'s own
-            # documented default) means "no staged binary" -- not an error,
-            # and not a value worth carrying as a native-identity fact.
-            # A fresh `ArtifactRef` carrying the same identity/sections plus
-            # this one extra native-identity fact -- `ArtifactRef` is a
-            # frozen dataclass, so this is reconstruction, not mutation.
-            artifact = ArtifactRef(
-                artifact_id=artifact.artifact_id,
-                variant_id=artifact.variant_id,
-                kind=artifact.kind,
-                native_identity={"binary_sha256": binary_sha256},
-                sections=artifact.sections,
-            )
+            native_identity["binary_sha256"] = binary_sha256
+        artifact = ArtifactRef(
+            artifact_id=artifact.artifact_id,
+            variant_id=artifact.variant_id,
+            kind=artifact.kind,
+            native_identity=native_identity,
+            sections=artifact.sections,
+        )
         artifact_refs.append(artifact)
         section_schema_versions.update(member_manifest.versions.section_schema_versions)
         member_schema_version = member_manifest.versions.source_schema_version
@@ -321,7 +346,11 @@ def export_baseline_set(
         artifact = next(
             a for a in manifest.artifact_refs if a.artifact_id == artifact_id
         )
-        snapshot_documents[artifact_id] = export_legacy_snapshot(
+        # `artifact_id` itself may be an opaque `resolve_ref_ids`-generated
+        # id, not the real library name -- `native_identity` is where
+        # `import_baseline_set` stashed the real one.
+        library = artifact.native_identity.get(_LIBRARY_NAME_KEY, artifact_id)
+        snapshot_documents[library] = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
     return metadata_document, snapshot_documents

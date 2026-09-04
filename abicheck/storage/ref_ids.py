@@ -23,17 +23,27 @@ moves cleanly to its own leaf.
 `_safe_ref_id`/`_reject_filesystem_collisions` under their original names,
 unchanged in behavior — see the module map's `package.py` entry for what
 they guard against (a variant/artifact id becoming a literal, cross-platform
-filename component)."""
+filename component).
+
+`resolve_ref_ids` (ADR-063 Track C 8B) is new: `import_bundle_facts`/
+`import_baseline_set` key a real document by an arbitrary caller-chosen
+string (a library name) they don't get to pick a safer `artifact_id` for,
+unlike `import_v1.import_legacy_snapshot`'s own caller-supplied
+`artifact_id` -- nothing upstream of those two adapters has already
+ensured the key is ref-id-safe."""
 
 from __future__ import annotations
 
+import hashlib
 import unicodedata
+from collections.abc import Sequence
 
 from .guards import identity_text as _identity_text
 
 __all__ = [
     "REF_SUFFIX",
     "reject_filesystem_collisions",
+    "resolve_ref_ids",
     "safe_ref_id",
 ]
 
@@ -158,3 +168,50 @@ def reject_filesystem_collisions(ids: list[str], record_kind: str) -> None:
                 "a case-insensitive or normalization-insensitive filesystem"
             )
         seen[folded] = ref_id
+
+
+def _opaque_ref_id(name: str, prefix: str) -> str:
+    """A deterministic id derived from *name* guaranteed to pass
+    `safe_ref_id` and never collide (up to sha256) with another name's own
+    opaque id -- lowercase hex is already `safe_ref_id`-safe and
+    case/normalization-collision-free by construction."""
+    digest = hashlib.sha256(name.encode("utf-8", errors="surrogatepass")).hexdigest()
+    return f"{prefix}-{digest[:16]}"
+
+
+def resolve_ref_ids(names: Sequence[str], *, opaque_prefix: str) -> dict[str, str]:
+    """Map each of *names* to a ref-id-safe, collision-free identifier --
+    preferring the literal name (for on-disk readability, e.g. in
+    `refs/artifacts/<id>.json`) when every name in *names* already passes
+    `safe_ref_id` and none collides with another on a case-insensitive or
+    normalization-insensitive filesystem (`reject_filesystem_collisions`);
+    falling back to a deterministic, opaque, sha256-derived id (see
+    `_opaque_ref_id`) for *every* name otherwise.
+
+    A single unsafe or colliding name falls the whole set back to opaque
+    ids, not just the offending one(s) -- deciding which of several
+    colliding names keeps its literal spelling would be an arbitrary
+    choice this function has no basis to make, and a set mixing opaque and
+    literal ids is more confusing to a reader of the resulting package than
+    a uniformly opaque one (Codex review: a real `BundleFacts`/baseline-set
+    document may legitimately name two libraries differing only by case --
+    `libFoo.so`/`libfoo.so` -- which this package's own cross-platform
+    ref-id safety would otherwise reject outright, even though the
+    canonical `BundleFacts` reader treats them as two distinct, valid
+    entries).
+
+    Raises nothing itself -- a name this function cannot make safe always
+    has a working opaque fallback.
+    """
+    safe_names: list[str] = []
+    for name in names:
+        try:
+            safe_ref_id(name, "name")
+        except ValueError:
+            return {n: _opaque_ref_id(n, opaque_prefix) for n in names}
+        safe_names.append(name)
+    try:
+        reject_filesystem_collisions(safe_names, "name")
+    except ValueError:
+        return {n: _opaque_ref_id(n, opaque_prefix) for n in names}
+    return {n: n for n in names}

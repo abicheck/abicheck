@@ -112,6 +112,29 @@ class TestImportBaselineSet:
             "libb.so",
         ]
 
+    def test_case_colliding_library_names_get_opaque_artifact_ids(self) -> None:
+        doc = _manifest_document(
+            artifacts=[
+                {"library": "libFoo.so", "artifact": "a", "snapshot": "a.json"},
+                {"library": "libfoo.so", "artifact": "b", "snapshot": "b.json"},
+            ]
+        )
+        snapshots = {
+            "libFoo.so": snapshot_to_dict(
+                AbiSnapshot(library="libFoo.so", version="1.0")
+            ),
+            "libfoo.so": snapshot_to_dict(
+                AbiSnapshot(library="libfoo.so", version="1.0")
+            ),
+        }
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, snapshots, store=store)
+        assert len(manifest.artifact_refs) == 2
+        artifact_ids = {a.artifact_id for a in manifest.artifact_refs}
+        assert artifact_ids.isdisjoint({"libFoo.so", "libfoo.so"})
+        _metadata, exported_snapshots = export_baseline_set(manifest, store=store)
+        assert set(exported_snapshots) == {"libFoo.so", "libfoo.so"}
+
     def test_carries_binary_sha256_onto_native_identity(self) -> None:
         doc = _manifest_document()
         store = InMemoryObjectStore()

@@ -58,6 +58,15 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="artifact_type"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 
+    def test_rejects_an_explicitly_null_artifact_type(self) -> None:
+        """`"artifact_type" in bundle_facts_document`, not `.get(...) is
+        not None` -- a document explicitly declaring `"artifact_type":
+        null` is a malformed marker to the canonical reader, not an absent
+        one (Codex review)."""
+        doc = _bundle_document(artifact_type=None)
+        with pytest.raises(ValueError, match="artifact_type"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
     def test_requires_per_library_snapshots(self) -> None:
         doc = _bundle_document()
         del doc["per_library_snapshots"]
@@ -86,6 +95,30 @@ class TestImportBundleFacts:
             "libb.so",
         ]
         assert manifest.variant_refs[0].artifact_ids == ("liba.so", "libb.so")
+
+    def test_case_colliding_library_names_get_opaque_artifact_ids(self) -> None:
+        """`libFoo.so`/`libfoo.so` are two distinct, valid libraries to
+        `BundleFacts` and its canonical reader, but would collide as
+        `ArtifactRef` ids on a case-insensitive filesystem -- both fall
+        back to safe, opaque ids instead of one failing to import at all
+        (Codex review)."""
+        doc = _bundle_document(
+            per_library_snapshots={
+                "libFoo.so": snapshot_to_dict(
+                    AbiSnapshot(library="libFoo.so", version="1.0")
+                ),
+                "libfoo.so": snapshot_to_dict(
+                    AbiSnapshot(library="libfoo.so", version="1.0")
+                ),
+            }
+        )
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        assert len(manifest.artifact_refs) == 2
+        artifact_ids = {a.artifact_id for a in manifest.artifact_refs}
+        assert artifact_ids.isdisjoint({"libFoo.so", "libfoo.so"})
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert set(roundtrip["per_library_snapshots"]) == {"libFoo.so", "libfoo.so"}
 
     def test_attaches_a_bundle_composition_section_to_the_variant(self) -> None:
         doc = _bundle_document()
