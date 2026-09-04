@@ -51,6 +51,18 @@ review on PR #1041) — this module stays the single-snapshot projection
 (:func:`legacy_typedef_ir`) plus the rendering/identity primitives every
 consumer of it, on either side of that split, shares.
 
+**Cohort 2 (constants) reuses this module verbatim.** ADR-063 Phase 6B's
+second detector cohort (``compare/constants.py``) is the identical shape as
+the typedef cohort above, substituting the constant collections
+(``AbiSnapshot.constants``/``constant_entity_ids``) and ``EntityKind.
+CONSTANT``: :func:`legacy_constant_ir` is :func:`legacy_typedef_ir` with a
+value-literal payload instead of a resolved-type-spelling one, and
+:func:`render_display_name`/:func:`producer_entity_id`/
+:data:`SYNTHETIC_IDENTITY_EXTRA` are shared unchanged — a constant's
+qualified name has exactly the same flat-spelling shape a typedef's alias
+does, so nothing about the rendering or synthetic-identity story differs
+between the two families.
+
 **Synthetic identity is marked, not hidden.** A legacy declaration whose
 producer resolved no ``EntityId`` still needs one to key an occurrence by,
 so the adapter derives one from the display spelling and tags it
@@ -86,6 +98,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SYNTHETIC_IDENTITY_EXTRA",
+    "legacy_constant_ir",
     "legacy_typedef_ir",
     "producer_entity_id",
     "render_display_name",
@@ -185,5 +198,43 @@ def legacy_typedef_ir(snapshot: AbiSnapshot, typedefs: dict[str, str]) -> Semant
             entity_id = _synthetic_entity_id(EntityKind.TYPEDEF, alias)
         occurrences[OccurrenceId(entity_id)] = CanonicalEntity(
             canonical_spelling=Fact.present(underlying)
+        )
+    return SemanticIR(occurrences=occurrences)
+
+
+def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> SemanticIR:
+    """Project one snapshot's constant collection into a real ``SemanticIR``.
+
+    The constant-family counterpart of :func:`legacy_typedef_ir` — same
+    shape, substituting ``AbiSnapshot.constants``/``constant_entity_ids``
+    and :attr:`~abicheck.model.identity.EntityKind.CONSTANT`. *constants* is
+    ``AbiSnapshot.constants`` itself (there is no alias-map selection
+    question here the way there is for typedefs' ``typedefs``/
+    ``typedefs_qualified`` pair — a constant has exactly one legacy
+    collection), passed in rather than read here because reading it is the
+    caller's job, not a single-snapshot projection's.
+
+    Each qualified name becomes one occurrence whose ``canonical_spelling``
+    is its raw value text — the identical, deliberately-uncanonicalized
+    payload ``extract/semantic_normalizer.py`` produces for a constant from
+    a real header-AST backend (see that module's own "Scope of the fourth
+    slice"), so the two sources are interchangeable to a reader. The
+    ``entity_id`` sidecar is used when present *and* it renders back to the
+    qualified name exactly; otherwise a synthetic, display-derived identity
+    is used — identical reasoning to :func:`legacy_typedef_ir`'s own sidecar
+    check, including why the render check matters (a sidecar id whose
+    rendering disagrees with its own map key would key the occurrence under
+    a name the detector then cannot find, turning a projection mismatch
+    into a phantom removal).
+    """
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    for qualified_name, value in constants.items():
+        sidecar = snapshot.constant_entity_ids.get(qualified_name)
+        if sidecar is not None and render_display_name(sidecar) == qualified_name:
+            entity_id = sidecar
+        else:
+            entity_id = _synthetic_entity_id(EntityKind.CONSTANT, qualified_name)
+        occurrences[OccurrenceId(entity_id)] = CanonicalEntity(
+            canonical_spelling=Fact.present(value)
         )
     return SemanticIR(occurrences=occurrences)

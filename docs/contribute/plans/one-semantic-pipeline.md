@@ -182,12 +182,138 @@ when a first PR lands against a sub-phase:
 
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
-| **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
+| **2B — Identity consumer migration** | in progress | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted). The `StableEntityId`/`SnapshotLocalIdentity` split landed (`abicheck/model/identity_tiers.py`), and two post-parse consumers migrated onto it — `diff_filtering.py`'s opaque-type suppression (`compare/opaque_types.OpaqueTypeIndex`, matching on `StableEntityId` first and the `RecordType.name` spelling second) and `type_reachability.py`'s closure-walk record-tracking keys (`SnapshotLocalIdentity` rather than bare `str`). Bare-name-collision narrowing landed (2026-09-03, see the note below the table): `OpaqueTypeIndex.complete` gates `contains(..., strict=...)` on both sides' stable tier being provably complete for the comparison at hand, closing the collision exactly when doing so cannot drop a real suppression. The `entity:` alias promotion in `finding_identity.resolve_change_identity`/`report_canonical_finding_id` was investigated (2026-09-03) and declined rather than deferred: no currently-identifiable finding needs it (typedefs/constants already get a fine NORMALIZED tier off their own spelling, functions/variables already get the stronger CANONICAL mangled tier), so wiring it in would trade real suppression-file compatibility for a benefit that cannot be demonstrated today — see the ledger's `identity` concept for the full reasoning |
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
 | **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
 | **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+
+**2B's bare-name-collision narrowing landed (2026-09-03).** The gap
+`compare/opaque_types.py`'s own docstring named as still-open since the
+opaque-type suppression migration: two unrelated types sharing a bare leaf
+spelling in different scopes (`ns1::Handle` opaque, `ns2::Handle` a
+different, visible declaration) could both be suppressed through the
+spelling tier, since the pre-existing design deliberately fell back to
+spelling on *any* stable-tier miss rather than trusting a miss as proof of
+non-opacity.
+
+*Why a miss couldn't simply be trusted before this slice.* Trusting it
+unconditionally would have traded a real bug for a worse one: a mixed
+header-AST/DWARF comparison, or one side loaded from an archived baseline
+predating `RecordType.entity_id` population, would leave one side's stable
+tier incomplete — a real, still-opaque declaration failing to resolve an
+identity on just one side reads identically to "not the opaque one" under
+an unconditional-trust rule, silently dropping a genuine suppression and
+reporting a purely private layout change as breaking (a live false-positive
+risk against this repo's FP-rate gate).
+
+*The fix: gate narrowing on a completeness signal, not on producer
+identity — three review rounds, each tightening the predicate a weaker
+one had gotten wrong.* The final shape: `OpaqueTypeIndex` carries
+`stable_by_local`, the stable ids resolved among just the declaration(s)
+sharing each bare spelling, and `intersect()`'s `complete` is true only
+when, for every spelling both sides agree is opaque, the two sides' own
+`stable_by_local` sets for it are **exactly equal and non-empty**.
+
+Two weaker predicates were tried and each fell to a real counter-example
+before landing on this one. First: "every raw declaration independently
+resolved *some* stable id" (per side, ANDed) — falsified by two producers
+resolving *different* ids for the *same* declaration (e.g. disagreeing on
+whether an enclosing scope segment is a namespace or a record), which
+this per-side-only check cannot see at all. Second, once fixed to compare
+the two sides' id sets per spelling: "the two sides' sets *intersect*" —
+falsified by a genuine collision itself, where *two distinct*
+declarations share one spelling and only *one* of them actually paired;
+a shared id from the paired declaration keeps the intersection non-empty
+while the other silently disagrees. Exact equality is what closes that
+gap: it requires *every* id either side resolved for a spelling to have a
+match on the other side, not merely that some id does. Equal-and-empty
+had to be excluded too (`frozenset() == frozenset()` is `True`, but two
+sides that both resolved *nothing* for a spelling are not in agreement —
+counting them as paired let `strict=True` reject a change on a
+contentless miss instead of falling through to the spelling tier, caught
+by an existing behavior-preservation test regressing).
+
+`_downgrade_opaque_type_changes` reads `complete` straight off the
+already-intersected index: `opaque.contains(c, ..., strict=opaque.complete)`.
+`strict=True` only changes what happens on a stable-tier *miss* (never a
+hit, and never when the change carries no resolvable identity at all) —
+so this is additive, both-or-neither-gated capability layered on the
+existing permissive default, the identical discipline
+`compare/typedefs.py`'s and `compare/constants.py`'s own fidelity gates
+already established for the `SemanticIR` cutover.
+
+*Investigation finding worth recording: the completeness precondition
+already holds far more often than the original "needs its own slice"
+caution assumed.* Checking each current producer found `RecordType.entity_id`
+populated unconditionally by castxml, clang, DWARF, and PDB (all via
+`entity_id_for_type`), and BTF/CTF inherits it for free by routing through
+`dwarf_snapshot.py`'s shared builder (`to_dwarf_metadata()`). The realistic
+incompleteness case today is narrower than "some current producer never
+resolves one" — it is producer *version/schema* skew: an archived baseline
+`.abi.json` from before this population existed, or a genuinely mixed
+header-AST/DWARF comparison. `OpaqueTypeIndex.complete` degrades safely to
+the pre-narrowing permissive behavior in exactly that case, so this
+finding motivated implementing the gate rather than skipping it — it did
+not remove the need for one.
+
+*What remains open, explicitly.* A change that carries no resolvable
+`entity_id` at all still falls straight through to the spelling tier,
+collision and all — `tests/test_opaque_identity_tiers.py`'s
+`TestKnownGapStaysDocumented` pins this narrower residual case, not the
+general collision (now closed by `TestBareNameCollisionNarrowing`).
+
+*Verification.* `tests/test_opaque_identity_tiers.py`'s new
+`TestBareNameCollisionNarrowing` class: the collision-closing case, the
+completeness-decline case (proving the gate actually degrades rather than
+silently narrowing anyway), and a hit-is-unaffected case. Full fast unit
+lane green; `ruff check`/`mypy abicheck/` clean; `check_fp_rate.py` 0 FP /
+0 FN, both deltas 0; `check_tier_accuracy.py` OK (top-tier correct,
+under-call monotonic).
+
+**2B's `entity:` alias promotion: investigated, declined rather than
+deferred (2026-09-03).** The narrowing slice above closed a demonstrated
+bug (a real false suppression, pinned as a test before the fix and closed
+after it). This is the other half of 2B's stated remaining scope, and it
+does not have one: `finding_identity.resolve_change_identity` already
+folds `Change.entity_id` in as an `entity:` alias, but never promotes it
+to `primary_id`/tier -- what `report_canonical_finding_id` (the
+cross-backend suppression-key function) actually hashes. Promoting it
+would mean trusting a stable `EntityId` ahead of (or instead of) the
+existing tier a finding already gets, which changes the hash for any
+already-stored `finding_id:` suppression rule matching that finding.
+
+Checked, rather than assumed, what promotion would actually buy for every
+family that currently reaches `Change.entity_id` at all: typedefs and
+constants already resolve `IDENTITY_TIER_NORMALIZED` off their own alias/
+qualified-name spelling, which both header-AST backends already agree on
+-- the one real cross-backend risk in that data, a *value* spelling
+difference (`"char const*"` vs `"char const *"`), is exactly what
+`canonicalize_values=True` already normalizes, independently of
+`entity_id`. Functions/variables reach `IDENTITY_TIER_CANONICAL` off their
+mangled name whenever one exists, which is strictly more precise than an
+entity-derived id could be. No currently-identifiable finding needs the
+promotion to resolve correctly or consistently across backends.
+
+That makes this the identical shape of decision `extract/
+semantic_normalizer.py`'s constants slice already declined for a different
+field (a value-spelling canonicalizer with no observed cross-backend
+divergence to fix) -- AGENTS.md's own "a canonicalizer with no known
+target divergence to fix is a heuristic in search of a bug, not a fix for
+one" applies here just as directly, now to an identity-tier promotion
+rather than a spelling canonicalizer. Declined on that basis: not "blocked
+on sign-off" (the stability precondition -- `StableEntityId`/
+`entity_id_is_cross_snapshot_stable`, ADR-063 Phase 2's own designated
+"entity: promotion gate" -- is already built and tested), but "no case
+found that would justify the compatibility cost yet." Revisit only if a
+real cross-backend or cross-detector identity collision surfaces that
+narrowing/canonicalization alone can't close, with the suppression-file
+compatibility trade-off put to a maintainer explicitly at that point, the
+same bar the opaque-type narrowing slice above did not have to clear
+because it introduced no compatibility change at all.
+
+---
 
 **5B's first PR landed (2026-09-03).** `abicheck.compare.fact_comparison.
 compare_facts` is the shared primitive (moved there from `model/fact.py`
@@ -10883,6 +11009,144 @@ and the selector's both-or-neither rule. Full fast unit lane green;
 `ruff check`/`mypy abicheck/` clean; `check_architecture.py` 0 errors;
 `check_ai_readiness.py` 0 errors; FP-rate gate 0 FP / 0 FN; tier-accuracy
 gate OK.
+
+---
+
+**Landed (2026-09-03): Phase 6B's second checker cutover — the constant
+family, reusing the typedef cohort's adapter and gate shape unchanged.**
+
+*Why constants.* The typedef cohort's own reasoning already ruled out
+records (layout facts the IR does not yet model) and functions (a canonical
+signature spelling whose cross-backend agreement is its own open question)
+as the next cohort. Constants are what's left of the "IR already covers
+this completely" set: `extract/semantic_normalizer.py`'s fourth slice
+already gave every public constant a real `EntityId`
+(`parse_constant_entity_ids()`, Phase 2) plus exactly one payload fact —
+its raw, deliberately-uncanonicalized value text
+(`CanonicalEntity.canonical_spelling`, matching `diff_symbols.
+_diff_constants`'s own long-standing raw-string `!=` comparison) — so, like
+typedefs, migrating this family is a real read-path change, not extraction
+work in disguise.
+
+*The shape, reused rather than re-derived.* `abicheck/compare/constants.py`
+is `compare/typedefs.py`'s design with the constant collections substituted:
+index-only reads (`diff_constants`), a fidelity-gated selector
+(`constant_index_pair`) requiring the IR's rendered names/values/identities
+to exactly reproduce `AbiSnapshot.constants` on both sides before trusting
+it, both-or-neither on any divergence. `abicheck/model/
+semantic_ir_legacy_adapter.py` gained one sibling function,
+`legacy_constant_ir`, reusing `render_display_name`/`producer_entity_id`/
+`SYNTHETIC_IDENTITY_EXTRA` unchanged — a constant's qualified name has the
+same flat-spelling shape a typedef's alias does, so nothing about the
+rendering or synthetic-identity story differs between the two families.
+
+*The one real difference: an injected reliability predicate, not a
+snapshot-blind detector reading a new fact directly.* Constants carry one
+comparison-level suppression typedefs don't:
+`diff_default_value_reliability.
+constant_value_fingerprint_comparison_unreliable` declines a `CONSTANT_
+CHANGED` verdict when either side's value is a pre-stabilization
+direct-clang fingerprint that can't be trusted against a fresh one. That
+function reads `AbiSnapshot.ast_producer`/`clang_field_initializer_facts_
+reliable` — snapshot fields the migrated cohort is not forbidden from
+reading — but keeping `compare/constants.py` snapshot-blind (matching
+`compare/typedefs.py`'s own discipline of taking only indexes and plain
+values) meant injecting it as a predicate closed over both snapshots by the
+caller (`diff_symbols._diff_constants`), the same reasoning that already
+motivated `diff_typedefs`'s own `is_non_abi_surface_type` injection.
+
+*A defensive floor with no reachable legacy sentinel.* A typedef's
+unresolved-chain placeholder (`"?"`) is a real string both backends agree
+on, so `compare/typedefs._underlying` can fall back to it defensively. A
+constant's `Fact.unsupported()` occurrence (a clang compound-initializer
+fingerprint or Python-bool-derived literal spelling) carries no such
+placeholder — the raw fingerprint text isn't retained on the fact at all —
+so `compare/constants._value` returns `None` instead. This is never reached
+through the real `constant_index_pair` gate in practice: a `None`
+projection can never equal the legacy raw string the fidelity gate compares
+against, so any entity in this state already forces a fallback to the
+adapter for both sides before a detector would iterate it. Exercised
+directly in `tests/test_constant_cutover.py` as the defensive floor, not
+the mechanism.
+
+*The closing gate.* One more `MIGRATED_COHORTS` entry in
+`scripts/semantic_ir_cutover.py` (`constants`, forbidding
+`AbiSnapshot.constants`/`constant_entity_ids` reads from
+`abicheck/compare/constants.py`) — no changes to the check itself, since the
+same real AST scan already generalizes across cohorts by construction.
+
+*What remains open, explicitly.* Same as the typedef cohort: bare-name-
+collision narrowing and promoting the `entity:` alias into a real match
+tier are both still out of scope, needing their own sign-off/completeness
+work first (see the identity concept's own removal_gate in the status
+ledger). Every family beyond typedefs and constants remains unmigrated.
+
+*Verification.* `tests/test_constant_cutover.py` states the identical
+Hypothesis equivalence property `test_typedef_cutover.py` does, substituted
+for constants (add/remove/change/unchanged across five qualified-name
+shapes and five value spellings) — the same comparison run through a real
+`SemanticIR` and through the adapter must produce identical findings, with
+the adapter path as the oracle — plus the gate-exercise tests proving
+`semantic_ir_cutover.py`'s scan actually fires on every forbidden read
+shape for the new cohort. Plus `TestLegacyConstantIr` in
+`tests/test_semantic_ir_legacy_adapter.py`, mirroring the typedef adapter's
+own round-trip/fallback/sidecar-mismatch coverage. Full fast unit lane
+green; `ruff check`/`mypy abicheck/` clean; `check_architecture.py` 0
+errors; `check_ai_readiness.py` 0 errors; `check_docs_contract.py` 0
+errors.
+
+**The next two candidate cohorts (records, functions): investigated,
+declined for now (2026-09-03).** The original cohort-1 landing text named
+both as blocked -- records on "the IR does not yet model layout facts",
+functions on "cross-backend signature-spelling agreement" being an open
+question. Checked both claims against the codebase as it stands today,
+rather than carried them forward unexamined, and found neither still
+holds as a *blocker*; what's missing instead is a bug to justify the
+migration cost, the same bar typedefs/constants/opaque-narrowing above
+each cleared and this pair does not.
+
+*Records.* `RecordType`/`TypeMap` matching (`diff_helpers.py`, ADR-045,
+predating ADR-063 entirely) is already qualified-name-keyed with an
+ambiguity-safe bare-name alias for schema-evolution compatibility --
+structurally the same shape `render_display_name`-based matching would
+give a migrated reader, not the flat, unqualified alias map typedefs
+carried before their own migration. And the simplest candidate layout
+facts, `size_bits`/`alignment_bits`, are a direct, single-source
+pass-through of the identical `RecordType` field a normalizer would read
+to populate a `SemanticIR` fact for them -- there is no second value
+source for those two projections to ever disagree on, unlike a rendered
+*type spelling* (where two backends really can disagree). So "records
+carry layout facts the IR does not yet model" was true but was not
+itself the blocker: modeling them is straightforward (verified by design
+during this investigation, not implemented, since doing so would close
+nothing).
+
+*Functions.* `CanonicalEntity.canonical_spelling` already resolves the
+cross-backend signature-spelling agreement the original framing named as
+open -- Phase 2's third slice landed it (the canonical
+`"<return>(<param>, ...)"` spelling, built from the same
+`canonicalize_function_signature_param_type`/`canonicalize_type_name`
+primitives `entity_id_for_function` itself uses) after that framing was
+written, and this investigation is what caught the plan text not having
+caught up. But checked one level deeper, past the resolved-doc claim, for
+whether the underlying spelling problem was ever actually *reachable* by
+a real detector: it is not. `diff_symbols.py`'s own return-type/
+parameter-type comparisons already canonicalize via `canonicalize_type_name`
+directly, with no dependency on `SemanticIR` at all, and function/variable
+*matching* keys on the mangled name (`resolve_function_identity`'s
+CANONICAL tier) -- an unambiguous, already-qualified identity with no
+bare-name collision analogous to the opaque-type one to close.
+
+*Conclusion.* Declined on the identical basis 2B's `entity:` alias
+promotion was (see that section's own note, above): not blocked on
+missing infrastructure, but lacking a currently-identifiable finding to
+justify the migration cost. Revisit either family the moment a concrete
+cross-backend matching or spelling divergence surfaces that today's
+`TypeMap`/mangled-name/`canonicalize_type_name` mechanisms cannot already
+close -- at which point the infrastructure work this investigation
+scoped (a `size_bits`/`alignment_bits`-shaped `CanonicalEntity` addition
+for records; nothing further needed for functions, whose spelling is
+already modeled) is the concrete next step, not a redesign.
 
 ---
 

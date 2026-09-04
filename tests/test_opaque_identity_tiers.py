@@ -40,6 +40,7 @@ from abicheck.model.identity import (
     Anonymous,
     EntityKind,
     Namespace,
+    Record,
     entity_id_for_type,
 )
 from abicheck.model.identity_tiers import (
@@ -221,14 +222,18 @@ class TestSpellingTierIsUnchanged:
 
 
 class TestKnownGapStaysDocumented:
-    def test_bare_name_collision_across_scopes_is_still_reachable(self) -> None:
-        """**Documented, still-open** (see
-        ``_downgrade_opaque_type_changes``'s own docstring): two unrelated
-        types sharing a leaf spelling in different scopes still collide
-        through the spelling tier when the change carries no stable
-        identity of its own. Pinned as a test so the gap is executable
-        rather than prose -- change this assertion when the stable tier is
-        made authoritative, do not delete it.
+    def test_bare_name_collision_is_still_reachable_when_the_change_has_no_identity(
+        self,
+    ) -> None:
+        """**Documented, still-open** (see ``OpaqueTypeIndex.contains``'s
+        own docstring): narrowing (below) closes the bare-``RecordType.name``
+        collision for a change that carries its own resolvable stable
+        identity -- but a change with no ``entity_id`` at all has nothing
+        for ``strict`` to narrow: it falls straight through to the spelling
+        tier, collision and all, exactly as before. Pinned as a test so the
+        residual gap is executable rather than prose -- change this
+        assertion only if a producer starts stamping every structural-type
+        ``Change`` with an ``entity_id`` unconditionally, do not delete it.
         """
         snap = _snap([_opaque("Handle", _STABLE_ID)])
         # A finding about `other::Handle`, rendered bare, with no resolved
@@ -237,6 +242,119 @@ class TestKnownGapStaysDocumented:
 
     def test_the_entity_kind_vocabulary_is_the_one_shared_enum(self) -> None:
         assert _STABLE_ID.kind is EntityKind.TYPE
+
+
+class TestBareNameCollisionNarrowing:
+    """ADR-063 Phase 2's closing slice: a change carrying its own resolvable
+    stable identity is no longer masked by an unrelated opaque declaration
+    that merely shares its bare leaf spelling -- the collision
+    ``TestKnownGapStaysDocumented`` above still documents for a change with
+    no identity at all, closed here for the (real, ``diff_types.py``-typical)
+    case where the change does carry one.
+    """
+
+    def test_a_distinct_type_sharing_a_bare_name_is_no_longer_masked(self) -> None:
+        """The real bug class this narrowing closes. ``ns1::Handle`` is
+        opaque; ``ns2::Handle`` is a different, non-opaque declaration that
+        happens to share the bare leaf spelling ``"Handle"``. Before this
+        slice, a genuine structural change on ``ns2::Handle`` was wrongly
+        suppressed through the spelling tier's bare-name collision -- even
+        though its own layout is fully visible to consumers. The change
+        below carries ``ns2::Handle``'s own identity, exactly as
+        ``diff_types.py``'s real ``entity_id=t_old.entity_id or
+        t_new.entity_id`` always does.
+        """
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id = entity_id_for_type((Namespace("ns2"),), "Handle")
+        snap = _snap([_opaque("Handle", ns1_id)])  # only ns1::Handle is opaque
+        change = _size_change("Handle", ns2_id)  # a change about the OTHER Handle
+        assert _survivors([change], snap, snap) == ["Handle"]
+
+    def test_narrowing_declines_when_either_side_is_incomplete(self) -> None:
+        """Completeness gates narrowing per *comparison*, not per
+        declaration: when ``ns1::Handle`` resolved no stable identity on one
+        side (a mixed-producer comparison, or one side loaded from a
+        pre-``entity_id``-population archived baseline), ``ns2::Handle``'s
+        own change must still fall back to the permissive spelling tier
+        rather than let an incomplete ``stable`` set stand in as proof of
+        non-opacity -- the exact live false-positive risk
+        ``OpaqueTypeIndex.complete``'s own docstring names. This is provably
+        the same (safe, collision-prone) behavior as before this slice,
+        not a regression: completeness is what makes narrowing an
+        *additional*, gated capability rather than a change to the default.
+        """
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id = entity_id_for_type((Namespace("ns2"),), "Handle")
+        old = _snap([_opaque("Handle", ns1_id)])
+        new = _snap([_opaque("Handle")])  # same declaration, unresolved here
+        change = _size_change("Handle", ns2_id)
+        assert _survivors([change], old, new) == []
+
+    def test_a_genuine_edit_on_the_opaque_type_itself_still_reports(self) -> None:
+        """Narrowing must never turn a *hit* into anything but a hit --
+        this only ever changes what happens on a *miss*. A change that
+        really is about the opaque declaration is suppressed exactly as
+        before, whether or not the comparison happens to be complete."""
+        snap = _snap([_opaque("Handle", _STABLE_ID)])
+        assert _survivors([_size_change("Handle", _STABLE_ID)], snap, snap) == []
+
+    def test_disagreeing_stable_ids_for_the_same_spelling_do_not_go_strict(
+        self,
+    ) -> None:
+        """Regression for the Codex review on PR #1045: presence alone
+        ("did each side resolve *something*?") is not completeness. Both
+        sides here individually resolve a stable id for their own
+        ``ns1::Handle`` declaration -- so a naive whole-index "every
+        declaration resolved something" flag reads ``True`` on both sides --
+        but the two ids *disagree* (mirroring two producers that scope the
+        same enclosing declaration differently, e.g. namespace vs. record).
+        ``self.stable & other.stable`` holds no match for it, yet the
+        *local* (spelling) tier still correctly proves ``ns1::Handle`` is
+        opaque on both sides. A completeness signal computed from bare
+        presence would still go strict here and treat the resulting
+        stable-tier miss on a change about that SAME (still-opaque)
+        declaration as proof of non-opacity -- silently un-suppressing a
+        genuinely invisible layout change. Paired completeness must decline
+        instead, exactly as when one side resolves nothing at all.
+        """
+        ns1_id_old = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns1_id_new = entity_id_for_type((Record("ns1"),), "Handle")
+        assert ns1_id_old != ns1_id_new  # the two producers genuinely disagree
+        old = _snap([_opaque("Handle", ns1_id_old)])
+        new = _snap([_opaque("Handle", ns1_id_new)])
+        # A change about the SAME still-opaque declaration -- old-preferred
+        # entity_id, exactly as diff_types.py's real `t_old.entity_id or
+        # t_new.entity_id` always resolves it.
+        change = _size_change("Handle", ns1_id_old)
+        assert _survivors([change], old, new) == []
+
+    def test_partial_pairing_among_colliding_declarations_does_not_go_strict(
+        self,
+    ) -> None:
+        """Regression for the Codex review on PR #1045, second round, fresh
+        evidence: the single-declaration case above is not the whole story.
+        Two *distinct* opaque declarations, ``ns1::Handle`` and
+        ``ns2::Handle``, genuinely collide on the bare spelling
+        ``"Handle"``. The two sides agree on ``ns1::Handle``'s id but --
+        the same producer-scoping disagreement as above -- disagree on
+        ``ns2::Handle``'s. An intersection-based pairing check (this
+        module's first fix) sees the *shared* ``ns1`` id, calls the whole
+        spelling "paired", and goes strict -- then wrongly trusts a
+        stable-tier miss on ``ns2::Handle``'s own still-opaque finding as
+        proof of non-opacity. Only exact set equality proves *every* id
+        either side resolved for a spelling has a match on the other side,
+        which correctly declines here instead.
+        """
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id_old = entity_id_for_type((Namespace("ns2"),), "Handle")
+        ns2_id_new = entity_id_for_type((Record("ns2"),), "Handle")
+        assert ns2_id_old != ns2_id_new  # the two producers genuinely disagree
+        old = _snap([_opaque("Handle", ns1_id), _opaque("Handle", ns2_id_old)])
+        new = _snap([_opaque("Handle", ns1_id), _opaque("Handle", ns2_id_new)])
+        # A change about ns2::Handle -- still genuinely opaque on both
+        # sides, just resolved under disagreeing ids.
+        change = _size_change("Handle", ns2_id_old)
+        assert _survivors([change], old, new) == []
 
 
 class TestByValueExposureAcrossAQualificationMismatch:
