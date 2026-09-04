@@ -508,7 +508,15 @@ def _composition_library_identity(
     )
 
     library_name = artifact.native_identity.get("library_name")
-    if not library_name or len(summary.variant_ids) != 1:
+    # `is None`, not truthiness: `import_bundle_facts` accepts and
+    # round-trips an explicitly-supported empty-string `per_library_
+    # snapshots` key, so `native_identity["library_name"]` can legitimately
+    # be `""` -- the same distinction `workflows.release_package.
+    # _release_match_key` already makes for the matching path (Codex/
+    # CodeRabbit review, fresh evidence: a no-DT_SONAME provider matched
+    # under the empty key would otherwise silently lose its real filename/
+    # alias evidence here even though composition genuinely has it).
+    if library_name is None or len(summary.variant_ids) != 1:
         return None, (), nodes_so_far
     variant_id = summary.variant_ids[0]
     try:
@@ -530,15 +538,34 @@ def _composition_library_identity(
     try:
         raw = DirectoryObjectStore(path).get(composition_ref.digest)
         composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
+        # `bundle_composition_from_dto` only asserts the payload is a dict
+        # -- it does not validate these two keys' own shape, so a stored
+        # package recording either as something other than a mapping (or
+        # `filesystem_aliases[library_name]` as a string, which `tuple()`
+        # would otherwise silently split into per-character aliases) must
+        # still be treated as declared-but-corrupted evidence, not let an
+        # `AttributeError`/wrong-shaped tuple escape this handler
+        # (CodeRabbit review, fresh evidence).
+        filenames = composition.get("library_filenames", {})
+        alias_map = composition.get("filesystem_aliases", {})
+        if not isinstance(filenames, dict) or not isinstance(alias_map, dict):
+            raise ValueError(
+                "library_filenames/filesystem_aliases must both be objects"
+            )
+        filename = filenames.get(library_name)
+        raw_aliases = alias_map.get(library_name, ())
+        if not isinstance(raw_aliases, (list, tuple)):
+            raise ValueError(
+                f"filesystem_aliases[{library_name!r}] must be an array of "
+                "strings"
+            )
     except Exception as exc:
         raise SnapshotError(
             f"{path}: variant {variant_id!r}'s declared bundle_composition "
             f"section could not be decoded: {exc}"
         ) from exc
 
-    filename = composition.get("library_filenames", {}).get(library_name)
     real_filename = Path(filename) if filename else None
-    raw_aliases = composition.get("filesystem_aliases", {}).get(library_name, ())
     alias_count = len(raw_aliases) + 1 if raw_aliases else 0
     max_nodes = _native_identity_aliases_mod.DEFAULT_MAX_JSON_CONTAINER_NODES
     if nodes_so_far + alias_count > max_nodes:

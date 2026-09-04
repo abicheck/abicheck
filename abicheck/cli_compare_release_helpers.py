@@ -399,6 +399,13 @@ def _run_bundle_analysis(
         # bundle-level analysis (Codex review, security finding); an empty map still builds a valid, empty BundleSnapshot.
         old_snap = build_bundle_snapshot_mixed(dict(old_map))
         new_snap = build_bundle_snapshot_mixed(dict(new_map))
+    except SnapshotError as exc:
+        # NOT additive degradation: declared-but-malformed stored evidence
+        # (corrupted aliases, a mismatched ObjectRef kind) must reach the
+        # user as a usage error, not silently skip bundle analysis and keep
+        # a passing verdict (Codex review, security finding) -- the same
+        # treatment --bundle-facts-out's own catch below already gives it.
+        raise click.UsageError(f"bundle analysis: {exc}") from exc
     except Exception as exc:
         # Treat snapshot-build failures as additive degradation: the
         # per-library compare-release report is still useful, and the
@@ -598,7 +605,7 @@ def reject_bundle_facts_out_dir_collision(
 
 def write_bundle_facts_out(
     bundle_facts_out: Path,
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    diff_pairs: list[tuple[str, DiffResult, AbiSnapshot]],
     manifest_path: Path | None,
     old_map: dict[str, Path],
     *,
@@ -609,9 +616,15 @@ def write_bundle_facts_out(
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
     file (G38 Phase 2's ``--bundle-facts-out`` producer).
 
-    *diff_pairs* is ``_compare_release_libraries``'s own
-    ``(DiffResult, old_snapshot)`` collection -- the caller must have
-    passed ``collect_diff_results=True`` for it to be populated.
+    *diff_pairs* is ``_compare_release_libraries``'s own ``(release_key,
+    DiffResult, old_snapshot)`` collection -- the caller must have passed
+    ``collect_diff_results=True`` for it to be populated. Each entry's own
+    ``release_key`` (``"_bundle_key"``, stashed alongside the pair) is used
+    as-is rather than re-derived from ``DiffResult.library``'s basename: a
+    stored snapshot's logical library label (e.g. ``provider``) can differ
+    from its persisted filename, which re-derivation could match to the
+    *wrong* ``old_map`` key, inserting the same snapshot under two logical
+    keys (Codex review, fresh evidence).
     *old_map* is ``_match_release_keys``'s own map: every key is the
     **canonical** release-matching key
     (``_canonical_library_key()`` -- e.g. ``libfoo.so`` for a discovered
@@ -624,7 +637,8 @@ def write_bundle_facts_out(
     versioned library's very identity, reading as a false
     ``bundle_library_removed``/``_added`` pair for a library that did not
     change at all (Codex review, fresh evidence: caught after the P1 fix
-    below already existed, which itself still keyed by the wrong basename).
+    below already existed, which itself still keyed by the wrong basename;
+    since fixed further, per this docstring's opening paragraph).
 
     *old_map* also covers what ``diff_pairs`` alone cannot -- and not only
     for an old-only library removed in the new release: ``diff_pairs``
@@ -698,7 +712,6 @@ def write_bundle_facts_out(
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
     from .serialization import save_bundle_facts
-    from .workflows.extraction import _canonical_library_key
 
     try:
         manifest: InstantiationManifest | None
@@ -707,24 +720,10 @@ def write_bundle_facts_out(
         else:
             manifest = load_manifest(manifest_path) if manifest_path is not None else None
 
-        # Canonicalize DiffResult.library itself (the real, possibly-
-        # versioned filename each compared snapshot reports) the same way
-        # old_map's own keys were derived, rather than matching by basename
-        # against old_map's *values* -- a stored operand's value is a
-        # materialized sub-package directory (its own display dirname, not
-        # the real library filename), which a basename match silently
-        # misses; the same successful diff pair then also (wrongly) reads
-        # as "stranded" below and gets appended a second time under its
-        # real canonical key (Codex review, fresh evidence: a stored
-        # comparison's captured baseline could contain the same library
-        # twice, reading as false library/provider findings). Falls back to
-        # the basename itself only if truly unmatched (shouldn't happen for
-        # a genuine diff_pairs entry, but degrades safely either way).
+        # Each entry carries its own matched release key directly (this
+        # function's own docstring), not re-derived from DiffResult.library.
         per_library_snapshots: dict[str, AbiSnapshot] = {}
-        for diff, old_snapshot in diff_pairs:
-            key = _canonical_library_key(Path(diff.library))
-            if key not in old_map:
-                key = Path(diff.library).name
+        for key, _diff, old_snapshot in diff_pairs:
             per_library_snapshots[key] = old_snapshot
         for key, old_path in old_map.items():
             if key in per_library_snapshots:
@@ -1005,7 +1004,7 @@ def _format_release_summary(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
     warning_msgs: list[str],
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
+    diff_pairs: list[tuple[str, DiffResult, AbiSnapshot]] | None = None,
     bundle_result: BundleDiffResult | None = None, matrix_result: DiffResult | None = None,
     severity_config: SeverityConfig | None = None, severity_exit_code: int | None = None,
     contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
@@ -1047,7 +1046,7 @@ def _format_release_summary(
 
 
 def _format_release_junit(
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None,
+    diff_pairs: list[tuple[str, DiffResult, AbiSnapshot]] | None,
     matrix_result: DiffResult | None,
     library_results: list[dict[str, object]],
     *,
@@ -1073,7 +1072,9 @@ def _format_release_junit(
     """
     from .junit_report import to_junit_xml_multi
 
-    pairs: list[tuple[DiffResult, AbiSnapshot | None]] = list(diff_pairs or [])
+    pairs: list[tuple[DiffResult, AbiSnapshot | None]] = [
+        (diff, old_snapshot) for _key, diff, old_snapshot in (diff_pairs or [])
+    ]
     # Release-global matrix findings ride in as their own synthetic
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:

@@ -382,7 +382,9 @@ def _display_dirname(key: str, artifact_id: str) -> str:
     return f"{sanitized}-{artifact_id}"
 
 
-def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
+def dso_only_package_map(
+    pkg_map: dict[str, Path],
+) -> tuple[dict[str, Path], list[str]]:
     """*pkg_map* (a `resolve_release_package_map` result), restricted to
     members whose materialized `ArtifactRef.kind` is `"elf"` and whose
     stored `ElfMetadata` reads as a real shared object -- `--dso-only`'s
@@ -405,38 +407,53 @@ def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     Best-effort per member: a sub-package whose own kind or ELF metadata
     cannot be determined is *excluded*, not included -- `--dso-only`'s
     whole contract is "only compare what is confirmed to be a DSO", so
-    uncertainty must not silently widen it.
+    uncertainty must not silently widen it. The second return value is
+    every excluded member's own key, so a caller can warn rather than let
+    the exclusion (which can hide a real ABI break -- e.g. a header-derived
+    snapshot with no `elf` block at all, which reads identically to a
+    genuinely non-DSO member here) pass in complete silence (CodeRabbit
+    review, fresh evidence).
     """
     from ..bundle import _stored_elf_metadata
     from ..package import _has_shared_object_name
     from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
 
     filtered: dict[str, Path] = {}
+    excluded: list[str] = []
     for key, sub_dir in pkg_map.items():
         try:
             summary = read_manifest_summary(sub_dir)
             (artifact_id,) = summary.artifact_ids
             if read_artifact_ref(sub_dir, artifact_id).kind != "elf":
+                excluded.append(key)
                 continue
         except Exception:
+            excluded.append(key)
             continue
         elf = _stored_elf_metadata(sub_dir)
         if elf is None or elf.is_pie:
+            excluded.append(key)
             continue
         if elf.interpreter and not _has_shared_object_name(key):
+            excluded.append(key)
             continue
         filtered[key] = sub_dir
-    return filtered
+    return filtered, excluded
 
 
 def dso_only_filter_pair(
     old_pkg_map: dict[str, Path] | None, new_pkg_map: dict[str, Path] | None
-) -> tuple[dict[str, Path] | None, dict[str, Path] | None]:
+) -> tuple[dict[str, Path] | None, dict[str, Path] | None, list[str]]:
     """`dso_only_package_map` applied to whichever of *old_pkg_map*/
     *new_pkg_map* is not `None` -- the pair shape
     `cli_compare_release_matrix._prepare_compare_release_inputs` needs for
-    its own two stored-side maps in one call."""
-    return (
-        dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
-        dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
+    its own two stored-side maps in one call. The third return value is
+    every excluded member's own key from both sides combined, in `old` then
+    `new` order, for the caller to surface as a warning."""
+    old_filtered, old_excluded = (
+        dso_only_package_map(old_pkg_map) if old_pkg_map is not None else (None, [])
     )
+    new_filtered, new_excluded = (
+        dso_only_package_map(new_pkg_map) if new_pkg_map is not None else (None, [])
+    )
+    return old_filtered, new_filtered, old_excluded + new_excluded

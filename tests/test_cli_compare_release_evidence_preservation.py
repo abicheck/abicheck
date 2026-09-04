@@ -292,7 +292,7 @@ class TestDsoOnlyStoredFiltering:
         assert sorted(kinds.values()) == ["elf", "elf", "pe"]
         pe_key = next(key for key, kind in kinds.items() if kind == "pe")
 
-        filtered = dso_only_package_map(resolved)
+        filtered, _excluded = dso_only_package_map(resolved)
         assert pe_key not in filtered
         assert set(filtered) == set(resolved) - {pe_key}
 
@@ -325,7 +325,7 @@ class TestDsoOnlyStoredFiltering:
         )
         assert len(resolved) == 2
 
-        filtered = dso_only_package_map(resolved)
+        filtered, _excluded = dso_only_package_map(resolved)
         assert set(filtered) == {"libcore.so"}
 
     def test_stored_non_pie_executable_is_also_excluded(self, tmp_path: Path) -> None:
@@ -363,7 +363,7 @@ class TestDsoOnlyStoredFiltering:
         )
         assert len(resolved) == 2
 
-        filtered = dso_only_package_map(resolved)
+        filtered, _excluded = dso_only_package_map(resolved)
         assert set(filtered) == {"libcore.so"}
 
 

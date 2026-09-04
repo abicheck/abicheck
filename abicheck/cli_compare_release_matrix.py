@@ -264,7 +264,7 @@ def _finalize_release_output(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
     warning_msgs: list[str],
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    diff_pairs: list[tuple[str, DiffResult, AbiSnapshot]],
     bundle_result: BundleDiffResult | None,
     output: Path | None,
     output_dir: Path | None,
@@ -689,14 +689,11 @@ def _prepare_compare_release_inputs(
         if make_temp_dir is not None
         else None
     )
+    dso_only_excluded: list[str] = []  # dropped keys, warned on below
     if dso_only:
-        # --dso-only's stored-side counterpart to is_elf_shared_object
-        # filtering a live directory's files below (Codex review: previously
-        # only applied there, so a stored non-ELF/executable artifact stayed
-        # in scope). No-op on either map that's already None.
         from .workflows.release_package import dso_only_filter_pair
 
-        old_pkg_map, new_pkg_map = dso_only_filter_pair(old_pkg_map, new_pkg_map)
+        old_pkg_map, new_pkg_map, dso_only_excluded = dso_only_filter_pair(old_pkg_map, new_pkg_map)
 
     old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
         old_dir,
@@ -739,6 +736,8 @@ def _prepare_compare_release_inputs(
     warning_msgs: list[str] = [
         f"Warning: {warning}" for warning in (old_warns + new_warns)
     ]
+    if dso_only_excluded:  # fail-closed exclusion can hide a real break
+        warning_msgs.append(f"Warning: --dso-only excluded: {sorted(set(dso_only_excluded))}")
     debian_symbols_note = _debian_symbols_warning(old_symbols_file, new_symbols_file)
     if debian_symbols_note is not None:
         warning_msgs.append(debian_symbols_note)

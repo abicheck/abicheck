@@ -1155,10 +1155,10 @@ class TestSaveBundleFactsPreservesTemplateInstantiationOrder:
 
 
 class TestWriteBundleFactsOut:
-    def _diff_pairs(self) -> list[tuple[DiffResult, AbiSnapshot]]:
+    def _diff_pairs(self) -> list[tuple[str, DiffResult, AbiSnapshot]]:
         snapshots = _per_library_snapshots(_old_metadata())
         return [
-            (_diff(name, verdict=Verdict.COMPATIBLE), snap)
+            (name, _diff(name, verdict=Verdict.COMPATIBLE), snap)
             for name, snap in snapshots.items()
         ]
 
@@ -1413,7 +1413,7 @@ class TestWriteBundleFactsOut:
             elf=_meta(soname="libfoo.so", exports=["foo_fn"]),
         )
         diff_pairs = [
-            (_diff("libfoo.so.1.2", verdict=Verdict.COMPATIBLE), old_snapshot)
+            ("libfoo.so", _diff("libfoo.so.1.2", verdict=Verdict.COMPATIBLE), old_snapshot)
         ]
 
         out = tmp_path / "old.bundlefacts.json"
@@ -1440,7 +1440,7 @@ class TestWriteBundleFactsOut:
         old_meta = _meta(soname="libfoo.so", exports=["foo_fn"])
         old_snapshot = AbiSnapshot(library="libfoo.so.1.2", version="old", elf=old_meta)
         diff_pairs = [
-            (_diff("libfoo.so.1.2", verdict=Verdict.COMPATIBLE), old_snapshot)
+            ("libfoo.so", _diff("libfoo.so.1.2", verdict=Verdict.COMPATIBLE), old_snapshot)
         ]
 
         out = tmp_path / "old.bundlefacts.json"

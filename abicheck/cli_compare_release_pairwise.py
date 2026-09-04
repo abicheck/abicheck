@@ -512,7 +512,7 @@ def _compare_release_libraries(
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
-) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
+) -> tuple[list[dict[str, object]], str, list[tuple[str, DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
     When *collect_diff_results* and *need_full_snapshots* are both True,
@@ -552,7 +552,7 @@ def _compare_release_libraries(
             )
             effective_jobs = mem_cap
     library_results: list[dict[str, object]] = []
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
+    diff_pairs: list[tuple[str, DiffResult, AbiSnapshot]] = []
     worst_verdict = "NO_CHANGE"
 
     common_args = (
@@ -647,8 +647,13 @@ def _compare_release_libraries(
         for entry in library_results:
             diff = entry.get("_diff_result")
             old_snap = entry.get("_old_snapshot")
-            if isinstance(diff, DiffResult) and isinstance(old_snap, AbiSnapshot):
-                diff_pairs.append((diff, old_snap))
+            bundle_key = entry.get("_bundle_key")
+            if (
+                isinstance(diff, DiffResult)
+                and isinstance(old_snap, AbiSnapshot)
+                and isinstance(bundle_key, str)
+            ):
+                diff_pairs.append((bundle_key, diff, old_snap))
 
     return library_results, worst_verdict, diff_pairs
 

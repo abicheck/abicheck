@@ -473,6 +473,133 @@ class TestMalformedStoredAliasesRaise:
             bundle._stored_library_identity(sub_dir, 0)
 
 
+class TestMalformedCompositionShapeRaises:
+    """CodeRabbit review, fresh evidence: `bundle_composition_from_dto`
+    only asserts the payload is a dict -- it does not validate that
+    `library_filenames`/`filesystem_aliases` are themselves mappings, or
+    that a `filesystem_aliases[library_name]` value is a sequence rather
+    than a string (which `tuple(...)` would otherwise silently split into
+    per-character aliases). Either shape must raise `SnapshotError`, the
+    same declared-but-corrupted treatment `TestMalformedStoredAliasesRaise`
+    already covers for a `bundle_composition_from_dto` failure outright."""
+
+    def _resolved_sub_dir(self, tmp_path: Path) -> Path:
+        from dataclasses import replace as dc_replace
+
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        libs = {
+            "liba.so": dc_replace(
+                _snap("liba.so", "1.0", [_fn("foo", "_Z3foov")]),
+                elf=ElfMetadata(soname="liba.so"),
+            ),
+        }
+        facts = capture_bundle_facts(libs, variant_fingerprint="gcc13-avx2")
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(pkg, manifest)
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        (sub_dir,) = resolved.values()
+        return sub_dir
+
+    def test_non_mapping_library_filenames_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck import bundle
+        from abicheck.errors import SnapshotError
+
+        sub_dir = self._resolved_sub_dir(tmp_path)
+
+        def _bad_shape(raw: object) -> dict[str, object]:
+            return {"library_filenames": ["not", "a", "mapping"], "filesystem_aliases": {}}
+
+        monkeypatch.setattr(
+            "abicheck.storage.dto.bundle_composition_from_dto", _bad_shape
+        )
+        with pytest.raises(SnapshotError):
+            bundle._stored_library_identity(sub_dir, 0)
+
+    def test_string_filesystem_aliases_value_raises_not_splits_chars(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck import bundle
+        from abicheck.errors import SnapshotError
+
+        sub_dir = self._resolved_sub_dir(tmp_path)
+
+        def _bad_shape(raw: object) -> dict[str, object]:
+            return {
+                "library_filenames": {"liba.so": "liba.so"},
+                "filesystem_aliases": {"liba.so": "liba-alias.so"},
+            }
+
+        monkeypatch.setattr(
+            "abicheck.storage.dto.bundle_composition_from_dto", _bad_shape
+        )
+        with pytest.raises(SnapshotError):
+            bundle._stored_library_identity(sub_dir, 0)
+
+
+class TestWriteBundleFactsOutUsesMatchedReleaseKey:
+    """Codex review, fresh evidence: a stored snapshot's logical library
+    label (e.g. ``"provider"``) can differ from its real filename's own
+    canonical form. Re-deriving the persisted key from ``DiffResult.
+    library`` (an earlier revision of ``write_bundle_facts_out``) matches
+    ``old_map`` under the wrong key, then the stranded-library loop inserts
+    the same snapshot a second time under the real key -- two logical
+    libraries for what is really one. Each ``diff_pairs`` entry must carry
+    its own matched key directly instead."""
+
+    def test_no_duplicate_under_a_re_derived_key(self, tmp_path: Path) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import load_bundle_facts
+
+        real_path = tmp_path / "libfoo.so.1.2"
+        real_path.write_bytes(b"")
+        # A logical label unrelated to the real filename's canonical form.
+        old_map = {"provider": real_path}
+        old_snapshot = AbiSnapshot(
+            library="libfoo.so.1.2",
+            version="old",
+            elf=ElfMetadata(soname="libfoo.so", symbols=[]),
+        )
+        diff = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libfoo.so.1.2",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+        )
+        diff_pairs = [("provider", diff, old_snapshot)]
+
+        out = tmp_path / "old.bundlefacts.json"
+
+        def resolve_stranded_library(p: Path) -> AbiSnapshot:
+            raise AssertionError("provider is already matched; must not strand")
+
+        write_bundle_facts_out(
+            out,
+            diff_pairs,
+            None,
+            old_map,
+            resolve_stranded_library=resolve_stranded_library,
+        )
+
+        loaded = load_bundle_facts(out)
+        assert set(loaded.per_library_snapshots) == {"provider"}, (
+            "expected exactly one logical library keyed by the matched "
+            f"release key, got {set(loaded.per_library_snapshots)}"
+        )
+
+
 class TestBundleFactsOutNeverAttributesNewsManifestToOld:
     """Codex review: `--bundle-facts-out` captures OLD's own baseline, but
     its shared manifest resolver searched *both* sides -- if OLD had no
@@ -565,3 +692,55 @@ class TestReleaseMatchKeyLooksUpEmptyLibraryName:
             f"expected key from {real_filename!r} for the empty bundle key, "
             f"not the opaque artifact_id: got {sorted(resolved)}"
         )
+
+
+class TestCompositionIdentityLooksUpEmptyLibraryKey:
+    """Codex/CodeRabbit review, fresh evidence: `bundle.
+    _composition_library_identity`'s own `library_name` guard used
+    truthiness the same way `_release_match_key`'s did (see the sibling
+    class above) -- an explicitly-supported empty-string bundle key must
+    still resolve its real filename/aliases from the preserved composition
+    section, not be silently treated as "no library name recorded"."""
+
+    def test_empty_bundle_key_still_resolves_composition_identity(
+        self, tmp_path: Path
+    ) -> None:
+        from dataclasses import replace as dc_replace
+
+        from abicheck import bundle
+        from abicheck.bundle_facts import BundleFacts
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        bundle_key = ""
+        real_filename = "libfoo.so.1"
+        libs = {
+            bundle_key: dc_replace(
+                _snap(bundle_key, "1.0", [_fn("foo", "_Z3foov")]),
+                elf=ElfMetadata(soname=""),
+            ),
+        }
+        facts = capture_bundle_facts(libs, variant_fingerprint="gcc13-avx2")
+        facts = BundleFacts(
+            variant_fingerprint=facts.variant_fingerprint,
+            per_library_snapshots=facts.per_library_snapshots,
+            manifest=facts.manifest,
+            filesystem_aliases={bundle_key: ("libfoo.so.1.0.0",)},
+            library_filenames={bundle_key: real_filename},
+        )
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(pkg, manifest)
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        (sub_dir,) = resolved.values()
+
+        real, aliases, _nodes = bundle._stored_library_identity(sub_dir, 0)
+        assert real is not None and real.name == real_filename, (
+            f"expected the empty bundle key's real filename {real_filename!r} "
+            f"resolved from composition, got {real}"
+        )
+        assert aliases == ("libfoo.so.1.0.0",)
