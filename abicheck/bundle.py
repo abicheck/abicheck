@@ -207,6 +207,66 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     )
 
 
+def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
+    """`build_bundle_snapshot`'s ADR-062 A1.7 counterpart: *libraries* may
+    map some names to a live ELF file (parsed exactly as
+    `build_bundle_snapshot` already does) and others to a stored,
+    directory-backed `ProjectSnapshot` sub-package
+    (`project_snapshot_legacy.materialize_release_variant_artifacts`'s own
+    output, or any other pre-resolved package directory) -- resolved via
+    `workflows.input_resolution.resolve_input` instead of a live ELF parse,
+    reusing whatever `ElfMetadata` its own stored `AbiSnapshot.elf` already
+    carries.
+
+    Without this split, `_path_looks_like_elf` (which `build_bundle_
+    snapshot` alone would apply) treats every directory as "not ELF, skip"
+    -- silently dropping every stored-side library from bundle-level
+    analysis (`compare_bundle`'s cross-DSO `DT_NEEDED`/symbol-removal/
+    provider-migration checks) rather than raising, which would otherwise
+    let a real intra-bundle break (a sibling library still importing a
+    symbol a stored library actually removed) go completely unreported --
+    both per-library *and* bundle-level -- for any release compared against
+    a stored package operand (Codex review, security finding: a CI ABI
+    gate silently passing on a real break).
+
+    Delegates the live-path subset to `build_bundle_snapshot` itself
+    (rather than re-deriving the identical parse loop here) -- including
+    the pure-live case (no directory entries at all), which returns
+    `build_bundle_snapshot(libraries)`'s own result unchanged. This keeps
+    `build_bundle_snapshot` the single owner of "how a live path becomes
+    `ElfMetadata`" and preserves it as the one seam a caller mocks to test
+    bundle-analysis wiring without real binaries.
+    """
+    stored = {name: path for name, path in libraries.items() if path.is_dir()}
+    if not stored:
+        return build_bundle_snapshot(libraries)
+
+    from .workflows.input_resolution import resolve_input
+
+    metadata: dict[str, ElfMetadata] = {}
+    for name, path in stored.items():
+        try:
+            snapshot = resolve_input(path)
+        except Exception as exc:
+            log.warning("bundle: failed to resolve stored package %s: %s", path, exc)
+            continue
+        if snapshot.elf is None:
+            log.debug("bundle: stored package %s has no ELF metadata", path)
+            continue
+        metadata[name] = snapshot.elf
+
+    live = {name: path for name, path in libraries.items() if name not in stored}
+    if live:
+        metadata.update(build_bundle_snapshot(live).metadata)
+
+    # probe_filesystem=True over *live* only -- a stored sub-package
+    # directory is never a real on-disk `.so` a symlink/hard-link alias
+    # probe would mean anything for.
+    return build_bundle_snapshot_from_metadata(
+        metadata, paths=live, probe_filesystem=True
+    )
+
+
 def build_bundle_snapshot_from_metadata(
     metadata: dict[str, ElfMetadata],
     *,

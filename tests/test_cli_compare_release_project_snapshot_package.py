@@ -270,6 +270,92 @@ class TestStoredVersusLiveReleaseParity:
         assert _sorted_outcomes(mixed_out) == _sorted_outcomes(live_out)
 
 
+class TestStoredBundleAnalysisSeesElfMetadata:
+    """Codex security review, PR #1058: `old_map`/`new_map` entries for a
+    stored side are directory paths, not live `.so` files -- `bundle.
+    build_bundle_snapshot`'s own `_path_looks_like_elf` treats every
+    directory as "not ELF, skip", which silently dropped every stored-side
+    library from bundle-level analysis (`compare_bundle`'s cross-DSO
+    `DT_NEEDED`/symbol-removal checks) rather than raising. A release where
+    a stored ``libcore.so`` drops a symbol a sibling still imports would
+    then report a clean bundle (and, combined with a per-library scope that
+    also missed it, a clean release) instead of ``BUNDLE_INTRA_DEP_REMOVED``
+    -- exactly the reported CI-gate-bypass scenario. This exercises the
+    real fix end to end: `bundle.build_bundle_snapshot_mixed` resolving
+    each stored sub-package's own `AbiSnapshot.elf`, feeding the identical
+    `compare_bundle` detector `tests/test_bundle.py::TestIntraDepRemoved
+    ::test_detects_missing_import` already covers for a live pair."""
+
+    def test_intra_dep_removal_detected_across_two_stored_libraries(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle import build_bundle_snapshot_mixed, compare_bundle
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+
+        def elf_snap(name: str, meta: ElfMetadata) -> AbiSnapshot:
+            return AbiSnapshot(library=name, version="1.0", elf=meta, from_headers=False)
+
+        old_libs = {
+            "libcore.so": elf_snap(
+                "libcore.so",
+                ElfMetadata(
+                    soname="libcore.so.1",
+                    symbols=[
+                        ElfSymbol(name="core_add"),
+                        ElfSymbol(name="core_mul"),
+                    ],
+                ),
+            ),
+            "libalgo.so": elf_snap(
+                "libalgo.so",
+                ElfMetadata(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=[ElfImport(name="core_add"), ElfImport(name="core_mul")],
+                ),
+            ),
+        }
+        new_libs = {
+            "libcore.so": elf_snap(
+                "libcore.so",
+                ElfMetadata(soname="libcore.so.1", symbols=[ElfSymbol(name="core_add")]),
+            ),
+            "libalgo.so": old_libs["libalgo.so"],  # unchanged
+        }
+
+        old_pkg = tmp_path / "old_pkg"
+        new_pkg = tmp_path / "new_pkg"
+        _write_package(old_pkg, old_libs)
+        _write_package(new_pkg, new_libs)
+
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        old_map = resolve_release_package_map(
+            old_pkg, variant_id=None, dest_root=tmp_path / "resolved_old"
+        )
+        new_map = resolve_release_package_map(
+            new_pkg, variant_id=None, dest_root=tmp_path / "resolved_new"
+        )
+
+        old_snap = build_bundle_snapshot_mixed(old_map)
+        new_snap = build_bundle_snapshot_mixed(new_map)
+        # The mechanism this fix adds: a stored sub-package's own ELF
+        # metadata must actually be recovered, not silently dropped.
+        assert set(old_snap.metadata) == {"libcore.so", "libalgo.so"}
+        assert old_snap.metadata["libcore.so"].soname == "libcore.so.1"
+        assert new_snap.metadata["libcore.so"].soname == "libcore.so.1"
+
+        result = compare_bundle(old_snap, new_snap, per_library_results=[])
+        kinds = {f.kind for f in result.bundle_findings}
+        assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
+        finding = next(
+            f for f in result.bundle_findings if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        )
+        assert finding.symbol == "core_mul"
+        assert finding.consumer_library == "libalgo.so"
+
+
 class TestVariantSelection:
     def test_single_variant_is_used_without_a_flag(self, tmp_path: Path) -> None:
         old_libs, new_libs = _old_new_libraries()

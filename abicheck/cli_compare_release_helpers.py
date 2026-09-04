@@ -291,14 +291,20 @@ def _run_bundle_analysis(
     structured ``analysis_errors`` as the same ``click.echo(...,
     err=True)`` warnings this function has always emitted.
     """
-    from .bundle import build_bundle_snapshot, load_manifest
+    from .bundle import build_bundle_snapshot_mixed, load_manifest
     from .bundle_analysis import analyze_bundle
 
     if not old_map and not new_map:
         return None
     try:
-        old_snap = build_bundle_snapshot(dict(old_map))
-        new_snap = build_bundle_snapshot(dict(new_map))
+        # ADR-062 A1.7: old_map/new_map may hold a stored ProjectSnapshot
+        # sub-package directory for some (or all) libraries, not only live
+        # binary paths -- build_bundle_snapshot_mixed resolves either kind,
+        # rather than build_bundle_snapshot's live-only ELF parse, which
+        # would otherwise silently drop every stored-side library from
+        # bundle-level analysis (Codex review, security finding).
+        old_snap = build_bundle_snapshot_mixed(dict(old_map))
+        new_snap = build_bundle_snapshot_mixed(dict(new_map))
     except Exception as exc:
         # Treat snapshot-build failures as additive degradation: the
         # per-library compare-release report is still useful, and the
