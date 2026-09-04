@@ -335,15 +335,23 @@ def _read_numeric_leaf(data: bytes, offset: int) -> tuple[int, int]:
     return (0, offset + 6)
 
 
-def _read_cstring(data: bytes, offset: int) -> tuple[str, int]:
+def _read_cstring(data: bytes, offset: int) -> tuple[str, int, bool]:
     """Read a null-terminated string at *offset*.
 
-    Returns ``(string, new_offset)`` past the null terminator.
+    Returns ``(string, new_offset, terminated)`` -- ``new_offset`` is past the
+    null terminator on success. ``terminated`` is False (P2 review) when no
+    NUL byte was found before the end of *data*: the caller previously
+    couldn't distinguish this from a legitimate empty string (both returned
+    ``("", ...)``-shaped results with no way to compare the returned offset
+    back to ``len(data)``, since a NUL as the very last byte also yields
+    ``new_offset == len(data)``). Callers that track record completeness
+    (``TypeDatabase``'s ``_parse_*``/``_skip_subrecord`` methods) must fold
+    this into their own return value rather than trusting the decoded name.
     """
     end = data.find(b"\x00", offset)
     if end < 0:
-        return ("", len(data))
-    return (data[offset:end].decode("utf-8", errors="replace"), end + 1)
+        return ("", len(data), False)
+    return (data[offset:end].decode("utf-8", errors="replace"), end + 1, True)
 
 
 # ---------------------------------------------------------------------------
@@ -555,8 +563,8 @@ def parse_dbi_stream(data: bytes) -> DbiStream:
         pos += 64
 
         # Two null-terminated strings: ModuleName, ObjFileName
-        mod_name, pos = _read_cstring(data, pos)
-        obj_name, pos = _read_cstring(data, pos)
+        mod_name, pos, _ = _read_cstring(data, pos)
+        obj_name, pos, _ = _read_cstring(data, pos)
 
         # 4-byte align
         pos = (pos + 3) & ~3
@@ -803,7 +811,7 @@ class TypeDatabase:
                 "<HHIII", d, 0)
             pos = 16
         byte_size, pos = _read_numeric_leaf(d, pos)
-        name, _pos = _read_cstring(d, pos)
+        name, _pos, name_terminated = _read_cstring(d, pos)
         self._structs[ti] = CvStruct(
             type_index=ti,
             name=name,
@@ -814,13 +822,13 @@ class TypeDatabase:
             is_union=is_union,
             count=count,
         )
-        return True
+        return name_terminated
 
     def _parse_enum(self, ti: int, d: bytes) -> bool:
         if len(d) < 12:
             return False
         (count, prop, utype_ti, field_ti) = struct.unpack_from("<HHII", d, 0)
-        name, _ = _read_cstring(d, 12)
+        name, _, name_terminated = _read_cstring(d, 12)
         self._enums[ti] = CvEnum(
             type_index=ti,
             name=name,
@@ -829,7 +837,7 @@ class TypeDatabase:
             is_forward_ref=bool(prop & _PROP_FORWARD_REF),
             count=count,
         )
-        return True
+        return name_terminated
 
     def _parse_fieldlist(
         self, ti: int, d: bytes,
@@ -896,12 +904,12 @@ class TypeDatabase:
         (attr, type_ti) = struct.unpack_from("<HI", d, pos)
         pos += 6
         offset_val, pos = _read_numeric_leaf(d, pos)
-        name, pos = _read_cstring(d, pos)
+        name, pos, name_terminated = _read_cstring(d, pos)
         members.append(CvMember(
             name=name, type_ti=type_ti,
             offset=offset_val, access=attr & 0x03,
         ))
-        return pos
+        return pos if name_terminated else None
 
     def _parse_lf_enumerate(
         self, d: bytes, pos: int, members: list[Any],
@@ -912,9 +920,9 @@ class TypeDatabase:
         (_attr,) = struct.unpack_from("<H", d, pos)
         pos += 2
         val, pos = _read_numeric_leaf(d, pos)
-        name, pos = _read_cstring(d, pos)
+        name, pos, name_terminated = _read_cstring(d, pos)
         members.append(CvEnumerator(name=name, value=val))
-        return pos
+        return pos if name_terminated else None
 
     def _parse_lf_index(
         self, d: bytes, pos: int, members: list[Any], _visited: set[int],
@@ -950,10 +958,10 @@ class TypeDatabase:
         mprop = (attr >> 2) & 0x07
         if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
             pos += 4
-        m_name, pos = _read_cstring(d, pos)
+        m_name, pos, name_terminated = _read_cstring(d, pos)
         if m_name:
             members.append(CvOneMethod(name=m_name, type_ti=m_type_ti))
-        return pos
+        return pos if name_terminated else None
 
     def _skip_subrecord(self, sub_leaf: int, d: bytes, pos: int) -> int | None:
         """Skip known sub-record types we don't parse.
@@ -967,16 +975,16 @@ class TypeDatabase:
             if pos + 6 > len(d):
                 return None
             pos += 6
-            _, pos = _read_cstring(d, pos)
-            return pos
+            _, pos, name_terminated = _read_cstring(d, pos)
+            return pos if name_terminated else None
 
         if sub_leaf == LF_NESTTYPE:
             # padding(2) + type_ti(4) + name(variable)
             if pos + 6 > len(d):
                 return None
             pos += 6
-            _, pos = _read_cstring(d, pos)
-            return pos
+            _, pos, name_terminated = _read_cstring(d, pos)
+            return pos if name_terminated else None
 
         # LF_ONEMETHOD is dispatched to _parse_lf_onemethod by _parse_fieldlist
         # before it reaches this fallback, so it is intentionally absent here.
@@ -986,8 +994,8 @@ class TypeDatabase:
             if pos + 6 > len(d):
                 return None
             pos += 6
-            _, pos = _read_cstring(d, pos)
-            return pos
+            _, pos, name_terminated = _read_cstring(d, pos)
+            return pos if name_terminated else None
 
         if sub_leaf == LF_VFUNCTAB:
             # padding(2) + type_ti(4)
@@ -1065,7 +1073,7 @@ class TypeDatabase:
         (elem_ti, idx_ti) = struct.unpack_from("<II", d, 0)
         pos = 8
         byte_size, pos = _read_numeric_leaf(d, pos)
-        name, _ = _read_cstring(d, pos)
+        name, _, name_terminated = _read_cstring(d, pos)
         self._arrays[ti] = CvArray(
             type_index=ti,
             element_type_ti=elem_ti,
@@ -1073,7 +1081,7 @@ class TypeDatabase:
             byte_size=byte_size,
             name=name,
         )
-        return True
+        return name_terminated
 
     def _parse_modifier(self, ti: int, d: bytes) -> bool:
         if len(d) < 6:

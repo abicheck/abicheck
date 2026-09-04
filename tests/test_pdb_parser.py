@@ -448,21 +448,24 @@ class TestNumericLeaf:
 class TestCString:
     def test_simple(self) -> None:
         data = b"hello\x00world"
-        s, pos = _read_cstring(data, 0)
+        s, pos, terminated = _read_cstring(data, 0)
         assert s == "hello"
         assert pos == 6
+        assert terminated is True
 
     def test_at_offset(self) -> None:
         data = b"\x00\x00foo\x00"
-        s, pos = _read_cstring(data, 2)
+        s, pos, terminated = _read_cstring(data, 2)
         assert s == "foo"
         assert pos == 6
+        assert terminated is True
 
     def test_empty(self) -> None:
         data = b"\x00rest"
-        s, pos = _read_cstring(data, 0)
+        s, pos, terminated = _read_cstring(data, 0)
         assert s == ""
         assert pos == 1
+        assert terminated is True
 
 
 # ---------------------------------------------------------------------------
@@ -869,11 +872,16 @@ class TestNumericLeafExtended:
 
 class TestCStringExtended:
     def test_no_null_terminator(self) -> None:
-        """String without null terminator returns empty string."""
+        """String without null terminator returns empty string and signals
+        ``terminated=False`` (P2 review) -- distinct from a legitimately
+        empty, properly-terminated string, which a two-value return could
+        not express (a NUL as the very last byte also yields
+        ``pos == len(data)``)."""
         data = b"abc"
-        s, pos = _read_cstring(data, 0)
+        s, pos, terminated = _read_cstring(data, 0)
         assert s == ""
         assert pos == len(data)
+        assert terminated is False
 
 
 class TestMsfParserExtended:

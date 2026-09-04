@@ -42,8 +42,10 @@ import struct
 import pytest
 
 from abicheck.pdb_parser import (
+    LF_ARRAY,
     LF_ENUM,
     LF_FIELDLIST,
+    LF_MEMBER,
     LF_STMEMBER,
     LF_STRUCTURE,
     LF_UNION,
@@ -251,6 +253,55 @@ class TestFailedRecordCountNonExceptionTruncation:
         flagged."""
         db = self._db([(LF_FIELDLIST, b"")])
         assert db.failed_record_count == 0
+
+    def test_lf_structure_with_unterminated_name(self) -> None:
+        """P2 review, fresh evidence beyond the resolved non-exception-
+        truncation thread: a fully-framed LF_STRUCTURE whose fixed header is
+        complete but whose trailing name bytes have no NUL terminator (a
+        truncated payload cut off mid-name) previously still reached
+        ``return True`` -- ``_read_cstring`` silently returned an empty
+        string with no signal a caller checked. The stored struct's name
+        (still the best-effort decode) comes back empty, but the record is
+        now correctly counted as failed."""
+        payload = _make_lf_structure(0, 0, 0, 4, "S")[:-1]  # drop the NUL
+        db = self._db([(LF_STRUCTURE, payload)])
+        assert db.failed_record_count == 1
+        structs = db.all_structs()
+        assert len(structs) == 1
+        assert structs[0x1000].name == ""
+
+    def test_lf_enum_with_unterminated_name(self) -> None:
+        """The reviewer's explicitly named sibling case: enum names."""
+        payload = struct.pack("<HHII", 0, 0, 0, 0) + b"Color"  # no NUL
+        db = self._db([(LF_ENUM, payload)])
+        assert db.failed_record_count == 1
+        assert len(db.all_enums()) == 1
+
+    def test_lf_array_with_unterminated_name(self) -> None:
+        """The reviewer's other explicitly named sibling case: array
+        names."""
+        payload = struct.pack("<II", 0, 0) + struct.pack("<H", 4) + b"Arr"
+        db = self._db([(LF_ARRAY, payload)])
+        assert db.failed_record_count == 1
+
+    def test_lf_structure_with_terminated_name_is_not_counted(self) -> None:
+        """Positive control: a properly NUL-terminated name (even the
+        legitimately-empty-string case) must not be flagged."""
+        db = self._db([(LF_STRUCTURE, _make_lf_structure(0, 0, 0, 4, "S"))])
+        assert db.failed_record_count == 0
+        assert db.all_structs()[0x1000].name == "S"
+
+    def test_fieldlist_member_with_unterminated_name(self) -> None:
+        """The unterminated-name gap also reaches fieldlist sub-records
+        (LF_MEMBER), not just the four top-level name-bearing leaves."""
+        member = (
+            struct.pack("<H", LF_MEMBER)
+            + struct.pack("<HI", 0, 0)  # attr, type_ti
+            + struct.pack("<H", 0)  # numeric leaf (offset)
+            + b"field"  # no NUL terminator
+        )
+        db = self._db([(LF_FIELDLIST, member)])
+        assert db.failed_record_count == 1
 
     def test_lf_vfunctab_shorter_than_its_fixed_header(self) -> None:
         """Latent bug this same fix closed: LF_VFUNCTAB previously had no
