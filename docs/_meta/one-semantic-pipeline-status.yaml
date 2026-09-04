@@ -90,13 +90,30 @@ concepts:
       an explicit ADR-063 Phase 5B docstring note recording why the plain
       resolved_fact_value() collapse is safe there (an evidence gap only
       narrows a closure or omits a graph edge, it cannot fabricate a
-      finding). is_va_list has no other readers. Not yet closed: vtable/
-      vptr_offset_bits (diff_types_vtable.py/diff_layout.py/
-      diff_vtable_layout.py's own pre-existing, individually-reasoned
-      evidence-gap heuristics, plus their downstream readers in
-      diff_cxx_rules.py's own vtable comparison, idioms.py, and
-      diff_cpp_patterns.py — deliberately left alone pending their own
-      dedicated slice, per the plan's own 5B note).
+      finding). is_va_list has no other readers. Third slice (2026-09-03):
+      vtable/vptr_offset_bits's own dedicated slice — diff_vtable_layout.
+      _is_polymorphic/diff_layout._check_vptr_introduced now read
+      FactStatus directly (additive, per-record); idioms.py's three vtable
+      reads and diff_cpp_patterns._is_empty_record audited as already safe
+      (single-snapshot, no old/new pair to gate). The one remaining piece
+      — diff_types_vtable.py's own TYPE_VTABLE_CHANGED cluster
+      (_vtable_transition_is_evidenced/
+      _vtable_transition_rests_on_unresolved_evidence, since moved to
+      compare/vtable_evidence.vtable_transition_is_evidenced) — is closed
+      as a formal, investigated decline (Track 4, 2026-09-04).
+      vtable_transition_is_evidenced's heuristic is unchanged from before
+      this closure. Full three-round reasoning (declined, then a landed
+      fix that regressed real detection coverage, then reverted) lives
+      once, canonically, in diff_types_vtable.py's own module docstring
+      ("Track 4, 5B final closure" section) — not repeated here. The PDB
+      fabrication that closure's second round found remains real,
+      reachable, and open, not fixed. This closes the
+      removal gate for every one of the five originally-named fields
+      (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
+      separately tracked: seven case-(a) fields (default, the five
+      deprecated/is_scoped surfaces) left on the existing fact_provenance
+      mechanism after their own fourth-through-seventh-slice investigation
+      found no safe conversion without a legacy-hybrid load-path fix.
 
   identity:
     primitive: complete
