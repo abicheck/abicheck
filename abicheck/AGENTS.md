@@ -23,7 +23,7 @@ scoped context, which this directory's `CLAUDE.md` follows.
    `abicheck/`.
 3. The nearest package `AGENTS.md`/`CLAUDE.md`, when one exists (e.g.
    `abicheck/buildsource/CLAUDE.md`).
-4. [ADR-061](/docs/contribute/adr/061-responsibility-package-architecture.md)
+4. [ADR-061](../docs/contribute/adr/061-responsibility-package-architecture.md)
    only when the task changes the contract itself.
 
 The machine-readable boundary graph and no-growth debt ledger are
