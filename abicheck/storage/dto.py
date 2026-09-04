@@ -59,6 +59,7 @@ from typing import Any
 
 from ..model.semantic_ir import SemanticIR
 from .canonical import canonical_form
+from .graph_section_codec import GraphSection
 from .guards import (
     identity_text as _identity_text,
     mapping as _mapping,
@@ -67,16 +68,45 @@ from .guards import (
 )
 from .legacy_sections import LEGACY_SECTION_KINDS
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
+from .sparse_section_codec import (
+    BinarySection,
+    BuildSection,
+    DebugSection,
+    DeclarationsSection,
+    LayoutSection,
+    ProvenanceSection,
+)
 from .types_section_codec import TypesSection
 
 __all__ = [
+    "BINARY_SECTION_KIND",
+    "BUILD_SECTION_KIND",
+    "DEBUG_SECTION_KIND",
+    "DECLARATIONS_SECTION_KIND",
+    "GRAPH_SECTION_KIND",
+    "LAYOUT_SECTION_KIND",
+    "PROVENANCE_SECTION_KIND",
     "SECTION_SCHEMA_VERSIONS",
     "SEMANTIC_IR_SECTION_KIND",
     "TYPES_SECTION_KIND",
     "SectionDTO",
+    "binary_from_dto",
+    "binary_to_dto",
+    "build_from_dto",
+    "build_to_dto",
+    "debug_from_dto",
+    "debug_to_dto",
+    "declarations_from_dto",
+    "declarations_to_dto",
+    "graph_from_dto",
+    "graph_to_dto",
+    "layout_from_dto",
+    "layout_to_dto",
     "legacy_section_from_dto",
     "legacy_section_to_dto",
     "migrate_section_dto",
+    "provenance_from_dto",
+    "provenance_to_dto",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",
     "types_from_dto",
@@ -104,10 +134,48 @@ SEMANTIC_IR_SECTION_KIND = "semantic_ir"
 #: membership in that vocabulary.
 TYPES_SECTION_KIND = "types"
 
+#: ADR-063 Track 4 (8B), second slice: the second `LEGACY_SECTION_KINDS`
+#: member with a real, dedicated DTO (`GraphSection`) instead of the generic
+#: `legacy_section_to_dto` pass-through -- see `graph_section_codec.py`'s
+#: own module docstring for why `"graph"` is the next section promoted by
+#: `types_section_codec.py`'s own heuristic. Like `TYPES_SECTION_KIND`
+#: above, this name IS one of `LEGACY_SECTION_KINDS`; only its DTO encoding
+#: function is specialized here.
+GRAPH_SECTION_KIND = "graph"
+
+#: ADR-063 Track 4 (8B), third slice: the six remaining `LEGACY_SECTION_
+#: KINDS` members, each with a real, dedicated DTO from
+#: `sparse_section_codec.py` -- see that module's own docstring for the
+#: required/optional field split that made this slice possible where the
+#: first two ("types"/"graph") could not have generalized to it directly.
+#: Every one of D8's eight named legacy section kinds now has its own DTO;
+#: none is left on the generic `legacy_section_to_dto` pass-through.
+BINARY_SECTION_KIND = "binary"
+DECLARATIONS_SECTION_KIND = "declarations"
+LAYOUT_SECTION_KIND = "layout"
+DEBUG_SECTION_KIND = "debug"
+BUILD_SECTION_KIND = "build"
+PROVENANCE_SECTION_KIND = "provenance"
+
 #: Section kinds `legacy_section_to_dto`/`legacy_section_from_dto` must
 #: refuse -- each has its own dedicated codec instead of the generic
-#: pass-through envelope those two functions provide.
-_SPECIALIZED_SECTION_KINDS = frozenset({SEMANTIC_IR_SECTION_KIND, TYPES_SECTION_KIND})
+#: pass-through envelope those two functions provide. As of the third 8B
+#: slice this is every entry in `SECTION_SCHEMA_VERSIONS`; the generic pair
+#: stays defined below as the fallback a future, not-yet-specialized
+#: section kind would use.
+_SPECIALIZED_SECTION_KINDS = frozenset(
+    {
+        SEMANTIC_IR_SECTION_KIND,
+        TYPES_SECTION_KIND,
+        GRAPH_SECTION_KIND,
+        BINARY_SECTION_KIND,
+        DECLARATIONS_SECTION_KIND,
+        LAYOUT_SECTION_KIND,
+        DEBUG_SECTION_KIND,
+        BUILD_SECTION_KIND,
+        PROVENANCE_SECTION_KIND,
+    }
+)
 
 #: Every section kind this module knows how to encode, and the current DTO
 #: version each one is written at today — `StorageVersions.
@@ -350,6 +418,15 @@ def legacy_section_to_dto(section_kind: str, payload: Mapping[str, Any]) -> Sect
     "reuse the existing, reviewed encoding, never a second one" reasoning
     `semantic_ir_to_dto` already documents, applied to a section whose
     payload is already flat JSON rather than a typed domain object.
+
+    As of ADR-063 Track 4 (8B)'s third slice every `LEGACY_SECTION_KINDS`
+    member has its own dedicated DTO (`types_to_dto`/`graph_to_dto`/
+    `binary_to_dto`/`declarations_to_dto`/`layout_to_dto`/`debug_to_dto`/
+    `build_to_dto`/`provenance_to_dto`), so this generic pass-through is no
+    longer reachable for any of today's eight -- it remains defined as the
+    fallback a future, not-yet-specialized ninth section kind would use, the
+    same "generic first, promoted once a real design exists" path `types`/
+    `graph` themselves came from.
     """
     if (
         section_kind not in SECTION_SCHEMA_VERSIONS
@@ -433,3 +510,180 @@ def types_from_dto(dto: SectionDTO) -> TypesSection:
     payload = current.to_dict()["payload"]
     assert isinstance(payload, dict)
     return TypesSection.from_document(payload)
+
+
+def graph_to_dto(section: GraphSection) -> SectionDTO:
+    """The domain `GraphSection` (ADR-063 Track 4 / 8B, second slice) as a
+    `SectionDTO` -- built on `GraphSection.to_document`, never `asdict`,
+    mirroring `types_to_dto`'s own "version stamp over an existing,
+    reviewed encoding" shape for its own single-field payload."""
+    return SectionDTO(
+        section_kind=GRAPH_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[GRAPH_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def graph_from_dto(dto: SectionDTO) -> GraphSection:
+    """The inverse of `graph_to_dto` — migrates *dto* to the current version
+    first, then decodes via `GraphSection.from_document`.
+
+    Reads `current.to_dict()["payload"]`, never `current.payload` directly
+    -- identical reasoning to `types_from_dto`'s own docstring: `SectionDTO
+    .payload` is recursively frozen, so `surface_graph`'s own nested lists
+    would otherwise round-trip as tuples while a freshly-dumped comparison
+    side holds plain lists.
+    """
+    if dto.section_kind != GRAPH_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {GRAPH_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return GraphSection.from_document(payload)
+
+
+# ADR-063 Track 4 (8B), third slice: the six remaining sparse legacy
+# sections. Each pair below is the identical shape as `types_to_dto`/
+# `types_from_dto` and `graph_to_dto`/`graph_from_dto` above -- a version
+# stamp over `sparse_section_codec.py`'s own `to_document`/`from_document`,
+# reading back through `current.to_dict()["payload"]` rather than
+# `current.payload` directly for the same recursive-freeze reason those two
+# docstrings already explain (a section's own nested lists must come back
+# as plain `list`s, not leftover `tuple`s, to compare equal against a
+# freshly-dumped document).
+
+
+def binary_to_dto(section: BinarySection) -> SectionDTO:
+    """The domain `BinarySection` as a `SectionDTO` -- see
+    `sparse_section_codec.py`'s own module docstring."""
+    return SectionDTO(
+        section_kind=BINARY_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[BINARY_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def binary_from_dto(dto: SectionDTO) -> BinarySection:
+    """The inverse of `binary_to_dto`."""
+    if dto.section_kind != BINARY_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {BINARY_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return BinarySection.from_document(payload)
+
+
+def declarations_to_dto(section: DeclarationsSection) -> SectionDTO:
+    """The domain `DeclarationsSection` as a `SectionDTO` -- see
+    `sparse_section_codec.py`'s own module docstring."""
+    return SectionDTO(
+        section_kind=DECLARATIONS_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[DECLARATIONS_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def declarations_from_dto(dto: SectionDTO) -> DeclarationsSection:
+    """The inverse of `declarations_to_dto`."""
+    if dto.section_kind != DECLARATIONS_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {DECLARATIONS_SECTION_KIND!r}, got "
+            f"{dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return DeclarationsSection.from_document(payload)
+
+
+def layout_to_dto(section: LayoutSection) -> SectionDTO:
+    """The domain `LayoutSection` as a `SectionDTO` -- see
+    `sparse_section_codec.py`'s own module docstring."""
+    return SectionDTO(
+        section_kind=LAYOUT_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[LAYOUT_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def layout_from_dto(dto: SectionDTO) -> LayoutSection:
+    """The inverse of `layout_to_dto`."""
+    if dto.section_kind != LAYOUT_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {LAYOUT_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return LayoutSection.from_document(payload)
+
+
+def debug_to_dto(section: DebugSection) -> SectionDTO:
+    """The domain `DebugSection` as a `SectionDTO` -- see
+    `sparse_section_codec.py`'s own module docstring."""
+    return SectionDTO(
+        section_kind=DEBUG_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[DEBUG_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def debug_from_dto(dto: SectionDTO) -> DebugSection:
+    """The inverse of `debug_to_dto`."""
+    if dto.section_kind != DEBUG_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {DEBUG_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return DebugSection.from_document(payload)
+
+
+def build_to_dto(section: BuildSection) -> SectionDTO:
+    """The domain `BuildSection` as a `SectionDTO` -- see
+    `sparse_section_codec.py`'s own module docstring."""
+    return SectionDTO(
+        section_kind=BUILD_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[BUILD_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def build_from_dto(dto: SectionDTO) -> BuildSection:
+    """The inverse of `build_to_dto`."""
+    if dto.section_kind != BUILD_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {BUILD_SECTION_KIND!r}, got {dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return BuildSection.from_document(payload)
+
+
+def provenance_to_dto(section: ProvenanceSection) -> SectionDTO:
+    """The domain `ProvenanceSection` as a `SectionDTO` -- see
+    `sparse_section_codec.py`'s own module docstring."""
+    return SectionDTO(
+        section_kind=PROVENANCE_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[PROVENANCE_SECTION_KIND],
+        payload=section.to_document(),
+    )
+
+
+def provenance_from_dto(dto: SectionDTO) -> ProvenanceSection:
+    """The inverse of `provenance_to_dto`."""
+    if dto.section_kind != PROVENANCE_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {PROVENANCE_SECTION_KIND!r}, got "
+            f"{dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return ProvenanceSection.from_document(payload)

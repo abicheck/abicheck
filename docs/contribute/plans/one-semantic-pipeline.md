@@ -772,6 +772,83 @@ are ~2800 lines with their own extensive review history; a shared
 pair-operation executor there needs its own dedicated slice, not a
 drive-by extension of this one).
 
+**7B's release-fan-out investigation landed (2026-09-03) — a dedicated
+slice, per the note above, that reads the ~2800 lines closely rather than
+attempting a rewrite.** The line count itself was stale (`cli_compare_release
+.py`/`cli_compare_release_helpers.py`/`cli_compare_release_matrix.py` are
+now 838/1277/718 lines — a fourth, sibling file the plan text above didn't
+name, `cli_compare_release_pairwise.py` (743 lines, the actual per-pair
+comparison engine: `_run_compare_pair`/`_compare_one_library`/the
+sequential/parallel dispatch), was split out afterward and carries none of
+the duplication this slice found). Reading every concrete axis the plan
+text names against `cli_compare_release_pairwise.py` found most of them
+**already unified**, through mechanisms that landed independently of this
+sub-phase:
+
+- **Depth, suppression, pack policy/namespace overrides, compile context,
+  contract evaluation** — every real per-library pair already routes
+  through `service.run_compare` (`_run_compare_pair`'s own docstring: "the
+  single Tier-2 chokepoint... this is what keeps `compare-release` and
+  `compare` on one classification path"), which folds all five identically
+  for a release pair and a single-pair `compare` invocation of the same
+  library. Nothing to unify here — it already is.
+- **Severity/exit-code-scheme gate resolution** — ADR-064's own
+  `GateOptions`/`resolve_release_gate_options`
+  (`abicheck/policy/release_gate_options.py`) already resolves this exactly
+  once *within* the release fan-out (replacing three independent
+  re-derivations that existed before that ADR — see that module's own
+  docstring), closing the specific drift risk PR B's own note there had
+  flagged as unsafe to fix reactively. What remains is narrower than "not
+  unified": `release_gate_options.py`'s own docstring states plainly that
+  `apply_release_gate_pack` "mirrors [`pack_application.
+  apply_to_compare_config`'s] *logic*... instead" of calling it, because the
+  release fan-out has no `ResolvedCompareConfig`-shaped object of its own to
+  fold packs onto — a full unification is ADR-064's own named, deferred
+  "PR G2" prerequisite work, not this sub-phase's to redo reactively.
+  `tests/test_release_gate_pack_fold_parity.py` (this PR) closes the actual
+  residual risk instead: a Hypothesis property test pinning the two
+  independently-reasoned fold implementations to agree on outcome for every
+  generated pack contribution, so a change to one that silently drifts from
+  the other fails there first — the "primitive-level property test"
+  AGENTS.md calls for when a real unification isn't the safe move for one
+  PR to make reactively.
+- **Report composition** — the release fan-out's per-library
+  `--output-dir` JSON write (`_compare_one_library`'s own `to_json(...)`
+  call) has no shared code with single-pair `compare`'s
+  `_render_compare_report` pipeline, but this is not a maintenance gap:
+  `compare-release` exposes neither `--use-cases` nor a suppression-audit
+  equivalent at all (confirmed by grep — no such flag exists anywhere in
+  the three/four release modules), so there is nothing for a shared
+  executor to fold in that the simpler direct `to_json` call is missing.
+  Unifying this would mean *adding* `--use-cases`/suppression-audit support
+  to `compare-release` first — a real, separate feature request, not a
+  7B-scoped refactor.
+- **The build-config matrix pseudo-pair** (`_collect_matrix_result`,
+  `cli_compare_release_matrix.py`) independently reloads suppression/policy
+  and re-folds packs (`_load_suppression_and_policy`/
+  `policy_file_with_packs` — the same shared helpers a real pair's
+  resolution already goes through, called at a third site, not a second,
+  divergent implementation). This is structurally required, not
+  duplicated-by-oversight: the matrix findings are release-global
+  (`extra_changes` fed to `service.compare_snapshots` against a pair of
+  *empty* snapshots), resolved once for the whole release regardless of how
+  many real library pairs exist — routing it through the real per-pair
+  `_run_compare_pair`/`_compare_one_library` path makes no sense for a
+  pseudo-pair with no actual old/new binaries. Its own docstring already
+  states this reasoning; left as-is.
+
+**Net effect**: the "shared pair-operation executor" the plan text's one-line
+goal names is, on inspection, substantially already real — just distributed
+across several independently-landed mechanisms rather than one function —
+with exactly one concrete, still-open gap (the `apply_to_compare_config`/
+`apply_release_gate_pack` duplication) that has its own named, deferred
+follow-up ("PR G2") and is now guarded by a parity test rather than left to
+silent drift in the meantime. Recorded here per this repo's own "say so
+explicitly and record the gap" convention rather than closing 7B's own
+status row on an incomplete account, or forcing a premature rewrite of
+carefully-built, recently-landed code (`GateOptions`) to manufacture a
+bigger diff.
+
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
 through `storage.dto.types_to_dto`/`types_from_dto` in place of the generic
@@ -798,6 +875,102 @@ sections (`binary`/`declarations`/`layout`/`debug`/`build`/`graph`/
 `provenance`), multi-artifact `ProjectSnapshot` packages, and folding
 baseline-set/`BundleFacts` into sections all remain open, per this
 sub-phase's own stated scope.
+
+**8B's second PR landed (2026-09-03).** `storage.graph_section_codec
+.GraphSection` promotes the `"graph"` D8 legacy section the same way, chosen
+next by the identical heuristic: `_SECTION_FIELDS["graph"]` is exactly one
+field (`surface_graph`), and `split_legacy_document` only ever creates a
+`"graph"` section when that field is present (a section with none of its
+fields present is omitted entirely, and `"graph"` has no other field it
+could carry) — so a present `"graph"` section's payload has exactly one
+possible shape, the same guarantee `"types"` relies on. This holds even
+though `_REQUIRED_SECTION_FIELDS["graph"]` is empty: that table is derived
+from schema v1 alone, and `surface_graph` postdates v1 (ADR-063 Phase 3 D5,
+schema v29), so its absence there reflects the field's introduction date,
+not genuine per-section optionality. Wired through `storage.dto
+.graph_to_dto`/`graph_from_dto` and `storage.import_v1`, mirroring
+`types_to_dto`/`types_from_dto`'s wiring exactly; on-disk shape unchanged.
+The remaining six legacy sections (`binary`/`declarations`/`layout`/`debug`/
+`build`/`provenance`) all carry the genuinely sparse, schema-version-
+dependent optional-field profile the first PR's note above describes, and
+still need that design problem solved before they can follow the same
+pattern.
+
+**8B's third PR landed (2026-09-03), closing "typed DTOs for the remaining
+sections beyond `semantic_ir`" in full.** `storage.sparse_section_codec`
+solves the sparsity design problem the first two PRs left open: each of the
+six remaining sections' fields is split by what `storage.legacy_sections
+._REQUIRED_SECTION_FIELDS` already, independently proves about it (derived
+empirically from `tests/fixtures/schema/v1.json`, the format's own oldest
+fixture — any key that table lists is safe to require unconditionally in
+any document this build can still read). A field in that set becomes a
+real, always-present, named dataclass attribute (`BinarySection.elf`/`.pe`/
+`.macho`, `ProvenanceSection.library`/`.version`, `DebugSection.dwarf`/
+`.dwarf_advanced`, `DeclarationsSection.functions`/`.variables`/`.enums`/
+`.typedefs`/`.sycl`); every other field in the section's own
+`_SECTION_FIELDS` allowlist lives in `extra`, a validated (allowlist-
+checked, canonically-frozen), *never-defaulted* pass-through mapping, so a
+document missing an optional key entirely still round-trips with that key
+simply absent from `extra` — never fabricated, never dropped. `layout` and
+`build` have no field `_REQUIRED_SECTION_FIELDS` proves present since v1 at
+all (both sections postdate schema v1 in full), so their entire content
+stays in `extra`; still real, dedicated, versioned classes rather than the
+generic pass-through, per the module's own "typed only in the sense the
+required half of D8 actually supports today" scoping note. Wired through
+`storage.dto`'s six new `*_to_dto`/`*_from_dto` pairs and one new registry
+(`storage.import_v1._LEGACY_SECTION_CODECS`) that replaced the by-then
+three-branch `if`/`elif` chain in both `import_legacy_snapshot` and
+`export_legacy_snapshot` — a lookup table scales to a ninth section kind as
+a one-line addition instead of a second edit in two functions each time.
+Every one of D8's eight named legacy section kinds now has its own DTO;
+`legacy_section_to_dto`/`legacy_section_from_dto` remain defined as the
+generic fallback a future, not-yet-specialized ninth section kind would
+use, but are unreachable for any of today's eight. One real behavior
+change, deliberately: `import_legacy_snapshot` now enforces a section's own
+required fields structurally *at import time* too, not only at
+`export_legacy_snapshot`'s post-hoc `missing_required_section_fields`
+check — a hand-built document missing e.g. `provenance.version` entirely
+(never a real `snapshot_to_dict()` output, which always includes both
+`AbiSnapshot.library`/`.version` since neither has a dataclass default) now
+fails on import rather than passing silently through and only failing
+later, if ever, on export.
+
+**8B's remaining two items investigated (2026-09-03): both explicitly
+blocked, not merely unstarted.** "Multi-artifact `ProjectSnapshot`
+packages" and "baseline-set/`BundleFacts` folded into sections" are not a
+one-line aspiration with no design behind them — `storage-format-v2.md`'s
+own A1.4/A1.5 sections carry a full, concrete design (a `PackageManifest
+.project_sections: Mapping[str, ObjectRef]` field for cross-library
+evidence stored once and shared by every `ArtifactRef` that needs it, a new
+`bundle_facts_store.py` reader/writer reconstructing a `BundleFacts`-shaped
+view so `compare_bundle_from_facts`'s existing tests pass unmodified,
+concrete file/test/acceptance-criteria lists). `PackageManifest.
+artifact_refs`/`.variant_refs` are already generic tuples and
+`__post_init__` already validates an arbitrary-length collection
+(`storage/package.py`) — the *object model* has supported this shape since
+A1.1 landed. What is missing is a producer: every real writer today
+(`import_v1.import_legacy_snapshot`, `project_snapshot_legacy
+.write_legacy_snapshot_package`, `sectioned_document`'s hard-coded single
+artifact/variant id) is wired to exactly one artifact, and no test
+round-trips a genuinely multi-artifact package successfully (only
+duplicate-id/collision *rejection* tests construct more than one
+`ArtifactRef`).
+
+**Why this isn't implemented here anyway.** `storage-format-v2.md`'s own
+"Relationship to G38" section states the constraint directly: this plan's
+Phase 1 and G38's own Phase 2 target the *same* eventual container, "They
+are complementary and must not both grow a container format... **Do not
+implement a third persisted bundle shape**." `one-semantic-pipeline.md`'s
+own Phase 8 text is equally explicit: "any remaining legacy baseline-set/
+`BundleFacts`-only code path once the `ProjectSnapshot` import adapter
+covers it — per ADR-062's own phasing, **not accelerated here**." This is a
+recorded governance decision, not a scope judgment this session is free to
+override — proceeding without the G38-side coordination the design itself
+requires would risk building exactly the "third persisted bundle shape"
+both texts name as the failure mode to avoid. Recorded here, per this
+repo's own "say so explicitly and record the gap" convention, rather than
+attempted against the plan's own stated blocker or left silently
+unaddressed.
 
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider

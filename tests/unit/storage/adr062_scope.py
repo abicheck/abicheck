@@ -45,7 +45,9 @@ import pathlib
 #: `fact_schema_versions` leaf they share, Phase 2's `entity_id_codec`,
 #: which keeps the parse-time `EntityId` carrier out of the wire format, and
 #: Phase 3's `surface_graph_codec` and Phase 6's `semantic_ir_codec`, the
-#: identical shape for `AbiSnapshot.surface_graph`/`semantic_ir`) — a third,
+#: identical shape for `AbiSnapshot.surface_graph`/`semantic_ir`, plus
+#: Track 4/8B's own `types_section_codec`/`graph_section_codec`/
+#: `sparse_section_codec` typed per-legacy-section DTOs) — a third,
 #: independent body of work in this
 #: package, unrelated to either ADR-062's Phase 0 primitives or G40's
 #: container. `snapshot_load_normalization` is a fourth, equally unrelated
@@ -68,6 +70,8 @@ NON_ADR062_MODULES = frozenset(
         "surface_graph_codec",
         "semantic_ir_codec",
         "types_section_codec",
+        "graph_section_codec",
+        "sparse_section_codec",
         "snapshot_load_normalization",
     }
 )

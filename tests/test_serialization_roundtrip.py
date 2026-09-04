@@ -38,7 +38,8 @@ def _minimal_dict(**overrides: object) -> dict:
         "variables": [],
         "types": [],
         "enums": [],
-        "typedefs": [],
+        # dict, matching AbiSnapshot.typedefs' real type (Codex review, #1044).
+        "typedefs": {},
     }
     base.update(overrides)
     return base
@@ -62,7 +63,8 @@ def _make_snap(**kwargs: object) -> AbiSnapshot:
         "variables": [],
         "types": [],
         "enums": [],
-        "typedefs": [],
+        # See _minimal_dict's identical note just above.
+        "typedefs": {},
     }
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
