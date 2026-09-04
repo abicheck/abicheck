@@ -553,15 +553,30 @@ abicheck compare release-1.0.bundlefacts.json release-3.0/
 `OLD_INPUT` being a stored `BundleFacts` document (from a prior
 `--bundle-facts-out` run) is detected automatically, the same way `compare`
 already classifies a directory vs. a package vs. a single binary — there is
-no separate flag to pass. `NEW_INPUT` stays a live release directory or
-package (extracted the same way the ordinary release fan-out extracts one).
-Only `--format json`/`markdown` are available in this mode, and most of the
-~44 flags the live release fan-out accepts have no channel into a
+no separate flag to pass. `NEW_INPUT` can be either a live release
+directory/package (extracted the same way the ordinary release fan-out
+extracts one) or a *second* stored `BundleFacts` document — comparing two
+previously-captured documents with no binaries reopened on either side, e.g.
+`abicheck compare release-1.0.bundlefacts.json release-2.0.bundlefacts.json`.
+Only `--format json`/`markdown` are available in either mode, and most of
+the ~44 flags the live release fan-out accepts have no channel into a
 stored-facts comparison and are rejected explicitly (exit 64) rather than
 silently ignored — see `abicheck compare --help-all` for the full, current
-list. Internally it routes through `abicheck.bundle_side_input.
-compare_release_against_bundle_facts()`, the same driver the paragraph
-below describes.
+list. When `NEW_INPUT` is also stored, every flag that would only ever
+apply to a *live* `NEW_INPUT` (`--header`/`--include`, `--ast-frontend`,
+`--compiler`/`--sysroot`, `--devel-pkg new=`,
+`--bundle-facts-library-manifest`, an explicit `--version new=`, ...) is
+rejected too, alongside a mismatched build variant between the two
+documents (`BundleFacts.variant_fingerprint`, a stable build-identity
+fingerprint each captured document carries): two documents captured from
+different logical builds (a CPU-only build vs. a SYCL/DPC build of the
+same source tree, say) are refused outright rather than silently diffed as
+if they were the same release. Internally, OLD-stored/NEW-live routes
+through
+`abicheck.bundle_side_input.compare_release_against_bundle_facts()` (the
+same driver the paragraph below describes); OLD-stored/NEW-stored routes
+through `abicheck.workflows.bundle_stored_pair_compare.
+compare_stored_bundle_facts_pair()`.
 
 `compare_bundle_from_facts()` reconstructs a live-equivalent
 `BundleSnapshot` from the stored per-library `AbiSnapshot.elf` metadata (no

@@ -256,3 +256,48 @@ class TestProfileOperandClassification:
 
     def test_a_missing_operand_key_is_skipped_without_classifying(self) -> None:
         assert _profile_targets_set_input({"old_input": None}) is False
+
+    def test_a_stored_bundle_facts_operand_is_recognised_as_a_set_input(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1060, round 13: a stored ``BundleFacts``
+        document is not a directory/package operand
+        (``classify_compare_operand`` reports it as an ordinary ``"file"``),
+        but it represents a whole multi-library bundle the same way a
+        directory/package does, and dispatches to the identical multi-
+        library engine -- ``--profile`` must reject it too, not silently
+        inject e.g. ``depth="binary"`` into every library's evidence depth."""
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.serialization import save_bundle_facts
+
+        snapshot = AbiSnapshot(library="libcore.so", version="old", elf=ElfMetadata(soname="libcore.so"))
+        facts = capture_bundle_facts({"libcore.so": snapshot})
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+
+        assert _profile_targets_set_input({"old_input": str(facts_path)}) is True
+
+    def test_stored_bundle_facts_pair_rejects_profile_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        """`compare old.bundlefacts.json new.bundlefacts.json --profile
+        ci-gate` exits as a usage error (64), the identical response a
+        directory/package pair already gets."""
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.serialization import save_bundle_facts
+
+        snapshot = AbiSnapshot(library="libcore.so", version="old", elf=ElfMetadata(soname="libcore.so"))
+        facts = capture_bundle_facts({"libcore.so": snapshot})
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(facts, old_path)
+        save_bundle_facts(facts, new_path)
+
+        result = CliRunner().invoke(
+            main, ["compare", str(old_path), str(new_path), "--profile", "ci-gate"]
+        )
+
+        assert result.exit_code == 64, result.output
+        assert "single-pair" in result.output

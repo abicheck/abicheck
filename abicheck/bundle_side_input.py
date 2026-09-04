@@ -64,8 +64,27 @@ in-flight comparison needs), and calls
 ``bundle_facts.compare_bundle_from_facts()`` with that real
 ``new_signature_evidence`` populated -- closing the literal gap Phase 12's own
 "Known gap" note named: "no end-to-end CLI invocation" exercising the Phase 4
-parity guarantee. It is reachable from a real Python caller today; it is not
-reachable from ``abicheck compare ...`` yet.
+parity guarantee. Reachable from ``abicheck compare ...`` since CLI cleanup
+phase two, PR I (``frontends/cli/commands/compare_bundle_facts.py``), which
+routes to it whenever OLD_INPUT classifies as a stored ``BundleFacts``
+document and NEW_INPUT does not.
+
+:func:`~abicheck.workflows.bundle_stored_pair_compare.
+compare_stored_bundle_facts_pair` is PR I's stored/stored sibling -- both
+sides already resolved, persisted ``BundleFacts`` documents, so it reads no
+binaries and parses no header AST on either side at all: a pure in-memory
+per-library diff plus the same shared
+``bundle_facts.compare_bundle_from_facts()`` bundle-level call. Also
+reachable from ``abicheck compare ...`` (via ``compare_bundle_facts.py``,
+once NEW_INPUT classifies as stored too). Lives in the real
+``abicheck/workflows/`` package rather than here -- it coordinates a
+compare workflow rather than sharing this module's own "one live/stored
+resolution primitive" scope, so it doesn't extend this file's own
+grandfathered-legacy footprint (Codex review). The remaining operand
+shape -- live/stored (OLD_INPUT live, NEW_INPUT a stored document) -- has
+no driver yet and is rejected outright by
+``compare_bundle_operand_dispatch.py``; see that module's own docstring
+and PR I's tracking in ``docs/contribute/plans/cli-cleanup-phase-two.md``.
 """
 
 from __future__ import annotations

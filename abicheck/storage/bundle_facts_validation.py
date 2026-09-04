@@ -21,7 +21,7 @@ budget check, and ``load_bundle_facts``'s full dispatch body, split out of
 `storage/`'s own ADR-061 D1 remit ("serialize snapshots/baselines, own
 their schemas") and its `model`-only dependency rule: every function here
 depends on nothing first-party but ``errors`` (a `public_root_surfaces`
-exemption) and `storage.json_budget` (same package) --
+exemption) and `storage.json_budget`/`storage.guards` (same package) --
 ``load_bundle_facts_dispatch`` takes its `bundle_facts.py`/`snapshot_io.py`/
 `serialization.py` collaborators as injected callables instead of importing
 them, since `storage`'s own `may_import: [model]` forbids importing any of
@@ -237,6 +237,49 @@ def validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
             )
         aliases[name] = tuple(values)
     return aliases
+
+
+def validated_variant_fingerprint(raw: object) -> str:
+    """Validate a persisted top-level ``variant_fingerprint`` field.
+
+    Rejects a non-string value (Codex review, PR #1060, round 8) instead of
+    silently coercing it with ``str(...)`` -- the prior behavior meant a
+    malformed ``variant_fingerprint: 1`` and a genuine ``variant_fingerprint:
+    "1"`` both loaded as the identical string ``"1"``, so
+    ``compare_stored_bundle_facts_pair()``'s own mismatch/empty-fingerprint
+    checks (which compare this field for identity) could not tell a real
+    match from a coincidental one.
+
+    Deliberately no ``default``/``None``-means-absent special case (Codex
+    review, PR #1060, round 9): an earlier version of this function treated
+    ``raw is None`` as "key absent, use the default", but the caller's own
+    ``d.get("variant_fingerprint")`` (no default arg) returns ``None`` for
+    an *explicit* JSON ``null`` too -- collapsing "never captured" and "a
+    malformed document naming an explicit null" onto the same fallback, the
+    same class of bug the non-string fix just above closed for an int/list/
+    dict value. The caller now passes ``d.get("variant_fingerprint",
+    default)`` instead (mirroring ``validated_alias_map``'s/
+    ``validated_filename_map``'s own identical two-arg ``.get`` call
+    immediately below): a truly absent key resolves to *default* -- a
+    valid string -- before this function ever sees it, while an explicit
+    ``null`` reaches this function as ``None`` and is rejected by the
+    ``isinstance`` check like any other wrong-typed value, never silently
+    defaulted.
+
+    Delegates to ``guards.identity_text()`` (Codex review, PR #1060, round
+    11) rather than repeating its own ``isinstance`` check -- this module's
+    own docstring and ``storage/AGENTS.md``'s "Never coerce a value a
+    decision reads" section both name ``guards.py`` as the one place this
+    check lives, precisely because a duplicated copy is how a future
+    validation improvement (or a bug fix to the check itself) drifts
+    between sites; an earlier version of this function kept its own
+    independent copy instead. Raises ``TypeError`` (``identity_text``'s own
+    contract), not this module's usual ``ValueError`` -- already covered by
+    every caller's ``except (SnapshotError, TypeError, ValueError,
+    OSError)`` boundary."""
+    from .guards import identity_text
+
+    return identity_text(raw, "variant_fingerprint")
 
 
 def validated_filename_map(raw: object) -> dict[str, str]:
