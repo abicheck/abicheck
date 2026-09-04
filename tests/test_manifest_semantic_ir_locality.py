@@ -187,3 +187,77 @@ def test_darwin_external_variables_from_different_tus_collapse_to_one_occurrence
     ir = manifest_semantic_ir([a, b])
     occurrences = ir.occurrences_for(darwin_id)
     assert len(occurrences) == 1
+
+
+def test_darwin_cxx_mangled_static_functions_from_different_tus_stay_distinct_occurrences():
+    # Second Darwin quirk instance (Codex review, fresh evidence): a
+    # *genuinely* Itanium-mangled Darwin symbol also carries an extra
+    # leading underscore ("__ZL6helperi", not the plain Itanium
+    # "_ZL6helperi") -- independent of the is_extern_c case above, and
+    # unfixed by that first round's own fix.
+    darwin_id = entity_id_for_function((), "helper", mangled_name="__ZL6helperi")
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "helper",
+                "__ZL6helperi",
+                is_static=True,
+                entity_id=darwin_id,
+                source_location="a.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "helper",
+                "__ZL6helperi",
+                is_static=True,
+                entity_id=darwin_id,
+                source_location="a.h:1",
+            ),
+        ),
+    )
+    ir = manifest_semantic_ir([a, b])
+    occurrences = ir.occurrences_for(darwin_id)
+    assert len(occurrences) == 2
+    disambiguators = {occ.disambiguator for occ in occurrences}
+    assert len(disambiguators) == 2
+    assert all(d.startswith("a:") or d.startswith("b:") for d in disambiguators)
+
+
+def test_darwin_cxx_mangled_static_member_functions_from_different_tus_collapse_to_one_occurrence():
+    # A static *member* function's Darwin-decorated mangled name carries
+    # neither the `_ZL` nor `_GLOBAL__N_` marker, so it must still
+    # collapse to one occurrence across TUs -- not TU-scoped just because
+    # it also happens to have the extra leading underscore.
+    member_id = entity_id_for_function((), "make", mangled_name="__ZN6Widget4makeEi")
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "make",
+                "__ZN6Widget4makeEi",
+                is_static=True,
+                entity_id=member_id,
+                source_location="widget.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "make",
+                "__ZN6Widget4makeEi",
+                is_static=True,
+                entity_id=member_id,
+                source_location="widget.h:1",
+            ),
+        ),
+    )
+    ir = manifest_semantic_ir([a, b])
+    occurrences = ir.occurrences_for(member_id)
+    assert len(occurrences) == 1

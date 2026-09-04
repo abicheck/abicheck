@@ -193,3 +193,87 @@ def test_merge_fragments_darwin_static_and_external_same_mangled_name_stay_disti
     )
     merged = merge_fragments([a, b, c])
     assert len(merged.functions) == 2
+
+
+# ---------------------------------------------------------------------------
+# Darwin leading-underscore quirk, second instance (Codex review, fresh
+# evidence): a *genuinely* Itanium-mangled Darwin symbol (real C++ name
+# mangling applied, not the plain-C/extern-"C" case above) also carries one
+# extra platform leading underscore -- "__ZL6helperi", not the plain
+# Itanium "_ZL6helperi" -- which `_has_local_linkage_mangling`'s own
+# `mangled.startswith("_Z")`-gated marker check rejected outright before
+# this fix, independently of the is_extern_c branch above.
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_keeps_distinct_darwin_cxx_static_functions_from_different_tus():
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("helper", "__ZL6helperi", is_static=True, return_type="int"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn("helper", "__ZL6helperi", is_static=True, return_type="double"),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 2
+    assert {fn.return_type for fn in merged.functions} == {"int", "double"}
+
+
+def test_merge_fragments_keeps_distinct_darwin_nested_namespace_static_functions():
+    # The nested-namespace-`L` shape ("static int state;" inside
+    # "namespace ns") mangles to "_ZN2nsL5stateE", not a leading "_ZL"
+    # prefix -- see `_has_local_linkage_mangling`'s own docstring. Darwin
+    # decorates this identically to the global-scope case: one extra
+    # leading underscore over the plain Itanium spelling.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn("nested", "__ZN2nsL6nestedEi", is_static=True, return_type="int"),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn("nested", "__ZN2nsL6nestedEi", is_static=True, return_type="double"),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 2
+    assert {fn.return_type for fn in merged.functions} == {"int", "double"}
+
+
+def test_merge_fragments_still_merges_darwin_cxx_static_member_functions_across_tus():
+    # A static *member* function has the class's own ordinary external
+    # linkage -- its Darwin-decorated mangled name carries neither the
+    # `_ZL` nor `_GLOBAL__N_` marker, so it must keep merging normally
+    # across TUs (the identical Linux-mangled-name case is pinned in
+    # test_tu_merge.py's own
+    # test_merge_fragments_still_merges_static_member_functions_across_tus).
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("make", "__ZN6Widget4makeEi", is_static=True),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("make", "__ZN6Widget4makeEi", is_static=True),),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 1
+
+
+def test_merge_fragments_keeps_distinct_darwin_cxx_static_variables_from_different_tus():
+    a = TuFragment(tu_name="a", variables=(_var("state", "__ZL5statei", value="1"),))
+    b = TuFragment(tu_name="b", variables=(_var("state", "__ZL5statei", value="2"),))
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 2
+    assert {v.value for v in merged.variables} == {"1", "2"}
+
+
+def test_merge_fragments_still_merges_darwin_cxx_static_member_variables_across_tus():
+    a = TuFragment(tu_name="a", variables=(_var("counter", "__ZN6Widget7counterE"),))
+    b = TuFragment(tu_name="b", variables=(_var("counter", "__ZN6Widget7counterE"),))
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 1

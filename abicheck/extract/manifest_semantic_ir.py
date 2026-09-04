@@ -147,7 +147,12 @@ __all__ = ["manifest_semantic_ir"]
 def _has_local_linkage_mangling(mangled: str) -> bool:
     """See ``tu_merge._has_local_linkage_mangling``'s own docstring --
     reused verbatim rather than re-derived, since ``extract/`` may not
-    import that root-level module."""
+    import that root-level module. Includes that function's Darwin
+    leading-underscore normalization (a genuinely Itanium-mangled Darwin
+    symbol carries one extra leading underscore, e.g. ``"__ZL6helperi"``
+    -- see that docstring for the full account)."""
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 

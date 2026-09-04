@@ -161,7 +161,29 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     the nested-namespace case; a plain ``startswith("_ZL")`` check only ever
     matches when the local entity is the *first* component, i.e. at global
     scope.
+
+    **Darwin leading-underscore quirk, second instance (macOS CI, fresh
+    evidence):** the same platform linker convention behind
+    :func:`_function_key`/:func:`_variable_key`'s own ``is_extern_c`` fix
+    also decorates a *genuinely* Itanium-mangled Darwin symbol with one
+    extra leading underscore (``"__ZL6helperi"``, not the plain Itanium
+    ``"_ZL6helperi"`` -- confirmed via ``model/mangled_name.py``'s own
+    ``_itanium_strip_prefix`` docstring, which fixed the identical quirk
+    for ``diff_cxx_rules.py``'s callers). ``_mangled_name_is_local_
+    linkage``'s own ``mangled.startswith("_Z")`` gate rejects every such
+    symbol outright, so a Darwin C++ ``static`` declaration whose mangled
+    name genuinely carries the ``_ZL``/nested-``L`` marker (as opposed to
+    the plain-C/``extern "C"`` case the ``is_extern_c`` branch above
+    already covers) still fell through to "not local" here, unfixed by
+    that first round. Normalized the same way
+    ``_itanium_strip_prefix`` already does for this exact quirk: one
+    leading underscore is stripped before the check, never gated on the
+    target actually being Darwin, since a real Itanium mangled name is
+    never introduced by two leading underscores followed by ``Z`` on any
+    platform -- there is no other symbol shape this could misfire on.
     """
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 
