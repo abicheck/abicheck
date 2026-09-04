@@ -1317,8 +1317,10 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "use/dump-compare-flags.md",
                 # A point-in-time "shipped in PR #422" use-case record: names
                 # the flag as it was called then, in its own historical-
-                # record capacity.
-                "docs/contribute/usecase-registry.yaml",
+                # record capacity. Line-scoped (not the whole multi-entry
+                # registry), so a live `--gcc-option` added to a different
+                # entry later still gets flagged (CodeRabbit review).
+                "docs/contribute/usecase-registry.yaml#L416",
             }
         ),
     ),
@@ -1565,8 +1567,10 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # an old invocation at the `.abicheck.yml` replacement.
                 "use/multi-binary.md",
                 # Same "formerly ..." historical framing, in the use-case
-                # registry's bundle_soname_skew entry.
-                "docs/contribute/usecase-registry.yaml",
+                # registry's bundle_soname_skew entry. Line-scoped, not the
+                # whole multi-entry registry (CodeRabbit review) -- see the
+                # --gcc-* entry above for why.
+                "docs/contribute/usecase-registry.yaml#L383",
                 # Same "replacing the removed ..." historical framing, in
                 # the canonical config-file reference's own bundle: section.
                 "reference/config-file.md",
@@ -1715,6 +1719,16 @@ def _check_retired_surfaces(f: Findings) -> None:
                 continue
             if text is None:
                 text = path.read_text(encoding="utf-8")
+            # An entry can also allow one specific line (`"<rel>#L<n>"`)
+            # instead of the whole file -- for a multi-entry catalogue like
+            # `docs/contribute/usecase-registry.yaml`, exempting the whole
+            # file for one historical mention would silently blind this
+            # sweep to a genuinely live occurrence of the same retired flag
+            # added to a different entry later (CodeRabbit review, fresh
+            # evidence). Line-pinned the same way `CLI_CONTRACT_ALLOWLIST`
+            # in check_ai_readiness.py is: a later edit shifting the line
+            # makes the allowlist entry stop matching, which re-surfaces the
+            # warning for a human to re-pin rather than silently drifting.
             # Longest-first, and skip a shorter pattern's match when it falls
             # entirely inside a longer pattern's already-reported span (e.g.
             # a bare "--source-abi" match sitting inside an already-flagged
@@ -1745,6 +1759,8 @@ def _check_retired_surfaces(f: Findings) -> None:
                         continue
                     reported_spans.append((idx, end))
                     line_no = text.count("\n", 0, idx) + 1
+                    if f"{rel}#L{line_no}" in allowed_paths:
+                        continue
                     f.warn(
                         "retired-surfaces",
                         f"{_rel(path)}:{line_no}: {pattern!r} names a retired "

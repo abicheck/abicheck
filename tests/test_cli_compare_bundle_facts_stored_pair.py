@@ -401,6 +401,52 @@ class TestStoredPairEarlyRejections:
         assert code != 64
         assert "nothing was compared" in out
 
+    def test_ambient_malformed_config_is_rejected_not_a_raw_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CodeRabbit review raised this as a suspected gap: an *ambient*
+        (auto-discovered, not explicit --config) .abicheck.yml is
+        deliberately unchecked for its compile: block here (silently
+        unused, above), and PR J's own bundle: read (dispatch()'s
+        _bundle_cfg load) consumes this SAME file for a stored/stored
+        comparison too -- so the concern was that a malformed one might
+        reach that unguarded load_build_config_with_digest() call as a
+        raw, untranslated ValueError (operational exit 1) instead of a
+        clean usage error. Verified against current code: dispatch()'s own
+        reject_unsupported_options() already resolves and parses
+        kwargs["config"] (by then already auto-discovered by
+        resolve_dispatch_compile_context()) unconditionally, translating
+        a parse failure to click.UsageError -- before either new_is_stored
+        branch, and before _bundle_cfg's own read. This test pins that
+        existing behavior directly (it was previously exercised only
+        incidentally, never asserted for the stored/stored + ambient-config
+        combination) rather than being a new fix."""
+        old_path, new_path = self._both_stored(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text("bundle:\n  system_providers: 123\n")
+        monkeypatch.chdir(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path))
+
+        assert code == 64, out
+        assert "cannot parse build config" in out
+
+    def test_explicit_malformed_config_is_rejected(self, tmp_path: Path) -> None:
+        """The explicit-`--config` sibling of the ambient case above --
+        already covered indirectly by test_explicit_config_with_compile_
+        block_is_rejected's happy-parse path, pinned directly here so both
+        the ambient and explicit routes into reject_unsupported_options'
+        parse-or-raise have their own regression test."""
+        old_path, new_path = self._both_stored(tmp_path)
+        config_path = tmp_path / "custom.yml"
+        config_path.write_text("bundle:\n  system_providers: 123\n")
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--config", str(config_path)
+        )
+
+        assert code == 64, out
+        assert "cannot parse build config" in out
+
 
 class TestStoredPairEndToEnd:
     def test_visibility_change_is_detected_through_the_real_cli(
