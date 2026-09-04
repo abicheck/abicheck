@@ -95,7 +95,7 @@ resolution.
 is also implemented**: `abicheck compare` (directory/package release
 fan-out, `cli_compare_release.py`) now accepts a multi-artifact
 `ProjectSnapshot` package directory as either operand, unpacked via
-`project_snapshot_legacy.resolve_project_snapshot_release_map` into
+`workflows.release_package.resolve_release_package_map` into
 per-library single-artifact sub-packages the existing single-artifact
 resolution path already reads unchanged; `--old-variant`/`--new-variant`
 select among multiple declared variants. Directory packages only — the

@@ -50,29 +50,14 @@ from .storage.package import (
     PackageManifest,
     VariantRef,
 )
-from .storage.ref_ids import safe_ref_id
 
 __all__ = [
     "is_project_snapshot_package_dir",
+    "materialize_release_variant_artifacts",
     "package_declares_full_dependency_scope",
     "read_legacy_snapshot_document",
-    "resolve_project_snapshot_release_map",
     "write_legacy_snapshot_package",
 ]
-
-#: The two `ArtifactRef.native_identity` keys used, independently, by both of
-#: today's not-yet-reconciled multi-artifact package writers
-#: (`bundle_facts_store.py`'s `_NATIVE_IDENTITY_FILENAME_KEY`/
-#: `_NATIVE_IDENTITY_LIBRARY_NAME_KEY` and `storage/import_bundle_facts.py`'s
-#: `_LIBRARY_NAME_KEY`) to record a library's real on-disk name -- see
-#: `storage-format-v2.md`'s A1.4 entry for why there are two writers at all.
-#: Duplicated here (rather than imported) since neither writer module is a
-#: leaf this one may depend on without risking a cycle (`bundle_facts_store.py`
-#: is `workflows`-layered, same as this module) and the string values
-#: themselves are the real cross-writer contract, not either module's own
-#: private name for it.
-_NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
-_NATIVE_IDENTITY_LIBRARY_NAME_KEY = "library_name"
 
 #: D6's fixed, package-relative object-store directory name
 #: (`objects/sha256/<aa>/<digest>.json[.zst]`, `storage/package.py`'s
@@ -302,57 +287,62 @@ def read_legacy_snapshot_document(
     )
 
 
-def _release_match_key(artifact: ArtifactRef) -> str:
-    """The canonical `cli_compare_release` matching key for *artifact*,
-    matching the same `binary_utils._canonical_library_key()` a live
-    directory-of-`.so`-files operand's own `_build_match_map` uses -- the
-    property a stored/live A1.7 comparison depends on: a package-sourced
-    map and a live-directory-sourced map must agree on the key for the same
-    library, or the two can never match via `_match_release_keys`'s plain
-    `set(old_map) & set(new_map)`.
-
-    Prefers the real on-disk filename (`_NATIVE_IDENTITY_FILENAME_KEY`,
-    e.g. `libfoo.so.1.2`, when the writer captured it) over the bare SONAME/
-    library name (`_NATIVE_IDENTITY_LIBRARY_NAME_KEY`) since the filename is
-    what `_canonical_library_key` is actually built to canonicalize (a
-    version suffix, a vendored hash, ...); falls back to the library name,
-    then -- for a package whose writer recorded neither -- to the artifact's
-    own opaque `artifact_id`, which at least keeps matching deterministic
-    (if unable to pair with a differently-produced package) rather than
-    raising.
+def _populate_objects_dir(sub_dir: Path, objects_source: Path) -> None:
+    """Make *objects_source* (*root*'s own `objects/` directory) reachable
+    from *sub_dir* -- preferring a symlink (cheap: D7 content addressing
+    means every object a sub-package's own `write_project_manifest`
+    validation reads through it resolves to the identical bytes *root*
+    already stores, so copying would only duplicate potentially large
+    section content for no benefit), but falling back to a real recursive
+    copy when the host/filesystem cannot create one -- a Windows host
+    without Developer Mode/elevated symlink privileges, or a filesystem
+    without directory-symlink support, must still be able to materialize a
+    stored-release comparison (Codex review).
     """
-    from .binary_utils import _canonical_library_key
+    import shutil
 
-    name = artifact.native_identity.get(
-        _NATIVE_IDENTITY_FILENAME_KEY
-    ) or artifact.native_identity.get(_NATIVE_IDENTITY_LIBRARY_NAME_KEY)
-    if name:
-        return _canonical_library_key(Path(name))
-    return artifact.artifact_id
+    dest = sub_dir / _OBJECTS_DIRNAME
+    try:
+        dest.symlink_to(objects_source, target_is_directory=True)
+    except OSError:
+        shutil.copytree(objects_source, dest)
 
 
-def resolve_project_snapshot_release_map(
+def materialize_release_variant_artifacts(
     root: str | Path,
     *,
     variant_id: str | None,
     dest_root: str | Path,
-) -> dict[str, Path]:
+) -> dict[str, tuple[Path, ArtifactRef]]:
     """Unpack the (possibly multi-artifact) `ProjectSnapshot` package
-    directory at *root* into the `old_map`/`new_map: dict[str, Path]` shape
-    `cli_compare_release`'s existing per-library fan-out already builds from
-    a loose directory of `.so` files (ADR-062 A1.7) -- one materialized,
-    real, single-artifact sub-package directory per member library, written
-    under *dest_root*, keyed by `_release_match_key` so a stored-side map
-    matches a live-side map for the same library.
+    directory at *root* into one materialized, real, independently-readable
+    single-artifact sub-package directory per member library of the
+    selected variant, written under *dest_root* -- the storage-layer half
+    of ADR-062 A1.7's stored-release comparison; `workflows.
+    release_package.resolve_release_package_map` is the workflows-layer
+    wrapper that re-keys this function's return value by a
+    live-directory-comparable canonical library name (this module may only
+    import `model`, per `storage/AGENTS.md`, so it cannot itself reach
+    `binary_utils._canonical_library_key`).
+
+    Returns `{artifact_id: (sub_package_dir, artifact_ref)}` -- keyed by
+    the artifact's own `artifact_id`, which is already validated safe and
+    unique as a filesystem path component (`storage.ref_ids.safe_ref_id`,
+    enforced by `ArtifactRef.__post_init__`), so `sub_package_dir` is
+    always `dest_root / artifact_id` and two artifacts can never collide on
+    one directory (Codex review) -- unlike a name derived from mutable,
+    caller-controlled `native_identity` content.
 
     *variant_id* selects which of *root*'s `VariantRef`s to resolve; `None`
     requires *root* to declare exactly one, raising `ValueError` otherwise --
     ambiguity is a hard usage error, not a silent first match, the same
     discipline `SymbolIdentityIndex.unique_alias_match` already establishes
     elsewhere in this codebase (see `storage-format-v2.md`'s A1.7 design
-    note). Also raises `ValueError` if two of the selected variant's
-    artifacts resolve to the same `_release_match_key` -- the fan-out's
-    `old_map`/`new_map` cannot represent two libraries under one key.
+    note). Each artifact is validated against *root*'s own membership graph
+    via `read_variant_artifact_pair` (not a bare `read_artifact_ref`), so a
+    stale or hand-edited `refs/variants/<id>.json` naming an artifact
+    `manifest.json` never actually published cannot be republished into a
+    sub-package here (Codex review).
 
     Each sub-package directory is a real, independently-readable
     single-artifact `ProjectSnapshot` package -- written via
@@ -362,12 +352,7 @@ def resolve_project_snapshot_release_map(
     (`workflows.input_resolution._resolve_project_snapshot_directory` via
     `read_legacy_snapshot_document`) reads it completely unchanged; this
     function is purely a *source* for the map, not a new code path through
-    comparison. Each sub-package's own `objects/` is a symlink back to
-    *root*'s `objects/` directory rather than a copy -- D7 content addressing
-    means every object `write_project_manifest`'s own validation reads
-    through it resolves to the identical bytes *root* already stores, so
-    copying would only duplicate potentially large section content for no
-    benefit (nothing here ever writes through this symlink).
+    comparison.
     """
     root_path = Path(root)
     summary = read_manifest_summary(root_path)
@@ -390,41 +375,16 @@ def resolve_project_snapshot_release_map(
     dest_root_path.mkdir(parents=True, exist_ok=True)
     objects_source = (root_path / _OBJECTS_DIRNAME).resolve()
 
-    result: dict[str, Path] = {}
-    owners: dict[str, str] = {}
+    result: dict[str, tuple[Path, ArtifactRef]] = {}
     for artifact_id in variant.artifact_ids:
-        artifact = read_artifact_ref(root_path, artifact_id)
-        key = _release_match_key(artifact)
-        existing_owner = owners.setdefault(key, artifact_id)
-        if existing_owner != artifact_id:
-            raise ValueError(
-                f"{root_path} variant {variant_id!r} has two artifacts "
-                f"({existing_owner!r} and {artifact_id!r}) that both "
-                f"resolve to release-matching key {key!r} -- their real "
-                "library names/filenames must be distinguishable for "
-                "compare-release's matching logic to tell them apart"
-            )
+        _variant, artifact = read_variant_artifact_pair(
+            root_path, variant_id, artifact_id
+        )
 
-        # The sub-package directory's own basename doubles as this library's
-        # display name in the release fan-out's JSON/Markdown output
-        # (`_compare_one_library`'s `entry["library"] = old_path.name`) --
-        # exactly the same way a live directory operand's own discovered
-        # filename does. Prefer the human-readable match *key* (e.g.
-        # `liba.so`) over the opaque `artifact_id` for this, falling back to
-        # `artifact_id` only when the key isn't itself a safe, portable
-        # filename component (`storage.ref_ids.safe_ref_id`'s own check --
-        # the identical guard `variant_id`/`artifact_id` already pass
-        # through).
-        try:
-            dir_name = safe_ref_id(key, "release-matching key")
-        except ValueError:
-            dir_name = artifact_id
-        sub_dir = dest_root_path / dir_name
+        sub_dir = dest_root_path / artifact_id
         sub_dir.mkdir(parents=True, exist_ok=True)
         if objects_source.is_dir():
-            (sub_dir / _OBJECTS_DIRNAME).symlink_to(
-                objects_source, target_is_directory=True
-            )
+            _populate_objects_dir(sub_dir, objects_source)
         trimmed_versions = replace(
             summary.versions,
             section_schema_versions={
@@ -440,5 +400,5 @@ def resolve_project_snapshot_release_map(
             artifact_refs=(artifact,),
         )
         write_project_manifest(sub_dir, sub_manifest)
-        result[key] = sub_dir
+        result[artifact_id] = (sub_dir, artifact)
     return result

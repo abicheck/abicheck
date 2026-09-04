@@ -20,7 +20,7 @@ reachable from the standard `compare` CLI.
 of `.so`/JSON files) now also accepts a multi-artifact `ProjectSnapshot`
 package directory (written by `bundle_facts_store.write_bundle_facts_package`)
 as either operand -- unpacked into the same `old_map`/`new_map` shape via
-`project_snapshot_legacy.resolve_project_snapshot_release_map`. This module
+`workflows.release_package.resolve_release_package_map`. This module
 exercises the plan's own named acceptance test: `stored/live`, `live/stored`,
 and `stored/stored`, each against a small (2-3 library) fixture, asserted to
 produce the same per-library findings a `live/live` run over the equivalent
@@ -77,7 +77,7 @@ def _old_new_libraries() -> tuple[dict[str, AbiSnapshot], dict[str, AbiSnapshot]
 def _with_filenames(facts: BundleFacts) -> BundleFacts:
     """`facts`, with `library_filenames` stamped to each library's own bare
     name -- what a real capture run records, and what
-    `project_snapshot_legacy._release_match_key` needs to derive the same
+    `workflows.release_package._release_match_key` needs to derive the same
     canonical key a live directory operand's own `_build_match_map` would."""
     names = tuple(facts.per_library_snapshots)
     return BundleFacts(
@@ -113,29 +113,46 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-def _library_outcomes(
-    release_json: str,
-) -> dict[str, tuple[str, int, int, int, int, int]]:
-    """`{canonical_key: (verdict, breaking, source_breaks, risk, additions,
-    quality)}` -- the finding-count fields the release JSON reports per
-    library, keyed by a name stripped of the one cosmetic difference between
-    a live directory's own literal `old_path.name` (e.g. ``liba.so.json``)
-    and a stored package's own display name (``liba.so``, see
-    `project_snapshot_legacy.resolve_project_snapshot_release_map`'s own
-    docstring) -- everything else in the entry must already agree."""
+_Outcome = tuple[str, int, int, int, int, int]
+
+
+def _outcome_tuple(entry: dict[str, object]) -> _Outcome:
+    return (
+        str(entry["verdict"]),
+        int(entry.get("breaking", 0) or 0),
+        int(entry.get("source_breaks", 0) or 0),
+        int(entry.get("risk_changes", 0) or 0),
+        int(entry.get("compatible_additions", 0) or 0),
+        int(entry.get("quality_issues", 0) or 0),
+    )
+
+
+def _library_outcomes(release_json: str) -> dict[str, _Outcome]:
+    """`{name: (verdict, breaking, source_breaks, risk, additions, quality)}`
+    -- the finding-count fields the release JSON reports per library, keyed
+    by the discovered filename (a live directory's own literal
+    `old_path.name`, e.g. ``liba.so.json``). Only meaningful for a *live*
+    directory operand -- a stored-package operand's own materialized
+    sub-package directory is named by the artifact's opaque `artifact_id`
+    (`project_snapshot_legacy.materialize_release_variant_artifacts`'s own
+    docstring: collision-safety, not a display name), so use
+    `_sorted_outcomes` instead to compare a stored side against anything."""
     doc = json.loads(release_json)
-    outcomes = {}
-    for entry in doc["libraries"]:
-        key = str(entry["library"]).removesuffix(".json")
-        outcomes[key] = (
-            entry["verdict"],
-            entry.get("breaking", 0),
-            entry.get("source_breaks", 0),
-            entry.get("risk_changes", 0),
-            entry.get("compatible_additions", 0),
-            entry.get("quality_issues", 0),
-        )
-    return outcomes
+    return {
+        str(entry["library"]).removesuffix(".json"): _outcome_tuple(entry)
+        for entry in doc["libraries"]
+    }
+
+
+def _sorted_outcomes(release_json: str) -> list[_Outcome]:
+    """Every library's `_outcome_tuple`, sorted -- name-independent, so a
+    stored-side release (whose per-library `library` field is an opaque
+    `artifact_id`, not a real name) can still be compared against a live
+    or another stored side: the *set* of (verdict, counts) tuples across a
+    release's libraries must agree, even though nothing here claims the
+    two sides name the same library the same way."""
+    doc = json.loads(release_json)
+    return sorted(_outcome_tuple(entry) for entry in doc["libraries"])
 
 
 class TestStoredVersusLiveReleaseParity:
@@ -204,7 +221,7 @@ class TestStoredVersusLiveReleaseParity:
             "1",
         )
         assert ec == 4
-        assert _library_outcomes(stored_out) == _library_outcomes(live_out)
+        assert _sorted_outcomes(stored_out) == _sorted_outcomes(live_out)
 
     def test_stored_live_matches_live_live(self, tmp_path: Path) -> None:
         paths = self._fixture(tmp_path)
@@ -227,7 +244,7 @@ class TestStoredVersusLiveReleaseParity:
             "1",
         )
         assert ec == 4
-        assert _library_outcomes(mixed_out) == _library_outcomes(live_out)
+        assert _sorted_outcomes(mixed_out) == _sorted_outcomes(live_out)
 
     def test_live_stored_matches_live_live(self, tmp_path: Path) -> None:
         paths = self._fixture(tmp_path)
@@ -250,7 +267,7 @@ class TestStoredVersusLiveReleaseParity:
             "1",
         )
         assert ec == 4
-        assert _library_outcomes(mixed_out) == _library_outcomes(live_out)
+        assert _sorted_outcomes(mixed_out) == _sorted_outcomes(live_out)
 
 
 class TestVariantSelection:
@@ -265,8 +282,8 @@ class TestVariantSelection:
             "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
         )
         assert ec == 4
-        outcomes = _library_outcomes(out)
-        assert outcomes["liba.so"][0] == "BREAKING"
+        outcomes = _sorted_outcomes(out)
+        assert any(o[0] == "BREAKING" and o[1] == 1 for o in outcomes)
 
     def _multi_variant_package(self, root: Path) -> None:
         """A package declaring two variants -- ``gcc12`` (``liba.so`` only,
@@ -344,5 +361,5 @@ class TestVariantSelection:
             "1",
         )
         assert ec == 4
-        outcomes = _library_outcomes(out)
-        assert outcomes["liba.so"][0] == "BREAKING"
+        outcomes = _sorted_outcomes(out)
+        assert any(o[0] == "BREAKING" and o[1] == 1 for o in outcomes)

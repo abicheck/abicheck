@@ -222,7 +222,7 @@ nothing in the existing pipeline changes behavior.
 5. **Landed**: stored/live release-comparison reachability (A1.7) —
    `cli_compare_release.py`'s per-library fan-out now accepts a
    multi-artifact `ProjectSnapshot` package directory as either operand,
-   via `project_snapshot_legacy.resolve_project_snapshot_release_map`; see
+   via `workflows.release_package.resolve_release_package_map`; see
    A1.7's own entry below.
    **Open, designed below**: the `.tar.zst` transport form (the remainder of
    A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
@@ -538,7 +538,7 @@ the fan-out already builds from a loose directory, so every downstream step
 (matching, per-pair comparison, bundle analysis, `--bundle-facts-out`) is
 unchanged code operating on resolved paths — a package is a *source* for
 that map, not a new code path through the fan-out.
-`project_snapshot_legacy.resolve_project_snapshot_release_map` does the
+`workflows.release_package.resolve_release_package_map` does the
 unpacking: for each artifact in the selected variant, it materializes a
 real, independently-readable single-artifact `ProjectSnapshot` sub-package
 directory (written via `write_project_manifest`, sharing the multi-artifact
@@ -567,19 +567,28 @@ elsewhere in this codebase).
 **Files.** `cli_resolve.py` (`classify_compare_operand`'s multi- vs.
 single-artifact split); `cli_compare_release_matrix.py`
 (`_resolve_release_package_side`, wired into `_prepare_compare_release_inputs`);
-`cli_compare_release.py`/`cli_compare_helpers.py`/
-`frontends/cli/commands/compare.py` (the `--old-variant`/`--new-variant`
-flags' plumbing from `compare` through to the release engine);
-`project_snapshot_legacy.py` (`resolve_project_snapshot_release_map`, the
-package → `{canonical_key: sub-package Path}` resolution a stored-side
-operand needs — a live-side operand keeps resolving through the existing
-binary-directory path unchanged). Deliberately does **not** yet build on
-`bundle_facts_store.py`'s own `ArtifactRef.native_identity` conventions any
-more tightly than reading the same two well-known keys
-(`library_filename`/`library_name`) both of today's not-yet-reconciled
-multi-artifact writers (`bundle_facts_store.py` and
-`storage/import_bundle_facts.py`) already stamp — see A1.4's own entry above
-for the reconciliation this still owes.
+`cli_compare_release.py`/`frontends/cli/commands/compare.py`/`cli_options.py`
+(the `--old-variant`/`--new-variant` flags and their plumbing from `compare`
+through to the release engine — deliberately routed around
+`cli_compare_helpers.py`'s `run_compare`, itself already at its own
+no-growth line ceiling, via `ctx.meta`/`ctx.params` rather than a new typed
+parameter on that function); `project_snapshot_legacy.py`
+(`materialize_release_variant_artifacts`, the storage-layer half: one
+sub-package directory per artifact, named by the artifact's own already-
+unique, already-safe `artifact_id` — never by a caller-controlled display
+name, which is exactly the source of a directory-collision risk an earlier
+revision of this item had); `workflows/release_package.py` (the
+workflows-layer half `materialize_release_variant_artifacts`'s
+`{artifact_id: (Path, ArtifactRef)}` is re-keyed through — canonical-key
+matching needs `binary_utils._canonical_library_key`, `extract`-classified,
+which `storage`-classified `project_snapshot_legacy.py` may not import; see
+that module's own docstring for the full dependency-direction account).
+Deliberately does **not** yet build on `bundle_facts_store.py`'s own
+`ArtifactRef.native_identity` conventions any more tightly than reading the
+same two well-known keys (`library_filename`/`library_name`) both of
+today's not-yet-reconciled multi-artifact writers (`bundle_facts_store.py`
+and `storage/import_bundle_facts.py`) already stamp — see A1.4's own entry
+above for the reconciliation this still owes.
 
 **Tests.** `tests/test_cli_compare_release_project_snapshot_package.py`:
 all three of `stored/live`, `live/stored`, `stored/stored` against a

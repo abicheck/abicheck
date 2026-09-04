@@ -852,6 +852,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/frontends/cli/commands/compare.py",
+      "baseline_lines": 803,
+      "target": "frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Crossed the 800-line production cap for a new-to-the-ledger file (ADR-062 A1.7): wiring `--old-variant`/`--new-variant` through `compare`'s directory/package release-fan-out dispatch needed one new decorator import, applying `cli_options.variant_options` to `compare_cmd`, and one line merging `cli_options.variant_kwargs_from_context(ctx)` into `_dispatch_release_compare`'s own kwargs before calling `compare_release_cmd.callback` -- kept to the minimum: the two flags are exposed via `expose_value=False` + a `ctx.meta` stash (`cli_options._stash_variant_in_context`) precisely so `run_compare`'s own already-at-cap typed signature (`cli_compare_helpers.py`) never has to gain or strip them, and the option definitions/help text themselves live in `cli_options.py` (1977-line baseline, ample headroom) rather than inline here. No smaller diff was found that keeps the flags on `compare` itself, the only registered entry point a directory/package operand reaches this dispatch through.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/finding_identity.py",
       "baseline_lines": 1923,
       "target": "compare",

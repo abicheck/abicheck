@@ -70,6 +70,8 @@ from ....cli_options import (
     set_input_options,
     severity_options,
     two_sided_input_options,
+    variant_kwargs_from_context,
+    variant_options,
     verbose_option,
 )
 from ....cli_resolve import (
@@ -185,6 +187,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         )
     from ....cli_compare_release import compare_release_cmd
 
+    kwargs.update(variant_kwargs_from_context(ctx))  # A1.7
     assert compare_release_cmd.callback is not None
     try:
         compare_release_cmd.callback(**kwargs)
@@ -640,14 +643,7 @@ def _embed_inline_source_side(
                    "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
                    "compares only, not the directory/package release fan-out. "
                    "See docs/reference/exit-codes.md.")
-@click.option("--old-variant", "old_variant", default=None, metavar="VARIANT_ID",
-              help="Which build variant to compare when OLD is a stored "
-                   "ProjectSnapshot package directory declaring more than one "
-                   "(ADR-062 A1.7). Defaults to the package's only variant "
-                   "when it declares exactly one; a usage error otherwise. "
-                   "No-op for a live directory/archive/single-file operand.")
-@click.option("--new-variant", "new_variant", default=None, metavar="VARIANT_ID",
-              help="The --old-variant counterpart for NEW.")
+@variant_options  # ADR-062 A1.7: --old-variant/--new-variant
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

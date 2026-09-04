@@ -595,24 +595,22 @@ def _resolve_release_package_side(
     """``None`` when *side_dir* is not a stored `ProjectSnapshot` package
     directory -- the caller falls back to its existing live-discovery path
     unchanged. Otherwise, *side_dir* is unpacked via
-    `project_snapshot_legacy.resolve_project_snapshot_release_map` into the
-    same canonical-key -> `Path` shape `_build_match_map` builds from a live
-    directory of `.so` files (ADR-062 A1.7), so `_match_release_keys`'s own
-    ``set(old_map) & set(new_map)`` matches a stored-side library against a
-    live-side or another stored-side one by the identical key.
+    `workflows.release_package.resolve_release_package_map` into
+    the same canonical-key -> `Path` shape `_build_match_map` builds from a
+    live directory of `.so` files (ADR-062 A1.7), so `_match_release_keys`'s
+    own ``set(old_map) & set(new_map)`` matches a stored-side library
+    against a live-side or another stored-side one by the identical key.
     """
     if not side_dir.is_dir():
         return None
-    from .project_snapshot_legacy import (
-        is_project_snapshot_package_dir,
-        resolve_project_snapshot_release_map,
-    )
+    from .workflows.release_package import resolve_release_package_map
+    from .workflows.storage import is_project_snapshot_package_dir
 
     if not is_project_snapshot_package_dir(side_dir):
         return None
     dest_root = make_temp_dir("abicheck_relpkg_")
     try:
-        return resolve_project_snapshot_release_map(
+        return resolve_release_package_map(
             side_dir, variant_id=variant_id, dest_root=dest_root
         )
     except ValueError as exc:
