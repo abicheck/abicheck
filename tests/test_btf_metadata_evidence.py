@@ -224,13 +224,22 @@ class TestInvalidStringOffsetPropagatesToPartial:
         assert meta.structs["S"].fields[0].byte_size == 0
 
     def test_unsupported_in_range_member_kind_marks_partial(self) -> None:
-        """P2 review, round 4: an otherwise well-formed struct member whose
-        ``m_type`` names a real, in-range type record -- but one whose own
-        ``kind`` value (31, the reviewer's exact repro; no real BTF_KIND_*
+        """P2 review, round 4, superseded by a later round (Codex): a real
+        BTF type record whose own ``kind`` value (31; no real BTF_KIND_*
         constant reaches that high) neither name nor size resolution
-        recognizes at all. Distinct from the out-of-range-type-id case
-        above: the record genuinely exists, its *kind* is what's
-        unsupported."""
+        recognizes at all used to be caught only when something referenced
+        it (this test originally built a struct member pointing at it).
+        That per-reference check is no longer how this is caught at all --
+        ``_parse_types()`` itself now stops at an unsupported kind (its real
+        extra-data size is unknowable, so continuing would misalign every
+        later record's offset in the type table), so type_id 2 (struct S,
+        placed after the unsupported record) is never even reached/parsed.
+        Still marks ``extraction_partial`` -- via the table-level
+        truncation signal instead of a per-reference one -- but the struct
+        that would have referenced it is correctly absent rather than
+        published with a degraded field. See
+        TestUnsupportedKindStopsTypeTableParsing for the direct
+        table-level contract this test now exercises indirectly."""
         b = BtfBuilder()
         unsupported_kind = 31
         b._type_entries.append(  # type_id 1: a real record, unsupported kind
@@ -245,11 +254,7 @@ class TestInvalidStringOffsetPropagatesToPartial:
 
         meta = parse_btf_from_bytes(b.build())
         assert meta.extraction_partial is True
-        assert "S" in meta.structs
-        assert (
-            meta.structs["S"].fields[0].type_name == f"<btf_kind_{unsupported_kind}:1>"
-        )
-        assert meta.structs["S"].fields[0].byte_size == 0
+        assert meta.structs == {}
 
     def test_recognized_but_legitimately_sizeless_kind_is_not_flagged(self) -> None:
         """Positive control: BTF_KIND_FUNC_PROTO is a *recognized* kind with
@@ -365,3 +370,70 @@ class TestCyclicQualifierChainMarksPartial:
         meta = parse_btf_from_bytes(b.build())
         assert meta.extraction_partial is False
         assert meta.structs["S"].fields[0].type_name == "const int"
+
+
+class TestUnsupportedKindStopsTypeTableParsing:
+    """P2 review, fresh evidence (Codex): a BTF record whose own ``kind``
+    isn't one this parser recognizes has an unknowable real extra-data
+    size, so ``_extra_data_size()``'s old "no extra data" fallback for it
+    could misalign every subsequent record's own offset in the type
+    table -- corrupting facts far beyond the one unsupported record, not
+    just omitting it. Fixed by validating every kind table-level, inside
+    ``_parse_types()`` itself, rather than relying on some later
+    extractor/resolver to reach the unsupported record on demand (which
+    an *unreferenced* unsupported-kind record -- one no struct/enum/
+    func_proto/typedef points at -- would never do at all)."""
+
+    def test_unreferenced_unsupported_kind_marks_partial(self) -> None:
+        b = BtfBuilder()
+        unsupported_kind = 30
+        # A standalone record nothing else references.
+        b._type_entries.append(struct.pack("<III", 0, unsupported_kind << 24, 0))
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert meta.type_count == 0
+
+    def test_type_after_unsupported_kind_is_dropped_not_misparsed(self) -> None:
+        """A struct placed *after* an unsupported-kind record in the type
+        table must not be reached at all (parsing stops at the
+        unsupported record) -- never silently misparsed from a
+        miscomputed offset."""
+        b = BtfBuilder()
+        unsupported_kind = 30
+        b._type_entries.append(struct.pack("<III", 0, unsupported_kind << 24, 0))
+        b.add_type("S", BTF_KIND_STRUCT, 0, 4)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert meta.structs == {}
+
+    def test_type_before_unsupported_kind_still_parses(self) -> None:
+        """Positive control: a struct defined *before* the unsupported
+        record in the type table is unaffected."""
+        b = BtfBuilder()
+        b.add_type("S", BTF_KIND_STRUCT, 0, 4)
+        unsupported_kind = 30
+        b._type_entries.append(struct.pack("<III", 0, unsupported_kind << 24, 0))
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+
+    def test_every_kind_this_parser_names_is_not_flagged(self) -> None:
+        """Positive control: every kind constant this module actually
+        exports must not trip the unsupported-kind guard -- an exhaustive
+        sibling to the one-kind-at-a-time positive controls elsewhere in
+        this suite, guarding against a future kind constant added to
+        _KNOWN_BTF_KINDS's *definition* silently drifting from the set
+        _extra_data_size() actually has a branch for."""
+        from abicheck.btf_metadata import _KNOWN_BTF_KINDS, _extra_data_size
+
+        for kind in sorted(_KNOWN_BTF_KINDS):
+            b = BtfBuilder()
+            b._type_entries.append(struct.pack("<III", 0, kind << 24, 0))
+            extra_len = _extra_data_size(kind, 0)
+            if extra_len:
+                b._type_entries[-1] += b"\x00" * extra_len
+            meta = parse_btf_from_bytes(b.build())
+            assert meta.extraction_partial is False, f"kind {kind} was flagged"

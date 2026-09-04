@@ -1613,12 +1613,12 @@
     },
     {
       "path": "tests/test_ctf_metadata.py",
-      "baseline_lines": 1364,
+      "baseline_lines": 1365,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1364 -> 1365 (2026-09-04, P2 review, fresh evidence, Codex, PR #784): test_unknown_kind rewritten to construct its type list directly (bypassing _parse_types, which now stops at an unsupported kind rather than continuing past it) to keep exercising _TypeResolver's own unhandled-kind placeholder fallback -- see the matching abicheck/btf_metadata.py/ctf_metadata.py debt entries for the production-side rationale.",
       "review_by": "2026-11-30"
     },
     {

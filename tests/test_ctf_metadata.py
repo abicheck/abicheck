@@ -971,19 +971,20 @@ class TestCtfResolverThroughExtraction:
         assert "<ctf:" in meta.structs["s"].fields[0].type_name
 
     def test_unknown_kind(self) -> None:
-        b = CtfBuilder()
-        # Add a type with unrecognized kind (30)
-        name_off = 0
-        info = (30 << 24) | 0
-        entry = struct.pack("<III", name_off, info, 0)
-        b._type_entries.append(entry)
-        # Struct referencing it
-        m_name = b.add_string("x")
-        members = struct.pack("<II", m_name, (1 << 16) | 0)
-        b.add_type("s", CTF_K_STRUCT, 1, 0, extra=members)
-
-        meta = parse_ctf_from_bytes(b.build())
-        assert "<ctf_kind_30:" in meta.structs["s"].fields[0].type_name
+        """P2 review, fresh evidence (Codex, mirrors the identical BTF fix):
+        _parse_types() itself now stops at an unsupported kind (its real
+        extra-data size is unknowable, so continuing would misalign every
+        later record in the type table) -- so a struct defined *after* an
+        unsupported-kind record is no longer reachable via the real
+        byte-parsing pipeline at all. This resolver-level "unhandled kind"
+        placeholder fallback remains correct, defense-in-depth behavior for
+        a type list built some other way (as here, constructed directly).
+        See test_ctf_metadata_evidence.py's TestCyclicQualifierChainMarksPartial
+        sibling and the table-level unsupported-kind tests there for the
+        real _parse_types()-level contract."""
+        unknown = CtfType(type_id=1, name_off=0, info=(30 << 24), size_or_type=0)
+        resolver = _TypeResolver([CtfType(0, 0, 0, 0), unknown], b"\x00", CTF_VERSION_3)
+        assert "<ctf_kind_30:" in resolver.name(1)
 
     def test_resolver_size_void(self) -> None:
         """Void type returns size 0."""

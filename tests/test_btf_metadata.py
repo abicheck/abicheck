@@ -924,13 +924,20 @@ class TestTypeResolverExtended:
         assert r.name(2) == "int"
 
     def test_unknown_kind(self) -> None:
-        b = BtfBuilder()
-        # Use an unrecognized kind (30)
-        name_off = 0
-        info = (30 << 24) | 0
-        entry = struct.pack("<III", name_off, info, 0)
-        b._type_entries.append(entry)
-        r = self._build_and_resolve(b)
+        """P2 review, fresh evidence (Codex): _parse_types() itself now
+        stops at an unsupported kind (its real extra-data size is
+        unknowable, so continuing would misalign every later record) --
+        this resolver-level "unhandled kind" placeholder fallback is
+        therefore unreachable via the real byte-parsing pipeline, but
+        remains correct, defense-in-depth behavior for a type list built
+        some other way (as here, constructed directly rather than through
+        _parse_types). See TestCyclicQualifierChainMarksPartial and the
+        table-level unsupported-kind tests in test_btf_metadata_evidence.py
+        for the real _parse_types()-level contract."""
+        unknown = BtfType(
+            type_id=1, name_off=0, info=(30 << 24), size_or_type=0, extra=b""
+        )
+        r = _TypeResolver([BtfType(0, 0, 0, 0, b""), unknown], b"\x00")
         assert "<btf_kind_30:" in r.name(1)
 
     def test_invalid_type_id(self) -> None:

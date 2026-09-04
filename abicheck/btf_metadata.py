@@ -89,6 +89,39 @@ log = logging.getLogger(__name__)
 # Header size
 _BTF_HEADER_SIZE = 24  # magic(2) + version(1) + flags(1) + hdr_len(4) + type_off/len(4+4) + str_off/len(4+4)
 
+# P2 review, fresh evidence (Codex): every kind _extra_data_size() has a real
+# branch for (BTF_KIND_VOID never appears as a real record -- type_id 0 is
+# the implicit sentinel this module synthesizes itself). A kind outside this
+# set is one _extra_data_size() cannot size correctly at all -- its fallback
+# `return 0` would misalign every subsequent record's offset in the type
+# section, not just this one type's own facts. Checked table-level in
+# _parse_types() itself: a demand-driven resolver check (_TypeResolver's own
+# _KNOWN_KINDS) never runs at all for a top-level unsupported-kind record no
+# extracted struct/enum/func_proto/typedef references.
+_KNOWN_BTF_KINDS = frozenset(
+    {
+        BTF_KIND_INT,
+        BTF_KIND_PTR,
+        BTF_KIND_ARRAY,
+        BTF_KIND_STRUCT,
+        BTF_KIND_UNION,
+        BTF_KIND_ENUM,
+        BTF_KIND_FWD,
+        BTF_KIND_TYPEDEF,
+        BTF_KIND_VOLATILE,
+        BTF_KIND_CONST,
+        BTF_KIND_RESTRICT,
+        BTF_KIND_FUNC,
+        BTF_KIND_FUNC_PROTO,
+        BTF_KIND_VAR,
+        BTF_KIND_DATASEC,
+        BTF_KIND_FLOAT,
+        BTF_KIND_DECL_TAG,
+        BTF_KIND_TYPE_TAG,
+        BTF_KIND_ENUM64,
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -206,6 +239,20 @@ def _parse_header(data: bytes) -> BtfHeader:
 
     if magic != BTF_MAGIC:
         raise ValueError(f"Bad BTF magic: 0x{magic:04X} (expected 0x{BTF_MAGIC:04X})")
+    if hdr_len < _BTF_HEADER_SIZE:
+        # P2 review, fresh evidence (Codex): a header declaring hdr_len
+        # smaller than the fixed header it is itself part of (e.g. 0) was
+        # previously accepted outright -- type_off/str_off are then computed
+        # relative to this bogus, too-small hdr_len, so parsing can silently
+        # read garbage (or nothing at all, as with hdr_len=0 and all-zero
+        # section offsets/lengths) while still reporting has_btf=True and
+        # extraction_partial=False. A malformed .BTF section is exactly the
+        # kind of evidence-fabrication this parser must reject up front,
+        # matching the "data too small" check just above.
+        raise ValueError(
+            f"BTF hdr_len {hdr_len} is smaller than the fixed header "
+            f"({_BTF_HEADER_SIZE} bytes) -- malformed BTF header"
+        )
     if version != BTF_VERSION:
         log.warning(
             "BTF version %d (expected %d), parsing may fail", version, BTF_VERSION
@@ -258,6 +305,21 @@ def _parse_types(
         pos += 12
         kind = (info >> 24) & 0x1F
         vlen = info & 0xFFFF
+
+        if kind not in _KNOWN_BTF_KINDS:
+            # P2 review, fresh evidence (Codex): an unsupported kind's real
+            # extra-data size is unknowable to this parser -- continuing
+            # would misread its own payload as the start of the next type
+            # record, corrupting every type_id after it. Same "stop and
+            # report truncated" shape as an actually-truncated buffer: this
+            # type (and everything after it) is dropped, not silently
+            # misparsed, and the caller can tell via `truncated`.
+            log.warning(
+                "BTF type %d has unsupported kind %d at offset %d", type_id, kind, pos
+            )
+            if truncated is not None:
+                truncated.append(True)
+            return types
 
         # Determine extra data size based on kind
         extra_size = _extra_data_size(kind, vlen)

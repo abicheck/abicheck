@@ -96,6 +96,31 @@ _MAX_DECOMPRESS = 256 * 1024 * 1024
 _CTF_V2_LSTRUCT_THRESH = 0x1FFF  # vlen threshold for v2 "large" members
 _CTF_V3_LSTRUCT_THRESH = 0x1FFF
 
+# P2 review, fresh evidence (Codex, mirrors the identical BTF fix): every
+# kind _extra_data_size() has a real branch for (CTF_K_UNKNOWN never appears
+# as a real record -- type_id 0 is the implicit sentinel this module
+# synthesizes itself). A kind outside this set is one _extra_data_size()
+# cannot size correctly at all -- its fallback `return 0` would misalign
+# every subsequent record's offset in the type section, not just this one
+# type's own facts.
+_KNOWN_CTF_KINDS = frozenset(
+    {
+        CTF_K_INTEGER,
+        CTF_K_FLOAT,
+        CTF_K_POINTER,
+        CTF_K_ARRAY,
+        CTF_K_FUNCTION,
+        CTF_K_STRUCT,
+        CTF_K_UNION,
+        CTF_K_ENUM,
+        CTF_K_FORWARD,
+        CTF_K_TYPEDEF,
+        CTF_K_VOLATILE,
+        CTF_K_CONST,
+        CTF_K_RESTRICT,
+    }
+)
+
 # Header sizes
 _CTF_PREAMBLE_SIZE = 4  # magic(2) + version(1) + flags(1)
 _CTF_V2_HEADER_SIZE = 36
@@ -390,6 +415,18 @@ def _parse_types(
         if version >= CTF_VERSION_3:
             # For v3, kind/vlen not yet decoded — decode now
             kind, vlen, _isroot = _parse_info_v3(info)
+
+        if kind not in _KNOWN_CTF_KINDS:
+            # An unsupported kind's real extra-data size is unknowable to
+            # this parser -- continuing would misread its own payload as the
+            # start of the next type record, corrupting every type_id after
+            # it. Same "stop and report truncated" shape as an
+            # actually-truncated buffer: this type (and everything after it)
+            # is dropped, not silently misparsed.
+            log.warning("CTF type %d has unsupported kind %d", type_id, kind)
+            if truncated is not None:
+                truncated.append(True)
+            break
 
         # Read kind-specific extra data
         extra_size = _extra_data_size(kind, vlen, version, size_or_type)
