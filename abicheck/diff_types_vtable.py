@@ -23,8 +23,11 @@ not import from ``diff_types`` at all, to avoid an import cycle:
 ``diff_types.py`` imports ``_diff_type_vtable`` back for its own use, the
 only symbol this module exports). ``_vtable_transition_is_evidenced``/
 ``_vtable_transition_rests_on_unresolved_evidence``/
-``_layout_evidence_is_unverifiable``/``_owned_virtual_signatures`` are
-private to this cluster and only ever called from within it.
+``_layout_evidence_is_unverifiable`` are private to this cluster and only
+ever called from within it (``_vtable_transition_is_evidenced`` is now a
+thin wrapper over ``compare/vtable_evidence.py``'s shared predicate, its
+own ``_owned_virtual_signatures`` helper moved there with it -- see the
+"ADR-063 Track 2, 5B closure" note below).
 ``_virtual_signatures_by_owner`` is the one exception (Codex review, fresh
 evidence): ``diff_vtable_layout._is_polymorphic`` also imports it directly
 as a sixth positive-evidence path (a retained ``Function.is_virtual``
@@ -34,8 +37,9 @@ already relies on) rather than reimplementing its own copy of the
 owner-matching logic -- built on the same *exact*-match identity
 ``_owned_virtual_signatures_for_record`` uses (a single-owner query, still
 private to this cluster, that ``_virtual_signatures_by_owner`` now shares
-its ``owner_class_of`` matching with), not ``_owned_virtual_signatures``'s
-eager namespace-suffix matching: that new caller uses a match as an
+its ``owner_class_of`` matching with), not the moved
+``compare.vtable_evidence``'s own eager namespace-suffix matching: that new
+caller uses a match as an
 unconditional affirmative ``True``, the opposite safety direction from
 this cluster's own suppression-oriented use, where over-inclusion only
 ever widens "keep the finding," never fabricates one (Codex review, second
@@ -75,27 +79,27 @@ indistinguishable from a genuinely non-polymorphic class, so both sides
 read ``PRESENT`` either way. A direct ``vtable_fact.status`` pre-check
 would therefore not replace the heuristic here -- it would only catch the
 disjoint case of a genuinely *uncollected* fact (``NOT_COLLECTED``/
-``FAILED``), and adding it as an unconditional decline was found, on
-tracing the actual call graph, to be **unsafe**: ``diff_cxx_rules.
-virtual_method_addition`` defers to this cluster ("``TYPE_VTABLE_CHANGED``
-covers this case") precisely in the one-side-uncollected/other-side-
-populated shape, relying on today's heuristic (not a ``FactStatus`` read)
-to still find real evidence there and fire. Declining outright on
-``NOT_COLLECTED`` would silently desynchronize the two detectors and drop
-coverage neither would then provide -- see ``virtual_method_addition``'s
-own docstring for the full trace, including why fixing it properly (making
-that function consult this cluster's own evidenced/not-evidenced verdict
-before deferring) needs an import this leaf module's own no-cycle
-constraint (above) does not allow without further restructuring. Recorded
-here, not silently left implicit, per this repo's own "say so explicitly
-and record the gap" convention -- the sub-phase's own "vtable... all five
-fields gated" removal gate is therefore still open for ``vtable`` through
-this specific cluster, even though the two sibling detectors it correlates
-with are now gated (Codex review, fresh evidence: this cluster never reads
-``vptr_offset_bits``/``vptr_offset_bits_fact`` at all -- see the "NOT
-consulted here" comment in the body below -- so ``vptr_offset_bits``
-itself carries no residual gap through this cluster; it is fully gated via
-``diff_layout._check_vptr_introduced``'s own direct-status pre-check).
+``FAILED``).
+
+**ADR-063 Track 2, 5B closure (this revision).** The predicate itself --
+``_vtable_transition_is_evidenced`` and its ``_owned_virtual_signatures``
+helper -- moved to ``compare/vtable_evidence.py`` as
+``vtable_transition_is_evidenced``, a genuine leaf below both this module
+and ``diff_cxx_rules.py`` (it takes ``owner_class_of``/
+``namespace_suffix_spellings`` as injected callables instead of importing
+either, so it depends on ``model`` only). The two thin wrappers below keep
+this module's own public names and call signature unchanged for every
+existing caller (including ``tests/test_vtable_evidence_guard.py``, which
+imports ``_vtable_transition_is_evidenced`` directly). ``diff_cxx_rules.
+virtual_method_addition`` now imports the same shared predicate and calls
+it before deferring, rather than assuming -- on prose alone -- that this
+cluster will fire whenever the raw vtable arrays differ. See
+``virtual_method_addition``'s own docstring for what changed there. This
+closes the gap the previous revision of this docstring recorded: an
+unevidenced difference (same owned-virtual-function set, same size, same
+virtual-base list on both sides) no longer leaves *both* detectors silently
+declining -- ``virtual_method_addition`` now falls through to its own
+signature-based override check instead.
 """
 
 from __future__ import annotations
@@ -105,9 +109,35 @@ from collections.abc import Mapping
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .diff_cxx_rules import vtable_slot_is_override_reuse
+from .compare.vtable_evidence import vtable_transition_is_evidenced
+from .diff_cxx_rules import owner_class_of, vtable_slot_is_override_reuse
 from .diff_helpers import make_change
 from .model import Function, RecordType, resolved_fact_value
+from .type_reachability_spelling import _namespace_suffix_spellings
+
+
+def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
+    """The mangled names of *name*'s own virtual member functions.
+
+    A thin wrapper over ``compare.vtable_evidence``'s private helper of the
+    same name (ADR-063 Track 2, 5B closure moved the implementation there
+    alongside ``vtable_transition_is_evidenced``, its one caller) -- kept
+    here under this exact name and signature purely for back-compat:
+    ``diff_types.py`` re-exports this name by value (``from .diff_types_vtable
+    import _owned_virtual_signatures as _owned_virtual_signatures``) so any
+    call site still resolving ``abicheck.diff_types._owned_virtual_signatures``
+    keeps working. Not called from within this module any more -- see
+    ``_vtable_transition_is_evidenced`` below, which calls the shared
+    predicate directly instead of this helper.
+    """
+    from .compare.vtable_evidence import _owned_virtual_signatures as _shared
+
+    return _shared(
+        name,
+        funcs,
+        owner_class_of=owner_class_of,
+        namespace_suffix_spellings=_namespace_suffix_spellings,
+    )
 
 
 def _vtable_transition_is_evidenced(
@@ -119,135 +149,22 @@ def _vtable_transition_is_evidenced(
 ) -> bool:
     """Whether an *empty↔non-empty* vtable difference rests on real evidence.
 
-    ``RecordType.vtable`` cannot express "not captured": it is a plain list,
-    and on the DWARF path it is simply the class's own virtual-method DIEs in
-    child order (``dwarf_snapshot._process_virtual_method_child``). So an
-    empty list means either "this class has no virtuals of its own" *or*
-    "this side's debug info did not carry them" -- and the two are
-    indistinguishable from the list alone.
-
-    That ambiguity produced a real false positive: identical headers on both
-    sides, no DWARF vtable, and not one ``_ZTV`` symbol anywhere still
-    emitted ``TYPE_VTABLE_CHANGED`` as BREAKING, because one side's virtual
-    methods happened to live in a translation unit only the other side's
-    debug info covered (differing ``-g`` level, a differently-inlined TU, or
-    ODR first-definition-wins in ``dwarf_snapshot``). The neighbouring
-    ``diff_vtable_layout`` already names this exact hazard for its own
-    detector and answers it with a tri-state ``None``; ``diff_elf_layout``
-    answers it by only ever comparing a ``_ZTV`` present on *both* sides.
-    This is the same principle applied to the type-level detector: degrade to
-    silence rather than fabricate a break.
-
-    An independent *layout* signal is what makes the transition real. A class
-    that genuinely gains its first virtual function also gains a vptr, so it
-    grows; one that gains or loses a virtual base says so directly. When
-    neither moved and both sizes are known, no real polymorphism change can
-    have occurred and the differing list is capture noise.
-
-    Size alone is **not** sufficient, which is why the class's own virtual
-    functions are consulted first (they are a different projection of the
-    same debug info, not a fully independent one -- see the body). A sufficiently over-aligned class absorbs
-    its new vptr into existing padding: verified against g++, both
-    ``struct alignas(8) A {}`` and ``struct alignas(8) A { virtual void f(); }``
-    are 8 bytes, as are the ``alignas(16)`` pair at 16 -- so a size-only guard
-    suppressed a genuine first-vptr addition (Codex review). It compounded:
-    ``diff_cxx_rules.virtual_method_addition`` withholds
-    ``VIRTUAL_METHOD_ADDED`` whenever the vtable lists differ, so the run was
-    left with a compatible ``FUNC_ADDED`` and a ``COMPATIBLE`` verdict on a
-    real layout break. ``snapshot.functions`` is a separate evidence stream
-    from the class DIE's virtual-method children, so it answers that case
-    without weakening the capture-gap guard.
-
-    Deliberately conservative in the other direction: an *unknown* size on
-    either side corroborates nothing but also refutes nothing, so the finding
-    is kept. The suppression needs positive evidence that layout held still;
-    it is not a fallback for missing information.
-
-    Two known false negatives, accepted rather than papered over -- both are
-    a class whose vtable grows while its object size does not, which is
-    indistinguishable from capture noise on the evidence this detector
-    receives:
-
-    * A class already polymorphic through a base, declaring no virtuals of
-      its own, that gains one.
-    * An over-aligned class gaining its first *pure* virtual. A pure virtual
-      has no out-of-line definition, so ``dwarf_snapshot`` drops its
-      declaration-only DIE from ``snapshot.functions`` while still counting
-      it as a vtable child -- both owned-signature sets read empty -- and
-      ``alignas`` absorbs the new vptr into existing padding so the size
-      does not move either (reproduced against g++ with
-      ``struct alignas(8) A { virtual void f() = 0; }``).
-
-    Neither loses the *break*: ``diff_layout._check_vptr_introduced`` fires
-    independently on the same None -> 0 vptr transition and the verdict stays
-    BREAKING. Only this detector's own ``TYPE_VTABLE_CHANGED`` is withheld.
-    Leaning on a sibling detector is not a comfortable place to be, and a
-    previous revision tried to close the second case here directly by reading
-    ``vptr_offset_bits`` -- see the body for why that witness is circular and
-    made this guard inert. Closing it for real needs evidence the model does
-    not carry (a per-finding provider record, or a polymorphism walk over
-    both base chains) -- see AGENTS.md's evidence-provider entry -- not a
-    cleverer reading of the fields already here.
+    A thin wrapper over the shared, module-independent predicate in
+    ``compare/vtable_evidence.py`` (ADR-063 Track 2, 5B closure) -- kept here,
+    under this exact name and signature, so every existing caller in this
+    file and ``tests/test_vtable_evidence_guard.py`` is unaffected. See that
+    module's ``vtable_transition_is_evidenced`` for the full rationale and
+    false-positive history; it is unchanged for this module's own callers.
     """
-    old_vtable = resolved_fact_value(t_old.vtable_fact, [])
-    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
-    if old_vtable and new_vtable:
-        # Both sides captured something, so the difference is a real
-        # reorder/replace rather than one side's evidence going missing.
-        return True
-    if _owned_virtual_signatures(name, old_funcs) != _owned_virtual_signatures(
-        name, new_funcs
-    ):
-        # The class's own virtual *functions* -- a different projection of
-        # the debug info from `RecordType.vtable`, and the signal that keeps
-        # an over-aligned class honest when the size check below cannot.
-        #
-        # Not fully independent, and the docstring used to overclaim that:
-        # on the DWARF path both ultimately derive from `DW_TAG_subprogram`
-        # evidence, so a TU whose coverage vanishes can take the vtable list
-        # *and* the function with it (Codex review). When that happens the
-        # sets differ, this returns True, and the finding is kept -- i.e. the
-        # guard declines to suppress rather than suppressing wrongly. That is
-        # the failure direction to have: it leaves the pre-existing false
-        # positive standing instead of hiding a real break. Closing it needs
-        # artifact or provenance evidence (`_ZTV` presence, per-finding
-        # providers) the type-level detector does not yet receive.
-        return True
-    # NOT consulted here: ``vptr_offset_bits``. It reads like the one
-    # independent layout witness available, and a previous revision of this
-    # function used it as exactly that -- wrongly. At the time, both
-    # producers assigned it as ``0 if vtable else None`` (``dwarf_snapshot.
-    # py``, ``dumper_castxml.py``), so on those two backends
-    # ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is None)``
-    # was *identical* to the empty-vs-non-empty vtable transition being
-    # guarded: true by construction for every input reaching this point,
-    # which silently made the whole guard a no-op and let the original
-    # capture-gap false positive straight back through (Codex review).
-    # ``dumper_castxml.py`` still assigns it exactly that way. ``dwarf_
-    # snapshot.py`` no longer does (G31 Phase C): it now reads a real
-    # ``_vptr.<Class>``/base-chain offset from DWARF in the common case,
-    # falling back to the same ``0 if vtable`` heuristic only for the
-    # residual unresolved set -- so for DWARF the field is no longer purely
-    # circular. This function still doesn't consult it, on purpose:
-    # declining to use an available signal is always safe (the failure mode
-    # this guard exists to avoid only ever ran the other way -- trusting a
-    # circular signal AS IF independent), and using it as a genuine witness
-    # for the now-partially-real DWARF case while still excluding it for
-    # castxml's own still-fully-circular case is its own careful design +
-    # FP-verification effort, not a drive-by extension here — see
-    # ``tests/test_vtable_evidence_guard.py``'s own note on why
-    # ``abicheck.dwarf_snapshot`` was dropped from its premise-pin test.
-    # Only the optional ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from
-    # a real layout query on the castxml/clang side, and nothing in the
-    # model distinguishes that value from the derived one -- so it still
-    # cannot be trusted as evidence here at all on that side.
-    if t_old.size_bits is None or t_new.size_bits is None:
-        return True
-    if t_old.size_bits != t_new.size_bits:
-        return True
-    old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
-    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
-    return list(old_virtual_bases) != list(new_virtual_bases)
+    return vtable_transition_is_evidenced(
+        name,
+        t_old,
+        t_new,
+        old_funcs,
+        new_funcs,
+        owner_class_of=owner_class_of,
+        namespace_suffix_spellings=_namespace_suffix_spellings,
+    )
 
 
 def _vtable_transition_rests_on_unresolved_evidence(
@@ -356,50 +273,14 @@ def _layout_evidence_is_unverifiable(
     )
 
 
-def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
-    """The mangled names of *name*'s own virtual member functions.
-
-    An evidence stream independent of ``RecordType.vtable``: these come from
-    ``snapshot.functions`` (their own DIEs / AST nodes), not from the class
-    DIE's virtual-method children, so one going missing does not take the
-    other with it.
-    """
-    from .diff_cxx_rules import owner_class_of
-    from .type_reachability_spelling import _namespace_suffix_spellings
-
-    # An *exact* comparison was wrong, in the direction that silences
-    # findings (Codex review). CastXML records a namespaced class under its
-    # bare leaf (`A`) while `owner_class_of` reconstructs the qualified
-    # `ns::A` from the mangled method, so the two never met, both signature
-    # sets came back empty, and the guard fell through to the size check --
-    # suppressing e.g. a class losing its last private virtual with no size
-    # change, which no other detector reports.
-    #
-    # Matched through `_namespace_suffix_spellings` (depth-aware, so a
-    # template argument's own `::` isn't mistaken for a namespace boundary).
-    # Deliberately *eager*: a spurious match makes the two sides' sets
-    # differ, which keeps the finding -- the only safe direction here.
-    wanted = {name, *_namespace_suffix_spellings(name)}
-
-    def _owns(fn: Function) -> bool:
-        owner = owner_class_of(fn)
-        if not owner:
-            return False
-        return bool(wanted & {owner, *_namespace_suffix_spellings(owner)})
-
-    return {
-        mangled
-        for mangled, fn in funcs.items()
-        if getattr(fn, "is_virtual", False) and _owns(fn)
-    }
-
-
 def _owned_virtual_signatures_for_record(
     qualified: str, funcs: Mapping[str, Function]
 ) -> set[str]:
     """The mangled names of *funcs*' virtual member functions owned by
     *qualified* -- an exact identity, matched by the bare-leaf suffix
-    matching ``_owned_virtual_signatures`` above uses.
+    matching ``compare.vtable_evidence``'s own ``_owned_virtual_signatures``
+    helper uses (moved there from this module -- see this file's own module
+    docstring, "ADR-063 Track 2, 5B closure").
 
     That function's eager namespace-suffix matching is safe for its own
     caller (``_vtable_transition_is_evidenced``): over-inclusion just makes
@@ -419,7 +300,8 @@ def _owned_virtual_signatures_for_record(
     complete nested-name chain, never a partial one. So an exact string
     comparison against *qualified* (also fully qualified -- see the caller)
     is precise here, unlike the bare-name comparison an earlier revision
-    tried and reverted (see ``_owned_virtual_signatures``'s own docstring).
+    tried and reverted (see ``compare.vtable_evidence._owned_virtual_
+    signatures``'s own docstring).
 
     Takes the identity as a plain string, computed *once* by the caller from
     both ``RecordType``s of an already-matched pair, rather than deriving it
