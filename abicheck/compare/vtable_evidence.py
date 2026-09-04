@@ -64,42 +64,39 @@ lookups became parameters; no behavior changed for ``diff_types_vtable``'s
 own existing callers.
 
 **ADR-063 Track 4, 5B final closure: whether a direct ``FactStatus``
-pre-check belongs here.** A whole-comparison decline (not a per-branch
-change) landed: ``vtable_transition_is_evidenced`` now returns ``False``
-outright whenever either side's ``vtable_fact`` is not ``is_present``
-(``PRESENT``/``PARTIAL``) -- see ``diff_types_vtable.py``'s own module
-docstring (its "Track 4, 5B final closure" section) for the full
-reasoning and the review history that found it, which is the canonical
-writeup for this finding rather than repeated here. In short: this is
-disjoint from the DWARF per-TU ambiguity the rest of this function's own
-docstring is about (DWARF always reports ``PRESENT`` even under that gap,
-so the new check cannot and does not try to help there) -- it instead
-closes a real, confirmed-reachable fabrication for a *structurally*
-uncollected side (PDB, which never captures vtable data on any record at
-all), safely, because no current backend that legitimately relies on this
-function's own fallback evidence streams (owned virtual functions,
-``size_bits``/``virtual_bases_fact``) ever produces a non-present
-``vtable_fact`` in the first place.
+pre-check belongs here.** Attempted, found to regress real detection
+coverage, reverted -- see ``diff_types_vtable.py``'s own module docstring
+(its "Track 4, 5B final closure" section) for the full three-round
+account, which is the canonical writeup for this finding rather than
+repeated here. In short: a whole-comparison decline whenever either
+side's ``vtable_fact`` was not ``is_present`` did close a real,
+confirmed-reachable fabrication for a PDB-derived side -- but ``vtable``
+is a public, positional ``RecordType`` field whose own omission at
+construction (not just PDB's) also resolves to ``NOT_COLLECTED`` via
+``bridge_legacy_and_fact``, which is exactly how a large fraction of this
+codebase's own hand-constructed test fixtures (and, by the same public
+constructor, any external typed-API caller) spell "this class has no
+vtable" for an ordinary non-polymorphic class. The decline could not tell
+that shape apart from PDB's, and silently regressed
+``tests/test_abicc_scenario_parity.py::TestLeafClassVirtualMethodAdditions
+::test_virtual_added_to_leaf_class``, a previously-passing scenario. This
+function's heuristic is therefore unchanged from before this closure --
+the PDB fabrication remains a real, open, and now-explicitly-documented
+gap (see the plan's own 5B note), not a hypothetical, but closing it
+needs a snapshot/producer-level signal analogous to
+``AbiSnapshot.clang_vtable_facts_reliable`` (something that can tell "this
+whole backend never captures vtable data" apart from "this one record's
+constructor omitted the field"), not a per-record ``FactStatus`` branch.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from ..model import Fact, Function, RecordType, resolved_fact_value
+from ..model import Function, RecordType, resolved_fact_value
 
 OwnerClassOf = Callable[[Function], "str | None"]
 NamespaceSuffixSpellings = Callable[[str], "list[str]"]
-
-
-def _fact_is_present(fact: Fact[list[str]] | None) -> bool:
-    """``fact.is_present`` (``PRESENT``/``PARTIAL``), treating an
-    unresolved ``None`` -- never true for an already-constructed
-    ``RecordType`` (its own ``__post_init__`` always bridges this field to
-    a real ``Fact``, see ``model/fact.py``'s ``bridge_legacy_and_fact``),
-    but still the field's declared type -- as absent rather than raising.
-    """
-    return fact is not None and fact.is_present
 
 
 def _owned_virtual_signatures(
@@ -240,20 +237,6 @@ def vtable_transition_is_evidenced(
     chains) -- see AGENTS.md's evidence-provider entry -- not a cleverer
     reading of the fields already here.
     """
-    if not (
-        _fact_is_present(t_old.vtable_fact) and _fact_is_present(t_new.vtable_fact)
-    ):
-        # Structurally uncollected on at least one side -- not the DWARF
-        # per-TU ambiguity the rest of this function's docstring is about
-        # (DWARF always reports PRESENT even under that gap, so this check
-        # cannot and does not try to catch it there). This catches the
-        # disjoint, genuinely-uncollected case instead: see the "ADR-063
-        # Track 4, 5B final closure" note above for why it is safe and
-        # necessary (PDB never captures vtable data at all, on any record,
-        # so without this a cross-backend compare against a PDB side
-        # fabricates a vtable-removed finding from an unrelated size
-        # change).
-        return False
     old_vtable = resolved_fact_value(t_old.vtable_fact, [])
     new_vtable = resolved_fact_value(t_new.vtable_fact, [])
     if old_vtable and new_vtable:

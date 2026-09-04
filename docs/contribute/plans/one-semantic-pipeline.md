@@ -184,7 +184,7 @@ when a first PR lands against a sub-phase:
 |---|---|---|---|
 | **2B — Identity consumer migration** | in progress | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted). The `StableEntityId`/`SnapshotLocalIdentity` split landed (`abicheck/model/identity_tiers.py`), and two post-parse consumers migrated onto it — `diff_filtering.py`'s opaque-type suppression (`compare/opaque_types.OpaqueTypeIndex`, matching on `StableEntityId` first and the `RecordType.name` spelling second) and `type_reachability.py`'s closure-walk record-tracking keys (`SnapshotLocalIdentity` rather than bare `str`). Bare-name-collision narrowing landed (2026-09-03, see the note below the table): `OpaqueTypeIndex.complete` gates `contains(..., strict=...)` on both sides' stable tier being provably complete for the comparison at hand, closing the collision exactly when doing so cannot drop a real suppression. The `entity:` alias promotion in `finding_identity.resolve_change_identity`/`report_canonical_finding_id` was investigated (2026-09-03) and declined rather than deferred: no currently-identifiable finding needs it (typedefs/constants already get a fine NORMALIZED tier off their own spelling, functions/variables already get the stronger CANONICAL mangled tier), so wiring it in would trade real suppression-file compatibility for a benefit that cannot be demonstrated today — see the ledger's `identity` concept for the full reasoning |
 | **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. A fourth slice (2026-09-04, "Track 3") closed the "unread" half of that gap for one concrete site: `classify_compare_pair`'s own `DiffResult.requested_depth` stamp — previously a second, independent `request.depth.lower()` normalization living a few lines away from the identical one `ResolvedExecutionContext.from_plan` already performs — now reads `pair.resolved_execution_context.requested_depth` instead, when it agrees with the call's own `request.depth` (Codex review, PR #1047: this function's own two-phase split lets a caller pass a *different* `request` than built `pair`, and `old`/`new` are always projected to *this* call's `request.depth`, so a disagreement defers to it rather than reporting a depth the classification never actually saw), falling back to the direct computation for a caller that attaches no context at all (a hand-built `ResolvedComparePair`, as some unit tests still do). `classify_compare_pair` is the typed Python API's `run_compare_request` path specifically -- the native `compare` CLI calls `compare_snapshots()` directly and does not go through it. **Correction to this row's own prior text:** `resolve_dump_request`/`execute_dump_request` are *not* "fully unwired" -- `execute_dump_request` already calls `with_assurance()` (landed 2026-09-03, commit `280b6c614`, the same day as the third slice above), the real post-execution caller this row previously said didn't exist yet; `DumpResult.resolved_execution_context` is fully built, assurance-enriched, and even carries a per-side `compile_contexts` entry when a header-AST parse ran -- but nothing downstream of `execute_dump_request` (no CLI, nothing outside the function itself) reads it back, so it remains a genuinely *unread*, not unbuilt, object. A fifth slice (2026-09-04) closed one more concrete site on the `compare` path: `resolve_compare_request` was carrying no `compile_contexts` at all (`evaluation_config`/`compile_contexts` were both named as deferred in the third slice's own note) even though each side's resolved `CompileContext` was reachable a few lines away -- switching `_resolve_side`/`_resolve_old_side`/`_resolve_new_side` from `resolve_side_snapshot` to `_resolve_side_snapshot_impl` recovers `SideResolution.effective_compile_context` per side, threaded through the identical safety gate the dump path already applied (lifted out of `execute_dump_request`'s own inline conditional into one shared predicate so the two paths share one decision instead of two hand-copies -- Codex review, PR #1037, six rounds, the dump-path original). A sixth slice (2026-09-04, Codex review, fresh evidence on the same PR) relocated that shared predicate a second time, to `workflows.artifact.compile_context_gate.side_effective_compile_context` (a new leaf module, not `workflows.artifact.execute` as first landed): the initial placement grew `service_compare_pipeline.py`/`workflows/artifact/execute.py` past the 800-line production cap, and a bare `SideResolution` type import would have pulled the helper into the large, already-allowlisted `workflows.artifact.execute -> service -> ...` import cycle as a genuinely new member -- so the function now takes the bare `CompileContext | None` it actually reads off `SideResolution.effective_compile_context` instead of the whole object, needing no import from `execute.py` at all. `evaluation_config` remains unresolved on both paths (still `None` on every real `ResolvedComparePair`/`ResolvedDumpRequest`), and every *other* independently-re-derived value this sub-phase names (policy/pack resolution) is still read the old way — this slice closes two concrete sites (compile-context threading, plus the dedup itself), not the sub-phase |
-| **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed. Third PR landed (see the note below the table): the dedicated `vtable`/`vptr_offset_bits` slice — `diff_vtable_layout._is_polymorphic`/`diff_layout._check_vptr_introduced` now read `FactStatus` directly (additive, per-record); the `TYPE_VTABLE_CHANGED` cluster (`diff_types_vtable.py`) itself was re-audited and found unsafe to convert without a `diff_cxx_rules.virtual_method_addition`-side fix blocked by an import-cycle constraint, so the removal gate remains open for that one cluster specifically. Fourth through seventh PRs landed (see the note below the table): closed the case-(a) field inventory's audit status entirely -- `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/`access` gated directly; `default` and the five `deprecated`/`is_scoped` surfaces investigated, found not safely convertible without a legacy-hybrid load-path fix (a real end-to-end test regression, not a hypothetical), and left on their existing `fact_provenance` mechanism with the specific finding recorded. Eighth PR landed (see the note below the table): audited the entire remaining case-(b) field inventory (nineteen per-declaration fields plus six detector-unconsumed snapshot-level ones) and found it already safe -- zero findings, no code changes -- closing this sub-phase's audit scope for every model field carrying a `Fact[T]` sibling as of this session; the sub-phase's own remaining work was the `vtable`/`TYPE_VTABLE_CHANGED` cluster (`vptr_offset_bits` is fully gated — see the corrected note further down). Track 4's 5B final closure (2026-09-04, see the note below the table) closed that last cluster with a landed, narrowly-scoped `FactStatus` fix: `vtable_transition_is_evidenced` now declines outright whenever either side's `vtable_fact` is not `is_present`, closing a real, review-confirmed fabrication reachable through PDB (whose real extractor never captures vtable data at all, unconditionally, for any record) -- disjoint from, and not a fix for, the still-open DWARF per-TU ambiguity the guard's original heuristic continues to handle unchanged. This closes 5B's removal gate for every named field family; the sub-phase's remaining open scope is the seven `fact_provenance`-gated fields from the fourth-through-seventh PRs, not a further audit sweep |
+| **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed. Third PR landed (see the note below the table): the dedicated `vtable`/`vptr_offset_bits` slice — `diff_vtable_layout._is_polymorphic`/`diff_layout._check_vptr_introduced` now read `FactStatus` directly (additive, per-record); the `TYPE_VTABLE_CHANGED` cluster (`diff_types_vtable.py`) itself was re-audited and found unsafe to convert without a `diff_cxx_rules.virtual_method_addition`-side fix blocked by an import-cycle constraint, so the removal gate remains open for that one cluster specifically. Fourth through seventh PRs landed (see the note below the table): closed the case-(a) field inventory's audit status entirely -- `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/`access` gated directly; `default` and the five `deprecated`/`is_scoped` surfaces investigated, found not safely convertible without a legacy-hybrid load-path fix (a real end-to-end test regression, not a hypothetical), and left on their existing `fact_provenance` mechanism with the specific finding recorded. Eighth PR landed (see the note below the table): audited the entire remaining case-(b) field inventory (nineteen per-declaration fields plus six detector-unconsumed snapshot-level ones) and found it already safe -- zero findings, no code changes -- closing this sub-phase's audit scope for every model field carrying a `Fact[T]` sibling as of this session; the sub-phase's own remaining work was the `vtable`/`TYPE_VTABLE_CHANGED` cluster (`vptr_offset_bits` is fully gated — see the corrected note further down). Track 4's 5B final closure (2026-09-04, see the note below the table) closed that last cluster as a formal, investigated decline, after a three-round investigation: round 1 declined, round 2 landed a `FactStatus` decline once Codex review found it closed a real, reachable PDB-driven fabrication, and round 3 reverted round 2 after it silently regressed a real detection scenario (a hand-constructed/typed-API `RecordType` omitting `vtable=` -- indistinguishable via `FactStatus` alone from PDB's own non-evidence -- means non-polymorphic, not "unknown"). `vtable_transition_is_evidenced`'s heuristic is unchanged from before this closure; the PDB fabrication remains a real, open, explicitly-documented gap. This closes 5B's removal gate for every named field family; the sub-phase's remaining open scope is the seven `fact_provenance`-gated fields from the fourth-through-seventh PRs, not a further audit sweep |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
 | **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary); the release fan-out's gate-pack-fold duplication (a distinct residual, not ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02); the release fan-out's explicit rejection of a `--pack`-asserted `contract.unresolved` | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; a real per-pair executor for depth/suppression/policy/compile-context/`--contract` mode-and-domain already exists (`service.run_compare`) and ADR-064's `GateOptions` already resolves the release fan-out's severity/exit-code-scheme gate config exactly once (confirmed by the 2026-09-03 investigation below) — what remains is narrower: `apply_release_gate_pack` mirrors, rather than calls, `pack_application.apply_to_compare_config` (deferred to the duplication-and-convergence-assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target, guarded meanwhile by `tests/test_release_gate_pack_fold_parity.py`'s parity property), and `resolve_release_pack_application` unconditionally rejects `contract.unresolved` for a release comparison — not for lack of a per-library `PersistedContractContext` (`service.run_compare` already creates one, `record_release_resolved_config` already merges into it after every pair), but as the rejection's own deliberate choice, unverified whether still necessary — no landed fix or confirmed-necessary rationale yet |
 | **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
@@ -709,78 +709,101 @@ remaining work is that one cluster (`vtable` only), not a further audit
 sweep.
 
 **Track 4 — 5B final closure (2026-09-04): the `TYPE_VTABLE_CHANGED`
-cluster's own residual gap. A real, narrow `FactStatus` check landed —
-not a decline, despite this closure's own first two passes concluding
-one.** The third PR's own consolidation (the evidence predicate moved to
-`compare/vtable_evidence.py` as `vtable_transition_is_evidenced`, a shared
-leaf both `diff_types_vtable.py` and `diff_cxx_rules.virtual_method_addition`
-now call) landed separately, fixing a real coupling bug but moving the
-heuristic itself verbatim — no `FactStatus` read was added. This closure
-re-examined whether that consolidation changed anything for the DWARF
-per-TU ambiguity specifically (it doesn't — the move says nothing about
-what DWARF's own extraction can observe, and the guard's original
-heuristic for that case is unchanged), and separately investigated the
-narrower case the third PR's own note left open: a check scoped
-specifically to `NOT_COLLECTED`/`FAILED` (more precisely, any status
-other than `PRESENT`/`PARTIAL` — `Fact.is_present`).
+cluster's own residual gap, resolved as a formal, investigated decline —
+after a three-round investigation that landed a fix, found it regressed
+real detection, and reverted it.** The third PR's own consolidation (the
+evidence predicate moved to `compare/vtable_evidence.py` as
+`vtable_transition_is_evidenced`, a shared leaf both `diff_types_vtable.py`
+and `diff_cxx_rules.virtual_method_addition` now call) landed separately,
+fixing a real coupling bug but moving the heuristic itself verbatim — no
+`FactStatus` read was added. This closure re-examined whether that
+consolidation changed anything for the DWARF per-TU ambiguity specifically
+(it doesn't — the move says nothing about what DWARF's own extraction can
+observe, and the guard's original heuristic for that case is unchanged),
+and separately investigated the narrower case the third PR's own note left
+open: a check scoped specifically to `NOT_COLLECTED`/`FAILED` (more
+precisely, any status other than `PRESENT`/`PARTIAL` — `Fact.is_present`).
 
-That narrower investigation ran twice with two different conclusions, and
-both rounds are worth recording, not just the second. **First pass:
-declined**, reasoning that the one branch such a check could replace was
-already unreachable via `resolved_fact_value`'s own collapse (making a
-direct check redundant there), and that using the status to short-circuit
-the two fallback evidence streams (owned virtual functions, `size_bits`/
-`virtual_bases_fact`) would be unsafe if either stream ever legitimately
-fires for a real, non-present-status side — reasoning from the assumption
-that no real producer sets a non-present `vtable_fact` outside the
-already-separately-gated clang/castxml-unreliable-legacy-load case.
-**Codex review (PR #1057) found that assumption false**, with a concrete,
-non-hypothetical counterexample: `pdb_model.py`'s real PDB extractor
-(`_record_from_layout`) never sets `vtable`/`vtable_fact` on any record at
-all, which `RecordType.__post_init__`'s bridge resolves to
-`Fact.not_collected()` unconditionally — entirely independent of
-`AbiSnapshot.clang_vtable_facts_reliable` (a clang/castxml-only concept
-the PDB path never touches). Reviewer-supplied and independently
-confirmed: this makes the fallback streams *not* merely
-theoretically-independent of `vtable_fact`'s status the way the first pass
-assumed — following either one for a PDB-derived side is reachable
-through a real serialize/reload/`checker.compare()` cycle and fabricates a
+That narrower investigation ran three rounds, each correcting the one
+before it — all three are worth recording, not just the last.
+
+**Round 1: declined**, reasoning that the one branch such a check could
+replace was already unreachable via `resolved_fact_value`'s own collapse
+(making a direct check redundant there), and that using the status to
+short-circuit the two fallback evidence streams (owned virtual functions,
+`size_bits`/`virtual_bases_fact`) would be unsafe if either stream ever
+legitimately fires for a real, non-present-status side — reasoning from
+the assumption that no real producer sets a non-present `vtable_fact` at
+all.
+
+**Round 2: landed, reversing round 1.** Codex review (PR #1057) found
+that assumption false, with a concrete, non-hypothetical counterexample:
+`pdb_model.py`'s real PDB extractor (`_record_from_layout`) never sets
+`vtable`/`vtable_fact` on any record at all, which
+`RecordType.__post_init__`'s bridge resolves to `Fact.not_collected()`
+unconditionally — entirely independent of
+`AbiSnapshot.clang_vtable_facts_reliable`. Following either fallback
+stream for a PDB-derived side is reachable through a real
+serialize/reload/`checker.compare()` cycle and fabricates a
 `TYPE_VTABLE_CHANGED` finding (an apparent vtable removal) from nothing
 but an unrelated size delta or a cross-format (Itanium-vs-MSVC mangling)
 function-map mismatch — the review's own reproduction round-tripped an
 explicit `NOT_COLLECTED` fact through real storage and confirmed the
 snapshot-level `clang_vtable_facts_reliable` flag stayed at its untouched
-default the whole time.
+default the whole time. Reasoning that PDB was the *only* current
+producer of a non-`is_present` `vtable_fact` — confirmed by inspecting
+every real extractor's `RecordType(...)` construction site
+(`dwarf_snapshot.py`, `extract/headers/castxml/records.py`, `extract/
+headers/clang/records.py` all construct this field explicitly, never
+omitted) — a decline gated on "either side not `is_present`" looked safe:
+DWARF/header-AST backends never carry the status that triggers it.
+`compare.vtable_evidence.vtable_transition_is_evidenced` landed exactly
+that decline.
 
-That reachability finding also settles the redundancy/safety trade-off
-the first pass got wrong: since PDB is the *only* current producer of a
-non-`is_present` `vtable_fact` — confirmed by inspecting every real
-`RecordType(...)` construction site (`dwarf_snapshot.py`, `extract/
-headers/castxml/records.py`, `extract/headers/clang/records.py` all
-construct this field explicitly, `Fact.present(...)`/`Fact.partial(...)`,
-never omitted) — a decline gated on "either side not `is_present`" can
-never suppress a legitimate use of either fallback stream by DWARF or
-either header-AST backend, because none of them ever produces the status
-that triggers it. **Second pass: landed.**
-`compare.vtable_evidence.vtable_transition_is_evidenced` now returns
-`False` outright whenever either side's `vtable_fact` is not `is_present`,
-before either fallback stream runs — disjoint from, and not a replacement
-for, the guard's original DWARF-ambiguity heuristic (which still handles
-the `Fact.present([])`-under-a-per-TU-gap case exactly as before, since
-that status is `PRESENT`, not caught by the new check). `diff_types_vtable
-.py`'s own module docstring carries the full account (the canonical
-writeup); this note records that the investigation happened, reversed
-itself once, and why. `tests/test_vtable_evidence_guard.py::
-TestNonPresentVtableFactIsDeclinedOutright` is the executable form —
-rewritten from its first-pass predecessor
-(`TestExplicitFactStatusWouldNotSafelyGateThisGuard`, which asserted the
-now-known-wrong direction) to pin the corrected contract in both
-directions and for both fallback streams, plus a same-side-status case and
-a fully-`PRESENT` sanity check that the new gate doesn't overreach.
+**Round 3: reverted, and declined again — for the right reason this
+time.** The round-2 reasoning checked every real *extractor* construction
+site but missed that `vtable` is also a public, positional field on the
+public `RecordType` dataclass: *omitting* it at construction — not just
+PDB's own extractor never setting it — resolves to the identical
+`Fact.not_collected()` via the same `bridge_legacy_and_fact` bridge. That
+omission is exactly how a large fraction of this codebase's own
+hand-constructed test fixtures (and any external typed-API caller using
+the same public constructor) spell "this class has no vtable" for an
+ordinary non-polymorphic class — a shape the round-2 decline could not
+tell apart from PDB's own structural non-evidence. Landing it silently
+regressed a previously-passing, real scenario:
+`tests/test_abicc_scenario_parity.py::
+TestLeafClassVirtualMethodAdditions::test_virtual_added_to_leaf_class` (a
+leaf class's old side omits `vtable=` entirely, meaning "no virtuals"; the
+new side gains one via `Function.is_virtual` evidence — exactly the
+owned-virtual-function fallback stream the decline short-circuited).
+Caught by running the full test suite before declaring the fix complete,
+not by review alone. Reverted in full: `vtable_transition_is_evidenced`'s
+heuristic is unchanged from before this closure began.
+
+`diff_types_vtable.py`'s own module docstring carries the full three-round
+account (the canonical writeup). `tests/test_vtable_evidence_guard.py::
+TestExplicitFactStatusWouldNotSafelyGateThisGuard` pins the
+reverted-to-original contract for both fallback streams (renamed back
+from its round-2 form, `TestNonPresentVtableFactIsDeclinedOutright`, which
+asserted the now-known-wrong direction); a new sibling class,
+`TestOmittedVtableStillDetectsARealAddition`, pins the round-3 regression
+directly at the guard level so a future attempt at this same narrowing
+trips over it immediately rather than rediscovering it via a full-suite
+run.
 
 This closes 5B's own removal gate for the `vtable` field family as a
-landed, narrowly-scoped fix — not a decline. Reopening the *remaining*
-DWARF per-TU ambiguity (unchanged by this closure) needs evidence this
+formal, investigated decline — the same disposition 2B's `entity:` alias
+promotion and 6B's own undone cohort items received — **not** left
+ambiguous between "landed" and "declined": the PDB fabrication round 2
+found is real, reachable, and still open, recorded here and in both
+modules' docstrings rather than only in this PR's own history. Closing it
+for real needs a snapshot/producer-level signal analogous to
+`AbiSnapshot.clang_vtable_facts_reliable` — something that can tell "this
+whole backend never captures vtable data" apart from "this one record's
+constructor simply omitted the field," which `vtable_fact.status` alone
+cannot do — not a per-record `FactStatus` branch. Reopening the
+*separate*, still-unresolved DWARF per-TU ambiguity needs evidence this
 predicate's inputs do not carry today (a per-finding provider record
 naming which translation unit each side's debug info actually covered, or
 a polymorphism walk over both base chains), not a different reading of

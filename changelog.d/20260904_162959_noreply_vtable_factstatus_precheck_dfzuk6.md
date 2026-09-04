@@ -2,20 +2,25 @@
 A new changelog fragment. See changelog.d/README.md for the workflow.
 -->
 
-### Fixed
+### Documentation
 
-- **`TYPE_VTABLE_CHANGED` no longer fabricates a vtable-removed finding
-  when comparing against a PDB-derived snapshot.** PDB's real extractor
-  never captures vtable data for any record, which previously let an
-  unrelated `size_bits` delta (or a cross-format Itanium-vs-MSVC
-  mangling mismatch) drive a fabricated `TYPE_VTABLE_CHANGED` BREAKING
-  finding reporting the PDB side's vtable as confirmed-empty rather than
-  simply unknown. `compare.vtable_evidence.vtable_transition_is_evidenced`
-  (shared by `diff_types_vtable.py`'s `TYPE_VTABLE_CHANGED` detector and
-  `diff_cxx_rules.virtual_method_addition`) now declines outright whenever
-  either side's `vtable_fact` is not `PRESENT`/`PARTIAL`, before either
-  fallback evidence stream runs. This is disjoint from, and does not
-  change, the existing DWARF per-TU capture-gap heuristic (`Fact.
-  present([])` on that path stays `PRESENT`, so it never trips the new
-  check) — the fix is scoped to backends that never capture vtable data
-  at all, which today is only PDB.
+- **`TYPE_VTABLE_CHANGED` evidence-gating cluster: `FactStatus` pre-check
+  investigated across three rounds, ultimately declined.** ADR-063 Track
+  4's 5B closure found a real, reachable fabrication risk (a
+  `TYPE_VTABLE_CHANGED` finding wrongly reported against a PDB-derived
+  snapshot, whose real extractor never captures vtable data at all) and
+  landed a `FactStatus`-based decline for it — but that decline also
+  regressed a real, previously-passing detection scenario, because a
+  hand-constructed/typed-API `RecordType` omitting `vtable=` (meaning "no
+  virtuals") resolves to the identical `NOT_COLLECTED` status PDB's own
+  non-evidence does, and `FactStatus` alone cannot tell the two apart. The
+  fix was reverted before merge; `diff_types_vtable.py`'s
+  `TYPE_VTABLE_CHANGED` cluster's evidence heuristic is unchanged. No
+  behavior change ships from this PR. The PDB fabrication remains a real,
+  open, documented gap — closing it needs a snapshot/producer-level
+  signal (analogous to `AbiSnapshot.clang_vtable_facts_reliable`), not a
+  per-record `FactStatus` branch. Full investigation recorded in both
+  touched modules' docstrings, the plan, and the status ledger, with a
+  regression-locking test
+  (`tests/test_vtable_evidence_guard.py::TestOmittedVtableStillDetectsARealAddition`)
+  pinning the scenario the reverted fix broke.
