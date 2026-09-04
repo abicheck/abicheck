@@ -111,9 +111,29 @@ class TestMaterializationObjectScoping:
         many artifacts (e.g. 100 artifacts sharing a 100 MB section
         consuming ~10 GB of temporary disk). The second (and later)
         artifact's copy of a shared object must now share an inode with
-        the first's, not merely have identical bytes."""
+        the first's, not merely have identical bytes.
+
+        Skipped when the filesystem under *tmp_path* itself rejects
+        `os.link` (a network/FAT volume, a restricted sandbox): the
+        production code deliberately catches exactly that `OSError` and
+        falls back to a real copy, so the inode-sharing assertion below
+        would fail against its own documented, supported fallback path
+        rather than a real regression (Codex review, fresh evidence)."""
+        import os
+
         from abicheck.project_snapshot_store import read_project_manifest
         from abicheck.workflows.release_package import resolve_release_package_map
+
+        probe_a = tmp_path / ".hardlink_probe_a"
+        probe_b = tmp_path / ".hardlink_probe_b"
+        probe_a.write_bytes(b"x")
+        try:
+            os.link(probe_a, probe_b)
+        except OSError:
+            pytest.skip(f"{tmp_path} does not support hard links (os.link)")
+        finally:
+            probe_a.unlink(missing_ok=True)
+            probe_b.unlink(missing_ok=True)
 
         old_libs, _ = _old_new_libraries()
         pkg = tmp_path / "pkg"

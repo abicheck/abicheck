@@ -32,6 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from . import guards
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SectionDTO,
@@ -116,18 +117,22 @@ def read_variant_composition_library_filenames(
     `dict(...)`'s own permissive construction unrejected, silently
     normalizing it (with a duplicate key becoming last-wins) instead of
     failing as malformed input `_release_match_key` then trusts for a real
-    matching decision (Codex review, fresh evidence).
+    matching decision. Validated through the shared `storage.guards`
+    primitives rather than a bespoke check here (`guards.mapping` for the
+    container, `guards.decision_key` for each bundle key -- exactly what
+    `_release_match_key` looks this mapping up by -- `guards.identity_text`
+    for each real filename), per `storage/AGENTS.md`'s "new guard goes in
+    guards.py" rule: a storage reader restating this rule ad hoc is the
+    drift that rule exists to stop (Codex review, fresh evidence).
     """
     composition = _read_variant_composition(root, variant_id)
     if composition is None:
         return {}
     raw = composition.get("library_filenames", {})
-    if not isinstance(raw, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) for k, v in raw.items()
-    ):
-        raise ValueError(
-            f"{root}: variant {variant_id!r}'s bundle_composition "
-            "library_filenames must be an object of string -> string, got "
-            f"{raw!r}"
+    guards.mapping(raw, "library_filenames")
+    return {
+        guards.decision_key(k, "library_filenames key"): guards.identity_text(
+            v, f"library_filenames[{k!r}]"
         )
-    return dict(raw)
+        for k, v in raw.items()
+    }

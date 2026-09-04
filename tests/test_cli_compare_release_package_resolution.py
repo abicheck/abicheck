@@ -577,7 +577,7 @@ class TestVariantCompositionRejectsNonMappingLibraryFilenames:
             "abicheck.storage.variant_composition.bundle_composition_from_dto",
             _bad_shape,
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             read_variant_composition_library_filenames(pkg, "v1")
 
 
