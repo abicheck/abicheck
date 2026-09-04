@@ -166,29 +166,29 @@ def capture_bundle_facts(
     """Build a :class:`BundleFacts` from already-dumped per-library snapshots.
 
     No new *ABI* extraction happens here -- *per_library_snapshots* is
-    expected to be exactly what a real ``dump``/``compare`` run already
-    produced for each bundle member (each carrying its own
-    ``AbiSnapshot.elf``).
+    exactly what a real ``dump``/``compare`` run already produced for each
+    member (each carrying its own ``AbiSnapshot.elf``).
 
     *library_paths*, when given, is a ``{library_name: Path}`` map of each
-    snapshot's real on-disk file (or a stored package member's materialized
-    sub-package directory, resolved via `bundle.stored_capture_identity`) --
-    probed for filesystem aliases and the real *filename*
-    (``BundleFacts.library_filenames``, the SONAME-skew fallback).
+    snapshot's real on-disk file (or a stored member's materialized
+    sub-package directory, via `bundle.stored_capture_identity`) -- probed
+    for filesystem aliases and the real *filename* (SONAME-skew fallback).
     """
     from .bundle import stored_capture_identity
     from .bundle_soname import filesystem_alias_basenames, resolved_basename
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
     library_filenames: dict[str, str] = {}
+    alias_nodes_so_far = 0
     if library_paths:
         for name, path in library_paths.items():
             if name not in per_library_snapshots:
                 continue
             if path.is_dir():
-                stored_name, stored_aliases = stored_capture_identity(path)
+                stored = stored_capture_identity(path, alias_nodes_so_far)
+                stored_name, stored_aliases, alias_nodes_so_far = stored
             else:
-                stored_name = resolved_basename(path)  # not path.name (Codex)
+                stored_name = resolved_basename(path)  # not path.name
                 stored_aliases = filesystem_alias_basenames(path)
             if stored_name:
                 library_filenames[name] = stored_name

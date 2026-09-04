@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from test_cli_compare_release_project_snapshot_package import (
     DirectoryObjectStore,
     _fn,
@@ -169,9 +170,17 @@ class TestEmbeddedInstantiationManifest:
             "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
         )
         doc = json.loads(out)
-        assert doc.get("bundle_findings"), (
-            f"expected a manifest-drift bundle finding, got none: {out}"
-        )
+        bundle_findings = doc.get("bundle_findings") or []
+        # CodeRabbit review: a bare non-empty check can pass on an unrelated
+        # change in libb.so/libc.so -- assert the specific manifest-drift
+        # finding this fixture actually promises and removes.
+        matching = [
+            f
+            for f in bundle_findings
+            if f.get("kind") == "bundle_manifest_instantiation_removed"
+            and f.get("symbol") == "_Z3foov"
+        ]
+        assert matching, f"expected the foo manifest-drift finding, got: {out}"
 
     def test_composition_embedded_manifest_is_read_back(self, tmp_path: Path) -> None:
         """Codex review, ninth round: a package written by
@@ -181,7 +190,7 @@ class TestEmbeddedInstantiationManifest:
         variant's `BUNDLE_COMPOSITION_SECTION_KIND` payload, which the
         earlier embedded-manifest fix never consulted."""
         from abicheck.bundle_facts_store import read_embedded_instantiation_manifest
-        from abicheck.serialization import snapshot_to_dict
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
         from abicheck.storage.import_bundle_facts import (
             BUNDLE_FACTS_ARTIFACT_TYPE,
             import_bundle_facts,
@@ -204,7 +213,7 @@ class TestEmbeddedInstantiationManifest:
         pkg = tmp_path / "pkg"
         store = DirectoryObjectStore(pkg)
         manifest = import_bundle_facts(
-            doc, store=store, max_known_schema_version=43, variant_id="v1"
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
         )
         write_project_manifest(pkg, manifest)
 
@@ -356,7 +365,7 @@ class TestStoredIdentityFromVariantComposition:
         self, tmp_path: Path
     ) -> None:
         from abicheck.bundle import stored_capture_identity
-        from abicheck.serialization import snapshot_to_dict
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
         from abicheck.storage.import_bundle_facts import (
             BUNDLE_FACTS_ARTIFACT_TYPE,
             import_bundle_facts,
@@ -379,7 +388,7 @@ class TestStoredIdentityFromVariantComposition:
         pkg = tmp_path / "pkg"
         store = DirectoryObjectStore(pkg)
         manifest = import_bundle_facts(
-            doc, store=store, max_known_schema_version=43, variant_id="v1"
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
         )
         write_project_manifest(pkg, manifest)
 
@@ -388,6 +397,204 @@ class TestStoredIdentityFromVariantComposition:
         )
         (sub_dir,) = resolved.values()
 
-        stored_name, stored_aliases = stored_capture_identity(sub_dir)
+        stored_name, stored_aliases, _ = stored_capture_identity(sub_dir)
         assert stored_name == "liba.so.1.2.3"
         assert stored_aliases == ("liba.so.1",)
+
+
+class TestFilesystemBackedNames:
+    """CodeRabbit review: `BundleSnapshot.filesystem_backed` is snapshot-
+    wide, so `build_bundle_snapshot_mixed` passing `filesystem_backed=False`
+    (required for its stored members -- see `TestStoredEntry...
+    NeverProbedAgainstCwd` in the parent module) also denied every *live*
+    member `_detect_soname_skew`'s own real-symlink-target resolution,
+    purely because a stored member happened to also participate.
+    `filesystem_backed_names` is the per-member override that fixes this."""
+
+    def test_live_members_stay_resolvable_alongside_stored_ones(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+        from abicheck.elf_metadata import ElfMetadata
+
+        snap = build_bundle_snapshot_from_metadata(
+            {
+                "live.so": ElfMetadata(soname="live.so.1"),
+                "stored.so": ElfMetadata(soname="stored.so.1"),
+            },
+            paths={
+                "live.so": tmp_path / "live.so",
+                "stored.so": tmp_path / "stored.so",
+            },
+            filesystem_backed=False,
+            filesystem_backed_names=frozenset({"live.so"}),
+        )
+        assert snap.member_is_filesystem_backed("live.so") is True
+        assert snap.member_is_filesystem_backed("stored.so") is False
+
+    def test_none_falls_back_to_the_snapshot_wide_flag(self) -> None:
+        """No `filesystem_backed_names` given -- every pre-existing caller's
+        behavior is unchanged: every member follows the one flag."""
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+        from abicheck.elf_metadata import ElfMetadata
+
+        snap = build_bundle_snapshot_from_metadata(
+            {"a.so": ElfMetadata(soname="a.so.1")},
+            filesystem_backed=True,
+        )
+        assert snap.member_is_filesystem_backed("a.so") is True
+        assert snap.member_is_filesystem_backed("nonexistent") is True
+
+
+class TestAliasNodeBudgetAggregation:
+    """CodeRabbit review, security finding (CWE-400, Denial of Service):
+    `bundle._stored_library_identity()` always passed `0` as
+    `decode_native_identity_aliases`'s `nodes_so_far`, resetting the
+    aggregate JSON-node budget for every artifact -- so many artifacts each
+    individually under the per-array limit could still sum to an unbounded
+    aggregate decode cost. The budget must now be threaded across calls,
+    the same way `bundle_facts_store.read_bundle_facts_package`'s own
+    `alias_nodes_so_far` already does."""
+
+    def test_budget_accumulates_across_two_stored_artifacts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from dataclasses import replace as dc_replace
+
+        from abicheck import bundle
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        monkeypatch.setattr(
+            "abicheck.storage.native_identity_aliases.DEFAULT_MAX_JSON_CONTAINER_NODES",
+            20,
+        )
+
+        libs = {
+            "liba.so": dc_replace(
+                _snap("liba.so", "1.0", [_fn("foo", "_Z3foov")]),
+                elf=ElfMetadata(soname="liba.so"),
+            ),
+            "libb.so": dc_replace(
+                _snap("libb.so", "1.0", [_fn("bar", "_Z3barv")]),
+                elf=ElfMetadata(soname="libb.so"),
+            ),
+        }
+        facts = capture_bundle_facts(libs, variant_fingerprint="gcc13-avx2")
+        # 15 aliases each -- 16 nodes per array (< 20 individually) but 32
+        # combined (> 20).
+        aliases_a = tuple(f"liba-alias-{i}.so" for i in range(15))
+        aliases_b = tuple(f"libb-alias-{i}.so" for i in range(15))
+        from abicheck.bundle_facts import BundleFacts
+
+        facts = BundleFacts(
+            variant_fingerprint=facts.variant_fingerprint,
+            per_library_snapshots=facts.per_library_snapshots,
+            manifest=facts.manifest,
+            filesystem_aliases={"liba.so": aliases_a, "libb.so": aliases_b},
+            library_filenames={"liba.so": "liba.so", "libb.so": "libb.so"},
+        )
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(pkg, manifest)
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert len(resolved) == 2
+
+        nodes_so_far = 0
+        decoded_alias_counts = []
+        for sub_dir in resolved.values():
+            _, aliases, nodes_so_far = bundle._stored_library_identity(
+                sub_dir, nodes_so_far
+            )
+            decoded_alias_counts.append(len(aliases))
+
+        # The first resolved must succeed (well under the 20-node budget on
+        # its own); the second must have degraded to no aliases at all,
+        # since 16 + 16 = 32 exceeds the 20-node aggregate budget -- proof
+        # the budget was actually carried across the two calls, not reset.
+        assert sorted(decoded_alias_counts) == [0, 15]
+
+
+class TestStoredElfMetadataContainsMalformedInput:
+    """CodeRabbit review: `_stored_elf_metadata()`'s own try/except only
+    wrapped `read_legacy_snapshot_document` -- a malformed `schema_version`/
+    `elf` field in an otherwise-readable document raised straight out of
+    this function (and, uncaught, out of `build_bundle_snapshot_mixed`'s own
+    per-member loop too), aborting the *entire* bundle analysis for one bad
+    member instead of degrading just that member the way every other
+    malformed-input case here already does."""
+
+    def test_malformed_schema_version_degrades_to_none_not_a_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck import bundle
+
+        monkeypatch.setattr(
+            "abicheck.project_snapshot_legacy.read_legacy_snapshot_document",
+            lambda path: {
+                "elf": {"soname": "liba.so.1"},
+                "schema_version": "not-an-int",
+            },
+        )
+        assert bundle._stored_elf_metadata(tmp_path) is None
+
+    def test_malformed_member_does_not_abort_the_whole_mixed_snapshot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.bundle import build_bundle_snapshot_mixed
+
+        monkeypatch.setattr(
+            "abicheck.project_snapshot_legacy.read_legacy_snapshot_document",
+            lambda path: {
+                "elf": {"soname": "bad.so.1"},
+                "schema_version": "not-an-int",
+            },
+        )
+        bad_dir = tmp_path / "bad"
+        bad_dir.mkdir()
+        # Must not raise -- the malformed member is simply dropped, matching
+        # every other "can't resolve this one" case in build_bundle_snapshot
+        # _mixed (an unparseable document, no ELF metadata present, ...).
+        snap = build_bundle_snapshot_mixed({"bad.so": bad_dir})
+        assert "bad.so" not in snap.metadata
+
+
+class TestReleasePackageResolutionCatchesKeyError:
+    """CodeRabbit review: `DirectoryObjectStore.get()` raises `KeyError`
+    (not `OSError`) for an object entirely absent from `objects/` -- a
+    truncated or partially-copied package directory, an ordinary release
+    operand. `_resolve_release_package_side`'s own exception tuple named
+    only `(ValueError, OSError, SnapshotError)`, so this case escaped as an
+    unhandled `KeyError` (an abicheck crash) instead of the intended
+    `click.UsageError` (exit 64)."""
+
+    def test_missing_object_becomes_a_usage_error(self, tmp_path: Path) -> None:
+        import click
+
+        from abicheck.cli_compare_release_matrix import _resolve_release_package_side
+
+        old_libs, _ = _old_new_libraries()
+        pkg = tmp_path / "pkg"
+        _write_package(pkg, old_libs, variant_id="v1")
+
+        # Delete one object -- simulates a truncated/partially-copied
+        # package directory.
+        object_files = [p for p in (pkg / "objects").rglob("*") if p.is_file()]
+        assert object_files
+        object_files[0].unlink()
+
+        counter = 0
+
+        def make_temp_dir(prefix: str) -> Path:
+            nonlocal counter
+            counter += 1
+            dest = tmp_path / f"{prefix}{counter}"
+            dest.mkdir()
+            return dest
+
+        with pytest.raises(click.UsageError):
+            _resolve_release_package_side(pkg, None, make_temp_dir)

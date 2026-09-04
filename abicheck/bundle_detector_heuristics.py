@@ -135,12 +135,18 @@ def _detect_soname_skew(
         for name, path in snap.libraries.items():
             meta = snap.metadata.get(name)
             # Resolved target's basename (matches capture_bundle_facts()'s
-            # identical use) -- but only when filesystem_backed: a facts-
-            # reconstructed snapshot's paths are synthetic (bare
-            # `Path("libfoo.so.1")`), and Path.resolve() would still walk
-            # CWD for those, letting an unrelated same-named CWD entry
-            # override the persisted basename (Codex review). Use it as-is.
-            real_name = resolved_basename(path) if snap.filesystem_backed else path.name
+            # identical use) -- but only when this member is filesystem-
+            # backed (CodeRabbit review: per-member, not the snapshot-wide
+            # flag alone -- a mixed stored/live snapshot's live members are
+            # still safe to resolve): a facts-reconstructed/stored path is
+            # synthetic (bare `Path("libfoo.so.1")`), and Path.resolve()
+            # would still walk CWD for those, letting an unrelated same-
+            # named CWD entry override the persisted basename. Use it as-is.
+            real_name = (
+                resolved_basename(path)
+                if snap.member_is_filesystem_backed(name)
+                else path.name
+            )
             soname = (meta.soname if meta and meta.soname else "") or real_name
             # G9 (remaining half): DT_SONAME is read directly off the ELF
             # here, unlike `.library` (the on-disk filename), which the

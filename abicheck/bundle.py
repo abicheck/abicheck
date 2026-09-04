@@ -262,12 +262,15 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     metadata: dict[str, ElfMetadata] = {}
     stored_paths: dict[str, Path] = {}
     extra_aliases: dict[str, tuple[str, ...]] = {}
+    alias_nodes_so_far = 0
     for name, path in stored.items():
         elf = _stored_elf_metadata(path)
         if elf is None:
             continue
         metadata[name] = elf
-        real_filename, aliases = _stored_library_identity(path)
+        real_filename, aliases, alias_nodes_so_far = _stored_library_identity(
+            path, alias_nodes_so_far
+        )
         if real_filename is not None:
             stored_paths[name] = real_filename
         if aliases:
@@ -288,15 +291,14 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     # (Codex review, security finding: metadata-only resolution must not
     # depend on ambient filesystem state).
     # filesystem_backed=False (not `probe_filesystem`, which stays True so
-    # the *live* subset above still gets real resolution): the snapshot-wide
-    # flag alone can't say "only some members are live", and
-    # `_detect_soname_skew`'s own SONAME-major fallback reads only this one
-    # flag -- not `probe_filesystem_names` -- to decide whether re-resolving
-    # a member's path is safe. Whenever *any* stored entry participates
-    # (guaranteed here -- `stored` is non-empty past the early return
-    # above), leaving it True would let that detector re-resolve a stored,
-    # non-live path against the caller's own cwd (Codex review, fresh
-    # evidence).
+    # the *live* subset above still gets real resolution) is the safe
+    # default for every member; filesystem_backed_names=frozenset(live)
+    # exempts exactly the live ones, so `_detect_soname_skew`'s own
+    # SONAME-major fallback still resolves a live symlink's real target
+    # name while a stored member's recovered filename is never re-resolved
+    # against the caller's own cwd (CodeRabbit review, fresh evidence: the
+    # snapshot-wide flag alone previously denied every live member this
+    # resolution too, whenever any stored entry also participated).
     return build_bundle_snapshot_from_metadata(
         metadata,
         paths={**stored_paths, **live},
@@ -304,6 +306,7 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
         probe_filesystem_names=frozenset(live),
         extra_aliases=extra_aliases or None,
         filesystem_backed=False,
+        filesystem_backed_names=frozenset(live),
     )
 
 
@@ -345,18 +348,25 @@ def _stored_elf_metadata(path: Path) -> ElfMetadata | None:
 
     try:
         document = read_legacy_snapshot_document(path)
+        elf_data = document.get("elf")
+        if not isinstance(elf_data, dict):
+            log.debug("bundle: stored package %s has no ELF metadata", path)
+            return None
+        schema_version = int(document.get("schema_version", 1))
+        return cast("ElfMetadata", elf_from_dict(elf_data, schema_version))
     except Exception as exc:
+        # A malformed `elf`/`schema_version` field (CodeRabbit review: a
+        # crafted or corrupted document previously escaped this function
+        # from here, aborting the whole build_bundle_snapshot_mixed() call
+        # -- not just this one member) is the identical "can't resolve this
+        # member" case a bad document/missing file already is above.
         log.warning("bundle: failed to resolve stored package %s: %s", path, exc)
         return None
-    elf_data = document.get("elf")
-    if not isinstance(elf_data, dict):
-        log.debug("bundle: stored package %s has no ELF metadata", path)
-        return None
-    schema_version = int(document.get("schema_version", 1))
-    return cast("ElfMetadata", elf_from_dict(elf_data, schema_version))
 
 
-def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
+def _stored_library_identity(
+    path: Path, nodes_so_far: int = 0
+) -> tuple[Path | None, tuple[str, ...], int]:
     """Best-effort real on-disk filename + filesystem aliases for a stored
     `ProjectSnapshot` sub-package directory at *path*, read from its sole
     artifact's `ArtifactRef.native_identity` -- the same
@@ -374,12 +384,21 @@ def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
     are two independent, not-yet-reconciled writers of this native_identity
     contract.
 
-    Returns `(None, ())` -- never raises -- for anything that doesn't parse
-    as a single-artifact package with that evidence recorded: a stored
-    package produced by something other than `project_snapshot_legacy.
-    materialize_release_variant_artifacts` (`build_bundle_snapshot_mixed`'s
-    own docstring accepts "any other pre-resolved package directory") may
-    simply not carry it, which is not itself an error --
+    *nodes_so_far*/the returned `int` thread `decode_native_identity_
+    aliases`'s own aggregate JSON-node budget across every artifact a
+    caller resolves in one run (CodeRabbit review, security finding: always
+    passing `0` reset the budget per artifact, so a package with many
+    artifacts each carrying an alias array just under the per-call limit
+    could sum to an unbounded aggregate decode cost) -- the same pattern
+    `bundle_facts_store.read_bundle_facts_package`'s own `alias_nodes_so_far`
+    already uses.
+
+    Returns `(None, (), nodes_so_far)` -- never raises -- for anything that
+    doesn't parse as a single-artifact package with that evidence recorded:
+    a stored package produced by something other than `project_snapshot_
+    legacy.materialize_release_variant_artifacts` (`build_bundle_snapshot_
+    mixed`'s own docstring accepts "any other pre-resolved package
+    directory") may simply not carry it, which is not itself an error --
     `build_bundle_snapshot_from_metadata` already degrades to a synthetic
     `Path(name)` when `paths` has no entry for a name.
     """
@@ -393,11 +412,11 @@ def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
     try:
         summary = read_manifest_summary(path)
         if len(summary.artifact_ids) != 1:
-            return None, ()
+            return None, (), nodes_so_far
         artifact = read_artifact_ref(path, summary.artifact_ids[0])
     except Exception as exc:
         log.debug("bundle: no native_identity evidence for %s: %s", path, exc)
-        return None, ()
+        return None, (), nodes_so_far
 
     filename = artifact.native_identity.get(NATIVE_IDENTITY_FILENAME_KEY)
     real_filename = Path(filename) if filename else None
@@ -406,7 +425,9 @@ def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
     aliases_text = artifact.native_identity.get(NATIVE_IDENTITY_ALIASES_KEY)
     if aliases_text:
         try:
-            aliases, _ = decode_native_identity_aliases(aliases_text, 0)
+            aliases, nodes_so_far = decode_native_identity_aliases(
+                aliases_text, nodes_so_far
+            )
         except Exception as exc:
             log.debug("bundle: malformed filesystem_aliases for %s: %s", path, exc)
             aliases = ()
@@ -421,7 +442,7 @@ def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
         # review, fresh evidence: a package built that way silently lost
         # this evidence here even though it was never actually missing).
         real_filename, aliases = _composition_library_identity(path, summary, artifact)
-    return real_filename, aliases
+    return real_filename, aliases, nodes_so_far
 
 
 def _composition_library_identity(
@@ -464,13 +485,21 @@ def _composition_library_identity(
     return real_filename, aliases
 
 
-def stored_capture_identity(path: Path) -> tuple[str | None, tuple[str, ...]]:
+def stored_capture_identity(
+    path: Path, nodes_so_far: int = 0
+) -> tuple[str | None, tuple[str, ...], int]:
     """`bundle_facts.capture_bundle_facts`'s own resolver for a
     `library_paths` entry that is a stored sub-package directory rather
     than a real file: `_stored_library_identity`'s filename, as a plain
-    string (or `None`)."""
-    real_filename, aliases = _stored_library_identity(path)
-    return (real_filename.name if real_filename is not None else None), aliases
+    string (or `None`). *nodes_so_far*/the returned `int` are that
+    function's own alias-node budget, threaded by the caller across every
+    stored directory in one run."""
+    real_filename, aliases, nodes_so_far = _stored_library_identity(path, nodes_so_far)
+    return (
+        (real_filename.name if real_filename is not None else None),
+        aliases,
+        nodes_so_far,
+    )
 
 
 def build_bundle_snapshot_from_metadata(
@@ -482,6 +511,7 @@ def build_bundle_snapshot_from_metadata(
     extra_aliases: dict[str, tuple[str, ...]] | None = None,
     probe_filesystem_names: frozenset[str] | None = None,
     filesystem_backed: bool | None = None,
+    filesystem_backed_names: frozenset[str] | None = None,
 ) -> BundleSnapshot:
     """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
     without re-parsing (or even requiring) the underlying binary files.
@@ -558,17 +588,17 @@ def build_bundle_snapshot_from_metadata(
             unchanged, matching every existing caller. A caller whose
             *paths* mixes genuinely live entries with recovered-but-not-
             resolvable ones (``build_bundle_snapshot_mixed``, whenever any
-            stored entry participates) must pass ``False`` explicitly: the
-            snapshot-wide flag alone cannot distinguish "every member is
-            safe to re-resolve" from "some are" ``_detect_soname_skew``'s
-            own SONAME-major fallback reads only this one flag, not
-            *probe_filesystem_names* -- gating the resolution graph
-            correctly (via that parameter) still leaves this detector
-            free to re-resolve a stored, non-live path against the
-            caller's cwd unless this flag itself says not to (Codex
-            review, fresh evidence: the CWD-probe fix above protects
-            ``_compute_resolution_graph`` alone, not every consumer of
-            ``filesystem_backed``).
+            stored entry participates) must pass ``False`` explicitly, so
+            a stored, non-live member is never re-resolved against the
+            caller's cwd (Codex review, security finding).
+        filesystem_backed_names: Forwarded unchanged to
+            :attr:`BundleSnapshot.filesystem_backed_names` -- names *this*
+            flag exempts from *filesystem_backed*\\ 's own value, since the
+            latter is snapshot-wide and cannot itself say "every member
+            except these few" (CodeRabbit review, fresh evidence:
+            ``build_bundle_snapshot_mixed``'s live members lost their own
+            resolved identity to ``_detect_soname_skew``'s fallback purely
+            because *some* stored member also participated).
     """
     from . import deadline
 
@@ -616,7 +646,10 @@ def build_bundle_snapshot_from_metadata(
         # existing caller (see BundleSnapshot.filesystem_backed's own
         # docstring); filesystem_backed lets build_bundle_snapshot_mixed
         # override that for its own mixed/stored case.
-        filesystem_backed=probe_filesystem if filesystem_backed is None else filesystem_backed,
+        filesystem_backed=(
+            probe_filesystem if filesystem_backed is None else filesystem_backed
+        ),
+        filesystem_backed_names=filesystem_backed_names,
     )
 
 

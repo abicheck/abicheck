@@ -615,12 +615,13 @@ def _resolve_release_package_side(
         return resolve_release_package_map(
             side_dir, variant_id=variant_id, dest_root=dest_root
         )
-    except (ValueError, OSError, SnapshotError) as exc:
+    except (KeyError, ValueError, OSError, SnapshotError) as exc:
         # Ambiguous variant, a same-key collision (ValueError), a missing/
-        # unreadable ref or object (OSError), or a corrupt document
-        # (SnapshotError) are all usage errors, not an abicheck bug --
-        # translated the same way `_build_match_map`'s own
-        # `AmbiguousLibraryMatchError` already is (Codex review).
+        # unreadable ref (OSError), an object absent from objects/ entirely
+        # (KeyError, DirectoryObjectStore.get's own error on a truncated
+        # package; CodeRabbit review), or a corrupt document (SnapshotError)
+        # are all usage errors, translated like `_build_match_map`'s own
+        # `AmbiguousLibraryMatchError` (Codex review).
         raise click.UsageError(str(exc)) from exc
 
 

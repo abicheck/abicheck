@@ -763,7 +763,7 @@ class TestMaterializationPreservesBundleComposition:
     def test_variant_composition_section_survives_materialization(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.serialization import snapshot_to_dict
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
         from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
         from abicheck.storage.import_bundle_facts import (
             BUNDLE_FACTS_ARTIFACT_TYPE,
@@ -790,7 +790,7 @@ class TestMaterializationPreservesBundleComposition:
         pkg = tmp_path / "pkg"
         store = DirectoryObjectStore(pkg)
         manifest = import_bundle_facts(
-            doc, store=store, max_known_schema_version=43, variant_id="v1"
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
         )
         write_project_manifest(pkg, manifest)
 
@@ -833,7 +833,9 @@ class TestMaterializationPreservesBundleComposition:
         (artifact,) = sub_manifest.artifact_refs
         assert isinstance(artifact, ArtifactRef)
         document = export_legacy_snapshot(
-            artifact, store=sub_store, source_schema_version=43
+            artifact,
+            store=sub_store,
+            source_schema_version=sub_manifest.versions.source_schema_version,
         )
         assert document["library"] in {"liba.so", "libb.so"}
 
@@ -852,7 +854,7 @@ class TestMaterializationPreservesBundleComposition:
         by the composition-preservation fix itself. This is the actual path
         `cli_compare_release.py`'s per-library fan-out reads each stored
         library through."""
-        from abicheck.serialization import snapshot_to_dict
+        from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
         from abicheck.storage.import_bundle_facts import (
             BUNDLE_FACTS_ARTIFACT_TYPE,
             import_bundle_facts,
@@ -875,7 +877,7 @@ class TestMaterializationPreservesBundleComposition:
         pkg = tmp_path / "pkg"
         store = DirectoryObjectStore(pkg)
         manifest = import_bundle_facts(
-            doc, store=store, max_known_schema_version=43, variant_id="v1"
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
         )
         write_project_manifest(pkg, manifest)
 
