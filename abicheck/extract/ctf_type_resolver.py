@@ -278,19 +278,18 @@ class _TypeResolver:
         if kind in (CTF_K_STRUCT, CTF_K_UNION, CTF_K_ENUM):
             return t.size_or_type
 
-        if kind == CTF_K_INTEGER:
-            if len(t.extra) >= 4:
-                enc: int = struct.unpack_from("<I", t.extra, 0)[0]
-                nr_bits = enc & 0xFFFF
-                return (nr_bits + 7) // 8
-            return 0
-
-        if kind == CTF_K_FLOAT:
-            if len(t.extra) >= 4:
-                enc_f: int = struct.unpack_from("<I", t.extra, 0)[0]
-                nr_bits = enc_f & 0xFFFF
-                return (nr_bits + 7) // 8
-            return 0
+        if kind in (CTF_K_INTEGER, CTF_K_FLOAT):
+            # P2 review, fresh evidence (Codex): size_or_type IS the
+            # declared storage size in bytes for both scalar kinds (per
+            # illumos sys/ctf.h) -- the encoding word's own bit-width
+            # field is only the occupied bit slice within that storage,
+            # which can legitimately be narrower (e.g. a bitfield-style
+            # member). Deriving the byte size from bits instead gave a
+            # struct member the wrong FieldInfo.byte_size whenever the
+            # two disagreed, with no completeness signal (extraction_
+            # partial stayed False). Mirrors the identical BTF_KIND_INT
+            # fix in extract/btf_type_resolver.py.
+            return t.size_or_type
 
         if kind == CTF_K_POINTER:
             return self._pointer_size

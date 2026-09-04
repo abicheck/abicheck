@@ -482,7 +482,18 @@ def _process_member(
     else:
         bit_offset = 0
 
-    # Resolve field type
+    # Resolve field type. A named member DIE that survived far enough to
+    # reach here (it has DW_AT_name) is always expected to carry
+    # DW_AT_type -- unlike _resolve_type's other, hypothetical callers
+    # (a return type or a "..." vararg parameter, where a missing type is
+    # legitimate), an absent DW_AT_type on a struct/union member is
+    # itself a truncation/malformation with no reference to resolve, so
+    # _resolve_type's own except-branch accounting never sees it. P2
+    # review, fresh evidence (Codex): fixed by marking it here, at the
+    # one call site that knows a type is mandatory, rather than widening
+    # _resolve_type's own no-type branch to assume every caller agrees.
+    if "DW_AT_type" not in die.attributes and incomplete is not None:
+        incomplete.append(True)
     type_name, field_byte_size = _resolve_type(
         die, CU, type_cache, incomplete=incomplete
     )

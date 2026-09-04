@@ -50,6 +50,19 @@ def _struct_with_bad_member_type() -> _Die:
     )
 
 
+def _struct_with_member_missing_type() -> _Die:
+    """A named struct member that carries no DW_AT_type attribute at all --
+    reaches _resolve_type's own `"DW_AT_type" not in die.attributes` branch,
+    which has no reference to resolve (unlike the malformed-reference repro
+    above) and so never reaches _resolve_type's except-branch accounting."""
+    member = _Die("DW_TAG_member", {"DW_AT_name": "field"})
+    return _Die(
+        "DW_TAG_structure_type",
+        {"DW_AT_name": "NoType", "DW_AT_byte_size": 4},
+        children=[member],
+    )
+
+
 def _typedef_with_bad_target() -> _Die:
     """A typedef whose DW_AT_type references an unresolved offset -- reaches
     _process_typedef's own except Exception: incomplete.append(True); return."""
@@ -143,6 +156,20 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
         assert result.cu_failed == 0  # the CU itself did not raise
         assert result.evidence_state == "partial"
         assert result.structs["S"].fields[0].type_name == "unknown"
+
+    def test_member_missing_type_marks_partial(self) -> None:
+        """P2 review, fresh evidence (Codex): a named member DIE with no
+        DW_AT_type at all (truncated/malformed debug info, not a
+        legitimate type-less case -- a real struct member always carries
+        DW_AT_type) previously fell through _resolve_type's own
+        `"DW_AT_type" not in die.attributes` branch with no completeness
+        signal, since that branch has no reference to resolve and so
+        never reaches the except-branch accounting the sibling
+        malformed-reference case above already fixed."""
+        result = _run_parse([_struct_with_member_missing_type()])
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        assert result.structs["NoType"].fields[0].type_name == "unknown"
 
     def test_malformed_typedef_target_marks_partial(self) -> None:
         # Real pyelftools raises (DWARFError) for an unresolvable ref rather
@@ -363,6 +390,14 @@ class TestUnifiedPassFlagsIncompleteTypeResolution:
         assert meta.cu_failed == 0
         assert meta.evidence_state == "partial"
         assert meta.structs["S"].fields[0].type_name == "unknown"
+
+    def test_member_missing_type_marks_meta_partial(self) -> None:
+        sess = _session_with([_struct_with_member_missing_type()])
+        with patch("abicheck.dwarf_unified._parse_frame_registers", return_value=True):
+            meta, _adv = parse_dwarf_from_session(sess)
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+        assert meta.structs["NoType"].fields[0].type_name == "unknown"
 
     def test_clean_parse_is_not_flagged_partial(self) -> None:
         struct, die_map = _clean_struct()

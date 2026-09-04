@@ -209,6 +209,44 @@ class TestCtfStructs:
         assert s.fields[1].name == "y"
         assert s.fields[1].byte_offset == 4
 
+    def test_int_member_uses_declared_storage_size_not_bit_width(self) -> None:
+        """P2 review, fresh evidence (Codex): CTF_K_INTEGER's size_or_type
+        is the type's real declared storage size in bytes (per illumos
+        sys/ctf.h); the encoding word's own bit-width field (lower 16
+        bits) is the *occupied bit slice within that storage*, not the
+        storage size -- a narrower value can legitimately sit in wider
+        storage. Reproduces the exact finding scenario: size_or_type=4
+        (4-byte storage), encoded bit width=8 -- byte_size must follow
+        the declared storage size (4), not (nr_bits + 7) // 8 (which
+        would wrongly report 1)."""
+        b = CtfBuilder()
+        narrow_int_enc = struct.pack("<I", 8)  # 8-bit encoded width
+        b.add_type("narrow_int", CTF_K_INTEGER, 0, 4, extra=narrow_int_enc)
+
+        m_name = b.add_string("v")
+        members = struct.pack("<II", m_name, (1 << 16) | 0)
+        b.add_type("s", CTF_K_STRUCT, 1, 4, extra=members)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.structs["s"].fields[0].byte_size == 4
+        assert meta.extraction_partial is False
+
+    def test_float_member_uses_declared_storage_size_not_bit_width(self) -> None:
+        """Same fix, CTF_K_FLOAT sibling: a float type whose declared
+        storage (size_or_type) exceeds its encoded bit width must still
+        report the declared storage size."""
+        b = CtfBuilder()
+        narrow_float_enc = struct.pack("<I", 16)  # 16-bit encoded width
+        b.add_type("narrow_float", CTF_K_FLOAT, 0, 8, extra=narrow_float_enc)
+
+        m_name = b.add_string("v")
+        members = struct.pack("<II", m_name, (1 << 16) | 0)
+        b.add_type("s", CTF_K_STRUCT, 1, 8, extra=members)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.structs["s"].fields[0].byte_size == 8
+        assert meta.extraction_partial is False
+
     def test_union(self) -> None:
         b = CtfBuilder()
         int_enc = struct.pack("<I", 32)
@@ -1258,22 +1296,26 @@ class TestParseTypesTruncation:
 
 
 class TestResolverEdgeCases:
-    def test_integer_missing_encoding_size_zero(self) -> None:
-
-        # Integer type with no extra encoding word → size resolves to 0.
+    def test_integer_missing_encoding_still_uses_declared_storage_size(self) -> None:
+        """P2 review, fresh evidence (Codex, sibling of the BTF_KIND_INT
+        fix): size_or_type is the type's real declared storage size
+        regardless of whether the encoding word is present at all --
+        previously required a nonzero-length ``extra`` to return
+        anything but 0, which this test pinned as if 0 were correct.
+        size() must not depend on the encoding word's presence."""
         t = CtfType(
             type_id=1, name_off=0, info=(CTF_K_INTEGER << 24), size_or_type=4, extra=b""
         )
         resolver = _TypeResolver([CtfType(0, 0, 0, 0), t], b"\x00", CTF_VERSION_3)
-        assert resolver.size(1) == 0
+        assert resolver.size(1) == 4
 
-    def test_float_missing_encoding_size_zero(self) -> None:
-
+    def test_float_missing_encoding_still_uses_declared_storage_size(self) -> None:
+        """Same fix, CTF_K_FLOAT sibling."""
         t = CtfType(
             type_id=1, name_off=0, info=(CTF_K_FLOAT << 24), size_or_type=4, extra=b""
         )
         resolver = _TypeResolver([CtfType(0, 0, 0, 0), t], b"\x00", CTF_VERSION_3)
-        assert resolver.size(1) == 0
+        assert resolver.size(1) == 4
 
     def test_array_v2_short_extra_size_zero(self) -> None:
 
