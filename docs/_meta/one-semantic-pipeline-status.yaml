@@ -346,25 +346,44 @@ concepts:
     consumers: partial
     authority: mixed
     removal_gate: >-
-      Phase 8B (multi-artifact-canonical-storage): typed DTOs for every
-      section beyond semantic_ir, and multi-artifact ProjectSnapshot
-      packages. First PR landed 2026-09-03:
-      storage.types_section_codec.TypesSection is the "types" legacy
-      section's own typed DTO (wired through storage.dto.types_to_dto/
-      types_from_dto in place of the generic legacy_section_to_dto
-      pass-through envelope), chosen first because it is the simplest
+      Phase 8B (multi-artifact-canonical-storage). Every typed-DTO item is
+      now closed: storage.types_section_codec.TypesSection (2026-09-03,
+      "types") was the first slice, chosen because it is the simplest
       case -- exactly one field, always required when the section is
       present, with none of the schema-version-dependent optional-field
-      sparsity that made provenance/debug/binary considered-and-deferred.
-      On-disk payload shape is unchanged. A second PR (2026-09-04,
-      ADR-063 Track C 8B) landed folding baseline-set/BundleFacts
-      documents into that same sectioned representation
-      (storage.import_bundle_facts/import_baseline_set, reusing
-      import_legacy_snapshot per library and attaching container-level
-      composition/metadata facts to VariantRef.sections) -- this item is
-      closed. The remaining seven legacy sections (binary/declarations/
-      layout/debug/build/graph/provenance) and multi-artifact
-      ProjectSnapshot packages still remain open.
+      sparsity that made provenance/debug/binary considered-and-deferred
+      at the time; a second, same-day PR (ADR-063 Track 4, 8B second
+      slice) promoted "graph", and a third (8B third slice) closed the
+      remaining five (binary/declarations/layout/debug/build/provenance)
+      -- storage.dto.py now wires every one of the eight D8 legacy
+      sections through its own dedicated *_to_dto/*_from_dto pair rather
+      than the generic legacy_section_to_dto pass-through envelope. A
+      fourth PR (2026-09-04, ADR-063 Track C 8B) landed folding
+      baseline-set/BundleFacts documents into that same sectioned,
+      multi-artifact representation (storage.import_bundle_facts/
+      import_baseline_set, reusing import_legacy_snapshot per library and
+      attaching container-level composition/metadata facts to
+      VariantRef.sections) -- `PackageManifest`'s own object model
+      (`artifact_refs`/`variant_refs` as tuples, Phase 0) already
+      supported multi-artifact packages, and these two adapters are its
+      first real multi-artifact producers.
+
+      The single-artifact sectioned document (Phase 8, distinct from this
+      concept's own Phase 8B) is already `dump`/`compare`/`scan`'s default
+      write/read shape -- that part of `authority: mixed`'s legacy side is
+      closed. What remains is specific to the *multi-artifact package*
+      half this concept names: it is reachable only as a typed-API
+      primitive and an explicit `compare`/`scan --against` input shape,
+      never `dump`/`compare`/`scan`'s own default path -- a user who
+      doesn't explicitly build or pass a package still gets the
+      pre-existing single-artifact representation. Per
+      docs/contribute/plans/storage-format-v2.md's own Phase 1 status,
+      closing that gap needs: the `.tar.zst` single-file transport form
+      (A1.1's own remainder), digest-deduplicated shared
+      BuildSourcePack/toolchain evidence (A1.5), `bundle_variants:`
+      config/CLI wiring (A1.6), stored/live and stored/stored
+      release-comparison reachability from the standard CLI (A1.7), and
+      non-ELF artifact membership (A1.8).
 
   report_document:
     primitive: complete
