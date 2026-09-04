@@ -340,12 +340,8 @@ def test_write_baseline_records_per_module_counts(
     monkeypatch.setattr(
         gate, "load_cicd_stats", lambda _dir: {"total": 10, "survived": 3}
     )
-    assert (
-        gate.main(
-            ["--results-file", results, "--baseline-file", out_file, "--write-baseline"]
-        )
-        == 0
-    )
+    args = ["--results-file", results, "--baseline-file", out_file, "--write-baseline"]
+    assert gate.main(args) == 0
     doc = json.loads(Path(out_file).read_text(encoding="utf-8"))
     assert doc["total_survivors"] == 3
     assert doc["modules"]["abicheck/diff_types.py"]["survivors"] == 2
@@ -614,9 +610,8 @@ def test_parse_changed_lines_hunk_shapes(hunk: str, expected: set[int]) -> None:
 
 
 def test_parse_changed_lines_ignores_deleted_files() -> None:
-    assert (
-        gate.parse_changed_lines("--- a/f.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n") == {}
-    )
+    diff = "--- a/f.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n"
+    assert gate.parse_changed_lines(diff) == {}
 
 
 # --- Codex review: the gate must not pass on a run that did not happen --------
@@ -645,9 +640,8 @@ def test_an_aborted_mutmut_run_fails_even_with_readable_results(
     output = capsys.readouterr().out
     assert "the run aborted" in output
     assert "saved full mutmut run output" in output
-    assert (
-        tmp_path / "mutmut-run-output.txt"
-    ).read_text() == "config error: nothing to mutate"
+    saved = (tmp_path / "mutmut-run-output.txt").read_text()
+    assert saved == "config error: nothing to mutate"
 
 
 def test_a_successful_run_with_survivors_is_still_measured(
@@ -1136,10 +1130,8 @@ def test_parse_removed_lines_reads_the_base_side_of_every_hunk() -> None:
 
 def test_parse_removed_lines_ignores_pure_additions() -> None:
     """Negative control: an added line has no base-side existence at all."""
-    assert (
-        gate.parse_removed_lines("--- a/x.py\n+++ b/x.py\n@@ -3,0 +4,2 @@\n+a\n+b\n")
-        == {}
-    )
+    diff = "--- a/x.py\n+++ b/x.py\n@@ -3,0 +4,2 @@\n+a\n+b\n"
+    assert gate.parse_removed_lines(diff) == {}
 
 
 # --- Codex review: two independent sources must agree ------------------------

@@ -688,15 +688,8 @@ from typing import Any
 #:       settings previously published an identical
 #:       ``surface.scope_to_public_surface`` value despite retaining
 #:       genuinely different findings.
-#: 2.48 -- ADR-063 Phase 7: every JSON report gains an additive top-level
-#:       ``run_outcome`` block (``policy.outcome.RunOutcome.to_dict()`` --
-#:       ``compatibility``/``assurance``/``gate``/``operational``/
-#:       ``lifecycle``), alongside the unchanged ``verdict``/``exit_code``/
-#:       ``severity`` fields.
-#: 2.49 -- G42 phase 1 (explicit check identifiers): ``check_id``'s pattern
-#:       gains two optional, composable tail segments -- ``!<environment_id>``
-#:       (reserved) and ``~<explicit_id>`` (a project author's
-#:       ``checks[].id``) -- additive to the existing four-component shape.
+#: 2.48 -- ADR-063 Phase 7: every JSON report gains an additive top-level ``run_outcome`` block (``policy.outcome.RunOutcome.to_dict()`` -- ``compatibility``/``assurance``/``gate``/``operational``/``lifecycle``), alongside the unchanged ``verdict``/``exit_code``/``severity`` fields.
+#: 2.49 -- G42 phase 1 (explicit check identifiers): ``check_id``'s pattern gains two optional, composable tail segments -- ``!<environment_id>`` (reserved) and ``~<explicit_id>`` (a project author's ``checks[].id``) -- additive to the existing four-component shape.
 REPORT_SCHEMA_VERSION = "2.50"  #: analysis_assurance gains debug_evidence (per-side DWARF/PDB/BTF/CTF extraction-outcome receipt); additive, present whenever analysis_assurance itself is. Renumbered from a conflicting 2.47 when the origin/main merge claimed 2.48/2.49 first (same "renumber, don't reuse" convention as the 2.32/2.36/2.38 entries above).
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

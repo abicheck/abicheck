@@ -541,10 +541,7 @@ def _strip_debug_info(*libs: Path) -> str | None:
     if not strip:
         return "SKIP:strip tool not found"
     if sys.platform == "win32":
-        return (
-            "SKIP:Windows PE/PDB require a different strip tool/flags "
-            "(not implemented)"
-        )
+        return "SKIP:Windows PE/PDB require a different strip tool/flags (not implemented)"
     flags = ["-S"] if sys.platform == "darwin" else ["-g"]
     for lib in libs:
         r = subprocess.run([strip, *flags, str(lib)], capture_output=True, text=True, timeout=30)
@@ -664,11 +661,10 @@ def _run_compare_and_parse(
     """Run the compare command and parse its JSON verdict, kinds, and receipt.
 
     Returns ``(verdict, kinds, analysis_assurance, None)`` on success or
-    ``(None, (), None, error_msg)`` on failure. *kinds* is every
-    ``changes[].kind`` in the report, used to check
-    ``expected_kinds``/``expected_absent_kinds`` from ground_truth.json.
-    The assurance object is carried into the validation artifact without
-    interpretation; ``check_stripped_fp.py`` owns its validation policy.
+    ``(None, (), None, error_msg)`` on failure. *kinds* is every ``changes[].kind``
+    in the report, used to check ``expected_kinds``/``expected_absent_kinds`` from
+    ground_truth.json. The assurance object is carried into the validation
+    artifact without interpretation; ``check_stripped_fp.py`` owns its policy.
     """
     rc = subprocess.run(compare_cmd, capture_output=True, text=True, timeout=60)
     try:
@@ -677,12 +673,8 @@ def _run_compare_and_parse(
         return None, (), None, f"invalid JSON from compare: {rc.stdout[:200]}"
     kinds = tuple(c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict))
     assurance = data.get("analysis_assurance")
-    return (
-        data.get("verdict", "UNKNOWN"),
-        kinds,
-        assurance if isinstance(assurance, dict) else None,
-        None,
-    )
+    assurance = assurance if isinstance(assurance, dict) else None
+    return data.get("verdict", "UNKNOWN"), kinds, assurance, None
 
 
 def _build_compare_direct_cmd(
@@ -848,10 +840,7 @@ def _write_source_compile_db(
                 resolved = path.resolve()
             except OSError:
                 return False
-            return (
-                resolved.name == src.name
-                and resolved.parent == case_resolved
-            )
+            return resolved.name == src.name and resolved.parent == case_resolved
 
         def same_side_target(entry: dict) -> bool:
             args = [str(a) for a in entry.get("arguments", [])]
@@ -859,20 +848,11 @@ def _write_source_compile_db(
             needle = f"{case_dir.name}_{target_suffix}"
             return needle in " ".join([*args, command])
 
-        selected = [
-            e for e in entries
-            if same_side_target(e)
-        ]
+        selected = [e for e in entries if same_side_target(e)]
         if not selected:
-            selected = [
-                e for e in entries
-                if same_source(e)
-            ]
+            selected = [e for e in entries if same_source(e)]
         if not selected:
-            selected = [
-                e for e in entries
-                if same_case_source(e)
-            ]
+            selected = [e for e in entries if same_case_source(e)]
         if selected:
             out.write_text(json.dumps(selected, indent=2))
             return out

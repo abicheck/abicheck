@@ -1317,9 +1317,8 @@ class TestAnalysisAssuranceCliIntegration:
     def test_json_report_persists_the_exit_contribution_for_aggregate(
         self, tmp_path: Path
     ) -> None:
-        """`abicheck aggregate` reads `analysis_assurance_exit_contribution`
-        directly rather than recomputing it (Codex review, PR #780) -- a
-        real `compare` invocation must actually write it, end to end."""
+        """`abicheck aggregate` reads `analysis_assurance_exit_contribution` directly
+        rather than recomputing it (Codex review, PR #780) -- a real `compare` invocation must actually write it, end to end."""
         res = _compare(
             tmp_path,
             _elf_only_pair(),
