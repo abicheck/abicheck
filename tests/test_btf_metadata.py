@@ -411,6 +411,10 @@ class TestBtfFuncProtos:
         assert len(fp.params) == 2
         assert fp.params[0] == ("a", "int")
         assert fp.params[1] == ("b", "int")
+        # Positive control (P2 review, fresh evidence, Codex): a fully
+        # resolvable function must not be marked partial -- proving the
+        # fix below doesn't disturb the ordinary resolvable-prototype path.
+        assert meta.extraction_partial is False
 
 
 # ---------------------------------------------------------------------------
@@ -1126,13 +1130,30 @@ class TestBtfEdgeCases:
         assert len(meta.typedefs) == 0
 
     def test_func_without_proto(self) -> None:
-        """FUNC that references non-FUNC_PROTO type is skipped."""
+        """FUNC that references non-FUNC_PROTO type is skipped, and (P2
+        review, fresh evidence, Codex) must mark the parse partial rather
+        than silently reporting a clean, complete extraction with this
+        function simply absent from func_protos."""
         b = BtfBuilder()
         int_enc = struct.pack("<I", 32)
         b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
         b.add_type("bad_func", BTF_KIND_FUNC, 0, 1)  # points to INT, not PROTO
         meta = parse_btf_from_bytes(b.build())
         assert len(meta.func_protos) == 0
+        assert meta.extraction_partial is True
+
+    def test_func_with_dangling_proto_reference(self) -> None:
+        """Sibling of test_func_without_proto above: size_or_type names no
+        type record at all (rather than one that exists but is the wrong
+        kind) -- the same silent-skip path through proto_map.get()
+        returning None, so it must be flagged the same way."""
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+        b.add_type("dangling_func", BTF_KIND_FUNC, 0, 999)  # no such type_id
+        meta = parse_btf_from_bytes(b.build())
+        assert len(meta.func_protos) == 0
+        assert meta.extraction_partial is True
 
     def test_truncated_type_section(self) -> None:
         """Type section that ends mid-entry."""

@@ -274,8 +274,15 @@ def _get_type_align(
     try:
         type_die = _resolve_die_ref(member_die, "DW_AT_type", CU)
 
-        # Follow transparent wrapper tags via _unwrap_qualifiers
-        type_die = _unwrap_qualifiers(type_die, CU)
+        # Follow transparent wrapper tags via _unwrap_qualifiers. Forward
+        # `incomplete` (P1 review, fresh evidence, Codex): a member whose
+        # DW_AT_type resolves but names a typedef/qualifier chain that
+        # itself has an unresolvable inner DW_AT_type was silently treated
+        # as a clean unwrap here -- `_unwrap_qualifiers` already records
+        # that failure via its own `incomplete` accumulator (see its
+        # `_resolve_type_die`/depth-limit branches), but only when a
+        # caller actually passes one through.
+        type_die = _unwrap_qualifiers(type_die, CU, incomplete=incomplete)
 
         # 1. DW_AT_alignment present on the resolved type (DWARF 5)
         if "DW_AT_alignment" in type_die.attributes:

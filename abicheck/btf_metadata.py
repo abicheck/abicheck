@@ -560,6 +560,16 @@ def _extract_func_protos(
 
         proto = proto_map.get(t.size_or_type)
         if proto is None:
+            # P2 review, fresh evidence (Codex): a BTF_KIND_FUNC whose
+            # size_or_type is missing from proto_map entirely (absent, or
+            # naming a record that isn't itself a BTF_KIND_FUNC_PROTO) was
+            # silently skipped here with no completeness signal -- the
+            # public parser then returned has_btf=True with this function
+            # simply missing from func_protos and extraction_partial=False,
+            # indistinguishable from a binary that genuinely has no such
+            # function at all.
+            if invalid_strings is not None:
+                invalid_strings.append(True)
             continue
 
         ret_type = resolver.name(proto.size_or_type)

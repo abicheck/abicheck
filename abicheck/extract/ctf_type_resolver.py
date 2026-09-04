@@ -106,11 +106,13 @@ class _TypeResolver:
         str_data: bytes,
         version: int,
         *,
+        pointer_size: int = 8,
         invalid_strings: list[bool] | None = None,
     ) -> None:
         self._types = types
         self._str = str_data
         self._version = version
+        self._pointer_size = pointer_size
         self._name_cache: dict[int, str] = {}
         self._size_cache: dict[int, int] = {}
         self._resolving_name: set[int] = set()
@@ -291,7 +293,7 @@ class _TypeResolver:
             return 0
 
         if kind == CTF_K_POINTER:
-            return 8  # assume 64-bit
+            return self._pointer_size
 
         if kind == CTF_K_ARRAY:
             if self._version >= CTF_VERSION_3 and len(t.extra) >= 12:

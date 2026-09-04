@@ -774,6 +774,27 @@ class TestCtfResolverThroughExtraction:
         assert s.fields[0].type_name == "int *"
         assert s.fields[0].byte_size == 8
 
+    def test_pointer_member_on_32bit_target(self) -> None:
+        """P2 review, fresh evidence (Codex): a pointer member's size must
+        follow the container's real pointer width, not a hardcoded 64-bit
+        assumption -- distinct from test_pointer_member above (which pins
+        the still-correct 64-bit default when no pointer_size is given).
+        On a 32-bit target, the struct's own byte_size (8, matching the
+        real 32-bit layout: two 4-byte fields) also proves the *struct's*
+        own size isn't silently derived from the pointer member either."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)  # id=1
+        b.add_type("", CTF_K_POINTER, 0, 1)  # ptr to int, id=2
+        m_name = b.add_string("ptr")
+        members = struct.pack("<II", m_name, (2 << 16) | 0)
+        b.add_type("s", CTF_K_STRUCT, 1, 8, extra=members)
+
+        meta = parse_ctf_from_bytes(b.build(), pointer_size=4)
+        s = meta.structs["s"]
+        assert s.fields[0].type_name == "int *"
+        assert s.fields[0].byte_size == 4
+
     def test_const_member(self) -> None:
         b = CtfBuilder()
         int_enc = struct.pack("<I", 32)
@@ -1249,7 +1270,10 @@ class TestReadCtfSection:
         elf = MagicMock()
         elf.get_section_by_name.side_effect = lambda n: section if n == ".ctf" else None
         with patch("elftools.elf.elffile.ELFFile", return_value=elf):
-            assert _read_ctf_section(f) == b"CTFDATA"
+            # elf.elfclass is a MagicMock attribute here (never == 32), so
+            # this exercises the 64-bit branch; the 32-bit branch is
+            # covered by test_read_pointer_size_from_32bit_elfclass below.
+            assert _read_ctf_section(f) == (b"CTFDATA", 8)
 
     def test_reads_sunw_ctf(self, tmp_path) -> None:
         f = tmp_path / "libfoo.so"
@@ -1261,7 +1285,7 @@ class TestReadCtfSection:
             section if n == ".SUNW_ctf" else None
         )
         with patch("elftools.elf.elffile.ELFFile", return_value=elf):
-            assert _read_ctf_section(f) == b"SUNW"
+            assert _read_ctf_section(f) == (b"SUNW", 8)
 
     def test_no_ctf_section_returns_none(self, tmp_path) -> None:
         f = tmp_path / "libfoo.so"
@@ -1270,6 +1294,22 @@ class TestReadCtfSection:
         elf.get_section_by_name.return_value = None
         with patch("elftools.elf.elffile.ELFFile", return_value=elf):
             assert _read_ctf_section(f) is None
+
+    def test_read_pointer_size_from_32bit_elfclass(self, tmp_path) -> None:
+        """P2 review, fresh evidence (Codex): _read_ctf_section must derive
+        pointer_size from the container's real ELF class, mirroring
+        btf_metadata._read_btf_section's own equivalent test -- a 32-bit
+        ELF carrying CTF previously had its class discarded entirely, so
+        _TypeResolver always reported an 8-byte pointer regardless."""
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        section = MagicMock()
+        section.data.return_value = b"CTFDATA"
+        elf = MagicMock()
+        elf.elfclass = 32
+        elf.get_section_by_name.side_effect = lambda n: section if n == ".ctf" else None
+        with patch("elftools.elf.elffile.ELFFile", return_value=elf):
+            assert _read_ctf_section(f) == (b"CTFDATA", 4)
 
 
 class TestParseCtfMetadata:
@@ -1295,9 +1335,34 @@ class TestParseCtfMetadata:
         b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
         f = tmp_path / "libfoo.so"
         f.write_bytes(b"\x7fELF")
-        with patch("abicheck.ctf_metadata._read_ctf_section", return_value=b.build()):
+        with patch(
+            "abicheck.ctf_metadata._read_ctf_section",
+            return_value=(b.build(), 8),
+        ):
             meta = parse_ctf_metadata(f)
         assert meta.has_ctf
+
+    def test_32bit_pointer_size_reaches_the_resolver(self, tmp_path) -> None:
+        """P2 review, fresh evidence (Codex): parse_ctf_metadata must
+        thread _read_ctf_section's derived pointer_size all the way
+        through to parse_ctf_from_bytes -> _TypeResolver, not just accept
+        it as an argument test_pointer_member_on_32bit_target (above)
+        exercises directly."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)  # id=1
+        b.add_type("", CTF_K_POINTER, 0, 1)  # ptr to int, id=2
+        m_name = b.add_string("ptr")
+        members = struct.pack("<II", m_name, (2 << 16) | 0)
+        b.add_type("s", CTF_K_STRUCT, 1, 8, extra=members)
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF")
+        with patch(
+            "abicheck.ctf_metadata._read_ctf_section",
+            return_value=(b.build(), 4),
+        ):
+            meta = parse_ctf_metadata(f)
+        assert meta.structs["s"].fields[0].byte_size == 4
 
 
 class TestParseCtfFromBytesErrorPaths:

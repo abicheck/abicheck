@@ -199,8 +199,15 @@ def has_ctf_section(elf_path: Path) -> bool:
         return False
 
 
-def _read_ctf_section(elf_path: Path) -> bytes | None:
-    """Read raw .ctf section data from an ELF file."""
+def _read_ctf_section(elf_path: Path) -> tuple[bytes, int] | None:
+    """Read raw .ctf section data from an ELF file; return (data, pointer_size).
+
+    P2 review, fresh evidence (Codex): the container's ELF class was
+    previously discarded here, so every CTF-sourced pointer member read a
+    hardcoded 64-bit size regardless of the binary's real word size --
+    identical to the bug `btf_type_resolver._TypeResolver` was already
+    fixed for; mirrors that module's own `_read_btf_section`.
+    """
     from elftools.elf.elffile import ELFFile
 
     with open(elf_path, "rb") as f:
@@ -210,7 +217,8 @@ def _read_ctf_section(elf_path: Path) -> bytes | None:
             section = elf.get_section_by_name(".SUNW_ctf")  # type: ignore[no-untyped-call]
         if section is None:
             return None
-        return bytes(section.data())
+        pointer_size = 4 if elf.elfclass == 32 else 8
+        return bytes(section.data()), pointer_size
 
 
 # ---------------------------------------------------------------------------
@@ -677,11 +685,19 @@ def parse_ctf_metadata(elf_path: Path) -> CtfMetadata:
         log.debug("parse_ctf_metadata: no .ctf section in %s", elf_path)
         return empty
 
-    return parse_ctf_from_bytes(raw)
+    ctf_data, pointer_size = raw
+    return parse_ctf_from_bytes(ctf_data, pointer_size=pointer_size)
 
 
-def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
+def parse_ctf_from_bytes(data: bytes, pointer_size: int = 8) -> CtfMetadata:
     """Parse CTF from raw bytes (useful for testing without ELF wrapper).
+
+    Args:
+        data: Raw CTF section bytes.
+        pointer_size: Pointer size in bytes (4 for 32-bit, 8 for 64-bit).
+            Defaults to 64-bit, matching ``parse_btf_from_bytes``'s own
+            default -- a caller with no ELF container to read the class
+            from (e.g. a bare raw-blob input) genuinely cannot know it.
 
     Returns ``CtfMetadata()`` on any error.  Never raises.
     """
@@ -752,7 +768,11 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
     # accumulator observes.
     invalid_strings: list[bool] = []
     resolver = _TypeResolver(
-        types, str_data, header.version, invalid_strings=invalid_strings
+        types,
+        str_data,
+        header.version,
+        pointer_size=pointer_size,
+        invalid_strings=invalid_strings,
     )
 
     meta = CtfMetadata(has_ctf=True, type_count=len(types) - 1)

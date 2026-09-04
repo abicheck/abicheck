@@ -549,6 +549,118 @@ class TestPackedMemberIncompletePropagation:
         assert "Named" in meta.packed_structs
 
 
+class TestGetTypeAlignForwardsIncompleteThroughQualifierUnwrap:
+    """P1 review, fresh evidence (Codex): distinct from
+    TestPackedMemberIncompletePropagation above (the member's own
+    DW_AT_type reference is itself unresolvable). Here the member's
+    DW_AT_type resolves fine to a typedef, but *that* typedef's own
+    DW_AT_type is unresolvable -- `_get_type_align` unwraps qualifiers via
+    `_unwrap_qualifiers`, which has its own `incomplete` accumulator (used
+    by `_resolve_type_die` inside it), but `_get_type_align` previously
+    called it without forwarding its own `incomplete` parameter, so the
+    inner failure was swallowed and `_unwrap_qualifiers` returned the
+    still-unresolved typedef DIE with no completeness signal at all --
+    `_get_type_align` then fell through to its composite-type branch and
+    returned a silent 0, exactly like a legitimate skip, while
+    evidence_state still reported "parsed"."""
+
+    def test_unresolvable_typedef_target_marks_partial(self) -> None:
+        # member -> typedef (resolves fine) -> unresolvable inner type
+        typedef_die = _Die(
+            "DW_TAG_typedef",
+            {
+                "DW_AT_name": "opaque_t",
+                "DW_AT_type": _Attr(999, "DW_FORM_ref_addr"),
+            },
+            offset=30,
+        )
+        bad_member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "x", "DW_AT_type": _Attr(30, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "Named", "DW_AT_byte_size": 4},
+            children=[bad_member],
+        )
+        root = _Die("DW_TAG_compile_unit", children=[struct])
+        cu = _CU(top_die=root, offset=0)
+        # The member's own DW_AT_type (offset 30) resolves normally; only
+        # the typedef's inner DW_AT_type (offset 999) is missing.
+        cu._die_map = {30: typedef_die}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+            # Only the *typedef's own* inner resolution goes through
+            # dwarf_utils.resolve_type_die -> dwarf_utils.resolve_die_ref;
+            # the member's own outer DW_AT_type resolution in
+            # _get_type_align uses a separately-imported name binding
+            # (abicheck.dwarf_advanced._resolve_die_ref) and is unaffected
+            # by this patch, so it still resolves the typedef DIE normally
+            # via cu._die_map.
+            patch(
+                "abicheck.dwarf_utils.resolve_die_ref",
+                side_effect=RuntimeError("bad ref"),
+            ),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+        assert "Named" in meta.all_struct_names
+        assert "Named" not in meta.packed_structs
+
+    def test_resolvable_typedef_target_is_not_flagged(self) -> None:
+        """Positive control: a fully-resolvable typedef chain must not be
+        flagged, proving the fix didn't disturb ordinary qualifier
+        unwrapping."""
+        int_type = _Die(
+            "DW_TAG_base_type",
+            {"DW_AT_name": "int", "DW_AT_byte_size": 4},
+            offset=21,
+        )
+        typedef_die = _Die(
+            "DW_TAG_typedef",
+            {"DW_AT_name": "myint_t", "DW_AT_type": _Attr(21, "DW_FORM_ref_addr")},
+            offset=30,
+        )
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "x", "DW_AT_type": _Attr(30, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "Named", "DW_AT_byte_size": 4},
+            children=[member],
+        )
+        root = _Die("DW_TAG_compile_unit", children=[struct])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {30: typedef_die, 21: int_type}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "parsed"
+        assert "Named" in meta.all_struct_names
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
