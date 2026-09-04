@@ -44,10 +44,20 @@ class TestWriteBundleFactsPackage:
 
         manifest = write_bundle_facts_package(facts, store=store)
 
-        assert {a.artifact_id for a in manifest.artifact_refs} == {"liba.so", "libb.so"}
+        # artifact_id is now an opaque, content-derived id -- not the
+        # library name itself (Codex review: a real library name can
+        # contain characters ArtifactRef.artifact_id's own safety
+        # validation refuses) -- so identity is checked via the recovered
+        # native_identity library_name instead.
+        recovered_names = {
+            a.native_identity["library_name"] for a in manifest.artifact_refs
+        }
+        assert recovered_names == {"liba.so", "libb.so"}
         assert [v.variant_id for v in manifest.variant_refs] == ["default"]
         (variant,) = manifest.variant_refs
-        assert set(variant.artifact_ids) == {"liba.so", "libb.so"}
+        assert set(variant.artifact_ids) == {
+            a.artifact_id for a in manifest.artifact_refs
+        }
         for artifact in manifest.artifact_refs:
             assert artifact.variant_id == "default"
             assert artifact.kind == "elf"
@@ -561,7 +571,26 @@ class TestManifestDecodeRejectsCorruption:
         huge_alias_array = json.dumps(["a"] * 2_000_000)
 
         with pytest.raises(JsonContainerBudgetExceeded):
-            _decode_aliases(huge_alias_array)
+            _decode_aliases(huge_alias_array, 0)
+
+    def test_rejects_a_bundle_wide_node_total_even_when_each_array_fits(
+        self,
+    ) -> None:
+        """N artifacts can each carry an alias array individually under the
+        per-call node cap while summing far past it in aggregate -- the
+        per-call cap alone doesn't see this (Codex review, fresh evidence
+        on this same guard, twice)."""
+        from abicheck.bundle_facts_store import _decode_aliases
+        from abicheck.storage.json_budget import JsonContainerBudgetExceeded
+
+        # Each array is comfortably under DEFAULT_MAX_JSON_CONTAINER_NODES
+        # (1_000_000) on its own.
+        one_array = json.dumps(["a"] * 900_000)
+
+        nodes_so_far = 0
+        _aliases, nodes_so_far = _decode_aliases(one_array, nodes_so_far)
+        with pytest.raises(JsonContainerBudgetExceeded):
+            _decode_aliases(one_array, nodes_so_far)
 
 
 class TestWriteBundleFactsPackageValidatesManifestStructure:
@@ -633,3 +662,34 @@ class TestBundleFactsPackageSurrogateEscapedFilenames:
         round_tripped = read_bundle_facts_package(manifest, store=store)
 
         assert round_tripped.library_filenames == {"liba.so": "caf\udce9"}
+
+
+class TestBundleFactsPackageLegalButUnsafeLibraryNames:
+    def test_round_trips_case_only_distinct_library_names(self) -> None:
+        """ELF library matching is deliberately case-sensitive, so
+        `libFoo.so`/`libfoo.so` are two distinct, legal bundle members --
+        but two artifact_ids differing only by case collide on a
+        case-insensitive filesystem (`PackageManifest`'s own filesystem-
+        collision guard), and passing the library name straight through as
+        artifact_id made this writer unable to store such a bundle even
+        though `BundleFacts` itself accepts it as input (Codex review)."""
+        facts = capture_bundle_facts(
+            {"libFoo.so": _snapshot("libFoo.so"), "libfoo.so": _snapshot("libfoo.so")}
+        )
+        store = InMemoryObjectStore()
+
+        manifest = write_bundle_facts_package(facts, store=store)
+        round_tripped = read_bundle_facts_package(manifest, store=store)
+
+        assert sorted(round_tripped.per_library_snapshots) == ["libFoo.so", "libfoo.so"]
+
+    def test_round_trips_a_library_name_with_a_colon(self) -> None:
+        """A `:` is not a `_safe_ref_id`-valid artifact_id character but is
+        a legal byte in a real SONAME/basename (Codex review)."""
+        facts = capture_bundle_facts({"weird:name.so": _snapshot("weird:name.so")})
+        store = InMemoryObjectStore()
+
+        manifest = write_bundle_facts_package(facts, store=store)
+        round_tripped = read_bundle_facts_package(manifest, store=store)
+
+        assert list(round_tripped.per_library_snapshots) == ["weird:name.so"]

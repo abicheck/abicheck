@@ -50,10 +50,16 @@ sections. `BundleFacts.filesystem_aliases`/`.library_filenames`, despite
 living on `BundleFacts` today keyed by library name, are genuinely
 per-artifact facts (real on-disk symlink/filename evidence for *one*
 library) — they move onto that library's own `ArtifactRef.native_identity`
-instead, using the two string keys this module defines
+instead, using string keys this module defines
 (`_NATIVE_IDENTITY_FILENAME_KEY`/`_NATIVE_IDENTITY_ALIASES_KEY`) rather than
 a new schema field, since `native_identity` is already exactly the
-`str -> str` per-artifact fact map D6 designates for this.
+`str -> str` per-artifact fact map D6 designates for this. The real
+library name itself is a third such fact
+(`_NATIVE_IDENTITY_LIBRARY_NAME_KEY`): a library name is arbitrary
+ELF/PE/Mach-O SONAME/basename content (case-sensitive siblings, a `:`, a
+non-UTF-8 byte), not a safe `ArtifactRef.artifact_id` -- see
+`_artifact_id_for_library`'s own docstring for why the two cannot be the
+same string.
 
 **Why this lives at the flat root, not in `storage/`.** Same reason
 `project_snapshot_store.py`/`project_snapshot_legacy.py` do (see their own
@@ -82,6 +88,7 @@ the libraries whose real version it discarded.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -98,6 +105,7 @@ from .storage.bundle_archive_json_guard import bounded_encode_utf8
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .storage.json_budget import (
     DEFAULT_MAX_JSON_CONTAINER_NODES,
+    JsonContainerBudgetExceeded,
     check_json_container_budget,
 )
 from .storage.package import (
@@ -128,12 +136,41 @@ INSTANTIATION_MANIFEST_SECTION_KIND = "instantiation_manifest"
 #: docstring's "genuinely project-level vs. per-artifact" section.
 _NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
 _NATIVE_IDENTITY_ALIASES_KEY = "filesystem_aliases"
+#: The real `BundleFacts.per_library_snapshots` dict key, recorded here
+#: because `ArtifactRef.artifact_id` cannot hold it directly -- see
+#: `_artifact_id_for_library`'s own docstring.
+_NATIVE_IDENTITY_LIBRARY_NAME_KEY = "library_name"
 
 #: `VariantRef.captured` coordinate key `BundleFacts.variant_fingerprint` is
 #: folded onto -- `captured`, not `declared`, since a fingerprint is what a
 #: real capture run actually observed, never a value `.abicheck.yml` states
 #: ahead of time (`VariantRef`'s own docstring distinguishes the two maps).
 _VARIANT_FINGERPRINT_KEY = "variant_fingerprint"
+
+
+def _artifact_id_for_library(library_name: str) -> str:
+    """A `_safe_ref_id`-valid, deterministic `ArtifactRef.artifact_id` for
+    *library_name*.
+
+    A library name is an arbitrary ELF/PE/Mach-O SONAME or basename --
+    legally containing a `:`, a `/`-free but otherwise unrestricted byte
+    sequence, a case-only distinction from a sibling (`libFoo.so` vs.
+    `libfoo.so`, which ELF matching keeps deliberately case-sensitive), or
+    a surrogate-escaped non-UTF-8 byte -- none of which
+    `ArtifactRef.artifact_id`'s own `_safe_ref_id`/filesystem-collision
+    validation accepts. Passing it straight through as `artifact_id` (as
+    an earlier revision did) made this writer unable to store some bundles
+    `BundleFacts` itself accepts as input (Codex review). The real name is
+    instead recorded on `native_identity`
+    (`_NATIVE_IDENTITY_LIBRARY_NAME_KEY`) and this opaque, content-derived
+    id becomes the artifact_id -- deterministic (not a counter) so writing
+    the same facts twice against the same store produces the same id,
+    consistent with `ObjectStore`'s own content-addressing.
+    """
+    digest = hashlib.sha256(
+        library_name.encode("utf-8", errors="surrogateescape")
+    ).hexdigest()
+    return f"lib-{digest[:32]}"
 
 
 def _encode_aliases(aliases: tuple[str, ...]) -> str:
@@ -149,21 +186,25 @@ def _encode_aliases(aliases: tuple[str, ...]) -> str:
     return json.dumps(sorted(aliases))
 
 
-def _decode_aliases(encoded: str) -> tuple[str, ...]:
-    """The exact inverse of `_encode_aliases`.
+def _decode_aliases(encoded: str, nodes_so_far: int) -> tuple[tuple[str, ...], int]:
+    """The exact inverse of `_encode_aliases`, returning the decoded tuple
+    alongside *nodes_so_far* updated with this array's own node count.
 
-    `check_json_container_budget` runs first: `encoded`'s own byte length
-    is already charged against `DEFAULT_MAX_BUNDLE_DECODED_BYTES` by the
-    caller, but an untrusted array of millions of short strings can stay
-    well under that byte budget while still costing `json.loads()` (and
-    the `tuple(decoded)` copy below) one Python-object allocation per
-    element -- a node-count amplification a byte-size charge alone cannot
-    see (Codex review). The same pre-scan `bundle_facts.py`'s own G40
-    archive uses for the identical reason, applied here before decoding.
+    `check_json_container_budget` runs first, capped to the *remaining*
+    cross-bundle allowance rather than the full budget every time: an
+    untrusted array of millions of short strings can stay well under the
+    aggregate byte budget while still costing `json.loads()` one Python-
+    object allocation per element (a node-count amplification a byte-size
+    charge alone cannot see), and capping only *one* array in isolation is
+    not enough either -- N artifacts can each carry an array individually
+    under the limit while summing far past it in aggregate (Codex review,
+    fresh evidence on this same guard, twice). The pre-scan bounds this one
+    array against what's left of the shared budget; the actual decoded
+    element count is then charged into the running total the same way
+    `_charge_document_bytes` charges bytes.
     """
-    check_json_container_budget(
-        encoded.encode("utf-8"), DEFAULT_MAX_JSON_CONTAINER_NODES
-    )
+    remaining_nodes = max(DEFAULT_MAX_JSON_CONTAINER_NODES - nodes_so_far, 0)
+    check_json_container_budget(encoded.encode("utf-8"), remaining_nodes)
     decoded = json.loads(encoded)
     if not isinstance(decoded, list) or not all(
         isinstance(item, str) for item in decoded
@@ -172,7 +213,12 @@ def _decode_aliases(encoded: str) -> tuple[str, ...]:
             f"native_identity[{_NATIVE_IDENTITY_ALIASES_KEY!r}] must decode to a "
             f"JSON array of strings, got {encoded!r}"
         )
-    return tuple(decoded)
+    # +1 for the array node itself, matching what `check_json_container_
+    # budget` itself counts (every container start plus every scalar leaf).
+    nodes_so_far += len(decoded) + 1
+    if nodes_so_far > DEFAULT_MAX_JSON_CONTAINER_NODES:
+        raise JsonContainerBudgetExceeded(nodes_so_far)
+    return tuple(decoded), nodes_so_far
 
 
 def _charge_document_bytes(
@@ -335,21 +381,35 @@ def write_bundle_facts_package(
             "empty, non-identifying fingerprint the same way"
         )
     artifact_refs: list[ArtifactRef] = []
+    artifact_ids: list[str] = []
+    artifact_id_owners: dict[str, str] = {}
     section_schema_versions: dict[str, int] = {}
     source_schema_version: int | None = None
     decoded_bytes_so_far = 0
     for library_name, snapshot in facts.per_library_snapshots.items():
+        artifact_id = _artifact_id_for_library(library_name)
+        # sha256 collisions are astronomically unlikely, but this is a
+        # cheap, defensive check rather than an assumption -- two distinct
+        # library names must never silently collapse onto one artifact_id.
+        existing_owner = artifact_id_owners.setdefault(artifact_id, library_name)
+        if existing_owner != library_name:
+            raise ValueError(
+                f"library names {existing_owner!r} and {library_name!r} both "
+                f"hash to artifact_id {artifact_id!r} -- refusing to collapse "
+                "two distinct libraries onto one artifact"
+            )
         document = snapshot_to_dict(snapshot)
         library_manifest = import_legacy_snapshot(
             document,
             store=store,
-            artifact_id=library_name,
+            artifact_id=artifact_id,
             max_known_schema_version=SCHEMA_VERSION,
             variant_id=variant_id,
         )
         (artifact,) = library_manifest.artifact_refs
 
         native_identity = dict(artifact.native_identity)
+        native_identity[_NATIVE_IDENTITY_LIBRARY_NAME_KEY] = library_name
         filename = facts.library_filenames.get(library_name)
         if filename:
             native_identity[_NATIVE_IDENTITY_FILENAME_KEY] = filename
@@ -359,6 +419,7 @@ def write_bundle_facts_package(
             native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = encoded_aliases
         if native_identity != dict(artifact.native_identity):
             artifact = replace(artifact, native_identity=native_identity)
+        artifact_ids.append(artifact_id)
 
         # `native_identity` lives outside `document` entirely, and
         # `read_bundle_facts_package` charges it too (Codex review, fresh
@@ -373,6 +434,7 @@ def write_bundle_facts_package(
                 f"(reached while encoding {library_name!r})"
             ),
         )
+        decoded_bytes_so_far += _text_byte_length(library_name)
         if filename:
             decoded_bytes_so_far += _text_byte_length(filename)
         if encoded_aliases:
@@ -417,7 +479,7 @@ def write_bundle_facts_package(
     variant = VariantRef(
         variant_id=variant_id,
         captured={_VARIANT_FINGERPRINT_KEY: facts.variant_fingerprint},
-        artifact_ids=tuple(facts.per_library_snapshots),
+        artifact_ids=tuple(artifact_ids),
     )
 
     project_sections: dict[str, ObjectRef] = {}
@@ -549,6 +611,7 @@ def read_bundle_facts_package(
     # have produced it.
     advertised_sections = set(manifest.versions.section_schema_versions)
     decoded_bytes_so_far = 0
+    alias_nodes_so_far = 0
     for artifact_id in variant.artifact_ids:
         artifact = artifacts_by_id[artifact_id]
         extra_sections = set(artifact.sections) - advertised_sections
@@ -569,14 +632,29 @@ def read_bundle_facts_package(
                 f"(reached while reconstructing {artifact_id!r})"
             ),
         )
-        # `native_identity` (the filename/aliases facts folded on at write
-        # time -- see the module docstring) lives outside `document`
-        # entirely, so it must be charged too: a budget sized exactly to
-        # the snapshot content alone still let an arbitrarily large alias
-        # array through for free (Codex review, fresh evidence beyond the
-        # artifact/project-section budget fixes above).
+        # `native_identity` (the library name/filename/aliases facts folded
+        # on at write time -- see the module docstring and
+        # `_artifact_id_for_library`) lives outside `document` entirely, so
+        # it must be charged too: a budget sized exactly to the snapshot
+        # content alone still let an arbitrarily large alias array through
+        # for free (Codex review, fresh evidence beyond the artifact/
+        # project-section budget fixes above).
+        library_name = artifact.native_identity.get(_NATIVE_IDENTITY_LIBRARY_NAME_KEY)
+        if not library_name:
+            raise ValueError(
+                f"artifact {artifact_id!r} has no "
+                f"{_NATIVE_IDENTITY_LIBRARY_NAME_KEY!r} in its native_identity "
+                "-- the package is corrupted or was hand-edited"
+            )
+        if library_name in per_library_snapshots:
+            raise ValueError(
+                f"library name {library_name!r} is claimed by more than one "
+                "artifact in this variant -- the package is corrupted or "
+                "was hand-edited"
+            )
         filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
         aliases_text = artifact.native_identity.get(_NATIVE_IDENTITY_ALIASES_KEY)
+        decoded_bytes_so_far += _text_byte_length(library_name)
         if filename:
             decoded_bytes_so_far += _text_byte_length(filename)
         if aliases_text:
@@ -589,11 +667,14 @@ def read_bundle_facts_package(
                 f"reconstructing {artifact_id!r}; refusing to retain it or "
                 "reconstruct further members"
             )
-        per_library_snapshots[artifact_id] = snapshot_from_dict(document)
+        per_library_snapshots[library_name] = snapshot_from_dict(document)
         if filename:
-            library_filenames[artifact_id] = filename
+            library_filenames[library_name] = filename
         if aliases_text:
-            filesystem_aliases[artifact_id] = _decode_aliases(aliases_text)
+            aliases, alias_nodes_so_far = _decode_aliases(
+                aliases_text, alias_nodes_so_far
+            )
+            filesystem_aliases[library_name] = aliases
 
     variant_fingerprint = variant.captured.get(
         _VARIANT_FINGERPRINT_KEY, DEFAULT_VARIANT_FINGERPRINT
