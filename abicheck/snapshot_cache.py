@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "30"
+_SNAPSHOT_CACHE_VERSION: str = "31"
 # v30: a BTF/CTF-sourced, headerless ELF snapshot now also populates
 # AbiSnapshot.semantic_ir for its struct/enum types (ADR-063 Phase 6,
 # BTF/CTF slice). An auto-detected BTF/CTF dump's cache-key inputs
@@ -53,6 +53,17 @@ _SNAPSHOT_CACHE_VERSION: str = "30"
 # debug_format stays None for the auto-detect path -- so a snapshot cached
 # by an older abicheck build would otherwise silently keep serving
 # semantic_ir=None forever for identical cache-key inputs.
+# v31 (P1 review, fresh evidence): snapshot schema 43 -> 44 added
+# evidence_source/evidence_state/cu_total/cu_failed provenance fields to
+# DwarfMetadata/AdvancedDwarfMetadata (analysis_assurance's debug_evidence
+# receipt). A v43-produced cache entry lacks these fields entirely, so the
+# current decoder's legacy-snapshot default (dwarf_from_dict's
+# "presence_only" fallback) reads it back as less complete than the same
+# binary would score under a fresh extraction -- --require-complete-
+# analysis could stay red until the entry aged out on its own, even though
+# re-extracting would produce full evidence. Cache-key inputs
+# (headers/includes/version/lang/extra) are unaffected by this schema
+# change, so without this bump the stale entry would keep hitting.
 # v29: PDB record/enum types now get a real entity_id and populate
 # AbiSnapshot.semantic_ir (ADR-063 Phase 6, PDB slice) via the PE
 # header-scoping fallback path in service_dump_native_pe.py. That path is

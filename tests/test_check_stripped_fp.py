@@ -208,6 +208,40 @@ def test_advanced_only_gap_waives_advanced_detector_kind() -> None:
     assert errors == []
 
 
+def test_advanced_not_supported_waives_advanced_detector_kind() -> None:
+    """P2 review, fresh evidence: "not_supported" (a BTF/CTF-sourced side's
+    advanced channel -- neither format carries calling-convention/value-ABI/
+    frame-register facts at all) proves capability loss just as much as the
+    other non-parsed states -- an L1 advanced-only downgrade backed by it
+    must be waived, not flagged as an unproven regression."""
+    guard = _guard_module()
+    row = _row("partial")
+    row["analysis_assurance"] = {
+        "status": "partial",
+        "dwarf_context_status": "asymmetric",
+        "debug_evidence": {
+            "old": {"basic": "parsed", "advanced": "parsed"},
+            "new": {"basic": "parsed", "advanced": "not_supported"},
+        },
+    }
+
+    _, downgrades, errors = guard._classify_results(
+        [row],
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["calling_convention_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
+    )
+
+    assert len(downgrades) == 1
+    assert errors == []
+
+
 def test_symmetric_stripping_requires_per_side_dwarf_receipt() -> None:
     guard = _guard_module()
     row = _row("partial")

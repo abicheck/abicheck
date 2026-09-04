@@ -131,6 +131,74 @@ def test_every_module_test_alone_needs_baseline() -> None:
         ), module
 
 
+# ---------------------------------------------------------------------------
+# _module_for_test_path / non-overlapping stem matching (P2 review)
+# ---------------------------------------------------------------------------
+
+OVERLAPPING_MODULES = [
+    "abicheck/policy/selectors.py",
+    "abicheck/policy/selectors_namespace_glob.py",
+]
+
+
+def test_longer_stem_test_pairs_with_its_own_longer_stem_module() -> None:
+    """The real overlap the review found: tests/test_selectors_namespace_
+    glob.py matches BOTH tests/test_selectors*.py (selectors.py) and its own
+    intended tests/test_selectors_namespace_glob*.py pattern. The longer,
+    more specific stem must win."""
+    assert (
+        scope._module_for_test_path(
+            "tests/test_selectors_namespace_glob.py", OVERLAPPING_MODULES
+        )
+        == "abicheck/policy/selectors_namespace_glob.py"
+    )
+
+
+def test_shorter_stem_test_still_pairs_with_its_own_module() -> None:
+    assert (
+        scope._module_for_test_path("tests/test_selectors.py", OVERLAPPING_MODULES)
+        == "abicheck/policy/selectors.py"
+    )
+
+
+def test_unrelated_test_pairs_with_neither_overlapping_module() -> None:
+    assert (
+        scope._module_for_test_path("tests/test_unrelated.py", OVERLAPPING_MODULES)
+        is None
+    )
+
+
+def test_overlap_does_not_select_the_wrong_module_for_pr_scoping() -> None:
+    """selected_modules must attribute the changed test to ONLY its own
+    longer-stemmed module, never also to the shorter-stemmed one."""
+    changed = {"tests/test_selectors_namespace_glob.py"}
+    assert scope.selected_modules(changed, OVERLAPPING_MODULES) == [
+        "abicheck/policy/selectors_namespace_glob.py"
+    ]
+
+
+def test_overlap_does_not_require_baseline_for_the_untouched_shorter_module() -> None:
+    """P2 review, fresh evidence: a PR changing selectors_namespace_glob.py
+    together with its own test must NOT be told selectors.py's test glob was
+    also touched -- selectors.py was never at risk."""
+    changed = {
+        "abicheck/policy/selectors_namespace_glob.py",
+        "tests/test_selectors_namespace_glob.py",
+    }
+    assert (
+        scope.require_baseline_for_pr(changed, OVERLAPPING_MODULES, labelled=False)
+        is False
+    )
+
+
+def test_overlap_still_requires_baseline_when_the_longer_module_is_untouched() -> None:
+    changed = {"tests/test_selectors_namespace_glob.py"}
+    assert (
+        scope.require_baseline_for_pr(changed, OVERLAPPING_MODULES, labelled=False)
+        is True
+    )
+
+
 def test_rewrite_only_mutate_preserves_following_config(tmp_path: Path) -> None:
     config = tmp_path / "pyproject.toml"
     config.write_text('before = 1\nonly_mutate = [\n    "a.py",\n]\nafter = 2\n')

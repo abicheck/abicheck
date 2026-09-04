@@ -38,6 +38,29 @@ MUTATION_INFRASTRUCTURE_PATHS = frozenset(
 )
 
 
+def _module_for_test_path(test_path: str, only_mutate: list[str]) -> str | None:
+    """Return the single ``only_mutate`` module *test_path* pairs with, or
+    ``None`` if it pairs with none.
+
+    P2 review, fresh evidence: matching every module's ``tests/test_<stem>*.py``
+    glob independently lets a shorter stem's pattern absorb a longer, unrelated
+    module's own test file -- ``tests/test_selectors_namespace_glob.py``
+    matches both ``tests/test_selectors*.py`` (module ``selectors.py``) and its
+    own intended ``tests/test_selectors_namespace_glob*.py`` pattern (module
+    ``selectors_namespace_glob.py``). Resolved by picking the LONGEST matching
+    stem -- the most specific module -- as the exclusive pairing, so a test
+    file is never attributed to more than one module at once.
+    """
+    candidates = [
+        module
+        for module in only_mutate
+        if fnmatch.fnmatch(test_path, f"tests/test_{Path(module).stem}*.py")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda m: len(Path(m).stem))
+
+
 def selected_modules(
     changed_paths: set[str], only_mutate: list[str]
 ) -> list[str] | None:
@@ -50,11 +73,10 @@ def selected_modules(
     """
     selected = {path for path in changed_paths if path in only_mutate}
     known_test_paths = set()
-    for module in only_mutate:
-        pattern = f"tests/test_{Path(module).stem}*.py"
-        matches = {path for path in changed_paths if fnmatch.fnmatch(path, pattern)}
-        known_test_paths.update(matches)
-        if matches:
+    for path in changed_paths:
+        module = _module_for_test_path(path, only_mutate)
+        if module is not None:
+            known_test_paths.add(path)
             selected.add(module)
 
     changed_tests = {
@@ -116,6 +138,17 @@ def require_baseline_for_pr(
     than folding into one aggregate boolean is what makes finding 2
     impossible.
 
+    P2 review, fresh evidence (finding 3): the per-module glob check above
+    still let a shorter module stem's pattern also match an unrelated
+    longer-stemmed module's own test file (see ``_module_for_test_path``'s
+    docstring for the exact overlap) -- a changed ``tests/test_selectors_
+    namespace_glob.py`` alone was treated as touching ``selectors.py``'s
+    test glob too, requiring baseline drift for a module the PR never
+    actually risked weakening coverage for. Fixed by routing through the
+    same longest-stem-wins ``_module_for_test_path`` pairing
+    ``selected_modules`` uses, so a test path is attributed to at most one
+    module.
+
     A ``mutation`` label always requires baseline drift regardless of the
     diff -- it is documented as the complete check, and a label-forced run
     on a diff this function would otherwise clear must not silently report
@@ -123,12 +156,13 @@ def require_baseline_for_pr(
     """
     if labelled:
         return True
-    for module in only_mutate:
-        pattern = f"tests/test_{Path(module).stem}*.py"
-        test_touched = any(fnmatch.fnmatch(p, pattern) for p in changed_paths)
-        if test_touched and module not in changed_paths:
-            return True
-    return False
+    touched_modules = {
+        _module_for_test_path(p, only_mutate)
+        for p in changed_paths
+        if p.startswith("tests/") and p.endswith(".py")
+    }
+    touched_modules.discard(None)
+    return any(module not in changed_paths for module in touched_modules)
 
 
 def rewrite_only_mutate(config_path: Path, modules: list[str]) -> None:

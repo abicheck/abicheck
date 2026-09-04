@@ -188,7 +188,21 @@ def _dwarf_evidence_loss_allows_downgrade(
     sides = [evidence.get(side) for side in ("old", "new")]
     if not all(isinstance(side, dict) for side in sides):
         return False
-    non_parsed_states = {"not_available", "presence_only", "partial", "failed"}
+    # P2 review, fresh evidence: "not_supported" (a BTF/CTF-sourced side's
+    # advanced channel -- neither format carries calling-convention/value-
+    # ABI/frame-register facts at all, see analysis_assurance._debug_
+    # evidence_receipt) is just as much a proven capability loss as the
+    # other non-parsed states below. Omitting it rejected a legitimate
+    # BTF/CTF-backed downgrade (e.g. calling_convention_changed) as an
+    # unproven regression even though the receipt already proves the
+    # required capability was unavailable on that side.
+    non_parsed_states = {
+        "not_available",
+        "presence_only",
+        "partial",
+        "failed",
+        "not_supported",
+    }
     for channel in channels:
         if not any(side.get(channel) in non_parsed_states for side in sides):
             return False
