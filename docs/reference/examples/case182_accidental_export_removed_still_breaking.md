@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | `examples/case182_accidental_export_removed_still_breaking/` |
+| **Rule family** | [`accidental-export-removed-still-breaking`](by-rule/accidental-export-removed-still-breaking.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -161,4 +163,4 @@ to answer.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Accidental export removed still breaking](by-rule/accidental-export-removed-still-breaking.md)._

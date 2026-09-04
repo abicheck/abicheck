@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
 | **Source files** | `examples/case20_enum_member_value_changed/` |
+| **Rule family** | [`enum-member-value-changed`](by-rule/enum-member-value-changed.md) — Variant (public-surface) of [case08_enum_value_change](case08_enum_value_change.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -131,4 +133,4 @@ to schema evolution.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enum member value changed](by-rule/enum-member-value-changed.md)._

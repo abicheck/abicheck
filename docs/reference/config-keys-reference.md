@@ -86,7 +86,6 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 
 | Key | Type |
 |---|---|
-| `exit_code_scheme` | str |
 | `version` | int |
 
 ## Other recognized top-level keys

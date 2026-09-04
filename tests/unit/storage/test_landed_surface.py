@@ -56,6 +56,7 @@ _MODULES = (
     "abicheck.storage.import_bundle_facts",
     "abicheck.storage.import_baseline_set",
     "abicheck.storage.sectioned_document",
+    "abicheck.storage.variant_composition",
 )
 
 #: Modules the package deliberately does not re-export. They are still

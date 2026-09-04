@@ -1002,6 +1002,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/frontends/cli/commands/compare_bundle_facts.py",
+      "baseline_lines": 811,
+      "target": "frontends (already home; split its stored/stored PR I branch or its PR J bundle: config read into a sibling module if it grows further)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: two independent tracks landed in parallel and collided at merge -- PR I's stored/stored compare_stored_bundle_facts_pair() dispatch branch (#1062) and PR J's .abicheck.yml bundle: config read replacing the removed --bundle-system-providers/--bundle-cohort CLI flags (this PR) -- pushing the file from main's own 800-line cap to 811 once merged. The merge also fixed a real bug the collision would otherwise have reintroduced: the stored/live compare_release_against_bundle_facts() call site's cohorts= argument still read the now-dead kwargs.get('bundle_cohorts') instead of the resolved bundle: config value.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/project_snapshot_store.py",
       "baseline_lines": 834,
       "target": "storage (already home; ADR-061 D1 layering keeps this filesystem-facing writer outside storage/ itself)",

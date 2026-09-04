@@ -29,7 +29,8 @@ out, don't trim the file to fit.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -39,13 +40,21 @@ from .project_snapshot_store import (
     read_artifact_ref,
     read_manifest_summary,
     read_variant_artifact_pair,
+    read_variant_ref,
     write_project_manifest,
 )
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
-from .storage.package import InMemoryObjectStore, PackageManifest
+from .storage.package import (
+    ArtifactRef,
+    InMemoryObjectStore,
+    ObjectRef,
+    PackageManifest,
+    VariantRef,
+)
 
 __all__ = [
     "is_project_snapshot_package_dir",
+    "materialize_release_variant_artifacts",
     "package_declares_full_dependency_scope",
     "read_legacy_snapshot_document",
     "write_legacy_snapshot_package",
@@ -222,7 +231,7 @@ def read_legacy_snapshot_document(
     # `read_variant_artifact_pair`, which checks both directions and is
     # this package's own established integrity path for exactly this.
     artifact = read_artifact_ref(root, artifact_id)
-    _variant, artifact = read_variant_artifact_pair(
+    variant, artifact = read_variant_artifact_pair(
         root, artifact.variant_id, artifact_id
     )
     # `export_legacy_snapshot` only ever looks at the sections *present* in
@@ -239,7 +248,20 @@ def read_legacy_snapshot_document(
     # is expected and not itself a corruption signal -- multi-artifact
     # packages are documented above as out of this function's scope anyway.
     if len(summary.artifact_ids) == 1:
-        advertised = set(summary.versions.section_schema_versions)
+        # `variant.sections`/`summary.project_sections` are real, legitimate
+        # entries in `section_schema_versions` too (ADR-062 A1.4/A1.5's
+        # project/variant-level evidence -- an instantiation manifest, a
+        # `storage.import_bundle_facts`-sourced bundle-composition object,
+        # ...), but they describe the variant/project as a whole, never one
+        # `ArtifactRef`'s own `sections`. A single-artifact sub-package
+        # `materialize_release_variant_artifacts` cut from a larger package
+        # legitimately carries both kinds side by side -- excluded here so
+        # this artifact-only integrity check isn't misapplied to evidence it
+        # was never scoped to check in the first place (Codex review, fresh
+        # evidence: this exact shape made every stored-release comparison
+        # sourced from `storage.import_bundle_facts` read as corrupted).
+        non_artifact_kinds = set(variant.sections) | set(summary.project_sections)
+        advertised = set(summary.versions.section_schema_versions) - non_artifact_kinds
         actual = set(artifact.sections)
         missing_sections = advertised - actual
         if missing_sections:
@@ -271,3 +293,208 @@ def read_legacy_snapshot_document(
         store=store,
         source_schema_version=summary.versions.source_schema_version,
     )
+
+
+def _materialize_referenced_objects(
+    dest_dir: Path,
+    source_store: DirectoryObjectStore,
+    refs: Iterable[ObjectRef],
+) -> None:
+    """Copy exactly the objects *refs* names -- not *root*'s entire
+    `objects/` tree -- into a fresh `DirectoryObjectStore` rooted at
+    *dest_dir*, via the content layer (`ObjectStore.get`/`.put`), never a
+    raw filesystem copy or symlink of the source tree.
+
+    Replaces an earlier symlink-the-whole-directory (falling back to
+    `shutil.copytree` on a host without symlink privileges) strategy that
+    had two real problems (Codex review, fresh evidence): a package with N
+    large objects unrelated to the one artifact/variant/project sections
+    actually referenced here paid an N-fold disk cost on every
+    materialized sub-package under the `copytree` fallback, and
+    `copytree`'s default `symlinks=False` follows source symlinks --
+    letting a crafted package plant one inside its own `objects/` tree at
+    exactly the path a real object would occupy, pointing outside the
+    package entirely, and have comparison silently read and copy that
+    external file's content in. Going through `get()`/`put()` instead
+    means every byte materialized here is read back out under the
+    identical digest scheme `ObjectStore.get()` already verifies (a
+    tampered or substituted object fails there, not silently), and no
+    directory-level symlink -- the one thing a malicious package's own
+    `objects/` layout could otherwise influence -- is ever created.
+    """
+    dest_store = DirectoryObjectStore(dest_dir)
+    for ref in refs:
+        materialized_digest = dest_store.put(source_store.get(ref.digest))
+        if materialized_digest != ref.digest:
+            # Can only happen if the source store's own content no longer
+            # hashes to the digest its own ref names -- a corrupted or
+            # hand-edited package, not something a correct writer produces.
+            raise SnapshotError(
+                f"object {ref.digest!r} re-hashed to {materialized_digest!r} "
+                "after being read back from the source package -- the "
+                "source package's object store is corrupted or was "
+                "hand-edited"
+            )
+
+
+def materialize_release_variant_artifacts(
+    root: str | Path,
+    *,
+    variant_id: str | None,
+    dest_root: str | Path,
+) -> dict[str, tuple[Path, ArtifactRef]]:
+    """Unpack the (possibly multi-artifact) `ProjectSnapshot` package
+    directory at *root* into one materialized, real, independently-readable
+    single-artifact sub-package directory per member library of the
+    selected variant, written under *dest_root* -- the storage-layer half
+    of ADR-062 A1.7's stored-release comparison; `workflows.
+    release_package.resolve_release_package_map` is the workflows-layer
+    wrapper that re-keys this function's return value by a
+    live-directory-comparable canonical library name (this module may only
+    import `model`, per `storage/AGENTS.md`, so it cannot itself reach
+    `binary_utils._canonical_library_key`).
+
+    Returns `{artifact_id: (sub_package_dir, artifact_ref)}` -- keyed by
+    the artifact's own `artifact_id`, which is already validated safe and
+    unique as a filesystem path component (`storage.ref_ids.safe_ref_id`,
+    enforced by `ArtifactRef.__post_init__`), so `sub_package_dir` is
+    always `dest_root / artifact_id` and two artifacts can never collide on
+    one directory (Codex review) -- unlike a name derived from mutable,
+    caller-controlled `native_identity` content.
+
+    *variant_id* selects which of *root*'s `VariantRef`s to resolve; `None`
+    requires *root* to declare exactly one, raising `ValueError` otherwise --
+    ambiguity is a hard usage error, not a silent first match, the same
+    discipline `SymbolIdentityIndex.unique_alias_match` already establishes
+    elsewhere in this codebase (see `storage-format-v2.md`'s A1.7 design
+    note). Each artifact is validated against *root*'s own membership graph
+    via `read_variant_artifact_pair` (not a bare `read_artifact_ref`), so a
+    stale or hand-edited `refs/variants/<id>.json` naming an artifact
+    `manifest.json` never actually published cannot be republished into a
+    sub-package here (Codex review).
+
+    Each sub-package directory is a real, independently-readable
+    single-artifact `ProjectSnapshot` package -- written via
+    `write_project_manifest`, the identical writer/validator
+    `write_legacy_snapshot_package` uses -- so every existing consumer of a
+    package-shaped `compare`/`compare-release` operand
+    (`workflows.input_resolution._resolve_project_snapshot_directory` via
+    `read_legacy_snapshot_document`) reads it completely unchanged; this
+    function is purely a *source* for the map, not a new code path through
+    comparison.
+    """
+    root_path = Path(root)
+    summary = read_manifest_summary(root_path)
+    if variant_id is None:
+        if len(summary.variant_ids) != 1:
+            raise ValueError(
+                f"{root_path} declares {len(summary.variant_ids)} variant(s) "
+                f"({sorted(summary.variant_ids)}) -- pass an explicit "
+                "variant id (--old-variant/--new-variant) to select one"
+            )
+        variant_id = summary.variant_ids[0]
+    elif variant_id not in summary.variant_ids:
+        raise ValueError(
+            f"{variant_id!r} is not a variant_id in {root_path} (known: "
+            f"{sorted(summary.variant_ids)})"
+        )
+    variant = read_variant_ref(root_path, variant_id)
+    # `read_variant_artifact_pair`'s own docstring names this exact gap as
+    # deliberately deferred: it validates the "declared" direction (every id
+    # `variant.artifact_ids` names is itself published and self-consistent)
+    # but not "owned" (a *different* published artifact whose own
+    # `variant_id` also names this variant, yet `variant.artifact_ids`
+    # simply omits it). Left unchecked, a stale or hand-edited package could
+    # omit exactly the one artifact carrying a real ABI break from
+    # `variant.artifact_ids`, and this function would silently compare
+    # every *other* artifact clean -- excluding the break from the release
+    # gate entirely rather than raising (Codex review, security finding).
+    # This is the real caller `read_variant_artifact_pair`'s docstring
+    # names as the reason to eventually close that gap: reading every
+    # artifact ref in the package to check the reverse direction.
+    owned_elsewhere = sorted(
+        artifact_id
+        for artifact_id in summary.artifact_ids
+        if artifact_id not in variant.artifact_ids
+        and read_artifact_ref(root_path, artifact_id).variant_id == variant_id
+    )
+    if owned_elsewhere:
+        raise ValueError(
+            f"{root_path} variant {variant_id!r} omits artifact_id(s) "
+            f"{owned_elsewhere} from its own artifact_ids even though each "
+            f"names {variant_id!r} as its own variant_id -- the package's "
+            "membership graph is self-contradictory (refusing to silently "
+            "exclude a real library from the comparison)"
+        )
+
+    dest_root_path = Path(dest_root)
+    dest_root_path.mkdir(parents=True, exist_ok=True)
+    source_store = DirectoryObjectStore(root_path)
+
+    result: dict[str, tuple[Path, ArtifactRef]] = {}
+    for artifact_id in variant.artifact_ids:
+        full_variant, artifact = read_variant_artifact_pair(
+            root_path, variant_id, artifact_id
+        )
+
+        sub_dir = dest_root_path / artifact_id
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        # Every section kind this sub-package's manifest ends up
+        # referencing needs a matching `section_schema_versions` entry
+        # (`write_project_manifest`'s own validation) -- not just the
+        # artifact's own sections, but also the *variant*-level and
+        # *project*-level ones carried through below (Codex review, fresh
+        # evidence: `storage.import_bundle_facts`' own writer stores
+        # filenames/aliases/manifest under `VariantRef.sections`, and
+        # `bundle_facts_store.write_bundle_facts_package` stores its
+        # InstantiationManifest under `PackageManifest.project_sections` --
+        # neither lives on the artifact itself, so dropping them here
+        # silently discarded that bundle-wide evidence from every stored
+        # release comparison sourced from either writer).
+        relevant_kinds = (
+            set(artifact.sections)
+            | set(full_variant.sections)
+            | set(summary.project_sections)
+        )
+        trimmed_versions = replace(
+            summary.versions,
+            section_schema_versions={
+                kind: version
+                for kind, version in summary.versions.section_schema_versions.items()
+                if kind in relevant_kinds
+            },
+        )
+        # `full_variant.sections`/`summary.project_sections` are carried
+        # through unchanged, on every single-artifact sub-package cut from
+        # this variant -- they describe the *whole* original variant/
+        # project, not this one library, but that is the correct shape
+        # here: `build_bundle_snapshot_mixed` (and any other stored-release
+        # reader) needs this bundle-wide evidence available from whichever
+        # one sub-package it happens to read first, since nothing else
+        # would carry it once the original multi-artifact package's own
+        # `refs/variants/<id>.json` is gone. Every `ObjectRef` referenced
+        # here is what `_materialize_referenced_objects` below actually
+        # copies -- not the whole source `objects/` store.
+        trimmed_variant = VariantRef(
+            variant_id=variant_id,
+            artifact_ids=(artifact_id,),
+            sections=full_variant.sections,
+        )
+        _materialize_referenced_objects(
+            sub_dir,
+            source_store,
+            [
+                *artifact.sections.values(),
+                *full_variant.sections.values(),
+                *summary.project_sections.values(),
+            ],
+        )
+        sub_manifest = PackageManifest(
+            versions=trimmed_versions,
+            variant_refs=(trimmed_variant,),
+            artifact_refs=(artifact,),
+            project_sections=summary.project_sections,
+        )
+        write_project_manifest(sub_dir, sub_manifest)
+        result[artifact_id] = (sub_dir, artifact)
+    return result

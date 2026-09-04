@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `unnamed_type_in_public_abi` |
 | **Source files** | `examples/case178_unnamed_type_in_public_abi/` |
+| **Rule family** | [`unnamed-type-in-public-abi`](by-rule/unnamed-type-in-public-abi.md) |
 
 **Category:** C++ Hygiene / Deployment Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -146,4 +148,4 @@ reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Unnamed type in public abi](by-rule/unnamed-type-in-public-abi.md)._

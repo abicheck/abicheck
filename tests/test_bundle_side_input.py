@@ -300,6 +300,12 @@ class TestCompareBundleSidesManifestPrecedence:
         )
 
 
+# compare_stored_bundle_facts_pair (the stored/stored driver, CLI cleanup
+# phase two, PR I) moved to abicheck/workflows/bundle_stored_pair_compare.py
+# (Codex review, PR #1060) -- its own tests now live in
+# tests/test_bundle_stored_pair_compare.py.
+
+
 # ---------------------------------------------------------------------------
 # compare_release_against_bundle_facts -- mocked-resolution unit coverage
 # ---------------------------------------------------------------------------
@@ -381,6 +387,62 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             facts_path, new_dir, include_dependencies=True
         )
         assert captured_kwargs["include_dependencies"] is True
+
+    def test_scope_mismatch_error_propagates_uncaught(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``compare_snapshots()`` raises ``ScopeMismatchError`` when a
+        matched pair's ``dependency_scope`` disagrees (both sides
+        header-derived) -- this function must let it propagate uncaught,
+        not swallow or translate it, since ``workflows/AGENTS.md``'s own
+        rule is that error types are the contract and the *CLI* layer is
+        the one place that translates them (Codex review, PR #1060, round
+        12 -- found on this function's stored/stored sibling, but this
+        function shares the identical ``service.compare_snapshots()``
+        chokepoint and so the identical failure mode)."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.errors import ScopeMismatchError
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+                from_headers=True,
+                dependency_scope="full",
+            ),
+        )
+
+        # service.compare_snapshots() is deliberately left real here -- it's
+        # the function under test for this scenario, not a collaborator to
+        # stub out.
+
+        # The OLD side's own facts were captured from a plain-ELF fixture
+        # (no from_headers/dependency_scope at all) -- reload and mutate it
+        # so both sides carry an explicit, disagreeing dependency_scope.
+        from abicheck.serialization import load_bundle_facts, save_bundle_facts
+
+        facts = load_bundle_facts(facts_path)
+        facts.per_library_snapshots["libcore.so"].from_headers = True
+        facts.per_library_snapshots["libcore.so"].dependency_scope = "filtered"
+        save_bundle_facts(facts, facts_path)
+
+        with pytest.raises(ScopeMismatchError):
+            compare_release_against_bundle_facts(facts_path, new_dir)
 
     def test_policy_file_is_forwarded_to_per_library_compare(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

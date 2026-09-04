@@ -124,9 +124,9 @@ an unknown-key error.
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
-`compile:`, `debug:`, `bundle:`, `exit_code_scheme:`, `version:`,
-`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
-`baseline:` are the recognized top-level keys. See the
+`compile:`, `debug:`, `bundle:`, `version:`, `risk_rules:`,
+`crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are the
+recognized top-level keys. See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
 cover what each block does, its effective defaults, and behavior that isn't
@@ -268,12 +268,14 @@ plural `bundles:` block below, which serves a different, unrelated purpose
 
 ---
 
-### `exit_code_scheme:`
+### Exit-code scheme (no config key — fully automatic)
 
-Top-level string, one of `auto`, `legacy`, `severity`. Default `auto`.
-
-- `auto` → `severity` when a severity map is in effect, otherwise `legacy`.
-- `legacy` / `severity` force that scheme.
+There is no `exit_code_scheme:` key (CLI cleanup phase two PR G2 removed
+it, along with the `--exit-code-scheme` CLI flag): the exit-code scheme is
+`severity` when a severity map is in effect (this file's `severity:` block,
+a `--severity-preset`, or a `kind: gate` pack's `gate.severity.<category>`),
+otherwise `legacy`. There is no way to force one scheme regardless of
+whether a severity setting is present.
 
 See [Exit codes](exit-codes.md).
 
@@ -391,7 +393,4 @@ suppression:
 # Precise evidence method (optional; a concrete s0..s6, never `auto`)
 source:
   method: s6
-
-# Exit-code scheme for CI
-exit_code_scheme: auto
 ```

@@ -167,7 +167,7 @@ class TestOverridesContributors:
             tmp_path / "g.yml",
             pack_id="g",
             kind="gate",
-            assignments="gate.exit_code_scheme: severity\n",
+            assignments="gate.severity.addition: error\n",
         )
         pf = _policy_file(
             tmp_path,
@@ -597,13 +597,16 @@ class TestProjectDerivedFieldsNameTheirConfigDigest:
         assert [e.sha256 for e in prov.selected_by] == [self.DIGEST]
 
     def test_severity_and_exit_scheme_keys_carry_it(self):
-        cfg = _resolve(
-            project=self._project(severity_addition="info", exit_code_scheme="legacy")
-        )
-        for field_name in ("gate.severity.addition", "gate.exit_code_scheme"):
-            prov = cfg.provenance[field_name]
-            assert prov.sha256 == self.DIGEST, field_name
-            assert [e.sha256 for e in prov.selected_by] == [self.DIGEST], field_name
+        # gate.exit_code_scheme itself is purely derived (PR G2 deleted
+        # ProjectCompatibilityInputs.exit_code_scheme along with the
+        # exit_code_scheme: config key) and carries no field_provenance
+        # entry any more -- only the severity field this project config
+        # actually stated is checked here.
+        cfg = _resolve(project=self._project(severity_addition="info"))
+        prov = cfg.provenance["gate.severity.addition"]
+        assert prov.sha256 == self.DIGEST
+        assert [e.sha256 for e in prov.selected_by] == [self.DIGEST]
+        assert "gate.exit_code_scheme" not in cfg.provenance
 
     def test_a_preset_keeps_its_own_identity_while_the_hop_names_the_file(self):
         # Two different artifacts: the value is the built-in preset, but the

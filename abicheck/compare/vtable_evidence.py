@@ -62,6 +62,14 @@ Docstrings quoting the FP-history and design rationale below are carried
 over unchanged from ``diff_types_vtable.py`` -- only the owner/namespace
 lookups became parameters; no behavior changed for ``diff_types_vtable``'s
 own existing callers.
+
+**ADR-063 Track 4, 5B final closure: whether a direct ``FactStatus``
+pre-check belongs here.** Attempted, found to regress real detection
+coverage, reverted -- this function's heuristic is unchanged from before
+that closure. See ``diff_types_vtable.py``'s own module docstring (its
+"Track 4, 5B final closure" section) for the full three-round account and
+the still-open PDB fabrication gap it describes -- the canonical writeup,
+not repeated here.
 """
 
 from __future__ import annotations

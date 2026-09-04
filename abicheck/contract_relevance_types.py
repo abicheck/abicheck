@@ -320,7 +320,7 @@ CONTRACT_EVIDENCE_SCHEMA_VERSION: int = 1
 """Version of the persisted, policy-independent ``contract_evidence`` block
 (observed provider records, declarations, manifests, raw type graph)."""
 
-EVALUATION_CONTEXT_SCHEMA_VERSION: int = 2
+EVALUATION_CONTEXT_SCHEMA_VERSION: int = 3
 """Version of the persisted ``evaluation_context`` block (the resolved
 ``CompatibilityEvaluationConfig`` plus field-level provenance).
 
@@ -330,7 +330,19 @@ Bumped to 2 when ``GateConfig`` gained ``require_complete_analysis``/
 older reader's ``resolved_config_from_dict`` has no code path that
 preserves those keys, so a context persisted under version 2 read by a
 version-1 build would silently drop gate-affecting input rather than fail
-closed the way ADR-049 D6 requires (Codex review, PR #817)."""
+closed the way ADR-049 D6 requires (Codex review, PR #817).
+
+Bumped to 3 (Codex review, PR #1062, fresh evidence): CLI cleanup phase
+two PR G2 deleted ``--exit-code-scheme``/``exit_code_scheme`` everywhere,
+which removes ``field_provenance["gate.exit_code_scheme"]`` from every
+context persisted from here on -- a v2 reader that expects that key
+(present in every context persisted before this PR) cannot tell "removed
+because the field no longer exists" apart from "removed because this
+particular run stated nothing for it," which version 2 alone never
+distinguished. A v3 reader knows the key is gone by construction; the scan
+envelope's own, independently-versioned ``SCAN_SCHEMA_VERSION`` bump to
+1.27 covers only the *scan* report's ``evidence_contract_error_message``
+addition and says nothing about this block."""
 
 DECISION_RECEIPT_SCHEMA_VERSION: int = 1
 """Version of the persisted ``decision_receipt`` block (evaluated roots,

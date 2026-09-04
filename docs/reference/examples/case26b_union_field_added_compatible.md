@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `union_field_added` |
 | **Source files** | `examples/case26b_union_field_added_compatible/` |
+| **Rule family** | [`union-field-added-compatible`](by-rule/union-field-added-compatible.md) |
 
 **Category:** Type Layout | **Verdict:** 🟢 COMPATIBLE
 
@@ -111,4 +113,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Union field added compatible](by-rule/union-field-added-compatible.md)._

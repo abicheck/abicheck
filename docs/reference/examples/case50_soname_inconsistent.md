@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `soname_changed` |
 | **Source files** | `examples/case50_soname_inconsistent/` |
+| **Rule family** | [`soname-inconsistent`](by-rule/soname-inconsistent.md) |
 
 **Category:** Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK (bad practice)
 
@@ -144,4 +146,4 @@ readelf -d libfoo_v2.so | grep SONAME
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Soname inconsistent](by-rule/soname-inconsistent.md)._

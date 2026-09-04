@@ -25,9 +25,8 @@ reviewed baseline bump).
 
 Round-6 review (Codex, fresh evidence, PR #1032): ``classify_compare_pair``
 resolves a :class:`~abicheck.policy.release_gate_options.GateOptions` from
-the request's ``severity_preset``/``exit_code_scheme`` and scores
-``CompareResult.exit_decision`` from it, but until this fix never installed
-that same gate onto
+the request's ``severity_preset`` and scores ``CompareResult.exit_decision``
+from it, but until this fix never installed that same gate onto
 ``result.contract_context.evaluation_context.resolved_config`` -- so a
 request combining ``contract_evaluation=True`` with a non-default gate
 persisted a context whose resolved config still described
@@ -79,17 +78,15 @@ def install_resolved_gate_receipt(
     gate: GateOptions,
     policy_file: PolicyFile | None,
     suppression: SuppressionList | None,
-    effective_scheme: str,
 ) -> None:
     """Install *request*'s resolved gate onto *result* in place.
 
-    *effective_scheme* is the exact ``"severity"``/``"legacy"`` string the
-    caller already resolved and scored ``exit_decision`` with (never
-    ``gate.exit_code_scheme`` itself, which can still be the unresolved
-    ``"auto"`` -- `GateConfig` only accepts ``"legacy"``/``"severity"``, so
-    installing the raw value here raised `ValueError` for a valid `auto`
-    request after the comparison had already completed, Codex review, fresh
-    evidence).
+    Installs ``gate.exit_code_scheme`` directly -- since CLI cleanup phase
+    two PR G2 deleted the manual algorithm selector, `GateOptions.
+    exit_code_scheme` is unconditionally already ``"legacy"``/``"severity"``
+    (never an unresolved ``"auto"``, which `GateConfig` never accepted and
+    used to require the caller to resolve separately before calling this;
+    see this repo's git history for the account of that now-moot gap).
 
     *suppression* is the already-loaded `SuppressionList` `classify_compare_
     pair` scored the comparison with -- passed through rather than left for
@@ -106,7 +103,6 @@ def install_resolved_gate_receipt(
     the gate into ``result.contract_context`` when one exists.
     """
     from ..compatibility_evaluation_frontend import (
-        EXIT_CODE_SCHEME_FIELD,
         SEVERITY_CATEGORY_FIELDS,
         SuppressionSource,
         compatibility_config_from_compare_request,
@@ -155,9 +151,8 @@ def install_resolved_gate_receipt(
     )
     result.contract_context = with_resolved_gate(
         ctx,
-        exit_code_scheme=effective_scheme,
+        exit_code_scheme=gate.exit_code_scheme,
         severity=severity_for_receipt,
-        scheme_provenance=config.provenance[EXIT_CODE_SCHEME_FIELD],
         severity_provenance={
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in SEVERITY_CATEGORY_FIELDS

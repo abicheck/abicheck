@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux, macOS |
 | **Flags** | API break, Bad practice |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case111_enumerable_thread_specific_lambda_ambiguity/` |
+| **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
+| **Related rules** | [`constructor-overload-ambiguity`](by-rule/constructor-overload-ambiguity.md) |
 | **Detectability** | None — no evidence tier currently proves this verdict (known detector gap) |
 | **Known detector gap** | `constructor_overload_ambiguity` |
 
@@ -134,4 +137,4 @@ classes.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._

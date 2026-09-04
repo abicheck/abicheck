@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Scenario — Capability / evidence demonstration · audit |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `examples/case151_xcheck_provider_matrix/` |
+| **Related rules** | [`audit-private-header-leak`](by-rule/audit-private-header-leak.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 

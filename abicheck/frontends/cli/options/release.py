@@ -519,3 +519,73 @@ def evidence_options(func: F) -> F:
 #: Back-compat alias for the pre-ADR-037-D3 name. ``evidence_options`` is the
 #: canonical spelling (the D3 table); this keeps existing imports working.
 build_source_compare_options = evidence_options
+
+
+def _stash_variant_in_context(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> None:
+    """``--old-variant``/``--new-variant``'s click ``callback=``: stashes
+    *value* on ``ctx.meta`` under *param*'s own name instead of exposing it
+    to the decorated command's own ``**kwargs`` (``expose_value=False``).
+
+    Neither flag means anything to a single-pair `compare`/`run_compare`
+    call -- only the directory/package release fan-out
+    (`frontends.cli.commands.compare._dispatch_release_compare`) reads them
+    back via `variant_kwargs_from_context`, off the identical `ctx` -- so
+    routing them through `ctx.meta` instead of `**kwargs` means `run_compare`
+    (whose own typed signature has no matching parameters) never has to see
+    or strip them.
+    """
+    ctx.meta[f"abicheck.variant.{param.name}"] = value
+
+
+def variant_options(func: F) -> F:
+    """``--old-variant``/``--new-variant`` (ADR-062 A1.7): which `VariantRef`
+    to compare when a stored `ProjectSnapshot` package operand declares more
+    than one -- release-fanout-specific, same as this module's other option
+    groups (a plain directory/package release comparison, ADR-054's own
+    admission bar for what belongs here). Not applied via ``@variant_options``
+    on ``compare_cmd`` itself -- ``cli.py`` calls it directly on the already-
+    registered ``compare`` command instead, once `frontends/cli/commands/
+    compare.py` is fully loaded, so that already-at-cap module owes this
+    flag family neither an import nor a decorator line. See
+    `variant_kwargs_from_context`/`frontends/cli/commands/compare.py`'s own
+    use for the full read-back contract.
+    """
+    func = click.option(
+        "--old-variant",
+        "old_variant",
+        default=None,
+        metavar="VARIANT_ID",
+        expose_value=False,
+        callback=_stash_variant_in_context,
+        help="Which build variant to compare when OLD is a stored "
+        "ProjectSnapshot package directory declaring more than one. "
+        "Defaults to the package's only variant when it declares exactly "
+        "one; a usage error otherwise. No-op for a live directory/archive/"
+        "single-file operand.",
+    )(func)
+    func = click.option(
+        "--new-variant",
+        "new_variant",
+        default=None,
+        metavar="VARIANT_ID",
+        expose_value=False,
+        callback=_stash_variant_in_context,
+        help="The --old-variant counterpart for NEW.",
+    )(func)
+    return func
+
+
+def variant_kwargs_from_context(ctx: click.Context) -> dict[str, str | None]:
+    """``--old-variant``/``--new-variant``'s current values, stashed on
+    *ctx* by `_stash_variant_in_context` -- what
+    `frontends.cli.commands.compare._dispatch_release_compare` merges into
+    its own kwargs before calling `compare_release_cmd.callback` (ADR-062
+    A1.7), since `variant_options`' `expose_value=False` means neither flag
+    ever reaches a decorated command's own `**kwargs`.
+    """
+    return {
+        "old_variant": ctx.meta.get("abicheck.variant.old_variant"),
+        "new_variant": ctx.meta.get("abicheck.variant.new_variant"),
+    }

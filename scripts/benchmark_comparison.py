@@ -131,7 +131,7 @@ PINNED_74_CASE_RE = re.compile(r"^case(?:0[1-9]|[1-6][0-9]|7[0-3])_|^case26b_")
 
 # Expected verdicts loaded from ground_truth.json — single source of truth.
 # To add/change a verdict, edit examples/ground_truth.json only.
-_GT_PATH = Path(__file__).parent.parent / "examples" / "ground_truth.json"
+_GT_PATH = example_catalog.GROUND_TRUTH_PATH
 try:
     _gt_data = json.loads(_GT_PATH.read_text())
     if "verdicts" not in _gt_data:

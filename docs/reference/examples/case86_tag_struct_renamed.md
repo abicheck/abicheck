@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `tag_type_renamed` |
 | **Source files** | `examples/case86_tag_struct_renamed/` |
+| **Rule family** | [`tag-struct-renamed`](by-rule/tag-struct-renamed.md) |
 
 **Category:** Mangling ABI | **Verdict:** 🔴 BREAKING
 
@@ -138,4 +140,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Tag struct renamed](by-rule/tag-struct-renamed.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `executable_stack_removed` |
 | **Source files** | `examples/case49_executable_stack/` |
+| **Rule family** | [`executable-stack-flag-changed`](by-rule/executable-stack-flag-changed.md) |
 
 **Category:** ELF / Security | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -133,4 +135,4 @@ check.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Executable stack flag changed](by-rule/executable-stack-flag-changed.md)._

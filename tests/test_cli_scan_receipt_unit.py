@@ -66,19 +66,22 @@ class TestParamsContract:
 class TestGateConfigReceipt:
     def test_a_project_gate_is_now_claimed_by_a_scan(self, tmp_path: Path) -> None:
         """CLI cleanup phase two, "PR B": a scan's exit code has honored
-        `.abicheck.yml`'s severity/exit-code-scheme config since the fix
+        `.abicheck.yml`'s severity config since the fix
         that closed the "scan never consults severity" gap, and
         `resolve_compare_config` (the resolver that actually scores the
         run) reads the identical `project_cfg` object this receipt resolver
         now also reads directly -- so the receipt claiming this value is no
         longer a guess (see the module docstring's own "PR B" note for why
         this is safe specifically for `scan`, which has no `--profile`
-        tier)."""
+        tier). `gate.exit_code_scheme` itself is purely derived (PR G2
+        deleted the manual override and its `field_provenance` entry) --
+        `severity: preset: info-only` alone is what flips the derived
+        scheme to `severity`."""
         from abicheck.buildsource.inline import load_build_config
 
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text(
-            "severity:\n  preset: info-only\nexit_code_scheme: severity\n",
+            "severity:\n  preset: info-only\n",
             encoding="utf-8",
         )
         config = resolve_scan_config(
@@ -89,23 +92,24 @@ class TestGateConfigReceipt:
         )
         gate = config.gate
         assert gate.exit_code_scheme == "severity"
-        prov = config.provenance["gate.exit_code_scheme"]
+        assert "gate.exit_code_scheme" not in config.provenance
+        prov = config.provenance["gate.preset"]
         assert prov.layer.value == "project_config"
 
     def test_an_explicit_cli_severity_preset_is_claimed_too(
         self, tmp_path: Path
     ) -> None:
         """The explicit-CLI tier of the same fix (Codex review on #801): a
-        real `--severity-preset`/`--exit-code-scheme` must resolve at
-        `explicit_cli`, not merely "not stated" -- that provenance is what
-        lets a selected gate pack's own precedence check
-        (`pack_application._pack_supplied`) decline to override it."""
+        real `--severity-preset` must resolve at `explicit_cli`, not merely
+        "not stated" -- that provenance is what lets a selected gate pack's
+        own precedence check (`pack_application._pack_supplied`) decline to
+        override it."""
         config = resolve_scan_config(
-            _params(severity_preset="strict", exit_code_scheme="severity"),
-            typed={"severity_preset", "exit_code_scheme"},
+            _params(severity_preset="strict"),
+            typed={"severity_preset"},
         )
         assert config.gate.exit_code_scheme == "severity"
-        prov = config.provenance["gate.exit_code_scheme"]
+        prov = config.provenance["gate.preset"]
         assert prov.layer.value == "explicit_cli"
 
     def test_a_project_scope_setting_is_still_honored(self, tmp_path: Path) -> None:
@@ -148,9 +152,11 @@ class TestNoProjectConfig:
     def test_a_missing_project_config_resolves_with_no_project_tier(self) -> None:
         """The common case: a scan with no `.abicheck.yml` has no project
         inputs at all, and must not fabricate one -- every field resolves
-        below `project_config`."""
+        below `project_config`. `gate.exit_code_scheme` itself carries no
+        `field_provenance` entry any more (purely derived, PR G2), so
+        `gate.preset` is the representative gate field checked here."""
         config = resolve_scan_config(_params(), typed=set())
-        prov = config.provenance["gate.exit_code_scheme"]
+        prov = config.provenance["gate.preset"]
         assert prov.layer.value == "built_in_default"
 
 

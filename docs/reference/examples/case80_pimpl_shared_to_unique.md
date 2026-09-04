@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `typedef_base_changed`, `struct_size_changed` |
 | **Source files** | `examples/case80_pimpl_shared_to_unique/` |
+| **Rule family** | [`pimpl-shared-to-unique`](by-rule/pimpl-shared-to-unique.md) |
 
 **Category:** Pimpl ABI | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +142,4 @@ cleanup a maintainer might propose without realizing it's binary-incompatible.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pimpl shared to unique](by-rule/pimpl-shared-to-unique.md)._

@@ -248,15 +248,20 @@ class TestRunProfileLayer:
     """``--profile``'s injected values are the profile's choice, not defaults."""
 
     def test_ci_gate_scheme_is_recorded_as_the_run_profile(self, tmp_path):
-        """``apply_compare_profile`` fills ``exit_code_scheme`` into the kwargs
-        without stamping a source, so a resolution that never saw the profile
-        answered ``legacy`` for a run that really scored ``severity`` -- a
+        """CLI cleanup phase two PR G2 migrated ``ci-gate`` from injecting
+        ``exit_code_scheme: "severity"`` to injecting
+        ``severity_preset: "default"`` -- behavior-preserving, since stating
+        a severity preset is exactly what flips the now-purely-derived
+        ``gate.exit_code_scheme`` to ``severity``, and it's the field
+        ``apply_compare_profile`` actually fills in without stamping a
+        source, so a resolution that never saw the profile would otherwise
+        answer ``legacy`` for a run that really scored ``severity`` -- a
         wrong *value*, not merely an under-claimed source.
         """
         ctx = _context(tmp_path, "--profile", "ci-gate")
 
         assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "severity"
-        prov = ctx["field_provenance"]["gate.exit_code_scheme"]
+        prov = ctx["field_provenance"]["gate.preset"]
         assert prov["layer"] == "run_profile"
         assert prov["reference"] == "ci-gate"
         assert prov["selected_by"][0]["option"] == "--profile"
@@ -269,19 +274,57 @@ class TestRunProfileLayer:
             tmp_path,
             "--profile",
             "ci-gate",
-            "--exit-code-scheme",
-            "legacy",
+            "--severity-preset",
+            "strict",
         )
-        assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "legacy"
-        assert ctx["field_provenance"]["gate.exit_code_scheme"]["layer"] == (
+        assert ctx["resolved_config"]["gate"]["preset"]["id"] == "strict"
+        assert ctx["field_provenance"]["gate.preset"]["layer"] == (
             "explicit_cli"
         )
 
     def test_no_profile_leaves_no_run_profile_layer(self, tmp_path):
         ctx = _context(tmp_path)
-        assert ctx["field_provenance"]["gate.exit_code_scheme"]["layer"] == (
+        assert ctx["field_provenance"]["gate.preset"]["layer"] == (
             "built_in_default"
         )
+
+    def test_a_configured_project_preset_outranks_the_placeholder(self, tmp_path):
+        """Codex review, PR #1062, fresh evidence: `ci-gate`'s injected
+        `"default"` is a placeholder that exists only to activate the
+        algorithm -- the live gate computation
+        (`cli_compare_options._resolve_profile_severity_preset`) already
+        discards it once the project states its own severity policy, so the
+        receipt must agree, not attribute a `run_profile`-sourced `"default"`
+        for a run that actually scored the project's `info-only`.
+
+        Not routed through `_context` (asserts exit_code in (1, 2, 4)):
+        `info-only` demotes the fixture's real API break's own severity
+        contribution to 0 -- exit 1 here is `--contract auto`'s orthogonal
+        contract-coverage axis (ADR-049 Phase 7), not the gate, which is
+        exactly the point: the gate and coverage axes are independent, and
+        this test is about the gate/receipt agreeing, not about the
+        coverage floor.
+        """
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("severity:\n  preset: info-only\n", encoding="utf-8")
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--contract", "auto", "--format", "json",
+                "--profile", "ci-gate", "--config", str(config),
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
+        assert ctx["resolved_config"]["gate"]["preset"]["id"] == "info-only"
+        prov = ctx["field_provenance"]["gate.preset"]
+        assert prov["layer"] == "project_config"
+        assert prov["path"] == str(config)
+        # gate.exit_code_scheme is purely derived and carries no
+        # field_provenance entry at all any more (PR G2).
+        assert "gate.exit_code_scheme" not in ctx["field_provenance"]
 
     def test_apply_compare_profile_records_only_what_it_injected(self):
         """The meta record is what the receipt reads; an explicitly-set option
@@ -303,12 +346,12 @@ class TestRunProfileLayer:
                     else ParameterSource.DEFAULT
                 )
 
-        ctx = _Ctx(explicit={"exit_code_scheme"})
-        kwargs: dict = {"profile": "ci-gate", "exit_code_scheme": "legacy"}
+        ctx = _Ctx(explicit={"severity_preset"})
+        kwargs: dict = {"profile": "ci-gate", "severity_preset": "strict"}
         apply_compare_profile(ctx, kwargs)
         record = ctx.meta[RUN_PROFILE_META_KEY]
         assert record["name"] == "ci-gate"
-        assert "exit_code_scheme" not in record["injected"]
+        assert "severity_preset" not in record["injected"]
         assert record["injected"]["depth"] == "headers"
 
     def test_no_profile_records_nothing(self):
@@ -337,7 +380,7 @@ class TestGateParityWithTheLiveRun:
         "params,typed,config_severity",
         [
             ({}, set(), {}),
-            ({"exit_code_scheme": "severity"}, set(), {}),
+            ({"severity_preset": "default"}, set(), {}),
             # The per-category levels have no CLI flag any more, so the tier
             # that can still state them is the project config -- and the
             # parity claim has to hold through it just the same.
@@ -366,7 +409,6 @@ class TestGateParityWithTheLiveRun:
             "policy_file_path": None,
             "suppress": None,
             "require_justification": False,
-            "exit_code_scheme": None,
             "severity_preset": None,
             "pack_paths": (),
             **params,
@@ -380,7 +422,6 @@ class TestGateParityWithTheLiveRun:
                 if "scope_public_headers" in typed
                 else None
             ),
-            cli_exit_code_scheme=full["exit_code_scheme"],
         )
         resolved = resolve_cli_config(
             full, typed=typed, project_cfg=project_cfg, project_path=None

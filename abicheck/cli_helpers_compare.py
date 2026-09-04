@@ -488,8 +488,16 @@ class ResolvedCompareConfig:
     public_symbols: tuple[str, ...]
     strict_suppressions: bool
     require_justification: bool
-    #: Resolved to a concrete scheme: ``"legacy"`` or ``"severity"`` (``auto``
-    #: has already been decided from ``severity_active``).
+    #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
+    #: G2): ``"severity"`` when a severity setting is in effect anywhere
+    #: (``severity_active``), else ``"legacy"``. Purely derived -- there is
+    #: no user-facing selector for this any more (the removed
+    #: ``--exit-code-scheme``/``.abicheck.yml``'s ``exit_code_scheme:`` key
+    #: used to let a caller force either value regardless of
+    #: ``severity_active``); kept as a named field because a large amount
+    #: of downstream reporting/dry-run code reads it as "which algorithm
+    #: did this run use", which is still a fact worth stating even though
+    #: it is no longer configurable.
     exit_code_scheme: str
     source_method: str | None
     #: ADR-040 Lever 2: debug-resolution knobs demoted to the ``debug:`` config
@@ -522,7 +530,6 @@ def resolve_compare_config(
     *,
     cli_severity_preset: str | None,
     cli_scope_public: bool | None,
-    cli_exit_code_scheme: str | None = None,
     cli_debug_format: str | None = None,
     cli_dwarf_only: bool | None = None,
     cli_debuginfod: bool | None = None,
@@ -580,13 +587,11 @@ def resolve_compare_config(
     strict = bool(cfg.suppression_strict) if cfg else False
     require_just = bool(cfg.suppression_require_justification) if cfg else False
 
-    raw_scheme = str(
-        _pick(cli_exit_code_scheme, cfg.exit_code_scheme if cfg else None, "auto")
-    )
-    if raw_scheme == "auto":
-        scheme = "severity" if severity_active else "legacy"
-    else:
-        scheme = raw_scheme
+    # ADR-064/CLI cleanup phase two PR G2: no manual override any more --
+    # the algorithm is fully determined by whether a severity policy is in
+    # effect. `severity_active` is exactly that predicate (see its own
+    # comment above).
+    scheme = "severity" if severity_active else "legacy"
 
     source_method = cfg.source_method if cfg else None
 

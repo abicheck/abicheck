@@ -49,11 +49,12 @@ per-artifact ref documents it names — one Python object graph, fanned out to
 disk by `abicheck/project_snapshot_store.py`'s `write_project_manifest`
 (`variant_ref_relpath`/`artifact_ref_relpath`/`object_relpath` fix the path
 convention that writer follows, so a future implementation can't invent a
-second layout). `PackageManifest.project_sections` (ADR-062 A1.4/A1.5) is
-the multi-artifact counterpart: cross-library evidence stored once and
-referenced by every `ArtifactRef` that shares it — `abicheck/
-bundle_facts_store.py` is the first real producer of a `PackageManifest`
-naming more than one `ArtifactRef`.
+second layout). `PackageManifest.project_sections` (ADR-062 A1.4/A1.5) is a
+general mechanism for cross-library evidence stored once and referenced by
+every `ArtifactRef` that shares it; the multi-artifact `BundleFacts` package
+(`abicheck/bundle_facts_store.py`, wrapping `storage/import_bundle_facts.py`)
+does not use it today — its own bundle-composition facts fold onto one
+`VariantRef.sections` entry instead, per that module's own docstring.
 """
 
 from __future__ import annotations

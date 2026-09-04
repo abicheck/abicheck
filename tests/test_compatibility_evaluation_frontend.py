@@ -41,7 +41,6 @@ from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import VALID_BASE_POLICIES
 from abicheck.compatibility_evaluation_frontend import (
     CONTRACT_MODE_FIELD,
-    EXIT_CODE_SCHEME_FIELD,
     EXPLICIT_SCOPE_FIELD,
     GATE_PACKS_FIELD,
     GATE_PRESET_FIELD,
@@ -105,9 +104,11 @@ class TestDefaults:
         cfg = _resolve()
         assert CONTRACT_MODE_FIELD in cfg.provenance
         assert POLICY_BASE_FIELD in cfg.provenance
-        assert EXIT_CODE_SCHEME_FIELD in cfg.provenance
         assert SUPPRESSIONS_FIELD in cfg.provenance
-        assert len(cfg.provenance) == 18
+        # No `gate.exit_code_scheme` receipt entry any more (CLI cleanup
+        # phase two PR G2): it is purely derived from `severity_active`,
+        # with no candidates/D7 resolution of its own to record.
+        assert len(cfg.provenance) == 17
 
 
 class TestContractModePrecedence:
@@ -299,86 +300,24 @@ class TestSeverityAndExitScheme:
             preset=preset, abi_breaking=abi, addition=addition
         )
 
-    def test_auto_scheme_resolves_to_severity_when_a_setting_is_in_effect(self):
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                exit_code_scheme="auto", severity_preset="strict"
-            )
-        )
+    # CLI cleanup phase two PR G2: `ExplicitCompatibilityInputs`/
+    # `ProjectCompatibilityInputs` no longer have an `exit_code_scheme`
+    # field at all -- the manual algorithm selector (the CLI flag, the
+    # `.abicheck.yml` key, and the D7 candidate/provenance resolution for
+    # it) was deleted everywhere. `cfg.gate.exit_code_scheme` is now purely
+    # derived from whether a severity setting is in effect anywhere (CLI,
+    # project config, or a gate pack's own severity level) -- there is no
+    # override to test any more, only the derivation itself, covered by
+    # `test_defaults_match_todays_real_behavior` (no setting -> "legacy")
+    # and the severity-preset/per-category tests above (a setting ->
+    # "severity", already exercised via `cfg.gate.severity`).
+    def test_severity_setting_from_project_config_alone_selects_severity(self):
+        cfg = _resolve(project=ProjectCompatibilityInputs(severity_preset="strict"))
         assert cfg.gate.exit_code_scheme == "severity"
-        # `auto` never survives as a *value* (GateConfig rejects it), but the
-        # receipt still records that it is what the user selected.
-        prov = cfg.provenance[EXIT_CODE_SCHEME_FIELD]
-        assert prov.layer is SelectorLayer.EXPLICIT_CLI
-        assert prov.reference == "auto"
 
-    def test_explicit_auto_outranks_a_project_config_scheme(self):
-        # Matches cli_helpers_compare.resolve_compare_config, where a CLI
-        # value wins whatever it is: a typed `--exit-code-scheme auto` with a
-        # severity setting in effect resolves to severity, not to the
-        # project's concrete `legacy`.
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                exit_code_scheme="auto", severity_preset="strict"
-            ),
-            project=ProjectCompatibilityInputs(exit_code_scheme="legacy"),
-        )
-        assert cfg.gate.exit_code_scheme == "severity"
-        assert cfg.provenance[EXIT_CODE_SCHEME_FIELD].layer is SelectorLayer.EXPLICIT_CLI
-
-    def test_explicit_auto_with_no_severity_setting_resolves_to_legacy(self):
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(exit_code_scheme="auto"),
-            project=ProjectCompatibilityInputs(exit_code_scheme="severity"),
-        )
+    def test_no_severity_setting_anywhere_selects_legacy(self):
+        cfg = _resolve()
         assert cfg.gate.exit_code_scheme == "legacy"
-
-    def test_a_project_auto_is_indistinguishable_from_unset_without_the_explicit_flag(
-        self,
-    ):
-        # BuildConfig.exit_code_scheme defaults to the string "auto", so a
-        # bare ProjectCompatibilityInputs(exit_code_scheme="auto") -- with no
-        # exit_code_scheme_explicit=True, i.e. not routed through
-        # from_build_config's real presence tracking -- cannot be told apart
-        # from one that never stated it.
-        stated = _resolve(project=ProjectCompatibilityInputs(exit_code_scheme="auto"))
-        unset = _resolve(project=ProjectCompatibilityInputs())
-        assert stated == unset
-
-    def test_an_explicit_project_auto_pin_beats_a_gate_pack(self):
-        # Codex review, fresh evidence: a project's ``.abicheck.yml`` writing
-        # `exit_code_scheme: auto` literally (exit_code_scheme_explicit=True,
-        # what BuildConfig.from_dict/from_build_config actually produce for a
-        # real project config) is a real, stated selection -- it must resolve
-        # `auto`'s own meaning (severity-active -> "severity") and outrank a
-        # lower-precedence pack, not silently read as "unstated" the way the
-        # sibling test above does for a directly-constructed object with no
-        # presence tracking.
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(severity_preset="strict"),
-            project=ProjectCompatibilityInputs(
-                exit_code_scheme="auto", exit_code_scheme_explicit=True
-            ),
-        )
-        assert cfg.gate.exit_code_scheme == "severity"
-        assert (
-            cfg.provenance[EXIT_CODE_SCHEME_FIELD].layer is SelectorLayer.PROJECT_CONFIG
-        )
-
-    def test_explicit_scheme_wins_over_severity_activity(self):
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                exit_code_scheme="legacy", severity_preset="strict"
-            )
-        )
-        assert cfg.gate.exit_code_scheme == "legacy"
-
-    def test_project_scheme_applies_when_no_flag_was_given(self):
-        cfg = _resolve(project=ProjectCompatibilityInputs(exit_code_scheme="severity"))
-        assert cfg.gate.exit_code_scheme == "severity"
-        assert (
-            cfg.provenance[EXIT_CODE_SCHEME_FIELD].layer is SelectorLayer.PROJECT_CONFIG
-        )
 
     def test_preset_alias_spellings_resolve_to_one_identity(self):
         assert severity_preset_identity("info_only") == severity_preset_identity(
@@ -504,13 +443,28 @@ class TestPackComposition:
             tmp_path / "g.yml",
             pack_id="security_hardening",
             kind="gate",
-            assignments=(
-                "gate.exit_code_scheme: severity\ngate.severity.addition: error\n"
-            ),
+            assignments="gate.severity.addition: error\n",
         )
         cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
-        assert cfg.gate.exit_code_scheme == "severity"
         assert cfg.gate.severity.addition is SeverityLevel.ERROR
+        # The severity level it just assigned is itself a severity setting
+        # in effect, so the (purely derived, no longer pack-assignable)
+        # algorithm moves to "severity" too.
+        assert cfg.gate.exit_code_scheme == "severity"
+
+    def test_a_gate_pack_may_not_assign_exit_code_scheme_at_all(self, tmp_path):
+        # CLI cleanup phase two PR G2: the manual algorithm selector was
+        # deleted everywhere, including as a pack-assignable field -- a
+        # pack asserting it is rejected at load time, the same "not a
+        # route this kind may assign" error an out-of-namespace field gets.
+        pack = _write_pack(
+            tmp_path / "g.yml",
+            pack_id="legacy_gate",
+            kind="gate",
+            assignments="gate.exit_code_scheme: legacy\n",
+        )
+        with pytest.raises(PackManifestError, match="may not assign"):
+            _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
 
     def test_a_stated_value_outranks_a_pack_assignment(self, tmp_path):
         pack = _write_pack(
@@ -543,32 +497,6 @@ class TestPackComposition:
             )
         )
         assert cfg.gate.severity.addition is SeverityLevel.ERROR
-
-    def test_an_explicit_project_auto_pin_outranks_a_gate_pack(self, tmp_path):
-        # Codex review, fresh evidence: a project explicitly pinning
-        # `exit_code_scheme: auto` (exit_code_scheme_explicit=True, what a
-        # real .abicheck.yml produces) must outrank a pack's concrete
-        # scheme, the same way an explicit CLI `--exit-code-scheme auto`
-        # already does -- not read as "unstated" purely because BuildConfig
-        # also defaults an absent key to the string "auto".
-        pack = _write_pack(
-            tmp_path / "g.yml",
-            pack_id="legacy_gate",
-            kind="gate",
-            assignments="gate.exit_code_scheme: legacy\n",
-        )
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                severity_preset="strict", pack_paths=(str(pack),)
-            ),
-            project=ProjectCompatibilityInputs(
-                exit_code_scheme="auto", exit_code_scheme_explicit=True
-            ),
-        )
-        # severity_preset="strict" activates severity -> auto resolves to
-        # "severity", and the project's explicit pin of that resolution
-        # outranks the pack's "legacy" assignment.
-        assert cfg.gate.exit_code_scheme == "severity"
 
     def test_a_project_preset_also_outranks_such_a_pack(self, tmp_path):
         pack = _write_pack(
@@ -627,19 +555,6 @@ class TestPackComposition:
         cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
         assert cfg.gate.severity.addition is SeverityLevel.INFO
 
-    def test_project_config_also_outranks_a_pack_assignment(self, tmp_path):
-        pack = _write_pack(
-            tmp_path / "g.yml",
-            pack_id="security_hardening",
-            kind="gate",
-            assignments="gate.exit_code_scheme: severity\n",
-        )
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
-            project=ProjectCompatibilityInputs(exit_code_scheme="legacy"),
-        )
-        assert cfg.gate.exit_code_scheme == "legacy"
-
     def test_selected_packs_are_recorded_per_namespace(self, tmp_path):
         contract_pack = _write_pack(
             tmp_path / "c.yml",
@@ -651,7 +566,7 @@ class TestPackComposition:
             tmp_path / "g.yml",
             pack_id="security",
             kind="gate",
-            assignments="gate.exit_code_scheme: severity\n",
+            assignments="gate.severity.addition: error\n",
         )
         cfg = _resolve(
             explicit=ExplicitCompatibilityInputs(
@@ -732,13 +647,13 @@ class TestPackComposition:
             tmp_path / "a.yml",
             pack_id="a",
             kind="gate",
-            assignments="gate.exit_code_scheme: severity\n",
+            assignments="gate.severity.addition: error\n",
         )
         second = _write_pack(
             tmp_path / "b.yml",
             pack_id="b",
             kind="gate",
-            assignments="gate.exit_code_scheme: legacy\n",
+            assignments="gate.severity.addition: warning\n",
         )
         with pytest.raises(PackConflictError):
             _resolve(
@@ -797,27 +712,27 @@ class TestPackComposition:
             tmp_path / "a.yml",
             pack_id="a",
             kind="gate",
-            assignments="gate.exit_code_scheme: severity\n",
+            assignments="gate.severity.addition: error\n",
         )
         second = _write_pack(
             tmp_path / "b.yml",
             pack_id="b",
             kind="gate",
-            assignments="gate.exit_code_scheme: legacy\n",
+            assignments="gate.severity.addition: warning\n",
         )
         cfg = _resolve(
             explicit=ExplicitCompatibilityInputs(
-                exit_code_scheme="legacy", pack_paths=(str(first), str(second))
+                severity_addition="info", pack_paths=(str(first), str(second))
             )
         )
-        assert cfg.gate.exit_code_scheme == "legacy"
+        assert cfg.gate.severity.addition is SeverityLevel.INFO
 
     def test_a_pack_may_not_assign_a_field_outside_its_namespace(self, tmp_path):
         pack = _write_pack(
             tmp_path / "c.yml",
             pack_id="sneaky",
             kind="contract",
-            assignments="gate.exit_code_scheme: severity\n",
+            assignments="gate.severity.addition: error\n",
         )
         with pytest.raises(PackManifestError, match="may not assign"):
             _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
@@ -896,13 +811,11 @@ class TestCliAdapter:
                 "contract_mode": "exports",
                 "severity_preset": "strict",
                 "public_symbols": ("foo",),
-                "exit_code_scheme": None,
             }
         )
         assert inputs.contract_mode == "exports"
         assert inputs.severity_preset == "strict"
         assert inputs.public_symbols == ("foo",)
-        assert inputs.exit_code_scheme is None
 
     def test_untyped_defaults_resolve_exactly_like_no_input_at_all(self):
         # A `compare` run where the user typed none of these must not look
@@ -937,30 +850,28 @@ class TestApiAdapter:
         assert cfg.policy.base.id == "plugin_abi"
         assert cfg.provenance[POLICY_BASE_FIELD].layer is SelectorLayer.LEGACY_ALIAS
 
-    def test_severity_preset_and_exit_code_scheme_forward(self, tmp_path):
+    def test_severity_preset_forwards(self, tmp_path):
         """Regression (Codex review, PR #1032): a typed CompareRequest's
-        severity_preset/exit_code_scheme fields must reach
-        ExplicitCompatibilityInputs -- otherwise a --contract JSON report's
-        persisted gate.* receipt could disagree with
-        CompareResult.exit_decision, which reads the two request fields
-        directly, for a request combining contract_evaluation=True with
-        either field."""
+        severity_preset field must reach ExplicitCompatibilityInputs --
+        otherwise a --contract JSON report's persisted gate.* receipt could
+        disagree with CompareResult.exit_decision, which reads it directly.
+        (The sibling exit_code_scheme field this test used to cover was
+        deleted in CLI cleanup phase two PR G2 -- there is no longer a
+        request field to forward at all.)"""
         inputs = compare_request_inputs(
-            self._request(
-                tmp_path, severity_preset="info-only", exit_code_scheme="severity"
-            )
+            self._request(tmp_path, severity_preset="info-only")
         )
         assert inputs.severity_preset == "info-only"
-        assert inputs.exit_code_scheme == "severity"
 
-    def test_one_call_adapter_reflects_severity_and_exit_code_scheme(self, tmp_path):
+    def test_one_call_adapter_reflects_severity_preset(self, tmp_path):
         """End-to-end sibling of the above: the whole-config adapter's own
-        gate namespace must carry the same values, not just the lower-level
-        ExplicitCompatibilityInputs the prior test checks directly."""
+        gate namespace must carry the same value, not just the lower-level
+        ExplicitCompatibilityInputs the prior test checks directly -- and,
+        since a severity setting is now in effect, the purely-derived
+        algorithm moves to "severity" too, with no separate field to state
+        it."""
         cfg = compatibility_config_from_compare_request(
-            self._request(
-                tmp_path, severity_preset="info-only", exit_code_scheme="severity"
-            )
+            self._request(tmp_path, severity_preset="info-only")
         )
         assert cfg.gate.exit_code_scheme == "severity"
         assert cfg.gate.preset is not None and cfg.gate.preset.id == "info-only"
@@ -1077,7 +988,6 @@ class TestProjectConfigProjection:
                   public_symbols: [foo]
                 severity:
                   preset: strict
-                exit_code_scheme: severity
                 """)
         )
         project = ProjectCompatibilityInputs.from_build_config(
@@ -1090,6 +1000,10 @@ class TestProjectConfigProjection:
         assert resolved.surface.explicit_scope.items == ("foo",)
         assert resolved.gate.preset is not None
         assert resolved.gate.preset.id == "strict"
+        # No top-level `exit_code_scheme:` key exists any more (CLI cleanup
+        # phase two PR G2) -- `severity.preset: strict` above is itself a
+        # severity setting in effect, which is what purely derives this to
+        # "severity", with no separate key needed to state it.
         assert resolved.gate.exit_code_scheme == "severity"
         assert resolved.provenance[GATE_PRESET_FIELD].path == str(cfg_path)
 

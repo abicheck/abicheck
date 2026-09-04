@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule · audit |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `examples/case144_audit_private_header_leak/` |
+| **Rule family** | [`audit-private-header-leak`](by-rule/audit-private-header-leak.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -106,4 +108,4 @@ other, not a binary's public surface against its own header provenance).
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Audit private header leak](by-rule/audit-private-header-leak.md)._

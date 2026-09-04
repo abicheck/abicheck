@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `overload_added` |
 | **Source files** | `examples/case169_overload_added/` |
+| **Rule family** | [`overload-added`](by-rule/overload-added.md) |
 
 **Category:** Overload Resolution / Source Compatibility | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -143,4 +145,4 @@ evolution.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Overload added](by-rule/overload-added.md)._

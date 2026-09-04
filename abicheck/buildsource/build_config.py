@@ -60,8 +60,6 @@ from .build_config_schema import (
 _SEVERITY_LEVELS = ("error", "warning", "info")
 #: Valid severity presets (mirror of ``severity.SEVERITY_PRESETS`` spelling).
 _SEVERITY_PRESETS = ("default", "strict", "info-only")
-#: Valid exit-code schemes (ADR-037 D12 ``exit_code_scheme:``).
-_EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
 
 # ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
 # command — every real ingestion path enforces this) ─────────────────────────
@@ -150,8 +148,12 @@ class BuildConfig:
     settings that are stable, reviewed-in-a-PR properties rather than per-run
     invocation flags: ``severity:`` (per-category levels + preset), ``scope:``
     (public-surface FP tuning), ``suppression:`` (hygiene policy), ``source:``
-    (precise S-axis), plus the top-level ``exit_code_scheme:`` and ``version:``.
-    CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
+    (precise S-axis), plus the top-level ``version:``. CLI cleanup phase two
+    PR G2 removed the top-level ``exit_code_scheme:`` key -- the one
+    automatic gate algorithm (ADR-064) is no longer user-selectable; see
+    :func:`abicheck.cli_helpers_compare.resolve_compare_config`'s own
+    ``exit_code_scheme`` field docstring for the replacement, purely-derived
+    computation. CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
     for the precedence resolver (CLI > config > built-in default).
 
     A field left at its ``None`` / ``""`` / empty default means "unset — inherit
@@ -222,11 +224,6 @@ class BuildConfig:
     #: declared cohorts.
     bundle_system_providers: list[str] = field(default_factory=list)
     bundle_cohorts: list[str] = field(default_factory=list)
-    #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
-    exit_code_scheme: str = "auto"
-    #: Whether ``exit_code_scheme:`` was literally present -- it defaults to
-    #: ``"auto"`` either way, so this lets a stated ``auto`` outrank a pack.
-    exit_code_scheme_explicit: bool = False
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -251,7 +248,6 @@ class BuildConfig:
             "compile",
             "debug",
             "bundle",
-            "exit_code_scheme",
             "version",
             "risk_rules",
             "crosschecks",
@@ -482,13 +478,6 @@ class BuildConfig:
             bundle_cohorts=[
                 s.strip() for s in _strs(bundle, "cohorts") if s.strip()
             ],
-            exit_code_scheme=_one_of(
-                _str(top, "exit_code_scheme", "auto") or "auto",
-                _EXIT_CODE_SCHEMES,
-                "exit_code_scheme",
-            )
-            or "auto",
-            exit_code_scheme_explicit="exit_code_scheme" in top,
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -625,11 +614,6 @@ class BuildConfig:
             if block:
                 out[key] = block
 
-        # An explicit `auto` round-trips too, not just a non-`auto` value.
-        if self.exit_code_scheme and (
-            self.exit_code_scheme != "auto" or self.exit_code_scheme_explicit
-        ):
-            out["exit_code_scheme"] = self.exit_code_scheme
         if self.version:
             out["version"] = self.version
         return out

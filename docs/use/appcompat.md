@@ -155,12 +155,12 @@ flags.
 `--used-by` app's own scoped result — the full-library verdict is folded
 into the rendered report as informational context (see "Example output"
 above) but does **not** participate in the exit-code calculation. Which
-*scheme* computes that scoped exit code follows the exact same `auto`/
-`legacy`/`severity` resolution as plain `compare` — see [The two exit-code
+*scheme* computes that scoped exit code follows the exact same, fully
+automatic resolution as plain `compare` — see [The two exit-code
 schemes](ci-gating.md#the-two-exit-code-schemes) for the resolution rule
-(an explicit `--exit-code-scheme` pin is always authoritative; `auto`
-follows whether any severity setting is active). Scoped and unscoped runs
-share that one resolution — nothing here overrides it.
+(purely derived from whether any severity setting is active; there is no
+manual pin). Scoped and unscoped runs share that one resolution — nothing
+here overrides it.
 
 **Legacy scheme (no severity setting active):**
 
@@ -174,10 +174,8 @@ share that one resolution — nothing here overrides it.
 ### `--severity-*` flags *do* apply to a scoped run
 
 A scoped `--used-by` (or `--required-symbol(s)`) run respects
-`--exit-code-scheme`/`--severity-*`/`--severity-preset` the same way plain
-`compare` does — including that an explicit `--exit-code-scheme legacy`
-still pins the legacy mapping even alongside a `--severity-*` flag (see
-above). When the scheme does resolve to severity-aware, it applies to the
+`--severity-*`/`--severity-preset` the same way plain
+`compare` does (see above). When the scheme does resolve to severity-aware, it applies to the
 scoped exit code too: `0`/`1`/`2`/`4` as described in [Exit
 Codes](../reference/exit-codes.md), computed over the changes relevant to
 that app (`compute_exit_code`/`compute_gate_decision` run against the

@@ -196,6 +196,7 @@ topics:
       - abicheck/product_baseline.py
       - abicheck/bundle_side_input.py
       - abicheck/workflows/bundle_facts_library_overrides.py
+      - abicheck/workflows/bundle_stored_pair_compare.py
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
       - abicheck/frontends/cli/options/bundle_facts.py
       - abicheck/buildsource/build_config.py
@@ -739,3 +740,4 @@ topics:
       - abicheck/project_snapshot_store.py
       - abicheck/project_snapshot_legacy.py
       - abicheck/storage/sectioned_document.py
+      - abicheck/workflows/release_package.py

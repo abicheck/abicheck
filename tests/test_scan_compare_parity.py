@@ -1360,10 +1360,10 @@ class TestScanResolvesTheSameTypedConfig:
         ctx = self._scan_context(runner, old, new, [], tmp_path)
         prov = ctx["evaluation_context"]["field_provenance"]
         assert prov["policy.base"]["layer"] == "built_in_default"
-        # `scan` has no severity or exit-code-scheme flags, so the gate
-        # resolves entirely from built-in defaults -- accurate rather than an
-        # under-claim, the same shape the MCP receipt documents.
-        assert prov["gate.exit_code_scheme"]["layer"] == "built_in_default"
+        # `scan` has no severity flags, so the gate resolves entirely from
+        # built-in defaults. `gate.exit_code_scheme` is purely derived (PR
+        # G2) with no `field_provenance` entry -- `gate.preset` stands in.
+        assert prov["gate.preset"]["layer"] == "built_in_default"
 
     def test_the_scan_context_is_byte_identical_to_compares(
         self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path

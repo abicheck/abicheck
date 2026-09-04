@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `symbol_elf_visibility_changed` |
 | **Source files** | `examples/case51_protected_visibility/` |
+| **Rule family** | [`protected-visibility`](by-rule/protected-visibility.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -107,4 +109,4 @@ interposability for codegen freedom.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Protected visibility](by-rule/protected-visibility.md)._

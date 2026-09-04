@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | `func_removed`, `func_added`, `versioned_symbol_scheme_detected` |
 | **Source files** | `examples/case141_versioned_symbol_scheme/` |
+| **Rule family** | [`versioned-symbol-scheme`](by-rule/versioned-symbol-scheme.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -145,4 +147,4 @@ symbol-table evidence.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Versioned symbol scheme](by-rule/versioned-symbol-scheme.md)._

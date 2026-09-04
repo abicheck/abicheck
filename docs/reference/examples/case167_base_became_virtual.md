@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `base_class_virtual_changed` |
 | **Source files** | `examples/case167_base_became_virtual/` |
+| **Rule family** | [`base-became-virtual`](by-rule/base-became-virtual.md) |
 
 **Category:** Class Layout / Virtual Inheritance | **Verdict:** 🔴 BREAKING
 
@@ -150,4 +152,4 @@ reason.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base became virtual](by-rule/base-became-virtual.md)._

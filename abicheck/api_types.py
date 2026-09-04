@@ -721,8 +721,12 @@ class CompareRequest:
     pack_internal_namespaces: tuple[str, ...] | None = field(
         default=None, kw_only=True
     )
+    #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
+    #: G2) is fully determined by whether a severity setting is in effect
+    #: -- there is no ``exit_code_scheme`` field here to force one direction
+    #: or the other (removed in PR G2 along with the CLI flag, the
+    #: ``.abicheck.yml`` key, and the pack field it used to mirror).
     severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
-    exit_code_scheme: str | None = field(default=None, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -813,32 +817,19 @@ class CompareRequest:
                 )
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
-        # Fail fast on a misspelled exit_code_scheme (Codex review, Round 6):
-        # `resolve_release_gate_options` already rejects an unknown scheme,
-        # but `classify_compare_pair` only calls it *after*
+        # Fail fast on a misspelled severity_preset (Codex review, fresh
+        # evidence): `resolve_release_gate_options` already rejects an
+        # unknown preset, but `classify_compare_pair` only calls it *after*
         # `resolve_compare_request` has already run extraction — a project-
         # controlled build/source step that can be slow or side-effecting.
-        # Checking the same set here means a bad value is a Tier-2
-        # ValidationError before any of that runs, for every front end that
-        # calls `validate()`/`validation_errors()` (native `compare` CLI
-        # included, via `cli_compare_receipt.py`).
-        if self.exit_code_scheme is not None:
-            from .policy.release_gate_options import _VALID_EXIT_CODE_SCHEMES
-
-            if self.exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES:
-                errors.append(
-                    f"invalid exit_code_scheme {self.exit_code_scheme!r}; "
-                    f"must be one of {_VALID_EXIT_CODE_SCHEMES} or None"
-                )
-        # Same fail-fast reasoning, same round (Codex review, fresh
-        # evidence): the `exit_code_scheme` check above left this sibling
-        # field unchecked, so a misspelled `severity_preset` (e.g.
-        # `"strcit"`) still reached `resolve_release_gate_options` only
-        # after `resolve_compare_request` had already extracted both
-        # sides -- `SEVERITY_PRESETS` is `resolve_severity_config`'s own
-        # lookup table, checked here without calling it (this method must
-        # stay side-effect-free; resolving would also require a real
-        # `SeverityConfig` this validation has no use for).
+        # Checking here means a bad value is a Tier-2 ValidationError before
+        # any of that runs, for every front end that calls
+        # `validate()`/`validation_errors()` (native `compare` CLI
+        # included, via `cli_compare_receipt.py`). `SEVERITY_PRESETS` is
+        # `resolve_severity_config`'s own lookup table, checked here without
+        # calling it (this method must stay side-effect-free; resolving
+        # would also require a real `SeverityConfig` this validation has no
+        # use for).
         if self.severity_preset is not None:
             from .policy.severity import SEVERITY_PRESETS
 

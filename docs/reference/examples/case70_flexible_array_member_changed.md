@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `flexible_array_member_changed`, `func_return_changed` |
 | **Source files** | `examples/case70_flexible_array_member_changed/` |
+| **Rule family** | [`flexible-array-member-changed`](by-rule/flexible-array-member-changed.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -145,4 +147,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Flexible array member changed](by-rule/flexible-array-member-changed.md)._

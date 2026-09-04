@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | ✅ **NO_CHANGE** |
 | **Category** | No Change |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `examples/case186_c_api_pointee_const_abi_neutral/` |
+| **Rule family** | [`api-pointee-const-abi-neutral`](by-rule/api-pointee-const-abi-neutral.md) |
 
 **Category:** No Change | **Verdict:** ✅ NO_CHANGE
 
@@ -127,4 +129,4 @@ for the non-suppressed baseline).
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Api pointee const abi neutral](by-rule/api-pointee-const-abi-neutral.md)._

@@ -322,13 +322,11 @@ class TestEndToEndJsonReport:
         assert legacy.exit_code == 4, legacy.output
         ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
-        # No severity setting anywhere: `auto` resolved to `legacy`.
+        # No severity setting anywhere: resolved to `legacy`.
+        # gate.exit_code_scheme is purely derived (PR G2) -- no provenance.
         assert gate["exit_code_scheme"] == "legacy"
         assert gate["severity"]["abi_breaking"] == "error"
-        assert (
-            ctx["field_provenance"]["gate.exit_code_scheme"]["layer"]
-            == "built_in_default"
-        )
+        assert "gate.exit_code_scheme" not in ctx["field_provenance"]
         for category in ("abi_breaking", "potential_breaking", "addition"):
             assert (
                 ctx["field_provenance"][f"gate.severity.{category}"]["layer"]
@@ -368,9 +366,11 @@ class TestEndToEndJsonReport:
         # value it never stated (Codex review).
         assert prov["gate.severity.addition"]["layer"] == "built_in_default"
 
-    def test_explicit_exit_code_scheme_records_its_own_provenance(self, tmp_path):
-        """A typed ``--exit-code-scheme`` is ``EXPLICIT_CLI``, not the
-        ``built_in_default`` layer an ``auto`` resolution gets."""
+    def test_explicit_severity_preset_records_its_own_provenance(self, tmp_path):
+        """A typed ``--severity-preset`` is ``EXPLICIT_CLI``, not the
+        ``built_in_default`` layer an unstated resolution gets. (PR G2
+        deleted the sibling ``--exit-code-scheme``/its provenance entry
+        entirely -- that field is now purely derived, nothing to assert.)"""
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -382,15 +382,13 @@ class TestEndToEndJsonReport:
                 "public",
                 "--format",
                 "json",
-                "--exit-code-scheme",
-                "legacy",
+                "--severity-preset",
+                "strict",
             ],
         )
         ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
-        assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "legacy"
-        assert (
-            ctx["field_provenance"]["gate.exit_code_scheme"]["layer"] == "explicit_cli"
-        )
+        assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "severity"
+        assert ctx["field_provenance"]["gate.preset"]["layer"] == "explicit_cli"
 
     def test_a_typed_contract_flag_is_not_an_api_request(self, tmp_path):
         """``checker.compare`` sees a value, not the option that supplied it.
@@ -667,15 +665,18 @@ class TestReleaseFanOutContractParity:
     def test_gate_pack_applied_on_directory_inputs(self, tmp_path):
         # CLI cleanup phase two, "PR B": --pack now applies both a
         # `policy.overrides`/`surface.internal_namespaces` contribution
-        # (slice 1) and a `kind: gate` pack's `gate.exit_code_scheme`/
-        # `gate.severity.*` contribution (slice 2) to the release fan-out
-        # uniformly -- see test_pack_application.py's
-        # TestOnlyAppliedFieldsAreAccepted for the exit-code-differs
-        # assertions this test doesn't repeat. A bare `gate.exit_code_
-        # scheme: severity` (no severity level) still resolves and applies
-        # cleanly here -- it's just not on its own enough to move this
-        # particular pair's exit code, since abi_breaking defaults to
-        # `error` under both the legacy and severity schemes.
+        # (slice 1) and a `kind: gate` pack's `gate.severity.*` contribution
+        # (slice 2) to the release fan-out uniformly -- see
+        # test_pack_application.py's TestOnlyAppliedFieldsAreAccepted for the
+        # exit-code-differs assertions this test doesn't repeat. PR G2
+        # deleted `gate.exit_code_scheme` as an assignable field entirely
+        # (the scheme is purely derived from whether a severity setting is
+        # in effect at all) -- a bare `gate.severity.abi_breaking: error`
+        # pack still resolves and applies cleanly here, and is itself
+        # exactly the kind of setting that flips the derived scheme to
+        # `severity`; it's just not on its own enough to move this
+        # particular pair's exit code, since abi_breaking already defaults
+        # to `error` under both the legacy and severity schemes.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -688,7 +689,7 @@ class TestReleaseFanOutContractParity:
         pack_path = pack_dir / "pack.yml"
         pack_path.write_text(
             "id: gate_scheme\nkind: gate\nversion: 1\n"
-            "assignments:\n  gate.exit_code_scheme: severity\n",
+            "assignments:\n  gate.severity.abi_breaking: error\n",
             encoding="utf-8",
         )
 

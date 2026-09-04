@@ -14,24 +14,34 @@
 # limitations under the License.
 
 """CLI cleanup phase two, PR G2's "typed-API half of the parity pass"
-(ADR-064): `CompareRequest`/`ScanRequest` now carry real
-`severity_preset`/`exit_code_scheme` fields (exactly the two flags
-single-pair `compare`/`scan --against` themselves expose -- neither has a
-per-category `--severity-<category>` CLI flag, only the release fan-out
-does, so neither typed request carries a per-category field either),
-resolved through the identical `abicheck.policy.release_gate_options.
-GateOptions` object the directory/package release fan-out resolves its own
-gate configuration from (`resolve_release_gate_options(None, ...)`), rather
-than each front end computing its own answer.
+(ADR-064): `CompareRequest`/`ScanRequest` now carry a real `severity_preset`
+field (the one flag single-pair `compare`/`scan --against` themselves
+expose -- neither has a per-category `--severity-<category>` CLI flag, only
+the release fan-out does, so neither typed request carries a per-category
+field either), resolved through the identical `abicheck.policy.
+release_gate_options.GateOptions` object the directory/package release
+fan-out resolves its own gate configuration from
+(`resolve_release_gate_options(None, ...)`), rather than each front end
+computing its own answer.
 
-Before this: `CompareRequest` had no severity/exit-code-scheme field at
-all -- a typed caller always classified through the legacy verdict-based
-exit code, with no way to reach the severity-aware scheme `compare
---severity-preset` already gives the CLI. `ScanRequest` had the fields'
-CLI-flag counterparts explicitly rejected as "not stated" in its own
-receipt-resolution comment, and `run_scan`'s own `run_scan_core` call never
-passed `sev_config`/`exit_code_scheme` at all (always the function's own
-`None`/`"legacy"` defaults), regardless of `--against`.
+Before this: `CompareRequest` had no severity field at all -- a typed
+caller always classified through the legacy verdict-based exit code, with
+no way to reach the severity-aware scheme `compare --severity-preset`
+already gives the CLI. `ScanRequest` had the field's CLI-flag counterpart
+explicitly rejected as "not stated" in its own receipt-resolution comment,
+and `run_scan`'s own `run_scan_core` call never passed `sev_config` at all
+(always the function's own `None` default, resolving to the legacy exit
+code), regardless of `--against`.
+
+This module originally also covered a sibling `exit_code_scheme` field on
+both typed requests -- the manual algorithm selector, mirroring the CLI's
+`--exit-code-scheme`. CLI cleanup phase two PR G2 deleted that selector
+everywhere: the one automatic gate algorithm is now fully determined by
+whether `severity_preset` (or any other severity setting) is in effect, so
+there is no longer a second field to resolve, forward, or validate --
+`TestInvalidExitCodeScheme` below is what remains of that coverage,
+narrowed to the primitive `resolve_release_gate_options` itself no longer
+accepting a scheme override at all.
 
 Two things are proven per request type, per the "bug fix's regression test
 targets the bug class" contract (AGENTS.md):
@@ -127,7 +137,6 @@ class TestCompareRequestGateOptions:
         demoted = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
         )
         assert legacy.exit_decision.code == 4
@@ -146,7 +155,6 @@ class TestCompareRequestGateOptions:
         result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="strict",
         )
         assert result.exit_decision.code == 4
@@ -158,7 +166,6 @@ class TestCompareRequestGateOptions:
         api_result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
         )
         cli_result = CliRunner().invoke(
@@ -169,8 +176,6 @@ class TestCompareRequestGateOptions:
                 str(new),
                 "--severity-preset",
                 "info-only",
-                "--exit-code-scheme",
-                "severity",
                 "--format",
                 "json",
             ],
@@ -182,14 +187,16 @@ class TestCompareRequestGateOptions:
     def test_default_severity_fields_leave_the_pre_existing_behaviour_unchanged(
         self, tmp_path: Path
     ) -> None:
-        """Both fields default to `None` -- a `CompareRequest` built before
-        they existed keeps resolving the identical decision."""
+        """The field defaults to `None` -- a `CompareRequest` built before
+        it existed keeps resolving the identical decision. (Its sibling
+        `exit_code_scheme` field, deleted in CLI cleanup phase two PR G2,
+        used to be checked here too; there is no longer a second field to
+        default.)"""
         old, new = _write(tmp_path, *_breaking_pair())
         explicit_none = self._run(
             old,
             new,
             severity_preset=None,
-            exit_code_scheme=None,
         )
         omitted = self._run(old, new)
         assert explicit_none.exit_decision.code == omitted.exit_decision.code == 4
@@ -227,7 +234,6 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
         )
         ctx = result.diff.contract_context
@@ -256,12 +262,8 @@ class TestCompareRequestContractContextGateReceipt:
         default both times (which a no-op fix could still pass if the
         default preset happened to match one of the two)."""
         old, new = _write(tmp_path, *_breaking_pair())
-        info_only = self._run(
-            old, new, exit_code_scheme="severity", severity_preset="info-only"
-        )
-        strict = self._run(
-            old, new, exit_code_scheme="severity", severity_preset="strict"
-        )
+        info_only = self._run(old, new, severity_preset="info-only")
+        strict = self._run(old, new, severity_preset="strict")
         info_cfg = info_only.diff.contract_context.evaluation_context.resolved_config
         strict_cfg = strict.diff.contract_context.evaluation_context.resolved_config
         assert info_cfg.gate.preset.id == "info-only"
@@ -271,12 +273,16 @@ class TestCompareRequestContractContextGateReceipt:
     def test_legacy_scheme_still_persists_a_real_severity_config(
         self, tmp_path: Path
     ) -> None:
-        """An explicit `exit_code_scheme="legacy"` clears `GateOptions.
-        severity` to `None` (`resolve_release_gate_options`'s own
-        contract) -- `with_resolved_gate` requires a real `SeverityConfig`
-        regardless, so the receipt must not crash or silently omit one."""
+        """No severity setting in effect resolves `GateOptions.severity` to
+        `None` (`resolve_release_gate_options`'s own contract) --
+        `with_resolved_gate` requires a real `SeverityConfig` regardless, so
+        the receipt must not crash or silently omit one. (Before CLI
+        cleanup phase two PR G2 this was reached via an explicit
+        `exit_code_scheme="legacy"`, which forced the identical outcome
+        even with a severity setting present; that override no longer
+        exists, so the no-setting-at-all case now covers it.)"""
         old, new = _write(tmp_path, *_breaking_pair())
-        result = self._run(old, new, exit_code_scheme="legacy")
+        result = self._run(old, new)
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.gate.exit_code_scheme == "legacy"
         from abicheck.severity import SeverityConfig
@@ -303,24 +309,23 @@ class TestCompareRequestContractContextGateReceipt:
             ("info-only", "severity"),  # a real preset -> resolves to severity
         ],
     )
-    def test_auto_scheme_resolves_without_crashing_the_receipt(
+    def test_scheme_resolves_without_crashing_the_receipt_either_way(
         self, tmp_path: Path, severity_preset: str | None, expected_scheme: str
     ) -> None:
-        """Round-8 review (Codex, fresh evidence): `exit_code_scheme="auto"`
-        is a real, valid value (`GateOptions` resolves it to `legacy`/
-        `severity` per whether a severity setting is actually in effect) --
-        but an earlier revision of the fix installed `gate.exit_code_scheme`
-        itself onto the receipt, still `"auto"` at that point, and
-        `with_resolved_gate`'s own `GateConfig` only accepts `"legacy"`/
-        `"severity"`. A valid `auto` request raised `ValueError` from
-        *inside* the receipt-install step, after the comparison had already
-        completed. Must resolve cleanly to the same value `exit_decision`
-        itself was scored with, for both the no-severity-in-effect and a
-        real-preset case."""
+        """Round-8 review (Codex, fresh evidence): an earlier revision of a
+        now-superseded fix installed `gate.exit_code_scheme` onto the
+        receipt before it was fully resolved, and `with_resolved_gate`'s own
+        `GateConfig` only accepts `"legacy"`/`"severity"` -- a request that
+        should have resolved cleanly raised `ValueError` from *inside* the
+        receipt-install step, after the comparison had already completed.
+        Must resolve cleanly to the same value `exit_decision` itself was
+        scored with, for both the no-severity-in-effect and a real-preset
+        case. (CLI cleanup phase two PR G2 removed the `exit_code_scheme`
+        field this test used to pass `"auto"` through -- the derivation is
+        unconditional now, so there is no longer a distinct "auto" input to
+        exercise, only the two outcomes.)"""
         old, new = _write(tmp_path, *_breaking_pair())
-        result = self._run(
-            old, new, exit_code_scheme="auto", severity_preset=severity_preset
-        )
+        result = self._run(old, new, severity_preset=severity_preset)
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.gate.exit_code_scheme == expected_scheme
 
@@ -354,7 +359,6 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
             suppress=suppress_path,
         )
@@ -533,7 +537,6 @@ class TestCompareResultSeverityConfigRenderingParity:
         result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
         )
         assert result.severity_config is not None
@@ -561,7 +564,6 @@ class TestCompareResultSeverityConfigRenderingParity:
         result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
         )
         assert result.exit_decision.code == 0
@@ -578,7 +580,6 @@ class TestCompareResultSeverityConfigRenderingParity:
         result = self._run(
             old,
             new,
-            exit_code_scheme="severity",
             severity_preset="info-only",
         )
         from abicheck.reporter import to_json
@@ -607,9 +608,7 @@ class TestRunCompareForwardsGateOptions:
 
         old, new = _write(tmp_path, *_breaking_pair())
         legacy = run_compare(old, new)
-        demoted = run_compare(
-            old, new, exit_code_scheme="severity", severity_preset="info-only"
-        )
+        demoted = run_compare(old, new, severity_preset="info-only")
         assert legacy.exit_decision.code == 4
         assert demoted.exit_decision.code == 0
         assert demoted.severity_config is not None
@@ -621,14 +620,11 @@ class TestRunCompareForwardsGateOptions:
         from abicheck.service import run_compare, run_compare_request
 
         old, new = _write(tmp_path, *_breaking_pair())
-        shim_result = run_compare(
-            old, new, exit_code_scheme="severity", severity_preset="info-only"
-        )
+        shim_result = run_compare(old, new, severity_preset="info-only")
         typed_result = run_compare_request(
             CompareRequest(
                 old=InputSpec(path=old),
                 new=InputSpec(path=new),
-                exit_code_scheme="severity",
                 severity_preset="info-only",
             )
         )
@@ -636,10 +632,12 @@ class TestRunCompareForwardsGateOptions:
 
 
 class TestScanRequestGateOptions:
-    """`ScanRequest.severity_preset`/`exit_code_scheme` -> `run_scan`'s
-    `sev_config`/`exit_code_scheme` forward into `run_scan_core` (only
-    meaningful with `baseline` set, matching `cli_scan.py`'s own
-    `_COMPARISON_ONLY_FLAGS` rule for the identical two CLI flags)."""
+    """`ScanRequest.severity_preset` -> `run_scan`'s `sev_config` forwards
+    into `run_scan_core` (only meaningful with `baseline` set, matching
+    `cli_scan.py`'s own `_COMPARISON_ONLY_FLAGS` rule for the identical CLI
+    flag). Its sibling `exit_code_scheme` field/flag, deleted in CLI cleanup
+    phase two PR G2, used to be covered here too -- there is no longer a
+    second field to forward, reject, or validate."""
 
     def _pair(self, tmp_path: Path) -> tuple[Path, Path]:
         return _write(tmp_path, *_breaking_pair())
@@ -663,7 +661,6 @@ class TestScanRequestGateOptions:
             ScanRequest(
                 binaries=[new],
                 baseline=old,
-                exit_code_scheme="severity",
                 severity_preset="info-only",
             )
         )
@@ -680,7 +677,6 @@ class TestScanRequestGateOptions:
             ScanRequest(
                 binaries=[new],
                 baseline=old,
-                exit_code_scheme="severity",
                 severity_preset="info-only",
             )
         )
@@ -693,8 +689,6 @@ class TestScanRequestGateOptions:
                 str(old),
                 "--severity-preset",
                 "info-only",
-                "--exit-code-scheme",
-                "severity",
             ],
         )
         assert cli_result.exit_code == 0, cli_result.output
@@ -704,38 +698,33 @@ class TestScanRequestGateOptions:
         self, tmp_path: Path
     ) -> None:
         """Mirrors `cli_scan._COMPARISON_ONLY_FLAGS`'s identical rejection
-        of `--severity-preset`/`--exit-code-scheme` with no `--against`."""
+        of `--severity-preset` with no `--against`."""
         from abicheck.errors import ValidationError
         from abicheck.service_scan import ScanRequest, run_scan
 
         _, new = self._pair(tmp_path)
         with pytest.raises(ValidationError, match="severity_preset"):
             run_scan(ScanRequest(binaries=[new], severity_preset="strict"))
-        with pytest.raises(ValidationError, match="exit_code_scheme"):
-            run_scan(ScanRequest(binaries=[new], exit_code_scheme="severity"))
 
     def test_invalid_gate_fields_raise_validation_error(self, tmp_path: Path) -> None:
         """CodeRabbit review, fresh evidence, PR #1032: `run_scan` called
         `resolve_scan_gate_options` -> `resolve_release_gate_options` with
-        no exception translation at all -- an invalid `exit_code_scheme`
-        raised bare `ValueError` and an invalid `severity_preset` raised
-        `PolicyError` (a `ValueError` subclass, from `resolve_severity_
-        config`), neither of which is `ValidationError`, the type every
-        other malformed-`ScanRequest` field raises (see the sibling test
-        above). A Tier-2 caller guarding `run_scan` with
-        `except ValidationError` -- the documented contract -- would miss
-        both and see the raw exception instead. Fixed by translating both
-        at the `resolve_scan_gate_options` call site, mirroring the
-        existing `_resolve_scan_contract_config` -> `resolve_scan_config`
-        translation just above it in `service_scan.py`."""
+        no exception translation at all -- an invalid `severity_preset`
+        raised `PolicyError` (a `ValueError` subclass, from
+        `resolve_severity_config`), not `ValidationError`, the type every
+        other malformed-`ScanRequest` field raises. A Tier-2 caller guarding
+        `run_scan` with `except ValidationError` -- the documented contract
+        -- would miss it and see the raw exception instead. Fixed by
+        translating it at the `resolve_scan_gate_options` call site,
+        mirroring the existing `_resolve_scan_contract_config` ->
+        `resolve_scan_config` translation just above it in
+        `service_scan.py`. (Its sibling assertion for an invalid
+        `exit_code_scheme` was removed along with the field itself, CLI
+        cleanup phase two PR G2.)"""
         from abicheck.errors import ValidationError
         from abicheck.service_scan import ScanRequest, run_scan
 
         old, new = self._pair(tmp_path)
-        with pytest.raises(ValidationError, match="exit_code_scheme"):
-            run_scan(
-                ScanRequest(binaries=[new], baseline=old, exit_code_scheme="legacy ")
-            )
         with pytest.raises(ValidationError):
             run_scan(
                 ScanRequest(
@@ -754,7 +743,6 @@ class TestScanRequestGateOptions:
                 binaries=[new],
                 baseline=old,
                 severity_preset=None,
-                exit_code_scheme=None,
             )
         )
         omitted = run_scan(ScanRequest(binaries=[new], baseline=old))
@@ -762,142 +750,78 @@ class TestScanRequestGateOptions:
 
 
 class TestInvalidExitCodeScheme:
-    """`exit_code_scheme` reaches `resolve_release_gate_options` unchecked
-    from a typed `CompareRequest`/`ScanRequest` -- unlike the CLI's own
-    `--exit-code-scheme` (`click.Choice`) or a pack's `gate.exit_code_scheme`
-    (validated at load time), a typed caller has no front-end validation of
-    its own (Codex review, PR #1032). Regression for the bug class, not just
-    the one reported spelling: a misspelled/mistyped scheme must be rejected
-    outright rather than silently falling through the `"severity"`/
-    `"legacy"` `==` checks -- which, combined with a `severity_preset` also
-    being set, would otherwise silently select the severity algorithm for a
-    scheme that was never actually `"severity"` (the exact failure mode
-    Codex's finding describes: a breaking change exiting 0 instead of the
-    typo being caught)."""
+    """Historically: `exit_code_scheme` reached `resolve_release_gate_
+    options` unchecked from a typed `CompareRequest`/`ScanRequest` -- unlike
+    the CLI's own `--exit-code-scheme` (`click.Choice`) or a pack's
+    `gate.exit_code_scheme` (validated at load time), a typed caller had no
+    front-end validation of its own (Codex review, PR #1032), so a
+    misspelled/mistyped scheme could silently fall through the
+    `"severity"`/`"legacy"` `==` checks and, combined with a
+    `severity_preset` also being set, select the severity algorithm for a
+    scheme that was never actually `"severity"`.
 
-    @pytest.mark.parametrize(
-        "bad_scheme",
-        [
-            "legacy ",  # trailing whitespace -- Codex's own repro
-            "Legacy",  # wrong case
-            "lgeacy",  # misspelling
-            "strict",  # a real severity *preset* name, not a scheme
-            "",  # empty string
-        ],
-    )
-    def test_resolve_release_gate_options_rejects_unknown_schemes(
-        self, bad_scheme: str
+    CLI cleanup phase two PR G2 deleted `exit_code_scheme` -- the field, the
+    CLI flag, the `.abicheck.yml` key, and the pack field -- everywhere, so
+    that whole misclassification class no longer has an input to trigger it
+    at all: there is no longer a scheme value for a caller to misspell.
+    `test_resolve_release_gate_options_no_longer_accepts_a_scheme_argument`
+    below is the regression proving the capability is actually gone, not
+    merely unexercised; the remaining tests here are this class's still-live
+    `severity_preset`/`policy` fail-fast siblings, unaffected by the
+    removal."""
+
+    def test_resolve_release_gate_options_no_longer_accepts_a_scheme_argument(
+        self,
     ) -> None:
+        """The primitive itself has no scheme parameter to pass any more --
+        proving the removal reaches the actual function signature, not just
+        its typed-API callers."""
+        import inspect
+
         from abicheck.policy.release_gate_options import resolve_release_gate_options
 
-        with pytest.raises(ValueError, match="exit_code_scheme"):
-            resolve_release_gate_options(
+        params = inspect.signature(resolve_release_gate_options).parameters
+        assert "release_exit_code_scheme" not in params
+        assert "exit_code_scheme" not in params
+        with pytest.raises(TypeError, match="exit_code_scheme"):
+            resolve_release_gate_options(  # type: ignore[call-arg]
                 None,
-                release_exit_code_scheme=bad_scheme,
-                severity_preset="info-only",
+                release_exit_code_scheme="legacy",
+                severity_preset=None,
                 severity_abi_breaking=None,
                 severity_potential_breaking=None,
                 severity_quality_issues=None,
                 severity_addition=None,
             )
 
-    @pytest.mark.parametrize("scheme", ["auto", "legacy", "severity", None])
-    def test_resolve_release_gate_options_accepts_every_valid_scheme(
-        self, scheme: str | None
-    ) -> None:
-        from abicheck.policy.release_gate_options import resolve_release_gate_options
-
-        # Must not raise.
-        gate = resolve_release_gate_options(
-            None,
-            release_exit_code_scheme=scheme,
-            severity_preset=None,
-            severity_abi_breaking=None,
-            severity_potential_breaking=None,
-            severity_quality_issues=None,
-            severity_addition=None,
-        )
-        assert gate.exit_code_scheme == scheme
-
-    def test_scan_request_with_a_misspelled_scheme_fails_fast_not_silently(
-        self, tmp_path: Path
-    ) -> None:
-        """The end-to-end regression this fix closes: before it, a typed
-        `ScanRequest(exit_code_scheme="legacy ", severity_preset=...)`
-        would silently resolve `GateOptions.severity` to a real config
-        (neither `==` branch in `resolve_release_gate_options` matched the
-        trailing-whitespace string), so `run_scan_core` would select the
-        severity algorithm for a scheme that was never actually
-        `"severity"` -- exactly the misclassification risk Codex's finding
-        named. It must now raise instead."""
-        from abicheck.model import AbiSnapshot
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        common = {"library": "libfoo.so.1", "from_headers": True}
-        old = AbiSnapshot(
-            version="1.0",
-            functions=[_fn("pub_a", "_Z5pub_av")],
-            elf=_elf("_Z5pub_av"),
-            **common,
-        )
-        new = AbiSnapshot(version="2.0", functions=[], elf=_elf(), **common)
-        old_p, new_p = _write(tmp_path, old, new)
-
-        with pytest.raises(ValueError, match="exit_code_scheme"):
-            run_scan(
-                ScanRequest(
-                    binaries=[new_p],
-                    baseline=old_p,
-                    severity_preset="info-only",
-                    exit_code_scheme="legacy ",
-                )
-            )
-
-    def test_compare_request_rejects_bad_scheme_before_extraction_runs(self) -> None:
-        """Round-6 review (Codex, fresh evidence): the fix above closed the
-        gap for `resolve_release_gate_options` itself, but
-        `classify_compare_pair` only calls it *after*
-        `resolve_compare_request` has already resolved both sides -- real
-        extraction, which can be slow or run a project-controlled build
-        step. A `CompareRequest` must fail on the bad scheme before that
-        work starts, not after.
-
-        Proven by pointing both sides at paths that don't exist: extraction
-        would raise `SnapshotError`/`OSError` long before any gate option is
-        resolved, so seeing `ValidationError` (raised from
-        `CompareRequest.validate()`, the first line of
-        `resolve_compare_request`) instead of a filesystem error is direct
-        evidence validation ran first -- not just that it eventually runs
-        somewhere in the pipeline."""
+    def test_compare_request_no_longer_has_an_exit_code_scheme_field(self) -> None:
+        """Same proof, one layer up: a typed `CompareRequest` cannot even be
+        constructed with the deleted field any more."""
         from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.errors import ValidationError
-        from abicheck.service import run_compare_request
 
-        missing_old = Path("/nonexistent/old.abi.json")
-        missing_new = Path("/nonexistent/new.abi.json")
-        assert not missing_old.exists()
-        assert not missing_new.exists()
-
-        with pytest.raises(ValidationError, match="exit_code_scheme"):
-            run_compare_request(
-                CompareRequest(
-                    old=InputSpec(path=missing_old),
-                    new=InputSpec(path=missing_new),
-                    severity_preset="info-only",
-                    exit_code_scheme="legacy ",
-                )
+        with pytest.raises(TypeError, match="exit_code_scheme"):
+            CompareRequest(  # type: ignore[call-arg]
+                old=InputSpec(path=Path("old.abi.json")),
+                new=InputSpec(path=Path("new.abi.json")),
+                exit_code_scheme="legacy",
             )
+
+    def test_scan_request_no_longer_has_an_exit_code_scheme_field(self) -> None:
+        from abicheck.service_scan import ScanRequest
+
+        with pytest.raises(TypeError, match="exit_code_scheme"):
+            ScanRequest(binaries=[Path("new.so")], exit_code_scheme="legacy")  # type: ignore[call-arg]
 
     def test_compare_request_rejects_bad_preset_before_extraction_runs(self) -> None:
-        """CodeRabbit review, fresh evidence: the fix above validated
-        `exit_code_scheme` but left its sibling field, `severity_preset`,
-        unchecked -- a misspelled preset (e.g. `"strcit"`) still only failed
-        later, inside `classify_compare_pair`'s `resolve_release_gate_
-        options` call, once extraction had already run. Same proof
-        structure as the sibling test above: a nonexistent path would raise
-        a filesystem error if extraction ran first, so seeing
-        `ValidationError` instead is direct evidence the check now runs
-        before it."""
+        """CodeRabbit review, fresh evidence: a misspelled preset (e.g.
+        `"strcit"`) must fail before extraction runs, not later, inside
+        `classify_compare_pair`'s `resolve_release_gate_options` call, once
+        extraction had already run. Proven by pointing both sides at paths
+        that don't exist: extraction would raise `SnapshotError`/`OSError`
+        long before any gate option is resolved, so seeing `ValidationError`
+        (raised from `CompareRequest.validate()`, the first line of
+        `resolve_compare_request`) instead of a filesystem error is direct
+        evidence the check now runs before it."""
         from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.errors import ValidationError
         from abicheck.service import run_compare_request

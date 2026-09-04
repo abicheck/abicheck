@@ -1392,26 +1392,45 @@ from .frontends.cli.options.release import (  # noqa: E402
     evidence_options as evidence_options,
     header_graph_options as header_graph_options,
     release_options as release_options,
+    variant_kwargs_from_context as variant_kwargs_from_context,
+    variant_options as variant_options,
     warn_deprecated_header_graph_flags as warn_deprecated_header_graph_flags,
 )
 
 
 def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
-    """True when the ``compare`` operands are a directory/package (set) input.
+    """True when the ``compare`` operands are a directory/package (set)
+    input, *or* either operand is itself a stored ``BundleFacts`` document
+    (Codex review, PR #1060, round 13).
 
     Mirrors the ADR-037 D7 dispatch (:func:`cli_resolve.classify_compare_operand`)
     so profile handling matches how ``run_compare`` will actually route the
-    comparison, without duplicating the classification rules.
+    comparison, without duplicating the classification rules. A stored
+    ``BundleFacts`` document is not itself a directory/package operand --
+    ``classify_compare_operand`` reports it as an ordinary ``"file"`` -- but
+    it represents a whole multi-library bundle exactly the same way a
+    directory/package does, and is dispatched to the identical multi-
+    library ``compare_bundle_facts`` engine (``workflows.bundle_compare_
+    operand``), never the single-pair path a profile's knobs (``--depth``,
+    ``--severity-preset``, the ``review`` format) were designed for.
+    Without this, ``--profile quick`` on a stored/stored pair silently
+    injected e.g. ``depth="binary"`` into every library's evidence depth
+    instead of being rejected the same way a directory/package operand
+    already is.
     """
     from .cli_resolve import classify_compare_operand
+    from .workflows.bundle_compare_operand import looks_like_stored_bundle_facts
 
     kinds: set[str] = set()
     for key in ("old_input", "new_input"):
         operand = kwargs.get(key)
         if operand is None:
             continue
+        path = Path(str(operand))
+        if looks_like_stored_bundle_facts(path):
+            return True
         try:
-            kinds.add(classify_compare_operand(Path(str(operand))))
+            kinds.add(classify_compare_operand(path))
         except Exception:  # noqa: BLE001 - classification is best-effort here
             # Logged rather than swallowed silently (bandit B112): an operand
             # this classifier cannot read contributes no kind, and the real
@@ -1430,7 +1449,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     declares **only** when the user left that option at its default.
 
     **Profiles are single-pair-only.** A profile bundles single-pair-only knobs
-    (``--depth``, ``--exit-code-scheme``) and single-pair report formats
+    (``--depth``, ``--severity-preset``) and single-pair report formats
     (``review``) that the directory/package *release fan-out* deliberately does
     not accept — the fan-out sources those from ``.abicheck.yml`` instead. Rather
     than silently drop half a profile (the codebase rejects such flags loudly on
@@ -1457,9 +1476,10 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     if _profile_targets_set_input(kwargs):
         raise click.UsageError(
             f"--profile {name} is not supported for directory/package (release) "
-            "comparisons: profiles bundle single-pair-only knobs (--depth, "
-            "--exit-code-scheme, the 'review' format). Configure release defaults "
-            "in .abicheck.yml (the fan-out reads format/severity/scheme from it), "
+            "comparisons, or when either operand is a stored BundleFacts "
+            "document: profiles bundle single-pair-only knobs (--depth, "
+            "--severity-preset, the 'review' format). Configure release defaults "
+            "in .abicheck.yml (the fan-out reads format/severity from it), "
             "or compare the libraries individually to use a profile."
         )
 

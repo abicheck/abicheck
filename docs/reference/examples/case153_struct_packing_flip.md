@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `struct_packing_mode_changed` |
 | **Source files** | `examples/case153_struct_packing_flip/` |
+| **Rule family** | [`struct-packing-flip`](by-rule/struct-packing-flip.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -127,4 +129,4 @@ directly localizes the cause to the packing flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Struct packing flip](by-rule/struct-packing-flip.md)._

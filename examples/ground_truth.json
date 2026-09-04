@@ -3908,6 +3908,7 @@
   "case01_symbol_removal": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -3920,11 +3921,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "exported-function-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case02_param_type_change": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -3937,11 +3941,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "param-type-change",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case03_compat_addition": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -3954,11 +3961,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "compat-addition",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case04_no_change": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -3971,11 +3981,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "no-change",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case05_soname": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -3988,11 +4001,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "soname",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case06_visibility": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4005,11 +4021,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "visibility",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case07_struct_layout": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4022,11 +4041,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "embedded-type-size-increased",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case08_enum_value_change": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4039,11 +4061,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "enum-member-value-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case09_cpp_vtable": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4056,11 +4081,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "cpp-vtable",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case100_experimental_removed_without_replacement": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols",
@@ -4074,11 +4102,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "experimental-removed-without-replacement",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case101_inline_namespace_version_bumped": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4091,11 +4122,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "inline-namespace-version-bumped",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case102_frozen_runtime_signature_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4108,11 +4142,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "frozen-runtime-signature-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case103_toolchain_flag_drift": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4125,11 +4162,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "toolchain-flag-drift",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case104_glibcxx_dual_abi_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform",
@@ -4143,11 +4183,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "glibcxx-dual-abi-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case105_concept_tightening": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -4160,11 +4203,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "concept-tightening",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case106_ctor_became_explicit": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4177,11 +4223,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "ctor-became-explicit",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case107_task_scheduler_init_removed": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "symbols",
@@ -4199,11 +4248,14 @@
     "exported-type-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case108_task_class_removed": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "symbols",
@@ -4224,11 +4276,14 @@
     "virtual-dispatch-contract-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case109_flow_graph_policy_renames": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "types"
@@ -4245,11 +4300,14 @@
     "tag-struct-renamed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case10_return_type": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4262,11 +4320,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "return-type",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case110_concurrent_unordered_map_api_drift": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "symbols"
@@ -4282,11 +4343,14 @@
     "exported-function-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case111_enumerable_thread_specific_lambda_ambiguity": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "symbols"
@@ -4301,11 +4365,14 @@
     "constructor-overload-ambiguity"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case112_lp64_ilp64": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onemkl",
    "topics": [
     "platform"
@@ -4321,11 +4388,14 @@
     "typedef-underlying-changed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case113_abi_tag_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4338,11 +4408,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "abi-tag-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case114_char8t_migration": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4355,11 +4428,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "char8t-migration",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case115_bit_int_width_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4372,11 +4448,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "bit-int-width-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case116_atomic_qualifier_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4389,11 +4468,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "atomic-qualifier-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case117_no_unique_address": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4406,11 +4488,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "no-unique-address",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case118_internal_struct_field_added_scoped": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -4423,11 +4508,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "internal-struct-field-added-scoped",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case119_internal_struct_field_removed_scoped": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -4440,11 +4528,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "internal-struct-field-removed-scoped",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case11_global_var_type": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4457,11 +4548,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "global-var-type",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case120_internal_struct_reordered_scoped": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -4474,11 +4568,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "internal-struct-reordered-scoped",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case121_kernel_btf_struct_field_added": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "linux-kernel",
    "topics": [
     "types"
@@ -4493,11 +4590,14 @@
     "embedded-type-size-increased"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case122_template_signature_uninstantiated": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -4510,11 +4610,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "template-signature-uninstantiated",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case123_default_argument_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4527,11 +4630,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "default-argument-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case124_header_constant_value_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4544,11 +4650,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "header-constant-value-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case125_class_became_final": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4561,11 +4670,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "class-became-final",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case126_sycl_device_impl_ptr": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "sycl",
    "topics": [
     "types"
@@ -4581,11 +4693,14 @@
     "public-struct-private-field-type"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case127_data_object_size_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4598,11 +4713,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "data-object-size-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case128_symbol_binding_strengthened": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4615,11 +4733,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "symbol-binding-strengthened",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case129_struct_return_convention": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4632,11 +4753,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "struct-return-convention",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case12_function_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -4649,11 +4773,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "exported-function-removed",
-   "variant_of": "case01_symbol_removal"
+   "variant_of": "case01_symbol_removal",
+   "relation_type": "duplicate",
+   "relation_axis": null
   },
   "case130_exceptions_mode_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4666,11 +4793,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "exceptions-mode-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case131_rtti_mode_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4683,11 +4813,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "rtti-mode-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case132_threadsafe_statics_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4700,11 +4833,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "threadsafe-statics-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case133_tls_model_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4717,11 +4853,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "tls-model-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case134_relro_weakened": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4734,11 +4873,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "relro-weakened",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case135_stack_canary_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4751,11 +4893,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "stack-canary-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case136_executable_stack_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4768,11 +4913,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "executable-stack-flag-changed",
-   "variant_of": "case49_executable_stack"
+   "variant_of": "case49_executable_stack",
+   "relation_type": "duplicate",
+   "relation_axis": null
   },
   "case137_runpath_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4785,11 +4933,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "runpath-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case138_needed_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4802,11 +4953,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "needed-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case139_symbol_version_node_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4819,11 +4973,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "symbol-version-node-removed",
-   "variant_of": "case65_symbol_version_removed"
+   "variant_of": "case65_symbol_version_removed",
+   "relation_type": "variant",
+   "relation_axis": "symbol-versioning"
   },
   "case13_symbol_versioning": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -4836,11 +4993,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "symbol-versioning",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case140_empty_base_optimization_lost": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4853,11 +5013,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "empty-base-optimization-lost",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case141_versioned_symbol_scheme": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform",
@@ -4871,11 +5034,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "versioned-symbol-scheme",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case142_vtable_slot_count_binary_only": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -4888,11 +5054,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "vtable-slot-count-binary-only",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case143_audit_accidental_export": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -4904,11 +5073,14 @@
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": "audit-accidental-export",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case144_audit_private_header_leak": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -4920,11 +5092,14 @@
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": "audit-private-header-leak",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case145_audit_unversioned_export": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -4936,11 +5111,14 @@
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": "audit-unversioned-export",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case146_audit_rtti_for_internal": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -4952,11 +5130,14 @@
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": "audit-rtti-for-internal",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case147_scan_depth_ladder": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -4970,11 +5151,14 @@
     "audit-private-header-leak"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case148_xcheck_header_build_mismatch": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -4988,11 +5172,14 @@
     "header-build-context-mismatch"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case149_xcheck_odr_variant": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -5006,11 +5193,14 @@
     "odr-type-variant"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case14_cpp_class_size": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5023,11 +5213,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "embedded-type-size-increased",
-   "variant_of": "case07_struct_layout"
+   "variant_of": "case07_struct_layout",
+   "relation_type": "variant",
+   "relation_axis": "language"
   },
   "case150_xcheck_export_public_pair": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -5042,11 +5235,14 @@
     "audit-public-not-exported"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case151_xcheck_provider_matrix": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -5060,11 +5256,14 @@
     "audit-private-header-leak"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case152_enum_size_flag_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5075,11 +5274,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "enum-size-flag-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case153_struct_packing_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5090,11 +5292,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "struct-packing-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case154_lto_mode_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5105,11 +5310,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "lto-mode-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case155_char_signedness_flip": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5120,11 +5328,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "char-signedness-flip",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case156_public_macro_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5135,11 +5346,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "public-macro-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case157_inline_function_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5150,11 +5364,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "inline-function-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case158_public_typedef_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5165,11 +5382,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "public-typedef-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case15_noexcept_change": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build"
@@ -5182,11 +5402,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "noexcept-change",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case160_public_api_internal_dep_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5197,11 +5420,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "public-api-gains-internal-dependency",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case161_target_dependency_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5212,11 +5438,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "target-dependency-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case162_symbol_source_owner_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5227,11 +5456,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "symbol-source-owner-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case163_python_kwarg_renamed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -5244,11 +5476,14 @@
    "validation_owner": "python-api",
    "related_rules": [],
    "rule_slug": "python-kwarg-renamed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case164_preproc_conditional_field": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -5259,11 +5494,14 @@
    "validation_owner": "reconcile",
    "related_rules": [],
    "rule_slug": "preproc-conditional-field",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case165_polymorphic_nonvirtual_dtor": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5276,11 +5514,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "polymorphic-nonvirtual-dtor",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case166_ref_qualifier_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5293,11 +5534,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "ref-qualifier-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case167_base_became_virtual": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5310,11 +5554,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "base-became-virtual",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case168_virtual_method_devirtualized": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -5327,11 +5574,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "virtual-method-devirtualized",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case169_overload_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5344,11 +5594,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "overload-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case16_inline_to_non_inline": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -5361,11 +5614,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "inline-function-outlined",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case170_env_runtime_floor_raised": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build",
@@ -5377,11 +5633,14 @@
    "validation_owner": "compare-cases",
    "related_rules": [],
    "rule_slug": "env-runtime-floor-raised",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case171_static_tls_introduced": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5394,11 +5653,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "static-tls-introduced",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case172_vtable_thunk_offset_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5411,11 +5673,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "vtable-thunk-offset-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case173_vtt_slot_count_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5428,11 +5693,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "vtt-slot-count-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case174_secondary_vtable_group_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5445,11 +5713,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "secondary-vtable-group-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case175_kabi_crc_changed": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "linux-kernel",
    "topics": [
     "platform"
@@ -5462,11 +5733,14 @@
     "symbol-type-signature-hash-changed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case176_kabi_symbol_namespace_changed": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "linux-kernel",
    "topics": [
     "platform"
@@ -5479,11 +5753,14 @@
     "symbol-export-namespace-changed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case177_long_double_abi_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5496,11 +5773,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "long-double-abi-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case178_unnamed_type_in_public_abi": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5513,11 +5793,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "unnamed-type-in-public-abi",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case179_cet_protection_weakened": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5530,11 +5813,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "cet-protection-weakened",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case17_template_abi": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5547,11 +5833,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "template-abi",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case180_symbol_binding_lost_unique": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5564,11 +5853,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "symbol-binding-lost-unique",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case181_xcheck_public_to_internal_dependency": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "audit",
    "ecosystem": "generic",
    "topics": [
     "audit",
@@ -5580,11 +5872,14 @@
    "validation_owner": "g20-audit",
    "related_rules": [],
    "rule_slug": "xcheck-public-to-internal-dependency",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case182_accidental_export_removed_still_breaking": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -5597,11 +5892,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "accidental-export-removed-still-breaking",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case183_internal_version_node_churn": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5614,11 +5912,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "internal-version-node-churn",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case184_internal_enum_churn_scoped": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -5631,11 +5932,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "internal-enum-churn-scoped",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case185_inherited_override_reuses_slot": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -5648,11 +5952,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "inherited-override-reuses-slot",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case186_c_api_pointee_const_abi_neutral": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "controls"
@@ -5665,11 +5972,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "api-pointee-const-abi-neutral",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case187_public_struct_private_field_type": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source",
@@ -5683,11 +5993,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "public-struct-private-field-type",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case188_public_class_private_base_class": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source",
@@ -5701,11 +6014,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "public-class-private-base-class",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case189_public_function_private_parameter_type": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source",
@@ -5719,11 +6035,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "public-function-private-parameter-type",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case190_public_inline_function_references_internal_constant": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -5734,11 +6053,14 @@
    "validation_owner": "evidence-cases",
    "related_rules": [],
    "rule_slug": "public-api-gains-internal-dependency",
-   "variant_of": "case160_public_api_internal_dep_added"
+   "variant_of": "case160_public_api_internal_dep_added",
+   "relation_type": "variant",
+   "relation_axis": "specialization"
   },
   "case191_header_only_graph_field_type": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source",
@@ -5757,11 +6079,14 @@
     "type-field-added-compatible"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case18_dependency_leak": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5774,11 +6099,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "dependency-leak",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case19_enum_member_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5791,11 +6119,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "enum-member-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case20_enum_member_value_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5808,11 +6139,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "enum-member-value-changed",
-   "variant_of": "case08_enum_value_change"
+   "variant_of": "case08_enum_value_change",
+   "relation_type": "variant",
+   "relation_axis": "public-surface"
   },
   "case21_method_became_static": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5825,11 +6159,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "method-became-static",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case22_method_const_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5842,11 +6179,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "method-const-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case23_pure_virtual_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5859,11 +6199,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "pure-virtual-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case24_union_field_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5876,11 +6219,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "union-field-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case25_enum_member_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5893,11 +6239,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "enum-member-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case26_union_field_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5910,11 +6259,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "union-field-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case26b_union_field_added_compatible": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5927,11 +6279,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "union-field-added-compatible",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case27_symbol_binding_weakened": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5944,11 +6299,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "symbol-binding-weakened",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case28_typedef_opaque": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5961,11 +6319,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "typedef-opaque",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case29_ifunc_transition": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -5978,11 +6339,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "ifunc-transition",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case30_field_qualifiers": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -5995,11 +6359,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "field-qualifiers",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case31_enum_rename": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6012,11 +6379,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "enum-rename",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case32_param_defaults": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6029,11 +6399,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "param-defaults",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case33_pointer_level": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6046,11 +6419,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "pointer-level",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case34_access_level": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6063,11 +6439,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "access-level",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case35_field_rename": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6080,11 +6459,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "field-rename",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case36_anon_struct": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6097,11 +6479,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "anon-struct",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case37_base_class": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6114,11 +6499,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "base-class",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case38_virtual_methods": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6131,11 +6519,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "virtual-methods",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case39_var_const": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6148,11 +6539,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "var-const",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case40_field_layout": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6165,11 +6559,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "field-layout",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case41_type_changes": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols",
@@ -6183,11 +6580,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "type-changes",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case42_type_alignment_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6200,11 +6600,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "type-alignment-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case43_base_class_member_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6217,11 +6620,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "base-class-member-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case44_cyclic_type_member_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6234,11 +6640,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "cyclic-type-member-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case45_multi_dim_array_change": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6251,11 +6660,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "multi-dim-array-change",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case46_pointer_chain_type_change": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6268,11 +6680,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "pointer-chain-type-change",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case47_inline_to_outlined": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6285,11 +6700,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "inline-function-outlined",
-   "variant_of": "case16_inline_to_non_inline"
+   "variant_of": "case16_inline_to_non_inline",
+   "relation_type": "variant",
+   "relation_axis": "callable-kind"
   },
   "case48_leaf_struct_through_pointer": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6302,11 +6720,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "leaf-struct-through-pointer",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case49_executable_stack": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6319,11 +6740,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "executable-stack-flag-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case50_soname_inconsistent": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6336,11 +6760,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "soname-inconsistent",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case51_protected_visibility": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6353,11 +6780,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "protected-visibility",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case52_rpath_leak": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6370,11 +6800,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "rpath-leak",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case53_namespace_pollution": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6387,11 +6820,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "namespace-pollution",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case54_used_reserved_field": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6404,11 +6840,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "used-reserved-field",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case55_type_kind_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6421,11 +6860,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "type-kind-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case56_struct_packing_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6438,11 +6880,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "struct-packing-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case57_enum_underlying_size_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6455,11 +6900,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "enum-underlying-size-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case58_var_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6472,11 +6920,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "var-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case59_func_became_inline": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6489,11 +6940,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "func-became-inline",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case60_base_class_position_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6506,11 +6960,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "base-class-position-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case61_var_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6523,11 +6980,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "var-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case62_type_field_added_compatible": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6540,11 +7000,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "type-field-added-compatible",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case63_bitfield_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6557,11 +7020,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "bitfield-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case64_calling_convention_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6574,11 +7040,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "calling-convention-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case65_symbol_version_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6591,11 +7060,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "symbol-version-node-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case66_language_linkage_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6609,11 +7081,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "language-linkage-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case67_tls_var_size_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6626,11 +7101,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "tls-var-size-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case68_virtual_method_added": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6643,11 +7121,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "virtual-method-added",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case69_trivial_to_nontrivial": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6660,11 +7141,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "trivial-to-nontrivial",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case70_flexible_array_member_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols",
@@ -6678,11 +7162,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "flexible-array-member-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case71_inline_namespace_moved": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "platform"
@@ -6695,11 +7182,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "inline-namespace-moved",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case72_covariant_return_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols",
@@ -6713,11 +7203,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "covariant-return-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case73_typedef_underlying_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6730,11 +7223,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "typedef-underlying-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case74_detail_base_class_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -6747,11 +7243,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "detail-base-class-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case75_detail_embedded_by_value": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -6764,11 +7263,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "detail-embedded-by-value",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case76_detail_pimpl_vtable_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -6781,11 +7283,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "detail-pimpl-vtable-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case77_detail_templated_base_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6798,11 +7303,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "detail-templated-base-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case78_task_arena_attach_tag": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "symbols",
@@ -6821,11 +7329,14 @@
     "exported-type-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case79_missing_template_instantiation": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6838,11 +7349,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "missing-template-instantiation",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case80_pimpl_shared_to_unique": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6855,11 +7369,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "pimpl-shared-to-unique",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case81_serialization_tag_reassigned": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -6872,11 +7389,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "serialization-tag-reassigned",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case82_sycl_overload_set_removed": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "sycl",
    "topics": [
     "types"
@@ -6893,11 +7413,14 @@
     "overload-set-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case83_cpu_dispatch_isa_dropped": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6910,11 +7433,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "cpu-dispatch-isa-dropped",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case84_bundle_soname_skew": {
    "entity": "scenario",
    "scenario_kind": "project-topology",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6929,11 +7455,14 @@
     "soname-inconsistent"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case85_internal_template_signature_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source",
@@ -6947,11 +7476,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "internal-template-signature-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case86_tag_struct_renamed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6964,11 +7496,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "tag-struct-renamed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case87_default_template_arg_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6981,11 +7516,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "default-template-arg-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case88_cpo_kind_changed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -6998,11 +7536,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "cpo-kind-changed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case89_inline_accessor_renamed_pimpl_member": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -7015,11 +7556,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "inline-accessor-renamed-pimpl-member",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case90_bundle_intra_dep_removed": {
    "entity": "scenario",
    "scenario_kind": "project-topology",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build"
@@ -7034,11 +7578,14 @@
     "exported-function-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case91_bundle_intra_signature_drift": {
    "entity": "scenario",
    "scenario_kind": "project-topology",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build"
@@ -7054,11 +7601,14 @@
     "return-type"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case92_bundle_provider_changed": {
    "entity": "scenario",
    "scenario_kind": "project-topology",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build"
@@ -7075,11 +7625,14 @@
     "symbol-source-owner-changed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case93_bundle_manifest_drift": {
    "entity": "scenario",
    "scenario_kind": "project-topology",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build"
@@ -7095,11 +7648,14 @@
     "missing-template-instantiation"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case94_empty_tag_gained_state": {
    "entity": "scenario",
    "scenario_kind": "case-study",
+   "operation": "compare",
    "ecosystem": "onetbb",
    "topics": [
     "types"
@@ -7116,11 +7672,14 @@
     "type-field-added-compatible"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case95_allocator_nested_typedef_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "types"
@@ -7133,11 +7692,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "allocator-nested-typedef-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case96_hidden_friend_removed": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -7150,11 +7712,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "hidden-friend-removed",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case97_api_depends_on_consumer_env": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -7167,11 +7732,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "api-depends-on-consumer-env",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case98_cxx_standard_floor_raised": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "build"
@@ -7184,11 +7752,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "cxx-standard-floor-raised",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case99_experimental_graduated": {
    "entity": "rule",
    "scenario_kind": null,
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols",
@@ -7202,11 +7773,14 @@
    "validation_owner": "compiler-pair",
    "related_rules": [],
    "rule_slug": "experimental-graduated",
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case192_call_graph_break_survives_suppression": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -7220,11 +7794,14 @@
     "internal-symbol-required-by-public-api"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case193_ordinary_exported_fn_call_not_reachable": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "symbols"
@@ -7237,11 +7814,14 @@
     "exported-function-removed"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case194_header_graph_rename_reconciled": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -7255,11 +7835,14 @@
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case195_header_graph_ambiguous_rename_not_reconciled": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -7272,11 +7855,14 @@
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case196_header_graph_move_reconciled": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -7290,11 +7876,14 @@
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   },
   "case197_header_graph_identity_reconciled": {
    "entity": "scenario",
    "scenario_kind": "capability",
+   "operation": "compare",
    "ecosystem": "generic",
    "topics": [
     "source"
@@ -7308,7 +7897,9 @@
     "public-api-gains-internal-dependency"
    ],
    "rule_slug": null,
-   "variant_of": null
+   "variant_of": null,
+   "relation_type": null,
+   "relation_axis": null
   }
  }
 }

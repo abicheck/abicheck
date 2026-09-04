@@ -90,13 +90,30 @@ concepts:
       an explicit ADR-063 Phase 5B docstring note recording why the plain
       resolved_fact_value() collapse is safe there (an evidence gap only
       narrows a closure or omits a graph edge, it cannot fabricate a
-      finding). is_va_list has no other readers. Not yet closed: vtable/
-      vptr_offset_bits (diff_types_vtable.py/diff_layout.py/
-      diff_vtable_layout.py's own pre-existing, individually-reasoned
-      evidence-gap heuristics, plus their downstream readers in
-      diff_cxx_rules.py's own vtable comparison, idioms.py, and
-      diff_cpp_patterns.py — deliberately left alone pending their own
-      dedicated slice, per the plan's own 5B note).
+      finding). is_va_list has no other readers. Third slice (2026-09-03):
+      vtable/vptr_offset_bits's own dedicated slice — diff_vtable_layout.
+      _is_polymorphic/diff_layout._check_vptr_introduced now read
+      FactStatus directly (additive, per-record); idioms.py's three vtable
+      reads and diff_cpp_patterns._is_empty_record audited as already safe
+      (single-snapshot, no old/new pair to gate). The one remaining piece
+      — diff_types_vtable.py's own TYPE_VTABLE_CHANGED cluster
+      (_vtable_transition_is_evidenced/
+      _vtable_transition_rests_on_unresolved_evidence, since moved to
+      compare/vtable_evidence.vtable_transition_is_evidenced) — is closed
+      as a formal, investigated decline (Track 4, 2026-09-04).
+      vtable_transition_is_evidenced's heuristic is unchanged from before
+      this closure. Full three-round reasoning (declined, then a landed
+      fix that regressed real detection coverage, then reverted) lives
+      once, canonically, in diff_types_vtable.py's own module docstring
+      ("Track 4, 5B final closure" section) — not repeated here. The PDB
+      fabrication that closure's second round found remains real,
+      reachable, and open, not fixed. This closes the
+      removal gate for every one of the five originally-named fields
+      (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
+      separately tracked: seven case-(a) fields (default, the five
+      deprecated/is_scoped surfaces) left on the existing fact_provenance
+      mechanism after their own fourth-through-seventh-slice investigation
+      found no safe conversion without a legacy-hybrid load-path fix.
 
   identity:
     primitive: complete
@@ -345,17 +362,29 @@ concepts:
       the duplication-and-convergence-assessment plan's own P0
       EffectiveGate/EffectiveEvaluationConfig target); and
       cli_compare_receipt.resolve_release_pack_application unconditionally
-      rejects a --pack asserting contract.unresolved for a release
-      comparison, with no landed fix yet. The first gap's exit-code-scheme
-      half closed 2026-09-04: policy.release_gate_options.
-      resolve_gate_pack_exit_code_scheme is now the one function both
-      callers use for that piece, guarded by tests/
-      test_release_gate_pack_fold_parity.py's parity property; the
-      *severity-level* application itself (a dataclasses.replace on an
-      already-resolved SeverityConfig vs. six raw-string overrides) remains
-      expressed twice against its two different pre-resolution shapes,
-      still the P0 EffectiveGate/EffectiveEvaluationConfig target's job to
-      collapse for real. Full investigation, evidence, and this content's
+      rejected a --pack asserting contract.unresolved for a release
+      comparison. The first gap's exit-code-scheme half was mooted
+      2026-09-04, not closed: CLI cleanup phase two PR G2 deleted
+      --exit-code-scheme/exit_code_scheme entirely (ADR-064 -- the gate
+      algorithm is now purely derived from whether a severity setting is in
+      effect, so there is no scheme value left for two callers to agree or
+      disagree on). apply_release_gate_pack remains the one function both
+      callers use for the severity-only fold that survives (a
+      dataclasses.replace on an already-resolved SeverityConfig vs. six
+      raw-string overrides), still expressed twice against its two
+      different pre-resolution shapes -- still the P0
+      EffectiveGate/EffectiveEvaluationConfig target's job to collapse for
+      real; tests/test_release_gate_pack_fold_parity.py's parity property
+      was rewritten to assert the surviving severity-only behavior. The
+      second gap (the contract.unresolved rejection)
+      closed 2026-09-04 too (Track 2): re-reading the rejection's own
+      reasoning against the already-confirmed plumbing found no hazard it
+      didn't already cover, so the unconditional rejection was replaced with
+      the same contract_evaluation-gated check the single-pair path already
+      applies -- tests/test_pack_application.py's
+      test_contract_unresolved_pack_now_applies_to_a_release_comparison
+      proves a release comparison now resolves the field rather than raising
+      PackManifestError. Full investigation, evidence, and this content's
       own review history (Codex, PR #1050, several rounds correcting this
       same account) live in docs/contribute/plans/one-semantic-pipeline.md's
       "7B's release-fan-out investigation landed" section -- the narrative
@@ -392,15 +421,17 @@ concepts:
       (ADR-063 Track B "8B"), abicheck/bundle_facts_store.py's
       write_bundle_facts_package/read_bundle_facts_package landed a second
       real multi-artifact producer/reader, from a *live* BundleFacts object
-      rather than an already-persisted document, using
+      rather than an already-persisted document, originally using
       PackageManifest.project_sections/ArtifactRef.native_identity instead
       of VariantRef.sections. The two tracks solved the identical plan item
-      without visibility into each other and now carry two
+      without visibility into each other and briefly carried two
       non-interoperable physical layouts for the same composition facts --
-      not yet reconciled; see storage-format-v2.md's A1.4 entry for the
-      proposed follow-up (rebuild bundle_facts_store.py as a thin wrapper
-      over import_bundle_facts, retiring project_sections/native_identity
-      for this use).
+      reconciled (Track 1, 2026-09-04): bundle_facts_store.py is now a thin
+      wrapper over bundle_facts_serialization.bundle_facts_to_dict/
+      bundle_facts_from_dict plus import_bundle_facts.import_bundle_facts/
+      export_bundle_facts, so both entry points (live object, persisted
+      document) produce and consume the identical VariantRef.sections
+      layout; see storage-format-v2.md's A1.4 entry for the closure record.
 
       The single-artifact sectioned document (Phase 8, distinct from this
       concept's own Phase 8B) is already `dump`/`compare`/`scan`'s default

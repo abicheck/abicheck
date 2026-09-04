@@ -28,14 +28,16 @@ Owned by [the policy profiles page](../../docs/use/policies.md).
 `--severity-preset default|strict|info-only` sets the coarse severity
 grading; a `.abicheck.yml` `severity:` map sets an individual category
 (abi_breaking, potential_breaking, addition, quality_issues), which has no
-CLI flag of its own. `--exit-code-scheme
-auto|legacy|severity` selects which exit-code contract applies.
+CLI flag of its own. Which of the two exit-code contracts applies (the
+legacy verdict-based `0/2/4` mapping, or the severity-aware `0/1/2/4` one)
+is fully automatic — there is no manual selector: it follows severity-aware
+grading whenever any of the sources below actually configure one.
 
 In the report, `severity.exit_code`, `severity.blocking`, and
 `severity.blocking_categories` express the gate decision. The block is present
 whenever severity-aware grading was **resolved from any source** —
-`--severity-preset`, a `.abicheck.yml` `severity:` map or
-`exit_code_scheme: severity`, a run profile, or a gate pack — not only from a
+`--severity-preset`, a `.abicheck.yml` `severity:` map,
+a run profile, or a gate pack — not only from a
 flag you passed. Absent means no gate was resolved anywhere and the exit code
 follows the legacy verdict mapping. (`policy_gate_decision` is an Action `check-target` field, not
 something a direct `compare` emits — see

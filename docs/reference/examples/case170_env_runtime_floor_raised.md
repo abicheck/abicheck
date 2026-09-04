@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `runtime_floor_raised`, `symbol_version_required_added` |
 | **Source files** | `examples/case170_env_runtime_floor_raised/` |
+| **Rule family** | [`env-runtime-floor-raised`](by-rule/env-runtime-floor-raised.md) |
 
 **Category:** Environment / Toolchain Drift | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -113,4 +115,4 @@ equivalent reproduction of this finding with either tool.
 - `new.abi.json`
 - `old.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Env runtime floor raised](by-rule/env-runtime-floor-raised.md)._

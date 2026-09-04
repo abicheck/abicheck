@@ -523,25 +523,20 @@ def _embed_inline_source_side(
 @app_usage_scope_options
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
-# ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
+# ── Project config (ADR-037 D4) ────────────────────────────────────────────
+# No manual --exit-code-scheme selector any more (CLI cleanup phase two PR
+# G2, ADR-064): the one automatic gate algorithm is fully determined by
+# whether a severity setting is in effect anywhere (--severity-preset, a
+# --profile, .abicheck.yml's severity: block, or a kind: gate pack's
+# gate.severity.<category>) -- no gate/severity policy configured means the
+# compatibility verdict decides 0/2/4; one in effect means the resolved
+# GateDecision decides 0/1/2/4.
 @click.option("--config", "config", type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
               help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
                    "nearest .abicheck.yml found from the current directory upward. "
                    "Supplies stable project settings (severity map, scope/FP "
-                   "tuning, suppression policy, exit-code scheme); CLI flags "
-                   "override it.")
-@click.option("--exit-code-scheme", "exit_code_scheme",
-              type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
-              default=None,
-              help="Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), "
-                   "'severity' (per-category error levels), or 'auto' (severity "
-                   "when a severity setting is in effect, else legacy). Declared "
-                   "explicitly here so passing --severity-preset no longer silently "
-                   "changes the scheme. Default: config's exit_code_scheme, else auto. "
-                   "Deliberately kept visible (unlike the removed per-category "
-                   "--severity-* family) -- ADR-040 D4 keeps it a coarse override; "
-                   "see test_config_rebalance.py's test_coarse_overrides_stay_visible.")
+                   "tuning, suppression policy); CLI flags override it.")
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")
@@ -741,58 +736,29 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # CLI cleanup phase two, PR I: OLD_INPUT/NEW_INPUT are classified
     # automatically for bundle-facts routing, replacing the removed
     # --old-bundle-facts flag -- see compare_bundle_operand_dispatch.py's
-    # own docstring (a stored NEW_INPUT is rejected there; OLD_INPUT
-    # classified as stored short-circuits the ordinary live-binary/
-    # directory dispatch entirely, never reaching run_compare/
-    # _dispatch_release_compare -- see compare_bundle_facts.py's own
-    # module docstring for why that lives here rather than as a branch
-    # inside cli_compare_helpers.run_compare itself).
+    # own docstring (stored NEW_INPUT + live OLD_INPUT is rejected there;
+    # OLD_INPUT classified as stored -- alone, or with NEW_INPUT stored
+    # too -- short-circuits the ordinary live-binary/directory dispatch
+    # entirely, never reaching run_compare/_dispatch_release_compare -- see
+    # compare_bundle_facts.py's own module docstring for why that lives
+    # here rather than as a branch inside cli_compare_helpers.run_compare).
     from .compare_bundle_operand_dispatch import resolve_bundle_compare_dispatch
 
-    if resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"]):
-        from ....cli_helpers_compare import discover_project_config
-        from ....cli_options import resolve_compile_context
+    _bundle_operands = resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"])
+    if _bundle_operands.old_is_stored:
         from .compare_bundle_facts import (
-            _resolve_new_side_headers_includes,
             dispatch as dispatch_bundle_facts,
+            resolve_dispatch_compile_context,
         )
 
         # Codex review: mirrors run_compare's own explicit-vs-default --lang
         # detection -- otherwise indistinguishable from Click's own default.
         _lang_src = ctx.get_parameter_source("lang")
         kwargs["lang_explicit"] = _lang_src == click.core.ParameterSource.COMMANDLINE
-        _headers, _includes = _resolve_new_side_headers_includes(kwargs)
-        _header_backend = kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
-        # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
-        # (_resolve_compare_config) -- resolve_compile_context alone never
-        # auto-discovers without a --sources tree. Overwriting kwargs
-        # ["config"] means dispatch()'s own config check (cli_options is
-        # kept out of that sibling module's own imports -- see its
-        # docstring) covers an auto-discovered .abicheck.yml too.
-        _cfg_path = kwargs.get("config") or discover_project_config()
-        kwargs["config"] = _cfg_path
-        _compile_context, _merged_includes = resolve_compile_context(
-            ctx,
-            sysroot=kwargs.get("sysroot"),
-            nostdinc=bool(kwargs.get("nostdinc", False)),
-            header_backend=_header_backend,
-            includes=tuple(_includes),
-            build_config=_cfg_path,
-            frontend_context=kwargs.get("frontend_context", "host"),
-            compiler_path=kwargs.get("compiler_path"),
-            compiler_prefix=kwargs.get("compiler_prefix"),
-            compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+        _compile_context = resolve_dispatch_compile_context(
+            ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored
         )
-        # Forward the *merged* include list (Codex review), not the raw
-        # kwargs `resolve_compile_context` was given -- when `.abicheck.yml`
-        # supplies `compile.include_dirs`, `_merged_includes` is `_includes`
-        # extended with those config-derived roots, and the side-scoped
-        # `new_includes_only` override (already folded into `_includes`
-        # above) would otherwise make `dispatch()`'s own independent
-        # re-derivation from raw kwargs silently drop them.
-        kwargs["includes"] = tuple(_merged_includes)
-        kwargs["new_includes_only"] = ()
-        dispatch_bundle_facts(compile_context=_compile_context, **kwargs)
+        dispatch_bundle_facts(compile_context=_compile_context, new_is_stored=_bundle_operands.new_is_stored, **kwargs)
         return
     kwargs.pop("max_json_object_nodes", None)
     reject_bundle_facts_manifest_without_old_bundle_facts(kwargs)

@@ -109,7 +109,10 @@ class TestBuildConfigFromDictRejects:
             )
 
     def test_wrong_top_level_scalar_string(self) -> None:
-        with pytest.raises(ValueError, match="exit_code_scheme must be a string"):
+        # exit_code_scheme itself no longer exists as a top-level key at all
+        # (CLI cleanup phase two PR G2) -- any presence of it, wrong type or
+        # not, is now an unknown-key error rather than a type error.
+        with pytest.raises(ValueError, match="exit_code_scheme"):
             BuildConfig.from_dict({"exit_code_scheme": 123})
 
     def test_wrong_top_level_scalar_int(self) -> None:
@@ -182,7 +185,6 @@ class TestBuildConfigFromDictRejects:
                     "debuginfod": True,
                     "debuginfod_url": "https://example.invalid",
                 },
-                "exit_code_scheme": "severity",
                 "bundle": {
                     "system_providers": ["libvendor.so.1"],
                     "cohorts": ["libfoo_"],
@@ -193,7 +195,6 @@ class TestBuildConfigFromDictRejects:
             }
         )
         assert cfg.version == 1
-        assert cfg.exit_code_scheme == "severity"
         assert cfg.compile_frontend == "clang"
         assert cfg.bundle_system_providers == ["libvendor.so.1"]
         assert cfg.bundle_cohorts == ["libfoo_"]

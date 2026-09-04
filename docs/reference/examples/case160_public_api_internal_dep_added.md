@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `public_api_internal_dependency_added` |
 | **Source files** | `examples/case160_public_api_internal_dep_added/` |
+| **Rule family** | [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
 
 **Category:** Build/Source Evidence (L5) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -141,4 +143,4 @@ is no `.so`/`abidw` XML pair to hand either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Public api gains internal dependency](by-rule/public-api-gains-internal-dependency.md)._

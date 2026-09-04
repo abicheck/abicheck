@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `target_dependency_added` |
 | **Source files** | `examples/case161_target_dependency_added/` |
+| **Rule family** | [`target-dependency-added`](by-rule/target-dependency-added.md) |
 
 **Category:** Build/Source Evidence (L5) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -135,4 +137,4 @@ finding reports from the build graph.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Target dependency added](by-rule/target-dependency-added.md)._

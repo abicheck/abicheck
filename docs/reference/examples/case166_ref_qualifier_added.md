@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_ref_qual_changed` |
 | **Source files** | `examples/case166_ref_qualifier_added/` |
+| **Rule family** | [`ref-qualifier-added`](by-rule/ref-qualifier-added.md) |
 
 **Category:** Function Signature / Mangling | **Verdict:** 🔴 BREAKING
 
@@ -132,4 +134,4 @@ accessors a recurring temptation in library changelogs.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Ref qualifier added](by-rule/ref-qualifier-added.md)._

@@ -477,17 +477,18 @@ def classify_compare_operand(path: Path) -> str:
 
     * ``"package"``   — a recognised archive/package (RPM/Deb/tar/conda/wheel);
       a *set* input that fans out to per-library comparison.
-    * ``"directory"`` — a plain directory of libraries; also a set input.
+    * ``"directory"`` — a plain directory of libraries, or a multi-artifact stored ``ProjectSnapshot`` package (ADR-062 A1.7); also a set input.
     * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
       ``compare`` cannot pair as a library (hint the user at ``appcompat``).
-    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a ``--project-
-      snapshot-dir`` package dir (storage-v2, ADR-062/063).
+    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a single-artifact
+      ``ProjectSnapshot`` package dir (storage-v2, ADR-062/063).
     """
     from .workflows.extraction import is_package
-    from .workflows.storage import is_project_snapshot_package_dir
+    from .workflows.release_package import is_multi_artifact_package as _multi
+    from .workflows.storage import is_project_snapshot_package_dir as _is_pkg
 
     if path.is_dir():
-        return "file" if is_project_snapshot_package_dir(path) else "directory"
+        return "directory" if not _is_pkg(path) or _multi(path) else "file"
     if is_package(path):
         return "package"
     norm, fmt = _normalize_binary_input(path)

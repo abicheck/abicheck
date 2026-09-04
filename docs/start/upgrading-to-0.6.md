@@ -99,11 +99,13 @@ mean.
 `compare --used-by`/`--required-symbol(s)` used to always compute its exit
 code from a fixed legacy `0`/`2`/`4` mapping, regardless of any
 `--severity-*` flag passed alongside it. That's fixed: a scoped run now
-resolves the same `legacy`/`severity` scheme plain `compare` does (an
-explicit `--exit-code-scheme` still pins one regardless of severity flags).
-If a script depended on the old, silently-ignored behavior, re-check it
-against [Application Compatibility → Exit
-codes](../use/appcompat.md#exit-codes).
+resolves the same `legacy`/`severity` scheme plain `compare` does (at the
+time, an explicit `--exit-code-scheme` flag could still pin one regardless
+of severity flags — that manual selector was removed in a later release; the
+scheme is now purely automatic, see [CI Gating → the two exit-code
+schemes](../use/ci-gating.md#the-two-exit-code-schemes)). If a script
+depended on the old, silently-ignored behavior, re-check it against
+[Application Compatibility → Exit codes](../use/appcompat.md#exit-codes).
 
 ## Project profiles
 

@@ -142,6 +142,10 @@ from .sectioned_document import (
     is_sectioned_document,
     to_sectioned_document,
 )
+from .variant_composition import (
+    read_variant_composition_library_filenames,
+    read_variant_composition_manifest_payload,
+)
 from .versioning import (
     COMPARISON_CONTRACT_VERSION,
     PACKAGE_FORMAT_VERSION,
@@ -234,6 +238,8 @@ __all__ = [
     "provenance_from_dto",
     "provenance_to_dto",
     "raw_digest",
+    "read_variant_composition_library_filenames",
+    "read_variant_composition_manifest_payload",
     "semantic_digest",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",

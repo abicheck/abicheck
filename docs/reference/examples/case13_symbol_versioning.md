@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `symbol_version_defined_added` |
 | **Source files** | `examples/case13_symbol_versioning/` |
+| **Rule family** | [`symbol-versioning`](by-rule/symbol-versioning.md) |
 
 **Category:** ELF/Linker | **Verdict:** ✅ COMPATIBLE
 
@@ -145,4 +147,4 @@ readelf --version-info libfoo_v2.so
 - `app.c`
 - `libfoo.map`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol versioning](by-rule/symbol-versioning.md)._

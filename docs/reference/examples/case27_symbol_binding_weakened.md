@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `symbol_binding_changed` |
 | **Source files** | `examples/case27_symbol_binding_weakened/` |
+| **Rule family** | [`symbol-binding-weakened`](by-rule/symbol-binding-weakened.md) |
 
 **Category:** ELF / Symbol Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -120,4 +122,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol binding weakened](by-rule/symbol-binding-weakened.md)._

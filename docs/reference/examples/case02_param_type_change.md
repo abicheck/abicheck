@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_params_changed` |
 | **Source files** | `examples/case02_param_type_change/` |
+| **Rule family** | [`param-type-change`](by-rule/param-type-change.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -116,4 +118,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Param type change](by-rule/param-type-change.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `default_template_arg_changed` |
 | **Source files** | `examples/case87_default_template_arg_changed/` |
+| **Rule family** | [`default-template-arg-changed`](by-rule/default-template-arg-changed.md) |
 
 **Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
@@ -153,4 +155,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Default template arg changed](by-rule/default-template-arg-changed.md)._
