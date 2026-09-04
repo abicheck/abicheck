@@ -145,9 +145,16 @@ class TestCfiSourceDecodeFailurePropagates:
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
         assert len(meta.frame_registers) == 0
 
-    def test_legitimately_absent_source_is_still_reported_complete(self) -> None:
-        """Positive control: neither section present at all remains a
-        legitimate, complete absence -- must not regress to False."""
+    def test_total_absence_of_cfi_sections_is_incomplete(self) -> None:
+        """P2 review, fresh evidence (Codex, PR #784): a genuine total
+        absence of unwind sections (neither .eh_frame nor .debug_frame) is
+        now reported incomplete (False), not complete -- both call sites
+        of _parse_frame_registers only invoke it once real DWARF DIEs
+        exist, so this shape means the unwind sections were stripped
+        independently of debug info, not that there was nothing to
+        extract. Renamed from test_legitimately_absent_source_is_still_
+        reported_complete, whose docstring and assertion described the
+        prior (now-corrected) behavior."""
         mock_elf = MagicMock()
         mock_elf.get_machine_arch.return_value = "x64"
         mock_dwarf = MagicMock()
@@ -155,7 +162,7 @@ class TestCfiSourceDecodeFailurePropagates:
         mock_dwarf.has_CFI.return_value = False
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
-        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
 
     def test_eh_frame_decode_failure_with_real_fde_free_debug_frame_fallback(
         self,

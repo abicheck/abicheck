@@ -311,6 +311,96 @@ class TestValueAbiTraitIncompletePropagation:
         assert meta.value_abi_traits["_Z3barv"] == "ret:trivial"
 
 
+class TestPackedTypedefIncompletePropagation:
+    """P1 review, fresh evidence (Codex): _walk_cu threaded `incomplete`
+    into the calling-convention path only -- the separate anonymous-
+    struct-typedef packed-check walk (_check_packed_typedef) still caught
+    a malformed DW_AT_type and returned silently, so both the unified and
+    standalone parsers could report advanced evidence "parsed" while
+    omitting that typedef's packing facts."""
+
+    def test_malformed_typedef_target_marks_partial(self) -> None:
+        typedef = _Die(
+            "DW_TAG_typedef",
+            {"DW_AT_name": "MyAlias", "DW_AT_type": _Attr(999, "DW_FORM_ref_addr")},
+        )
+        root = _Die("DW_TAG_compile_unit", children=[typedef])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+            patch(
+                "abicheck.dwarf_advanced._resolve_die_ref",
+                side_effect=RuntimeError("bad ref"),
+            ),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+        assert "MyAlias" not in meta.all_struct_names
+
+    def test_resolvable_packed_typedef_is_not_flagged(self) -> None:
+        """Positive control: a fully-resolvable anonymous packed struct
+        typedef must not be flagged, and its packing must still be
+        recorded correctly."""
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "c", "DW_AT_type": _Attr(20, "DW_FORM_ref_addr")},
+        )
+        member2 = _Die(
+            "DW_TAG_member",
+            {
+                "DW_AT_name": "i",
+                "DW_AT_type": _Attr(21, "DW_FORM_ref_addr"),
+                "DW_AT_data_member_location": _Attr(1),
+            },
+        )
+        anon_struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_byte_size": 5},
+            offset=10,
+            children=[member, member2],
+        )
+        typedef = _Die(
+            "DW_TAG_typedef",
+            {"DW_AT_name": "Packed", "DW_AT_type": _Attr(10, "DW_FORM_ref_addr")},
+        )
+        root = _Die("DW_TAG_compile_unit", children=[typedef])
+        cu = _CU(top_die=root, offset=0)
+        char_type = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "char", "DW_AT_byte_size": 1}, offset=20
+        )
+        int_type = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=21
+        )
+        cu._die_map = {10: anon_struct, 20: char_type, 21: int_type}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "parsed"
+        assert "Packed" in meta.packed_structs
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 

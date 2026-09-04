@@ -339,7 +339,7 @@ def _walk_cu(
         elif tag == "DW_TAG_typedef":
             # Anonymous struct typedef: `typedef struct {...} Name` — struct has no
             # DW_AT_name; resolve the typedef target and check if it's a packed struct.
-            _check_packed_typedef(die, meta, CU)
+            _check_packed_typedef(die, meta, CU, incomplete=incomplete)
 
         # Push children in reverse order (DFS left-to-right)
         stack.extend(reversed(list(die.iter_children())))
@@ -746,7 +746,13 @@ def _extract_calling_convention(
 # ---------------------------------------------------------------------------
 
 
-def _check_packed_typedef(die: Any, meta: AdvancedDwarfMetadata, CU: Any) -> None:
+def _check_packed_typedef(
+    die: Any,
+    meta: AdvancedDwarfMetadata,
+    CU: Any,
+    *,
+    incomplete: list[bool] | None = None,
+) -> None:
     """Handle `typedef struct __attribute__((packed)) {...} Name`.
 
     In this pattern the struct itself is anonymous (no DW_AT_name); the typedef
@@ -759,6 +765,15 @@ def _check_packed_typedef(die: Any, meta: AdvancedDwarfMetadata, CU: Any) -> Non
     try:
         target = _resolve_die_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
+        # P1 review, fresh evidence (Codex): a malformed DW_AT_type on an
+        # anonymous struct typedef previously left this packed-typedef
+        # walk's own failure invisible to the caller -- _walk_cu threaded
+        # `incomplete` into the calling-convention path only, not here, so
+        # both the unified and standalone parsers could report advanced
+        # evidence "parsed" while silently omitting this typedef's packing
+        # facts.
+        if incomplete is not None:
+            incomplete.append(True)
         return
 
     tag = target.tag
@@ -1272,6 +1287,21 @@ _DWARF_ADVANCED_DIFF_REEXPORTS = frozenset(
         "_diff_frame_registers",
     }
 )
+
+# P2 review, fresh evidence: `from abicheck.dwarf_advanced import *` no
+# longer surfaced `diff_advanced_dwarf` (or its siblings above) despite the
+# compatibility shim's own stated promise -- `import *` reads `__all__`
+# directly and never consults a module's `__getattr__` (PEP 562) for names
+# absent from it. Declaring `__all__` here fixes that: Python's import-star
+# machinery resolves each listed name via `getattr(module, name)`, which
+# *does* fall through to `__getattr__` for a name not otherwise bound in the
+# module namespace, so the lazy resolution above still applies per-name.
+__all__ = [
+    "AdvancedDwarfMetadata",
+    "ToolchainInfo",
+    "parse_advanced_dwarf",
+    *sorted(_DWARF_ADVANCED_DIFF_REEXPORTS),
+]
 
 
 def __getattr__(name: str) -> Any:

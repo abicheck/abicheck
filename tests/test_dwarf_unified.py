@@ -951,3 +951,54 @@ class TestUnifiedPassDowngradesOnMissingCfiSections:
         assert adv.frame_registers == {}
         # The value-ABI trait (unrelated to CFI) still resolves correctly.
         assert adv.value_abi_traits["_Z3barv"] == "ret:trivial"
+
+
+class TestUnifiedPassDowngradesOnIncompletePackedTypedef:
+    """P1 review, fresh evidence (Codex): sibling of the above value-ABI-
+    trait gap -- the separate anonymous-struct-typedef packed-check walk
+    (_check_packed_typedef) previously left a malformed DW_AT_type
+    invisible on this unified path too."""
+
+    def test_malformed_typedef_target_marks_advanced_channel_partial(
+        self,
+    ) -> None:
+        from abicheck import dwarf_unified as du
+
+        typedef = _Die(
+            "DW_TAG_typedef",
+            {"DW_AT_name": "MyAlias", "DW_AT_type": _Attr(999, "DW_FORM_ref_addr")},
+        )
+        root = _Die("DW_TAG_compile_unit", children=[typedef])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {}
+
+        class _DwarfInfo:
+            def iter_CUs(self):
+                return [cu]
+
+            def has_EH_CFI(self):
+                return True
+
+            def EH_CFI_entries(self):
+                return []
+
+        sess = DwarfSession(
+            path=Path("libtest.so"),
+            _file=object(),  # type: ignore[arg-type]
+            elf=object(),
+            dwarf=_DwarfInfo(),
+            arch="x86_64",  # type: ignore[arg-type]
+        )
+        with (
+            patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
+            patch("abicheck.dwarf_advanced._build_addr_to_sym", return_value={}),
+            patch(
+                "abicheck.dwarf_advanced._resolve_die_ref",
+                side_effect=RuntimeError("bad ref"),
+            ),
+        ):
+            meta, adv = du.parse_dwarf_from_session(sess)
+
+        assert adv.cu_failed == 0
+        assert adv.evidence_state == "partial"
+        assert "MyAlias" not in adv.all_struct_names
