@@ -42,12 +42,22 @@ four `--severity-<category>` CLI flags were removed, and
 themselves *not* a second CLI surface -- they are internal, `.abicheck.yml`-
 resolved values `compare`'s directory/package fan-out forwards from that
 very `ResolvedCompareConfig`, so a preset-only "pre-pack" state is the real
-production shape, not a simplification), with `exit_code_scheme="severity"`
-forced explicitly on both sides so neither implementation's own "auto"
-resolution (which differs in shape between the two -- concrete-and-final on
-`ResolvedCompareConfig`, deferred to `resolve_release_gate_options`'s own
-later `PRESET_DEFAULT` fallback on the release side) enters the comparison
-at all.
+production shape, not a simplification). *pre_pack_scheme* is generated as
+an explicit `"legacy"` or `"severity"` CLI choice (never `"auto"` -- neither
+implementation's own "auto" resolution enters the comparison at all, since
+the two differ in shape: concrete-and-final on `ResolvedCompareConfig`,
+deferred to `resolve_release_gate_options`'s own later `PRESET_DEFAULT`
+fallback on the release side) and threaded through *both* the CLI input
+*and* `PackApplication.resolved_exit_code_scheme` -- in real production
+these are the same resolved config's own `gate.exit_code_scheme` value
+(`pack_application()`'s own construction), so decoupling them, as an
+earlier revision of this test did, could never exercise the exact
+regression `apply_to_compare_config`'s own docstring documents as
+previously real (Codex review, PR #1032: a severity-only gate pack silently
+overriding an explicit `--exit-code-scheme legacy`) -- an explicit `legacy`
+pre-pack state with `resolved_exit_code_scheme` correctly still reading
+`"legacy"` is what proves a severity-only pack cannot flip it (Codex
+review, PR #1044, fifth round).
 
 `exit_code_scheme` agreement is asserted unconditionally. Severity-content
 agreement is asserted only when the *pack itself* did not force the final
@@ -78,7 +88,9 @@ _PRESETS = ("default", "strict", "info-only")
 
 
 @st.composite
-def _pack_applications(draw: st.DrawFn) -> PackApplication:
+def _pack_applications(
+    draw: st.DrawFn, *, resolved_exit_code_scheme: str
+) -> PackApplication:
     """A `PackApplication` carrying only a gate pack's own contribution --
     `policy_overrides`/`internal_namespaces` are irrelevant to either fold
     function under test, so they stay at their inert defaults.
@@ -91,7 +103,11 @@ def _pack_applications(draw: st.DrawFn) -> PackApplication:
     Codex review per that class's own docstring), and `SeverityLevel` being
     a `str` subclass means the same values still satisfy
     `resolve_severity_config`'s `str | None` category parameters on the
-    release side unchanged."""
+    release side unchanged.
+
+    *resolved_exit_code_scheme* is the caller's own already-resolved
+    pre-pack scheme (see module docstring: coupled to the same value real
+    production couples it to, never hard-coded)."""
     levels: dict[str, SeverityLevel] = {}
     for category in _SEVERITY_CATEGORIES:
         if draw(st.booleans()):
@@ -101,31 +117,36 @@ def _pack_applications(draw: st.DrawFn) -> PackApplication:
         policy_overrides={},
         severity_levels=levels,
         exit_code_scheme=scheme,
-        # Mirrors the real coupling: both call sites' "already-resolved
-        # scheme" is the *same* resolved config in production (see this
-        # module's own docstring) -- forced to "severity" here, matching
-        # the pre-pack state built below on both sides.
-        resolved_exit_code_scheme="severity",
+        resolved_exit_code_scheme=resolved_exit_code_scheme,
     )
 
 
-@given(preset=st.sampled_from(_PRESETS), pack_application=_pack_applications())
+@given(
+    preset=st.sampled_from(_PRESETS),
+    pre_pack_scheme=st.sampled_from(["legacy", "severity"]),
+    data=st.data(),
+)
 def test_severity_and_scheme_fold_agree_between_compare_and_release(
-    preset: str, pack_application: PackApplication
+    preset: str, pre_pack_scheme: str, data: st.DataObject
 ) -> None:
+    pack_application = data.draw(
+        _pack_applications(resolved_exit_code_scheme=pre_pack_scheme)
+    )
     resolved_cfg = resolve_compare_config(
         None,
         cli_severity_preset=preset,
         cli_scope_public=None,
-        cli_exit_code_scheme="severity",
+        cli_exit_code_scheme=pre_pack_scheme,
     )
-    assert resolved_cfg.exit_code_scheme == "severity"  # the test's own precondition
+    assert (
+        resolved_cfg.exit_code_scheme == pre_pack_scheme
+    )  # the test's own precondition
 
     single_pair = apply_to_compare_config(resolved_cfg, pack_application)
 
     release = resolve_release_gate_options(
         pack_application,
-        release_exit_code_scheme="severity",
+        release_exit_code_scheme=pre_pack_scheme,
         severity_preset=preset,
         severity_abi_breaking=None,
         severity_potential_breaking=None,
@@ -135,8 +156,12 @@ def test_severity_and_scheme_fold_agree_between_compare_and_release(
 
     # Unconditional: both sides fold an identical pack's exit_code_scheme/
     # resolved_exit_code_scheme contribution the same way, from an
-    # identical pre-pack "severity" starting scheme.
+    # identical pre-pack starting scheme -- including an explicit `legacy`
+    # pre-pack state, which a severity-only pack must never flip (the
+    # regression this test's own docstring names).
     assert single_pair.exit_code_scheme == release.exit_code_scheme
+    if pre_pack_scheme == "legacy" and pack_application.exit_code_scheme is None:
+        assert single_pair.exit_code_scheme == "legacy"
 
     if release.exit_code_scheme == "legacy":
         # The one deliberate, documented asymmetry -- see module docstring.
@@ -148,15 +173,19 @@ def test_severity_and_scheme_fold_agree_between_compare_and_release(
     assert single_pair.severity == release.severity
 
 
-@given(preset=st.sampled_from(_PRESETS))
+@given(
+    preset=st.sampled_from(_PRESETS),
+    pre_pack_scheme=st.sampled_from(["legacy", "severity"]),
+)
 def test_a_pack_with_no_gate_contribution_is_a_no_op_on_both_sides(
-    preset: str,
+    preset: str, pre_pack_scheme: str
 ) -> None:
     """`PackApplication`'s own contract ("every attribute is None/empty
     unless a pack actually supplied the value") means an inert pack must
     change nothing on either fold -- the degenerate case of the property
     above, pinned directly rather than only reachable by chance through the
-    generator."""
+    generator. Includes the explicit-`legacy` pre-pack state: an inert pack
+    must leave it exactly as `"legacy"`, never flip it."""
     inert = PackApplication(policy_overrides={})
     assert inert.is_empty()
 
@@ -164,19 +193,22 @@ def test_a_pack_with_no_gate_contribution_is_a_no_op_on_both_sides(
         None,
         cli_severity_preset=preset,
         cli_scope_public=None,
-        cli_exit_code_scheme="severity",
+        cli_exit_code_scheme=pre_pack_scheme,
     )
     single_pair = apply_to_compare_config(resolved_cfg, inert)
     assert single_pair == resolved_cfg
 
     release = resolve_release_gate_options(
         inert,
-        release_exit_code_scheme="severity",
+        release_exit_code_scheme=pre_pack_scheme,
         severity_preset=preset,
         severity_abi_breaking=None,
         severity_potential_breaking=None,
         severity_quality_issues=None,
         severity_addition=None,
     )
-    assert release.severity == resolved_cfg.severity
-    assert release.exit_code_scheme == resolved_cfg.exit_code_scheme
+    assert release.exit_code_scheme == resolved_cfg.exit_code_scheme == pre_pack_scheme
+    if pre_pack_scheme == "legacy":
+        assert release.severity is None
+    else:
+        assert release.severity == resolved_cfg.severity
