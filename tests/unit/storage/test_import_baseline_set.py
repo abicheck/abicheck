@@ -120,12 +120,23 @@ class TestImportBaselineSet:
         assert liba.native_identity["binary_sha256"] == "bbbb"
         assert "binary_sha256" not in libb.native_identity
 
-    @pytest.mark.parametrize("bad_value", [0, 1234, 0.0, [], {}, ""])
+    @pytest.mark.parametrize("bad_value", [0, 1234, 0.0, [], {}])
     def test_rejects_a_non_string_binary_sha256(self, bad_value: Any) -> None:
         doc = _manifest_document()
         doc["artifacts"][0]["binary_sha256"] = bad_value
         with pytest.raises(ValueError, match="binary_sha256"):
             import_baseline_set(doc, _snapshot_documents(), store=InMemoryObjectStore())
+
+    def test_an_empty_string_binary_sha256_means_no_staged_binary(self) -> None:
+        """`""` is `BaselineArtifact.binary_sha256`'s own documented default
+        for "no staged binary" -- not an error, and not carried onto
+        `native_identity` (CodeRabbit review)."""
+        doc = _manifest_document()
+        doc["artifacts"][0]["binary_sha256"] = ""
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        liba = next(a for a in manifest.artifact_refs if a.artifact_id == "liba.so")
+        assert "binary_sha256" not in liba.native_identity
 
     def test_attaches_a_baseline_set_metadata_section_to_the_variant(self) -> None:
         doc = _manifest_document()
@@ -153,6 +164,22 @@ class TestImportBaselineSet:
         assert metadata["generator"] == {"tool": "actions/baseline", "version": "1.2.3"}
         assert set(snapshots) == {"liba.so", "libb.so"}
         assert snapshots["liba.so"]["library"] == "liba.so"
+
+    def test_absent_optional_metadata_keys_stay_absent_on_export(self) -> None:
+        """`fact_set`/`baseline_generation`/`generator` are legitimately
+        absent on a real manifest -- re-exporting must not turn that
+        absence into an explicit `null` (CodeRabbit review)."""
+        doc = _manifest_document()
+        del doc["fact_set"]
+        del doc["baseline_generation"]
+        del doc["generator"]
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert "fact_set" not in metadata
+        assert "baseline_generation" not in metadata
+        assert "generator" not in metadata
+        assert metadata["project_ref"] == "refs/heads/main"
 
     def test_export_rejects_an_unknown_variant_id(self) -> None:
         doc = _manifest_document()

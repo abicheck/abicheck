@@ -201,11 +201,18 @@ def import_baseline_set(
         (artifact,) = member_manifest.artifact_refs
         if "binary_sha256" in entry:
             binary_sha256 = entry["binary_sha256"]
-            if not isinstance(binary_sha256, str) or not binary_sha256:
+            if not isinstance(binary_sha256, str):
                 raise ValueError(
                     f"manifest_document['artifacts'][{index}]['binary_sha256'] "
-                    f"must be a non-empty string, not {binary_sha256!r}"
+                    f"must be a string, not {type(binary_sha256).__name__} "
+                    f"({binary_sha256!r})"
                 )
+        else:
+            binary_sha256 = ""
+        if binary_sha256:
+            # `""` (absent key, or `BaselineArtifact.binary_sha256`'s own
+            # documented default) means "no staged binary" -- not an error,
+            # and not a value worth carrying as a native-identity fact.
             # A fresh `ArtifactRef` carrying the same identity/sections plus
             # this one extra native-identity fact -- `ArtifactRef` is a
             # frozen dataclass, so this is reconstruction, not mutation.
@@ -233,7 +240,16 @@ def import_baseline_set(
             )
     assert source_schema_version is not None  # non-empty loop guarantees this
 
-    metadata_payload = {key: manifest_document.get(key) for key in _METADATA_KEYS}
+    # Only keys actually present in *manifest_document* -- `.get(key)` would
+    # store an absent optional field (`fact_set`/`baseline_generation`/
+    # `generator`, all legitimately absent on a real manifest) as an
+    # explicit `None`, so `export_baseline_set` would then re-export a
+    # `null` key the original document never had (CodeRabbit review).
+    metadata_payload = {
+        key: manifest_document[key]
+        for key in _METADATA_KEYS
+        if key in manifest_document
+    }
     metadata_dto = baseline_set_metadata_to_dto(metadata_payload)
     metadata_ref = ObjectRef(
         kind=BASELINE_SET_SECTION_KIND, digest=store.put(metadata_dto.to_dict())
