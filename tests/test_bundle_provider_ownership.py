@@ -321,3 +321,34 @@ class TestAuditBundleWiring:
         monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
         result = audit_bundle(libraries)
         assert result.findings == []
+
+
+class TestMatchEntryDeadlineCheckpoint:
+    """`_match_entry`'s per-target loop calls `deadline.check()` (Codex
+    review, PR H): a large pattern/template manifest scans the full
+    demangled export index per target, and `deadline_scope()` alone does
+    not interrupt pure Python work -- without a checkpoint here a small
+    `--budget` could be overrun well before `run_scan_set`'s own elapsed-
+    time check (after `audit_bundle` returns) ever sees it."""
+
+    def test_raises_when_deadline_already_expired(self) -> None:
+        from abicheck import deadline
+        from abicheck.bundle import ManifestEntry
+        from abicheck.bundle_detector_heuristics import _match_entry
+
+        new = _snapshot({"liba.so": _meta(soname="liba.so.1", exports=["foo"])})
+        entry = ManifestEntry(pattern="foo*")
+        with deadline.deadline_scope(-1):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _match_entry(entry, new)
+
+    def test_no_deadline_is_a_no_op(self) -> None:
+        from abicheck.bundle import ManifestEntry
+        from abicheck.bundle_detector_heuristics import _match_entry
+
+        new = _snapshot({"liba.so": _meta(soname="liba.so.1", exports=["foo"])})
+        entry = ManifestEntry(symbol="foo")
+        # No deadline_scope active -- must behave exactly as before.
+        [(target, kind, matched, providers)] = _match_entry(entry, new)
+        assert (target, kind, matched) == ("foo", "symbol", ["foo"])
+        assert [p.library for p in providers] == ["liba.so"]

@@ -316,11 +316,20 @@ def _match_entry(
     :func:`_build_demangled_index` and pass it in to amortise the
     O(symbols) demangle pass across all targets.
     """
+    from . import deadline
+
     needs_index = any(kind != "symbol" for _, kind in _entry_targets(entry))
     if index is None and needs_index:
         index = _build_demangled_index(snapshot)
     out: list[tuple[str, str, list[str], list[ProviderEntry]]] = []
     for target, kind in _entry_targets(entry):
+        # Cooperative checkpoint (Codex review, PR H): a large pattern/
+        # template manifest can spend arbitrarily long here scanning the
+        # full demangled index per target -- deadline_scope() alone
+        # doesn't interrupt pure Python work, so without this a small
+        # --budget could be exceeded well before run_scan_set's own
+        # elapsed-time check (after audit_bundle returns) ever sees it.
+        deadline.check()
         matched, providers = _match_target_against_index(target, kind, snapshot, index)
         out.append((target, kind, matched, providers))
     return out
