@@ -446,15 +446,25 @@ def _extract_structs(
     resolver: _TypeResolver,
     str_data: bytes,
     version: int,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, StructLayout]:
-    """Extract struct/union layouts from CTF types."""
+    """Extract struct/union layouts from CTF types.
+
+    P2 review: *invalid_strings* records (append-only) every ``name_off``/
+    ``m_name_off`` that ``_read_string`` reports out of ``str_data``'s
+    bounds -- a corrupt/malformed CTF blob, not a legitimate anonymous
+    (empty) name. Left ``None`` for a caller that doesn't track it.
+    """
     structs: dict[str, StructLayout] = {}
 
     for t in types:
         if t.kind not in (CTF_K_STRUCT, CTF_K_UNION):
             continue
 
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if not name:
             continue
 
@@ -499,7 +509,9 @@ def _extract_structs(
                     m_type = (m_off_val >> 10) & 0x3F  # v2 packs type in offset
                     m_offset = m_off_val & 0x3FF
 
-            m_name = _read_string(str_data, m_name_off)
+            m_name, m_name_valid = _read_string(str_data, m_name_off)
+            if invalid_strings is not None and not m_name_valid:
+                invalid_strings.append(True)
             byte_offset = m_offset // 8
             bit_offset = m_offset % 8
 
@@ -531,6 +543,8 @@ def _extract_structs(
 def _extract_enums(
     types: list[CtfType],
     str_data: bytes,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, EnumInfo]:
     """Extract enum types from CTF."""
     enums: dict[str, EnumInfo] = {}
@@ -539,7 +553,9 @@ def _extract_enums(
         if t.kind != CTF_K_ENUM:
             continue
 
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if not name:
             continue
 
@@ -549,7 +565,9 @@ def _extract_enums(
             if off + 8 > len(t.extra):
                 break
             e_name_off, e_val = struct.unpack_from("<Ii", t.extra, off)
-            e_name = _read_string(str_data, e_name_off)
+            e_name, e_name_valid = _read_string(str_data, e_name_off)
+            if invalid_strings is not None and not e_name_valid:
+                invalid_strings.append(True)
             if e_name:
                 members[e_name] = e_val
 
@@ -567,13 +585,17 @@ def _extract_typedefs(
     types: list[CtfType],
     resolver: _TypeResolver,
     str_data: bytes,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, str]:
     """Extract typedef mappings."""
     typedefs: dict[str, str] = {}
     for t in types:
         if t.kind != CTF_K_TYPEDEF:
             continue
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if not name:
             continue
         target = resolver.name(t.size_or_type)
@@ -664,22 +686,36 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
         # whose type table was read incomplete.
         meta.extraction_partial = True
 
+    # P2 review, fresh evidence: an out-of-bounds string offset (a
+    # corrupt/malformed CTF blob) doesn't raise either -- read_null_
+    # terminated_string() silently falls back to "", indistinguishable from
+    # a legitimate anonymous name, so this shared accumulator is what lets
+    # every extractor below report it into extraction_partial.
+    invalid_strings: list[bool] = []
+
     try:
-        meta.structs = _extract_structs(types, resolver, str_data, header.version)
+        meta.structs = _extract_structs(
+            types, resolver, str_data, header.version, invalid_strings=invalid_strings
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_ctf_from_bytes: struct extraction failed: %s", exc)
         meta.extraction_partial = True
 
     try:
-        meta.enums = _extract_enums(types, str_data)
+        meta.enums = _extract_enums(types, str_data, invalid_strings=invalid_strings)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_ctf_from_bytes: enum extraction failed: %s", exc)
         meta.extraction_partial = True
 
     try:
-        meta.typedefs = _extract_typedefs(types, resolver, str_data)
+        meta.typedefs = _extract_typedefs(
+            types, resolver, str_data, invalid_strings=invalid_strings
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_ctf_from_bytes: typedef extraction failed: %s", exc)
+        meta.extraction_partial = True
+
+    if invalid_strings:
         meta.extraction_partial = True
 
     return meta

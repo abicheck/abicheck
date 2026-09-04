@@ -42,17 +42,26 @@ class FuncProto:
     linkage: int | None = None
 
 
-def read_null_terminated_string(data: bytes, offset: int) -> str:
+def read_null_terminated_string(data: bytes, offset: int) -> tuple[str, bool]:
     """Read a null-terminated UTF-8 string from a binary section.
 
     Shared by BTF and CTF parsers for reading their string tables.
+
+    Returns ``(string, valid)`` (P2 review): ``valid`` is False only when
+    *offset* itself is out of ``data``'s bounds -- a corrupt/out-of-range
+    name offset a caller must not silently treat the same as a legitimate
+    zero-length name (both previously returned the bare string ``""`` with
+    no way to tell them apart). An in-bounds offset with no NUL terminator
+    before the end of the buffer is left as-is (decodes to the end of the
+    buffer, `valid=True`) -- unlike an out-of-range offset, that shape is
+    not necessarily corrupt data, just an untruncated trailing name.
     """
     if offset < 0 or offset >= len(data):
-        return ""
+        return "", False
     end = data.find(b"\x00", offset)
     if end < 0:
-        return data[offset:].decode("utf-8", errors="replace")
-    return data[offset:end].decode("utf-8", errors="replace")
+        return data[offset:].decode("utf-8", errors="replace"), True
+    return data[offset:end].decode("utf-8", errors="replace"), True
 
 
 @runtime_checkable

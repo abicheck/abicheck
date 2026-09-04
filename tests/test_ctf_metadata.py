@@ -143,14 +143,14 @@ class CtfBuilder:
 class TestReadString:
     def test_basic(self) -> None:
         data = b"hello\x00world\x00"
-        assert _read_string(data, 0) == "hello"
-        assert _read_string(data, 6) == "world"
+        assert _read_string(data, 0) == ("hello", True)
+        assert _read_string(data, 6) == ("world", True)
 
     def test_empty(self) -> None:
-        assert _read_string(b"\x00", 0) == ""
+        assert _read_string(b"\x00", 0) == ("", True)
 
     def test_out_of_bounds(self) -> None:
-        assert _read_string(b"abc\x00", 100) == ""
+        assert _read_string(b"abc\x00", 100) == ("", False)
 
 
 # ---------------------------------------------------------------------------
@@ -743,11 +743,11 @@ class TestCtfEdgeCases:
         assert "A" in meta.enums["dup"].members
 
     def test_string_out_of_bounds(self) -> None:
-        assert _read_string(b"abc\x00", 100) == ""
-        assert _read_string(b"abc\x00", -1) == ""
+        assert _read_string(b"abc\x00", 100) == ("", False)
+        assert _read_string(b"abc\x00", -1) == ("", False)
 
     def test_string_no_null(self) -> None:
-        assert _read_string(b"no_null", 0) == "no_null"
+        assert _read_string(b"no_null", 0) == ("no_null", True)
 
 
 # ---------------------------------------------------------------------------

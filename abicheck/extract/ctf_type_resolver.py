@@ -84,8 +84,12 @@ class CtfType:
         return bool((self.info >> 31) & 1)  # v3; v2 uses >> 10 & 1
 
 
-def _read_string(str_data: bytes, offset: int) -> str:
-    """Read a null-terminated string from the CTF string table."""
+def _read_string(str_data: bytes, offset: int) -> tuple[str, bool]:
+    """Read a null-terminated string from the CTF string table.
+
+    Returns ``(name, valid)`` -- see ``read_null_terminated_string``'s own
+    docstring for what ``valid=False`` means.
+    """
     return read_null_terminated_string(str_data, offset)
 
 
@@ -133,7 +137,12 @@ class _TypeResolver:
         return None
 
     def _str_at(self, offset: int) -> str:
-        return _read_string(self._str, offset)
+        # Type-name resolution already has its own fallback for an invalid
+        # reference -- this resolver's own validity signal is a separate,
+        # larger surface out of scope for the extraction-completeness fix
+        # (see ctf_metadata._extract_structs and friends).
+        name, _valid = _read_string(self._str, offset)
+        return name
 
     def _resolve_name_array(self, t: CtfType) -> str:
         """Return the name string for a CTF array type."""

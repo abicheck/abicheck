@@ -149,7 +149,7 @@ def _find_cycle(graph: Mapping[str, set[str]]) -> list[str] | None:
 
 
 def _validate_modules(
-    config: dict[str, Any], findings: list[Finding]
+    config: dict[str, Any], findings: list[Finding], root: Path
 ) -> dict[str, dict[str, Any]]:
     if config.get("schema_version") != SCHEMA_VERSION:
         findings.append(
@@ -195,6 +195,23 @@ def _validate_modules(
                     Finding(
                         "schema",
                         f"{where}.legacy_paths[{index}]: must name an abicheck Python module",
+                    )
+                )
+            elif valid_legacy and not (root / valid_legacy).is_file():
+                # P2 review, fresh evidence: an entry naming a file that no
+                # longer exists (e.g. deleted/moved during a cleanup) is not
+                # rejected by anything above -- it silently keeps
+                # pre-authorizing a *future* file at that path to reappear
+                # under the flat legacy classification, bypassing the
+                # canonical-owner/no-growth gate a genuinely new module
+                # would otherwise have to clear. Stale entries must be
+                # removed, not left to accumulate.
+                findings.append(
+                    Finding(
+                        "schema",
+                        f"{where}.legacy_paths[{index}]: {valid_legacy!r} does not "
+                        "exist -- remove the stale entry instead of leaving it to "
+                        "pre-authorize a future file at that path",
                     )
                 )
         validated[name] = {
@@ -570,7 +587,7 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     findings: list[Finding] = []
     modules = _load_mapping(root / "architecture/modules.yaml", findings)
     debt = _load_mapping(root / "architecture/debt.yaml", findings)
-    layers = _validate_modules(modules, findings)
+    layers = _validate_modules(modules, findings, root)
     _check_selector_leaf_purity(root, findings)
     limits = modules.get("limits", {})
     production_limit = (

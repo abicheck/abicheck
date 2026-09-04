@@ -91,8 +91,12 @@ class BtfType:
         return (self.info >> 31) & 1
 
 
-def _read_string(str_data: bytes, offset: int) -> str:
-    """Read a null-terminated string from the BTF string section."""
+def _read_string(str_data: bytes, offset: int) -> tuple[str, bool]:
+    """Read a null-terminated string from the BTF string section.
+
+    Returns ``(name, valid)`` -- see ``read_null_terminated_string``'s own
+    docstring for what ``valid=False`` means.
+    """
     return read_null_terminated_string(str_data, offset)
 
 
@@ -160,7 +164,13 @@ class _TypeResolver:
         return None
 
     def _str_at(self, offset: int) -> str:
-        return _read_string(self._str, offset)
+        # Type-name resolution already has its own fallback for an invalid
+        # reference (e.g. "<btf:N>" for a bad type_id below) -- this
+        # resolver's own validity signal is a separate, larger surface out
+        # of scope for the extraction-completeness fix (see
+        # btf_metadata._extract_structs and friends).
+        name, _valid = _read_string(self._str, offset)
+        return name
 
     def _resolve_name(self, type_id: int) -> str:
         if type_id == 0:

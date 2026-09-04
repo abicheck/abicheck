@@ -123,15 +123,19 @@ class BtfBuilder:
 class TestReadString:
     def test_basic(self) -> None:
         data = b"hello\x00world\x00"
-        assert _read_string(data, 0) == "hello"
-        assert _read_string(data, 6) == "world"
+        assert _read_string(data, 0) == ("hello", True)
+        assert _read_string(data, 6) == ("world", True)
 
     def test_empty(self) -> None:
-        assert _read_string(b"\x00", 0) == ""
+        """A NUL right at the offset is a legitimate zero-length name --
+        valid=True, unlike an out-of-bounds offset below."""
+        assert _read_string(b"\x00", 0) == ("", True)
 
     def test_out_of_bounds(self) -> None:
-        assert _read_string(b"abc\x00", 100) == ""
-        assert _read_string(b"abc\x00", -1) == ""
+        """P2 review: an out-of-bounds offset must be distinguishable from
+        a legitimate empty name -- valid=False."""
+        assert _read_string(b"abc\x00", 100) == ("", False)
+        assert _read_string(b"abc\x00", -1) == ("", False)
 
 
 # ---------------------------------------------------------------------------
@@ -1066,9 +1070,11 @@ class TestParseHeaderExtended:
         assert result.version == 99
 
     def test_string_no_null_terminator(self) -> None:
-        """String without null terminator returns remainder."""
+        """String without null terminator returns remainder, still
+        valid=True -- an untruncated trailing name is not the same
+        corruption shape as an out-of-bounds offset."""
         data = b"no_null"
-        assert _read_string(data, 0) == "no_null"
+        assert _read_string(data, 0) == ("no_null", True)
 
 
 # ---------------------------------------------------------------------------

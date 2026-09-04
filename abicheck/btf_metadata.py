@@ -325,15 +325,25 @@ def _extract_structs(
     types: list[BtfType],
     resolver: _TypeResolver,
     str_data: bytes,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, StructLayout]:
-    """Extract struct/union layouts from BTF types."""
+    """Extract struct/union layouts from BTF types.
+
+    P2 review: *invalid_strings* records (append-only) every ``name_off``/
+    ``m_name_off`` that ``_read_string`` reports out of ``str_data``'s
+    bounds -- a corrupt/malformed BTF blob, not a legitimate anonymous
+    (empty) name. Left ``None`` for a caller that doesn't track it.
+    """
     structs: dict[str, StructLayout] = {}
 
     for t in types:
         if t.kind not in (BTF_KIND_STRUCT, BTF_KIND_UNION):
             continue
 
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if not name:
             continue  # skip anonymous
 
@@ -344,7 +354,9 @@ def _extract_structs(
             if off + 12 > len(t.extra):
                 break
             m_name_off, m_type, m_offset = struct.unpack_from("<III", t.extra, off)
-            m_name = _read_string(str_data, m_name_off)
+            m_name, m_name_valid = _read_string(str_data, m_name_off)
+            if invalid_strings is not None and not m_name_valid:
+                invalid_strings.append(True)
 
             # kflag determines offset encoding:
             # kflag=0: m_offset is byte_offset * 8 (bit offset from struct start)
@@ -384,7 +396,9 @@ def _extract_structs(
     return structs
 
 
-def _parse_enum32_members(t: BtfType, str_data: bytes) -> dict[str, int]:
+def _parse_enum32_members(
+    t: BtfType, str_data: bytes, *, invalid_strings: list[bool] | None = None
+) -> dict[str, int]:
     """Parse 32-bit BTF enum enumerators (8 bytes each)."""
     members: dict[str, int] = {}
     # kflag=1 → signed enumerators, kflag=0 → unsigned
@@ -394,13 +408,17 @@ def _parse_enum32_members(t: BtfType, str_data: bytes) -> dict[str, int]:
         if off + 8 > len(t.extra):
             break
         e_name_off, e_val = struct.unpack_from(fmt, t.extra, off)
-        e_name = _read_string(str_data, e_name_off)
+        e_name, e_name_valid = _read_string(str_data, e_name_off)
+        if invalid_strings is not None and not e_name_valid:
+            invalid_strings.append(True)
         if e_name:
             members[e_name] = e_val
     return members
 
 
-def _parse_enum64_members(t: BtfType, str_data: bytes) -> dict[str, int]:
+def _parse_enum64_members(
+    t: BtfType, str_data: bytes, *, invalid_strings: list[bool] | None = None
+) -> dict[str, int]:
     """Parse 64-bit BTF enum enumerators (12 bytes each)."""
     members: dict[str, int] = {}
     for i in range(t.vlen):
@@ -408,7 +426,9 @@ def _parse_enum64_members(t: BtfType, str_data: bytes) -> dict[str, int]:
         if off + 12 > len(t.extra):
             break
         e_name_off, e_val_lo, e_val_hi = struct.unpack_from("<III", t.extra, off)
-        e_name = _read_string(str_data, e_name_off)
+        e_name, e_name_valid = _read_string(str_data, e_name_off)
+        if invalid_strings is not None and not e_name_valid:
+            invalid_strings.append(True)
         e_val = e_val_lo | (e_val_hi << 32)
         # kflag=1 → signed: sign-extend 64-bit value
         if t.kflag and e_val >= (1 << 63):
@@ -421,19 +441,27 @@ def _parse_enum64_members(t: BtfType, str_data: bytes) -> dict[str, int]:
 def _extract_enums(
     types: list[BtfType],
     str_data: bytes,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, EnumInfo]:
     """Extract enum types from BTF."""
     enums: dict[str, EnumInfo] = {}
 
     for t in types:
         if t.kind == BTF_KIND_ENUM:
-            members = _parse_enum32_members(t, str_data)
+            members = _parse_enum32_members(
+                t, str_data, invalid_strings=invalid_strings
+            )
         elif t.kind == BTF_KIND_ENUM64:
-            members = _parse_enum64_members(t, str_data)
+            members = _parse_enum64_members(
+                t, str_data, invalid_strings=invalid_strings
+            )
         else:
             continue
 
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if name and name not in enums:
             enums[name] = EnumInfo(
                 name=name,
@@ -448,6 +476,8 @@ def _extract_func_protos(
     types: list[BtfType],
     resolver: _TypeResolver,
     str_data: bytes,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, FuncProto]:
     """Extract function prototypes from BTF FUNC + FUNC_PROTO pairs."""
     # Build proto_id → FuncProto mapping first
@@ -460,7 +490,9 @@ def _extract_func_protos(
     for t in types:
         if t.kind != BTF_KIND_FUNC:
             continue
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if not name:
             continue
 
@@ -475,7 +507,9 @@ def _extract_func_protos(
             if off + 8 > len(proto.extra):
                 break
             p_name_off, p_type = struct.unpack_from("<II", proto.extra, off)
-            p_name = _read_string(str_data, p_name_off)
+            p_name, p_name_valid = _read_string(str_data, p_name_off)
+            if invalid_strings is not None and not p_name_valid:
+                invalid_strings.append(True)
             p_type_name = resolver.name(p_type)
             params.append((p_name, p_type_name))
 
@@ -496,13 +530,17 @@ def _extract_typedefs(
     types: list[BtfType],
     resolver: _TypeResolver,
     str_data: bytes,
+    *,
+    invalid_strings: list[bool] | None = None,
 ) -> dict[str, str]:
     """Extract typedef mappings."""
     typedefs: dict[str, str] = {}
     for t in types:
         if t.kind != BTF_KIND_TYPEDEF:
             continue
-        name = _read_string(str_data, t.name_off)
+        name, name_valid = _read_string(str_data, t.name_off)
+        if invalid_strings is not None and not name_valid:
+            invalid_strings.append(True)
         if not name:
             continue
         target = resolver.name(t.size_or_type)
@@ -587,28 +625,44 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
         # whose type table was read incomplete.
         meta.extraction_partial = True
 
+    # P2 review, fresh evidence: an out-of-bounds string offset (a
+    # corrupt/malformed BTF blob) doesn't raise either -- read_null_
+    # terminated_string() silently falls back to "", indistinguishable from
+    # a legitimate anonymous name, so this shared accumulator is what lets
+    # every extractor below report it into extraction_partial.
+    invalid_strings: list[bool] = []
+
     try:
-        meta.structs = _extract_structs(types, resolver, str_data)
+        meta.structs = _extract_structs(
+            types, resolver, str_data, invalid_strings=invalid_strings
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: struct extraction failed: %s", exc)
         meta.extraction_partial = True
 
     try:
-        meta.enums = _extract_enums(types, str_data)
+        meta.enums = _extract_enums(types, str_data, invalid_strings=invalid_strings)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: enum extraction failed: %s", exc)
         meta.extraction_partial = True
 
     try:
-        meta.func_protos = _extract_func_protos(types, resolver, str_data)
+        meta.func_protos = _extract_func_protos(
+            types, resolver, str_data, invalid_strings=invalid_strings
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: func_proto extraction failed: %s", exc)
         meta.extraction_partial = True
 
     try:
-        meta.typedefs = _extract_typedefs(types, resolver, str_data)
+        meta.typedefs = _extract_typedefs(
+            types, resolver, str_data, invalid_strings=invalid_strings
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_btf_from_bytes: typedef extraction failed: %s", exc)
+        meta.extraction_partial = True
+
+    if invalid_strings:
         meta.extraction_partial = True
 
     return meta

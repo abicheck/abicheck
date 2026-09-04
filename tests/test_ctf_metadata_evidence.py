@@ -34,9 +34,11 @@ import struct
 
 from abicheck.ctf_metadata import (
     _CTF_V2_LSTRUCT_THRESH,
+    CTF_K_ENUM,
     CTF_K_INTEGER,
     CTF_K_POINTER,
     CTF_K_STRUCT,
+    CTF_K_TYPEDEF,
     CTF_MAGIC,
     CTF_VERSION_2,
     CTF_VERSION_3,
@@ -247,3 +249,84 @@ class TestParseTypesTruncationOutParam:
         result = _parse_types(data, CTF_VERSION_2, truncated)
         assert truncated == []
         assert len(result) == 2  # void + the one complete (empty) struct
+
+
+def _corrupt_name_off_type(
+    kind: int, vlen: int, size_or_type: int, extra: bytes = b""
+) -> bytes:
+    """A raw CTF v3 type entry (bypassing CtfBuilder.add_type, which always
+    allocates a real, in-bounds string-table offset) whose name_off is
+    deliberately out of the string table's bounds."""
+    info = (kind << 24) | (vlen & 0xFFFF)
+    bad_name_off = 0xFFFFFF  # far past any real str_data this builds
+    return struct.pack("<III", bad_name_off, info, size_or_type) + extra
+
+
+class TestInvalidStringOffsetPropagatesToPartial:
+    """P2 review, fresh evidence beyond the resolved BTF thread (same root
+    cause, CTF's own sibling): a CTF type/member with a string-table offset
+    outside ``str_data`` fell back to ``read_null_terminated_string``'s
+    empty-string return with no completeness signal -- ``_extract_structs()``
+    would then drop the named layout (empty name reads as anonymous) or emit
+    a blank member, and ``parse_ctf_from_bytes`` only set
+    ``extraction_partial`` for type-table truncation or a raised exception,
+    neither of which this shape triggers. Covered through the public parser
+    (``parse_ctf_from_bytes``/``extraction_partial``), not ``_read_string``
+    directly. Split into this sibling file for the same reason as the class
+    above -- ``test_ctf_metadata.py`` is already at its debt baseline.
+    """
+
+    def test_struct_with_invalid_name_offset_marks_partial(self) -> None:
+        b = CtfBuilder()
+        b._type_entries.append(_corrupt_name_off_type(CTF_K_STRUCT, 0, 4))
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.has_ctf is True
+        assert meta.extraction_partial is True
+        assert meta.structs == {}
+
+    def test_struct_member_with_invalid_name_offset_marks_partial(self) -> None:
+        """The reviewer's other named shape: a member name offset outside
+        str_data, on an otherwise well-named, well-formed struct."""
+        b = CtfBuilder()
+        info = (CTF_K_STRUCT << 24) | (1 & 0xFFFF)
+        name_off = b.add_string("S")
+        bad_member_off = 0xFFFFFF
+        member = struct.pack("<II", bad_member_off, (1 << 16) | 0)
+        entry = struct.pack("<III", name_off, info, 4) + member
+        b._type_entries.append(entry)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        assert meta.structs["S"].fields[0].name == ""
+
+    def test_enum_with_invalid_name_offset_marks_partial(self) -> None:
+        b = CtfBuilder()
+        b._type_entries.append(_corrupt_name_off_type(CTF_K_ENUM, 0, 4))
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert meta.enums == {}
+
+    def test_typedef_with_invalid_name_offset_marks_partial(self) -> None:
+        b = CtfBuilder()
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=struct.pack("<I", 32))
+        b._type_entries.append(_corrupt_name_off_type(CTF_K_TYPEDEF, 0, 1))
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert meta.typedefs == {}
+
+    def test_well_formed_blob_is_not_flagged(self) -> None:
+        """Positive control: every real, in-bounds offset must not trip
+        the new signal."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+        m_name = b.add_string("val")
+        members = struct.pack("<II", m_name, (1 << 16) | 0)
+        b.add_type("simple", CTF_K_STRUCT, 1, 4, extra=members)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is False

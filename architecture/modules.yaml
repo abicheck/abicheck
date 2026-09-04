@@ -777,7 +777,6 @@
     "dumper_toolchain.py",
     "dwarf_advanced.py",
     "dwarf_metadata.py",
-    "dwarf_metadata_codec.py",
     "dwarf_presence.py",
     "dwarf_snapshot.py",
     "dwarf_unified.py",

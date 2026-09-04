@@ -360,6 +360,46 @@ def test_legacy_module_cannot_have_two_target_owners(tmp_path: Path) -> None:
     )
 
 
+def test_legacy_path_naming_a_deleted_file_is_rejected(tmp_path: Path) -> None:
+    """P2 review, fresh evidence: a ``legacy_paths`` entry naming a file that
+    no longer exists on disk (e.g. deleted/moved during a cleanup, but left
+    in the inventory) was accepted silently -- nothing checked the entry
+    against the real file tree, so it kept pre-authorizing a *future* file
+    reappearing at that exact path to be flat-classified without ever
+    clearing the canonical-owner/no-growth gate a genuinely new module has
+    to. A stale entry must be rejected until removed."""
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["model"]["legacy_paths"] = ["abicheck/deleted_legacy.py"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    # Deliberately never write abicheck/deleted_legacy.py.
+
+    findings = check_repository(root)
+
+    assert any(
+        finding.rule == "schema"
+        and "deleted_legacy.py" in finding.message
+        and "does not exist" in finding.message
+        for finding in findings
+    )
+
+
+def test_legacy_path_naming_an_existing_file_is_not_rejected(tmp_path: Path) -> None:
+    """Positive control: an existing legacy_paths target must not trip the
+    new existence check (covered implicitly by
+    test_legacy_module_is_classified_by_its_target_owner's clean-findings
+    assertion too, but stated directly here against just this rule)."""
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["model"]["legacy_paths"] = ["abicheck/legacy_model.py"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_model.py", "VALUE = 1\n")
+
+    findings = check_repository(root)
+
+    assert not any("does not exist" in finding.message for finding in findings)
+
+
 def test_migrated_package_cannot_import_legacy_facade(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     _add_package(root, "workflows", "from abicheck.service import run_dump\n")
