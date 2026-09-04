@@ -100,28 +100,14 @@ concepts:
       (_vtable_transition_is_evidenced/
       _vtable_transition_rests_on_unresolved_evidence, since moved to
       compare/vtable_evidence.vtable_transition_is_evidenced) — is closed
-      as a formal, investigated decline (Track 4, 2026-09-04), after a
-      three-round investigation on the same PR. Full reasoning lives once,
-      canonically, in diff_types_vtable.py's own module docstring ("Track 4,
-      5B final closure" section) and is not repeated here: round 1
-      declined (assumed no real producer sets a non-present vtable_fact);
-      round 2 landed a decline once Codex review found pdb_model.py's real
-      PDB extractor unconditionally NOT_COLLECTED on every record,
-      independent of clang_vtable_facts_reliable, following either
-      fallback evidence stream for that status fabricating a real,
-      reachable TYPE_VTABLE_CHANGED finding; round 3 reverted round 2 after
-      it silently regressed tests/test_abicc_scenario_parity.py's
-      TestLeafClassVirtualMethodAdditions::test_virtual_added_to_leaf_class
-      — a hand-constructed/typed-API RecordType omitting vtable= (meaning
-      "non-polymorphic") resolves to the identical NOT_COLLECTED status as
-      PDB's own structural non-evidence, and FactStatus alone cannot tell
-      the two apart. vtable_transition_is_evidenced's heuristic is
-      unchanged from before this closure. The PDB fabrication round 2
-      found remains real, reachable, and open — not fixed, not
-      hypothetical. Proven via tests/test_vtable_evidence_guard.py::
-      TestExplicitFactStatusWouldNotSafelyGateThisGuard (reverted-contract
-      pin) and ::TestOmittedVtableStillDetectsARealAddition (round-3
-      regression pin). This closes the
+      as a formal, investigated decline (Track 4, 2026-09-04).
+      vtable_transition_is_evidenced's heuristic is unchanged from before
+      this closure. Full three-round reasoning (declined, then a landed
+      fix that regressed real detection coverage, then reverted) lives
+      once, canonically, in diff_types_vtable.py's own module docstring
+      ("Track 4, 5B final closure" section) — not repeated here. The PDB
+      fabrication that closure's second round found remains real,
+      reachable, and open, not fixed. This closes the
       removal gate for every one of the five originally-named fields
       (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
       separately tracked: seven case-(a) fields (default, the five

@@ -709,105 +709,35 @@ remaining work is that one cluster (`vtable` only), not a further audit
 sweep.
 
 **Track 4 — 5B final closure (2026-09-04): the `TYPE_VTABLE_CHANGED`
-cluster's own residual gap, resolved as a formal, investigated decline —
-after a three-round investigation that landed a fix, found it regressed
-real detection, and reverted it.** The third PR's own consolidation (the
-evidence predicate moved to `compare/vtable_evidence.py` as
-`vtable_transition_is_evidenced`, a shared leaf both `diff_types_vtable.py`
-and `diff_cxx_rules.virtual_method_addition` now call) landed separately,
-fixing a real coupling bug but moving the heuristic itself verbatim — no
-`FactStatus` read was added. This closure re-examined whether that
-consolidation changed anything for the DWARF per-TU ambiguity specifically
-(it doesn't — the move says nothing about what DWARF's own extraction can
-observe, and the guard's original heuristic for that case is unchanged),
-and separately investigated the narrower case the third PR's own note left
-open: a check scoped specifically to `NOT_COLLECTED`/`FAILED` (more
-precisely, any status other than `PRESENT`/`PARTIAL` — `Fact.is_present`).
-
-That narrower investigation ran three rounds, each correcting the one
-before it — all three are worth recording, not just the last.
-
-**Round 1: declined**, reasoning that the one branch such a check could
-replace was already unreachable via `resolved_fact_value`'s own collapse
-(making a direct check redundant there), and that using the status to
-short-circuit the two fallback evidence streams (owned virtual functions,
-`size_bits`/`virtual_bases_fact`) would be unsafe if either stream ever
-legitimately fires for a real, non-present-status side — reasoning from
-the assumption that no real producer sets a non-present `vtable_fact` at
-all.
-
-**Round 2: landed, reversing round 1.** Codex review (PR #1057) found
-that assumption false, with a concrete, non-hypothetical counterexample:
-`pdb_model.py`'s real PDB extractor (`_record_from_layout`) never sets
-`vtable`/`vtable_fact` on any record at all, which
-`RecordType.__post_init__`'s bridge resolves to `Fact.not_collected()`
-unconditionally — entirely independent of
-`AbiSnapshot.clang_vtable_facts_reliable`. Following either fallback
-stream for a PDB-derived side is reachable through a real
-serialize/reload/`checker.compare()` cycle and fabricates a
-`TYPE_VTABLE_CHANGED` finding (an apparent vtable removal) from nothing
-but an unrelated size delta or a cross-format (Itanium-vs-MSVC mangling)
-function-map mismatch — the review's own reproduction round-tripped an
-explicit `NOT_COLLECTED` fact through real storage and confirmed the
-snapshot-level `clang_vtable_facts_reliable` flag stayed at its untouched
-default the whole time. Reasoning that PDB was the *only* current
-producer of a non-`is_present` `vtable_fact` — confirmed by inspecting
-every real extractor's `RecordType(...)` construction site
-(`dwarf_snapshot.py`, `extract/headers/castxml/records.py`, `extract/
-headers/clang/records.py` all construct this field explicitly, never
-omitted) — a decline gated on "either side not `is_present`" looked safe:
-DWARF/header-AST backends never carry the status that triggers it.
-`compare.vtable_evidence.vtable_transition_is_evidenced` landed exactly
-that decline.
-
-**Round 3: reverted, and declined again — for the right reason this
-time.** The round-2 reasoning checked every real *extractor* construction
-site but missed that `vtable` is also a public, positional field on the
-public `RecordType` dataclass: *omitting* it at construction — not just
-PDB's own extractor never setting it — resolves to the identical
-`Fact.not_collected()` via the same `bridge_legacy_and_fact` bridge. That
-omission is exactly how a large fraction of this codebase's own
-hand-constructed test fixtures (and any external typed-API caller using
-the same public constructor) spell "this class has no vtable" for an
-ordinary non-polymorphic class — a shape the round-2 decline could not
-tell apart from PDB's own structural non-evidence. Landing it silently
-regressed a previously-passing, real scenario:
-`tests/test_abicc_scenario_parity.py::
-TestLeafClassVirtualMethodAdditions::test_virtual_added_to_leaf_class` (a
-leaf class's old side omits `vtable=` entirely, meaning "no virtuals"; the
-new side gains one via `Function.is_virtual` evidence — exactly the
-owned-virtual-function fallback stream the decline short-circuited).
-Caught by running the full test suite before declaring the fix complete,
-not by review alone. Reverted in full: `vtable_transition_is_evidenced`'s
-heuristic is unchanged from before this closure began.
-
-`diff_types_vtable.py`'s own module docstring carries the full three-round
-account (the canonical writeup). `tests/test_vtable_evidence_guard.py::
-TestExplicitFactStatusWouldNotSafelyGateThisGuard` pins the
-reverted-to-original contract for both fallback streams (renamed back
-from its round-2 form, `TestNonPresentVtableFactIsDeclinedOutright`, which
-asserted the now-known-wrong direction); a new sibling class,
-`TestOmittedVtableStillDetectsARealAddition`, pins the round-3 regression
-directly at the guard level so a future attempt at this same narrowing
-trips over it immediately rather than rediscovering it via a full-suite
-run.
+cluster's own residual gap, resolved as a formal, investigated decline.**
+Full three-round account (declined → landed → reverted) lives once,
+canonically, in `diff_types_vtable.py`'s own module docstring ("Track 4,
+5B final closure" section) — not repeated here. Outcome only:
+`vtable_transition_is_evidenced`'s heuristic is unchanged from before this
+closure (confirmed identical to its pre-closure state via `git diff`). A
+real, reachable fabrication risk was found along the way — a PDB-derived
+side's `vtable_fact` is unconditionally `NOT_COLLECTED` on every record,
+independent of `AbiSnapshot.clang_vtable_facts_reliable`, and a
+cross-backend comparison against one can fabricate a `TYPE_VTABLE_CHANGED`
+finding from an unrelated size delta — and a fix for it was landed, then
+reverted after it regressed a real, previously-passing scenario
+(`tests/test_abicc_scenario_parity.py::
+TestLeafClassVirtualMethodAdditions::test_virtual_added_to_leaf_class`):
+`vtable` is a public, positional `RecordType` field, and *omitting* it at
+construction — not just PDB's own extractor never setting it — resolves
+to the identical `NOT_COLLECTED` status, which is exactly how this
+codebase's own hand-constructed test fixtures (and any external typed-API
+caller) spell "no vtable" for an ordinary non-polymorphic class.
 
 This closes 5B's own removal gate for the `vtable` field family as a
 formal, investigated decline — the same disposition 2B's `entity:` alias
 promotion and 6B's own undone cohort items received — **not** left
-ambiguous between "landed" and "declined": the PDB fabrication round 2
-found is real, reachable, and still open, recorded here and in both
-modules' docstrings rather than only in this PR's own history. Closing it
-for real needs a snapshot/producer-level signal analogous to
-`AbiSnapshot.clang_vtable_facts_reliable` — something that can tell "this
-whole backend never captures vtable data" apart from "this one record's
-constructor simply omitted the field," which `vtable_fact.status` alone
-cannot do — not a per-record `FactStatus` branch. Reopening the
-*separate*, still-unresolved DWARF per-TU ambiguity needs evidence this
-predicate's inputs do not carry today (a per-finding provider record
-naming which translation unit each side's debug info actually covered, or
-a polymorphism walk over both base chains), not a different reading of
-the fields already here.
+ambiguous between "landed" and "declined." The PDB fabrication remains
+real, reachable, and open; closing it for real needs a snapshot/producer-
+level signal analogous to `AbiSnapshot.clang_vtable_facts_reliable`, not a
+per-record `FactStatus` branch. The DWARF per-TU ambiguity is a separate,
+still-unresolved gap needing evidence this predicate's inputs do not carry
+today — see the canonical docstring for both.
 
 **Known gap surfaced by review (Codex security review, this PR, not
 closed): a "decline rather than fabricate" evidence gate can be an

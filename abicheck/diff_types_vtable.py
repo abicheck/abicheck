@@ -479,18 +479,22 @@ def _diff_type_vtable(
         # `old_value`/`new_value` below are built from `resolved_fact_value
         # (...,  [])`, which on its own cannot distinguish "confirmed empty"
         # from "not collected" -- so a NOT_COLLECTED status reaching that
-        # construction would render as an empty vtable rather than an
-        # unknown one. This early return catches that for the
-        # clang-legacy-unreliable case specifically; the general case (any
-        # side whose `vtable_fact` is not PRESENT/PARTIAL -- PDB's own
-        # `vtable_fact`, always NOT_COLLECTED on every record, being the
-        # one real producer today) is caught structurally, earlier, by
-        # `_vtable_transition_is_evidenced` itself (ADR-063 Track 4, 5B
-        # final closure -- see this module's own docstring and `compare/
-        # vtable_evidence.py`'s), so this function never reaches `old_value`/
-        # `new_value` construction for that case either, by the same
-        # discipline this early return already applies for the
-        # clang-legacy-unreliable one.
+        # construction renders as an empty vtable rather than an unknown
+        # one. This early return catches that for the
+        # clang-legacy-unreliable case specifically. It is NOT caught in
+        # general: a PDB-derived side's `vtable_fact` is always
+        # NOT_COLLECTED (independent of `clang_vtable_facts_reliable`,
+        # which PDB never touches), and `_vtable_transition_is_evidenced`
+        # does not gate on `vtable_fact.status` at all -- a fix that added
+        # exactly that gate was attempted, landed, and reverted on this
+        # same PR (ADR-063 Track 4, 5B final closure -- see this module's
+        # own docstring for the full three-round account) after it
+        # regressed real detection coverage for an unrelated, far more
+        # common shape (a hand-constructed/typed-API `RecordType` that
+        # simply omits `vtable=`). The PDB fabrication this early return's
+        # own reasoning describes therefore remains real, reachable, and
+        # open for a comparison this function's `vtable_facts_reliable`
+        # parameter does not cover.
         return []
     if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
         return []
