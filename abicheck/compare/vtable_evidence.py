@@ -191,18 +191,26 @@ def vtable_transition_is_evidenced(
 
     Neither loses the *break*: ``diff_layout._check_vptr_introduced`` fires
     independently on the same None -> 0 vptr transition and the verdict stays
-    BREAKING. Only ``TYPE_VTABLE_CHANGED`` (and, since the 5B closure this
-    module implements, ``VIRTUAL_METHOD_ADDED``'s own deferral) is withheld
-    -- ``virtual_method_addition`` falls through to its own signature-based
-    override check instead of silently dropping coverage, exactly because it
-    now calls this same predicate rather than assuming the answer. Leaning on
-    a sibling detector is not a comfortable place to be, and a previous
-    revision tried to close the second case here directly by reading
-    ``vptr_offset_bits`` -- see the body for why that witness is circular and
-    made this guard inert. Closing it for real needs evidence the model does
-    not carry (a per-finding provider record, or a polymorphism walk over
-    both base chains) -- see AGENTS.md's evidence-provider entry -- not a
-    cleverer reading of the fields already here.
+    BREAKING. Only this predicate's own ``TYPE_VTABLE_CHANGED`` is withheld.
+    The 5B closure this module implements does not reach either accepted
+    false negative above: the second bullet's pure virtual has no linkable
+    definition at all, so ``diff_cxx_rules.virtual_method_addition`` is never
+    even called for it (nothing for ``_diff_functions``'s own loop to
+    iterate over); the first bullet, when it involves a real, linkable
+    virtual method, is *evidenced* by this predicate's own "class's own
+    virtual functions" branch (a genuinely new mangled symbol is always
+    present in the new side's owned-signature set and absent from the old
+    side's), so ``virtual_method_addition`` correctly defers to this
+    predicate rather than needing its own fallthrough -- it is this
+    predicate's own remaining gap to close, not a gap in the symbol-level
+    caller's own coupling to it. Leaning on a sibling detector is not a
+    comfortable place to be, and a previous revision tried to close the
+    second case here directly by reading ``vptr_offset_bits`` -- see the
+    body for why that witness is circular and made this guard inert.
+    Closing it for real needs evidence the model does not carry (a
+    per-finding provider record, or a polymorphism walk over both base
+    chains) -- see AGENTS.md's evidence-provider entry -- not a cleverer
+    reading of the fields already here.
     """
     old_vtable = resolved_fact_value(t_old.vtable_fact, [])
     new_vtable = resolved_fact_value(t_new.vtable_fact, [])

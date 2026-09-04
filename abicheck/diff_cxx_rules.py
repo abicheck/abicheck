@@ -1158,9 +1158,9 @@ def virtual_method_addition(
 
     ``old_funcs``/``new_funcs`` are each snapshot's full function map
     (``AbiSnapshot.function_map``, mangled name -> ``Function``, including
-    non-public/hidden entries) — needed only to consult the shared vtable-
-    evidence predicate below, not for this function's own override check.
-    ``vtable_facts_reliable`` mirrors ``diff_types.py``'s own
+    non-public/hidden entries) — used both for the already-existed guard
+    just below and to consult the shared vtable-evidence predicate further
+    down. ``vtable_facts_reliable`` mirrors ``diff_types.py``'s own
     ``old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable``
     computation for the identical pair of snapshots; a caller that does not
     have both snapshots at hand (unusual — every real caller does) may leave
@@ -1174,13 +1174,7 @@ def virtual_method_addition(
     in the one shape this blind spot actually needs covered (one side's
     ``vtable_fact`` uncollected, the other genuinely populated) — the two
     detectors were coupled only by prose, in two separate files, with no
-    executable link between them. Anywhere that heuristic does *not* find
-    evidence (e.g. the class's own virtual-function set, size, and virtual
-    bases all read identically on both sides — the array difference is
-    capture noise the sibling detector correctly ignores), ``TYPE_VTABLE_
-    CHANGED`` was never going to fire, and this function was deferring to a
-    detector that stays silent — silently dropping the one coverage it exists
-    to provide.
+    executable link between them.
 
     Fixed by making the coupling a real function call: both detectors now
     share one predicate, ``compare.vtable_evidence.vtable_transition_is_
@@ -1190,15 +1184,44 @@ def virtual_method_addition(
     import this leaf module's own no-cycle constraint does not allow without
     further restructuring" gap this docstring and ``diff_types_vtable.py``'s
     own module docstring used to record. When the predicate says the
-    difference is genuinely evidenced (or ``vtable_facts_reliable`` is
-    ``False``, in which case ``diff_types_vtable`` declines before ever
-    reaching the predicate — see ``_diff_type_vtable``), this function defers.
-    Otherwise it falls through to its own signature-based override check
-    below, exactly as it already does when the raw arrays are equal outright
-    — the only remaining signal, and no longer a blind assumption that some
-    other module will catch it.
+    difference is genuinely evidenced, this function defers to avoid a
+    duplicate finding, same as before.
+
+    When it is *not* evidenced (or ``vtable_facts_reliable`` is ``False``, in
+    which case ``diff_types_vtable`` declines before ever reaching the
+    predicate — see ``_diff_type_vtable``), this function falls through to
+    its own signature-based override check below instead of silently
+    dropping the finding. For a genuinely *new* mangled symbol this branch
+    is reached only when ``vtable_facts_reliable`` is ``False`` — the shared
+    predicate's own "class's own virtual functions" evidence branch always
+    sees a real difference for a brand-new symbol (it is present in
+    ``new_funcs``'s owned set and, by construction, absent from
+    ``old_funcs``'s), so it is always evidenced when reliable. The one way a
+    *reliable* comparison reaches "not evidenced" at all is the shape the
+    already-existed guard above now intercepts explicitly — this function no
+    longer relies on that being merely implied by the evidence predicate's
+    absence of a positive signal (Codex review, fresh evidence: an earlier
+    revision let exactly that shape fall through here uncaught, fabricating
+    a BREAKING ``VIRTUAL_METHOD_ADDED`` for a compatible hidden-to-public
+    visibility promotion).
     """
     if not f_new.is_virtual:
+        return None
+    old_self = old_funcs.get(f_new.mangled)
+    if old_self is not None and old_self.is_virtual:
+        # Already existed in the old ABI under this exact mangled name --
+        # just not public (hidden/internal linkage becoming exported, the
+        # shape a header/export-scoping change or a build-mode switch
+        # produces). No new vtable slot was added: the slot was already
+        # accounted for whenever this method was first declared, and
+        # nothing about becoming public changes that. A compatible
+        # visibility promotion (tracked separately as FUNC_ADDED for the
+        # newly-public symbol), never VIRTUAL_METHOD_ADDED. (Codex review,
+        # fresh evidence: without this guard, the fallthrough below — added
+        # for the ADR-063 5B closure — reached exactly this shape, since a
+        # promoted method's own owned-virtual-function set reads identical
+        # on both sides and so never evidences a real vtable transition,
+        # fabricating a BREAKING finding for a compatible export change.)
         return None
     owner = owner_class_of(f_new)
     if owner is None:
