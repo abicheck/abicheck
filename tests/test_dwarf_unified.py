@@ -745,3 +745,56 @@ class TestZeroCuDwarfIsNeverParsed:
         assert meta.cu_total == 0
         assert meta.cu_failed == 0
         assert meta.evidence_state == "failed"
+
+
+class TestUnifiedPassDowngradesOnIncompleteCfi:
+    """P1 review, fresh evidence: parse_dwarf_from_session (the path
+    dumper.py's real ELF dumps actually use) ran _parse_frame_registers but
+    exposed no completion signal from it at all -- a malformed/unsupported
+    FDE caught and skipped internally left evidence_state at whatever the
+    (otherwise clean) CU accounting decided, "parsed", despite frame-
+    register/callee-saved-register facts for that FDE never being
+    extracted. Mirrors the identical dwarf_advanced.parse_advanced_dwarf
+    fix, at the unified entry point."""
+
+    def test_incomplete_cfi_downgrades_a_clean_parse_to_partial(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _require_tool("g++")
+        from abicheck import dwarf_unified as du
+
+        so = _compile_so(tmp_path, "libcfiincomplete", _SESSION_SRC, lang="cpp")
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        monkeypatch.setattr(du, "_parse_frame_registers", lambda *_a: False)
+        try:
+            meta, adv = du.parse_dwarf_from_session(sess)
+        finally:
+            sess.close()
+
+        assert meta.evidence_state == "parsed"  # basic channel unaffected
+        assert adv.cu_failed == 0
+        assert adv.evidence_state == "partial"
+
+    def test_incomplete_cfi_never_upgrades_an_already_failed_parse(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Downgrading must only ever apply to a clean "parsed" state."""
+        _require_tool("g++")
+        from abicheck import dwarf_unified as du
+
+        so = _compile_so(tmp_path, "libcfifailed", _SESSION_SRC, lang="cpp")
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        monkeypatch.setattr(du, "_parse_frame_registers", lambda *_a: False)
+
+        def boom(_cu, _meta):
+            raise ValueError("corrupt CU")
+
+        monkeypatch.setattr(du, "_adv_process_cu", boom)
+        try:
+            meta, adv = du.parse_dwarf_from_session(sess)
+        finally:
+            sess.close()
+
+        assert adv.evidence_state == "failed"

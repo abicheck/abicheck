@@ -225,15 +225,17 @@ def parse_dwarf_from_session(
     # editing concurrently. Skipped entirely for a zero-CU parse: nothing
     # to correlate frame data against, and a test double standing in for a
     # truncated/empty .debug_info section carries no real ELF/DWARFInfo.
+    cfi_complete = True
     if meta.cu_total:
         try:
-            _parse_frame_registers(session.elf, session.dwarf, adv)
+            cfi_complete = _parse_frame_registers(session.elf, session.dwarf, adv)
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "parse_dwarf: frame-register extraction failed in %s: %s",
                 session.path,
                 exc,
             )
+            cfi_complete = False
 
     if skeleton_cus:
         log.warning(
@@ -261,6 +263,17 @@ def parse_dwarf_from_session(
                 if channel.cu_failed and channel.cu_failed == channel.cu_total
                 else "partial"
             )
+
+    if not cfi_complete and adv.evidence_state == "parsed":
+        # P1 review, fresh evidence: mirrors dwarf_advanced.
+        # parse_advanced_dwarf's identical CFI-completeness downgrade -- a
+        # malformed/unsupported FDE is caught and skipped inside
+        # _parse_frame_registers itself, so the pass "succeeds" while
+        # frame-register/callee-saved-register facts for that FDE were
+        # never extracted. Only downgrades a clean "parsed" -- an already
+        # partial/failed state from the CU accounting above is not
+        # overwritten either direction.
+        adv.evidence_state = "partial"
 
     return meta, adv
 

@@ -94,6 +94,44 @@ class TestParseAdvancedDwarfEvidenceState:
         assert meta.cu_failed == 0
         assert meta.evidence_state == "parsed"
 
+    def test_incomplete_cfi_downgrades_a_clean_parse_to_partial(self) -> None:
+        """P1 review, fresh evidence: _parse_frame_registers previously
+        exposed no completion signal at all, so a malformed/unsupported FDE
+        it caught and skipped internally left evidence_state at whatever
+        the (otherwise clean) CU accounting decided -- "parsed", despite
+        frame-register/callee-saved-register facts for that FDE never
+        being extracted."""
+        good_cu = MagicMock()
+        good_cu.get_top_DIE.return_value = MagicMock(attributes={})
+
+        mock_elf = self._mock_session([good_cu])
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=False),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+
+    def test_incomplete_cfi_never_upgrades_an_already_failed_parse(self) -> None:
+        """Downgrading must only ever apply to a clean "parsed" state --
+        it must not paper over (or otherwise disturb) a worse state the CU
+        accounting already decided."""
+        bad_cu = MagicMock()
+        bad_cu.get_top_DIE.side_effect = ValueError("corrupt CU")
+
+        mock_elf = self._mock_session([bad_cu])
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=False),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.evidence_state == "failed"
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

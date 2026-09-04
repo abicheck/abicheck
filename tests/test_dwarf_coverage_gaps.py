@@ -1134,7 +1134,7 @@ class TestParseFrameRegisters:
         mock_dwarf.get_CFI_entries.return_value = None
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
         assert len(meta.frame_registers) == 0
 
     def test_fde_no_symbol(self):
@@ -1157,7 +1157,7 @@ class TestParseFrameRegisters:
         mock_dwarf.get_EH_CFI_entries.return_value = [fde]
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
         assert len(meta.frame_registers) == 0
 
     def test_outer_exception(self):
@@ -1173,7 +1173,7 @@ class TestParseFrameRegisters:
         mock_dwarf = MagicMock()
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         # Should not raise
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
         assert len(meta.frame_registers) == 0
 
     def test_fde_inner_exception(self):
@@ -1196,7 +1196,7 @@ class TestParseFrameRegisters:
         mock_dwarf.get_EH_CFI_entries.return_value = [fde]
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
         assert len(meta.frame_registers) == 0
 
 

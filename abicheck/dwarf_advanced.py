@@ -205,7 +205,16 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                     else "partial"
                 )
             # Parse .eh_frame / .debug_frame CFA register convention (#117)
-            _parse_frame_registers(elf, dwarf, meta)
+            cfi_complete = _parse_frame_registers(elf, dwarf, meta)
+            if not cfi_complete and meta.evidence_state == "parsed":
+                # P1 review, fresh evidence: a malformed/unsupported FDE is
+                # caught and skipped inside _parse_frame_registers itself,
+                # so the pass "succeeds" (never raises) while frame-
+                # register/callee-saved-register facts for that FDE were
+                # never extracted. Only downgrades a clean "parsed" -- an
+                # already partial/failed state from the CU accounting above
+                # is not overwritten either direction.
+                meta.evidence_state = "partial"
             return meta
     except (ELFError, OSError, ValueError) as exc:
         log.warning("parse_advanced_dwarf: failed %s: %s", so_path, exc)
@@ -915,7 +924,7 @@ def _extract_cfa_reg_from_fde(entry: Any, arch_key: str) -> str | None:
         return None
 
 
-def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) -> None:
+def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) -> bool:
     """Extract CFA register convention + callee-saved regs for exported functions.
 
     For each FDE in .eh_frame / .debug_frame:
@@ -931,14 +940,29 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
     absent (GCC does not emit this attribute for __attribute__((ms_abi))).
 
     Graceful: any parsing error is logged/skipped. Never raises.
+
+    P1 review, fresh evidence: this pass runs (see the two DWARF entry
+    points below) but previously exposed no completion signal at all, so a
+    malformed/unsupported FDE that this function itself catches and skips
+    left the advanced channel's ``evidence_state`` at whatever the CU
+    accounting already decided -- "parsed" on an otherwise-clean binary,
+    even though frame-register/callee-saved-register facts for the skipped
+    FDE(s) were never actually extracted. Returns ``True`` when CFI
+    extraction completed without skipping anything (including the
+    legitimate "no CFI section at all" case -- absence of data is not a
+    parse failure), ``False`` whenever a per-FDE error was caught and
+    skipped, or the whole pass failed outright. Callers downgrade
+    ``evidence_state`` to ``"partial"`` on a ``False`` return, mirroring
+    the cu_failed/skeleton-CU downgrades they already apply.
     """
     try:
         arch_key = _normalize_arch(elf)
         addr_to_sym = _build_addr_to_sym(elf)
         cfi_src = _get_cfi_source(dwarf)
         if cfi_src is None:
-            return
+            return True
 
+        complete = True
         for entry in cfi_src:
             try:
                 if entry.__class__.__name__ != "FDE":
@@ -956,9 +980,13 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                     meta.callee_saved_regs[sym_name] = saved
             except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
                 log.debug("_parse_frame_registers: skipping FDE: %s", exc)
+                complete = False
+
+        return complete
 
     except (ELFError, OSError, ValueError) as exc:
         log.warning("_parse_frame_registers: failed: %s", exc)
+        return False
 
 
 def _extract_callee_saved_regs(entry: Any, arch_key: str) -> frozenset[str] | None:
