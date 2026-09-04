@@ -165,6 +165,21 @@ class TestReadBundleFactsPackage:
             "liba.so": ("liba.so.1", "liba.so.1.2")
         }
 
+    def test_native_identity_round_trips_an_alias_containing_a_newline(self) -> None:
+        """POSIX allows a newline inside a real filename -- an alias-array
+        encoding that joined on `"\\n"` would silently split this one alias
+        into two on read-back (Codex review)."""
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        facts.filesystem_aliases["liba.so"] = ("weird\nname.so", "liba.so.1")
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        round_tripped = read_bundle_facts_package(manifest, store=store)
+
+        assert round_tripped.filesystem_aliases == {
+            "liba.so": ("liba.so.1", "weird\nname.so")
+        }
+
     def test_unknown_variant_id_raises(self) -> None:
         facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
         store = InMemoryObjectStore()
@@ -181,6 +196,25 @@ class TestReadBundleFactsPackage:
         round_tripped = read_bundle_facts_package(manifest, store=store)
 
         assert round_tripped.per_library_snapshots == {}
+
+    def test_refuses_to_eagerly_reconstruct_past_the_library_count_bound(
+        self, monkeypatch: Any
+    ) -> None:
+        """A `PackageManifest` may come from another producer -- untrusted
+        input a reader must not eagerly materialize without bound (Codex
+        review)."""
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        monkeypatch.setattr(module, "DEFAULT_MAX_LIBRARY_COUNT", 1)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_LIBRARY_COUNT"):
+            read_bundle_facts_package(manifest, store=store)
 
 
 class TestBundleFactsPackageThroughDirectoryStore:

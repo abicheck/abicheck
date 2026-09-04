@@ -82,10 +82,15 @@ the libraries whose real version it discarded.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from .bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
+from .bundle_facts import (
+    DEFAULT_MAX_LIBRARY_COUNT,
+    DEFAULT_VARIANT_FINGERPRINT,
+    BundleFacts,
+)
 from .bundle_manifest import manifest_from_dict, manifest_to_dict
 from .serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
@@ -117,17 +122,38 @@ INSTANTIATION_MANIFEST_SECTION_KIND = "instantiation_manifest"
 #: docstring's "genuinely project-level vs. per-artifact" section.
 _NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
 _NATIVE_IDENTITY_ALIASES_KEY = "filesystem_aliases"
-#: `filesystem_alias_basenames` returns real filesystem basenames, which can
-#: never themselves contain a newline -- safe as a separator for folding a
-#: tuple of them into one `native_identity` string value without inventing a
-#: JSON-inside-JSON encoding for a mapping that is otherwise plain text.
-_ALIASES_SEPARATOR = "\n"
 
 #: `VariantRef.captured` coordinate key `BundleFacts.variant_fingerprint` is
 #: folded onto -- `captured`, not `declared`, since a fingerprint is what a
 #: real capture run actually observed, never a value `.abicheck.yml` states
 #: ahead of time (`VariantRef`'s own docstring distinguishes the two maps).
 _VARIANT_FINGERPRINT_KEY = "variant_fingerprint"
+
+
+def _encode_aliases(aliases: tuple[str, ...]) -> str:
+    """`aliases`, folded into one `native_identity` string value.
+
+    JSON, not a delimiter-joined string: POSIX allows a newline (or any
+    byte but NUL/`/`) inside a real filename, so
+    `filesystem_alias_basenames()`'s own basenames are not guaranteed
+    delimiter-safe -- a joined-and-split encoding would silently split one
+    alias into two, or merge two into one, changing resolution evidence
+    (Codex review). `json.dumps` of a list of strings has no such ambiguity.
+    """
+    return json.dumps(sorted(aliases))
+
+
+def _decode_aliases(encoded: str) -> tuple[str, ...]:
+    """The exact inverse of `_encode_aliases`."""
+    decoded = json.loads(encoded)
+    if not isinstance(decoded, list) or not all(
+        isinstance(item, str) for item in decoded
+    ):
+        raise ValueError(
+            f"native_identity[{_NATIVE_IDENTITY_ALIASES_KEY!r}] must decode to a "
+            f"JSON array of strings, got {encoded!r}"
+        )
+    return tuple(decoded)
 
 
 def write_bundle_facts_package(
@@ -169,9 +195,7 @@ def write_bundle_facts_package(
             native_identity[_NATIVE_IDENTITY_FILENAME_KEY] = filename
         aliases = facts.filesystem_aliases.get(library_name)
         if aliases:
-            native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = _ALIASES_SEPARATOR.join(
-                sorted(aliases)
-            )
+            native_identity[_NATIVE_IDENTITY_ALIASES_KEY] = _encode_aliases(aliases)
         if native_identity != dict(artifact.native_identity):
             artifact = replace(artifact, native_identity=native_identity)
         artifact_refs.append(artifact)
@@ -251,6 +275,24 @@ def read_bundle_facts_package(
             f"{variant_id!r} is not a variant_id in this PackageManifest "
             f"(known: {sorted(v.variant_id for v in manifest.variant_refs)})"
         )
+    # A `PackageManifest` may come from another producer (a directory package
+    # read off disk, not one this process itself wrote), so its declared
+    # membership is untrusted input -- reconstructing eagerly materializes one
+    # full `AbiSnapshot` per artifact, all held at once, with no lazy-loading
+    # escape hatch yet (that is Phase 2's A2.1). Bounding the artifact count
+    # against the same `DEFAULT_MAX_LIBRARY_COUNT` the G40 bundle-facts
+    # archive already enforces keeps a small package from amplifying into
+    # unbounded parsing/memory (Codex review); the aggregate-decoded-bytes
+    # half of that archive's own defense has no equivalent here yet, since
+    # `ObjectRef.size` is optional/informational and this module's own writer
+    # does not populate it.
+    if len(variant.artifact_ids) > DEFAULT_MAX_LIBRARY_COUNT:
+        raise ValueError(
+            f"variant {variant_id!r} names {len(variant.artifact_ids)} "
+            f"artifact_ids, exceeding DEFAULT_MAX_LIBRARY_COUNT "
+            f"({DEFAULT_MAX_LIBRARY_COUNT}) -- refusing to eagerly reconstruct "
+            "every member into memory at once"
+        )
     artifacts_by_id = {
         artifact.artifact_id: artifact for artifact in manifest.artifact_refs
     }
@@ -271,9 +313,7 @@ def read_bundle_facts_package(
             library_filenames[artifact_id] = filename
         aliases_text = artifact.native_identity.get(_NATIVE_IDENTITY_ALIASES_KEY)
         if aliases_text:
-            filesystem_aliases[artifact_id] = tuple(
-                aliases_text.split(_ALIASES_SEPARATOR)
-            )
+            filesystem_aliases[artifact_id] = _decode_aliases(aliases_text)
 
     variant_fingerprint = variant.captured.get(
         _VARIANT_FINGERPRINT_KEY, DEFAULT_VARIANT_FINGERPRINT
