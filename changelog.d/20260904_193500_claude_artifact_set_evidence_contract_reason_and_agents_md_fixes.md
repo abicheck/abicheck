@@ -12,8 +12,9 @@
   now accepts the exception message and stores it under
   `report["evidence_contract_error_message"]`; `cli_scan.py`'s
   `--artifact-set` text renderer prints it per member (`  reason: ...`),
-  and the JSON `per_artifact[].report` carries the same field. Found by
-  Codex review on PR #1062.
+  and the JSON `per_artifact[].report` carries the same field.
+  `SCAN_SCHEMA_VERSION` bumped to `1.27` for the new additive field. Found
+  by Codex review on PR #1062.
 - **Stale `--exit-code-scheme`/`exit_code_scheme:` mentions in agent
   instructions** (root `AGENTS.md`'s Exit codes section and its
   `pack_application.py` module-map narrative, and
