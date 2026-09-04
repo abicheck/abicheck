@@ -127,8 +127,11 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > OLD_INPUT automatically, delete --old-bundle-facts`) merged into `main`
 > at `23c7808`, base `48152645` (#1052). `--old-bundle-facts` is gone,
 > `workflows/bundle_compare_operand.py`/`bundle_compare_operand_marker.py`
-> do the classification (hardened across 11 adversarial review rounds per
-> that PR's own description), `compare_bundle_operand_dispatch.py` wires it
+> do the classification (hardened across many adversarial review rounds —
+> #1042's own description said 11, but `bundle_compare_operand.py`'s own
+> docstring on current `main` already documents fixes through round 19, so
+> don't hard-code a count here; see that module's docstring for the current
+> total), `compare_bundle_operand_dispatch.py` wires it
 > into `compare_cmd`. **The full `BundleCompareRequest` unification is
 > still explicitly out of scope of #1042 and remains this row's open
 > item** — live/stored and stored/stored still have no execution engine,
@@ -186,8 +189,13 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > signal gap), PR H (artifact-set provider-ownership semantics — not
 > started), PR I's full `BundleCompareRequest` unification (classification
 > + flag deletion done; the unification itself not started), and PR J
-> (bundle topology out of CLI flags — not started). PR A/B/C/D/E/F and PR
-> 1/1b/2 are done.
+> (bundle topology out of CLI flags — not started). **Correction (Codex
+> review of this PR, fresh evidence): PR C is not fully done either** — its
+> binary-format migration (ELF + PE/Mach-O) is, but the config-discovery
+> tail this plan already tracked under "Re-verified, unchanged, still
+> open" (`.abicheck.yml`-only `build: targets:` not visible to `--dry-run`)
+> is real and unresolved on current `main`; see PR C's own corrected row
+> above. PR A/B/D/E/F and PR 1/1b/2 are done.
 
 ## Problem
 
@@ -5041,11 +5049,11 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-      (DONE — ELF and PE/Mach-O both    ResolvedDumpRequest → DumpResult, one
-       migrated)                       resolver for dump CLI/Python/Action
-                                       *and* scan_engine's candidate
-                                       resolution, JSON dry-run rendered
-                                       from that object. The real ELF `dump`
+      (binary-format migration DONE —  ResolvedDumpRequest → DumpResult, one
+       ELF and PE/Mach-O both route     resolver for dump CLI/Python/Action
+       through execute_dump_request;    *and* scan_engine's candidate
+       config-discovery tail still      resolution, JSON dry-run rendered
+       open, see below)                 from that object. The real ELF `dump`
                                        run now executes through
                                        execute_dump_request (scan's
                                        candidate resolution already did),
@@ -5061,7 +5069,22 @@ PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        unit tests) — verified only via
                                        mock-based CLI/unit tests, no real
                                        PE/Mach-O toolchain was available to
-                                       verify against a real binary
+                                       verify against a real binary. **Not
+                                       fully done**: the "Re-verified,
+                                       unchanged, still open" bullet under
+                                       the 2026-09-01 checkpoint above
+                                       explicitly tracks this row's own
+                                       remaining tail — a `.abicheck.yml`-
+                                       only `build: targets:` is discovered
+                                       only during real execution, so
+                                       `--dry-run` can answer "valid" for a
+                                       request the real run then rejects.
+                                       That gap is unresolved on current
+                                       `main` and is not closed by the
+                                       binary-format migration above; see
+                                       that bullet for the target fix
+                                       (ADR-063 Phase 4's `AnalysisPlan`,
+                                       before extraction)
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
